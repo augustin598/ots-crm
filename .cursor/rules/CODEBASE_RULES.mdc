@@ -1,0 +1,1213 @@
+---
+alwaysApply: true
+---
+
+## Remote Functions
+
+### Overview
+
+Remote Functions allow you to call server-side functions directly from Svelte components using `await`. They replace the need for API routes for many use cases.
+
+### Defining Remote Functions
+
+Create `.remote.ts` or `.remote.js` files in your routes directory:
+
+```typescript
+// src/routes/posts/data.remote.ts
+import { query, command } from "$app/server";
+import * as v from "valibot";
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+
+// Query function - for reading data
+export const getPosts = query(async () => {
+  const posts = await db.select().from(table.posts);
+  return posts;
+});
+
+// Query with validation
+export const getPost = query(
+  v.string(), // Input validation schema
+  async (slug) => {
+    const [post] = await db
+      .select()
+      .from(table.posts)
+      .where(eq(table.posts.slug, slug));
+    return post;
+  }
+);
+
+// Command function - for mutations
+export const createPost = command(
+  v.object({
+    title: v.string(),
+    content: v.string(),
+  }),
+  async (data) => {
+    await db.insert(table.posts).values(data);
+  }
+);
+```
+
+### Using Remote Functions in Components
+
+```svelte
+<script lang="ts">
+  import { getPosts, createPost } from './data.remote';
+</script>
+
+<!-- Using await directly -->
+<ul>
+  {#each await getPosts() as post}
+    <li>{post.title}</li>
+  {/each}
+</ul>
+
+<!-- Using with loading/error states -->
+<script lang="ts">
+  const postsQuery = getPosts();
+</script>
+
+{#if postsQuery.error}
+  <p>Error loading posts</p>
+{:else if postsQuery.loading}
+  <p>Loading...</p>
+{:else}
+  <ul>
+    {#each postsQuery.current as post}
+      <li>{post.title}</li>
+    {/each}
+  </ul>
+{/if}
+```
+
+### Handling Form Submissions with Remote Functions
+
+Use `command` functions for form submissions. Handle form data in your component:
+
+```svelte
+<script lang="ts">
+	import { createPost } from './data.remote';
+
+	let title = $state('');
+	let content = $state('');
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let success = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		error = null;
+		try {
+			await createPost({ title, content });
+			success = true;
+			title = '';
+			content = '';
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'An error occurred';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={title} placeholder="Title" />
+	<textarea bind:value={content} placeholder="Content" />
+	<button type="submit" disabled={loading}>
+		{loading ? 'Creating...' : 'Create Post'}
+	</button>
+</form>
+
+{#if error}
+	<p style="color: red">{error}</p>
+{/if}
+
+{#if success}
+	<p>Post created successfully!</p>
+{/if}
+```
+
+### Best Practices
+
+1. **Use `query` for read operations** - Automatically cached and optimized
+2. **Use `command` for write operations** - Mutations that change data, including form submissions
+3. **Always validate inputs** - Use Valibot schemas for type safety
+4. **Prefer Remote Functions over API routes** - Simpler and more type-safe
+5. **Use `query.batch` for multiple queries** - Automatically batches requests
+6. **Handle errors in components** - Wrap command calls in try-catch blocks
+7. **Use loading states** - Provide feedback during async operations
+
+---
+
+## Drizzle ORM
+
+### Schema Definition
+
+Define schemas in `src/lib/server/db/schema.ts`:
+
+```typescript
+import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id),
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
+});
+
+// Export types
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+export type Session = typeof session.$inferSelect;
+```
+
+### Database Connection
+
+Database connection is configured in `src/lib/server/db/index.ts`:
+
+```typescript
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+import { env } from "$env/dynamic/private";
+
+if (!env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
+
+const client = postgres(env.DATABASE_URL);
+export const db = drizzle(client, { schema });
+```
+
+### Querying
+
+#### Basic Queries
+
+```typescript
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+import { eq } from "drizzle-orm";
+
+// Select all
+const users = await db.select().from(table.user);
+
+// Select with condition
+const user = await db
+  .select()
+  .from(table.user)
+  .where(eq(table.user.id, userId));
+
+// Select specific columns
+const usernames = await db
+  .select({ username: table.user.username })
+  .from(table.user);
+
+// Insert
+await db.insert(table.user).values({
+  id: userId,
+  username: "john",
+  passwordHash: hash,
+});
+
+// Update
+await db
+  .update(table.user)
+  .set({ username: "newusername" })
+  .where(eq(table.user.id, userId));
+
+// Delete
+await db.delete(table.user).where(eq(table.user.id, userId));
+```
+
+#### Joins
+
+```typescript
+import { eq } from "drizzle-orm";
+
+const result = await db
+  .select({
+    user: { id: table.user.id, username: table.user.username },
+    session: table.session,
+  })
+  .from(table.session)
+  .innerJoin(table.user, eq(table.session.userId, table.user.id))
+  .where(eq(table.session.id, sessionId));
+```
+
+### Migrations
+
+1. **Generate migrations** after schema changes:
+
+   ```bash
+   pnpm db:generate
+   ```
+
+2. **Push schema changes** (development):
+
+   ```bash
+   pnpm db:push
+   ```
+
+3. **Run migrations** (production):
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+4. **Open Drizzle Studio** (development):
+   ```bash
+   pnpm db:studio
+   ```
+
+### Best Practices
+
+1. **Always use schema imports** - Import from `$lib/server/db/schema`
+2. **Use type inference** - `typeof table.user.$inferSelect` for types
+3. **Validate inputs** - Use Valibot or similar before database operations
+4. **Use transactions** for related operations:
+   ```typescript
+   await db.transaction(async (tx) => {
+     await tx.insert(table.user).values(userData);
+     await tx.insert(table.session).values(sessionData);
+   });
+   ```
+5. **Handle errors** - Wrap database operations in try-catch
+6. **Use prepared statements** - Drizzle handles this automatically
+7. **Select only needed columns** - Improves performance
+
+---
+
+## Authentication (Lucia-style)
+
+### Architecture
+
+This codebase uses a custom Lucia-style authentication implementation. Authentication logic is centralized in `src/lib/server/auth.ts`.
+
+### Session Management
+
+#### Creating Sessions
+
+```typescript
+import * as auth from "$lib/server/auth";
+
+const sessionToken = auth.generateSessionToken();
+const session = await auth.createSession(sessionToken, userId);
+auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+```
+
+#### Validating Sessions
+
+Sessions are automatically validated in `hooks.server.ts`. Access the user via `event.locals.user`:
+
+```typescript
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return {
+    user: event.locals.user,
+  };
+};
+```
+
+#### Invalidating Sessions
+
+```typescript
+import * as auth from "$lib/server/auth";
+
+await auth.invalidateSession(sessionId);
+auth.deleteSessionTokenCookie(event);
+```
+
+### Password Hashing
+
+Use `@node-rs/argon2` for password hashing:
+
+```typescript
+import { hash, verify } from "@node-rs/argon2";
+
+// Hashing
+const passwordHash = await hash(password, {
+  memoryCost: 19456,
+  timeCost: 2,
+  outputLen: 32,
+  parallelism: 1,
+});
+
+// Verification
+const validPassword = await verify(existingUser.passwordHash, password, {
+  memoryCost: 19456,
+  timeCost: 2,
+  outputLen: 32,
+  parallelism: 1,
+});
+```
+
+### User ID Generation
+
+Generate secure user IDs:
+
+```typescript
+import { encodeBase32LowerCase } from "@oslojs/encoding";
+
+function generateUserId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(15));
+  return encodeBase32LowerCase(bytes);
+}
+```
+
+### Authentication Flow with Remote Functions
+
+#### Login Command
+
+```typescript
+// src/routes/login/auth.remote.ts
+import { command } from "$app/server";
+import { getRequestEvent, redirect } from "@sveltejs/kit";
+import * as v from "valibot";
+import { hash, verify } from "@node-rs/argon2";
+import { eq } from "drizzle-orm";
+import * as auth from "$lib/server/auth";
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+
+const loginSchema = v.object({
+  username: v.string(),
+  password: v.string(),
+});
+
+export const login = command(loginSchema, async (data) => {
+  const event = getRequestEvent();
+  const { username, password } = data;
+
+  // Validate credentials
+  const [user] = await db
+    .select()
+    .from(table.user)
+    .where(eq(table.user.username, username));
+
+  if (!user) {
+    throw new Error("Incorrect username or password");
+  }
+
+  const validPassword = await verify(user.passwordHash, password, {
+    memoryCost: 19456,
+    timeCost: 2,
+    outputLen: 32,
+    parallelism: 1,
+  });
+
+  if (!validPassword) {
+    throw new Error("Incorrect username or password");
+  }
+
+  // Create session
+  const sessionToken = auth.generateSessionToken();
+  const session = await auth.createSession(sessionToken, user.id);
+  auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+
+  return { success: true, userId: user.id };
+});
+```
+
+#### Registration Command
+
+```typescript
+// src/routes/login/auth.remote.ts
+import { encodeBase32LowerCase } from "@oslojs/encoding";
+
+const registerSchema = v.object({
+  username: v.string(),
+  password: v.string(),
+});
+
+export const register = command(registerSchema, async (data) => {
+  const event = getRequestEvent();
+  const { username, password } = data;
+
+  // Validate username
+  if (
+    !/^[a-z0-9_-]+$/.test(username) ||
+    username.length < 3 ||
+    username.length > 31
+  ) {
+    throw new Error("Invalid username");
+  }
+
+  // Check if user exists
+  const [existing] = await db
+    .select()
+    .from(table.user)
+    .where(eq(table.user.username, username));
+
+  if (existing) {
+    throw new Error("Username already taken");
+  }
+
+  // Create user
+  const userId = generateUserId();
+  const passwordHash = await hash(password, {
+    memoryCost: 19456,
+    timeCost: 2,
+    outputLen: 32,
+    parallelism: 1,
+  });
+
+  await db.insert(table.user).values({ id: userId, username, passwordHash });
+
+  // Create session immediately after registration
+  const sessionToken = auth.generateSessionToken();
+  const session = await auth.createSession(sessionToken, userId);
+  auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+
+  return { success: true, userId };
+});
+
+function generateUserId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(15));
+  return encodeBase32LowerCase(bytes);
+}
+```
+
+#### Logout Command
+
+```typescript
+// src/routes/logout/auth.remote.ts
+import { command, getRequestEvent } from "$app/server";
+import * as auth from "$lib/server/auth";
+
+export const logout = command(async () => {
+  const event = getRequestEvent();
+
+  if (!event.locals.session) {
+    throw new Error("Not authenticated");
+  }
+
+  await auth.invalidateSession(event.locals.session.id);
+  auth.deleteSessionTokenCookie(event);
+
+  return { success: true };
+});
+```
+
+#### Using Authentication Commands in Components
+
+```svelte
+<!-- src/routes/login/+page.svelte -->
+<script lang="ts">
+	import { login, register } from './auth.remote';
+	import { goto } from '$app/navigation';
+
+	let username = $state('');
+	let password = $state('');
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let isRegistering = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		error = null;
+
+		try {
+			if (isRegistering) {
+				await register({ username, password });
+			} else {
+				await login({ username, password });
+			}
+			// Redirect after successful login/register
+			goto('/dashboard');
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'An error occurred';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={username} placeholder="Username" />
+	<input type="password" bind:value={password} placeholder="Password" />
+	<button type="submit" disabled={loading}>
+		{loading ? 'Processing...' : isRegistering ? 'Register' : 'Login'}
+	</button>
+</form>
+
+<button onclick={() => (isRegistering = !isRegistering)}>
+	{isRegistering ? 'Switch to Login' : 'Switch to Register'}
+</button>
+
+{#if error}
+	<p style="color: red">{error}</p>
+{/if}
+```
+
+### Protecting Routes
+
+#### Server-side Protection
+
+```typescript
+// In +page.server.ts
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return {
+    user: event.locals.user,
+  };
+};
+```
+
+#### Using getRequestEvent() with Remote Functions
+
+```typescript
+import { getRequestEvent } from "$app/server";
+
+function requireLogin() {
+  const { locals } = getRequestEvent();
+
+  if (!locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return locals.user;
+}
+
+export const getProtectedData = query(async () => {
+  const user = requireLogin();
+  // Use user...
+});
+```
+
+### Best Practices
+
+1. **Always validate passwords** - Check length and complexity
+2. **Use secure session tokens** - Generated with crypto.getRandomValues
+3. **Hash session tokens** - Store hashed tokens in database
+4. **Set appropriate cookie options** - httpOnly, secure, sameSite
+5. **Renew sessions** - Automatically renew before expiration
+6. **Invalidate on logout** - Always delete session from database
+7. **Handle errors gracefully** - Don't reveal if username exists
+
+---
+
+## shadcn-svelte
+
+### Installation
+
+Components are installed using the CLI:
+
+```bash
+npx shadcn-ui@latest add [component-name]
+```
+
+Components are installed to `src/lib/components/ui/` based on `components.json` configuration.
+
+### Configuration
+
+The `components.json` file configures:
+
+- Tailwind CSS location
+- Component aliases (`$lib/components/ui`)
+- TypeScript support
+- Registry URL
+
+### Using Components
+
+```svelte
+<script lang="ts">
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+</script>
+
+<Button>Click me</Button>
+<Input placeholder="Enter text..." />
+```
+
+### Component Variants
+
+Most shadcn-svelte components support variants:
+
+```svelte
+<script>
+	import { Button } from '$lib/components/ui/button';
+</script>
+
+<Button variant="default">Default</Button>
+<Button variant="destructive">Delete</Button>
+<Button variant="outline">Outline</Button>
+<Button variant="ghost">Ghost</Button>
+```
+
+### Form Components with Remote Functions
+
+Use shadcn-svelte components with remote functions:
+
+```svelte
+<script lang="ts">
+	import { createPost } from './data.remote';
+	import { Input } from '$lib/components/ui/input';
+	import { Button } from '$lib/components/ui/button';
+	import { Label } from '$lib/components/ui/label';
+
+	let title = $state('');
+	let content = $state('');
+	let loading = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		try {
+			await createPost({ title, content });
+			title = '';
+			content = '';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<Label for="title">Title</Label>
+	<Input id="title" bind:value={title} />
+
+	<Label for="content">Content</Label>
+	<Input id="content" bind:value={content} />
+
+	<Button type="submit" disabled={loading}>
+		{loading ? 'Submitting...' : 'Submit'}
+	</Button>
+</form>
+```
+
+### Best Practices
+
+1. **Import from aliases** - Use `$lib/components/ui` paths
+2. **Customize components** - Edit component files directly (they're yours)
+3. **Use TypeScript** - Components are fully typed
+4. **Follow accessibility** - Components follow ARIA patterns
+5. **Combine with Tailwind** - Use Tailwind utilities for styling
+6. **Check documentation** - Visit [shadcn-svelte.com](https://www.shadcn-svelte.com) for component docs
+
+### Common Components
+
+- **Button** - `$lib/components/ui/button`
+- **Input** - `$lib/components/ui/input`
+- **Label** - `$lib/components/ui/label`
+- **Card** - `$lib/components/ui/card`
+- **Dialog** - `$lib/components/ui/dialog`
+- **Select** - `$lib/components/ui/select`
+- **Table** - `$lib/components/ui/table`
+
+---
+
+## General Practices
+
+### TypeScript
+
+- Use TypeScript throughout the codebase
+- Define types explicitly when needed
+- Use type inference from Drizzle schemas
+- Export types from schema files
+
+### File Organization
+
+```
+src/
+├── lib/
+│   ├── components/
+│   │   └── ui/          # shadcn-svelte components
+│   ├── i18n/
+│   │   ├── index.svelte.ts  # Translation function (t)
+│   │   └── translations.json # Fallback translations
+│   ├── server/
+│   │   ├── auth.ts      # Authentication utilities
+│   │   ├── translations.ts  # Load translations from DB
+│   │   └── db/
+│   │       ├── index.ts # Database connection
+│   │       └── schema.ts # Drizzle schemas
+│   └── utils.ts         # Shared utilities
+└── routes/
+    └── [tenant]/   # Language parameter route
+        ├── +layout.server.ts  # Load translations
+        ├── +layout.svelte    # Root layout
+        └── [route]/
+            ├── +page.svelte      # Component
+            ├── +page.server.ts   # Load function only (no actions)
+            └── data.remote.ts     # Remote functions (queries & commands)
+```
+
+### Environment Variables
+
+- Use `$env/dynamic/private` for server-side env vars
+- Use `$env/dynamic/public` for client-side env vars
+- Always validate env vars exist before use
+
+### Error Handling
+
+- Use SvelteKit's `error()` helper for page errors
+- Handle validation errors in remote functions
+- Throw errors from remote functions - they'll be caught by components
+- Don't expose sensitive information in errors
+- Use try-catch in components when calling remote functions
+
+### Code Style
+
+- Use Prettier for formatting
+- Use ESLint for linting
+- Follow Svelte 5 runes patterns
+- Use async/await over promises where possible
+
+### Testing
+
+- Write tests for critical business logic
+- Test authentication flows
+- Test database operations
+- Test remote function calls and error handling
+
+### Security
+
+- Always validate user input
+- Use parameterized queries (Drizzle handles this)
+- Hash passwords with Argon2
+- Use secure session tokens
+- Set appropriate cookie flags
+- Protect sensitive routes
+
+---
+
+## Quick Reference
+
+### Creating a New Feature
+
+1. **Define schema** (if needed):
+
+   ```typescript
+   // src/lib/server/db/schema.ts
+   export const myTable = pgTable('my_table', { ... });
+   ```
+
+2. **Create remote functions**:
+
+   ```typescript
+   // src/routes/my-feature/data.remote.ts
+   import { query, command } from "$app/server";
+   ```
+
+3. **Create page**:
+
+   ```svelte
+   <!-- src/routes/[[lang=lang]]/my-feature/+page.svelte -->
+   <script lang="ts">
+   	import { page } from '$app/state';
+   	import { t } from '$lib/i18n/index.svelte';
+   	import { getData } from './data.remote';
+
+   	const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+   </script>
+
+   <h1>{t('my-feature.title') || 'My Feature'}</h1>
+   ```
+
+4. **Add authentication** (if needed):
+
+   ```typescript
+   // In remote function using getRequestEvent()
+   import { getRequestEvent } from "$app/server";
+   import { redirect } from "@sveltejs/kit";
+
+   export const getProtectedData = query(async () => {
+     const { locals } = getRequestEvent();
+     if (!locals.user) throw redirect(302, "/login");
+     // Use locals.user...
+   });
+   ```
+
+### Common Patterns
+
+**Protected Route:**
+
+```typescript
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) throw redirect(302, "/login");
+  return { user: event.locals.user };
+};
+```
+
+**Form Submission with Remote Function:**
+
+```svelte
+<script lang="ts">
+	import { createItem } from './data.remote';
+
+	let name = $state('');
+	let loading = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		try {
+			await createItem({ name });
+			name = '';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={name} />
+	<button type="submit" disabled={loading}>Submit</button>
+</form>
+```
+
+**Database Query:**
+
+```typescript
+const result = await db
+  .select()
+  .from(table.myTable)
+  .where(eq(table.myTable.id, id));
+```
+
+---
+
+## Resources
+
+- [SvelteKit Docs](https://kit.svelte.dev)
+- [Drizzle ORM Docs](https://orm.drizzle.team)
+- [Lucia Auth Docs](https://lucia-auth.com)
+- [shadcn-svelte Docs](https://www.shadcn-svelte.com)
+- [Svelte 5 Docs](https://svelte.dev/docs)
+
+---
+
+## CRM Multi-Tenant System
+
+### Project Overview
+
+This is a multi-tenant CRM (Customer Relationship Management) system built for Romanian businesses. The system supports multiple organizations (tenants), each with their own users, clients, projects, tasks, documents, services, invoices, and contract templates.
+
+### Key Features
+
+1. **Multi-Tenancy**: Complete data isolation per tenant/organization
+2. **Client Management**: Manage client information with Romanian legal data (CUI, registration numbers, etc.)
+3. **Project Management**: Track projects associated with clients
+4. **Task Management**: Create and manage tasks linked to projects or clients
+5. **Document Management**: Upload and manage documents with MinIO storage
+6. **Contract Templates**: Create reusable contract templates with variable placeholders
+7. **Service Management**: Define services for clients with recurring billing options
+8. **Invoice Management**: Generate invoices manually or from services
+9. **ANAF API Integration**: Auto-fill Romanian company data using CUI lookup
+10. **Romanian Legal Data**: Support for Romanian company legal fields (CUI, IBAN, trade register, etc.)
+
+### Architecture
+
+#### Multi-Tenancy Implementation
+
+- **Tenant Identification**: Tenants are identified via URL path parameter `/[tenant]`
+- **Data Isolation**: All tenant-scoped data includes `tenantId` foreign key
+- **User-Tenant Relationship**: Users can belong to multiple tenants via `tenantUser` join table
+- **Roles**: Each user-tenant relationship has a role (`owner`, `admin`, `member`)
+
+#### Database Schema
+
+The system uses SQLite with Drizzle ORM. Key tables:
+
+- **user**: User accounts
+- **session**: User sessions for authentication
+- **tenant**: Organizations with Romanian legal data
+- **tenantUser**: Many-to-many relationship between users and tenants
+- **client**: Clients with Romanian legal data
+- **project**: Projects linked to clients
+- **task**: Tasks linked to projects/clients
+- **document**: Documents stored with MinIO file paths
+- **service**: Services with recurring billing configuration
+- **invoice**: Invoices with tax calculations
+- **contractTemplate**: Reusable contract templates with variables
+
+#### Remote Functions Organization
+
+All remote functions are centralized in `src/lib/remotes/`:
+
+- `auth.remote.ts` - Authentication (login, logout)
+- `register.remote.ts` - User and tenant registration
+- `clients.remote.ts` - Client CRUD operations
+- `projects.remote.ts` - Project CRUD operations
+- `tasks.remote.ts` - Task CRUD operations
+- `documents.remote.ts` - Document upload/download/delete
+- `services.remote.ts` - Service CRUD operations
+- `invoices.remote.ts` - Invoice creation and management
+- `contract-templates.remote.ts` - Contract template management and generation
+- `tenant-settings.remote.ts` - Tenant settings updates
+- `anaf.remote.ts` - ANAF API integration for Romanian company data
+- `upload.remote.ts` - File upload utilities
+
+### Romanian Legal Data Fields
+
+Both tenants and clients support Romanian legal data:
+
+- `companyType`: Type of company (e.g., "SRL", "SA", "PFA")
+- `cui`: Unique company identifier (CUI)
+- `registrationNumber`: Registration number
+- `tradeRegister`: Trade register information
+- `vatNumber`: VAT number
+- `legalRepresentative`: Legal representative name
+- `iban`: Bank IBAN
+- `bankName`: Bank name
+- `address`: Street address
+- `city`: City
+- `county`: County (județ)
+- `postalCode`: Postal code
+- `country`: Country (defaults to "România")
+
+### ANAF API Integration
+
+The system integrates with the Romanian ANAF (Agenția Națională de Administrare Fiscală) API to auto-fill company data:
+
+```typescript
+// Usage in components
+import { getCompanyData } from "$lib/remotes/anaf.remote";
+
+const companyData = await getCompanyData(cui);
+// Returns structured Romanian company data
+```
+
+The ANAF remote function:
+
+- Validates CUI format
+- Fetches company data from ANAF API
+- Maps ANAF response to our schema format
+- Handles errors gracefully
+
+### Contract Template System
+
+Contract templates support variable placeholders that are replaced when generating contracts:
+
+**Available Variables:**
+
+- `{{tenant.*}}` - Tenant/organization data (name, CUI, IBAN, address, etc.)
+- `{{client.*}}` - Client data (name, CUI, IBAN, email, phone, etc.)
+- `{{project.*}}` - Project data (name, description, budget, dates)
+- `{{date}}`, `{{currentDate}}`, `{{year}}` - System date variables
+- Custom variables passed during generation
+
+**Example Template:**
+
+```
+Contract between {{tenant.name}} (CUI: {{tenant.cui}})
+and {{client.name}} (CUI: {{client.cui}})
+
+Project: {{project.name}}
+Budget: {{project.budget}}
+Date: {{date}}
+```
+
+### File Storage
+
+Documents are stored using MinIO (S3-compatible storage):
+
+- Files are uploaded to tenant-specific paths
+- File metadata stored in database
+- Download URLs generated with expiration
+- Supports any file type up to 50MB
+
+### Route Structure
+
+```
+/[tenant]/                    # Dashboard
+/[tenant]/clients             # Client list
+/[tenant]/clients/new         # Create client
+/[tenant]/clients/[clientId]  # Client detail
+/[tenant]/clients/[clientId]/edit  # Edit client
+/[tenant]/projects            # Project list
+/[tenant]/projects/new        # Create project
+/[tenant]/projects/[projectId]  # Project detail
+/[tenant]/projects/[projectId]/edit  # Edit project
+/[tenant]/tasks               # Task list
+/[tenant]/tasks/new          # Create task
+/[tenant]/tasks/[taskId]     # Task detail
+/[tenant]/tasks/[taskId]/edit  # Edit task
+/[tenant]/documents           # Document list
+/[tenant]/documents/upload   # Upload document
+/[tenant]/services           # Service list
+/[tenant]/services/new       # Create service
+/[tenant]/invoices           # Invoice list
+/[tenant]/invoices/new      # Create invoice
+/[tenant]/invoices/[invoiceId]  # Invoice detail
+/[tenant]/contract-templates  # Template list
+/[tenant]/contract-templates/new  # Create template
+/[tenant]/contract-templates/[templateId]  # Template detail
+/[tenant]/contract-templates/[templateId]/generate  # Generate contract
+/[tenant]/settings           # Tenant settings
+```
+
+### Authentication & Authorization
+
+#### Registration Flow
+
+1. User registers with username/password
+2. User simultaneously creates their first tenant (organization)
+3. User is automatically assigned as `owner` role
+4. Session is created and user is logged in
+5. User is redirected to `/[tenant]/dashboard`
+
+#### Tenant Access Control
+
+- All tenant-scoped routes require authentication
+- `hooks.server.ts` validates tenant access via URL parameter
+- `event.locals.tenant` and `event.locals.tenantUser` are set for tenant context
+- Remote functions check `event.locals.tenant` for authorization
+
+#### Role-Based Access
+
+- **owner**: Full access, can modify tenant settings
+- **admin**: Can manage most resources, limited tenant settings access
+- **member**: Read/write access to resources, no tenant settings access
+
+### UI Components
+
+#### Sidebar Navigation
+
+The sidebar (`/[tenant]/+layout.svelte`) includes:
+
+- Tenant/organization header with icon
+- Navigation menu with Lucide icons for each section
+- Active state highlighting
+- Logout button in footer
+
+#### Form Components
+
+- All forms use shadcn-svelte components
+- Select components use bits-ui (no SelectValue component)
+- File uploads use drag-and-drop interface similar to image upload
+- Forms handle loading and error states
+
+### Best Practices for CRM Development
+
+1. **Always check tenant context**: Use `event.locals.tenant` in remote functions
+2. **Validate tenant access**: Ensure user has access to tenant before operations
+3. **Use transactions**: For multi-step operations (e.g., registration)
+4. **Romanian data validation**: Validate CUI format, IBAN format, etc.
+5. **File storage**: Always use tenant-specific paths for file organization
+6. **Invoice calculations**: Store amounts in cents (integers) to avoid floating-point issues
+7. **Contract generation**: Always validate template variables before replacement
+8. **Error handling**: Don't expose sensitive tenant/client information in errors
+
+### Environment Variables
+
+Required environment variables:
+
+- `DATABASE_URL`: SQLite database path or Turso database URL
+- `MINIO_ENDPOINT`: MinIO server endpoint
+- `MINIO_ACCESS_KEY`: MinIO access key
+- `MINIO_SECRET_KEY`: MinIO secret key
+- `MINIO_BUCKET`: MinIO bucket name
+- `ANAF_API_URL`: ANAF API endpoint (optional, has default)
+
+### Database Migrations
+
+```bash
+# Generate migration after schema changes
+pnpm db:generate
+
+# Push schema changes (development)
+pnpm db:push
+
+# Run migrations (production)
+pnpm db:migrate
+
+# Open Drizzle Studio
+pnpm db:studio
+```
+
+### Common Patterns
+
+#### Creating a Tenant-Scoped Resource
+
+```typescript
+// In remote function
+export const createResource = command(schema, async (data) => {
+  const event = getRequestEvent();
+  if (!event?.locals.user || !event?.locals.tenant) {
+    throw new Error("Unauthorized");
+  }
+
+  await db.insert(table.resource).values({
+    id: generateId(),
+    tenantId: event.locals.tenant.id,
+    ...data,
+  });
+
+  return { success: true };
+});
+```
+
+#### Filtering by Tenant
+
+```typescript
+const resources = await db
+  .select()
+  .from(table.resource)
+  .where(eq(table.resource.tenantId, event.locals.tenant.id));
+```
+
+#### Romanian CUI Lookup
+
+```typescript
+import { getCompanyData } from "$lib/remotes/anaf.remote";
+
+// In component
+async function lookupCUI() {
+  try {
+    const data = await getCompanyData(cui);
+    // Auto-fill form fields with Romanian company data
+    companyName = data.denumire;
+    address = data.adresa;
+    // ... etc
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Failed to lookup CUI";
+  }
+}
+```
+
+### Testing Considerations
+
+- Test multi-tenant data isolation
+- Test role-based access control
+- Test ANAF API integration (mock in tests)
+- Test file upload/download with MinIO
+- Test contract template variable replacement
+- Test invoice calculations (tax, totals)
+- Test Romanian legal data validation

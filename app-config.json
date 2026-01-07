@@ -1,0 +1,43 @@
+{
+  "appName": "crm",
+  "namespace": "crm",
+  "configs": [
+    {
+      "name": "crm-config",
+      "data": {
+        "NODE_ENV": "production",
+        "APP_NAME": "crm",
+        "APP_ENV": "production",
+        "SQLITE_URI": "libsql://eebc2e3f-74de-43fe-b6f1-95061fda419e-navitech.navitech.cloud",
+        "SQLITE_AUTH_TOKEN": "eyJhbGciOiJFZERTQSJ9.eyJpYXQiOjE3NjYzMjExMTcsImlzcyI6Im5hdml0ZWNoLWhvc3RlZCJ9.bs9Wqn-ayW6Nju_nR-mQ3C4FSmZGx1XHnl39ctGKmYu4xQcj5XyibLlzdyb1PjUFLqhlWmBhsEWv6v1xlobzCA",
+        "MINIO_ENDPOINT": "s3.navitech.cloud",
+        "MINIO_ACCESS_KEY": "PObN3EWsdqeFQKonraRQ",
+        "MINIO_SECRET_KEY": "7C7DOXL54vH5bXvSPHbcZ9MzRNlGevcP5mqKiJVU",
+        "MINIO_REGION": "eu-romania-1",
+        "MINIO_BUCKET_NAME": "navitech",
+        "MINIO_USE_SSL": "true",
+        "MINIO_PORT": "443",
+        "MINIO_PUBLIC_URL": "https://s3.navitech.cloud",
+        "REDIS_URL": "redis://:Awesome-Pass-11@database-6ce3a5ca-da0f-4918-a686-b62b036ec24b.navitech.svc.cluster.local:6379"
+      }
+    }
+  ],
+  "deployments": [
+    {
+      "name": "crm",
+      "path": "./app",
+      "kind": "web",
+      "domain": "crm.navitech.systems",
+      "location": "/",
+      "port": 3000,
+      "env": "crm-config",
+      "tls": true,
+      "docker": {
+        "imageName": "crm",
+        "tag": "latest",
+        "context": "./",
+        "dockerfile": "./app/Dockerfile"
+      }
+    }
+  ]
+}

@@ -1,0 +1,1216 @@
+---
+alwaysApply: true
+---
+
+## Remote Functions
+
+### Overview
+
+Remote Functions allow you to call server-side functions directly from Svelte components using `await`. They replace the need for API routes for many use cases.
+
+### Defining Remote Functions
+
+Create `.remote.ts` or `.remote.js` files in your routes directory:
+
+```typescript
+// src/routes/posts/data.remote.ts
+import { query, command } from "$app/server";
+import * as v from "valibot";
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+
+// Query function - for reading data
+export const getPosts = query(async () => {
+  const posts = await db.select().from(table.posts);
+  return posts;
+});
+
+// Query with validation
+export const getPost = query(
+  v.string(), // Input validation schema
+  async (slug) => {
+    const [post] = await db
+      .select()
+      .from(table.posts)
+      .where(eq(table.posts.slug, slug));
+    return post;
+  }
+);
+
+// Command function - for mutations
+export const createPost = command(
+  v.object({
+    title: v.string(),
+    content: v.string(),
+  }),
+  async (data) => {
+    await db.insert(table.posts).values(data);
+  }
+);
+```
+
+### Using Remote Functions in Components
+
+```svelte
+<script lang="ts">
+  import { getPosts, createPost } from './data.remote';
+</script>
+
+<!-- Using await directly -->
+<ul>
+  {#each await getPosts() as post}
+    <li>{post.title}</li>
+  {/each}
+</ul>
+
+<!-- Using with loading/error states -->
+<script lang="ts">
+  const postsQuery = getPosts();
+</script>
+
+{#if postsQuery.error}
+  <p>Error loading posts</p>
+{:else if postsQuery.loading}
+  <p>Loading...</p>
+{:else}
+  <ul>
+    {#each postsQuery.current as post}
+      <li>{post.title}</li>
+    {/each}
+  </ul>
+{/if}
+```
+
+### Handling Form Submissions with Remote Functions
+
+Use `command` functions for form submissions. Handle form data in your component:
+
+```svelte
+<script lang="ts">
+	import { createPost } from './data.remote';
+
+	let title = $state('');
+	let content = $state('');
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let success = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		error = null;
+		try {
+			await createPost({ title, content });
+			success = true;
+			title = '';
+			content = '';
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'An error occurred';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={title} placeholder="Title" />
+	<textarea bind:value={content} placeholder="Content" />
+	<button type="submit" disabled={loading}>
+		{loading ? 'Creating...' : 'Create Post'}
+	</button>
+</form>
+
+{#if error}
+	<p style="color: red">{error}</p>
+{/if}
+
+{#if success}
+	<p>Post created successfully!</p>
+{/if}
+```
+
+### Best Practices
+
+1. **Use `query` for read operations** - Automatically cached and optimized
+2. **Use `command` for write operations** - Mutations that change data, including form submissions
+3. **Always validate inputs** - Use Valibot schemas for type safety
+4. **Prefer Remote Functions over API routes** - Simpler and more type-safe
+5. **Use `query.batch` for multiple queries** - Automatically batches requests
+6. **Handle errors in components** - Wrap command calls in try-catch blocks
+7. **Use loading states** - Provide feedback during async operations
+
+---
+
+## Drizzle ORM
+
+### Schema Definition
+
+Define schemas in `src/lib/server/db/schema.ts`:
+
+```typescript
+import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id),
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
+});
+
+// Export types
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+export type Session = typeof session.$inferSelect;
+```
+
+### Database Connection
+
+Database connection is configured in `src/lib/server/db/index.ts`:
+
+```typescript
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+import { env } from "$env/dynamic/private";
+
+if (!env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
+
+const client = postgres(env.DATABASE_URL);
+export const db = drizzle(client, { schema });
+```
+
+### Querying
+
+#### Basic Queries
+
+```typescript
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+import { eq } from "drizzle-orm";
+
+// Select all
+const users = await db.select().from(table.user);
+
+// Select with condition
+const user = await db
+  .select()
+  .from(table.user)
+  .where(eq(table.user.id, userId));
+
+// Select specific columns
+const usernames = await db
+  .select({ username: table.user.username })
+  .from(table.user);
+
+// Insert
+await db.insert(table.user).values({
+  id: userId,
+  username: "john",
+  passwordHash: hash,
+});
+
+// Update
+await db
+  .update(table.user)
+  .set({ username: "newusername" })
+  .where(eq(table.user.id, userId));
+
+// Delete
+await db.delete(table.user).where(eq(table.user.id, userId));
+```
+
+#### Joins
+
+```typescript
+import { eq } from "drizzle-orm";
+
+const result = await db
+  .select({
+    user: { id: table.user.id, username: table.user.username },
+    session: table.session,
+  })
+  .from(table.session)
+  .innerJoin(table.user, eq(table.session.userId, table.user.id))
+  .where(eq(table.session.id, sessionId));
+```
+
+### Migrations
+
+1. **Generate migrations** after schema changes:
+
+   ```bash
+   pnpm db:generate
+   ```
+
+2. **Push schema changes** (development):
+
+   ```bash
+   pnpm db:push
+   ```
+
+3. **Run migrations** (production):
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+4. **Open Drizzle Studio** (development):
+   ```bash
+   pnpm db:studio
+   ```
+
+### Best Practices
+
+1. **Always use schema imports** - Import from `$lib/server/db/schema`
+2. **Use type inference** - `typeof table.user.$inferSelect` for types
+3. **Validate inputs** - Use Valibot or similar before database operations
+4. **Use transactions** for related operations:
+   ```typescript
+   await db.transaction(async (tx) => {
+     await tx.insert(table.user).values(userData);
+     await tx.insert(table.session).values(sessionData);
+   });
+   ```
+5. **Handle errors** - Wrap database operations in try-catch
+6. **Use prepared statements** - Drizzle handles this automatically
+7. **Select only needed columns** - Improves performance
+
+---
+
+## Authentication (Lucia-style)
+
+### Architecture
+
+This codebase uses a custom Lucia-style authentication implementation. Authentication logic is centralized in `src/lib/server/auth.ts`.
+
+### Session Management
+
+#### Creating Sessions
+
+```typescript
+import * as auth from "$lib/server/auth";
+
+const sessionToken = auth.generateSessionToken();
+const session = await auth.createSession(sessionToken, userId);
+auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+```
+
+#### Validating Sessions
+
+Sessions are automatically validated in `hooks.server.ts`. Access the user via `event.locals.user`:
+
+```typescript
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return {
+    user: event.locals.user,
+  };
+};
+```
+
+#### Invalidating Sessions
+
+```typescript
+import * as auth from "$lib/server/auth";
+
+await auth.invalidateSession(sessionId);
+auth.deleteSessionTokenCookie(event);
+```
+
+### Password Hashing
+
+Use `@node-rs/argon2` for password hashing:
+
+```typescript
+import { hash, verify } from "@node-rs/argon2";
+
+// Hashing
+const passwordHash = await hash(password, {
+  memoryCost: 19456,
+  timeCost: 2,
+  outputLen: 32,
+  parallelism: 1,
+});
+
+// Verification
+const validPassword = await verify(existingUser.passwordHash, password, {
+  memoryCost: 19456,
+  timeCost: 2,
+  outputLen: 32,
+  parallelism: 1,
+});
+```
+
+### User ID Generation
+
+Generate secure user IDs:
+
+```typescript
+import { encodeBase32LowerCase } from "@oslojs/encoding";
+
+function generateUserId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(15));
+  return encodeBase32LowerCase(bytes);
+}
+```
+
+### Authentication Flow with Remote Functions
+
+#### Login Command
+
+```typescript
+// src/routes/login/auth.remote.ts
+import { command } from "$app/server";
+import { getRequestEvent, redirect } from "@sveltejs/kit";
+import * as v from "valibot";
+import { hash, verify } from "@node-rs/argon2";
+import { eq } from "drizzle-orm";
+import * as auth from "$lib/server/auth";
+import { db } from "$lib/server/db";
+import * as table from "$lib/server/db/schema";
+
+const loginSchema = v.object({
+  username: v.string(),
+  password: v.string(),
+});
+
+export const login = command(loginSchema, async (data) => {
+  const event = getRequestEvent();
+  const { username, password } = data;
+
+  // Validate credentials
+  const [user] = await db
+    .select()
+    .from(table.user)
+    .where(eq(table.user.username, username));
+
+  if (!user) {
+    throw new Error("Incorrect username or password");
+  }
+
+  const validPassword = await verify(user.passwordHash, password, {
+    memoryCost: 19456,
+    timeCost: 2,
+    outputLen: 32,
+    parallelism: 1,
+  });
+
+  if (!validPassword) {
+    throw new Error("Incorrect username or password");
+  }
+
+  // Create session
+  const sessionToken = auth.generateSessionToken();
+  const session = await auth.createSession(sessionToken, user.id);
+  auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+
+  return { success: true, userId: user.id };
+});
+```
+
+#### Registration Command
+
+```typescript
+// src/routes/login/auth.remote.ts
+import { encodeBase32LowerCase } from "@oslojs/encoding";
+
+const registerSchema = v.object({
+  username: v.string(),
+  password: v.string(),
+});
+
+export const register = command(registerSchema, async (data) => {
+  const event = getRequestEvent();
+  const { username, password } = data;
+
+  // Validate username
+  if (
+    !/^[a-z0-9_-]+$/.test(username) ||
+    username.length < 3 ||
+    username.length > 31
+  ) {
+    throw new Error("Invalid username");
+  }
+
+  // Check if user exists
+  const [existing] = await db
+    .select()
+    .from(table.user)
+    .where(eq(table.user.username, username));
+
+  if (existing) {
+    throw new Error("Username already taken");
+  }
+
+  // Create user
+  const userId = generateUserId();
+  const passwordHash = await hash(password, {
+    memoryCost: 19456,
+    timeCost: 2,
+    outputLen: 32,
+    parallelism: 1,
+  });
+
+  await db.insert(table.user).values({ id: userId, username, passwordHash });
+
+  // Create session immediately after registration
+  const sessionToken = auth.generateSessionToken();
+  const session = await auth.createSession(sessionToken, userId);
+  auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
+
+  return { success: true, userId };
+});
+
+function generateUserId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(15));
+  return encodeBase32LowerCase(bytes);
+}
+```
+
+#### Logout Command
+
+```typescript
+// src/routes/logout/auth.remote.ts
+import { command, getRequestEvent } from "$app/server";
+import * as auth from "$lib/server/auth";
+
+export const logout = command(async () => {
+  const event = getRequestEvent();
+
+  if (!event.locals.session) {
+    throw new Error("Not authenticated");
+  }
+
+  await auth.invalidateSession(event.locals.session.id);
+  auth.deleteSessionTokenCookie(event);
+
+  return { success: true };
+});
+```
+
+#### Using Authentication Commands in Components
+
+```svelte
+<!-- src/routes/login/+page.svelte -->
+<script lang="ts">
+	import { login, register } from './auth.remote';
+	import { goto } from '$app/navigation';
+
+	let username = $state('');
+	let password = $state('');
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let isRegistering = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		error = null;
+
+		try {
+			if (isRegistering) {
+				await register({ username, password });
+			} else {
+				await login({ username, password });
+			}
+			// Redirect after successful login/register
+			goto('/dashboard');
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'An error occurred';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={username} placeholder="Username" />
+	<input type="password" bind:value={password} placeholder="Password" />
+	<button type="submit" disabled={loading}>
+		{loading ? 'Processing...' : isRegistering ? 'Register' : 'Login'}
+	</button>
+</form>
+
+<button onclick={() => (isRegistering = !isRegistering)}>
+	{isRegistering ? 'Switch to Login' : 'Switch to Register'}
+</button>
+
+{#if error}
+	<p style="color: red">{error}</p>
+{/if}
+```
+
+### Protecting Routes
+
+#### Server-side Protection
+
+```typescript
+// In +page.server.ts
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return {
+    user: event.locals.user,
+  };
+};
+```
+
+#### Using getRequestEvent() with Remote Functions
+
+```typescript
+import { getRequestEvent } from "$app/server";
+
+function requireLogin() {
+  const { locals } = getRequestEvent();
+
+  if (!locals.user) {
+    throw redirect(302, "/login");
+  }
+
+  return locals.user;
+}
+
+export const getProtectedData = query(async () => {
+  const user = requireLogin();
+  // Use user...
+});
+```
+
+### Best Practices
+
+1. **Always validate passwords** - Check length and complexity
+2. **Use secure session tokens** - Generated with crypto.getRandomValues
+3. **Hash session tokens** - Store hashed tokens in database
+4. **Set appropriate cookie options** - httpOnly, secure, sameSite
+5. **Renew sessions** - Automatically renew before expiration
+6. **Invalidate on logout** - Always delete session from database
+7. **Handle errors gracefully** - Don't reveal if username exists
+
+---
+
+## shadcn-svelte
+
+### Installation
+
+Components are installed using the CLI:
+
+```bash
+npx shadcn-ui@latest add [component-name]
+```
+
+Components are installed to `src/lib/components/ui/` based on `components.json` configuration.
+
+### Configuration
+
+The `components.json` file configures:
+
+- Tailwind CSS location
+- Component aliases (`$lib/components/ui`)
+- TypeScript support
+- Registry URL
+
+### Using Components
+
+```svelte
+<script lang="ts">
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+</script>
+
+<Button>Click me</Button>
+<Input placeholder="Enter text..." />
+```
+
+### Component Variants
+
+Most shadcn-svelte components support variants:
+
+```svelte
+<script>
+	import { Button } from '$lib/components/ui/button';
+</script>
+
+<Button variant="default">Default</Button>
+<Button variant="destructive">Delete</Button>
+<Button variant="outline">Outline</Button>
+<Button variant="ghost">Ghost</Button>
+```
+
+### Form Components with Remote Functions
+
+Use shadcn-svelte components with remote functions:
+
+```svelte
+<script lang="ts">
+	import { createPost } from './data.remote';
+	import { Input } from '$lib/components/ui/input';
+	import { Button } from '$lib/components/ui/button';
+	import { Label } from '$lib/components/ui/label';
+
+	let title = $state('');
+	let content = $state('');
+	let loading = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		try {
+			await createPost({ title, content });
+			title = '';
+			content = '';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<Label for="title">Title</Label>
+	<Input id="title" bind:value={title} />
+
+	<Label for="content">Content</Label>
+	<Input id="content" bind:value={content} />
+
+	<Button type="submit" disabled={loading}>
+		{loading ? 'Submitting...' : 'Submit'}
+	</Button>
+</form>
+```
+
+### Best Practices
+
+1. **Import from aliases** - Use `$lib/components/ui` paths
+2. **Customize components** - Edit component files directly (they're yours)
+3. **Use TypeScript** - Components are fully typed
+4. **Follow accessibility** - Components follow ARIA patterns
+5. **Combine with Tailwind** - Use Tailwind utilities for styling
+6. **Check documentation** - Visit [shadcn-svelte.com](https://www.shadcn-svelte.com) for component docs
+
+### Common Components
+
+- **Button** - `$lib/components/ui/button`
+- **Input** - `$lib/components/ui/input`
+- **Label** - `$lib/components/ui/label`
+- **Card** - `$lib/components/ui/card`
+- **Dialog** - `$lib/components/ui/dialog`
+- **Select** - `$lib/components/ui/select`
+- **Table** - `$lib/components/ui/table`
+
+---
+
+## Translations
+
+### Architecture
+
+This codebase uses a hybrid translation system that combines:
+
+- **JSON fallback file** (`src/lib/i18n/translations.json`) - Static translations for development
+- **Database translations** (`translation` table) - Dynamic translations that override JSON (loaded via `+layout.server.ts`)
+
+Translations are automatically loaded in the root layout and made available to all pages through `page.data.translations`.
+
+### Supported Languages
+
+Currently supported languages:
+
+- `'ro'` - Romanian (default)
+- `'en'` - English
+
+### Database Schema
+
+Translations are stored in the `translation` table:
+
+```typescript
+export const translation = pgTable("translation", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 255 }).notNull(), // e.g., 'contact.title'
+  language: varchar("language", { length: 10 }).notNull(), // 'ro', 'en'
+  value: text("value").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+```
+
+### Loading Translations
+
+Translations are loaded in the root layout server file:
+
+```typescript
+// src/routes/[[lang=lang]]/+layout.server.ts
+import type { LayoutServerLoad } from "./$types";
+import { loadTranslations } from "$lib/server/translations";
+
+export const load: LayoutServerLoad = async (event) => {
+  const translations = await loadTranslations();
+
+  return {
+    user: event.locals.user,
+    translations,
+  };
+};
+```
+
+The `loadTranslations()` function:
+
+1. Fetches all translations from the database
+2. Converts flat records (e.g., `key: 'contact.title'`) into nested objects
+3. Returns a structure matching `translations.json` format
+4. Falls back to empty structure if no DB translations exist (JSON will be used)
+
+### Using Translations in Components
+
+#### Basic Usage
+
+Import the `t` function from `$lib/i18n/index.svelte`:
+
+```svelte
+<script lang="ts">
+  import { page } from '$app/state';
+  import { t } from '$lib/i18n/index.svelte';
+
+  // Get current language from route params
+  const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+</script>
+
+<h1>{t('contact.title')}</h1>
+<p>{t('contact.description')}</p>
+```
+
+#### With Fallback Values
+
+Always provide fallback text for better developer experience:
+
+```svelte
+<h1>{t('contact.title') || 'Contact Us'}</h1>
+<p>{t('contact.description') || 'Get in touch with us'}</p>
+```
+
+#### Nested Keys
+
+Use dot notation for nested translation keys:
+
+```svelte
+<!-- translations.json structure: -->
+<!-- {
+  "ro": {
+    "contact": {
+      "hero": {
+        "title": "GET IN TOUCH"
+      }
+    }
+  }
+} -->
+
+<h1>{t('contact.hero.title') || 'GET IN TOUCH'}</h1>
+```
+
+#### Placeholder Replacement
+
+Use `{{placeholder}}` syntax in translations and pass replacements:
+
+```svelte
+<script lang="ts">
+  import { t } from '$lib/i18n/index.svelte';
+
+  const userName = $state('John');
+  const itemCount = $state(5);
+</script>
+
+<!-- Translation: "Hello {{name}}, you have {{count}} items" -->
+<p>{t('greeting.message', { name: userName, count: itemCount })}</p>
+```
+
+#### SEO Meta Tags
+
+Use translations in `<svelte:head>` for SEO:
+
+```svelte
+<script lang="ts">
+  import { page } from '$app/state';
+  import { t } from '$lib/i18n/index.svelte';
+
+  const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+</script>
+
+<svelte:head>
+  <title>{t('contact-page.title') || 'GET IN TOUCH'}</title>
+  <meta name="description" content={t('contact-page.description') || 'Contact us'} />
+  <meta property="og:title" content={t('contact-page.title') || 'GET IN TOUCH'} />
+  <meta property="og:description" content={t('contact-page.description') || 'Contact us'} />
+  <meta property="og:image" content={t('contact-page.image') || ''} />
+  <meta property="og:url" content={page.url.toString()} />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content={t('site.name') || 'Sakura'} />
+  <meta property="og:locale" content={language} />
+</svelte:head>
+```
+
+#### Language Detection
+
+The current language is automatically determined from the route parameter:
+
+```svelte
+<script lang="ts">
+  import { page } from '$app/state';
+
+  // Language from route: /ro/contact or /en/contact
+  const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+</script>
+```
+
+The `t` function automatically uses the current language from `page.params.lang`. If a translation key is missing in the current language, it falls back to Romanian (`'ro'`).
+
+### Translation Key Naming Convention
+
+Use descriptive, hierarchical keys:
+
+- **Page-level keys**: `contact.title`, `menu.title`, `landing.hero.title`
+- **Component-level keys**: `contact-hero.title`, `contact-hero.description`
+- **Common keys**: `common.loading`, `common.error`, `site.name`
+- **SEO keys**: `contact-page.title`, `contact-page.description`, `contact-page.image`
+
+### Example: Complete Page with Translations
+
+```svelte
+<script lang="ts">
+  import { page } from '$app/state';
+  import { t } from '$lib/i18n/index.svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+
+  const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+
+  let name = $state('');
+  let loading = $state(false);
+  let error = $state<string | null>(null);
+</script>
+
+<svelte:head>
+  <title>{t('contact-page.title') || 'GET IN TOUCH'}</title>
+  <meta name="description" content={t('contact-page.description') || 'Contact us'} />
+  <meta property="og:locale" content={language} />
+</svelte:head>
+
+<div class="container mx-auto my-24">
+  <h1 class="text-5xl font-light">
+    {t('contact-hero.title') || 'GET IN TOUCH'}
+  </h1>
+
+  <form
+    onsubmit={(e) => {
+      e.preventDefault();
+      // Handle submit...
+    }}
+  >
+    <Input
+      placeholder={t('contact.form.name') || 'Name'}
+      bind:value={name}
+    />
+
+    <Button type="submit" disabled={loading}>
+      {loading
+        ? (t('common.loading') || 'Loading...')
+        : (t('contact.send-message') || 'Send Message')
+      }
+    </Button>
+  </form>
+
+  {#if error}
+    <p class="text-red-500">{error}</p>
+  {/if}
+</div>
+```
+
+### Managing Translations
+
+#### Adding Translations to Database
+
+Translations can be added/updated in the database through:
+
+- Admin interface (if available)
+- Direct database operations
+- Migration scripts
+
+#### Translation Key Format
+
+Store keys in the database using dot notation:
+
+- `contact.title` → `{ "contact": { "title": "..." } }`
+- `contact-hero.description1` → `{ "contact-hero": { "description1": "..." } }`
+
+The `loadTranslations()` function automatically converts flat keys into nested objects.
+
+### Best Practices
+
+1. **Always provide fallbacks** - Use `t('key') || 'Fallback text'` pattern
+2. **Use consistent naming** - Follow the hierarchical key structure
+3. **Group related translations** - Use prefixes like `contact-`, `menu-`, `landing-`
+4. **Translate all user-facing text** - Never hardcode text in components
+5. **Use translations in SEO tags** - Always translate meta tags and Open Graph data
+6. **Test both languages** - Verify translations work for both `'ro'` and `'en'`
+7. **Keep JSON file updated** - Maintain `translations.json` as a fallback
+8. **Use placeholders for dynamic content** - Use `{{placeholder}}` syntax for variables
+9. **Access language reactively** - Use `$derived` to get language from `page.params.lang`
+10. **Handle missing translations gracefully** - Fallback to Romanian, then to the key itself
+
+### Translation File Structure
+
+The `translations.json` file structure:
+
+```json
+{
+  "ro": {
+    "site": {
+      "name": "Sakura"
+    },
+    "common": {
+      "loading": "Se încarcă...",
+      "error": "Eroare"
+    },
+    "contact": {
+      "title": "CONTACTEAZĂ-NE",
+      "description": "Trimite-ne un mesaj"
+    },
+    "contact-hero": {
+      "title": "GET IN TOUCH",
+      "description1": "Open hours"
+    }
+  },
+  "en": {
+    "site": {
+      "name": "Sakura"
+    },
+    "common": {
+      "loading": "Loading...",
+      "error": "Error"
+    },
+    "contact": {
+      "title": "CONTACT US",
+      "description": "Send us a message"
+    },
+    "contact-hero": {
+      "title": "GET IN TOUCH",
+      "description1": "Open hours"
+    }
+  }
+}
+```
+
+---
+
+## General Practices
+
+### TypeScript
+
+- Use TypeScript throughout the codebase
+- Define types explicitly when needed
+- Use type inference from Drizzle schemas
+- Export types from schema files
+
+### File Organization
+
+```
+src/
+├── lib/
+│   ├── components/
+│   │   └── ui/          # shadcn-svelte components
+│   ├── i18n/
+│   │   ├── index.svelte.ts  # Translation function (t)
+│   │   └── translations.json # Fallback translations
+│   ├── server/
+│   │   ├── auth.ts      # Authentication utilities
+│   │   ├── translations.ts  # Load translations from DB
+│   │   └── db/
+│   │       ├── index.ts # Database connection
+│   │       └── schema.ts # Drizzle schemas
+│   └── utils.ts         # Shared utilities
+└── routes/
+    └── [[lang=lang]]/   # Language parameter route
+        ├── +layout.server.ts  # Load translations
+        ├── +layout.svelte    # Root layout
+        └── [route]/
+            ├── +page.svelte      # Component
+            ├── +page.server.ts   # Load function only (no actions)
+            └── data.remote.ts     # Remote functions (queries & commands)
+```
+
+### Environment Variables
+
+- Use `$env/dynamic/private` for server-side env vars
+- Use `$env/dynamic/public` for client-side env vars
+- Always validate env vars exist before use
+
+### Error Handling
+
+- Use SvelteKit's `error()` helper for page errors
+- Handle validation errors in remote functions
+- Throw errors from remote functions - they'll be caught by components
+- Don't expose sensitive information in errors
+- Use try-catch in components when calling remote functions
+
+### Code Style
+
+- Use Prettier for formatting
+- Use ESLint for linting
+- Follow Svelte 5 runes patterns
+- Use async/await over promises where possible
+
+### Testing
+
+- Write tests for critical business logic
+- Test authentication flows
+- Test database operations
+- Test remote function calls and error handling
+
+### Security
+
+- Always validate user input
+- Use parameterized queries (Drizzle handles this)
+- Hash passwords with Argon2
+- Use secure session tokens
+- Set appropriate cookie flags
+- Protect sensitive routes
+
+---
+
+## Quick Reference
+
+### Creating a New Feature
+
+1. **Define schema** (if needed):
+
+   ```typescript
+   // src/lib/server/db/schema.ts
+   export const myTable = pgTable('my_table', { ... });
+   ```
+
+2. **Create remote functions**:
+
+   ```typescript
+   // src/routes/my-feature/data.remote.ts
+   import { query, command } from "$app/server";
+   ```
+
+3. **Create page**:
+
+   ```svelte
+   <!-- src/routes/[[lang=lang]]/my-feature/+page.svelte -->
+   <script lang="ts">
+   	import { page } from '$app/state';
+   	import { t } from '$lib/i18n/index.svelte';
+   	import { getData } from './data.remote';
+
+   	const language = $derived((page.params?.lang || 'ro') as 'ro' | 'en');
+   </script>
+
+   <h1>{t('my-feature.title') || 'My Feature'}</h1>
+   ```
+
+4. **Add authentication** (if needed):
+
+   ```typescript
+   // In remote function using getRequestEvent()
+   import { getRequestEvent } from "$app/server";
+   import { redirect } from "@sveltejs/kit";
+
+   export const getProtectedData = query(async () => {
+     const { locals } = getRequestEvent();
+     if (!locals.user) throw redirect(302, "/login");
+     // Use locals.user...
+   });
+   ```
+
+### Common Patterns
+
+**Protected Route:**
+
+```typescript
+export const load: PageServerLoad = async (event) => {
+  if (!event.locals.user) throw redirect(302, "/login");
+  return { user: event.locals.user };
+};
+```
+
+**Form Submission with Remote Function:**
+
+```svelte
+<script lang="ts">
+	import { createItem } from './data.remote';
+
+	let name = $state('');
+	let loading = $state(false);
+
+	async function handleSubmit() {
+		loading = true;
+		try {
+			await createItem({ name });
+			name = '';
+		} finally {
+			loading = false;
+		}
+	}
+</script>
+
+<form
+	onsubmit={(e) => {
+		e.preventDefault();
+		handleSubmit();
+	}}
+>
+	<input bind:value={name} />
+	<button type="submit" disabled={loading}>Submit</button>
+</form>
+```
+
+**Database Query:**
+
+```typescript
+const result = await db
+  .select()
+  .from(table.myTable)
+  .where(eq(table.myTable.id, id));
+```
+
+---
+
+## Resources
+
+- [SvelteKit Docs](https://kit.svelte.dev)
+- [Drizzle ORM Docs](https://orm.drizzle.team)
+- [Lucia Auth Docs](https://lucia-auth.com)
+- [shadcn-svelte Docs](https://www.shadcn-svelte.com)
+- [Svelte 5 Docs](https://svelte.dev/docs)
