@@ -1,9 +1,23 @@
 <script lang="ts">
-	import { getInvoice } from '$lib/remotes/invoices.remote';
+	import { getInvoice, markInvoiceAsPaid, sendInvoice } from '$lib/remotes/invoices.remote';
+	import { getClient } from '$lib/remotes/clients.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Separator } from '$lib/components/ui/separator';
+	import {
+		ArrowLeft,
+		Download,
+		Send,
+		Mail,
+		Phone,
+		Building2,
+		Calendar,
+		Edit,
+		CheckCircle2
+	} from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const invoiceId = $derived(page.params.invoiceId);
@@ -11,50 +25,367 @@
 	const invoiceQuery = getInvoice(invoiceId);
 	const invoice = $derived(invoiceQuery.current);
 	const loading = $derived(invoiceQuery.loading);
+
+	const clientQuery = $derived(invoice?.clientId ? getClient(invoice.clientId) : null);
+	const client = $derived(clientQuery?.current);
+
+	// Get tenant data from layout
+	let { data }: { data: any } = $props();
+	const tenant = $derived(data?.tenant);
+
+	function getStatusVariant(status: string) {
+		switch (status) {
+			case 'paid':
+				return 'default';
+			case 'overdue':
+				return 'destructive';
+			case 'sent':
+				return 'secondary';
+			case 'draft':
+				return 'outline';
+			default:
+				return 'secondary';
+		}
+	}
+
+	// Calculate amounts
+	const subtotal = $derived(invoice ? (invoice.amount || 0) / 100 : 0);
+	const taxRate = $derived(invoice ? (invoice.taxRate || 0) / 100 : 0);
+	const tax = $derived(invoice ? (invoice.taxAmount || 0) / 100 : 0);
+	const total = $derived(invoice ? (invoice.totalAmount || 0) / 100 : 0);
+
+	// Get line items or create a default one from invoice amount
+	const lineItems = $derived(
+		invoice?.lineItems && invoice.lineItems.length > 0
+			? invoice.lineItems.map((item) => ({
+					description: item.description,
+					quantity: item.quantity,
+					rate: item.rate / 100,
+					amount: item.amount / 100
+				}))
+			: invoice
+				? [
+						{
+							description: invoice.notes || 'Professional Services',
+							quantity: 1,
+							rate: subtotal,
+							amount: subtotal
+						}
+					]
+				: []
+	);
+
+	async function handleSendInvoice() {
+		if (!invoice) return;
+		try {
+			await sendInvoice(invoiceId);
+			// Refresh invoice data
+			invoiceQuery.refetch();
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to send invoice');
+		}
+	}
+
+	async function handleMarkAsPaid() {
+		if (!invoice) return;
+		try {
+			await markInvoiceAsPaid(invoiceId);
+			// Refresh invoice data
+			invoiceQuery.refetch();
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to mark invoice as paid');
+		}
+	}
+
+	function handleDownloadPDF() {
+		// TODO: Implement PDF download
+		alert('PDF download will be implemented soon');
+	}
+
+	function formatAddress() {
+		if (!tenant) return '';
+		const parts = [tenant.address, tenant.city, tenant.county, tenant.postalCode].filter(Boolean);
+		return parts.join(', ') || '';
+	}
+
+	function formatClientAddress() {
+		if (!client) return '';
+		const parts = [client.address, client.city, client.county, client.postalCode].filter(Boolean);
+		return parts.join(', ') || '';
+	}
 </script>
+
+<svelte:head>
+	<title>Invoice {invoice?.invoiceNumber || ''} - CRM</title>
+</svelte:head>
 
 <div class="space-y-6">
 	{#if loading}
 		<p>Loading invoice...</p>
 	{:else if invoice}
-		<div class="flex items-center justify-between">
-			<h1 class="text-3xl font-bold">Invoice {invoice.invoiceNumber}</h1>
+		<div class="mb-6">
+			<Button variant="ghost" size="sm" class="mb-4" onclick={() => goto(`/${tenantSlug}/invoices`)}>
+				<ArrowLeft class="mr-2 h-4 w-4" />
+				Back to Invoices
+			</Button>
+
+			<div class="flex items-start justify-between">
+				<div>
+					<div class="flex items-center gap-3 mb-2">
+						<h1 class="text-3xl font-bold tracking-tight">{invoice.invoiceNumber}</h1>
+						<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
+					</div>
+					<p class="text-lg text-muted-foreground">{client?.name || 'Unknown Client'}</p>
+				</div>
+				<div class="flex gap-2">
+					<Button variant="outline" onclick={handleDownloadPDF}>
+						<Download class="mr-2 h-4 w-4" />
+						Download PDF
+					</Button>
+					{#if invoice.status !== 'paid'}
+						<Button variant="outline" onclick={handleSendInvoice}>
+							<Send class="mr-2 h-4 w-4" />
+							Send Invoice
+						</Button>
+					{/if}
+					<Button onclick={() => goto(`/${tenantSlug}/invoices/${invoiceId}/edit`)}>
+						<Edit class="mr-2 h-4 w-4" />
+						Edit
+					</Button>
+				</div>
+			</div>
 		</div>
 
-		<Card>
-			<CardHeader>
-				<CardTitle>Invoice Details</CardTitle>
-			</CardHeader>
-			<CardContent class="space-y-2">
-				<div>
-					<span class="font-semibold">Invoice Number:</span> {invoice.invoiceNumber}
-				</div>
-				<div>
-					<span class="font-semibold">Status:</span> {invoice.status}
-				</div>
-				<div>
-					<span class="font-semibold">Amount:</span> €{(invoice.amount / 100).toFixed(2)}
-				</div>
-				{#if invoice.taxAmount}
-					<div>
-						<span class="font-semibold">Tax ({invoice.taxRate / 100}%):</span> €{(invoice.taxAmount / 100).toFixed(2)}
+		<div class="grid gap-6 lg:grid-cols-3">
+			<div class="lg:col-span-2 space-y-6">
+				<Card class="p-8">
+					<div class="flex justify-between items-start mb-8">
+						<div>
+							<h2 class="text-2xl font-bold mb-2">{tenant?.name || 'Your Company Name'}</h2>
+							{#if tenant?.address}
+								<p class="text-muted-foreground">{tenant.address}</p>
+							{/if}
+							{#if tenant?.city}
+								<p class="text-muted-foreground">
+									{tenant.city}
+									{#if tenant.county}, {tenant.county}{/if}
+									{#if tenant.postalCode} {tenant.postalCode}{/if}
+								</p>
+							{/if}
+							{#if tenant?.email}
+								<p class="text-muted-foreground">{tenant.email}</p>
+							{/if}
+						</div>
+						<div class="text-right">
+							<h3 class="text-3xl font-bold mb-2">INVOICE</h3>
+							<p class="text-muted-foreground">{invoice.invoiceNumber}</p>
+						</div>
 					</div>
-				{/if}
-				<div>
-					<span class="font-semibold">Total:</span> €{(invoice.totalAmount / 100).toFixed(2)}
-				</div>
-				{#if invoice.issueDate}
-					<div>
-						<span class="font-semibold">Issue Date:</span> {new Date(invoice.issueDate).toLocaleDateString()}
+
+					<Separator class="my-6" />
+
+					<div class="grid md:grid-cols-2 gap-8 mb-8">
+						<div>
+							<h4 class="font-semibold mb-2">Bill To:</h4>
+							<p class="font-medium">{client?.name || 'Unknown Client'}</p>
+							{#if client?.companyType}
+								<p class="text-muted-foreground">{client.companyType}</p>
+							{/if}
+							{#if client?.email}
+								<p class="text-muted-foreground">{client.email}</p>
+							{/if}
+							{#if client?.phone}
+								<p class="text-muted-foreground">{client.phone}</p>
+							{/if}
+							{#if formatClientAddress()}
+								<p class="text-muted-foreground">{formatClientAddress()}</p>
+							{/if}
+						</div>
+						<div>
+							<div class="space-y-2">
+								{#if invoice.issueDate}
+									<div class="flex justify-between">
+										<span class="text-muted-foreground">Issue Date:</span>
+										<span class="font-medium">{new Date(invoice.issueDate).toLocaleDateString()}</span>
+									</div>
+								{/if}
+								{#if invoice.dueDate}
+									<div class="flex justify-between">
+										<span class="text-muted-foreground">Due Date:</span>
+										<span class="font-medium">{new Date(invoice.dueDate).toLocaleDateString()}</span>
+									</div>
+								{/if}
+								{#if invoice.paidDate}
+									<div class="flex justify-between">
+										<span class="text-muted-foreground">Paid Date:</span>
+										<span class="font-medium text-green-600">
+											{new Date(invoice.paidDate).toLocaleDateString()}
+										</span>
+									</div>
+								{/if}
+							</div>
+						</div>
 					</div>
-				{/if}
-				{#if invoice.dueDate}
-					<div>
-						<span class="font-semibold">Due Date:</span> {new Date(invoice.dueDate).toLocaleDateString()}
+
+					<div class="mb-8">
+						<table class="w-full">
+							<thead>
+								<tr class="border-b">
+									<th class="text-left py-3 font-semibold">Description</th>
+									<th class="text-right py-3 font-semibold">Quantity</th>
+									<th class="text-right py-3 font-semibold">Rate</th>
+									<th class="text-right py-3 font-semibold">Amount</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each lineItems as item}
+									<tr class="border-b">
+										<td class="py-4">
+											<p class="font-medium">{item.description}</p>
+										</td>
+										<td class="text-right py-4">{item.quantity}</td>
+										<td class="text-right py-4">€{item.rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+										<td class="text-right py-4 font-medium">€{item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
 					</div>
+
+					<div class="flex justify-end">
+						<div class="w-64 space-y-2">
+							<div class="flex justify-between">
+								<span class="text-muted-foreground">Subtotal:</span>
+								<span class="font-medium">€{subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+							</div>
+							{#if tax > 0}
+								<div class="flex justify-between">
+									<span class="text-muted-foreground">Tax ({taxRate}%):</span>
+									<span class="font-medium">€{tax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+								</div>
+							{/if}
+							<Separator />
+							<div class="flex justify-between text-lg">
+								<span class="font-semibold">Total:</span>
+								<span class="font-bold">€{total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+							</div>
+						</div>
+					</div>
+				</Card>
+
+				{#if invoice.status === 'paid'}
+					<Card class="p-6 bg-green-50 border-green-200">
+						<div class="flex items-center gap-3">
+							<div class="flex h-12 w-12 items-center justify-center rounded-full bg-green-500 text-white">
+								<CheckCircle2 class="h-6 w-6" />
+							</div>
+							<div>
+								<h4 class="font-semibold text-green-900">Payment Received</h4>
+								<p class="text-sm text-green-700">
+									This invoice was paid on
+									{#if invoice.paidDate}
+										{new Date(invoice.paidDate).toLocaleDateString()}
+									{/if}
+								</p>
+							</div>
+						</div>
+					</Card>
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+
+			<div class="space-y-6">
+				<Card class="p-6">
+					<CardHeader>
+						<CardTitle>Invoice Summary</CardTitle>
+					</CardHeader>
+					<CardContent class="space-y-4">
+						<div>
+							<p class="text-sm text-muted-foreground mb-1">Status</p>
+							<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
+						</div>
+						<Separator />
+						<div>
+							<p class="text-sm text-muted-foreground mb-1">Total Amount</p>
+							<p class="text-2xl font-bold">€{total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+						</div>
+						<Separator />
+						{#if invoice.dueDate}
+							<div class="flex items-center gap-2">
+								<Calendar class="h-4 w-4 text-muted-foreground" />
+								<div>
+									<p class="text-sm text-muted-foreground">Due Date</p>
+									<p class="font-medium">{new Date(invoice.dueDate).toLocaleDateString()}</p>
+								</div>
+							</div>
+						{/if}
+					</CardContent>
+				</Card>
+
+				{#if client}
+					<Card class="p-6">
+						<CardHeader>
+							<CardTitle>Client Information</CardTitle>
+						</CardHeader>
+						<CardContent class="space-y-3">
+							{#if client.companyType || client.name}
+								<div class="flex items-center gap-3">
+									<Building2 class="h-5 w-5 text-muted-foreground" />
+									<div>
+										<p class="text-sm text-muted-foreground">Company</p>
+										<p class="font-medium">{client.companyType || client.name}</p>
+									</div>
+								</div>
+							{/if}
+							{#if client.email}
+								<div class="flex items-center gap-3">
+									<Mail class="h-5 w-5 text-muted-foreground" />
+									<div>
+										<p class="text-sm text-muted-foreground">Email</p>
+										<p class="font-medium">{client.email}</p>
+									</div>
+								</div>
+							{/if}
+							{#if client.phone}
+								<div class="flex items-center gap-3">
+									<Phone class="h-5 w-5 text-muted-foreground" />
+									<div>
+										<p class="text-sm text-muted-foreground">Phone</p>
+										<p class="font-medium">{client.phone}</p>
+									</div>
+								</div>
+							{/if}
+						</CardContent>
+						<CardContent>
+							<Button
+								variant="outline"
+								class="w-full bg-transparent"
+								onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}
+							>
+								View Client Profile
+							</Button>
+						</CardContent>
+					</Card>
+				{/if}
+
+				{#if invoice.status !== 'paid'}
+					<Card class="p-6">
+						<CardHeader>
+							<CardTitle>Quick Actions</CardTitle>
+						</CardHeader>
+						<CardContent class="space-y-2">
+							<Button class="w-full" onclick={handleSendInvoice}>
+								<Send class="mr-2 h-4 w-4" />
+								Send Reminder
+							</Button>
+							<Button variant="outline" class="w-full bg-transparent" onclick={handleMarkAsPaid}>
+								<CheckCircle2 class="mr-2 h-4 w-4" />
+								Mark as Paid
+							</Button>
+						</CardContent>
+					</Card>
+				{/if}
+			</div>
+		</div>
 	{:else}
 		<p>Invoice not found</p>
 	{/if}

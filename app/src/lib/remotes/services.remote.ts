@@ -13,6 +13,7 @@ function generateServiceId() {
 const serviceSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
 	description: v.optional(v.string()),
+	category: v.optional(v.string()),
 	clientId: v.pipe(v.string(), v.minLength(1, 'Client ID is required')),
 	projectId: v.optional(v.string()),
 	price: v.optional(v.number()),
@@ -60,6 +61,7 @@ export const createService = command(serviceSchema, async (data) => {
 		projectId: data.projectId || null,
 		name: data.name,
 		description: data.description || null,
+		category: data.category || null,
 		price: data.price ? Math.round(data.price * 100) : null,
 		recurringType: data.recurringType || 'none',
 		recurringInterval: data.recurringInterval || 1,
@@ -68,3 +70,87 @@ export const createService = command(serviceSchema, async (data) => {
 
 	return { success: true, serviceId };
 });
+
+export const getService = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (serviceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const [service] = await db
+			.select()
+			.from(table.service)
+			.where(and(eq(table.service.id, serviceId), eq(table.service.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!service) {
+			throw new Error('Service not found');
+		}
+
+		return service;
+	}
+);
+
+export const updateService = command(
+	v.object({
+		serviceId: v.pipe(v.string(), v.minLength(1)),
+		...serviceSchema.entries
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const { serviceId, ...updateData } = data;
+
+		// Verify service belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.service)
+			.where(and(eq(table.service.id, serviceId), eq(table.service.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Service not found');
+		}
+
+		await db
+			.update(table.service)
+			.set({
+				...updateData,
+				price: updateData.price ? Math.round(updateData.price * 100) : undefined,
+				updatedAt: new Date()
+			})
+			.where(eq(table.service.id, serviceId));
+
+		return { success: true };
+	}
+);
+
+export const deleteService = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (serviceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Verify service belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.service)
+			.where(and(eq(table.service.id, serviceId), eq(table.service.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Service not found');
+		}
+
+		await db.delete(table.service).where(eq(table.service.id, serviceId));
+
+		return { success: true };
+	}
+);

@@ -81,6 +81,7 @@ export const client = sqliteTable('client', {
 	name: text('name').notNull(),
 	email: text('email'),
 	phone: text('phone'),
+	status: text('status').default('prospect'), // 'prospect', 'active', 'inactive'
 	companyType: text('company_type'),
 	cui: text('cui'),
 	registrationNumber: text('registration_number'),
@@ -125,6 +126,27 @@ export const project = sqliteTable('project', {
 		.default(sql`current_date`)
 });
 
+export const milestone = sqliteTable('milestone', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => project.id),
+	name: text('name').notNull(),
+	description: text('description'),
+	status: text('status').notNull().default('pending'), // 'pending', 'in-progress', 'completed'
+	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
+	completedDate: timestamp('completed_date', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const task = sqliteTable('task', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -132,9 +154,10 @@ export const task = sqliteTable('task', {
 		.references(() => tenant.id),
 	projectId: text('project_id').references(() => project.id),
 	clientId: text('client_id').references(() => client.id),
+	milestoneId: text('milestone_id').references(() => milestone.id),
 	title: text('title').notNull(),
 	description: text('description'),
-	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'done', 'cancelled'
+	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled'
 	priority: text('priority').default('medium'), // 'low', 'medium', 'high', 'urgent'
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
 	assignedToUserId: text('assigned_to_user_id').references(() => user.id),
@@ -201,10 +224,28 @@ export const service = sqliteTable('service', {
 	projectId: text('project_id').references(() => project.id),
 	name: text('name').notNull(),
 	description: text('description'),
+	category: text('category'), // 'Development', 'Design', 'Marketing', 'Consulting', etc.
 	price: integer('price'), // in cents
 	recurringType: text('recurring_type').notNull().default('none'), // 'none', 'daily', 'weekly', 'monthly', 'yearly'
 	recurringInterval: integer('recurring_interval').notNull().default(1),
 	isActive: boolean('is_active').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const taskComment = sqliteTable('task_comment', {
+	id: text('id').primaryKey(),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	content: text('content').notNull(),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -244,6 +285,20 @@ export const invoice = sqliteTable('invoice', {
 		.default(sql`current_date`)
 });
 
+export const invoiceLineItem = sqliteTable('invoice_line_item', {
+	id: text('id').primaryKey(),
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	description: text('description').notNull(),
+	quantity: integer('quantity').notNull().default(1),
+	rate: integer('rate').notNull(), // in cents
+	amount: integer('amount').notNull(), // in cents (quantity * rate)
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -251,7 +306,8 @@ export const userRelations = relations(user, ({ many }) => ({
 	tasks: many(task),
 	documents: many(document),
 	invoices: many(invoice),
-	contractTemplates: many(contractTemplate)
+	contractTemplates: many(contractTemplate),
+	taskComments: many(taskComment)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -266,6 +322,7 @@ export const tenantRelations = relations(tenant, ({ many }) => ({
 	clients: many(client),
 	projects: many(project),
 	tasks: many(task),
+	milestones: many(milestone),
 	contractTemplates: many(contractTemplate),
 	documents: many(document),
 	services: many(service),
@@ -305,12 +362,25 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 		references: [client.id]
 	}),
 	tasks: many(task),
+	milestones: many(milestone),
 	documents: many(document),
 	services: many(service),
 	invoices: many(invoice)
 }));
 
-export const taskRelations = relations(task, ({ one }) => ({
+export const milestoneRelations = relations(milestone, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [milestone.tenantId],
+		references: [tenant.id]
+	}),
+	project: one(project, {
+		fields: [milestone.projectId],
+		references: [project.id]
+	}),
+	tasks: many(task)
+}));
+
+export const taskRelations = relations(task, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [task.tenantId],
 		references: [tenant.id]
@@ -323,8 +393,24 @@ export const taskRelations = relations(task, ({ one }) => ({
 		fields: [task.clientId],
 		references: [client.id]
 	}),
+	milestone: one(milestone, {
+		fields: [task.milestoneId],
+		references: [milestone.id]
+	}),
 	assignedTo: one(user, {
 		fields: [task.assignedToUserId],
+		references: [user.id]
+	}),
+	comments: many(taskComment)
+}));
+
+export const taskCommentRelations = relations(taskComment, ({ one }) => ({
+	task: one(task, {
+		fields: [taskComment.taskId],
+		references: [task.id]
+	}),
+	user: one(user, {
+		fields: [taskComment.userId],
 		references: [user.id]
 	})
 }));
@@ -380,7 +466,7 @@ export const serviceRelations = relations(service, ({ one, many }) => ({
 	invoices: many(invoice)
 }));
 
-export const invoiceRelations = relations(invoice, ({ one }) => ({
+export const invoiceRelations = relations(invoice, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [invoice.tenantId],
 		references: [tenant.id]
@@ -400,6 +486,14 @@ export const invoiceRelations = relations(invoice, ({ one }) => ({
 	createdBy: one(user, {
 		fields: [invoice.createdByUserId],
 		references: [user.id]
+	}),
+	lineItems: many(invoiceLineItem)
+}));
+
+export const invoiceLineItemRelations = relations(invoiceLineItem, ({ one }) => ({
+	invoice: one(invoice, {
+		fields: [invoiceLineItem.invoiceId],
+		references: [invoice.id]
 	})
 }));
 
@@ -414,8 +508,12 @@ export type Client = typeof client.$inferSelect;
 export type NewClient = typeof client.$inferInsert;
 export type Project = typeof project.$inferSelect;
 export type NewProject = typeof project.$inferInsert;
+export type Milestone = typeof milestone.$inferSelect;
+export type NewMilestone = typeof milestone.$inferInsert;
 export type Task = typeof task.$inferSelect;
 export type NewTask = typeof task.$inferInsert;
+export type TaskComment = typeof taskComment.$inferSelect;
+export type NewTaskComment = typeof taskComment.$inferInsert;
 export type ContractTemplate = typeof contractTemplate.$inferSelect;
 export type NewContractTemplate = typeof contractTemplate.$inferInsert;
 export type Document = typeof document.$inferSelect;
@@ -424,3 +522,5 @@ export type Service = typeof service.$inferSelect;
 export type NewService = typeof service.$inferInsert;
 export type Invoice = typeof invoice.$inferSelect;
 export type NewInvoice = typeof invoice.$inferInsert;
+export type InvoiceLineItem = typeof invoiceLineItem.$inferSelect;
+export type NewInvoiceLineItem = typeof invoiceLineItem.$inferInsert;

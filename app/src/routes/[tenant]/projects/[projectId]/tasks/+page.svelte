@@ -1,18 +1,26 @@
 <script lang="ts">
-	import { getTasks } from '$lib/remotes/tasks.remote';
+	import { getTasks, updateTask, deleteTask } from '$lib/remotes/tasks.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Card, CardContent } from '$lib/components/ui/card';
+	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import {
-		Table,
-		TableBody,
-		TableCell,
-		TableHead,
-		TableHeader,
-		TableRow
-	} from '$lib/components/ui/table';
-	import { Plus } from '@lucide/svelte';
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu';
+	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { Plus, Calendar, Users, MoreVertical } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const projectId = $derived(page.params.projectId);
@@ -20,6 +28,63 @@
 	const tasksQuery = getTasks({ projectId });
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
+
+	let statusDialogOpen = $state(false);
+	let selectedTaskId = $state<string | null>(null);
+	let newStatus = $state('todo');
+
+	function getPriorityBadgeVariant(priority: string) {
+		switch (priority) {
+			case 'urgent':
+				return 'destructive';
+			case 'high':
+				return 'default';
+			case 'medium':
+				return 'secondary';
+			default:
+				return 'outline';
+		}
+	}
+
+	function formatStatus(status: string) {
+		return status.replace('-', ' ');
+	}
+
+	async function handleChangeStatus(taskId: string) {
+		selectedTaskId = taskId;
+		const task = tasks.find((t) => t.id === taskId);
+		if (task) {
+			newStatus = task.status;
+		}
+		statusDialogOpen = true;
+	}
+
+	async function handleSaveStatus() {
+		if (!selectedTaskId) return;
+
+		try {
+			await updateTask({
+				taskId: selectedTaskId,
+				status: newStatus
+			});
+			statusDialogOpen = false;
+			selectedTaskId = null;
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to update task status');
+		}
+	}
+
+	async function handleDeleteTask(taskId: string) {
+		if (!confirm('Are you sure you want to delete this task?')) {
+			return;
+		}
+
+		try {
+			await deleteTask(taskId);
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to delete task');
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -34,39 +99,106 @@
 	{#if loading}
 		<p>Loading...</p>
 	{:else if tasks.length === 0}
-		<Card>
-			<CardContent class="pt-6">
-				<p class="text-center text-muted-foreground">No tasks for this project yet</p>
-			</CardContent>
+		<Card class="p-4">
+			<p class="text-muted-foreground">No tasks for this project yet.</p>
 		</Card>
 	{:else}
-		<Card>
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Title</TableHead>
-						<TableHead>Status</TableHead>
-						<TableHead>Priority</TableHead>
-						<TableHead>Due Date</TableHead>
-						<TableHead>Actions</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{#each tasks as task}
-						<TableRow>
-							<TableCell class="font-medium">{task.title}</TableCell>
-							<TableCell>{task.status}</TableCell>
-							<TableCell>{task.priority}</TableCell>
-							<TableCell>{task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}</TableCell>
-							<TableCell>
-								<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/tasks/${task.id}`)}>
-									View
+		<div class="space-y-3">
+			{#each tasks as task}
+				<Card class="p-4">
+					<div class="flex items-start justify-between">
+						<div class="flex-1">
+							<div class="flex items-center gap-3 mb-2">
+								<h4 class="font-semibold">{task.title}</h4>
+								{#if task.priority}
+									<Badge variant={getPriorityBadgeVariant(task.priority)}>
+										{task.priority}
+									</Badge>
+								{/if}
+								<Badge variant="outline">{formatStatus(task.status)}</Badge>
+							</div>
+							{#if task.description}
+								<p class="text-sm text-muted-foreground mb-3">{task.description}</p>
+							{/if}
+							<div class="flex items-center gap-4 text-sm text-muted-foreground">
+								{#if task.assignedToUserId}
+									<div class="flex items-center gap-1">
+										<Users class="h-4 w-4" />
+										<span>{task.assignedToUserId.substring(0, 8)}</span>
+									</div>
+								{/if}
+								{#if task.dueDate}
+									<div class="flex items-center gap-1">
+										<Calendar class="h-4 w-4" />
+										<span>Due: {new Date(task.dueDate).toLocaleDateString()}</span>
+									</div>
+								{/if}
+							</div>
+						</div>
+						<DropdownMenu>
+							<DropdownMenuTrigger>
+								<Button variant="ghost" size="icon">
+									<MoreVertical class="h-4 w-4" />
 								</Button>
-							</TableCell>
-						</TableRow>
-					{/each}
-				</TableBody>
-			</Table>
-		</Card>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/tasks/${task.id}`)}>
+									View Details
+								</DropdownMenuItem>
+								<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/tasks/${task.id}/edit`)}>
+									Edit
+								</DropdownMenuItem>
+								<DropdownMenuItem onclick={() => handleChangeStatus(task.id)}>Change Status</DropdownMenuItem>
+								<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteTask(task.id)}>
+									Delete
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
+				</Card>
+			{/each}
+		</div>
 	{/if}
 </div>
+
+<Dialog bind:open={statusDialogOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Change Task Status</DialogTitle>
+			<DialogDescription>Update the status of this task</DialogDescription>
+		</DialogHeader>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<label class="text-sm font-medium">Status</label>
+				<Select type="single" bind:value={newStatus}>
+					<SelectTrigger>
+						{#if newStatus === 'todo'}
+							Todo
+						{:else if newStatus === 'in-progress'}
+							In Progress
+						{:else if newStatus === 'review'}
+							Review
+						{:else if newStatus === 'done'}
+							Done
+						{:else if newStatus === 'cancelled'}
+							Cancelled
+						{:else}
+							Select status
+						{/if}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="todo">Todo</SelectItem>
+						<SelectItem value="in-progress">In Progress</SelectItem>
+						<SelectItem value="review">Review</SelectItem>
+						<SelectItem value="done">Done</SelectItem>
+						<SelectItem value="cancelled">Cancelled</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
+		</div>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (statusDialogOpen = false)}>Cancel</Button>
+			<Button onclick={handleSaveStatus}>Save</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>

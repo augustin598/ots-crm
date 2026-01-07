@@ -1,17 +1,26 @@
 <script lang="ts">
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
-	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
-	import { getServices } from '$lib/remotes/services.remote';
+	import { getDocuments } from '$lib/remotes/documents.remote';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Plus, FolderKanban, CheckSquare, FileText, Receipt } from '@lucide/svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import {
+		FolderKanban,
+		FileText,
+		TrendingUp,
+		DollarSign,
+		Mail,
+		Phone,
+		MapPin,
+		Building2
+	} from '@lucide/svelte';
 
-	const tenantSlug = $derived(page.params.tenant);
-	const clientId = $derived(page.params.clientId);
+	const tenantSlug = $derived(page.params.tenant as string);
+	const clientId = $derived(page.params.clientId as string);
 
 	const clientQuery = getClient(clientId);
 	const client = $derived(clientQuery.current);
@@ -21,21 +30,27 @@
 	const projectsQuery = getProjects(clientId);
 	const projects = $derived(projectsQuery.current || []);
 
-	const tasksQuery = getTasks({ clientId });
-	const tasks = $derived(tasksQuery.current || []);
-
 	const invoicesQuery = getInvoices({ clientId });
 	const invoices = $derived(invoicesQuery.current || []);
 
-	const servicesQuery = getServices({ clientId });
-	const services = $derived(servicesQuery.current || []);
+	const documentsQuery = getDocuments({ clientId });
+	const documents = $derived(documentsQuery.current || []);
+	const contracts = $derived(documents.filter((d) => d.type === 'contract'));
 
-	const totalProjects = $derived(projects.length);
-	const totalTasks = $derived(tasks.length);
-	const totalInvoices = $derived(invoices.length);
-	const totalServices = $derived(services.length);
-	const totalRevenue = $derived(
-		invoices.filter((i) => i.status === 'paid').reduce((sum, i) => sum + i.totalAmount, 0) / 100
+	const activeProjects = $derived(projects.filter((p) => p.status === 'active').length);
+	const totalContracts = $derived(contracts.length);
+	const paidInvoices = $derived(invoices.filter((i) => i.status === 'paid'));
+	const totalPaid = $derived(paidInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0) / 100);
+	const pendingInvoices = $derived(invoices.filter((i) => i.status === 'sent' || i.status === 'overdue'));
+	const totalPending = $derived(pendingInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0) / 100);
+	const recentInvoices = $derived(
+		[...invoices]
+			.sort((a, b) => {
+				const ad = a.issueDate ? new Date(a.issueDate).getTime() : 0;
+				const bd = b.issueDate ? new Date(b.issueDate).getTime() : 0;
+				return bd - ad;
+			})
+			.slice(0, 3)
 	);
 </script>
 
@@ -51,170 +66,164 @@
 			<p class="text-sm text-red-800">{error instanceof Error ? error.message : 'Failed to load client'}</p>
 		</div>
 	{:else if client}
-		<!-- Summary Cards -->
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Projects</CardTitle>
-					<FolderKanban class="h-4 w-4 text-muted-foreground" />
-				</CardHeader>
-				<CardContent>
-					<div class="text-2xl font-bold">{totalProjects}</div>
-					<p class="text-xs text-muted-foreground">Active projects</p>
-				</CardContent>
+		
+
+		<!-- KPIs -->
+		<div class="grid gap-4 md:grid-cols-4 mb-6">
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500/10">
+						<DollarSign class="h-6 w-6 text-green-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Total Revenue</p>
+						<p class="text-2xl font-bold">€{totalPaid.toLocaleString()}</p>
+					</div>
+				</div>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Tasks</CardTitle>
-					<CheckSquare class="h-4 w-4 text-muted-foreground" />
-				</CardHeader>
-				<CardContent>
-					<div class="text-2xl font-bold">{totalTasks}</div>
-					<p class="text-xs text-muted-foreground">Total tasks</p>
-				</CardContent>
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500/10">
+						<FolderKanban class="h-6 w-6 text-blue-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Active Projects</p>
+						<p class="text-2xl font-bold">{activeProjects}</p>
+					</div>
+				</div>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Invoices</CardTitle>
-					<Receipt class="h-4 w-4 text-muted-foreground" />
-				</CardHeader>
-				<CardContent>
-					<div class="text-2xl font-bold">{totalInvoices}</div>
-					<p class="text-xs text-muted-foreground">Total invoices</p>
-				</CardContent>
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500/10">
+						<FileText class="h-6 w-6 text-purple-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Contracts</p>
+						<p class="text-2xl font-bold">{totalContracts}</p>
+					</div>
+				</div>
 			</Card>
 
-			<Card>
-				<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-					<CardTitle class="text-sm font-medium">Revenue</CardTitle>
-					<FileText class="h-4 w-4 text-muted-foreground" />
-				</CardHeader>
-				<CardContent>
-					<div class="text-2xl font-bold">€{totalRevenue.toFixed(2)}</div>
-					<p class="text-xs text-muted-foreground">Paid invoices</p>
-				</CardContent>
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-500/10">
+						<TrendingUp class="h-6 w-6 text-orange-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Pending</p>
+						<p class="text-2xl font-bold">€{totalPending.toLocaleString()}</p>
+					</div>
+				</div>
 			</Card>
 		</div>
 
-		<!-- Quick Actions -->
-		<Card>
-			<CardHeader>
-				<CardTitle>Quick Actions</CardTitle>
-				<CardDescription>Create new items for this client</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div class="flex flex-wrap gap-2">
-					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/projects/new?clientId=${clientId}`)}>
-						<Plus class="h-4 w-4 mr-2" />
-						New Project
-					</Button>
-					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/tasks/new?clientId=${clientId}`)}>
-						<Plus class="h-4 w-4 mr-2" />
-						New Task
-					</Button>
-					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/invoices/new?clientId=${clientId}`)}>
-						<Plus class="h-4 w-4 mr-2" />
-						New Invoice
-					</Button>
-					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/services/new?clientId=${clientId}`)}>
-						<Plus class="h-4 w-4 mr-2" />
-						New Service
-					</Button>
-					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/documents/upload?clientId=${clientId}`)}>
-						<Plus class="h-4 w-4 mr-2" />
-						Upload Document
-					</Button>
-				</div>
-			</CardContent>
-		</Card>
-
-		<!-- Client Details -->
+		<!-- Overview content -->
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 			<Card>
 				<CardHeader>
 					<CardTitle>Contact Information</CardTitle>
 				</CardHeader>
 				<CardContent class="space-y-2">
-					{#if client.email}
-						<div>
-							<span class="font-semibold">Email:</span> {client.email}
-						</div>
-					{/if}
-					{#if client.phone}
-						<div>
-							<span class="font-semibold">Phone:</span> {client.phone}
-						</div>
-					{/if}
+					<div class="space-y-3">
+						{#if client.email}
+							<div class="flex items-center gap-3">
+								<Mail class="h-5 w-5 text-muted-foreground" />
+								<div>
+									<p class="text-sm text-muted-foreground">Email</p>
+									<p class="font-medium">{client.email}</p>
+								</div>
+							</div>
+						{/if}
+						{#if client.phone}
+							<div class="flex items-center gap-3">
+								<Phone class="h-5 w-5 text-muted-foreground" />
+								<div>
+									<p class="text-sm text-muted-foreground">Phone</p>
+									<p class="font-medium">{client.phone}</p>
+								</div>
+							</div>
+						{/if}
+						{#if client.address}
+							<div class="flex items-center gap-3">
+								<MapPin class="h-5 w-5 text-muted-foreground" />
+								<div>
+									<p class="text-sm text-muted-foreground">Address</p>
+									<p class="font-medium">
+										{client.address}
+										{#if client.city}, {client.city}{/if}
+										{#if client.county}, {client.county}{/if}
+									</p>
+								</div>
+							</div>
+						{/if}
+						{#if client.companyType}
+							<div class="flex items-center gap-3">
+								<Building2 class="h-5 w-5 text-muted-foreground" />
+								<div>
+                                    <p class="text-sm text-muted-foreground">Company Type</p>
+									<p class="font-medium">{client.companyType}</p>
+								</div>
+							</div>
+						{/if}
+					</div>
 				</CardContent>
 			</Card>
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Legal Data</CardTitle>
+					<CardTitle>Notes</CardTitle>
 				</CardHeader>
 				<CardContent class="space-y-2">
-					{#if client.cui}
-						<div>
-							<span class="font-semibold">CUI:</span> {client.cui}
-						</div>
-					{/if}
-					{#if client.companyType}
-						<div>
-							<span class="font-semibold">Company Type:</span> {client.companyType}
-						</div>
-					{/if}
-					{#if client.registrationNumber}
-						<div>
-							<span class="font-semibold">Registration Number:</span> {client.registrationNumber}
-						</div>
-					{/if}
-					{#if client.tradeRegister}
-						<div>
-							<span class="font-semibold">Trade Register:</span> {client.tradeRegister}
-						</div>
-					{/if}
-					{#if client.iban}
-						<div>
-							<span class="font-semibold">IBAN:</span> {client.iban}
-						</div>
-					{/if}
+					<p class="text-muted-foreground leading-relaxed">
+						{client.notes || 'No notes available for this client.'}
+					</p>
 				</CardContent>
 			</Card>
 
-			{#if client.address || client.city || client.county}
-				<Card>
-					<CardHeader>
-						<CardTitle>Address</CardTitle>
-					</CardHeader>
-					<CardContent class="space-y-2">
-						{#if client.address}
-							<div>{client.address}</div>
+			<!-- Recent Activity -->
+			<Card class="md:col-span-2">
+				<CardHeader>
+					<CardTitle>Recent Activity</CardTitle>
+					<CardDescription>Latest invoices for this client</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div class="space-y-4">
+						{#if recentInvoices.length === 0}
+							<p class="text-sm text-muted-foreground">No recent invoices.</p>
+						{:else}
+							{#each recentInvoices as invoice}
+								<div class="flex items-center gap-4 pb-4 border-b last:border-0 last:pb-0">
+									<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+										<FileText class="h-5 w-5 text-primary" />
+									</div>
+									<div class="flex-1">
+										<p class="font-medium">{invoice.invoiceNumber}</p>
+										<p class="text-sm text-muted-foreground">
+											Issued on {invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '—'}
+										</p>
+									</div>
+									<div class="text-right">
+										<p class="font-semibold">€{((invoice.totalAmount || 0) / 100).toLocaleString()}</p>
+										<Badge
+											variant={
+												invoice.status === 'paid'
+													? 'default'
+													: invoice.status === 'overdue'
+													? 'destructive'
+													: 'secondary'
+											}
+										>
+											{invoice.status}
+										</Badge>
+									</div>
+								</div>
+							{/each}
 						{/if}
-						<div>
-							{#if client.city}{client.city}{/if}
-							{#if client.city && client.county}, {/if}
-							{#if client.county}{client.county}{/if}
-							{#if client.postalCode} {client.postalCode}{/if}
-						</div>
-						{#if client.country}
-							<div>{client.country}</div>
-						{/if}
-					</CardContent>
-				</Card>
-			{/if}
-
-			{#if client.notes}
-				<Card>
-					<CardHeader>
-						<CardTitle>Notes</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<p class="whitespace-pre-wrap">{client.notes}</p>
-					</CardContent>
-				</Card>
-			{/if}
+					</div>
+				</CardContent>
+			</Card>
 		</div>
 	{/if}
 </div>

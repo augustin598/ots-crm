@@ -4,18 +4,12 @@
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import {
-		Table,
-		TableBody,
-		TableCell,
-		TableHead,
-		TableHeader,
-		TableRow
-	} from '$lib/components/ui/table';
+	import { Badge } from '$lib/components/ui/badge';
+	import { FileText } from '@lucide/svelte';
 	import { Plus } from '@lucide/svelte';
 
-	const tenantSlug = $derived(page.params.tenant);
-	const clientId = $derived(page.params.clientId);
+	const tenantSlug = $derived(page.params.tenant as string);
+	const clientId = $derived(page.params.clientId as string);
 
 	const invoicesQuery = getInvoices({ clientId });
 	const invoices = $derived(invoicesQuery.current || []);
@@ -40,33 +34,45 @@
 			</CardContent>
 		</Card>
 	{:else}
-		<Card>
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Invoice Number</TableHead>
-						<TableHead>Status</TableHead>
-						<TableHead>Total Amount</TableHead>
-						<TableHead>Due Date</TableHead>
-						<TableHead>Actions</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{#each invoices as invoice}
-						<TableRow>
-							<TableCell class="font-medium">{invoice.invoiceNumber}</TableCell>
-							<TableCell>{invoice.status}</TableCell>
-							<TableCell>€{(invoice.totalAmount / 100).toFixed(2)}</TableCell>
-							<TableCell>{invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '-'}</TableCell>
-							<TableCell>
-								<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
-									View
-								</Button>
-							</TableCell>
-						</TableRow>
-					{/each}
-				</TableBody>
-			</Table>
-		</Card>
+		<div class="space-y-4">
+			{#each invoices as invoice}
+				<Card class="p-6">
+					<div class="flex items-center justify-between">
+						<div>
+							<h3 class="text-lg font-semibold">{invoice.invoiceNumber}</h3>
+							<p class="text-sm text-muted-foreground mt-1">
+								Issued: {invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '—'} •
+								{' '}Due: {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '—'}
+							</p>
+							{#if invoice.paidDate}
+								<p class="text-sm text-muted-foreground">
+									Paid: {new Date(invoice.paidDate).toLocaleDateString()}
+								</p>
+							{/if}
+						</div>
+						<div class="text-right">
+							<p class="text-2xl font-bold">€{((invoice.totalAmount || 0) / 100).toLocaleString()}</p>
+							<Badge
+								variant={
+									invoice.status === 'paid'
+										? 'default'
+										: invoice.status === 'overdue'
+										? 'destructive'
+										: 'secondary'
+								}
+								class="mt-2"
+							>
+								{invoice.status}
+							</Badge>
+						</div>
+					</div>
+					<div class="mt-4">
+						<Button variant="outline" class="bg-transparent" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
+							View Details
+						</Button>
+					</div>
+				</Card>
+			{/each}
+		</div>
 	{/if}
 </div>

@@ -8,6 +8,27 @@
       "when": 1767785824443,
       "tag": "0000_slim_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1767798010114,
+      "tag": "0001_sharp_living_mummy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767798691205,
+      "tag": "0002_smart_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1767798879143,
+      "tag": "0003_chemical_union_jack",
+      "breakpoints": true
     }
   ]
 }

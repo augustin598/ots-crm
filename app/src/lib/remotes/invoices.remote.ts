@@ -5,6 +5,11 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
+function generateInvoiceLineItemId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
 function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
@@ -28,7 +33,15 @@ export const getInvoice = query(
 			throw new Error('Invoice not found');
 		}
 
-		return invoice;
+		const lineItems = await db
+			.select()
+			.from(table.invoiceLineItem)
+			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+		return {
+			...invoice,
+			lineItems
+		};
 	}
 );
 
@@ -115,6 +128,7 @@ export const createInvoice = command(
 		serviceId: v.optional(v.string()),
 		amount: v.number(),
 		taxRate: v.optional(v.number()),
+		status: v.optional(v.string()),
 		issueDate: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
 		notes: v.optional(v.string())
@@ -140,7 +154,7 @@ export const createInvoice = command(
 			projectId: data.projectId || null,
 			serviceId: data.serviceId || null,
 			invoiceNumber,
-			status: 'draft',
+			status: data.status || 'draft',
 			amount,
 			taxRate,
 			taxAmount,
@@ -152,5 +166,197 @@ export const createInvoice = command(
 		});
 
 		return { success: true, invoiceId };
+	}
+);
+
+export const updateInvoice = command(
+	v.object({
+		invoiceId: v.pipe(v.string(), v.minLength(1)),
+		clientId: v.optional(v.string()),
+		projectId: v.optional(v.string()),
+		serviceId: v.optional(v.string()),
+		amount: v.optional(v.number()),
+		taxRate: v.optional(v.number()),
+		status: v.optional(v.string()),
+		issueDate: v.optional(v.string()),
+		dueDate: v.optional(v.string()),
+		paidDate: v.optional(v.string()),
+		notes: v.optional(v.string())
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const { invoiceId, ...updateData } = data;
+
+		// Verify invoice belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Invoice not found');
+		}
+
+		// Recalculate amounts if amount or taxRate changed
+		let amount = existing.amount;
+		let taxRate = existing.taxRate;
+		let taxAmount = existing.taxAmount;
+		let totalAmount = existing.totalAmount;
+
+		if (updateData.amount !== undefined) {
+			amount = Math.round(updateData.amount * 100);
+		}
+		if (updateData.taxRate !== undefined) {
+			taxRate = Math.round(updateData.taxRate * 100);
+		}
+		if (updateData.amount !== undefined || updateData.taxRate !== undefined) {
+			taxAmount = Math.round(amount * taxRate / 10000);
+			totalAmount = amount + taxAmount;
+		}
+
+		await db
+			.update(table.invoice)
+			.set({
+				clientId: updateData.clientId || undefined,
+				projectId: updateData.projectId !== undefined ? (updateData.projectId || null) : undefined,
+				serviceId: updateData.serviceId !== undefined ? (updateData.serviceId || null) : undefined,
+				amount,
+				taxRate,
+				taxAmount,
+				totalAmount,
+				status: updateData.status || undefined,
+				issueDate: updateData.issueDate ? new Date(updateData.issueDate) : undefined,
+				dueDate: updateData.dueDate ? new Date(updateData.dueDate) : undefined,
+				paidDate: updateData.paidDate ? new Date(updateData.paidDate) : undefined,
+				notes: updateData.notes !== undefined ? (updateData.notes || null) : undefined,
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, invoiceId));
+
+		return { success: true };
+	}
+);
+
+export const deleteInvoice = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (invoiceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Verify invoice belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Invoice not found');
+		}
+
+		await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+
+		return { success: true };
+	}
+);
+
+export const markInvoiceAsPaid = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (invoiceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Verify invoice belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Invoice not found');
+		}
+
+		await db
+			.update(table.invoice)
+			.set({
+				status: 'paid',
+				paidDate: new Date(),
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, invoiceId));
+
+		return { success: true };
+	}
+);
+
+export const sendInvoice = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (invoiceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Verify invoice belongs to tenant
+		const [existing] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Invoice not found');
+		}
+
+		// Update status to 'sent' if it's currently 'draft'
+		if (existing.status === 'draft') {
+			await db
+				.update(table.invoice)
+				.set({
+					status: 'sent',
+					updatedAt: new Date()
+				})
+				.where(eq(table.invoice.id, invoiceId));
+		}
+
+		// TODO: Implement actual email sending logic
+		// For now, just return success
+
+		return { success: true };
+	}
+);
+
+export const downloadInvoicePDF = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (invoiceId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Verify invoice belongs to tenant
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!invoice) {
+			throw new Error('Invoice not found');
+		}
+
+		// TODO: Implement PDF generation
+		// For now, return invoice data that can be used to generate PDF on client side
+		return { invoiceId, invoiceNumber: invoice.invoiceNumber };
 	}
 );

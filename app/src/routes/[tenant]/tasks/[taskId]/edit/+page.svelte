@@ -2,6 +2,8 @@
 	import { getTask, updateTask } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
+	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getMilestones } from '$lib/remotes/milestones.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -20,16 +22,28 @@
 	const clients = $derived(clientsQuery.current || []);
 	const projectsQuery = getProjects();
 	const projects = $derived(projectsQuery.current || []);
+	const usersQuery = getTenantUsers();
+	const users = $derived(usersQuery.current || []);
+	const userMap = $derived(new Map(users.map((u) => [u.id, u.username])));
 
 	let title = $state('');
 	let description = $state('');
 	let clientId = $state('');
 	let projectId = $state('');
+	let milestoneId = $state('');
 	let status = $state('todo');
 	let priority = $state('medium');
+	let assignedToUserId = $state('');
 	let dueDate = $state('');
 	let saving = $state(false);
 	let error = $state<string | null>(null);
+
+	// Load milestones for selected project
+	const milestonesQuery = $derived(
+		projectId ? getMilestones(projectId) : null
+	);
+	const milestones = $derived(milestonesQuery?.current || []);
+	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
 
 	$effect(() => {
 		if (task) {
@@ -37,8 +51,10 @@
 			description = task.description || '';
 			clientId = task.clientId || '';
 			projectId = task.projectId || '';
+			milestoneId = task.milestoneId || '';
 			status = task.status || 'todo';
 			priority = task.priority || 'medium';
+			assignedToUserId = task.assignedToUserId || '';
 			dueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
 		}
 	});
@@ -54,8 +70,10 @@
 				description: description || undefined,
 				clientId: clientId || undefined,
 				projectId: projectId || undefined,
+				milestoneId: milestoneId || undefined,
 				status: status || undefined,
 				priority: priority || undefined,
+				assignedToUserId: assignedToUserId || undefined,
 				dueDate: dueDate || undefined
 			});
 
@@ -131,6 +149,26 @@
 							</Select>
 						</div>
 					</div>
+					{#if projectId && milestones.length > 0}
+						<div class="space-y-2">
+							<Label for="milestoneId">Milestone</Label>
+							<Select type="single" bind:value={milestoneId}>
+								<SelectTrigger>
+									{#if milestoneId && milestoneMap.has(milestoneId)}
+										{milestoneMap.get(milestoneId)}
+									{:else}
+										Select a milestone
+									{/if}
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="">None</SelectItem>
+									{#each milestones as milestone}
+										<SelectItem value={milestone.id}>{milestone.name}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
+						</div>
+					{/if}
 					<div class="grid grid-cols-2 gap-4">
 						<div class="space-y-2">
 							<Label for="status">Status</Label>
@@ -140,6 +178,8 @@
 										To Do
 									{:else if status === 'in-progress'}
 										In Progress
+									{:else if status === 'review'}
+										Review
 									{:else if status === 'done'}
 										Done
 									{:else if status === 'cancelled'}
@@ -151,6 +191,7 @@
 								<SelectContent>
 									<SelectItem value="todo">To Do</SelectItem>
 									<SelectItem value="in-progress">In Progress</SelectItem>
+									<SelectItem value="review">Review</SelectItem>
 									<SelectItem value="done">Done</SelectItem>
 									<SelectItem value="cancelled">Cancelled</SelectItem>
 								</SelectContent>
@@ -181,9 +222,31 @@
 							</Select>
 						</div>
 					</div>
-					<div class="space-y-2">
-						<Label for="dueDate">Due Date</Label>
-						<Input id="dueDate" bind:value={dueDate} type="date" />
+					<div class="grid grid-cols-2 gap-4">
+						<div class="space-y-2">
+							<Label for="assignee">Assignee</Label>
+							<Select type="single" bind:value={assignedToUserId}>
+								<SelectTrigger id="assignee">
+									{#if assignedToUserId && userMap.has(assignedToUserId)}
+										{userMap.get(assignedToUserId)}
+									{:else if assignedToUserId}
+										{assignedToUserId.substring(0, 8)}...
+									{:else}
+										Select a user
+									{/if}
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="">None</SelectItem>
+									{#each users as user}
+										<SelectItem value={user.id}>{user.username}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
+						</div>
+						<div class="space-y-2">
+							<Label for="dueDate">Due Date</Label>
+							<Input id="dueDate" bind:value={dueDate} type="date" />
+						</div>
 					</div>
 
 					{#if error}

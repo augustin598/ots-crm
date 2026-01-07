@@ -4,53 +4,40 @@
 	import { type VariantProps, tv } from "tailwind-variants";
 
 	export const buttonVariants = tv({
-		base: 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-ring focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+		base: "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
 		variants: {
 			variant: {
-				default: 'bg-[#f40] text-white hover:bg-[#f40]/90 border border-[#f40] shadow-[0px_3px_10px_0px_rgba(255,68,0,0.2)]',
+				default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs",
 				destructive:
-					'bg-destructive-foreground text-destructive hover:bg-destructive-foreground/90',
-				outline: 'border border-[#e6e6e6] bg-white text-black hover:bg-gray-50 shadow-[0px_3px_5px_0px_rgba(0,0,0,0.05)]',
-				outlineDark: 'border border-white bg-transparent text-white hover:bg-white/10',
-				secondary: 'bg-red-600 text-white hover:bg-red-600/80  border border-red-600',
-				ghost:
-					'bg-transparent text-gray-400 hover:bg-transparent hover:text-black focus:text-black',
-				link: 'text-primary underline-offset-4 hover:underline',
-				white: 'bg-white text-black hover:bg-white/80 border border-white',
-				transparent: 'bg-transparent'
+					"bg-destructive hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60 text-white shadow-xs",
+				outline:
+					"bg-background hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 border shadow-xs",
+				secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-xs",
+				ghost: "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+				link: "text-primary underline-offset-4 hover:underline",
 			},
 			size: {
-				default: 'h-10 px-5 text-sm',
-				sm: 'h-9 px-4 py-2 text-sm',
-				md: 'h-[35px] px-[15px] text-sm',
-				lg: 'h-12 px-8 py-3 text-base',
-				xl: 'h-[45px] px-5 text-[15px]',
-				icon: 'h-10 px-4 w-10'
+				default: "h-9 px-4 py-2 has-[>svg]:px-3",
+				sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
+				lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+				icon: "size-9",
+				"icon-sm": "size-8",
+				"icon-lg": "size-10",
 			},
-			rounded: {
-				full: 'rounded-full',
-				xl: 'rounded-xl',
-				'2xl': 'rounded-2xl',
-				default: 'rounded-full'
-			}
 		},
 		defaultVariants: {
-			variant: 'default',
-			size: 'default',
-			rounded: 'default'
-		}
+			variant: "default",
+			size: "default",
+		},
 	});
 
 	export type ButtonVariant = VariantProps<typeof buttonVariants>["variant"];
 	export type ButtonSize = VariantProps<typeof buttonVariants>["size"];
 
-	export type ButtonRounded = VariantProps<typeof buttonVariants>["rounded"];
-
 	export type ButtonProps = WithElementRef<HTMLButtonAttributes> &
 		WithElementRef<HTMLAnchorAttributes> & {
 			variant?: ButtonVariant;
 			size?: ButtonSize;
-			rounded?: ButtonRounded;
 		};
 </script>
 
@@ -59,7 +46,6 @@
 		class: className,
 		variant = "default",
 		size = "default",
-		rounded = "default",
 		ref = $bindable(null),
 		href = undefined,
 		type = "button",
@@ -73,8 +59,7 @@
 	<a
 		bind:this={ref}
 		data-slot="button"
-		class={cn(buttonVariants({ variant, size, rounded }), className)}
-		style="font-family: 'Plus Jakarta Sans', sans-serif;"
+		class={cn(buttonVariants({ variant, size }), className)}
 		href={disabled ? undefined : href}
 		aria-disabled={disabled}
 		role={disabled ? "link" : undefined}
@@ -87,8 +72,7 @@
 	<button
 		bind:this={ref}
 		data-slot="button"
-		class={cn(buttonVariants({ variant, size, rounded }), className)}
-		style="font-family: 'Plus Jakarta Sans', sans-serif;"
+		class={cn(buttonVariants({ variant, size }), className)}
 		{type}
 		{disabled}
 		{...restProps}

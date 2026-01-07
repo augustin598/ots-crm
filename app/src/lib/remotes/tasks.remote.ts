@@ -15,6 +15,7 @@ const taskSchema = v.object({
 	description: v.optional(v.string()),
 	projectId: v.optional(v.string()),
 	clientId: v.optional(v.string()),
+	milestoneId: v.optional(v.string()),
 	status: v.optional(v.string()),
 	priority: v.optional(v.string()),
 	dueDate: v.optional(v.string()),
@@ -80,6 +81,7 @@ export const createTask = command(taskSchema, async (data) => {
 		tenantId: event.locals.tenant.id,
 		projectId: data.projectId || null,
 		clientId: data.clientId || null,
+		milestoneId: data.milestoneId || null,
 		title: data.title,
 		description: data.description || null,
 		status: data.status || 'todo',
@@ -119,6 +121,7 @@ export const updateTask = command(
 			.set({
 				...updateData,
 				dueDate: updateData.dueDate ? new Date(updateData.dueDate) : undefined,
+				milestoneId: updateData.milestoneId || undefined,
 				updatedAt: new Date()
 			})
 			.where(eq(table.task.id, taskId));
