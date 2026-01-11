@@ -3,6 +3,7 @@
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getMilestones, createMilestone, updateMilestone, deleteMilestone } from '$lib/remotes/milestones.remote';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -121,7 +122,7 @@
 				projectId,
 				status: formStatus || undefined,
 				dueDate: formDueDate || undefined
-			});
+			}).updates(getMilestones(projectId));
 
 			// Reset form
 			formName = '';
@@ -154,7 +155,7 @@
 				status: formStatus || undefined,
 				dueDate: formDueDate || undefined,
 				completedDate: formStatus === 'completed' ? new Date().toISOString() : undefined
-			});
+			}).updates(getMilestones(projectId));
 
 			closeEditMilestoneDialog();
 		} catch (e) {
@@ -170,7 +171,7 @@
 		}
 
 		try {
-			await deleteMilestone(milestoneId);
+			await deleteMilestone(milestoneId).updates(getMilestones(projectId));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete milestone');
 		}
@@ -213,7 +214,11 @@
 					<div>
 						<p class="text-sm text-muted-foreground">Budget</p>
 						<p class="text-2xl font-bold">
-							{#if project.budget}€{(project.budget / 100).toLocaleString()}{:else}—{/if}
+							{#if project.budget}
+								{formatAmount(project.budget, (project.currency || 'RON') as Currency)}
+							{:else}
+								—
+							{/if}
 						</p>
 					</div>
 				</div>

@@ -8,6 +8,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const templateId = $derived(page.params.templateId);
@@ -18,6 +19,12 @@
 	const clients = $derived(clientsQuery.current || []);
 	const projectsQuery = getProjects();
 	const projects = $derived(projectsQuery.current || []);
+
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+	const projectOptions = $derived([
+		{ value: '', label: 'None' },
+		...projects.map((p) => ({ value: p.id, label: p.name }))
+	]);
 
 	let clientId = $state('');
 	let projectId = $state('');
@@ -71,38 +78,21 @@
 				>
 					<div class="space-y-2">
 						<Label for="clientId">Client *</Label>
-						<Select type="single" bind:value={clientId} required>
-							<SelectTrigger>
-								{#if clientId}
-									{clients.find((c) => c.id === clientId)?.name || 'Select a client'}
-								{:else}
-									Select a client
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								{#each clients as client}
-									<SelectItem value={client.id}>{client.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
+						<Combobox
+							bind:value={clientId}
+							options={clientOptions}
+							placeholder="Select a client"
+							searchPlaceholder="Search clients..."
+						/>
 					</div>
 					<div class="space-y-2">
 						<Label for="projectId">Project</Label>
-						<Select type="single" bind:value={projectId}>
-							<SelectTrigger>
-								{#if projectId}
-									{projects.find((p) => p.id === projectId)?.name || 'Select a project'}
-								{:else}
-									Select a project (optional)
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">None</SelectItem>
-								{#each projects as project}
-									<SelectItem value={project.id}>{project.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
+						<Combobox
+							bind:value={projectId}
+							options={projectOptions}
+							placeholder="Select a project (optional)"
+							searchPlaceholder="Search projects..."
+						/>
 					</div>
 
 					{#if error}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTask, deleteTask } from '$lib/remotes/tasks.remote';
+	import { getTask, deleteTask, getTasks } from '$lib/remotes/tasks.remote';
 	import { getTaskComments, createTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getProject } from '$lib/remotes/projects.remote';
@@ -26,7 +26,14 @@
 
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
-	const userMap = $derived(new Map(users.map((u) => [u.id, u.username])));
+	const userMap = $derived(
+		new Map(
+			users.map((u) => [
+				u.id,
+				`${u.firstName} ${u.lastName}`.trim() || u.email
+			])
+		)
+	);
 
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
 	const client = $derived(clientQuery?.current);
@@ -77,9 +84,8 @@
 			await createTaskComment({
 				taskId,
 				content: newComment.trim()
-			});
+			}).updates(getTaskComments(taskId));
 			newComment = '';
-			commentsQuery.refetch();
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to add comment');
 		} finally {
@@ -93,8 +99,7 @@
 		}
 
 		try {
-			await deleteTaskComment(commentId);
-			commentsQuery.refetch();
+			await deleteTaskComment(commentId).updates(getTaskComments(taskId));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete comment');
 		}
@@ -106,7 +111,7 @@
 		}
 
 		try {
-			await deleteTask(taskId);
+			await deleteTask(taskId).updates(getTask(taskId));
 			goto(`/${tenantSlug}/tasks`);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete task');

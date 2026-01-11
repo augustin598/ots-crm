@@ -23,14 +23,14 @@
 		<CardContent>
 			<form method="post" action="?/login" use:enhance class="space-y-4">
 				<div class="space-y-2">
-					<Label for="username">Username</Label>
+					<Label for="email">Email</Label>
 					<Input
-						id="username"
-						name="username"
-						type="text"
+						id="email"
+						name="email"
+						type="email"
 						required
-						autocomplete="username"
-						placeholder="Enter your username"
+						autocomplete="email"
+						placeholder="Enter your email"
 					/>
 				</div>
 				<div class="space-y-2">

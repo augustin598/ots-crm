@@ -13,6 +13,7 @@
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import BriefcaseIcon from '@lucide/svelte/icons/briefcase';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
@@ -150,11 +151,11 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/contract-templates`)}>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/document-templates`)}>
 						{#snippet child({ props })}
-							<a href="/{tenantSlug}/contract-templates" {...props}>
+							<a href="/{tenantSlug}/document-templates" {...props}>
 								<FileSignatureIcon />
-								<span>Contract Templates</span>
+								<span>Document Templates</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>
@@ -175,6 +176,16 @@
 							<a href="/{tenantSlug}/invoices" {...props}>
 								<ReceiptIcon />
 								<span>Invoices</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/banking`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/banking" {...props}>
+								<CreditCardIcon />
+								<span>Banking</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

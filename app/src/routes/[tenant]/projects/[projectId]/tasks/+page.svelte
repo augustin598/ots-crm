@@ -20,6 +20,7 @@
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
 	import { Plus, Calendar, Users, MoreVertical } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -32,6 +33,7 @@
 	let statusDialogOpen = $state(false);
 	let selectedTaskId = $state<string | null>(null);
 	let newStatus = $state('todo');
+	let isCreateDialogOpen = $state(false);
 
 	function getPriorityBadgeVariant(priority: string) {
 		switch (priority) {
@@ -66,7 +68,7 @@
 			await updateTask({
 				taskId: selectedTaskId,
 				status: newStatus
-			});
+			}).updates(getTasks({ projectId }));
 			statusDialogOpen = false;
 			selectedTaskId = null;
 		} catch (e) {
@@ -80,17 +82,21 @@
 		}
 
 		try {
-			await deleteTask(taskId);
+			await deleteTask(taskId).updates(getTasks({ projectId }));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete task');
 		}
+	}
+
+	function handleCreateSuccess() {
+		// Tasks will be refreshed automatically via .updates() in the dialog
 	}
 </script>
 
 <div class="space-y-6">
 	<div class="flex items-center justify-between">
 		<h2 class="text-2xl font-semibold">Tasks</h2>
-		<Button onclick={() => goto(`/${tenantSlug}/tasks/new?projectId=${projectId}`)}>
+		<Button onclick={() => (isCreateDialogOpen = true)}>
 			<Plus class="h-4 w-4 mr-2" />
 			New Task
 		</Button>
@@ -202,3 +208,12 @@
 		</DialogFooter>
 	</DialogContent>
 </Dialog>
+
+<CreateTaskDialog
+	open={isCreateDialogOpen}
+	onOpenChange={(open) => {
+		isCreateDialogOpen = open;
+	}}
+	onSuccess={handleCreateSuccess}
+	defaultProjectId={projectId}
+/>

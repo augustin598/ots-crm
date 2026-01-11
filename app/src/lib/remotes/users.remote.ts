@@ -13,7 +13,9 @@ export const getTenantUsers = query(async () => {
 	const tenantUsers = await db
 		.select({
 			id: table.user.id,
-			username: table.user.username
+			email: table.user.email,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName
 		})
 		.from(table.tenantUser)
 		.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))

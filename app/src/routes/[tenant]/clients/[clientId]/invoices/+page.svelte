@@ -5,6 +5,7 @@
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { FileText } from '@lucide/svelte';
 	import { Plus } from '@lucide/svelte';
 
@@ -51,7 +52,9 @@
 							{/if}
 						</div>
 						<div class="text-right">
-							<p class="text-2xl font-bold">€{((invoice.totalAmount || 0) / 100).toLocaleString()}</p>
+							<p class="text-2xl font-bold">
+								{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}
+							</p>
 							<Badge
 								variant={
 									invoice.status === 'paid'

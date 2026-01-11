@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getInvoice, updateInvoice } from '$lib/remotes/invoices.remote';
+	import { getInvoice, updateInvoice, getInvoices } from '$lib/remotes/invoices.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { goto } from '$app/navigation';
@@ -10,9 +10,12 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
+	import { CURRENCIES, type Currency } from '$lib/utils/currency';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const invoiceId = $derived(page.params.invoiceId);
+	const invoiceId = $derived(page.params.invoiceId || '');
 
 	const invoiceQuery = getInvoice(invoiceId);
 	const invoice = $derived(invoiceQuery.current);
@@ -24,10 +27,20 @@
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+	const projectOptions = $derived([
+		{ value: '', label: 'None' },
+		...projects.map((p) => ({ value: p.id, label: p.name }))
+	]);
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	let clientId = $state('');
 	let projectId = $state('');
 	let amount = $state('');
 	let taxRate = $state('19');
+	let currency = $state<Currency>('RON');
 	let status = $state('draft');
 	let issueDate = $state('');
 	let dueDate = $state('');
@@ -41,10 +54,17 @@
 			projectId = invoice.projectId || '';
 			amount = invoice.amount ? (invoice.amount / 100).toString() : '';
 			taxRate = invoice.taxRate ? (invoice.taxRate / 100).toString() : '19';
+			currency = (invoice.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
 			status = invoice.status || 'draft';
 			issueDate = invoice.issueDate ? new Date(invoice.issueDate).toISOString().split('T')[0] : '';
 			dueDate = invoice.dueDate ? new Date(invoice.dueDate).toISOString().split('T')[0] : '';
 			notes = invoice.notes || '';
+		}
+	});
+
+	$effect(() => {
+		if (invoiceSettings && !invoice) {
+			currency = (invoiceSettings.defaultCurrency || 'RON') as Currency;
 		}
 	});
 
@@ -68,11 +88,12 @@
 				projectId: projectId || undefined,
 				amount: parseFloat(amount),
 				taxRate: parseFloat(taxRate),
+				currency: currency,
 				status: status || undefined,
 				issueDate: issueDate || undefined,
 				dueDate: dueDate || undefined,
 				notes: notes || undefined
-			});
+			}).updates(invoiceQuery, getInvoice(invoiceId), getInvoices({}));
 
 			goto(`/${tenantSlug}/invoices/${invoiceId}`);
 		} catch (e) {
@@ -108,42 +129,40 @@
 				>
 					<div class="grid gap-2">
 						<Label for="clientId">Client *</Label>
-						<Select type="single" bind:value={clientId} required>
-							<SelectTrigger>
-								{#if clientId}
-									{clients.find((c) => c.id === clientId)?.name || 'Select a client'}
-								{:else}
-									Select a client
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								{#each clients as client}
-									<SelectItem value={client.id}>{client.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
+						<Combobox
+							bind:value={clientId}
+							options={clientOptions}
+							placeholder="Select a client"
+							searchPlaceholder="Search clients..."
+						/>
 					</div>
 					<div class="grid gap-2">
 						<Label for="projectId">Project</Label>
-						<Select type="single" bind:value={projectId}>
-							<SelectTrigger>
-								{#if projectId}
-									{projects.find((p) => p.id === projectId)?.name || 'Select a project'}
-								{:else}
-									Select a project
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">None</SelectItem>
-								{#each projects as project}
-									<SelectItem value={project.id}>{project.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
+						<Combobox
+							bind:value={projectId}
+							options={projectOptions}
+							placeholder="Select a project (optional)"
+							searchPlaceholder="Search projects..."
+						/>
 					</div>
-					<div class="grid gap-2">
-						<Label for="amount">Amount (€) *</Label>
-						<Input id="amount" type="number" bind:value={amount} step="0.01" required />
+					<div class="grid grid-cols-2 gap-4">
+						<div class="grid gap-2">
+							<Label for="amount">Amount *</Label>
+							<Input id="amount" type="number" bind:value={amount} step="0.01" required />
+						</div>
+						<div class="grid gap-2">
+							<Label for="currency">Currency</Label>
+							<Select type="single" bind:value={currency}>
+								<SelectTrigger>
+									{currency}
+								</SelectTrigger>
+								<SelectContent>
+									{#each CURRENCIES as curr}
+										<SelectItem value={curr}>{curr}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
+						</div>
 					</div>
 					<div class="grid gap-2">
 						<Label for="taxRate">Tax Rate (%)</Label>

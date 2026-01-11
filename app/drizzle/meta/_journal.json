@@ -29,6 +29,90 @@
       "when": 1767798879143,
       "tag": "0003_chemical_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1768051722833,
+      "tag": "0004_peaceful_starfox",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1768065437220,
+      "tag": "0005_smooth_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1768070441089,
+      "tag": "0006_overrated_wither",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1768071409598,
+      "tag": "0007_public_may_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1768072838245,
+      "tag": "0008_nosy_robbie_robertson",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1768076694852,
+      "tag": "0009_bored_magus",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1768077778308,
+      "tag": "0010_majestic_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1768117948172,
+      "tag": "0011_sudden_komodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1768118958707,
+      "tag": "0012_acoustic_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1768134416050,
+      "tag": "0013_classy_overlord",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1768141128859,
+      "tag": "0014_fast_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1768147692341,
+      "tag": "0015_good_mathemanic",
+      "breakpoints": true
     }
   ]
 }

@@ -14,12 +14,9 @@ export const lucia = new Lucia(adapter, {
 	},
 	getUserAttributes: (attributes) => {
 		return {
-			username: attributes.username,
 			email: attributes.email,
-			emailVerified: attributes.emailVerified,
-			role: attributes.role,
-			marketingConsent: attributes.marketingConsent,
-			preferredLanguage: attributes.preferredLanguage
+			firstName: attributes.firstName,
+			lastName: attributes.lastName
 		};
 	}
 });
@@ -28,12 +25,9 @@ declare module 'lucia' {
 	interface Register {
 		Lucia: typeof lucia;
 		DatabaseUserAttributes: {
-			username: string;
 			email: string;
-			emailVerified: boolean;
-			role: 'admin' | 'client' | 'translator' | 'staff';
-			marketingConsent: boolean;
-			preferredLanguage: 'ro' | 'es' | 'en';
+			firstName: string;
+			lastName: string;
 		};
 	}
 }

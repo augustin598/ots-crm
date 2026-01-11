@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getClient, updateClient } from '$lib/remotes/clients.remote';
+	import { getClient, updateClient, getClients } from '$lib/remotes/clients.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -117,7 +117,7 @@
 				postalCode: postalCode || undefined,
 				country: country || undefined,
 				notes: notes || undefined
-			});
+			}).updates(clientQuery, getClient(clientId), getClients());
 
 			goto(`/${tenantSlug}/clients/${clientId}`);
 		} catch (e) {

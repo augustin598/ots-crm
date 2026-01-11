@@ -23,13 +23,8 @@ function generateUserId() {
 	return id;
 }
 
-function validateUsername(username: string): boolean {
-	return (
-		typeof username === 'string' &&
-		username.length >= 3 &&
-		username.length <= 31 &&
-		/^[a-z0-9_-]+$/.test(username)
-	);
+function validateEmail(email: string): boolean {
+	return typeof email === 'string' && email.includes('@') && email.length > 0;
 }
 
 function validatePassword(password: string): boolean {
@@ -54,29 +49,48 @@ async function createAdmin() {
 	try {
 		console.log('🔐 Admin User Creation Script\n');
 
-		// Get username from command line args or prompt
-		let username = process.argv[2];
-		if (!username) {
-			username = await prompt('Enter username (min 3, max 31 characters, alphanumeric only): ');
+		// Get email from command line args or prompt
+		let email = process.argv[2];
+		if (!email) {
+			email = await prompt('Enter email address: ');
 		}
 
-		if (!validateUsername(username)) {
-			console.error('❌ Invalid username (min 3, max 31 characters, alphanumeric only)');
+		if (!validateEmail(email)) {
+			console.error('❌ Invalid email address');
 			process.exit(1);
 		}
 
 		// Check if user already exists
-		const existingUsers = await db
-			.select()
-			.from(schema.user)
-			.where(eq(schema.user.username, username));
+		const existingUsers = await db.select().from(schema.user).where(eq(schema.user.email, email));
 		if (existingUsers.length > 0) {
-			console.error(`❌ User "${username}" already exists!`);
+			console.error(`❌ User with email "${email}" already exists!`);
+			process.exit(1);
+		}
+
+		// Get first name
+		let firstName = process.argv[3];
+		if (!firstName) {
+			firstName = await prompt('Enter first name: ');
+		}
+
+		if (!firstName || firstName.trim().length === 0) {
+			console.error('❌ First name is required');
+			process.exit(1);
+		}
+
+		// Get last name
+		let lastName = process.argv[4];
+		if (!lastName) {
+			lastName = await prompt('Enter last name: ');
+		}
+
+		if (!lastName || lastName.trim().length === 0) {
+			console.error('❌ Last name is required');
 			process.exit(1);
 		}
 
 		// Get password from command line args or prompt
-		let password = process.argv[3];
+		let password = process.argv[5];
 		if (!password) {
 			console.log('⚠️  Note: Password will be visible as you type');
 			password = await prompt('Enter password (min 6 characters): ');
@@ -104,11 +118,13 @@ async function createAdmin() {
 		console.log('👤 Creating admin user...');
 		await db.insert(schema.user).values({
 			id: userId,
-			username,
+			email,
+			firstName: firstName.trim(),
+			lastName: lastName.trim(),
 			passwordHash
 		});
 
-		console.log(`✅ Admin user "${username}" created successfully!`);
+		console.log(`✅ Admin user "${firstName} ${lastName}" (${email}) created successfully!`);
 		console.log(`   User ID: ${userId}`);
 	} catch (error) {
 		console.error('❌ Error creating admin user:', error);

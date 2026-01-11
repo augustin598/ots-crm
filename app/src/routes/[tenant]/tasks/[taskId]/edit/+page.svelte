@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTask, updateTask } from '$lib/remotes/tasks.remote';
+	import { getTask, updateTask, getTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -12,6 +12,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId);
@@ -22,9 +23,25 @@
 	const clients = $derived(clientsQuery.current || []);
 	const projectsQuery = getProjects();
 	const projects = $derived(projectsQuery.current || []);
+
+	const clientOptions = $derived([
+		{ value: '', label: 'None' },
+		...clients.map((c) => ({ value: c.id, label: c.name }))
+	]);
+	const projectOptions = $derived([
+		{ value: '', label: 'None' },
+		...projects.map((p) => ({ value: p.id, label: p.name }))
+	]);
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
-	const userMap = $derived(new Map(users.map((u) => [u.id, u.username])));
+	const userMap = $derived(
+		new Map(
+			users.map((u) => [
+				u.id,
+				`${u.firstName} ${u.lastName}`.trim() || u.email
+			])
+		)
+	);
 
 	let title = $state('');
 	let description = $state('');
@@ -75,7 +92,7 @@
 				priority: priority || undefined,
 				assignedToUserId: assignedToUserId || undefined,
 				dueDate: dueDate || undefined
-			});
+			}).updates(taskQuery, getTask(taskId), getTasks({}));
 
 			goto(`/${tenantSlug}/tasks/${taskId}`);
 		} catch (e) {
@@ -114,39 +131,21 @@
 					<div class="grid grid-cols-2 gap-4">
 						<div class="space-y-2">
 							<Label for="clientId">Client</Label>
-							<Select type="single" bind:value={clientId}>
-								<SelectTrigger>
-									{#if clientId}
-										{clients.find((c) => c.id === clientId)?.name || 'Select a client'}
-									{:else}
-										Select a client
-									{/if}
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="">None</SelectItem>
-									{#each clients as client}
-										<SelectItem value={client.id}>{client.name}</SelectItem>
-									{/each}
-								</SelectContent>
-							</Select>
+							<Combobox
+								bind:value={clientId}
+								options={clientOptions}
+								placeholder="Select a client (optional)"
+								searchPlaceholder="Search clients..."
+							/>
 						</div>
 						<div class="space-y-2">
 							<Label for="projectId">Project</Label>
-							<Select type="single" bind:value={projectId}>
-								<SelectTrigger>
-									{#if projectId}
-										{projects.find((p) => p.id === projectId)?.name || 'Select a project'}
-									{:else}
-										Select a project
-									{/if}
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="">None</SelectItem>
-									{#each projects as project}
-										<SelectItem value={project.id}>{project.name}</SelectItem>
-									{/each}
-								</SelectContent>
-							</Select>
+							<Combobox
+								bind:value={projectId}
+								options={projectOptions}
+								placeholder="Select a project (optional)"
+								searchPlaceholder="Search projects..."
+							/>
 						</div>
 					</div>
 					{#if projectId && milestones.length > 0}
@@ -238,7 +237,9 @@
 								<SelectContent>
 									<SelectItem value="">None</SelectItem>
 									{#each users as user}
-										<SelectItem value={user.id}>{user.username}</SelectItem>
+										<SelectItem value={user.id}>
+											{`${user.firstName} ${user.lastName}`.trim() || user.email}
+										</SelectItem>
 									{/each}
 								</SelectContent>
 							</Select>

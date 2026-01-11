@@ -1,7 +1,10 @@
-<script>
-    import './layout.css';
+<script lang="ts">
+	import './layout.css';
+	import { NuqsAdapter } from 'nuqs-svelte/adapters/svelte-kit';
 
-    const { children } = $props();
+	const { children } = $props();
 </script>
 
-{@render children()}
+<NuqsAdapter>
+	{@render children()}
+</NuqsAdapter>

@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { getProjects, createProject, deleteProject, updateProject } from '$lib/remotes/projects.remote';
+	import { getProjects, createProject, deleteProject, updateProject, getProject } from '$lib/remotes/projects.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -31,6 +33,7 @@
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import type { Project } from '$lib/server/db/schema';
+	import { Combobox } from '$lib/components/ui/combobox';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -42,10 +45,14 @@
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
 
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	// Create a map of client IDs to names
 	const clientMap = $derived(
 		new Map(clients.map((client) => [client.id, client.name]))
 	);
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 
 	let isDialogOpen = $state(false);
 	let isEditDialogOpen = $state(false);
@@ -54,11 +61,19 @@
 	let formDescription = $state('');
 	let formClientId = $state('');
 	let formBudget = $state('');
+	let formCurrency = $state<Currency>('RON');
 	let formStartDate = $state('');
 	let formEndDate = $state('');
 	let formStatus = $state('planning');
 	let formLoading = $state(false);
 	let formError = $state<string | null>(null);
+
+	// Update currency when settings load
+	$effect(() => {
+		if (invoiceSettings?.defaultCurrency) {
+			formCurrency = invoiceSettings.defaultCurrency as Currency;
+		}
+	});
 
 	function getStatusColor(status: string) {
 		switch (status) {
@@ -94,8 +109,9 @@
 		editingProject = project;
 		formName = project.name;
 		formDescription = project.description || '';
-		formClientId = project.clientId;
+		formClientId = project.clientId || '';
 		formBudget = project.budget ? (project.budget / 100).toString() : '';
+		formCurrency = (project.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
 		formStartDate = project.startDate ? new Date(project.startDate).toISOString().split('T')[0] : '';
 		formEndDate = project.endDate ? new Date(project.endDate).toISOString().split('T')[0] : '';
 		formStatus = project.status || 'planning';
@@ -109,6 +125,7 @@
 		formDescription = '';
 		formClientId = '';
 		formBudget = '';
+		formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
 		formStartDate = '';
 		formEndDate = '';
 		formStatus = 'planning';
@@ -139,11 +156,6 @@
 	}
 
 	async function handleCreateProject() {
-		if (!formClientId) {
-			formError = 'Please select a client';
-			return;
-		}
-
 		formLoading = true;
 		formError = null;
 
@@ -151,12 +163,13 @@
 			await createProject({
 				name: formName,
 				description: formDescription || undefined,
-				clientId: formClientId,
+				clientId: formClientId || undefined,
 				status: formStatus || undefined,
 				startDate: formStartDate || undefined,
 				endDate: formEndDate || undefined,
-				budget: formBudget ? parseFloat(formBudget) : undefined
-			});
+				budget: formBudget ? parseFloat(formBudget) : undefined,
+				currency: formCurrency || undefined
+			}).updates(projectsQuery);
 
 			// Reset form
 			formName = '';
@@ -175,8 +188,8 @@
 	}
 
 	async function handleUpdateProject() {
-		if (!editingProject || !formClientId) {
-			formError = 'Please select a client';
+		if (!editingProject) {
+			formError = 'No project selected';
 			return;
 		}
 
@@ -188,12 +201,13 @@
 				projectId: editingProject.id,
 				name: formName,
 				description: formDescription || undefined,
-				clientId: formClientId,
+				clientId: formClientId || undefined,
 				status: formStatus || undefined,
 				startDate: formStartDate || undefined,
 				endDate: formEndDate || undefined,
-				budget: formBudget ? parseFloat(formBudget) : undefined
-			});
+				budget: formBudget ? parseFloat(formBudget) : undefined,
+				currency: formCurrency || undefined
+			}).updates(projectsQuery, getProjects(undefined));
 
 			closeEditDialog();
 		} catch (e) {
@@ -209,7 +223,7 @@
 		}
 
 		try {
-			await deleteProject(projectId);
+			await deleteProject(projectId).updates(projectsQuery);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete project');
 		}
@@ -236,7 +250,7 @@
 			<DialogContent class="sm:max-w-[600px]">
 				<DialogHeader>
 					<DialogTitle>Create New Project</DialogTitle>
-					<DialogDescription>Start a new project for a client</DialogDescription>
+					<DialogDescription>Start a new project (client is optional for internal projects)</DialogDescription>
 				</DialogHeader>
 				<div class="grid gap-4 py-4">
 					<div class="grid gap-2">
@@ -247,26 +261,33 @@
 						<Label for="description">Description</Label>
 						<Textarea id="description" bind:value={formDescription} placeholder="Project description..." />
 					</div>
-					<div class="grid gap-2">
-						<Label for="client">Client</Label>
-						<Select type="single" bind:value={formClientId}>
-							<SelectTrigger id="client">
-								{#if formClientId && clientMap.has(formClientId)}
-									{clientMap.get(formClientId)}
-								{:else}
-									Select a client
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								{#each clients as client}
-									<SelectItem value={client.id}>{client.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-					</div>
-					<div class="grid gap-2">
-						<Label for="budget">Budget</Label>
-						<Input id="budget" type="number" bind:value={formBudget} placeholder="45000" />
+				<div class="grid gap-2">
+					<Label for="client">Client</Label>
+					<Combobox
+						bind:value={formClientId}
+						options={clientOptions}
+						placeholder="Select a client"
+						searchPlaceholder="Search clients..."
+					/>
+				</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div class="grid gap-2">
+							<Label for="budget">Budget</Label>
+							<Input id="budget" type="number" bind:value={formBudget} placeholder="45000" step="0.01" />
+						</div>
+						<div class="grid gap-2">
+							<Label for="currency">Currency</Label>
+							<Select type="single" bind:value={formCurrency}>
+								<SelectTrigger id="currency">
+									{formCurrency}
+								</SelectTrigger>
+								<SelectContent>
+									{#each CURRENCIES as curr}
+										<SelectItem value={curr}>{curr}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
+						</div>
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div class="grid gap-2">
@@ -337,24 +358,31 @@
 				</div>
 				<div class="grid gap-2">
 					<Label for="edit-client">Client</Label>
-					<Select type="single" bind:value={formClientId}>
-						<SelectTrigger id="edit-client">
-							{#if formClientId && clientMap.has(formClientId)}
-								{clientMap.get(formClientId)}
-							{:else}
-								Select a client
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							{#each clients as client}
-								<SelectItem value={client.id}>{client.name}</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
+					<Combobox
+						bind:value={formClientId}
+						options={clientOptions}
+						placeholder="Select a client"
+						searchPlaceholder="Search clients..."
+					/>
 				</div>
-				<div class="grid gap-2">
-					<Label for="edit-budget">Budget</Label>
-					<Input id="edit-budget" type="number" bind:value={formBudget} placeholder="45000" />
+				<div class="grid grid-cols-2 gap-4">
+					<div class="grid gap-2">
+						<Label for="edit-budget">Budget</Label>
+						<Input id="edit-budget" type="number" bind:value={formBudget} placeholder="45000" step="0.01" />
+					</div>
+					<div class="grid gap-2">
+						<Label for="edit-currency">Currency</Label>
+						<Select type="single" bind:value={formCurrency}>
+							<SelectTrigger id="edit-currency">
+								{formCurrency}
+							</SelectTrigger>
+							<SelectContent>
+								{#each CURRENCIES as curr}
+									<SelectItem value={curr}>{curr}</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div class="grid gap-2">
@@ -423,9 +451,9 @@
 {:else}
 	<div class="grid gap-6 md:grid-cols-2">
 		{#each projects as project}
-			{@const clientName = clientMap.get(project.clientId) || 'Unknown Client'}
+			{@const clientName = project.clientId ? (clientMap.get(project.clientId) || 'Unknown Client') : 'Internal Project'}
 			{@const progress = calculateProgress(project.status)}
-			{@const formattedBudget = project.budget ? (project.budget / 100).toFixed(2) : '0'}
+			{@const projectCurrency = (project.currency || 'RON') as Currency}
 			{@const formattedEndDate = project.endDate ? new Date(project.endDate).toLocaleDateString() : 'No date'}
 			<Card class="p-6">
 				<div class="flex items-start justify-between mb-4">
@@ -439,12 +467,18 @@
 							</a>
 							<Badge variant={getStatusColor(project.status)}>{formatStatus(project.status)}</Badge>
 						</div>
-						<a
-							href="/{tenantSlug}/clients/{project.clientId}"
-							class="text-sm text-muted-foreground hover:text-primary cursor-pointer"
-						>
-							{clientName}
-						</a>
+						{#if project.clientId}
+							<a
+								href="/{tenantSlug}/clients/{project.clientId}"
+								class="text-sm text-muted-foreground hover:text-primary cursor-pointer"
+							>
+								{clientName}
+							</a>
+						{:else}
+							<span class="text-sm text-muted-foreground">
+								{clientName}
+							</span>
+						{/if}
 					</div>
 					<DropdownMenu>
 						<DropdownMenuTrigger>
@@ -483,7 +517,9 @@
 							</div>
 							<div>
 								<p class="text-xs text-muted-foreground">Budget</p>
-								<p class="text-sm font-semibold">€{formattedBudget}</p>
+								<p class="text-sm font-semibold">
+									{project.budget ? formatAmount(project.budget, projectCurrency) : '—'}
+								</p>
 							</div>
 						</div>
 

@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { getService, updateService } from '$lib/remotes/services.remote';
+	import { getService, updateService, getServices } from '$lib/remotes/services.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -10,6 +12,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { Switch } from '$lib/components/ui/switch';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -25,12 +28,18 @@
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	let name = $state('');
 	let description = $state('');
 	let category = $state('');
 	let clientId = $state('');
 	let projectId = $state('');
 	let price = $state('');
+	let currency = $state<Currency>('RON');
 	let unit = $state('hour');
 	let isActive = $state(true);
 	let saving = $state(false);
@@ -77,8 +86,15 @@
 			clientId = service.clientId || '';
 			projectId = service.projectId || '';
 			price = service.price ? (service.price / 100).toString() : '';
+			currency = (service.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
 			unit = getUnitFromRecurringType(service.recurringType);
 			isActive = service.isActive !== undefined ? service.isActive : true;
+		}
+	});
+
+	$effect(() => {
+		if (invoiceSettings && !service) {
+			currency = (invoiceSettings.defaultCurrency || 'RON') as Currency;
 		}
 	});
 
@@ -100,10 +116,11 @@
 				clientId,
 				projectId: projectId || undefined,
 				price: price ? parseFloat(price) : undefined,
+				currency: currency || undefined,
 				recurringType: getRecurringTypeFromUnit(unit),
 				recurringInterval: 1,
 				isActive: isActive
-			});
+			}).updates(serviceQuery, getService(serviceId), getServices({}));
 
 			goto(`/${tenantSlug}/services/${serviceId}`);
 		} catch (e) {
@@ -151,20 +168,12 @@
 					</div>
 					<div class="grid gap-2">
 						<Label for="clientId">Client *</Label>
-						<Select type="single" bind:value={clientId} required>
-							<SelectTrigger id="clientId">
-								{#if clientId}
-									{clients.find((c) => c.id === clientId)?.name || 'Select a client'}
-								{:else}
-									Select a client
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								{#each clients as client}
-									<SelectItem value={client.id}>{client.name}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
+						<Combobox
+							bind:value={clientId}
+							options={clientOptions}
+							placeholder="Select a client"
+							searchPlaceholder="Search clients..."
+						/>
 					</div>
 					<div class="grid gap-2">
 						<Label for="category">Category</Label>
@@ -185,10 +194,23 @@
 							</SelectContent>
 						</Select>
 					</div>
+					<div class="grid gap-2">
+						<Label for="price">Price</Label>
+						<Input id="price" type="number" bind:value={price} placeholder="150" step="0.01" />
+					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div class="grid gap-2">
-							<Label for="price">Price</Label>
-							<Input id="price" type="number" bind:value={price} placeholder="150" step="0.01" />
+							<Label for="currency">Currency</Label>
+							<Select type="single" bind:value={currency}>
+								<SelectTrigger id="currency">
+									{currency}
+								</SelectTrigger>
+								<SelectContent>
+									{#each CURRENCIES as curr}
+										<SelectItem value={curr}>{curr}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
 						</div>
 						<div class="grid gap-2">
 							<Label for="unit">Unit</Label>

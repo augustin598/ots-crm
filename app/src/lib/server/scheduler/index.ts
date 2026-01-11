@@ -1,0 +1,149 @@
+import { Queue, Worker } from 'bullmq';
+import { env } from '$env/dynamic/private';
+import { processRecurringInvoices } from './tasks/recurring-invoices';
+import { processTaskReminders } from './tasks/task-reminders';
+
+const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
+
+const connection = {
+	host: new URL(REDIS_URL).hostname,
+	port: parseInt(new URL(REDIS_URL).port, 10),
+	password: new URL(REDIS_URL).password || undefined
+};
+
+// Use a global symbol to store the scheduler queue instance
+const SCHEDULER_QUEUE_SYMBOL = Symbol.for('scheduler_queue');
+
+/**
+ * Creates a singleton instance of the 'scheduler' queue.
+ * This queue handles scheduled/recurring jobs.
+ */
+function createSchedulerQueue() {
+	const queue = new Queue('scheduler', {
+		connection,
+		defaultJobOptions: {
+			attempts: 3,
+			backoff: {
+				type: 'exponential',
+				delay: 1000
+			}
+		}
+	});
+
+	queue.on('error', (error) => {
+		console.error('Scheduler queue error:', error);
+	});
+
+	return queue;
+}
+
+const schedulerQueue =
+	(globalThis as any)[SCHEDULER_QUEUE_SYMBOL] ||
+	((globalThis as any)[SCHEDULER_QUEUE_SYMBOL] = createSchedulerQueue());
+
+/**
+ * Task handler type
+ */
+type TaskHandler = (params: Record<string, any>) => Promise<any>;
+
+/**
+ * Task registry - maps task types to their handlers
+ */
+const taskHandlers: Record<string, TaskHandler> = {
+	recurring_invoices: processRecurringInvoices,
+	task_reminders: processTaskReminders
+};
+
+/**
+ * Scheduler job data interface
+ */
+interface SchedulerJobData {
+	type: string;
+	params?: Record<string, any>;
+}
+
+/**
+ * Create scheduler worker that processes scheduled jobs
+ */
+function createSchedulerWorker() {
+	const worker = new Worker<SchedulerJobData>(
+		'scheduler',
+		async (job) => {
+			const { type, params } = job.data;
+
+			const handler = taskHandlers[type];
+			if (!handler) {
+				throw new Error(`Unknown scheduler job type: ${type}`);
+			}
+
+			return await handler(params || {});
+		},
+		{ connection }
+	);
+
+	worker.on('completed', (job) => {
+		console.log(`Scheduler job completed: ${job.id} (${job.data.type})`);
+	});
+
+	worker.on('failed', (job, err) => {
+		console.error(`Scheduler job failed: ${job?.id} (${job?.data.type})`, err);
+	});
+
+	return worker;
+}
+
+/**
+ * Register a task handler
+ */
+export function registerTask(type: string, handler: TaskHandler) {
+	taskHandlers[type] = handler;
+}
+
+/**
+ * Start the scheduler - sets up recurring jobs and starts the worker
+ */
+export const startScheduler = () => {
+	console.log('Starting scheduler...');
+
+	// Create scheduler worker
+	const worker = createSchedulerWorker();
+	console.log('Scheduler worker created');
+
+	// Schedule recurring invoice job to run daily at 2:00 AM
+	schedulerQueue.add(
+		'recurring-invoices',
+		{
+			type: 'recurring_invoices',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 2 * * *', // Every day at 2:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'recurring-invoices'
+		}
+	);
+
+	console.log('Scheduled recurring invoice generation: daily at 2:00 AM');
+
+	// Schedule task reminders job to run daily at 9:00 AM
+	schedulerQueue.add(
+		'task-reminders',
+		{
+			type: 'task_reminders',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 9 * * *', // Every day at 9:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'task-reminders'
+		}
+	);
+
+	console.log('Scheduled task reminders: daily at 9:00 AM');
+
+	return { queue: schedulerQueue, worker };
+};

@@ -6,14 +6,14 @@ WORKDIR /usr/src/app
 
 # ---- Dependencies install (caching) ----
 FROM base AS deps
-COPY website/package.json website/bun.lock ./
+COPY app/package.json app/bun.lock ./
 RUN bun install --frozen-lockfile
 
 # ---- Build stage ----
 FROM deps AS builder
 ARG GIT_REF
 ENV GIT_REF=$GIT_REF
-COPY website ./
+COPY app ./
 RUN bun run build
 
 # ---- Final production stage ----

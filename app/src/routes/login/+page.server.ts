@@ -16,23 +16,23 @@ export const load: PageServerLoad = async (event) => {
 export const actions: Actions = {
 	login: async (event) => {
 		const formData = await event.request.formData();
-		const username = formData.get('username');
+		const email = formData.get('email');
 		const password = formData.get('password');
 
-		if (!validateUsername(username)) {
+		if (!validateEmail(email)) {
 			return fail(400, {
-				message: 'Invalid username (min 3, max 31 characters, alphanumeric only)'
+				message: 'Invalid email address'
 			});
 		}
 		if (!validatePassword(password)) {
 			return fail(400, { message: 'Invalid password (min 6, max 255 characters)' });
 		}
 
-		const results = await db.select().from(table.user).where(eq(table.user.username, username));
+		const results = await db.select().from(table.user).where(eq(table.user.email, email));
 
 		const existingUser = results.at(0);
 		if (!existingUser) {
-			return fail(400, { message: 'Incorrect username or password' });
+			return fail(400, { message: 'Incorrect email or password' });
 		}
 
 		const validPassword = await verify(existingUser.passwordHash, password, {
@@ -42,7 +42,7 @@ export const actions: Actions = {
 			parallelism: 1
 		});
 		if (!validPassword) {
-			return fail(400, { message: 'Incorrect username or password' });
+			return fail(400, { message: 'Incorrect email or password' });
 		}
 
 		const sessionToken = auth.generateSessionToken();
@@ -53,13 +53,8 @@ export const actions: Actions = {
 	}
 };
 
-function validateUsername(username: unknown): username is string {
-	return (
-		typeof username === 'string' &&
-		username.length >= 3 &&
-		username.length <= 31 &&
-		/^[a-z0-9_-]+$/.test(username)
-	);
+function validateEmail(email: unknown): email is string {
+	return typeof email === 'string' && email.includes('@') && email.length > 0;
 }
 
 function validatePassword(password: unknown): password is string {

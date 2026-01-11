@@ -7,14 +7,10 @@ const config = {
 	// for more information about preprocessors
 	preprocess: [vitePreprocess()],
 	kit: {
-		adapter: adapter({ precompress: true }),
+		adapter: adapter({ precompress: true, isr: false }),
 		experimental: { remoteFunctions: true },
 		csrf: {
-			trustedOrigins: [
-				'https://beta.navitech.systems',
-				'https://navitech.systems',
-				'https://localhost:3000'
-			]
+			trustedOrigins: ['https://crm.navitech.cloud', 'https://localhost:3000']
 		}
 	},
 	compilerOptions: {

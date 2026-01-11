@@ -8,17 +8,18 @@
         "NODE_ENV": "production",
         "APP_NAME": "crm",
         "APP_ENV": "production",
-        "SQLITE_URI": "libsql://eebc2e3f-74de-43fe-b6f1-95061fda419e-navitech.navitech.cloud",
-        "SQLITE_AUTH_TOKEN": "eyJhbGciOiJFZERTQSJ9.eyJpYXQiOjE3NjYzMjExMTcsImlzcyI6Im5hdml0ZWNoLWhvc3RlZCJ9.bs9Wqn-ayW6Nju_nR-mQ3C4FSmZGx1XHnl39ctGKmYu4xQcj5XyibLlzdyb1PjUFLqhlWmBhsEWv6v1xlobzCA",
+        "SQLITE_URI": "libsql://29a2a7b0-e78b-4fa3-b44e-34d4e9949eee-crm.navitech.cloud",
+        "SQLITE_AUTH_TOKEN": "eyJhbGciOiJFZERTQSJ9.e30.rECUltPb9WGHmvottmREpu7p-Zsswig2aL1GGizUl-ey7Yj98lRafmtYDUNRTNJcfopK7ytLG6VO84iwFlIwCA",
         "MINIO_ENDPOINT": "s3.navitech.cloud",
         "MINIO_ACCESS_KEY": "PObN3EWsdqeFQKonraRQ",
         "MINIO_SECRET_KEY": "7C7DOXL54vH5bXvSPHbcZ9MzRNlGevcP5mqKiJVU",
         "MINIO_REGION": "eu-romania-1",
-        "MINIO_BUCKET_NAME": "navitech",
+        "MINIO_BUCKET_NAME": "crm",
         "MINIO_USE_SSL": "true",
         "MINIO_PORT": "443",
         "MINIO_PUBLIC_URL": "https://s3.navitech.cloud",
-        "REDIS_URL": "redis://:Awesome-Pass-11@database-6ce3a5ca-da0f-4918-a686-b62b036ec24b.navitech.svc.cluster.local:6379"
+        "REDIS_URL": "redis://:Awesome-pass-11@database-5d419200-418d-4659-8e91-e0825fc52569.crm.svc.cluster.local:6379",
+        "ENCRYPTION_SECRET": "Awesome-pass-11-1234567890@#$%^&*()"
       }
     }
   ],
@@ -27,7 +28,7 @@
       "name": "crm",
       "path": "./app",
       "kind": "web",
-      "domain": "crm.navitech.systems",
+      "domain": "crm.navitech.cloud",
       "location": "/",
       "port": 3000,
       "env": "crm-config",

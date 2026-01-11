@@ -36,8 +36,7 @@
 		}
 
 		try {
-			await deleteDocument(documentId);
-			documentsQuery.refetch();
+			await deleteDocument(documentId).updates(documentsQuery);
 		} catch (e) {
 			alert('Failed to delete document');
 		}

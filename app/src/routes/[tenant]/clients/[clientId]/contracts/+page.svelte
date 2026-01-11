@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { getDocuments, getDownloadUrl } from '$lib/remotes/documents.remote';
+	import { getDocuments, getDownloadUrl, generateDocumentPDF } from '$lib/remotes/documents.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { FileText, Download } from '@lucide/svelte';
+	import { FileText, Download, Plus, FileDown } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
@@ -23,7 +23,18 @@
 				window.open(url, '_blank');
 			}
 		} catch (e) {
-			// no-op UI error
+			alert('Failed to download document');
+		}
+	}
+
+	async function handleGeneratePDF(id: string) {
+		try {
+			const result = await generateDocumentPDF(id);
+			if (result.url) {
+				window.open(result.url, '_blank');
+			}
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to generate PDF');
 		}
 	}
 </script>
@@ -31,8 +42,9 @@
 <div class="space-y-6">
 	<div class="flex items-center justify-between">
 		<h2 class="text-2xl font-semibold">Contracts</h2>
-		<Button variant="outline" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
-			Browse Templates
+		<Button onclick={() => goto(`/${tenantSlug}/documents/new?type=contract&clientId=${clientId}`)}>
+			<Plus class="mr-2 h-4 w-4" />
+			Create Contract
 		</Button>
 	</div>
 
@@ -65,6 +77,12 @@
 								</div>
 							</div>
 							<div class="flex items-center gap-2">
+								{#if contract.documentTemplateId && !contract.pdfGenerated}
+									<Button variant="outline" onclick={() => handleGeneratePDF(contract.id)}>
+										<FileDown class="h-4 w-4 mr-2" />
+										Generate PDF
+									</Button>
+								{/if}
 								<Button variant="outline" onclick={() => handleDownload(contract.id)}>
 									<Download class="h-4 w-4 mr-2" />
 									Download

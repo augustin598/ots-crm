@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import {
 		Table,
 		TableBody,
@@ -56,7 +57,7 @@
 						<TableRow>
 							<TableCell class="font-medium">{invoice.invoiceNumber}</TableCell>
 							<TableCell>{invoice.status}</TableCell>
-							<TableCell>€{(invoice.totalAmount / 100).toFixed(2)}</TableCell>
+							<TableCell>{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}</TableCell>
 							<TableCell>{invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '-'}</TableCell>
 							<TableCell>
 								<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>

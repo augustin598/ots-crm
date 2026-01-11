@@ -12,7 +12,7 @@ function getMinioClient(): MinioClient {
 		const secretKey = env.MINIO_SECRET_KEY || 'minioadmin';
 
 		minioClient = new MinioClient({
-			endpoint,
+			endPoint: endpoint,
 			port,
 			useSSL,
 			accessKey,

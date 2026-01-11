@@ -30,7 +30,14 @@
 
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
-	const userMap = $derived(new Map(users.map((u) => [u.id, u.username])));
+	const userMap = $derived(
+		new Map(
+			users.map((u) => [
+				u.id,
+				`${u.firstName} ${u.lastName}`.trim() || u.email
+			])
+		)
+	);
 
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
@@ -64,11 +71,8 @@
 			await createTaskComment({
 				taskId: task.id,
 				content: newComment.trim()
-			});
+			}).updates(getTaskComments(task.id));
 			newComment = '';
-			if (commentsQuery && 'refetch' in commentsQuery) {
-				(commentsQuery as any).refetch();
-			}
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to add comment');
 		} finally {

@@ -3,11 +3,13 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { getDocuments } from '$lib/remotes/documents.remote';
+	import { getClientCredit } from '$lib/remotes/banking.remote';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import {
 		FolderKanban,
 		FileText,
@@ -16,7 +18,8 @@
 		Mail,
 		Phone,
 		MapPin,
-		Building2
+		Building2,
+		CreditCard
 	} from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -40,9 +43,29 @@
 	const activeProjects = $derived(projects.filter((p) => p.status === 'active').length);
 	const totalContracts = $derived(contracts.length);
 	const paidInvoices = $derived(invoices.filter((i) => i.status === 'paid'));
-	const totalPaid = $derived(paidInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0) / 100);
 	const pendingInvoices = $derived(invoices.filter((i) => i.status === 'sent' || i.status === 'overdue'));
-	const totalPending = $derived(pendingInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0) / 100);
+
+	// Calculate totals grouped by currency
+	const paidByCurrency = $derived.by(() => {
+		const map = new Map<Currency, number>();
+		for (const invoice of paidInvoices) {
+			const currency = (invoice.currency || 'RON') as Currency;
+			const current = map.get(currency) || 0;
+			map.set(currency, current + (invoice.totalAmount || 0));
+		}
+		return map;
+	});
+
+	const pendingByCurrency = $derived.by(() => {
+		const map = new Map<Currency, number>();
+		for (const invoice of pendingInvoices) {
+			const currency = (invoice.currency || 'RON') as Currency;
+			const current = map.get(currency) || 0;
+			map.set(currency, current + (invoice.totalAmount || 0));
+		}
+		return map;
+	});
+
 	const recentInvoices = $derived(
 		[...invoices]
 			.sort((a, b) => {
@@ -52,6 +75,9 @@
 			})
 			.slice(0, 3)
 	);
+
+	const creditQuery = getClientCredit(clientId);
+	const credit = $derived(creditQuery.current);
 </script>
 
 <svelte:head>
@@ -77,7 +103,21 @@
 					</div>
 					<div>
 						<p class="text-sm text-muted-foreground">Total Revenue</p>
-						<p class="text-2xl font-bold">€{totalPaid.toLocaleString()}</p>
+						<div class="space-y-1">
+							{#if paidByCurrency.size === 0}
+								<p class="text-2xl font-bold">—</p>
+							{:else if paidByCurrency.size === 1}
+								{#each Array.from(paidByCurrency.entries()) as [currency, amount]}
+									<p class="text-2xl font-bold">{formatAmount(amount, currency)}</p>
+								{/each}
+							{:else}
+								<div class="space-y-1">
+									{#each Array.from(paidByCurrency.entries()) as [currency, amount]}
+										<p class="text-xl font-bold">{formatAmount(amount, currency)}</p>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					</div>
 				</div>
 			</Card>
@@ -108,12 +148,21 @@
 
 			<Card class="p-4">
 				<div class="flex items-center gap-3">
-					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-500/10">
-						<TrendingUp class="h-6 w-6 text-orange-600" />
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-red-500/10">
+						<CreditCard class="h-6 w-6 text-red-600" />
 					</div>
 					<div>
-						<p class="text-sm text-muted-foreground">Pending</p>
-						<p class="text-2xl font-bold">€{totalPending.toLocaleString()}</p>
+						<p class="text-sm text-muted-foreground">Remaining Credit</p>
+						{#if credit}
+							<p class="text-2xl font-bold {credit.remainingCredit > 0 ? 'text-red-600' : 'text-green-600'}">
+								{formatAmount(credit.remainingCredit, 'RON')}
+							</p>
+							<p class="text-xs text-muted-foreground mt-1">
+								{credit.unpaidInvoices} unpaid invoice{credit.unpaidInvoices !== 1 ? 's' : ''}
+							</p>
+						{:else}
+							<p class="text-2xl font-bold">—</p>
+						{/if}
 					</div>
 				</div>
 			</Card>
@@ -205,7 +254,9 @@
 										</p>
 									</div>
 									<div class="text-right">
-										<p class="font-semibold">€{((invoice.totalAmount || 0) / 100).toLocaleString()}</p>
+										<p class="font-semibold">
+											{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}
+										</p>
 										<Badge
 											variant={
 												invoice.status === 'paid'

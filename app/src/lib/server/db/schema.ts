@@ -21,8 +21,10 @@ const jsonb = customType({
 
 export const user = sqliteTable('user', {
 	id: text('id').primaryKey(),
-	age: integer('age'),
-	username: text('username').notNull().unique(),
+	email: text('email').notNull().unique(),
+	firstName: text('first_name').notNull(),
+	lastName: text('last_name').notNull(),
+	username: text('username'), // Deprecated, kept for migration purposes
 	passwordHash: text('password_hash').notNull()
 });
 
@@ -73,6 +75,25 @@ export const tenantUser = sqliteTable('tenant_user', {
 		.default(sql`current_date`)
 });
 
+export const invitation = sqliteTable('invitation', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
+	token: text('token').notNull().unique(),
+	invitedByUserId: text('invited_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	status: text('status').notNull().default('pending'), // 'pending', 'accepted', 'expired', 'cancelled'
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const client = sqliteTable('client', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -109,15 +130,14 @@ export const project = sqliteTable('project', {
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
-	clientId: text('client_id')
-		.notNull()
-		.references(() => client.id),
+	clientId: text('client_id').references(() => client.id),
 	name: text('name').notNull(),
 	description: text('description'),
 	status: text('status').notNull().default('planning'), // 'planning', 'active', 'on-hold', 'completed', 'cancelled'
 	startDate: timestamp('start_date', { withTimezone: true, mode: 'date' }),
 	endDate: timestamp('end_date', { withTimezone: true, mode: 'date' }),
 	budget: integer('budget'), // in cents
+	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -159,8 +179,11 @@ export const task = sqliteTable('task', {
 	description: text('description'),
 	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled'
 	priority: text('priority').default('medium'), // 'low', 'medium', 'high', 'urgent'
+	position: integer('position'), // Position within status column for custom ordering
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
 	assignedToUserId: text('assigned_to_user_id').references(() => user.id),
+	createdByUserId: text('created_by_user_id').references(() => user.id),
+	lastReminderSentAt: timestamp('last_reminder_sent_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -190,6 +213,37 @@ export const contractTemplate = sqliteTable('contract_template', {
 		.default(sql`current_date`)
 });
 
+export const documentTemplate = sqliteTable('document_template', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	name: text('name').notNull(),
+	description: text('description'),
+	type: text('type').notNull(), // 'offer', 'contract', 'generic'
+	content: text('content').notNull(), // HTML content
+	variables:
+		jsonb('variables').$type<Array<{ key: string; label: string; defaultValue?: string }>>(),
+	styling: jsonb('styling').$type<{
+		primaryColor?: string;
+		secondaryColor?: string;
+		fontFamily?: string;
+		fontSize?: string;
+		header?: { content: string; height?: number };
+		footer?: { content: string; height?: number };
+	}>(),
+	isActive: boolean('is_active').notNull().default(true),
+	createdByUserId: text('created_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const document = sqliteTable('document', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -199,12 +253,14 @@ export const document = sqliteTable('document', {
 		.notNull()
 		.references(() => client.id),
 	projectId: text('project_id').references(() => project.id),
-	contractTemplateId: text('contract_template_id').references(() => contractTemplate.id),
+	documentTemplateId: text('document_template_id').references(() => documentTemplate.id),
 	name: text('name').notNull(),
-	type: text('type').notNull().default('other'), // 'contract', 'proposal', 'invoice', 'other'
+	type: text('type').notNull().default('other'), // 'contract', 'proposal', 'invoice', 'offer', 'other'
 	filePath: text('file_path').notNull(),
 	fileSize: integer('file_size'),
 	mimeType: text('mime_type'),
+	renderedContent: text('rendered_content'), // Store rendered HTML for PDF generation
+	pdfGenerated: boolean('pdf_generated').notNull().default(false),
 	uploadedByUserId: text('uploaded_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -226,6 +282,7 @@ export const service = sqliteTable('service', {
 	description: text('description'),
 	category: text('category'), // 'Development', 'Design', 'Marketing', 'Consulting', etc.
 	price: integer('price'), // in cents
+	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	recurringType: text('recurring_type').notNull().default('none'), // 'none', 'daily', 'weekly', 'monthly', 'yearly'
 	recurringInterval: integer('recurring_interval').notNull().default(1),
 	isActive: boolean('is_active').notNull().default(true),
@@ -254,6 +311,22 @@ export const taskComment = sqliteTable('task_comment', {
 		.default(sql`current_date`)
 });
 
+export const taskWatcher = sqliteTable('task_watcher', {
+	id: text('id').primaryKey(),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id, { onDelete: 'cascade' }),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const invoice = sqliteTable('invoice', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -273,7 +346,10 @@ export const invoice = sqliteTable('invoice', {
 	issueDate: timestamp('issue_date', { withTimezone: true, mode: 'date' }),
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
 	paidDate: timestamp('paid_date', { withTimezone: true, mode: 'date' }),
+	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	notes: text('notes'),
+	smartbillSeries: text('smartbill_series'),
+	smartbillNumber: text('smartbill_number'),
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -299,6 +375,267 @@ export const invoiceLineItem = sqliteTable('invoice_line_item', {
 		.default(sql`current_date`)
 });
 
+export const recurringInvoice = sqliteTable('recurring_invoice', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	projectId: text('project_id').references(() => project.id),
+	serviceId: text('service_id').references(() => service.id),
+	name: text('name').notNull(),
+	amount: integer('amount').notNull(), // in cents
+	taxRate: integer('tax_rate').notNull().default(1900), // in cents, e.g., 1900 = 19%
+	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
+	recurringType: text('recurring_type').notNull(), // 'daily', 'weekly', 'monthly', 'yearly'
+	recurringInterval: integer('recurring_interval').notNull().default(1), // e.g., 2 for every 2 months
+	startDate: timestamp('start_date', { withTimezone: true, mode: 'date' }).notNull(),
+	endDate: timestamp('end_date', { withTimezone: true, mode: 'date' }),
+	nextRunDate: timestamp('next_run_date', { withTimezone: true, mode: 'date' }).notNull(),
+	lastRunDate: timestamp('last_run_date', { withTimezone: true, mode: 'date' }),
+	issueDateOffset: integer('issue_date_offset').notNull().default(0), // days offset for issue date
+	dueDateOffset: integer('due_date_offset').notNull().default(30), // days offset for due date
+	notes: text('notes'),
+	isActive: boolean('is_active').notNull().default(true),
+	createdByUserId: text('created_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const plugin = sqliteTable('plugin', {
+	id: text('id').primaryKey(),
+	name: text('name').notNull().unique(),
+	displayName: text('display_name').notNull(),
+	description: text('description'),
+	version: text('version').notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	config: jsonb('config').$type<Record<string, unknown>>(),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const tenantPlugin = sqliteTable('tenant_plugin', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	pluginId: text('plugin_id')
+		.notNull()
+		.references(() => plugin.id),
+	isActive: boolean('is_active').notNull().default(true),
+	config: jsonb('config').$type<Record<string, unknown>>(),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const invoiceSettings = sqliteTable('invoice_settings', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	smartbillSeries: text('smartbill_series'),
+	smartbillStartNumber: text('smartbill_start_number'),
+	smartbillLastSyncedNumber: text('smartbill_last_synced_number'),
+	smartbillAutoSync: boolean('smartbill_auto_sync').notNull().default(false),
+	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
+	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const taskSettings = sqliteTable('task_settings', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	taskRemindersEnabled: boolean('task_reminders_enabled').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const smartbillIntegration = sqliteTable('smartbill_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	email: text('email').notNull(),
+	token: text('token').notNull(), // encrypted
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const smartbillInvoiceSync = sqliteTable('smartbill_invoice_sync', {
+	id: text('id').primaryKey(),
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	smartbillSeries: text('smartbill_series').notNull(),
+	smartbillNumber: text('smartbill_number').notNull(),
+	smartbillCif: text('smartbill_cif').notNull(),
+	syncDirection: text('sync_direction').notNull(), // 'push', 'pull', 'both'
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+	syncStatus: text('sync_status').notNull().default('pending'), // 'pending', 'synced', 'error'
+	errorMessage: text('error_message'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const revolutIntegration = sqliteTable('revolut_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	clientId: text('client_id'), // From Revolut Business app after certificate upload
+	privateKey: text('private_key').notNull(), // Encrypted private key (PEM format)
+	publicCertificate: text('public_certificate').notNull(), // Public certificate (PEM format) - stored for display
+	redirectUri: text('redirect_uri'), // Must match what's configured in Revolut
+	isActive: boolean('is_active').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const bankAccount = sqliteTable('bank_account', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	bankName: text('bank_name').notNull(), // 'revolut', 'transilvania', 'bcr'
+	accountId: text('account_id').notNull(), // Bank's account identifier
+	iban: text('iban').notNull(),
+	accountName: text('account_name'),
+	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
+	accessToken: text('access_token').notNull(), // encrypted
+	refreshToken: text('refresh_token').notNull(), // encrypted
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }),
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const bankTransaction = sqliteTable('bank_transaction', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	bankAccountId: text('bank_account_id')
+		.notNull()
+		.references(() => bankAccount.id, { onDelete: 'cascade' }),
+	transactionId: text('transaction_id').notNull(), // Bank's transaction ID
+	amount: integer('amount').notNull(), // in cents, negative for outgoing
+	currency: text('currency').notNull().default('RON'),
+	date: timestamp('date', { withTimezone: true, mode: 'date' }).notNull(),
+	description: text('description'),
+	reference: text('reference'), // Transaction reference/payment reference
+	counterpartIban: text('counterpart_iban'),
+	counterpartName: text('counterpart_name'),
+	category: text('category'),
+	isExpense: boolean('is_expense').notNull().default(false), // true for outgoing transactions
+	expenseId: text('expense_id'), // References expense.id (defined after)
+	matchedInvoiceId: text('matched_invoice_id').references(() => invoice.id),
+	matchingMethod: text('matching_method'), // 'iban-amount', 'invoice-number', 'manual'
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const expense = sqliteTable('expense', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	bankTransactionId: text('bank_transaction_id'), // References bankTransaction.id (defined before)
+	clientId: text('client_id').references(() => client.id),
+	projectId: text('project_id').references(() => project.id),
+	category: text('category'),
+	description: text('description').notNull(),
+	amount: integer('amount').notNull(), // in cents
+	currency: text('currency').notNull().default('RON'),
+	date: timestamp('date', { withTimezone: true, mode: 'date' }).notNull(),
+	vatRate: integer('vat_rate'), // in cents, e.g., 1900 = 19%
+	vatAmount: integer('vat_amount'), // in cents
+	receiptPath: text('receipt_path'), // File path for receipt upload
+	createdByUserId: text('created_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const transactionInvoiceMatch = sqliteTable('transaction_invoice_match', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	transactionId: text('transaction_id')
+		.notNull()
+		.references(() => bankTransaction.id, { onDelete: 'cascade' }),
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	matchingMethod: text('matching_method').notNull(), // 'iban-amount', 'invoice-number', 'manual'
+	matchedAt: timestamp('matched_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	matchedByUserId: text('matched_by_user_id').references(() => user.id)
+});
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -306,8 +643,14 @@ export const userRelations = relations(user, ({ many }) => ({
 	tasks: many(task),
 	documents: many(document),
 	invoices: many(invoice),
-	contractTemplates: many(contractTemplate),
-	taskComments: many(taskComment)
+	taskComments: many(taskComment),
+	sentInvitations: many(invitation),
+	expenses: many(expense),
+	transactionMatches: many(transactionInvoiceMatch),
+	taskWatchers: many(taskWatcher),
+	createdTasks: many(task, {
+		relationName: 'createdTasks'
+	})
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -317,16 +660,26 @@ export const sessionRelations = relations(session, ({ one }) => ({
 	})
 }));
 
-export const tenantRelations = relations(tenant, ({ many }) => ({
+export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	tenantUsers: many(tenantUser),
 	clients: many(client),
 	projects: many(project),
 	tasks: many(task),
 	milestones: many(milestone),
-	contractTemplates: many(contractTemplate),
 	documents: many(document),
 	services: many(service),
-	invoices: many(invoice)
+	invoices: many(invoice),
+	recurringInvoices: many(recurringInvoice),
+	invitations: many(invitation),
+	tenantPlugins: many(tenantPlugin),
+	invoiceSettings: one(invoiceSettings),
+	taskSettings: one(taskSettings),
+	smartbillIntegration: one(smartbillIntegration),
+	revolutIntegration: one(revolutIntegration),
+	bankAccounts: many(bankAccount),
+	bankTransactions: many(bankTransaction),
+	expenses: many(expense),
+	transactionInvoiceMatches: many(transactionInvoiceMatch)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -349,7 +702,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	tasks: many(task),
 	documents: many(document),
 	services: many(service),
-	invoices: many(invoice)
+	invoices: many(invoice),
+	expenses: many(expense)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -365,7 +719,8 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 	milestones: many(milestone),
 	documents: many(document),
 	services: many(service),
-	invoices: many(invoice)
+	invoices: many(invoice),
+	expenses: many(expense)
 }));
 
 export const milestoneRelations = relations(milestone, ({ one, many }) => ({
@@ -401,7 +756,13 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 		fields: [task.assignedToUserId],
 		references: [user.id]
 	}),
-	comments: many(taskComment)
+	createdBy: one(user, {
+		fields: [task.createdByUserId],
+		references: [user.id],
+		relationName: 'createdTasks'
+	}),
+	comments: many(taskComment),
+	watchers: many(taskWatcher)
 }));
 
 export const taskCommentRelations = relations(taskComment, ({ one }) => ({
@@ -415,13 +776,28 @@ export const taskCommentRelations = relations(taskComment, ({ one }) => ({
 	})
 }));
 
-export const contractTemplateRelations = relations(contractTemplate, ({ one, many }) => ({
+export const taskWatcherRelations = relations(taskWatcher, ({ one }) => ({
+	task: one(task, {
+		fields: [taskWatcher.taskId],
+		references: [task.id]
+	}),
+	user: one(user, {
+		fields: [taskWatcher.userId],
+		references: [user.id]
+	}),
 	tenant: one(tenant, {
-		fields: [contractTemplate.tenantId],
+		fields: [taskWatcher.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const documentTemplateRelations = relations(documentTemplate, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [documentTemplate.tenantId],
 		references: [tenant.id]
 	}),
 	createdBy: one(user, {
-		fields: [contractTemplate.createdByUserId],
+		fields: [documentTemplate.createdByUserId],
 		references: [user.id]
 	}),
 	documents: many(document)
@@ -440,9 +816,9 @@ export const documentRelations = relations(document, ({ one }) => ({
 		fields: [document.projectId],
 		references: [project.id]
 	}),
-	contractTemplate: one(contractTemplate, {
-		fields: [document.contractTemplateId],
-		references: [contractTemplate.id]
+	documentTemplate: one(documentTemplate, {
+		fields: [document.documentTemplateId],
+		references: [documentTemplate.id]
 	}),
 	uploadedBy: one(user, {
 		fields: [document.uploadedByUserId],
@@ -487,13 +863,174 @@ export const invoiceRelations = relations(invoice, ({ one, many }) => ({
 		fields: [invoice.createdByUserId],
 		references: [user.id]
 	}),
-	lineItems: many(invoiceLineItem)
+	lineItems: many(invoiceLineItem),
+	smartbillSync: many(smartbillInvoiceSync),
+	matchedTransactions: many(bankTransaction),
+	transactionMatches: many(transactionInvoiceMatch)
 }));
 
 export const invoiceLineItemRelations = relations(invoiceLineItem, ({ one }) => ({
 	invoice: one(invoice, {
 		fields: [invoiceLineItem.invoiceId],
 		references: [invoice.id]
+	})
+}));
+
+export const recurringInvoiceRelations = relations(recurringInvoice, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [recurringInvoice.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [recurringInvoice.clientId],
+		references: [client.id]
+	}),
+	project: one(project, {
+		fields: [recurringInvoice.projectId],
+		references: [project.id]
+	}),
+	service: one(service, {
+		fields: [recurringInvoice.serviceId],
+		references: [service.id]
+	}),
+	createdBy: one(user, {
+		fields: [recurringInvoice.createdByUserId],
+		references: [user.id]
+	})
+}));
+
+export const invitationRelations = relations(invitation, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [invitation.tenantId],
+		references: [tenant.id]
+	}),
+	invitedBy: one(user, {
+		fields: [invitation.invitedByUserId],
+		references: [user.id]
+	})
+}));
+
+export const pluginRelations = relations(plugin, ({ many }) => ({
+	tenantPlugins: many(tenantPlugin)
+}));
+
+export const tenantPluginRelations = relations(tenantPlugin, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [tenantPlugin.tenantId],
+		references: [tenant.id]
+	}),
+	plugin: one(plugin, {
+		fields: [tenantPlugin.pluginId],
+		references: [plugin.id]
+	})
+}));
+
+export const invoiceSettingsRelations = relations(invoiceSettings, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [invoiceSettings.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const taskSettingsRelations = relations(taskSettings, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [taskSettings.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const smartbillIntegrationRelations = relations(smartbillIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [smartbillIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const revolutIntegrationRelations = relations(revolutIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [revolutIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const smartbillInvoiceSyncRelations = relations(smartbillInvoiceSync, ({ one }) => ({
+	invoice: one(invoice, {
+		fields: [smartbillInvoiceSync.invoiceId],
+		references: [invoice.id]
+	}),
+	tenant: one(tenant, {
+		fields: [smartbillInvoiceSync.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const bankAccountRelations = relations(bankAccount, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [bankAccount.tenantId],
+		references: [tenant.id]
+	}),
+	transactions: many(bankTransaction)
+}));
+
+export const bankTransactionRelations = relations(bankTransaction, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [bankTransaction.tenantId],
+		references: [tenant.id]
+	}),
+	bankAccount: one(bankAccount, {
+		fields: [bankTransaction.bankAccountId],
+		references: [bankAccount.id]
+	}),
+	expense: one(expense, {
+		fields: [bankTransaction.expenseId],
+		references: [expense.id]
+	}),
+	matchedInvoice: one(invoice, {
+		fields: [bankTransaction.matchedInvoiceId],
+		references: [invoice.id]
+	}),
+	invoiceMatches: many(transactionInvoiceMatch)
+}));
+
+export const expenseRelations = relations(expense, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [expense.tenantId],
+		references: [tenant.id]
+	}),
+	bankTransaction: one(bankTransaction, {
+		fields: [expense.bankTransactionId],
+		references: [bankTransaction.id]
+	}),
+	client: one(client, {
+		fields: [expense.clientId],
+		references: [client.id]
+	}),
+	project: one(project, {
+		fields: [expense.projectId],
+		references: [project.id]
+	}),
+	createdBy: one(user, {
+		fields: [expense.createdByUserId],
+		references: [user.id]
+	})
+}));
+
+export const transactionInvoiceMatchRelations = relations(transactionInvoiceMatch, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [transactionInvoiceMatch.tenantId],
+		references: [tenant.id]
+	}),
+	transaction: one(bankTransaction, {
+		fields: [transactionInvoiceMatch.transactionId],
+		references: [bankTransaction.id]
+	}),
+	invoice: one(invoice, {
+		fields: [transactionInvoiceMatch.invoiceId],
+		references: [invoice.id]
+	}),
+	matchedBy: one(user, {
+		fields: [transactionInvoiceMatch.matchedByUserId],
+		references: [user.id]
 	})
 }));
 
@@ -514,8 +1051,10 @@ export type Task = typeof task.$inferSelect;
 export type NewTask = typeof task.$inferInsert;
 export type TaskComment = typeof taskComment.$inferSelect;
 export type NewTaskComment = typeof taskComment.$inferInsert;
-export type ContractTemplate = typeof contractTemplate.$inferSelect;
-export type NewContractTemplate = typeof contractTemplate.$inferInsert;
+export type TaskWatcher = typeof taskWatcher.$inferSelect;
+export type NewTaskWatcher = typeof taskWatcher.$inferInsert;
+export type DocumentTemplate = typeof documentTemplate.$inferSelect;
+export type NewDocumentTemplate = typeof documentTemplate.$inferInsert;
 export type Document = typeof document.$inferSelect;
 export type NewDocument = typeof document.$inferInsert;
 export type Service = typeof service.$inferSelect;
@@ -524,3 +1063,29 @@ export type Invoice = typeof invoice.$inferSelect;
 export type NewInvoice = typeof invoice.$inferInsert;
 export type InvoiceLineItem = typeof invoiceLineItem.$inferSelect;
 export type NewInvoiceLineItem = typeof invoiceLineItem.$inferInsert;
+export type RecurringInvoice = typeof recurringInvoice.$inferSelect;
+export type NewRecurringInvoice = typeof recurringInvoice.$inferInsert;
+export type Invitation = typeof invitation.$inferSelect;
+export type NewInvitation = typeof invitation.$inferInsert;
+export type Plugin = typeof plugin.$inferSelect;
+export type NewPlugin = typeof plugin.$inferInsert;
+export type TenantPlugin = typeof tenantPlugin.$inferSelect;
+export type NewTenantPlugin = typeof tenantPlugin.$inferInsert;
+export type InvoiceSettings = typeof invoiceSettings.$inferSelect;
+export type NewInvoiceSettings = typeof invoiceSettings.$inferInsert;
+export type TaskSettings = typeof taskSettings.$inferSelect;
+export type NewTaskSettings = typeof taskSettings.$inferInsert;
+export type SmartbillIntegration = typeof smartbillIntegration.$inferSelect;
+export type NewSmartbillIntegration = typeof smartbillIntegration.$inferInsert;
+export type SmartbillInvoiceSync = typeof smartbillInvoiceSync.$inferSelect;
+export type NewSmartbillInvoiceSync = typeof smartbillInvoiceSync.$inferInsert;
+export type RevolutIntegration = typeof revolutIntegration.$inferSelect;
+export type NewRevolutIntegration = typeof revolutIntegration.$inferInsert;
+export type BankAccount = typeof bankAccount.$inferSelect;
+export type NewBankAccount = typeof bankAccount.$inferInsert;
+export type BankTransaction = typeof bankTransaction.$inferSelect;
+export type NewBankTransaction = typeof bankTransaction.$inferInsert;
+export type Expense = typeof expense.$inferSelect;
+export type NewExpense = typeof expense.$inferInsert;
+export type TransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferSelect;
+export type NewTransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferInsert;

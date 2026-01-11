@@ -25,17 +25,21 @@ function generateToken(): string {
  */
 export const register = command(
 	v.object({
-		username: v.pipe(v.string(), v.nonEmpty()),
+		email: v.pipe(v.string(), v.email('Invalid email address')),
+		firstName: v.pipe(v.string(), v.minLength(1, 'First name is required')),
+		lastName: v.pipe(v.string(), v.minLength(1, 'Last name is required')),
 		password: v.pipe(v.string(), v.minLength(6, 'Password must be at least 6 characters'))
 	}),
 	async ({
-		username,
+		email,
+		firstName,
+		lastName,
 		password
 	}): Promise<{ success: boolean; user?: User | null; userId?: string; error?: string }> => {
 		try {
-			// Check if user exists
-			const existingUser = await db.select().from(user).where(eq(user.username, username)).limit(1);
-			if (existingUser.length > 0) {
+			// Check if email is already in use
+			const [existingEmail] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+			if (existingEmail) {
 				return { success: false, error: 'Email already registered' };
 			}
 
@@ -52,7 +56,9 @@ export const register = command(
 
 			await db.insert(user).values({
 				id: userId,
-				username,
+				email,
+				firstName,
+				lastName,
 				passwordHash
 			});
 
@@ -67,11 +73,11 @@ export const register = command(
 );
 
 /**
- * Login user
+ * Login user (email-based)
  */
 export const login = command(
 	v.object({
-		email: v.pipe(v.string(), v.email(), v.nonEmpty()),
+		email: v.pipe(v.string(), v.email('Invalid email address')),
 		password: v.pipe(v.string(), v.nonEmpty())
 	}),
 	async ({
@@ -79,12 +85,13 @@ export const login = command(
 		password
 	}): Promise<{ success: boolean; user?: User | null; error?: string }> => {
 		try {
-			const users = await db.select().from(user).where(eq(user.email, email)).limit(1);
-			if (users.length === 0) {
+			// Find user by email
+			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+
+			if (!userRecord) {
 				return { success: false, error: 'Invalid email or password' };
 			}
 
-			const userRecord = users[0];
 			const validPassword = await verify(userRecord.passwordHash, password, {
 				memoryCost: 19456,
 				timeCost: 2,
@@ -98,7 +105,9 @@ export const login = command(
 
 			// Create session with Lucia
 			const session = await lucia.createSession(userRecord.id, {
-				username: userRecord.username
+				email: userRecord.email,
+				firstName: userRecord.firstName,
+				lastName: userRecord.lastName
 			});
 
 			// Set session cookie

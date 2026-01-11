@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getService, deleteService } from '$lib/remotes/services.remote';
+	import { getService, deleteService, getServices } from '$lib/remotes/services.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { goto } from '$app/navigation';
@@ -7,6 +7,7 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { DollarSign, Calendar, Building2, FileText } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -43,10 +44,6 @@
 		}
 	}
 
-	function formatPrice(price: number | null): string {
-		if (!price) return '-';
-		return `€${(price / 100).toFixed(2)}`;
-	}
 
 	function formatUnit(recurringType: string): string {
 		switch (recurringType) {
@@ -70,7 +67,7 @@
 		}
 
 		try {
-			await deleteService(serviceId);
+			await deleteService(serviceId).updates(serviceQuery, getService(serviceId), getServices({}));
 			goto(`/${tenantSlug}/services`);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete service');
@@ -127,7 +124,9 @@
 					<div>
 						<p class="text-sm text-muted-foreground mb-1">Price</p>
 						<p class="text-2xl font-bold text-primary">
-							{formatPrice(service.price)} {service.price ? `/ ${formatUnit(service.recurringType)}` : ''}
+							{service.price
+								? `${formatAmount(service.price, (service.currency || 'RON') as Currency)} ${formatUnit(service.recurringType)}`
+								: '—'}
 						</p>
 					</div>
 				</CardContent>
@@ -175,7 +174,9 @@
 										</div>
 									</div>
 									<div class="flex items-center gap-4">
-										<p class="font-semibold">€{((invoice.totalAmount || 0) / 100).toLocaleString()}</p>
+										<p class="font-semibold">
+											{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}
+										</p>
 										<Badge
 											variant={
 												invoice.status === 'paid'

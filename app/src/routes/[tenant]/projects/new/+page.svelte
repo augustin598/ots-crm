@@ -9,12 +9,15 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { FormSection } from '$lib/components/app/form-section';
 	import { Progress } from '$lib/components/ui/progress/index';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
+
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 
 	let name = $state('');
 	let description = $state('');
@@ -27,7 +30,7 @@
 	let error = $state<string | null>(null);
 
 	// Section completion states
-	let basicInfoCompleted = $derived(!!(name && clientId));
+	let basicInfoCompleted = $derived(!!name);
 	let detailsCompleted = $derived(!!(status || startDate || endDate || budget));
 
 	const completedSections = $derived((basicInfoCompleted ? 1 : 0) + (detailsCompleted ? 1 : 0));
@@ -35,11 +38,6 @@
 	const progress = $derived((completedSections / totalSections) * 100);
 
 	async function handleSubmit() {
-		if (!clientId) {
-			error = 'Please select a client';
-			return;
-		}
-
 		loading = true;
 		error = null;
 
@@ -47,7 +45,7 @@
 			const result = await createProject({
 				name,
 				description: description || undefined,
-				clientId,
+				clientId: clientId || undefined,
 				status: status || undefined,
 				startDate: startDate || undefined,
 				endDate: endDate || undefined,
@@ -90,27 +88,19 @@
 			>
 				<FormSection
 					title="Basic Information"
-					description="Client and project details"
+					description="Project details (client is optional for internal projects)"
 					bind:completed={basicInfoCompleted}
 					defaultOpen={true}
 				>
 					<div class="space-y-4">
 						<div class="space-y-2">
-							<Label for="clientId">Client *</Label>
-							<Select type="single" bind:value={clientId} required>
-								<SelectTrigger>
-									{#if clientId}
-										{clients.find((c) => c.id === clientId)?.name || 'Select a client'}
-									{:else}
-										Select a client
-									{/if}
-								</SelectTrigger>
-								<SelectContent>
-									{#each clients as client}
-										<SelectItem value={client.id}>{client.name}</SelectItem>
-									{/each}
-								</SelectContent>
-							</Select>
+							<Label for="clientId">Client</Label>
+							<Combobox
+								bind:value={clientId}
+								options={clientOptions}
+								placeholder="Select a client (optional)"
+								searchPlaceholder="Search clients..."
+							/>
 						</div>
 						<div class="space-y-2">
 							<Label for="name">Project Name *</Label>

@@ -4,6 +4,8 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { getHooksManager } from '$lib/server/plugins/hooks';
+import { sendInvoiceEmail } from '$lib/server/email';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -15,35 +17,32 @@ function generateInvoiceId() {
 	return encodeBase32LowerCase(bytes);
 }
 
-export const getInvoice = query(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		const [invoice] = await db
-			.select()
-			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!invoice) {
-			throw new Error('Invoice not found');
-		}
-
-		const lineItems = await db
-			.select()
-			.from(table.invoiceLineItem)
-			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
-
-		return {
-			...invoice,
-			lineItems
-		};
+export const getInvoice = query(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	const [invoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!invoice) {
+		throw new Error('Invoice not found');
+	}
+
+	const lineItems = await db
+		.select()
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+	return {
+		...invoice,
+		lineItems
+	};
+});
 
 export const getInvoices = query(
 	v.object({
@@ -84,7 +83,9 @@ export const createInvoiceFromService = command(
 		const [service] = await db
 			.select()
 			.from(table.service)
-			.where(and(eq(table.service.id, serviceId), eq(table.service.tenantId, event.locals.tenant.id)))
+			.where(
+				and(eq(table.service.id, serviceId), eq(table.service.tenantId, event.locals.tenant.id))
+			)
 			.limit(1);
 
 		if (!service) {
@@ -97,24 +98,45 @@ export const createInvoiceFromService = command(
 
 		const amount = service.price || 0;
 		const taxRate = 1900; // 19% VAT
-		const taxAmount = Math.round(amount * taxRate / 10000);
+		const taxAmount = Math.round((amount * taxRate) / 10000);
 		const totalAmount = amount + taxAmount;
 
-		await db.insert(table.invoice).values({
+		// Get default currency from invoice settings
+		const [invoiceSettings] = await db
+			.select()
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+			.limit(1);
+
+		const currency = invoiceSettings?.defaultCurrency || 'RON';
+
+		const newInvoice = {
 			id: invoiceId,
 			tenantId: event.locals.tenant.id,
 			clientId: service.clientId,
 			projectId: service.projectId,
 			serviceId: service.id,
 			invoiceNumber,
-			status: 'draft',
+			status: 'draft' as const,
 			amount,
 			taxRate,
 			taxAmount,
 			totalAmount,
+			currency,
 			issueDate: new Date(),
 			dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
 			createdByUserId: event.locals.user.id
+		};
+
+		await db.insert(table.invoice).values(newInvoice);
+
+		// Emit invoice.created hook
+		const hooks = getHooksManager();
+		await hooks.emit({
+			type: 'invoice.created',
+			invoice: newInvoice as any,
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id
 		});
 
 		return { success: true, invoiceId };
@@ -131,7 +153,8 @@ export const createInvoice = command(
 		status: v.optional(v.string()),
 		issueDate: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
-		notes: v.optional(v.string())
+		notes: v.optional(v.string()),
+		currency: v.optional(v.string()) // 'RON', 'EUR', 'USD', etc.
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -139,30 +162,53 @@ export const createInvoice = command(
 			throw new Error('Unauthorized');
 		}
 
+		// Get default currency from invoice settings
+		const [invoiceSettings] = await db
+			.select()
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+			.limit(1);
+
+		const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
+
 		const invoiceNumber = `INV-${Date.now()}`;
 		const invoiceId = generateInvoiceId();
 
 		const amount = Math.round(data.amount * 100); // Convert to cents
 		const taxRate = data.taxRate ? Math.round(data.taxRate * 100) : 1900; // Default 19%
-		const taxAmount = Math.round(amount * taxRate / 10000);
+		const taxAmount = Math.round((amount * taxRate) / 10000);
 		const totalAmount = amount + taxAmount;
 
-		await db.insert(table.invoice).values({
+		const newInvoice = {
 			id: invoiceId,
 			tenantId: event.locals.tenant.id,
 			clientId: data.clientId,
 			projectId: data.projectId || null,
 			serviceId: data.serviceId || null,
 			invoiceNumber,
-			status: data.status || 'draft',
+			status: (data.status || 'draft') as const,
 			amount,
 			taxRate,
 			taxAmount,
 			totalAmount,
+			currency,
 			issueDate: data.issueDate ? new Date(data.issueDate) : new Date(),
-			dueDate: data.dueDate ? new Date(data.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			dueDate: data.dueDate
+				? new Date(data.dueDate)
+				: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
 			notes: data.notes || null,
 			createdByUserId: event.locals.user.id
+		};
+
+		await db.insert(table.invoice).values(newInvoice);
+
+		// Emit invoice.created hook
+		const hooks = getHooksManager();
+		await hooks.emit({
+			type: 'invoice.created',
+			invoice: newInvoice as any,
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id
 		});
 
 		return { success: true, invoiceId };
@@ -181,7 +227,8 @@ export const updateInvoice = command(
 		issueDate: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
 		paidDate: v.optional(v.string()),
-		notes: v.optional(v.string())
+		notes: v.optional(v.string()),
+		currency: v.optional(v.string()) // 'RON', 'EUR', 'USD', etc.
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -195,7 +242,9 @@ export const updateInvoice = command(
 		const [existing] = await db
 			.select()
 			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+			.where(
+				and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id))
+			)
 			.limit(1);
 
 		if (!existing) {
@@ -215,148 +264,261 @@ export const updateInvoice = command(
 			taxRate = Math.round(updateData.taxRate * 100);
 		}
 		if (updateData.amount !== undefined || updateData.taxRate !== undefined) {
-			taxAmount = Math.round(amount * taxRate / 10000);
+			taxAmount = Math.round((amount * taxRate) / 10000);
 			totalAmount = amount + taxAmount;
 		}
+
+		const previousInvoice = { ...existing };
 
 		await db
 			.update(table.invoice)
 			.set({
 				clientId: updateData.clientId || undefined,
-				projectId: updateData.projectId !== undefined ? (updateData.projectId || null) : undefined,
-				serviceId: updateData.serviceId !== undefined ? (updateData.serviceId || null) : undefined,
+				projectId: updateData.projectId !== undefined ? updateData.projectId || null : undefined,
+				serviceId: updateData.serviceId !== undefined ? updateData.serviceId || null : undefined,
 				amount,
 				taxRate,
 				taxAmount,
 				totalAmount,
+				currency: updateData.currency !== undefined ? updateData.currency : undefined,
 				status: updateData.status || undefined,
 				issueDate: updateData.issueDate ? new Date(updateData.issueDate) : undefined,
 				dueDate: updateData.dueDate ? new Date(updateData.dueDate) : undefined,
 				paidDate: updateData.paidDate ? new Date(updateData.paidDate) : undefined,
-				notes: updateData.notes !== undefined ? (updateData.notes || null) : undefined,
+				notes: updateData.notes !== undefined ? updateData.notes || null : undefined,
 				updatedAt: new Date()
 			})
 			.where(eq(table.invoice.id, invoiceId));
 
+		// Get updated invoice
+		const [updatedInvoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(eq(table.invoice.id, invoiceId))
+			.limit(1);
+
+		if (updatedInvoice) {
+			// Emit invoice.updated hook
+			const hooks = getHooksManager();
+			await hooks.emit({
+				type: 'invoice.updated',
+				invoice: updatedInvoice as any,
+				previousInvoice: previousInvoice as any,
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id
+			});
+
+			// Emit status changed hook if status changed
+			if (updateData.status && updateData.status !== existing.status) {
+				await hooks.emit({
+					type: 'invoice.status.changed',
+					invoice: updatedInvoice as any,
+					previousStatus: existing.status,
+					newStatus: updateData.status,
+					tenantId: event.locals.tenant.id,
+					userId: event.locals.user.id
+				});
+
+				// Emit paid hook if status changed to paid
+				if (updateData.status === 'paid') {
+					await hooks.emit({
+						type: 'invoice.paid',
+						invoice: updatedInvoice as any,
+						tenantId: event.locals.tenant.id,
+						userId: event.locals.user.id
+					});
+				}
+			}
+		}
+
 		return { success: true };
 	}
 );
 
-export const deleteInvoice = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Verify invoice belongs to tenant
-		const [existing] = await db
-			.select()
-			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!existing) {
-			throw new Error('Invoice not found');
-		}
-
-		await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
-
-		return { success: true };
+export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
 
-export const markInvoiceAsPaid = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+	// Verify invoice belongs to tenant
+	const [existing] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!existing) {
+		throw new Error('Invoice not found');
+	}
+
+	await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+
+	// Emit invoice.deleted hook
+	const hooks = getHooksManager();
+	await hooks.emit({
+		type: 'invoice.deleted',
+		invoice: existing as any,
+		tenantId: event.locals.tenant.id,
+		userId: event.locals.user.id
+	});
+
+	return { success: true };
+});
+
+export const markInvoiceAsPaid = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	// Verify invoice belongs to tenant
+	const [existing] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!existing) {
+		throw new Error('Invoice not found');
+	}
+
+	const previousStatus = existing.status;
+
+	await db
+		.update(table.invoice)
+		.set({
+			status: 'paid',
+			paidDate: new Date(),
+			updatedAt: new Date()
+		})
+		.where(eq(table.invoice.id, invoiceId));
+
+	// Get updated invoice
+	const [updatedInvoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(eq(table.invoice.id, invoiceId))
+		.limit(1);
+
+	if (updatedInvoice) {
+		// Emit hooks
+		const hooks = getHooksManager();
+		await hooks.emit({
+			type: 'invoice.updated',
+			invoice: updatedInvoice as any,
+			previousInvoice: existing as any,
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id
+		});
+
+		if (previousStatus !== 'paid') {
+			await hooks.emit({
+				type: 'invoice.status.changed',
+				invoice: updatedInvoice as any,
+				previousStatus,
+				newStatus: 'paid',
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id
+			});
+
+			await hooks.emit({
+				type: 'invoice.paid',
+				invoice: updatedInvoice as any,
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id
+			});
 		}
+	}
 
-		// Verify invoice belongs to tenant
-		const [existing] = await db
-			.select()
-			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-			.limit(1);
+	return { success: true };
+});
 
-		if (!existing) {
-			throw new Error('Invoice not found');
+export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	// Verify invoice belongs to tenant
+	const [existing] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!existing) {
+		throw new Error('Invoice not found');
+	}
+
+	// Check if invoice emails are enabled for this tenant
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	const invoiceEmailsEnabled = invoiceSettings?.invoiceEmailsEnabled ?? true;
+
+	// Get client email
+	const [client] = await db
+		.select()
+		.from(table.client)
+		.where(eq(table.client.id, existing.clientId))
+		.limit(1);
+
+	if (!client?.email) {
+		if (invoiceEmailsEnabled) {
+			throw new Error('Client email not found. Cannot send invoice email.');
 		}
+		// If emails are disabled, we can still mark as sent
+	}
 
+	// Update status to 'sent' if it's currently 'draft'
+	if (existing.status === 'draft') {
 		await db
 			.update(table.invoice)
 			.set({
-				status: 'paid',
-				paidDate: new Date(),
+				status: 'sent',
 				updatedAt: new Date()
 			})
 			.where(eq(table.invoice.id, invoiceId));
-
-		return { success: true };
 	}
-);
 
-export const sendInvoice = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+	// Send email to client only if enabled
+	if (invoiceEmailsEnabled && client?.email) {
+		try {
+			await sendInvoiceEmail(invoiceId, client.email);
+		} catch (error) {
+			console.error('Failed to send invoice email:', error);
+			// Don't throw - allow invoice to be marked as sent even if email fails
+			// The email error is logged for debugging
 		}
-
-		// Verify invoice belongs to tenant
-		const [existing] = await db
-			.select()
-			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!existing) {
-			throw new Error('Invoice not found');
-		}
-
-		// Update status to 'sent' if it's currently 'draft'
-		if (existing.status === 'draft') {
-			await db
-				.update(table.invoice)
-				.set({
-					status: 'sent',
-					updatedAt: new Date()
-				})
-				.where(eq(table.invoice.id, invoiceId));
-		}
-
-		// TODO: Implement actual email sending logic
-		// For now, just return success
-
-		return { success: true };
+	} else if (!invoiceEmailsEnabled) {
+		console.log('Invoice emails are disabled for this tenant. Skipping email send.');
 	}
-);
 
-export const downloadInvoicePDF = query(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
+	return { success: true };
+});
 
-		// Verify invoice belongs to tenant
-		const [invoice] = await db
-			.select()
-			.from(table.invoice)
-			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!invoice) {
-			throw new Error('Invoice not found');
-		}
-
-		// TODO: Implement PDF generation
-		// For now, return invoice data that can be used to generate PDF on client side
-		return { invoiceId, invoiceNumber: invoice.invoiceNumber };
+export const downloadInvoicePDF = query(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	// Verify invoice belongs to tenant
+	const [invoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!invoice) {
+		throw new Error('Invoice not found');
+	}
+
+	// TODO: Implement PDF generation
+	// For now, return invoice data that can be used to generate PDF on client side
+	return { invoiceId, invoiceNumber: invoice.invoiceNumber };
+});

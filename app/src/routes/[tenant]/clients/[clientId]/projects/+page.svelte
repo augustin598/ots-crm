@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTasks } from '$lib/remotes/tasks.remote';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -69,7 +70,11 @@
 						<div class="flex items-center justify-between pt-2 border-t">
 							<div class="flex items-center gap-2 text-sm text-muted-foreground">
 								<DollarSign class="h-4 w-4" />
-								<span>{project.budget ? `€${(project.budget / 100).toLocaleString()}` : '—'}</span>
+								<span>
+									{project.budget
+										? formatAmount(project.budget, (project.currency || 'RON') as Currency)
+										: '—'}
+								</span>
 							</div>
 							<div class="flex items-center gap-2 text-sm text-muted-foreground">
 								<Calendar class="h-4 w-4" />

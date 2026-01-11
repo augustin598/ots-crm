@@ -69,7 +69,7 @@
 				email: formEmail || undefined,
 				phone: formPhone || undefined,
 				status: formStatus || undefined
-			});
+			}).updates(clientsQuery);
 			// Reset form
 			formName = '';
 			formEmail = '';
@@ -90,7 +90,7 @@
 		}
 
 		try {
-			await deleteClient(clientId);
+			await deleteClient(clientId).updates(clientsQuery);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete client');
 		}

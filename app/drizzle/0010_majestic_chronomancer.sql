@@ -1,0 +1,1 @@
+ALTER TABLE `document` DROP COLUMN `contract_template_id`;

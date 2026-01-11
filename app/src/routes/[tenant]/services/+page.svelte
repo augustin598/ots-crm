@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getServices, createService, deleteService } from '$lib/remotes/services.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -24,6 +26,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Switch } from '$lib/components/ui/switch';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -37,10 +40,14 @@
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
 
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	// Create a map of client IDs to names
 	const clientMap = $derived(
 		new Map(clients.map((client) => [client.id, client.name]))
 	);
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 
 	let isDialogOpen = $state(false);
 	let formName = $state('');
@@ -48,10 +55,18 @@
 	let formClientId = $state('');
 	let formCategory = $state('');
 	let formPrice = $state('');
+	let formCurrency = $state<Currency>('RON');
 	let formUnit = $state('hour');
 	let formActive = $state(true);
 	let formLoading = $state(false);
 	let formError = $state<string | null>(null);
+
+	// Update currency when settings load
+	$effect(() => {
+		if (invoiceSettings?.defaultCurrency) {
+			formCurrency = invoiceSettings.defaultCurrency as Currency;
+		}
+	});
 
 	// Map recurring type to display unit
 	function getUnitFromRecurringType(recurringType: string): string {
@@ -117,10 +132,11 @@
 				category: formCategory || undefined,
 				clientId: formClientId,
 				price: formPrice ? parseFloat(formPrice) : undefined,
+				currency: formCurrency || undefined,
 				recurringType: getRecurringTypeFromUnit(formUnit),
 				recurringInterval: 1,
 				isActive: formActive
-			});
+			}).updates(servicesQuery);
 
 			// Reset form
 			formName = '';
@@ -128,6 +144,7 @@
 			formClientId = '';
 			formCategory = '';
 			formPrice = '';
+			formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
 			formUnit = 'hour';
 			formActive = true;
 			isDialogOpen = false;
@@ -144,16 +161,12 @@
 		}
 
 		try {
-			await deleteService(serviceId);
+			await deleteService(serviceId).updates(servicesQuery);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete service');
 		}
 	}
 
-	function formatPrice(price: number | null): string {
-		if (!price) return '-';
-		return `€${(price / 100).toFixed(2)}`;
-	}
 
 	function formatUnit(recurringType: string): string {
 		const unit = getUnitFromRecurringType(recurringType);
@@ -202,20 +215,12 @@
 				</div>
 				<div class="grid gap-2">
 					<Label for="clientId">Client *</Label>
-					<Select type="single" bind:value={formClientId}>
-						<SelectTrigger id="clientId">
-							{#if formClientId}
-								{clientMap.get(formClientId) || 'Select a client'}
-							{:else}
-								Select a client
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							{#each clients as client}
-								<SelectItem value={client.id}>{client.name}</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
+					<Combobox
+						bind:value={formClientId}
+						options={clientOptions}
+						placeholder="Select a client"
+						searchPlaceholder="Search clients..."
+					/>
 				</div>
 				<div class="grid gap-2">
 					<Label for="category">Category</Label>
@@ -235,10 +240,23 @@
 						</SelectContent>
 					</Select>
 				</div>
+				<div class="grid gap-2">
+					<Label for="price">Price</Label>
+					<Input id="price" type="number" bind:value={formPrice} placeholder="150" step="0.01" />
+				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div class="grid gap-2">
-						<Label for="price">Price</Label>
-						<Input id="price" type="number" bind:value={formPrice} placeholder="150" step="0.01" />
+						<Label for="currency">Currency</Label>
+						<Select type="single" bind:value={formCurrency}>
+							<SelectTrigger id="currency">
+								{formCurrency}
+							</SelectTrigger>
+							<SelectContent>
+								{#each CURRENCIES as curr}
+									<SelectItem value={curr}>{curr}</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
 					</div>
 					<div class="grid gap-2">
 						<Label for="unit">Unit</Label>
@@ -343,7 +361,11 @@
 
 				<div class="pt-4 border-t">
 					<div class="flex items-baseline gap-1">
-						<span class="text-3xl font-bold text-primary">{formatPrice(service.price)}</span>
+						<span class="text-3xl font-bold text-primary">
+							{service.price
+								? formatAmount(service.price, (service.currency || 'RON') as Currency)
+								: '—'}
+						</span>
 						<span class="text-sm text-muted-foreground">/ {formatUnit(service.recurringType)}</span>
 					</div>
 				</div>

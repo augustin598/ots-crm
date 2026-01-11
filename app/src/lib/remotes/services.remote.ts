@@ -17,6 +17,7 @@ const serviceSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1, 'Client ID is required')),
 	projectId: v.optional(v.string()),
 	price: v.optional(v.number()),
+	currency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 	recurringType: v.optional(v.string()),
 	recurringInterval: v.optional(v.number()),
 	isActive: v.optional(v.boolean())
@@ -52,6 +53,15 @@ export const createService = command(serviceSchema, async (data) => {
 		throw new Error('Unauthorized');
 	}
 
+	// Get default currency from invoice settings
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
+
 	const serviceId = generateServiceId();
 
 	await db.insert(table.service).values({
@@ -63,6 +73,7 @@ export const createService = command(serviceSchema, async (data) => {
 		description: data.description || null,
 		category: data.category || null,
 		price: data.price ? Math.round(data.price * 100) : null,
+		currency,
 		recurringType: data.recurringType || 'none',
 		recurringInterval: data.recurringInterval || 1,
 		isActive: data.isActive !== undefined ? data.isActive : true
@@ -122,6 +133,7 @@ export const updateService = command(
 			.set({
 				...updateData,
 				price: updateData.price ? Math.round(updateData.price * 100) : undefined,
+				currency: updateData.currency !== undefined ? updateData.currency : undefined,
 				updatedAt: new Date()
 			})
 			.where(eq(table.service.id, serviceId));

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateTask } from '$lib/remotes/tasks.remote';
+	import { updateTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -10,7 +10,9 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import type { Task } from '$lib/server/db/schema';
+	import { getTaskFilters } from '$lib/components/task-filters-context';
 
 	interface Props {
 		task: Task | null;
@@ -21,15 +23,30 @@
 
 	let { task, open, onOpenChange, onSuccess }: Props = $props();
 
+	// Get filterParams from context (set by parent page) or use empty object as fallback
+	const filterParams = getTaskFilters();
+
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
 
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 
+	const projectOptions = $derived([
+		{ value: '', label: 'None' },
+		...projects.map((p) => ({ value: p.id, label: p.name }))
+	]);
+
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
-	const userMap = $derived(new Map(users.map((u) => [u.id, u.username])));
+	const userMap = $derived(
+		new Map(
+			users.map((u) => [
+				u.id,
+				`${u.firstName} ${u.lastName}`.trim() || u.email
+			])
+		)
+	);
 
 	let title = $state('');
 	let description = $state('');
@@ -83,6 +100,7 @@
 		error = null;
 
 		try {
+			// Refresh getTasks query with the same filters as the page and the specific task query
 			await updateTask({
 				taskId: task.id,
 				title,
@@ -94,7 +112,7 @@
 				priority: priority || undefined,
 				assignedToUserId: assignedToUserId || undefined,
 				dueDate: dueDate || undefined
-			});
+			}).updates(getTasks(filterParams || {}), getTask(task.id));
 
 			onOpenChange(false);
 			onSuccess?.();
@@ -124,21 +142,12 @@
 				</div>
 				<div class="grid gap-2">
 					<Label for="edit-project">Project</Label>
-					<Select type="single" bind:value={projectId}>
-						<SelectTrigger id="edit-project">
-							{#if projectId && projects.find((p) => p.id === projectId)}
-								{projects.find((p) => p.id === projectId)?.name}
-							{:else}
-								Select a project
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="">None</SelectItem>
-							{#each projects as project}
-								<SelectItem value={project.id}>{project.name}</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
+					<Combobox
+						bind:value={projectId}
+						options={projectOptions}
+						placeholder="Select a project (optional)"
+						searchPlaceholder="Search projects..."
+					/>
 				</div>
 				{#if projectId && milestones.length > 0}
 					<div class="grid gap-2">
@@ -226,7 +235,9 @@
 							<SelectContent>
 								<SelectItem value="">None</SelectItem>
 								{#each users as user}
-									<SelectItem value={user.id}>{user.username}</SelectItem>
+									<SelectItem value={user.id}>
+										{`${user.firstName} ${user.lastName}`.trim() || user.email}
+									</SelectItem>
 								{/each}
 							</SelectContent>
 						</Select>

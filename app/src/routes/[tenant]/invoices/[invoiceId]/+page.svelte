@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { getInvoice, markInvoiceAsPaid, sendInvoice } from '$lib/remotes/invoices.remote';
+	import { getInvoice, markInvoiceAsPaid, sendInvoice, getInvoices } from '$lib/remotes/invoices.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
+	import { getTransactions } from '$lib/remotes/banking.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import {
 		ArrowLeft,
 		Download,
@@ -16,11 +18,12 @@
 		Building2,
 		Calendar,
 		Edit,
-		CheckCircle2
+		CheckCircle2,
+		CreditCard
 	} from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const invoiceId = $derived(page.params.invoiceId);
+	const invoiceId = $derived(page.params.invoiceId || '');
 
 	const invoiceQuery = getInvoice(invoiceId);
 	const invoice = $derived(invoiceQuery.current);
@@ -28,6 +31,13 @@
 
 	const clientQuery = $derived(invoice?.clientId ? getClient(invoice.clientId) : null);
 	const client = $derived(clientQuery?.current);
+
+	const matchedTransactionsQuery = $derived(
+		invoice?.id ? getTransactions({ matched: true }) : null
+	);
+	const matchedTransactions = $derived(
+		matchedTransactionsQuery?.current?.filter((t) => t.matchedInvoiceId === invoice?.id) || []
+	);
 
 	// Get tenant data from layout
 	let { data }: { data: any } = $props();
@@ -47,6 +57,9 @@
 				return 'secondary';
 		}
 	}
+
+	// Get currency from invoice (default to RON)
+	const invoiceCurrency = $derived((invoice?.currency || 'RON') as Currency);
 
 	// Calculate amounts
 	const subtotal = $derived(invoice ? (invoice.amount || 0) / 100 : 0);
@@ -76,22 +89,18 @@
 	);
 
 	async function handleSendInvoice() {
-		if (!invoice) return;
+		if (!invoice || !invoiceId) return;
 		try {
-			await sendInvoice(invoiceId);
-			// Refresh invoice data
-			invoiceQuery.refetch();
+			await sendInvoice(invoiceId).updates(invoiceQuery, getInvoice(invoiceId), getInvoices({}));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to send invoice');
 		}
 	}
 
 	async function handleMarkAsPaid() {
-		if (!invoice) return;
+		if (!invoice || !invoiceId) return;
 		try {
-			await markInvoiceAsPaid(invoiceId);
-			// Refresh invoice data
-			invoiceQuery.refetch();
+			await markInvoiceAsPaid(invoiceId).updates(invoiceQuery, getInvoice(invoiceId), getInvoices({}));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to mark invoice as paid');
 		}
@@ -244,8 +253,8 @@
 											<p class="font-medium">{item.description}</p>
 										</td>
 										<td class="text-right py-4">{item.quantity}</td>
-										<td class="text-right py-4">€{item.rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-										<td class="text-right py-4 font-medium">€{item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+										<td class="text-right py-4">{formatAmount(Math.round(item.rate * 100), invoiceCurrency)}</td>
+										<td class="text-right py-4 font-medium">{formatAmount(Math.round(item.amount * 100), invoiceCurrency)}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -256,18 +265,18 @@
 						<div class="w-64 space-y-2">
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Subtotal:</span>
-								<span class="font-medium">€{subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+								<span class="font-medium">{formatAmount(invoice?.amount || 0, invoiceCurrency)}</span>
 							</div>
 							{#if tax > 0}
 								<div class="flex justify-between">
-									<span class="text-muted-foreground">Tax ({taxRate}%):</span>
-									<span class="font-medium">€{tax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+									<span class="text-muted-foreground">Tax ({taxRate.toFixed(2)}%):</span>
+									<span class="font-medium">{formatAmount(invoice?.taxAmount || 0, invoiceCurrency)}</span>
 								</div>
 							{/if}
 							<Separator />
 							<div class="flex justify-between text-lg">
 								<span class="font-semibold">Total:</span>
-								<span class="font-bold">€{total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+								<span class="font-bold">{formatAmount(invoice?.totalAmount || 0, invoiceCurrency)}</span>
 							</div>
 						</div>
 					</div>
@@ -279,7 +288,7 @@
 							<div class="flex h-12 w-12 items-center justify-center rounded-full bg-green-500 text-white">
 								<CheckCircle2 class="h-6 w-6" />
 							</div>
-							<div>
+							<div class="flex-1">
 								<h4 class="font-semibold text-green-900">Payment Received</h4>
 								<p class="text-sm text-green-700">
 									This invoice was paid on
@@ -287,6 +296,12 @@
 										{new Date(invoice.paidDate).toLocaleDateString()}
 									{/if}
 								</p>
+								{#if matchedTransactions.length > 0}
+									{@const txn = matchedTransactions[0]}
+									<p class="text-xs text-green-600 mt-1">
+										Paid via bank transaction {txn.matchingMethod === 'manual' ? '(manually matched)' : '(auto-matched)'}
+									</p>
+								{/if}
 							</div>
 						</div>
 					</Card>
@@ -306,7 +321,7 @@
 						<Separator />
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Total Amount</p>
-							<p class="text-2xl font-bold">€{total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+							<p class="text-2xl font-bold">{formatAmount(invoice?.totalAmount || 0, invoiceCurrency)}</p>
 						</div>
 						<Separator />
 						{#if invoice.dueDate}

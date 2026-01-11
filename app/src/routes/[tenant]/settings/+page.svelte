@@ -2,11 +2,15 @@
 	import type { PageData } from './$types';
 	import { updateTenantSettings } from '$lib/remotes/tenant-settings.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
+	import { sendInvitation, getInvitations, cancelInvitation } from '$lib/remotes/invitations.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
+	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { Badge } from '$lib/components/ui/badge';
+	import { X } from '@lucide/svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -30,6 +34,17 @@
 	let county = $state(data.tenant?.county || '');
 	let postalCode = $state(data.tenant?.postalCode || '');
 	let country = $state(data.tenant?.country || 'România');
+
+	// Invitation state
+	let invitationEmail = $state('');
+	let invitationRole = $state<'member' | 'admin'>('member');
+	let sendingInvitation = $state(false);
+	let invitationError = $state<string | null>(null);
+	let invitationSuccess = $state(false);
+
+	const invitationsQuery = getInvitations();
+	const invitations = $derived(invitationsQuery.current || []);
+	const loadingInvitations = $derived(invitationsQuery.loading);
 
 	async function handleAnafLookup() {
 		if (!cui) {
@@ -83,17 +98,75 @@
 				county: county || undefined,
 				postalCode: postalCode || undefined,
 				country: country || undefined
-			});
+			}).updates(getInvitations());
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update settings';
 		} finally {
 			loading = false;
 		}
 	}
+
+	async function handleSendInvitation() {
+		if (!invitationEmail) {
+			invitationError = 'Email is required';
+			return;
+		}
+
+		sendingInvitation = true;
+		invitationError = null;
+		invitationSuccess = false;
+
+		try {
+			await sendInvitation({
+				email: invitationEmail,
+				role: invitationRole
+			}).updates(invitationsQuery);
+			invitationEmail = '';
+			invitationSuccess = true;
+			setTimeout(() => {
+				invitationSuccess = false;
+			}, 3000);
+		} catch (e) {
+			invitationError = e instanceof Error ? e.message : 'Failed to send invitation';
+		} finally {
+			sendingInvitation = false;
+		}
+	}
+
+	async function handleCancelInvitation(invitationId: string) {
+		if (!confirm('Are you sure you want to cancel this invitation?')) {
+			return;
+		}
+
+		try {
+			await cancelInvitation(invitationId).updates(invitationsQuery);
+		} catch (e) {
+			invitationError = e instanceof Error ? e.message : 'Failed to cancel invitation';
+		}
+	}
+
+	function getStatusBadgeVariant(status: string) {
+		switch (status) {
+			case 'pending':
+				return 'default';
+			case 'accepted':
+				return 'secondary';
+			case 'cancelled':
+				return 'outline';
+			case 'expired':
+				return 'destructive';
+			default:
+				return 'outline';
+		}
+	}
+
+	function formatDate(date: Date | string | null) {
+		if (!date) return 'N/A';
+		return new Date(date).toLocaleDateString();
+	}
 </script>
 
 <div class="space-y-6">
-	<h1 class="text-3xl font-bold">Organization Settings</h1>
 
 	<Card>
 		<CardHeader>
@@ -205,4 +278,121 @@
 			</form>
 		</CardContent>
 	</Card>
+
+	{#if data.tenantUser?.role === 'owner' || data.tenantUser?.role === 'admin'}
+		<Card>
+			<CardHeader>
+				<CardTitle>Team Invitations</CardTitle>
+				<CardDescription>Invite users to join your organization</CardDescription>
+			</CardHeader>
+			<CardContent class="space-y-6">
+				<!-- Send Invitation Form -->
+				<div class="space-y-4">
+					<h3 class="text-lg font-semibold">Send Invitation</h3>
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							handleSendInvitation();
+						}}
+						class="space-y-4"
+					>
+						<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+							<div class="md:col-span-2 space-y-2">
+								<Label for="invitationEmail">Email Address</Label>
+								<Input
+									id="invitationEmail"
+									type="email"
+									bind:value={invitationEmail}
+									placeholder="user@example.com"
+									required
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="invitationRole">Role</Label>
+								<Select type="single" bind:value={invitationRole}>
+									<SelectTrigger id="invitationRole">
+										{invitationRole === 'admin' ? 'Admin' : 'Member'}
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="member">Member</SelectItem>
+										<SelectItem value="admin">Admin</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
+
+						{#if invitationError}
+							<div class="rounded-md bg-red-50 p-3">
+								<p class="text-sm text-red-800">{invitationError}</p>
+							</div>
+						{/if}
+
+						{#if invitationSuccess}
+							<div class="rounded-md bg-green-50 p-3">
+								<p class="text-sm text-green-800">Invitation sent successfully!</p>
+							</div>
+						{/if}
+
+						<Button type="submit" disabled={sendingInvitation}>
+							{sendingInvitation ? 'Sending...' : 'Send Invitation'}
+						</Button>
+					</form>
+				</div>
+
+				<Separator />
+
+				<!-- Invitations List -->
+				<div class="space-y-4">
+					<h3 class="text-lg font-semibold">Pending Invitations</h3>
+					{#if loadingInvitations}
+						<p class="text-sm text-muted-foreground">Loading invitations...</p>
+					{:else if invitations.length === 0}
+						<p class="text-sm text-muted-foreground">No invitations sent yet.</p>
+					{:else}
+						<div class="space-y-2">
+							{#each invitations as invitation}
+								<div
+									class="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900"
+								>
+									<div class="flex-1">
+										<div class="flex items-center gap-2">
+											<p class="font-medium">{invitation.email}</p>
+											<Badge variant={getStatusBadgeVariant(invitation.status)}>
+												{invitation.status}
+											</Badge>
+										</div>
+										<div class="mt-1 text-sm text-muted-foreground">
+											<p>
+												Role: <span class="capitalize">{invitation.role}</span> • Invited by{' '}
+												{invitation.invitedBy
+													? `${invitation.invitedBy.firstName} ${invitation.invitedBy.lastName}`.trim() ||
+													  invitation.invitedBy.email
+													: 'Unknown'}{' '}
+												•{' '}
+												{formatDate(invitation.createdAt)}
+											</p>
+											{#if invitation.status === 'pending'}
+												<p class="text-xs">
+													Expires: {formatDate(invitation.expiresAt)}
+												</p>
+											{/if}
+										</div>
+									</div>
+									{#if invitation.status === 'pending'}
+										<Button
+											variant="ghost"
+											size="sm"
+											onclick={() => handleCancelInvitation(invitation.id)}
+										>
+											<X class="h-4 w-4" />
+										</Button>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</CardContent>
+		</Card>
+	{/if}
 </div>
