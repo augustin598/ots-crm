@@ -52,7 +52,8 @@ type TaskHandler = (params: Record<string, any>) => Promise<any>;
  */
 const taskHandlers: Record<string, TaskHandler> = {
 	recurring_invoices: processRecurringInvoices,
-	task_reminders: processTaskReminders
+	task_reminders: processTaskReminders,
+	daily_work_reminders: processDailyWorkReminders
 };
 
 /**

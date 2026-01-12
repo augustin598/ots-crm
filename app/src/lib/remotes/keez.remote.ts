@@ -156,142 +156,132 @@ export const getKeezStatus = query(async () => {
 	};
 });
 
-export const syncInvoiceToKeez = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Get invoice
-		const [invoice] = await db
-			.select()
-			.from(table.invoice)
-			.where(
-				and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id))
-			)
-			.limit(1);
-
-		if (!invoice) {
-			throw new Error('Invoice not found');
-		}
-
-		// Get integration
-		const [integration] = await db
-			.select()
-			.from(table.keezIntegration)
-			.where(
-				and(
-					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
-					eq(table.keezIntegration.isActive, true)
-				)
-			)
-			.limit(1);
-
-		if (!integration) {
-			throw new Error('Keez integration not connected');
-		}
-
-		// Get tenant and client
-		const [tenant] = await db
-			.select()
-			.from(table.tenant)
-			.where(eq(table.tenant.id, event.locals.tenant.id))
-			.limit(1);
-		const [client] = await db
-			.select()
-			.from(table.client)
-			.where(eq(table.client.id, invoice.clientId))
-			.limit(1);
-
-		if (!tenant || !client) {
-			throw new Error('Tenant or client not found');
-		}
-
-		// Get line items
-		const lineItems = await db
-			.select()
-			.from(table.invoiceLineItem)
-			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
-
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
-
-		// Use existing external ID or generate one
-		const externalId = invoice.keezExternalId || invoice.id;
-
-		// Map and create invoice
-		const keezInvoice = mapInvoiceToKeez(
-			{ ...invoice, lineItems },
-			client,
-			tenant,
-			externalId
-		);
-
-		const response = await keezClient.createInvoice(keezInvoice);
-
-		// Update invoice
-		await db
-			.update(table.invoice)
-			.set({
-				keezInvoiceId: response.externalId,
-				keezExternalId: response.externalId,
-				updatedAt: new Date()
-			})
-			.where(eq(table.invoice.id, invoiceId));
-
-		// Create/update sync record
-		const [existingSync] = await db
-			.select()
-			.from(table.keezInvoiceSync)
-			.where(eq(table.keezInvoiceSync.invoiceId, invoiceId))
-			.limit(1);
-
-		if (existingSync) {
-			await db
-				.update(table.keezInvoiceSync)
-				.set({
-					keezInvoiceId: response.externalId,
-					keezExternalId: response.externalId,
-					syncStatus: 'synced',
-					lastSyncedAt: new Date(),
-					updatedAt: new Date()
-				})
-				.where(eq(table.keezInvoiceSync.id, existingSync.id));
-		} else {
-			const syncId = generateSyncId();
-			await db.insert(table.keezInvoiceSync).values({
-				id: syncId,
-				invoiceId,
-				tenantId: event.locals.tenant.id,
-				keezInvoiceId: response.externalId,
-				keezExternalId: response.externalId,
-				syncDirection: 'push',
-				syncStatus: 'synced',
-				lastSyncedAt: new Date()
-			});
-		}
-
-		// Update integration last sync time
-		await db
-			.update(table.keezIntegration)
-			.set({
-				lastSyncAt: new Date(),
-				updatedAt: new Date()
-			})
-			.where(eq(table.keezIntegration.tenantId, event.locals.tenant.id));
-
-		return { success: true, externalId: response.externalId };
+export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	// Get invoice
+	const [invoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!invoice) {
+		throw new Error('Invoice not found');
+	}
+
+	// Get integration
+	const [integration] = await db
+		.select()
+		.from(table.keezIntegration)
+		.where(
+			and(
+				eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+				eq(table.keezIntegration.isActive, true)
+			)
+		)
+		.limit(1);
+
+	if (!integration) {
+		throw new Error('Keez integration not connected');
+	}
+
+	// Get tenant and client
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, event.locals.tenant.id))
+		.limit(1);
+	const [client] = await db
+		.select()
+		.from(table.client)
+		.where(eq(table.client.id, invoice.clientId))
+		.limit(1);
+
+	if (!tenant || !client) {
+		throw new Error('Tenant or client not found');
+	}
+
+	// Get line items
+	const lineItems = await db
+		.select()
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+	// Decrypt secret
+	const secret = decrypt(event.locals.tenant.id, integration.secret);
+
+	// Create Keez client
+	const keezClient = new KeezClient({
+		clientEid: integration.clientEid,
+		applicationId: integration.applicationId,
+		secret
+	});
+
+	// Use existing external ID or generate one
+	const externalId = invoice.keezExternalId || invoice.id;
+
+	// Map and create invoice
+	const keezInvoice = mapInvoiceToKeez({ ...invoice, lineItems }, client, tenant, externalId);
+
+	const response = await keezClient.createInvoice(keezInvoice);
+
+	// Update invoice
+	await db
+		.update(table.invoice)
+		.set({
+			keezInvoiceId: response.externalId,
+			keezExternalId: response.externalId,
+			updatedAt: new Date()
+		})
+		.where(eq(table.invoice.id, invoiceId));
+
+	// Create/update sync record
+	const [existingSync] = await db
+		.select()
+		.from(table.keezInvoiceSync)
+		.where(eq(table.keezInvoiceSync.invoiceId, invoiceId))
+		.limit(1);
+
+	if (existingSync) {
+		await db
+			.update(table.keezInvoiceSync)
+			.set({
+				keezInvoiceId: response.externalId,
+				keezExternalId: response.externalId,
+				syncStatus: 'synced',
+				lastSyncedAt: new Date(),
+				updatedAt: new Date()
+			})
+			.where(eq(table.keezInvoiceSync.id, existingSync.id));
+	} else {
+		const syncId = generateSyncId();
+		await db.insert(table.keezInvoiceSync).values({
+			id: syncId,
+			invoiceId,
+			tenantId: event.locals.tenant.id,
+			keezInvoiceId: response.externalId,
+			keezExternalId: response.externalId,
+			syncDirection: 'push',
+			syncStatus: 'synced',
+			lastSyncedAt: new Date()
+		});
+	}
+
+	// Update integration last sync time
+	await db
+		.update(table.keezIntegration)
+		.set({
+			lastSyncAt: new Date(),
+			updatedAt: new Date()
+		})
+		.where(eq(table.keezIntegration.tenantId, event.locals.tenant.id));
+
+	return { success: true, externalId: response.externalId };
+});
 
 export const syncInvoicesFromKeez = command(
 	v.object({
@@ -341,7 +331,6 @@ export const syncInvoicesFromKeez = command(
 		let imported = 0;
 		let skipped = 0;
 
-
 		// Import each invoice
 		for (const invoiceHeader of response.data || []) {
 			try {
@@ -360,21 +349,23 @@ export const syncInvoicesFromKeez = command(
 				// Get full invoice details
 				const keezInvoice = await keezClient.getInvoice(invoiceHeader.externalId);
 
-
 				// Find or create client
 				let clientId: string | null = null;
-				if (keezInvoice.partner) {
+				if (keezInvoice.partner?.partnerName) {
 					const [existingClient] = await db
 						.select()
 						.from(table.client)
-						.where(and(eq(table.client.name, keezInvoice.partner.name), eq(table.client.tenantId, event.locals.tenant.id)))
+						.where(
+							and(
+								eq(table.client.name, keezInvoice.partner.partnerName),
+								eq(table.client.tenantId, event.locals.tenant.id)
+							)
+						)
 						.limit(1);
 
 					if (existingClient) {
-						console.log(existingClient, { depth: 1 });
 						clientId = existingClient.id;
 					} else if (keezInvoice.partner) {
-						console.log(keezInvoice.partner, { depth: 1 });
 						// Create new client
 						const newClientId = generateClientId();
 						const clientData = mapKeezPartnerToClient(keezInvoice.partner, event.locals.tenant.id);
@@ -385,7 +376,7 @@ export const syncInvoicesFromKeez = command(
 						clientId = newClientId;
 					}
 				}
-				
+
 				if (!clientId) {
 					skipped++;
 					continue; // Skip if no client
@@ -539,7 +530,10 @@ export const importClientsFromKeez = command(
 
 				imported++;
 			} catch (error) {
-				console.error(`[Keez] Failed to import partner ${partner.externalId || partner.name}:`, error);
+				console.error(
+					`[Keez] Failed to import partner ${partner.externalId || partner.name}:`,
+					error
+				);
 				skipped++;
 			}
 		}

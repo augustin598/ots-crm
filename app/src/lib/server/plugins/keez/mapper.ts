@@ -39,11 +39,11 @@ export function mapInvoiceToKeez(
 	const details: KeezInvoiceDetail[] = invoice.lineItems.map((item) => {
 		const unitPrice = item.rate / 100; // Convert from cents
 		const amount = (item.amount || item.rate * item.quantity) / 100; // Convert from cents
-		
+
 		// Calculate VAT if tax rate is set
 		let vatRate: number | undefined;
 		let vatAmount: number | undefined;
-		
+
 		if (invoice.taxRate) {
 			vatRate = invoice.taxRate / 100; // Convert from cents (1900) to percentage (19)
 			// Assume tax is included in the amount
@@ -101,14 +101,14 @@ export function mapKeezInvoiceToCRM(
 	let taxAmount = 0;
 	let totalAmount = 0;
 
-	for (const detail of keezInvoice.details) {
-		const detailAmount = detail.amount || detail.unitPrice * detail.quantity;
+	for (const detail of keezInvoice.invoiceDetails) {
+		const detailAmount = detail.netAmount || detail.unitPrice * detail.quantity;
 		amount += detailAmount;
-		
+
 		if (detail.vatAmount) {
 			taxAmount += detail.vatAmount;
-		} else if (detail.vatRate) {
-			taxAmount += detailAmount * (detail.vatRate / 100);
+		} else if (detail.vatPercent) {
+			taxAmount += detailAmount * (detail.vatPercent / 100);
 		}
 	}
 
@@ -120,8 +120,8 @@ export function mapKeezInvoiceToCRM(
 	totalAmount = Math.round(totalAmount * 100);
 
 	// Determine tax rate (use first detail's tax rate or default to 19%)
-	const taxRate = keezInvoice.details[0]?.vatRate
-		? Math.round(keezInvoice.details[0].vatRate * 100)
+	const taxRate = keezInvoice.invoiceDetails[0]?.vatPercent
+		? Math.round(keezInvoice.invoiceDetails[0].vatPercent * 100)
 		: 1900;
 
 	// Parse dates
@@ -166,24 +166,24 @@ export function mapKeezPartnerToClient(
 ): Omit<Client, 'id' | 'createdAt' | 'updatedAt'> {
 	return {
 		tenantId,
-		name: keezPartner.name,
+		name: keezPartner.partnerName,
 		status: 'active',
-		companyType: keezPartner.isLegalEntity ? 'SRL' : null, // Default to SRL for legal entities
-		cui: keezPartner.vatCode || null,
-		vatNumber: keezPartner.vatCode || null,
+		companyType: keezPartner.isLegalPerson ? 'SRL' : null, // Default to SRL for legal entities
+		cui: keezPartner.identificationNumber || null,
+		vatNumber: keezPartner.taxAttribute || null,
 		registrationNumber: keezPartner.registrationNumber || null,
 		tradeRegister: null,
-		address: keezPartner.address || null,
-		city: keezPartner.city || null,
-		county: keezPartner.county || null,
+		address: keezPartner.addressDetails || null,
+		city: keezPartner.cityName || null,
+		county: keezPartner.countyName || null,
 		postalCode: keezPartner.postalCode || null,
-		country: keezPartner.country || 'România',
+		country: keezPartner.countryName || 'România',
 		email: keezPartner.email || null,
 		phone: keezPartner.phone || null,
 		legalRepresentative: keezPartner.legalRepresentative || null,
 		iban: keezPartner.iban || null,
 		bankName: keezPartner.bankName || null,
-		keezPartnerId: keezPartner.externalId || null,
+		keezPartnerId: keezPartner.partnerName || null,
 		notes: null
 	};
 }
@@ -193,18 +193,17 @@ export function mapKeezPartnerToClient(
  */
 export function mapClientToKeezPartner(client: Client): KeezPartner {
 	return {
-		externalId: client.keezPartnerId || undefined,
-		name: client.name,
-		vatCode: client.vatNumber || client.cui || undefined,
+		partnerName: client.name,
+		taxAttribute: client.vatNumber || client.cui || undefined,
 		registrationNumber: client.registrationNumber || undefined,
-		address: client.address || undefined,
-		city: client.city || undefined,
-		county: client.county || undefined,
+		addressDetails: client.address || undefined,
+		cityName: client.city || undefined,
+		countyName: client.county || undefined,
 		postalCode: client.postalCode || undefined,
-		country: client.country || 'România',
+		countryName: client.country || 'România',
 		email: client.email || undefined,
 		phone: client.phone || undefined,
-		isLegalEntity: client.companyType !== null && client.companyType !== undefined,
+		isLegalPerson: client.companyType === 'SRL',
 		legalRepresentative: client.legalRepresentative || undefined,
 		iban: client.iban || undefined,
 		bankName: client.bankName || undefined
@@ -220,10 +219,10 @@ export function mapKeezDetailsToLineItems(
 ): Array<Omit<InvoiceLineItem, 'id' | 'createdAt'>> {
 	return details.map((detail) => ({
 		invoiceId,
-		description: detail.item?.name || 'Item',
+		description: detail.itemDescription || detail.itemName || 'Item',
 		quantity: detail.quantity,
 		rate: Math.round(detail.unitPrice * 100), // Convert to cents
-		amount: Math.round((detail.amount || detail.unitPrice * detail.quantity) * 100) // Convert to cents
+		amount: Math.round(detail.netAmount * 100) // Convert to cents
 	}));
 }
 

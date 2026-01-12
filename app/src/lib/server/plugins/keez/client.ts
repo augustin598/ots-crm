@@ -27,40 +27,59 @@ export interface KeezInvoice {
 	deliveryDate?: string; // YYYY-MM-DD
 	currency?: string; // 'RON', 'EUR', etc.
 	exchangeRate?: number;
-	details: KeezInvoiceDetail[];
+	invoiceDetails: KeezInvoiceDetail[];
 	notes?: string;
 	paymentType?: string;
 	paymentDueDate?: string;
 }
 
 export interface KeezInvoiceDetail {
-	item?: {
-		externalId?: string;
-		name: string;
-		code?: string;
-	};
-	quantity: number;
-	unitPrice: number;
-	discount?: number;
-	discountType?: 'value' | 'percentage';
-	vatRate?: number;
-	vatAmount?: number;
-	amount?: number;
+	itemExternalId?: string; // Identificatorul Keez al articolului (externalId)
+	itemName: string; // Numele articolului
+	itemDescription?: string; // Descrierea articolului
+	measureUnitId: string; // Unitatea de măsură
+	quantity: number; // Cantitatea articolului (Numeric 2 zecimale)
+	unitPrice: number; // Prețul articolului (Numeric 4 zecimale)
+	unitPriceCurrency?: number; // Prețul articolului în valuta facturii (Numeric 4 zecimale)
+	vatPercent?: number; // Procent de TVA (Numeric 2 zecimale)
+	discountType?: 'Percent' | 'Value'; // Tipul de discount global
+	discountPercent?: number; // Procentul de discount (Numeric 2 zecimale)
+	discountValueOnNet?: boolean; // Se aplică discountul la valoarea netă sau la valoarea brută
+	originalNetAmount: number; // Valoarea netă înainte de discount în RON (Numeric 2 zecimale)
+	originalVatAmount: number; // Valoarea TVA înainte de discount în RON (Numeric 2 zecimale)
+	discountNetValue?: number; // Valoarea netă de discount în RON (Numeric 2 zecimale)
+	discountGrossValue?: number; // Valoarea brută de discount în RON (Numeric 2 zecimale)
+	discountVatValue?: number; // Valoarea TVA de discount în RON (Numeric 2 zecimale)
+	netAmount: number; // Valoarea netă totală în RON (Net - Discount) (Numeric 2 zecimale)
+	vatAmount: number; // Valoarea TVA totală în RON (TVA - TVA discount) (Numeric 2 zecimale)
+	grossAmount: number; // Valoarea totală brută în RON (Net + TVA) (Numeric 2 zecimale)
+	exciseAmount?: number; // Valoarea totală a accizei de pe factură (Numeric 2 zecimale)
+	originalNetAmountCurrency?: number; // Valoarea netă înainte de discount în valuta facturii (Numeric 2 zecimale)
+	originalVatAmountCurrency?: number; // Valoarea TVA înainte de discount în valuta facturii (Numeric 2 zecimale)
+	discountNetValueCurrency?: number; // Valoarea netă de discount în valuta facturii (Numeric 2 zecimale)
+	discountGrossValueCurrency?: number; // Valoarea brută de discount în valuta facturii (Numeric 2 zecimale)
+	discountVatValueCurrency?: number; // Valoarea TVA de discount în valuta facturii (Numeric 2 zecimale)
+	netAmountCurrency?: number; // Valoarea netă totală în valuta facturii (Net - Discount) (Numeric 2 zecimale)
+	vatAmountCurrency?: number; // Valoarea TVA totală în valuta facturii (TVA - TVA discount) (Numeric 2 zecimale)
+	grossAmountCurrency?: number; // Valoarea totală brută în valuta facturii (Net + VAT) (Numeric 2 zecimale)
+	exciseAmountCurrency?: number; // Valoarea totală a accizei de pe factură în valuta facturii (Numeric 2 zecimale)
 }
 
 export interface KeezPartner {
-	externalId?: string;
-	name: string;
-	vatCode?: string;
-	registrationNumber?: string;
-	address?: string;
-	city?: string;
-	county?: string;
+	partnerName: string; // e.g., "WEBCO MEDIA S.R.L."
+	registrationNumber?: string; // e.g., "J33/1558/2018"
+	identificationNumber?: string; // e.g., "40015841"
+	taxAttribute?: string; // e.g., "RO"
+	isLegalPerson: boolean; // true for legal entity, false for individual
+	countryCode?: string; // e.g., "RO"
+	countryName?: string; // e.g., "Romania"
+	countyCode?: string; // e.g., "RO-SV"
+	countyName?: string; // e.g., "Suceava"
+	cityName?: string; // e.g., "SUCEAVA"
+	addressDetails?: string; // e.g., "STR. TINERETULUI, NR.6, BL.86, SC.A, ET.0, AP.4"
 	postalCode?: string;
-	country?: string;
 	email?: string;
 	phone?: string;
-	isLegalEntity?: boolean; // true for legal entity, false for individual
 	legalRepresentative?: string;
 	iban?: string;
 	bankName?: string;
@@ -73,9 +92,9 @@ export interface KeezInvoiceResponse {
 export interface KeezInvoiceListResponse {
 	data: KeezInvoiceHeader[];
 	total?: number;
-    recordsCount: number;
-    first: number;
-    last: number;
+	recordsCount: number;
+	first: number;
+	last: number;
 }
 
 export interface KeezInvoiceHeader {
@@ -111,10 +130,10 @@ export class KeezClient {
 		this.clientEid = config.clientEid;
 		this.applicationId = config.applicationId;
 		this.secret = config.secret;
-		
+
 		const environment = config.environment || 'app';
 		const envPrefix = environment === 'sandbox' ? 'sandbox' : 'app';
-		
+
 		this.baseUrl = config.baseUrl || `https://${envPrefix}.keez.ro/api/v1.0/public-api`;
 		this.tokenUrl = config.tokenUrl || `https://${envPrefix}.keez.ro/idp/connect/token`;
 	}
@@ -131,15 +150,14 @@ export class KeezClient {
 		const response = await fetch(this.tokenUrl, {
 			method: 'POST',
 			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
+				'Content-Type': 'application/x-www-form-urlencoded'
 			},
 			body: new URLSearchParams({
 				grant_type: 'client_credentials',
 				scope: 'public-api',
-                client_id: `app${this.applicationId}`,
-                client_secret: this.secret,
-                
-            })
+				client_id: `app${this.applicationId}`,
+				client_secret: this.secret
+			})
 		});
 
 		if (!response.ok) {
@@ -148,12 +166,12 @@ export class KeezClient {
 		}
 
 		const tokenData: KeezAccessToken = await response.json();
-		
+
 		// Cache token
 		this.cachedToken = tokenData.access_token;
 		const expiresIn = tokenData.expires_in || 3600; // Default to 1 hour
 		this.tokenExpiresAt = new Date(Date.now() + (expiresIn - 60) * 1000); // Subtract 60s for safety
-		
+
 		// Update base URL if provided in token response
 		if (tokenData.api_endpoint) {
 			this.baseUrl = tokenData.api_endpoint;
@@ -168,7 +186,7 @@ export class KeezClient {
 	private async request<T>(endpoint: string, options: RequestInit = {}, retries = 3): Promise<T> {
 		const token = await this.getAccessToken();
 		const url = `${this.baseUrl}${endpoint}`;
-		
+
 		const headers = {
 			'Content-Type': 'application/json',
 			Accept: 'application/json',
@@ -247,7 +265,7 @@ export class KeezClient {
 
 		const queryString = params.toString();
 		const endpoint = `/${this.clientEid}/invoices${queryString ? `?${queryString}` : ''}`;
-		
+
 		return this.request<KeezInvoiceListResponse>(endpoint, {
 			method: 'GET'
 		});
@@ -266,11 +284,14 @@ export class KeezClient {
 	 * Create invoice
 	 */
 	async createInvoice(invoice: KeezInvoice): Promise<KeezInvoiceResponse> {
-		const response = await this.request<string | { externalId: string }>(`/${this.clientEid}/invoices`, {
-			method: 'POST',
-			body: JSON.stringify(invoice)
-		});
-		
+		const response = await this.request<string | { externalId: string }>(
+			`/${this.clientEid}/invoices`,
+			{
+				method: 'POST',
+				body: JSON.stringify(invoice)
+			}
+		);
+
 		// Keez returns externalId as a string or object
 		if (typeof response === 'string') {
 			return { externalId: response };
@@ -331,13 +352,16 @@ export class KeezClient {
 	/**
 	 * Send invoice via email
 	 */
-	async sendInvoiceEmail(externalId: string, emailData: {
-		to?: string;
-		cc?: string;
-		bcc?: string;
-		subject?: string;
-		message?: string;
-	}): Promise<void> {
+	async sendInvoiceEmail(
+		externalId: string,
+		emailData: {
+			to?: string;
+			cc?: string;
+			bcc?: string;
+			subject?: string;
+			message?: string;
+		}
+	): Promise<void> {
 		await this.request(`/${this.clientEid}/invoices/${externalId}/email`, {
 			method: 'POST',
 			body: JSON.stringify(emailData)
@@ -370,7 +394,7 @@ export class KeezClient {
 
 		const queryString = params.toString();
 		const endpoint = `/${this.clientEid}/partners${queryString ? `?${queryString}` : ''}`;
-		
+
 		return this.request<KeezPartnerListResponse>(endpoint, {
 			method: 'GET'
 		});
@@ -393,7 +417,7 @@ export class KeezClient {
 			method: 'POST',
 			body: JSON.stringify(partner)
 		});
-		
+
 		return { externalId: response };
 	}
 }
