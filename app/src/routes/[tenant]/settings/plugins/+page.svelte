@@ -154,6 +154,22 @@
 							</div>
 						</CardContent>
 					{/if}
+					{#if plugin.name === 'keez'}
+						<CardContent>
+							<Separator class="mb-4" />
+							<div class="space-y-2">
+								<p class="text-sm font-medium">Keez Integration</p>
+								<p class="text-sm text-muted-foreground">
+									Connect your Keez account to sync invoices and import clients automatically.
+								</p>
+								{#if isEnabled}
+									<Button variant="outline" size="sm" href="/{tenantSlug}/settings/keez">
+										Configure Keez
+									</Button>
+								{/if}
+							</div>
+						</CardContent>
+					{/if}
 					{#if plugin.name === 'banking-revolut'}
 						<CardContent>
 							<Separator class="mb-4" />

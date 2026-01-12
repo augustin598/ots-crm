@@ -116,6 +116,7 @@ export const client = sqliteTable('client', {
 	county: text('county'),
 	postalCode: text('postal_code'),
 	country: text('country').default('România'),
+	keezPartnerId: text('keez_partner_id'),
 	notes: text('notes'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -366,6 +367,8 @@ export const invoice = sqliteTable('invoice', {
 	notes: text('notes'),
 	smartbillSeries: text('smartbill_series'),
 	smartbillNumber: text('smartbill_number'),
+	keezInvoiceId: text('keez_invoice_id'),
+	keezExternalId: text('keez_external_id'),
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -470,6 +473,10 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	smartbillStartNumber: text('smartbill_start_number'),
 	smartbillLastSyncedNumber: text('smartbill_last_synced_number'),
 	smartbillAutoSync: boolean('smartbill_auto_sync').notNull().default(false),
+	keezSeries: text('keez_series'),
+	keezStartNumber: text('keez_start_number'),
+	keezLastSyncedNumber: text('keez_last_synced_number'),
+	keezAutoSync: boolean('keez_auto_sync').notNull().default(false),
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
@@ -568,6 +575,70 @@ export const smartbillInvoiceSync = sqliteTable('smartbill_invoice_sync', {
 	syncDirection: text('sync_direction').notNull(), // 'push', 'pull', 'both'
 	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
 	syncStatus: text('sync_status').notNull().default('pending'), // 'pending', 'synced', 'error'
+	errorMessage: text('error_message'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const keezIntegration = sqliteTable('keez_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	clientEid: text('client_eid').notNull(),
+	applicationId: text('application_id').notNull(),
+	secret: text('secret').notNull(), // encrypted
+	accessToken: text('access_token'), // encrypted, cached token
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }),
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const keezInvoiceSync = sqliteTable('keez_invoice_sync', {
+	id: text('id').primaryKey(),
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	keezInvoiceId: text('keez_invoice_id').notNull(),
+	keezExternalId: text('keez_external_id'),
+	syncDirection: text('sync_direction').notNull(), // 'push', 'pull', 'both'
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+	syncStatus: text('sync_status').notNull().default('pending'), // 'pending', 'synced', 'error'
+	errorMessage: text('error_message'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const keezClientSync = sqliteTable('keez_client_sync', {
+	id: text('id').primaryKey(),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	keezPartnerId: text('keez_partner_id').notNull(),
+	keezExternalId: text('keez_external_id'),
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+	syncStatus: text('sync_status').notNull().default('synced'), // 'synced', 'error'
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -734,6 +805,7 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	invoiceSettings: one(invoiceSettings),
 	taskSettings: one(taskSettings),
 	smartbillIntegration: one(smartbillIntegration),
+	keezIntegration: one(keezIntegration),
 	revolutIntegration: one(revolutIntegration),
 	bankAccounts: many(bankAccount),
 	bankTransactions: many(bankTransaction),
@@ -941,6 +1013,7 @@ export const invoiceRelations = relations(invoice, ({ one, many }) => ({
 	}),
 	lineItems: many(invoiceLineItem),
 	smartbillSync: many(smartbillInvoiceSync),
+	keezSync: many(keezInvoiceSync),
 	matchedTransactions: many(bankTransaction),
 	transactionMatches: many(transactionInvoiceMatch)
 }));
@@ -1040,6 +1113,13 @@ export const smartbillIntegrationRelations = relations(smartbillIntegration, ({ 
 	})
 }));
 
+export const keezIntegrationRelations = relations(keezIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [keezIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
 export const revolutIntegrationRelations = relations(revolutIntegration, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [revolutIntegration.tenantId],
@@ -1054,6 +1134,28 @@ export const smartbillInvoiceSyncRelations = relations(smartbillInvoiceSync, ({ 
 	}),
 	tenant: one(tenant, {
 		fields: [smartbillInvoiceSync.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const keezInvoiceSyncRelations = relations(keezInvoiceSync, ({ one }) => ({
+	invoice: one(invoice, {
+		fields: [keezInvoiceSync.invoiceId],
+		references: [invoice.id]
+	}),
+	tenant: one(tenant, {
+		fields: [keezInvoiceSync.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const keezClientSyncRelations = relations(keezClientSync, ({ one }) => ({
+	client: one(client, {
+		fields: [keezClientSync.clientId],
+		references: [client.id]
+	}),
+	tenant: one(tenant, {
+		fields: [keezClientSync.tenantId],
 		references: [tenant.id]
 	})
 }));
@@ -1177,6 +1279,12 @@ export type SmartbillIntegration = typeof smartbillIntegration.$inferSelect;
 export type NewSmartbillIntegration = typeof smartbillIntegration.$inferInsert;
 export type SmartbillInvoiceSync = typeof smartbillInvoiceSync.$inferSelect;
 export type NewSmartbillInvoiceSync = typeof smartbillInvoiceSync.$inferInsert;
+export type KeezIntegration = typeof keezIntegration.$inferSelect;
+export type NewKeezIntegration = typeof keezIntegration.$inferInsert;
+export type KeezInvoiceSync = typeof keezInvoiceSync.$inferSelect;
+export type NewKeezInvoiceSync = typeof keezInvoiceSync.$inferInsert;
+export type KeezClientSync = typeof keezClientSync.$inferSelect;
+export type NewKeezClientSync = typeof keezClientSync.$inferInsert;
 export type RevolutIntegration = typeof revolutIntegration.$inferSelect;
 export type NewRevolutIntegration = typeof revolutIntegration.$inferInsert;
 export type BankAccount = typeof bankAccount.$inferSelect;

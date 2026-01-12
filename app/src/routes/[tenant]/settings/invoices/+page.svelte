@@ -18,6 +18,9 @@
 	let smartbillSeries = $state(settings?.smartbillSeries || '');
 	let smartbillStartNumber = $state(settings?.smartbillStartNumber || '');
 	let smartbillAutoSync = $state(settings?.smartbillAutoSync || false);
+	let keezSeries = $state(settings?.keezSeries || '');
+	let keezStartNumber = $state(settings?.keezStartNumber || '');
+	let keezAutoSync = $state(settings?.keezAutoSync || false);
 	let defaultCurrency = $state<Currency>((settings?.defaultCurrency || 'RON') as Currency);
 	let invoiceEmailsEnabled = $state(settings?.invoiceEmailsEnabled ?? true);
 	let saving = $state(false);
@@ -30,6 +33,9 @@
 			smartbillSeries = settings.smartbillSeries || '';
 			smartbillStartNumber = settings.smartbillStartNumber || '';
 			smartbillAutoSync = settings.smartbillAutoSync || false;
+			keezSeries = settings.keezSeries || '';
+			keezStartNumber = settings.keezStartNumber || '';
+			keezAutoSync = settings.keezAutoSync || false;
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
 		}
@@ -45,6 +51,9 @@
 				smartbillSeries: smartbillSeries || undefined,
 				smartbillStartNumber: smartbillStartNumber || undefined,
 				smartbillAutoSync,
+				keezSeries: keezSeries || undefined,
+				keezStartNumber: keezStartNumber || undefined,
+				keezAutoSync,
 				defaultCurrency: defaultCurrency || undefined,
 				invoiceEmailsEnabled
 			}).updates(settingsQuery);
@@ -128,6 +137,63 @@
 							</p>
 						</div>
 					{/if}
+
+					<Separator />
+
+					<h3 class="text-lg font-semibold">Keez Invoice Settings</h3>
+
+					<div class="space-y-2">
+						<Label for="keezSeries">Keez Invoice Series</Label>
+						<Input
+							id="keezSeries"
+							bind:value={keezSeries}
+							type="text"
+							placeholder="e.g., FAC"
+							maxlength={10}
+						/>
+						<p class="text-xs text-muted-foreground">
+							The invoice series name used in Keez (optional)
+						</p>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="keezStartNumber">Starting Invoice Number</Label>
+						<Input
+							id="keezStartNumber"
+							bind:value={keezStartNumber}
+							type="text"
+							placeholder="e.g., 0001"
+							maxlength={20}
+						/>
+						<p class="text-xs text-muted-foreground">
+							The starting invoice number for iteration (optional)
+						</p>
+					</div>
+
+					{#if settings?.keezLastSyncedNumber}
+						<div class="space-y-2">
+							<Label>Last Synced Number</Label>
+							<Input
+								type="text"
+								value={settings.keezLastSyncedNumber}
+								disabled
+								class="bg-muted"
+							/>
+							<p class="text-xs text-muted-foreground">
+								The last invoice external ID that was synced to/from Keez. This is updated automatically.
+							</p>
+						</div>
+					{/if}
+
+					<div class="flex items-center justify-between">
+						<div class="space-y-0.5">
+							<Label for="keezAutoSync">Automatic Sync</Label>
+							<p class="text-xs text-muted-foreground">
+								Automatically sync invoices to Keez when they are created
+							</p>
+						</div>
+						<Switch id="keezAutoSync" bind:checked={keezAutoSync} />
+					</div>
 
 					<Separator />
 

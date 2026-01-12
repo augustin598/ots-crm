@@ -1,6 +1,7 @@
 import { getPluginRegistry } from './registry';
 import { getPluginManager } from './manager';
 import { smartBillPlugin } from './smartbill/plugin';
+import { keezPlugin } from './keez/plugin';
 import { bankingRevolutPlugin } from './banking/revolut/plugin';
 import { bankingTransilvaniaPlugin } from './banking/transilvania/plugin';
 import { bankingBCRPlugin } from './banking/bcr/plugin';
@@ -19,6 +20,9 @@ export async function initializePlugins(): Promise<void> {
 	// Register SmartBill plugin
 	registry.register(smartBillPlugin);
 
+	// Register Keez plugin
+	registry.register(keezPlugin);
+
 	// Register Banking plugins
 	registry.register(bankingRevolutPlugin);
 	registry.register(bankingTransilvaniaPlugin);
@@ -26,6 +30,7 @@ export async function initializePlugins(): Promise<void> {
 
 	// Load plugin from database and ensure plugins are registered
 	await ensureSmartBillPluginInDatabase();
+	await ensureKeezPluginInDatabase();
 	await ensureBankingPluginsInDatabase();
 
 	// Initialize all registered plugins
@@ -58,6 +63,36 @@ async function ensureSmartBillPluginInDatabase(): Promise<void> {
 		}
 	} catch (error) {
 		console.error('[Plugins] Failed to ensure SmartBill plugin:', error);
+		// Don't throw - allow app to continue
+	}
+}
+
+/**
+ * Ensure Keez plugin exists in database
+ */
+async function ensureKeezPluginInDatabase(): Promise<void> {
+	try {
+		const [existing] = await db
+			.select()
+			.from(table.plugin)
+			.where(eq(table.plugin.name, 'keez'))
+			.limit(1);
+
+		if (!existing) {
+			const pluginId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.plugin).values({
+				id: pluginId,
+				name: 'keez',
+				displayName: 'Keez Integration',
+				description: 'Integrate with Keez for invoice management and syncing',
+				version: '1.0.0',
+				isActive: true,
+				config: {}
+			});
+			console.log('[Plugins] Created Keez plugin in database');
+		}
+	} catch (error) {
+		console.error('[Plugins] Failed to ensure Keez plugin:', error);
 		// Don't throw - allow app to continue
 	}
 }

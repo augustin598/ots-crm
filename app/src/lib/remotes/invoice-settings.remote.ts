@@ -29,6 +29,10 @@ export const getInvoiceSettings = query(async () => {
 			smartbillStartNumber: null,
 			smartbillLastSyncedNumber: null,
 			smartbillAutoSync: false,
+			keezSeries: null,
+			keezStartNumber: null,
+			keezLastSyncedNumber: null,
+			keezAutoSync: false,
 			defaultCurrency: 'RON',
 			invoiceEmailsEnabled: true
 		};
@@ -39,6 +43,10 @@ export const getInvoiceSettings = query(async () => {
 		smartbillStartNumber: settings.smartbillStartNumber,
 		smartbillLastSyncedNumber: settings.smartbillLastSyncedNumber,
 		smartbillAutoSync: settings.smartbillAutoSync,
+		keezSeries: settings.keezSeries,
+		keezStartNumber: settings.keezStartNumber,
+		keezLastSyncedNumber: settings.keezLastSyncedNumber,
+		keezAutoSync: settings.keezAutoSync,
 		defaultCurrency: settings.defaultCurrency || 'RON',
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true
 	};
@@ -49,6 +57,9 @@ export const updateInvoiceSettings = command(
 		smartbillSeries: v.optional(v.string()),
 		smartbillStartNumber: v.optional(v.string()),
 		smartbillAutoSync: v.optional(v.boolean()),
+		keezSeries: v.optional(v.string()),
+		keezStartNumber: v.optional(v.string()),
+		keezAutoSync: v.optional(v.boolean()),
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 		invoiceEmailsEnabled: v.optional(v.boolean())
 	}),
@@ -93,6 +104,10 @@ export const updateInvoiceSettings = command(
 				smartbillStartNumber: data.smartbillStartNumber || null,
 				smartbillLastSyncedNumber: null,
 				smartbillAutoSync: data.smartbillAutoSync ?? false,
+				keezSeries: data.keezSeries || null,
+				keezStartNumber: data.keezStartNumber || null,
+				keezLastSyncedNumber: null,
+				keezAutoSync: data.keezAutoSync ?? false,
 				defaultCurrency: data.defaultCurrency || 'RON',
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true
 			});

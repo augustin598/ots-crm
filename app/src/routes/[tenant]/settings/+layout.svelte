@@ -31,6 +31,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/settings/email`)) return 'email';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/plugins`)) return 'plugins';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/smartbill`)) return 'plugins'; // SmartBill is under plugins
+		if (currentPath.startsWith(`/${tenantSlug}/settings/keez`)) return 'plugins'; // Keez is under plugins
 		return 'general';
 	});
 
