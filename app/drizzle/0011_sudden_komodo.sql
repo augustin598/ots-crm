@@ -1,4 +1,4 @@
-CREATE TABLE `bank_account` (
+CREATE TABLE IF NOT EXISTS `bank_account` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`bank_name` text NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE `bank_account` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `bank_transaction` (
+CREATE TABLE IF NOT EXISTS `bank_transaction` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`bank_account_id` text NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE `bank_transaction` (
 	FOREIGN KEY (`matched_invoice_id`) REFERENCES `invoice`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `expense` (
+CREATE TABLE IF NOT EXISTS `expense` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`bank_transaction_id` text,
@@ -63,7 +63,7 @@ CREATE TABLE `expense` (
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `transaction_invoice_match` (
+CREATE TABLE IF NOT EXISTS `transaction_invoice_match` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`transaction_id` text NOT NULL,

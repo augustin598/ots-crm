@@ -1,4 +1,4 @@
-CREATE TABLE `task_settings` (
+CREATE TABLE IF NOT EXISTS `task_settings` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`task_reminders_enabled` number DEFAULT true NOT NULL,
@@ -7,8 +7,8 @@ CREATE TABLE `task_settings` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `task_settings_tenant_id_unique` ON `task_settings` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `task_watcher` (
+CREATE UNIQUE INDEX IF NOT EXISTS `task_settings_tenant_id_unique` ON `task_settings` (`tenant_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `task_watcher` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_id` text NOT NULL,
 	`user_id` text NOT NULL,

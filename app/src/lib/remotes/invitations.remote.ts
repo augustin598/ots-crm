@@ -95,7 +95,7 @@ export const sendInvitation = command(sendInvitationSchema, async (data) => {
 	// Send email
 	try {
 		const inviterName = `${event.locals.user.firstName} ${event.locals.user.lastName}`.trim() || event.locals.user.email;
-		await sendInvitationEmail(email, token, event.locals.tenant.name, inviterName);
+		await sendInvitationEmail(email, token, event.locals.tenant.name, inviterName, event.locals.tenant.id);
 	} catch (error) {
 		// If email fails, delete the invitation
 		await db.delete(table.invitation).where(eq(table.invitation.id, invitationId));

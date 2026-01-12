@@ -146,6 +146,22 @@ export const project = sqliteTable('project', {
 		.default(sql`current_date`)
 });
 
+export const projectUser = sqliteTable('project_user', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => project.id),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const milestone = sqliteTable('milestone', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -479,6 +495,47 @@ export const taskSettings = sqliteTable('task_settings', {
 		.default(sql`current_date`)
 });
 
+export const userWorkHours = sqliteTable('user_work_hours', {
+	id: text('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	workStartTime: text('work_start_time'), // Format "HH:MM", e.g., "09:00"
+	workEndTime: text('work_end_time'), // Format "HH:MM", e.g., "17:00"
+	workDays: jsonb('work_days').$type<string[]>(), // Array of day names: ["monday", "tuesday", ...]
+	remindersEnabled: boolean('reminders_enabled').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const emailSettings = sqliteTable('email_settings', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	smtpHost: text('smtp_host'),
+	smtpPort: integer('smtp_port').default(587),
+	smtpSecure: boolean('smtp_secure').default(false), // true for 465, false for other ports
+	smtpUser: text('smtp_user'),
+	smtpPassword: text('smtp_password'), // encrypted
+	smtpFrom: text('smtp_from'), // From email address (optional, defaults to smtp_user)
+	isEnabled: boolean('is_enabled').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const smartbillIntegration = sqliteTable('smartbill_integration', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -648,9 +705,11 @@ export const userRelations = relations(user, ({ many }) => ({
 	expenses: many(expense),
 	transactionMatches: many(transactionInvoiceMatch),
 	taskWatchers: many(taskWatcher),
+	projectUsers: many(projectUser),
 	createdTasks: many(task, {
 		relationName: 'createdTasks'
-	})
+	}),
+	workHours: many(userWorkHours)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -679,7 +738,8 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	bankAccounts: many(bankAccount),
 	bankTransactions: many(bankTransaction),
 	expenses: many(expense),
-	transactionInvoiceMatches: many(transactionInvoiceMatch)
+	transactionInvoiceMatches: many(transactionInvoiceMatch),
+	userWorkHours: many(userWorkHours)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -720,7 +780,8 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 	documents: many(document),
 	services: many(service),
 	invoices: many(invoice),
-	expenses: many(expense)
+	expenses: many(expense),
+	projectUsers: many(projectUser)
 }));
 
 export const milestoneRelations = relations(milestone, ({ one, many }) => ({
@@ -787,6 +848,21 @@ export const taskWatcherRelations = relations(taskWatcher, ({ one }) => ({
 	}),
 	tenant: one(tenant, {
 		fields: [taskWatcher.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const projectUserRelations = relations(projectUser, ({ one }) => ({
+	project: one(project, {
+		fields: [projectUser.projectId],
+		references: [project.id]
+	}),
+	user: one(user, {
+		fields: [projectUser.userId],
+		references: [user.id]
+	}),
+	tenant: one(tenant, {
+		fields: [projectUser.tenantId],
 		references: [tenant.id]
 	})
 }));
@@ -939,6 +1015,24 @@ export const taskSettingsRelations = relations(taskSettings, ({ one }) => ({
 	})
 }));
 
+export const userWorkHoursRelations = relations(userWorkHours, ({ one }) => ({
+	user: one(user, {
+		fields: [userWorkHours.userId],
+		references: [user.id]
+	}),
+	tenant: one(tenant, {
+		fields: [userWorkHours.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const emailSettingsRelations = relations(emailSettings, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [emailSettings.tenantId],
+		references: [tenant.id]
+	})
+}));
+
 export const smartbillIntegrationRelations = relations(smartbillIntegration, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [smartbillIntegration.tenantId],
@@ -1075,6 +1169,10 @@ export type InvoiceSettings = typeof invoiceSettings.$inferSelect;
 export type NewInvoiceSettings = typeof invoiceSettings.$inferInsert;
 export type TaskSettings = typeof taskSettings.$inferSelect;
 export type NewTaskSettings = typeof taskSettings.$inferInsert;
+export type UserWorkHours = typeof userWorkHours.$inferSelect;
+export type NewUserWorkHours = typeof userWorkHours.$inferInsert;
+export type EmailSettings = typeof emailSettings.$inferSelect;
+export type NewEmailSettings = typeof emailSettings.$inferInsert;
 export type SmartbillIntegration = typeof smartbillIntegration.$inferSelect;
 export type NewSmartbillIntegration = typeof smartbillIntegration.$inferInsert;
 export type SmartbillInvoiceSync = typeof smartbillInvoiceSync.$inferSelect;

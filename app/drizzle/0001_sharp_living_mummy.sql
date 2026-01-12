@@ -1,4 +1,4 @@
-CREATE TABLE `task_comment` (
+CREATE TABLE IF NOT EXISTS `task_comment` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_id` text NOT NULL,
 	`user_id` text NOT NULL,

@@ -4,12 +4,16 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { db } from './db';
 import * as table from './db/schema';
 import { eq, and } from 'drizzle-orm';
+import { decrypt } from './plugins/smartbill/crypto';
 
-let transporter: nodemailer.Transporter | null = null;
+// Cache tenant-specific transporters
+const tenantTransporters = new Map<string, nodemailer.Transporter>();
 
-function getTransporter(): nodemailer.Transporter {
-	if (transporter) {
-		return transporter;
+let defaultTransporter: nodemailer.Transporter | null = null;
+
+function getDefaultTransporter(): nodemailer.Transporter {
+	if (defaultTransporter) {
+		return defaultTransporter;
 	}
 
 	// Check if SMTP is configured
@@ -18,7 +22,7 @@ function getTransporter(): nodemailer.Transporter {
 			'SMTP not configured. Email sending will be disabled. Set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD environment variables.'
 		);
 		// Create a test transporter that won't actually send emails
-		transporter = nodemailer.createTransport({
+		defaultTransporter = nodemailer.createTransport({
 			host: 'localhost',
 			port: 1025,
 			secure: false,
@@ -27,10 +31,10 @@ function getTransporter(): nodemailer.Transporter {
 				pass: 'test'
 			}
 		});
-		return transporter;
+		return defaultTransporter;
 	}
 
-	transporter = nodemailer.createTransport({
+	defaultTransporter = nodemailer.createTransport({
 		host: env.SMTP_HOST,
 		port: parseInt(env.SMTP_PORT || '587'),
 		secure: env.SMTP_PORT === '465', // true for 465, false for other ports
@@ -40,20 +44,111 @@ function getTransporter(): nodemailer.Transporter {
 		}
 	});
 
-	return transporter;
+	return defaultTransporter;
+}
+
+/**
+ * Get tenant-specific transporter or fall back to environment variables
+ */
+export async function getTenantTransporter(
+	tenantId: string
+): Promise<nodemailer.Transporter | null> {
+	// Check cache first
+	if (tenantTransporters.has(tenantId)) {
+		return tenantTransporters.get(tenantId)!;
+	}
+
+	// Load email settings from database
+	let emailSettings: typeof table.emailSettings.$inferSelect | undefined;
+	try {
+		const [settings] = await db
+			.select()
+			.from(table.emailSettings)
+			.where(eq(table.emailSettings.tenantId, tenantId))
+			.limit(1);
+
+		emailSettings = settings;
+	} catch (error) {
+		console.error('Failed to load email settings:', error);
+	}
+
+	// If tenant has email settings configured and enabled, use them
+	if (
+		emailSettings &&
+		emailSettings.isEnabled &&
+		emailSettings.smtpHost &&
+		emailSettings.smtpUser &&
+		emailSettings.smtpPassword
+	) {
+		try {
+			// Decrypt password
+			const decryptedPassword = decrypt(tenantId, emailSettings.smtpPassword);
+
+			// Create transporter with tenant-specific settings
+			const transporter = nodemailer.createTransport({
+				host: emailSettings.smtpHost,
+				port: emailSettings.smtpPort || 587,
+				secure: emailSettings.smtpSecure || false,
+				auth: {
+					user: emailSettings.smtpUser,
+					pass: decryptedPassword
+				}
+			});
+
+			// Cache the transporter
+			tenantTransporters.set(tenantId, transporter);
+			return transporter;
+		} catch (error) {
+			console.error('Failed to create tenant-specific transporter:', error);
+			// Fall through to default transporter
+		}
+	}
+
+	// Fall back to environment variables (default transporter)
+	return getDefaultTransporter();
+}
+
+/**
+ * Clear cached transporter for a tenant (call this when settings are updated)
+ */
+export function clearTenantTransporterCache(tenantId: string): void {
+	tenantTransporters.delete(tenantId);
+}
+
+/**
+ * @deprecated Use getTenantTransporter(tenantId) instead
+ */
+function getTransporter(): nodemailer.Transporter {
+	return getDefaultTransporter();
 }
 
 export async function sendInvitationEmail(
 	email: string,
 	invitationToken: string,
 	tenantName: string,
-	inviterName: string
+	inviterName: string,
+	tenantId: string
 ): Promise<void> {
-	const transporter = getTransporter();
+	const transporter = await getTenantTransporter(tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
@@ -98,20 +193,19 @@ export async function sendInvitationEmail(
 		`
 	};
 
-		try {
-			await transporter.sendMail(mailOptions);
-			console.log(`Invitation email sent to ${email}`);
-		} catch (error) {
-			console.error('Failed to send invitation email:', error);
-			throw new Error('Failed to send invitation email');
-		}
+	try {
+		await transporter.sendMail(mailOptions);
+		console.log(`Invitation email sent to ${email}`);
+	} catch (error) {
+		console.error('Failed to send invitation email:', error);
+		throw new Error('Failed to send invitation email');
 	}
+}
 
 /**
  * Send invoice email to client
  */
 export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): Promise<void> {
-	const transporter = getTransporter();
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get invoice details
@@ -123,6 +217,12 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 	if (!invoice) {
 		throw new Error('Invoice not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(invoice.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
 	}
 
 	// Get client details
@@ -139,7 +239,19 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		.where(eq(table.tenant.id, invoice.tenantId))
 		.limit(1);
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
 	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
 
@@ -220,18 +332,19 @@ export async function sendTaskAssignmentEmail(
 	assigneeEmail: string,
 	assigneeName?: string
 ): Promise<void> {
-	const transporter = getTransporter();
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get task details
-	const [task] = await db
-		.select()
-		.from(table.task)
-		.where(eq(table.task.id, taskId))
-		.limit(1);
+	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task) {
 		throw new Error('Task not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(task.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
 	}
 
 	// Get tenant details
@@ -241,7 +354,19 @@ export async function sendTaskAssignmentEmail(
 		.where(eq(table.tenant.id, task.tenantId))
 		.limit(1);
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, task.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
 	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -311,18 +436,19 @@ export async function sendTaskUpdateEmail(
 	watcherName?: string,
 	changeType?: string
 ): Promise<void> {
-	const transporter = getTransporter();
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get task details
-	const [task] = await db
-		.select()
-		.from(table.task)
-		.where(eq(table.task.id, taskId))
-		.limit(1);
+	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task) {
 		throw new Error('Task not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(task.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
 	}
 
 	// Get tenant details
@@ -332,7 +458,19 @@ export async function sendTaskUpdateEmail(
 		.where(eq(table.tenant.id, task.tenantId))
 		.limit(1);
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, task.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
 	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -409,7 +547,6 @@ export async function sendTaskUpdateEmail(
  * Send invoice paid confirmation email
  */
 export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: string): Promise<void> {
-	const transporter = getTransporter();
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get invoice details
@@ -421,6 +558,12 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 
 	if (!invoice) {
 		throw new Error('Invoice not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(invoice.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
 	}
 
 	// Get client details
@@ -437,7 +580,19 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		.where(eq(table.tenant.id, invoice.tenantId))
 		.limit(1);
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
 	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
 
@@ -517,18 +672,19 @@ export async function sendTaskReminderEmail(
 	assigneeEmail: string,
 	assigneeName?: string
 ): Promise<void> {
-	const transporter = getTransporter();
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get task details
-	const [task] = await db
-		.select()
-		.from(table.task)
-		.where(eq(table.task.id, taskId))
-		.limit(1);
+	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task || !task.dueDate) {
 		throw new Error('Task not found or has no due date');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(task.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
 	}
 
 	// Get tenant details
@@ -538,7 +694,19 @@ export async function sendTaskReminderEmail(
 		.where(eq(table.tenant.id, task.tenantId))
 		.limit(1);
 
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, task.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
 	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -603,5 +771,164 @@ export async function sendTaskReminderEmail(
 	} catch (error) {
 		console.error('Failed to send task reminder email:', error);
 		throw new Error('Failed to send task reminder email');
+	}
+}
+
+/**
+ * Send daily work reminder email with tasks scheduled for today
+ */
+export async function sendDailyWorkReminderEmail(
+	userId: string,
+	tenantId: string,
+	tasks: Array<typeof table.task.$inferSelect>,
+	userName: string
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	// Get user details
+	const [user] = await db.select().from(table.user).where(eq(table.user.id, userId)).limit(1);
+
+	if (!user?.email) {
+		throw new Error('User email not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
+
+	// Get tenant details
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantId))
+		.limit(1);
+
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
+	const tenantName = tenant?.name || 'CRM';
+	const myPlansUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/my-plans`;
+
+	// Format priority badge color
+	const getPriorityColor = (priority: string | null) => {
+		switch (priority) {
+			case 'urgent':
+				return '#dc2626';
+			case 'high':
+				return '#f59e0b';
+			case 'medium':
+				return '#2563eb';
+			case 'low':
+				return '#10b981';
+			default:
+				return '#6b7280';
+		}
+	};
+
+	// Format tasks list HTML
+	const tasksListHtml = tasks
+		.map((task) => {
+			const priorityColor = getPriorityColor(task.priority);
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
+			const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date';
+			return `
+				<div style="background-color: white; padding: 16px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid ${priorityColor};">
+					<h3 style="margin: 0 0 8px 0; color: #2563eb;">
+						<a href="${taskUrl}" style="color: #2563eb; text-decoration: none;">${task.title}</a>
+					</h3>
+					${task.description ? `<p style="color: #666; margin: 8px 0; font-size: 14px;">${task.description}</p>` : ''}
+					<div style="display: flex; gap: 16px; margin-top: 12px; font-size: 14px;">
+						<span><strong>Priority:</strong> <span style="color: ${priorityColor};">${task.priority || 'Medium'}</span></span>
+						<span><strong>Status:</strong> ${task.status || 'Todo'}</span>
+						<span><strong>Due:</strong> ${dueDate}</span>
+					</div>
+				</div>
+			`;
+		})
+		.join('');
+
+	// Format tasks list text
+	const tasksListText = tasks
+		.map((task) => {
+			const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date';
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
+			return `
+${task.title}
+${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority || 'Medium'}
+  Status: ${task.status || 'Todo'}
+  Due: ${dueDate}
+  View: ${taskUrl}
+`;
+		})
+		.join('\n---\n');
+
+	const today = new Date().toLocaleDateString('en-US', {
+		weekday: 'long',
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric'
+	});
+
+	const mailOptions = {
+		from: `"${tenantName}" <${fromEmail}>`,
+		to: user.email,
+		subject: `Your Daily Work Plan - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} for today`,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Daily Work Reminder</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: #2563eb; margin-top: 0;">Good Morning, ${userName}!</h1>
+					<p>Here's your work plan for <strong>${today}</strong>:</p>
+					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
+						<h2 style="margin-top: 0; color: #2563eb;">You have ${tasks.length} task${tasks.length !== 1 ? 's' : ''} scheduled for today</h2>
+						${tasksListHtml}
+					</div>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${myPlansUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View My Plans</a>
+					</div>
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">Have a productive day!</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+			Good Morning, ${userName}!
+
+			Here's your work plan for ${today}:
+
+			You have ${tasks.length} task${tasks.length !== 1 ? 's' : ''} scheduled for today:
+
+			${tasksListText}
+
+			View My Plans: ${myPlansUrl}
+
+			Have a productive day!
+		`
+	};
+
+	try {
+		await transporter.sendMail(mailOptions);
+		console.log(`Daily work reminder email sent to ${user.email} with ${tasks.length} tasks`);
+	} catch (error) {
+		console.error('Failed to send daily work reminder email:', error);
+		throw new Error('Failed to send daily work reminder email');
 	}
 }

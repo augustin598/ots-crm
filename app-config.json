@@ -19,7 +19,8 @@
         "MINIO_PORT": "443",
         "MINIO_PUBLIC_URL": "https://s3.navitech.cloud",
         "REDIS_URL": "redis://:Awesome-pass-11@database-5d419200-418d-4659-8e91-e0825fc52569.crm.svc.cluster.local:6379",
-        "ENCRYPTION_SECRET": "Awesome-pass-11-1234567890@#$%^&*()"
+        "ENCRYPTION_SECRET": "Awesome-pass-11-1234567890@#$%^&*()",
+        "PUBLIC_APP_URL": "https://crm.navitech.cloud"
       }
     }
   ],

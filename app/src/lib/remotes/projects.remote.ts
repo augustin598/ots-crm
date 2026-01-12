@@ -10,6 +10,11 @@ function generateProjectId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+function generateProjectUserId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
 const projectSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
 	description: v.optional(v.string()),
@@ -39,27 +44,24 @@ export const getProjects = query(
 	}
 );
 
-export const getProject = query(
-	v.pipe(v.string(), v.minLength(1)),
-	async (projectId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		const [project] = await db
-			.select()
-			.from(table.project)
-			.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!project) {
-			throw new Error('Project not found');
-		}
-
-		return project;
+export const getProject = query(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	const [project] = await db
+		.select()
+		.from(table.project)
+		.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!project) {
+		throw new Error('Project not found');
+	}
+
+	return project;
+});
 
 export const createProject = command(projectSchema, async (data) => {
 	const event = getRequestEvent();
@@ -72,7 +74,9 @@ export const createProject = command(projectSchema, async (data) => {
 		const [client] = await db
 			.select()
 			.from(table.client)
-			.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+			.where(
+				and(eq(table.client.id, data.clientId), eq(table.client.tenantId, event.locals.tenant.id))
+			)
 			.limit(1);
 
 		if (!client) {
@@ -123,7 +127,9 @@ export const updateProject = command(
 		const [existing] = await db
 			.select()
 			.from(table.project)
-			.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
+			.where(
+				and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id))
+			)
 			.limit(1);
 
 		if (!existing) {
@@ -135,7 +141,12 @@ export const updateProject = command(
 			const [client] = await db
 				.select()
 				.from(table.client)
-				.where(and(eq(table.client.id, updateData.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+				.where(
+					and(
+						eq(table.client.id, updateData.clientId),
+						eq(table.client.tenantId, event.locals.tenant.id)
+					)
+				)
 				.limit(1);
 
 			if (!client) {
@@ -149,7 +160,12 @@ export const updateProject = command(
 			status: updateData.status !== undefined ? updateData.status : undefined,
 			startDate: updateData.startDate ? new Date(updateData.startDate) : undefined,
 			endDate: updateData.endDate ? new Date(updateData.endDate) : undefined,
-			budget: updateData.budget !== undefined ? (updateData.budget ? Math.round(updateData.budget * 100) : null) : undefined,
+			budget:
+				updateData.budget !== undefined
+					? updateData.budget
+						? Math.round(updateData.budget * 100)
+						: null
+					: undefined,
 			currency: updateData.currency !== undefined ? updateData.currency : undefined,
 			updatedAt: new Date()
 		};
@@ -158,16 +174,34 @@ export const updateProject = command(
 			updateValues.clientId = updateData.clientId || null;
 		}
 
-		await db
-			.update(table.project)
-			.set(updateValues)
-			.where(eq(table.project.id, projectId));
+		await db.update(table.project).set(updateValues).where(eq(table.project.id, projectId));
 
 		return { success: true };
 	}
 );
 
-export const deleteProject = command(
+export const deleteProject = command(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [existing] = await db
+		.select()
+		.from(table.project)
+		.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!existing) {
+		throw new Error('Project not found');
+	}
+
+	await db.delete(table.project).where(eq(table.project.id, projectId));
+
+	return { success: true };
+});
+
+export const getProjectTeamMembers = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (projectId) => {
 		const event = getRequestEvent();
@@ -175,17 +209,105 @@ export const deleteProject = command(
 			throw new Error('Unauthorized');
 		}
 
-		const [existing] = await db
+		// Verify project belongs to tenant
+		const [project] = await db
 			.select()
 			.from(table.project)
-			.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
+			.where(
+				and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id))
+			)
 			.limit(1);
 
-		if (!existing) {
+		if (!project) {
 			throw new Error('Project not found');
 		}
 
-		await db.delete(table.project).where(eq(table.project.id, projectId));
+		// Get team members with user details
+		const teamMembers = await db
+			.select({
+				id: table.user.id,
+				email: table.user.email,
+				firstName: table.user.firstName,
+				lastName: table.user.lastName
+			})
+			.from(table.projectUser)
+			.innerJoin(table.user, eq(table.projectUser.userId, table.user.id))
+			.where(
+				and(
+					eq(table.projectUser.projectId, projectId),
+					eq(table.projectUser.tenantId, event.locals.tenant.id)
+				)
+			);
+
+		return teamMembers;
+	}
+);
+
+export const updateProjectTeamMembers = command(
+	v.object({
+		projectId: v.pipe(v.string(), v.minLength(1)),
+		userIds: v.array(v.pipe(v.string(), v.minLength(1)))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const { projectId, userIds } = data;
+
+		// Verify project belongs to tenant
+		const [project] = await db
+			.select()
+			.from(table.project)
+			.where(
+				and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id))
+			)
+			.limit(1);
+
+		if (!project) {
+			throw new Error('Project not found');
+		}
+
+		// Verify all users belong to tenant
+		if (userIds.length > 0) {
+			const tenantUsers = await db
+				.select({ userId: table.tenantUser.userId })
+				.from(table.tenantUser)
+				.where(eq(table.tenantUser.tenantId, event.locals.tenant.id));
+
+			const validUserIds = new Set(tenantUsers.map((tu) => tu.userId));
+			const invalidUserIds = userIds.filter((userId) => !validUserIds.has(userId));
+
+			if (invalidUserIds.length > 0) {
+				throw new Error('Some users do not belong to this tenant');
+			}
+		}
+
+		// Use transaction to delete existing and insert new relationships
+		await db.transaction(async (tx) => {
+			// Delete existing project-user relationships
+			await tx
+				.delete(table.projectUser)
+				.where(
+					and(
+						eq(table.projectUser.projectId, projectId),
+						eq(table.projectUser.tenantId, event.locals.tenant.id)
+					)
+				);
+
+			// Insert new relationships
+			if (userIds.length > 0) {
+				await tx.insert(table.projectUser).values(
+					userIds.map((userId) => ({
+						id: generateProjectUserId(),
+						tenantId: event.locals.tenant.id,
+						projectId,
+						userId
+					}))
+				);
+			}
+		});
 
 		return { success: true };
 	}

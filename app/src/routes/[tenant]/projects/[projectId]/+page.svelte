@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { getProject } from '$lib/remotes/projects.remote';
+	import { getProject, getProjectTeamMembers, updateProjectTeamMembers } from '$lib/remotes/projects.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getMilestones, createMilestone, updateMilestone, deleteMilestone } from '$lib/remotes/milestones.remote';
+	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -29,6 +30,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import {
 		Calendar,
 		DollarSign,
@@ -37,12 +39,13 @@
 		Circle,
 		Clock,
 		Plus,
-		MoreVertical
+		MoreVertical,
+		Pencil
 	} from '@lucide/svelte';
 	import type { Milestone } from '$lib/server/db/schema';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const projectId = $derived(page.params.projectId);
+	const projectId = $derived(page.params.projectId as string);
 
 	const projectQuery = getProject(projectId);
 	const project = $derived(projectQuery.current);
@@ -58,6 +61,14 @@
 
 	const milestonesQuery = getMilestones(projectId);
 	const milestones = $derived(milestonesQuery.current || []);
+
+	// Get team members for the project
+	const teamMembersQuery = $derived(getProjectTeamMembers(projectId));
+	const teamMembers = $derived(teamMembersQuery.current || []);
+
+	// Get all tenant users for the edit dialog
+	const tenantUsersQuery = getTenantUsers();
+	const tenantUsers = $derived(tenantUsersQuery.current || []);
 
 	// Calculate progress from tasks
 	const projectProgress = $derived.by(() => {
@@ -177,24 +188,63 @@
 		}
 	}
 
-	// Extract unique team members from tasks
-	type TeamMember = {
-		id: string;
-		name: string;
-	};
+	// Team members dialog state
+	let isTeamMembersDialogOpen = $state(false);
+	let selectedUserIds = $state<string[]>([]);
+	let teamMembersLoading = $state(false);
+	let teamMembersError = $state<string | null>(null);
 
-	const teamMembers = $derived.by((): TeamMember[] => {
-		const userIds = new Set<string>();
-		tasks.forEach((task) => {
-			if (task.assignedToUserId) {
-				userIds.add(task.assignedToUserId);
-			}
-		});
-		return Array.from(userIds).map((userId) => ({
-			id: userId,
-			name: userId.substring(0, 8) // Show first 8 chars as placeholder
-		}));
+	// Helper function to get user display name
+	function getUserDisplayName(user: { firstName: string; lastName: string; email: string }): string {
+		const fullName = `${user.firstName} ${user.lastName}`.trim();
+		return fullName || user.email;
+	}
+
+	// Helper function to get user initials
+	function getUserInitials(user: { firstName: string; lastName: string; email: string }): string {
+		const fullName = `${user.firstName} ${user.lastName}`.trim();
+		if (fullName) {
+			return fullName
+				.split(' ')
+				.map((n) => n[0])
+				.join('')
+				.toUpperCase()
+				.substring(0, 2);
+		}
+		return user.email.substring(0, 2).toUpperCase();
+	}
+
+	// Initialize selected users when dialog opens
+	$effect(() => {
+		if (isTeamMembersDialogOpen) {
+			selectedUserIds = teamMembers.map((member) => member.id);
+		}
 	});
+
+	function toggleUserSelection(userId: string) {
+		if (selectedUserIds.includes(userId)) {
+			selectedUserIds = selectedUserIds.filter((id) => id !== userId);
+		} else {
+			selectedUserIds = [...selectedUserIds, userId];
+		}
+	}
+
+	async function handleSaveTeamMembers() {
+		teamMembersLoading = true;
+		teamMembersError = null;
+
+		try {
+			await updateProjectTeamMembers({
+				projectId,
+				userIds: selectedUserIds
+			}).updates(getProjectTeamMembers(projectId));
+			isTeamMembersDialogOpen = false;
+		} catch (e) {
+			teamMembersError = e instanceof Error ? e.message : 'Failed to update team members';
+		} finally {
+			teamMembersLoading = false;
+		}
+	}
 
 </script>
 
@@ -496,7 +546,56 @@
 
 		<!-- Team Section -->
 		<Card class="p-6">
-			<h3 class="text-lg font-semibold mb-4">Team Members</h3>
+			<div class="flex items-center justify-between mb-4">
+				<h3 class="text-lg font-semibold">Team Members</h3>
+				<Dialog bind:open={isTeamMembersDialogOpen}>
+					<DialogTrigger>
+						<Button variant="outline" size="sm" onclick={() => (isTeamMembersDialogOpen = true)}>
+							<Pencil class="mr-2 h-4 w-4" />
+							Edit Team Members
+						</Button>
+					</DialogTrigger>
+					<DialogContent class="sm:max-w-[500px]">
+						<DialogHeader>
+							<DialogTitle>Edit Team Members</DialogTitle>
+							<DialogDescription>Select team members for this project</DialogDescription>
+						</DialogHeader>
+						<div class="grid gap-4 py-4">
+							<div class="space-y-2 max-h-[400px] overflow-y-auto">
+								{#if tenantUsers.length === 0}
+									<p class="text-muted-foreground">No users available.</p>
+								{:else}
+									{#each tenantUsers as user}
+										<div class="flex items-center space-x-2">
+											<Checkbox
+												checked={selectedUserIds.includes(user.id)}
+												onCheckedChange={() => toggleUserSelection(user.id)}
+												id={`team-member-${user.id}`}
+											/>
+											<Label for={`team-member-${user.id}`} class="cursor-pointer flex-1">
+												{getUserDisplayName(user)}
+											</Label>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</div>
+						{#if teamMembersError}
+							<div class="rounded-md bg-red-50 p-3">
+								<p class="text-sm text-red-800">{teamMembersError}</p>
+							</div>
+						{/if}
+						<DialogFooter>
+							<Button variant="outline" onclick={() => (isTeamMembersDialogOpen = false)}>
+								Cancel
+							</Button>
+							<Button onclick={handleSaveTeamMembers} disabled={teamMembersLoading}>
+								{teamMembersLoading ? 'Saving...' : 'Save Changes'}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+			</div>
 			<div class="grid gap-4 md:grid-cols-2">
 				{#if teamMembers.length === 0}
 					<p class="text-muted-foreground">No team members assigned yet.</p>
@@ -507,10 +606,10 @@
 								<div
 									class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground text-lg font-semibold"
 								>
-									{member.name.substring(0, 2).toUpperCase()}
+									{getUserInitials(member)}
 								</div>
 								<div>
-									<h4 class="font-semibold">{member.name}</h4>
+									<h4 class="font-semibold">{getUserDisplayName(member)}</h4>
 									<p class="text-sm text-muted-foreground">Team Member</p>
 								</div>
 							</div>

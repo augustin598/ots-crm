@@ -9,6 +9,7 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import FolderKanbanIcon from '@lucide/svelte/icons/folder-kanban';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import BriefcaseIcon from '@lucide/svelte/icons/briefcase';
@@ -136,6 +137,16 @@
 							<a href="/{tenantSlug}/tasks" {...props}>
 								<CheckSquareIcon />
 								<span>Tasks</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/my-plans`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/my-plans" {...props}>
+								<CalendarIcon />
+								<span>My Plans</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

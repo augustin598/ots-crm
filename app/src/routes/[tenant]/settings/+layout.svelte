@@ -2,7 +2,7 @@
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { page } from '$app/state';
-	import { Settings, Receipt, Plug, CheckSquare } from '@lucide/svelte';
+	import { Settings, Receipt, Plug, CheckSquare, Mail, Calendar } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 
 	let { data, children }: { data: PageData; children: any } = $props();
@@ -16,7 +16,9 @@
 		{ id: 'general', label: 'General', href: `/${tenantSlug}/settings`, icon: Settings },
 		{ id: 'invoices', label: 'Invoices', href: `/${tenantSlug}/settings/invoices`, icon: Receipt },
 		{ id: 'tasks', label: 'Tasks', href: `/${tenantSlug}/settings/tasks`, icon: CheckSquare },
+		{ id: 'my-plans', label: 'My Plans', href: `/${tenantSlug}/settings/my-plans`, icon: Calendar },
 		{ id: 'banking', label: 'Banking', href: `/${tenantSlug}/settings/banking`, icon: CreditCard },
+		{ id: 'email', label: 'Email', href: `/${tenantSlug}/settings/email`, icon: Mail },
 		{ id: 'plugins', label: 'Plugins', href: `/${tenantSlug}/settings/plugins`, icon: Plug }
 	];
 
@@ -24,7 +26,9 @@
 		if (currentPath === `/${tenantSlug}/settings` || currentPath === `/${tenantSlug}/settings/`) return 'general';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/invoices`)) return 'invoices';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/tasks`)) return 'tasks';
+		if (currentPath.startsWith(`/${tenantSlug}/settings/my-plans`)) return 'my-plans';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/banking`)) return 'banking';
+		if (currentPath.startsWith(`/${tenantSlug}/settings/email`)) return 'email';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/plugins`)) return 'plugins';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/smartbill`)) return 'plugins'; // SmartBill is under plugins
 		return 'general';
@@ -45,7 +49,7 @@
 	</div>
 
 	<Tabs value={activeTab()} class="w-full">
-		<TabsList class="grid w-full grid-cols-5">
+		<TabsList class="grid w-full grid-cols-7">
 			{#each tabs as tab}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					<svelte:component this={tab.icon} class="h-4 w-4 mr-2" />

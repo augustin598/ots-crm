@@ -1,4 +1,4 @@
-CREATE TABLE `document_template` (
+CREATE TABLE IF NOT EXISTS `document_template` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`name` text NOT NULL,

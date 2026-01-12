@@ -1,4 +1,4 @@
-CREATE TABLE `revolut_integration` (
+CREATE TABLE IF NOT EXISTS `revolut_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text,
@@ -11,4 +11,4 @@ CREATE TABLE `revolut_integration` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `revolut_integration_tenant_id_unique` ON `revolut_integration` (`tenant_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `revolut_integration_tenant_id_unique` ON `revolut_integration` (`tenant_id`);

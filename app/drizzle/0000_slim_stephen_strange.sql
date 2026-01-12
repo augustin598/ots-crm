@@ -1,4 +1,4 @@
-CREATE TABLE `client` (
+CREATE TABLE IF NOT EXISTS `client` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`name` text NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE `client` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `contract_template` (
+CREATE TABLE IF NOT EXISTS `contract_template` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`name` text NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE `contract_template` (
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `document` (
+CREATE TABLE IF NOT EXISTS `document` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE `document` (
 	FOREIGN KEY (`uploaded_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `invoice` (
+CREATE TABLE IF NOT EXISTS `invoice` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE `invoice` (
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `project` (
+CREATE TABLE IF NOT EXISTS `project` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE `project` (
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `service` (
+CREATE TABLE IF NOT EXISTS `service` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -118,14 +118,14 @@ CREATE TABLE `service` (
 	FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `session` (
+CREATE TABLE IF NOT EXISTS `session` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`expires_at` timestamp NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `task` (
+CREATE TABLE IF NOT EXISTS `task` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`project_id` text,
@@ -144,7 +144,7 @@ CREATE TABLE `task` (
 	FOREIGN KEY (`assigned_to_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `tenant` (
+CREATE TABLE IF NOT EXISTS `tenant` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`slug` text NOT NULL,
@@ -165,9 +165,9 @@ CREATE TABLE `tenant` (
 	`updated_at` timestamp DEFAULT current_date NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `tenant_slug_unique` ON `tenant` (`slug`);--> statement-breakpoint
-CREATE UNIQUE INDEX `tenant_cui_unique` ON `tenant` (`cui`);--> statement-breakpoint
-CREATE TABLE `tenant_user` (
+CREATE UNIQUE INDEX IF NOT EXISTS `tenant_slug_unique` ON `tenant` (`slug`);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `tenant_cui_unique` ON `tenant` (`cui`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `tenant_user` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`user_id` text NOT NULL,
@@ -177,11 +177,11 @@ CREATE TABLE `tenant_user` (
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `user` (
+CREATE TABLE IF NOT EXISTS `user` (
 	`id` text PRIMARY KEY NOT NULL,
 	`age` integer,
 	`username` text NOT NULL,
 	`password_hash` text NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `user_username_unique` ON `user` (`username`);
+CREATE UNIQUE INDEX IF NOT EXISTS `user_username_unique` ON `user` (`username`);

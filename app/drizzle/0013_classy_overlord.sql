@@ -1,4 +1,4 @@
-CREATE TABLE `recurring_invoice` (
+CREATE TABLE IF NOT EXISTS `recurring_invoice` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,

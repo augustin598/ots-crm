@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { env } from '$env/dynamic/private';
 import { processRecurringInvoices } from './tasks/recurring-invoices';
 import { processTaskReminders } from './tasks/task-reminders';
+import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -144,6 +145,24 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled task reminders: daily at 9:00 AM');
+
+	// Schedule daily work reminders job to run every hour
+	schedulerQueue.add(
+		'daily-work-reminders',
+		{
+			type: 'daily_work_reminders',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 * * * *', // Every hour at minute 0
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'daily-work-reminders'
+		}
+	);
+
+	console.log('Scheduled daily work reminders: every hour at minute 0');
 
 	return { queue: schedulerQueue, worker };
 };

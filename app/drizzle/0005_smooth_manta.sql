@@ -1,4 +1,4 @@
-CREATE TABLE `invoice_settings` (
+CREATE TABLE IF NOT EXISTS `invoice_settings` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`smartbill_series` text,
@@ -11,7 +11,7 @@ CREATE TABLE `invoice_settings` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `invoice_settings_tenant_id_unique` ON `invoice_settings` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `plugin` (
+CREATE TABLE IF NOT EXISTS `plugin` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`display_name` text NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE `plugin` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `plugin_name_unique` ON `plugin` (`name`);--> statement-breakpoint
-CREATE TABLE `smartbill_integration` (
+CREATE TABLE IF NOT EXISTS `smartbill_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`email` text NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE `smartbill_integration` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `smartbill_integration_tenant_id_unique` ON `smartbill_integration` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `smartbill_invoice_sync` (
+CREATE TABLE IF NOT EXISTS `smartbill_invoice_sync` (
 	`id` text PRIMARY KEY NOT NULL,
 	`invoice_id` text NOT NULL,
 	`tenant_id` text NOT NULL,
@@ -54,7 +54,7 @@ CREATE TABLE `smartbill_invoice_sync` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `tenant_plugin` (
+CREATE TABLE IF NOT EXISTS `tenant_plugin` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`plugin_id` text NOT NULL,

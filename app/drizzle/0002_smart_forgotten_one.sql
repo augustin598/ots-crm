@@ -1,4 +1,4 @@
-CREATE TABLE `invoice_line_item` (
+CREATE TABLE IF NOT EXISTS `invoice_line_item` (
 	`id` text PRIMARY KEY NOT NULL,
 	`invoice_id` text NOT NULL,
 	`description` text NOT NULL,

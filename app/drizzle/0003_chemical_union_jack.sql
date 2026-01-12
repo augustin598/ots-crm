@@ -1,4 +1,4 @@
-CREATE TABLE `milestone` (
+CREATE TABLE IF NOT EXISTS `milestone` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`project_id` text NOT NULL,
@@ -13,4 +13,4 @@ CREATE TABLE `milestone` (
 	FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-ALTER TABLE `task` ADD `milestone_id` text REFERENCES milestone(id);
+ALTER TABLE IF NOT EXISTS `task` ADD `milestone_id` text REFERENCES milestone(id);

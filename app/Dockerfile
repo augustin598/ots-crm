@@ -24,7 +24,7 @@ WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/build ./build
 COPY --from=builder /usr/src/app/package.json ./
-COPY --from=builder /usr/src/app/drizzle ./drizzle
+COPY --from=builder /usr/src/app/drizzle ./build/drizzle
 
 USER bun
 
