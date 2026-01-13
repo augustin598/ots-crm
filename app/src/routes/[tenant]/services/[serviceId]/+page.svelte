@@ -2,6 +2,8 @@
 	import { getService, deleteService, getServices } from '$lib/remotes/services.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -13,10 +15,10 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const serviceId = $derived(page.params.serviceId);
 
-	const serviceQuery = getService(serviceId);
-	const service = $derived(serviceQuery.current);
-	const loading = $derived(serviceQuery.loading);
-	const error = $derived(serviceQuery.error);
+	const serviceQuery = $derived(serviceId ? getService(serviceId) : null);
+	const service = $derived(serviceQuery?.current);
+	const loading = $derived(serviceQuery?.loading ?? false);
+	const error = $derived(serviceQuery?.error);
 
 	const clientQuery = $derived(
 		service?.clientId ? getClient(service.clientId) : null
@@ -27,6 +29,9 @@
 		service ? getInvoices({ serviceId: service.id }) : null
 	);
 	const invoices = $derived(invoicesQuery?.current || []);
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
 
 	function getCategoryColor(category: string | null) {
 		if (!category) return 'bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300';
@@ -62,12 +67,20 @@
 	}
 
 	async function handleDelete() {
+		if (!serviceId || !tenantSlug) {
+			return;
+		}
+
 		if (!confirm('Are you sure you want to delete this service?')) {
 			return;
 		}
 
 		try {
-			await deleteService(serviceId).updates(serviceQuery, getService(serviceId), getServices({}));
+			if (serviceQuery) {
+				await deleteService(serviceId).updates(serviceQuery, getService(serviceId), getServices({}));
+			} else {
+				await deleteService(serviceId);
+			}
 			goto(`/${tenantSlug}/services`);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to delete service');
@@ -90,9 +103,11 @@
 		<div class="flex items-center justify-between">
 			<h1 class="text-3xl font-bold">{service.name}</h1>
 			<div class="flex items-center gap-2">
-				<Button variant="outline" onclick={() => goto(`/${tenantSlug}/services/${serviceId}/edit`)}>
-					Edit
-				</Button>
+				{#if tenantSlug && serviceId}
+					<Button variant="outline" onclick={() => goto(`/${tenantSlug}/services/${serviceId}/edit`)}>
+						Edit
+					</Button>
+				{/if}
 				<Button variant="destructive" onclick={handleDelete}>
 					Delete
 				</Button>
@@ -145,9 +160,11 @@
 								<p class="text-sm text-muted-foreground">Client</p>
 							</div>
 						</div>
-						<Button variant="outline" onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}>
-							View Client
-						</Button>
+						{#if tenantSlug}
+							<Button variant="outline" onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}>
+								View Client
+							</Button>
+						{/if}
 					{:else}
 						<p class="text-muted-foreground">Client information not available</p>
 					{/if}
@@ -167,7 +184,7 @@
 									<div class="flex items-center gap-3">
 										<FileText class="h-5 w-5 text-muted-foreground" />
 										<div>
-											<p class="font-medium">{invoice.invoiceNumber}</p>
+											<p class="font-medium">{formatInvoiceNumberDisplay(invoice, invoiceSettings)}</p>
 											<p class="text-sm text-muted-foreground">
 												{invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '—'}
 											</p>
@@ -188,9 +205,11 @@
 										>
 											{invoice.status}
 										</Badge>
-										<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
-											View
-										</Button>
+										{#if tenantSlug}
+											<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
+												View
+											</Button>
+										{/if}
 									</div>
 								</div>
 							{/each}

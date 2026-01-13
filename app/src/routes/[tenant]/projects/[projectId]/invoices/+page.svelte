@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { getInvoices } from '$lib/remotes/invoices.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -21,6 +23,22 @@
 	const invoicesQuery = getInvoices({ projectId });
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
+	function formatDate(date: Date | string | null | undefined): string {
+		if (!date) return '-';
+		try {
+			const d = date instanceof Date ? date : new Date(date);
+			if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
+				return d.toLocaleDateString();
+			}
+		} catch {
+			// ignore
+		}
+		return '-';
+	}
 </script>
 
 <div class="space-y-6">
@@ -55,10 +73,10 @@
 				<TableBody>
 					{#each invoices as invoice}
 						<TableRow>
-							<TableCell class="font-medium">{invoice.invoiceNumber}</TableCell>
+							<TableCell class="font-medium">{formatInvoiceNumberDisplay(invoice, invoiceSettings)}</TableCell>
 							<TableCell>{invoice.status}</TableCell>
 							<TableCell>{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}</TableCell>
-							<TableCell>{invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '-'}</TableCell>
+							<TableCell>{formatDate(invoice.dueDate)}</TableCell>
 							<TableCell>
 								<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
 									View

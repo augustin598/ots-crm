@@ -18,6 +18,8 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getServices } from '$lib/remotes/services.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { syncInvoicesFromKeez, getKeezStatus } from '$lib/remotes/keez.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
 	import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { Card } from '$lib/components/ui/card';
@@ -55,6 +57,10 @@
 	import PowerIcon from '@lucide/svelte/icons/power';
 	import PowerOffIcon from '@lucide/svelte/icons/power-off';
 	import PlayIcon from '@lucide/svelte/icons/play';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import CoinsIcon from '@lucide/svelte/icons/coins';
 	import { goto } from '$app/navigation';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -79,6 +85,10 @@
 
 	const invoiceSettingsQuery = getInvoiceSettings();
 	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
+	const keezStatusQuery = getKeezStatus();
+	const keezStatus = $derived(keezStatusQuery.current);
+	const isKeezActive = $derived(keezStatus?.connected && keezStatus?.isActive);
 
 	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 	const projectOptions = $derived([
@@ -154,7 +164,7 @@
 	function getStatusColor(status: string) {
 		switch (status) {
 			case 'paid':
-				return 'default';
+				return 'success';
 			case 'sent':
 				return 'secondary';
 			case 'draft':
@@ -194,13 +204,31 @@
 		return `Every ${interval} ${type}s`;
 	}
 
-	function formatDate(date: Date | string | null): string {
-		if (!date) return 'N/A';
-		return new Date(date).toLocaleDateString('ro-RO', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric'
-		});
+	function formatDate(date: Date | string | null | undefined): string {
+		if (!date) return '-';
+		try {
+			const d = date instanceof Date ? date : new Date(date);
+			if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
+				return d.toLocaleDateString('ro-RO', {
+					year: 'numeric',
+					month: 'short',
+					day: 'numeric'
+				});
+			}
+		} catch {
+			// ignore
+		}
+		return '-';
+	}
+
+	function isValidDate(date: Date | string | null | undefined): boolean {
+		if (!date) return false;
+		try {
+			const d = date instanceof Date ? date : new Date(date);
+			return !isNaN(d.getTime()) && d.getFullYear() > 1970;
+		} catch {
+			return false;
+		}
 	}
 
 	// Invoice handlers
@@ -416,6 +444,32 @@
 			alert(e instanceof Error ? e.message : 'Failed to generate invoice');
 		}
 	}
+
+	// Keez sync state
+	let syncingInvoices = $state(false);
+	let syncError = $state<string | null>(null);
+	let syncResult = $state<{ imported: number; skipped: number } | null>(null);
+
+	async function handleSyncInvoices() {
+		syncingInvoices = true;
+		syncError = null;
+		syncResult = null;
+
+		try {
+			const result = await syncInvoicesFromKeez({}).updates(invoicesQuery, keezStatusQuery);
+
+			if (result.success) {
+				syncResult = { imported: result.imported, skipped: result.skipped };
+				setTimeout(() => {
+					syncResult = null;
+				}, 5000);
+			}
+		} catch (e) {
+			syncError = e instanceof Error ? e.message : 'Failed to sync invoices from Keez';
+		} finally {
+			syncingInvoices = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -429,6 +483,21 @@
 			<p class="text-muted-foreground mt-1">Create and manage invoices and recurring invoice templates</p>
 		</div>
 		<div class="flex gap-2">
+			{#if isKeezActive}
+				<Button
+					variant="default"
+					onclick={handleSyncInvoices}
+					disabled={syncingInvoices}
+				>
+					{#if syncingInvoices}
+						<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
+						Syncing...
+					{:else}
+						<RefreshCwIcon class="mr-2 h-4 w-4" />
+						Sync Invoices from Keez
+					{/if}
+				</Button>
+			{/if}
 			<Dialog bind:open={isRecurringDialogOpen}>
 				<DialogTrigger>
 					<Button variant="outline" onclick={() => openRecurringDialog()}>
@@ -719,6 +788,20 @@
 		</div>
 	</div>
 
+	{#if syncError}
+		<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
+			<p class="text-sm text-red-800 dark:text-red-200">{syncError}</p>
+		</div>
+	{/if}
+
+	{#if syncResult}
+		<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
+			<p class="text-sm text-green-800 dark:text-green-200">
+				Sync completed: {syncResult.imported} imported, {syncResult.skipped} skipped
+			</p>
+		</div>
+	{/if}
+
 	<Tabs value="invoices" class="w-full">
 		<TabsList>
 			<TabsTrigger value="invoices">Invoices</TabsTrigger>
@@ -743,82 +826,139 @@
 			{:else}
 				<div class="space-y-4">
 					{#each invoices as invoice}
-						<Card class="p-6">
-							<div class="flex items-start justify-between">
-								<div class="flex-1">
-									<div class="flex items-center gap-3 mb-2">
-										<h3 class="text-xl font-semibold">{invoice.invoiceNumber}</h3>
-										<Badge variant={getStatusColor(invoice.status)}>
-											{getStatusIcon(invoice.status)} {invoice.status}
-										</Badge>
-									</div>
-									<p class="text-sm text-muted-foreground mb-4">
-										{clientMap.get(invoice.clientId) || 'Unknown Client'}
-									</p>
-
-									<div class="grid gap-4 md:grid-cols-4">
-										<div>
-											<p class="text-xs text-muted-foreground mb-1">Amount</p>
-											<p class="text-2xl font-bold text-primary">
-												{formatAmount(invoice.totalAmount, (invoice.currency || 'RON') as Currency)}
-											</p>
+						<Card class="group relative overflow-hidden border-2 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5">
+							<!-- Modern gradient accent bar -->
+							<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-primary/80 to-primary/60"></div>
+							
+							<div class="p-4 pt-5">
+								<div class="flex items-start justify-between gap-4">
+									<div class="flex-1 min-w-0">
+										<!-- Header with invoice number and status -->
+										<div class="flex items-center gap-2 mb-2 flex-wrap">
+											<div class="flex items-center gap-1.5">
+												<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+													<FileTextIcon class="h-3.5 w-3.5 text-primary" />
+												</div>
+												<h3 class="text-lg font-bold tracking-tight text-foreground">
+													{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
+												</h3>
+											</div>
+											<Badge 
+												variant={getStatusColor(invoice.status)} 
+												class="text-xs font-semibold px-2 py-0.5 shadow-sm"
+											>
+												{getStatusIcon(invoice.status)} {invoice.status}
+											</Badge>
 										</div>
 
-										<div>
-											<p class="text-xs text-muted-foreground mb-1">Issue Date</p>
-											<p class="text-sm font-medium">
-												{invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '-'}
-											</p>
-										</div>
+										<!-- Client name -->
+										<p class="text-xs font-medium text-muted-foreground mb-4 flex items-center gap-1.5">
+											<span class="w-1 h-1 rounded-full bg-muted-foreground/40"></span>
+											{clientMap.get(invoice.clientId) || 'Unknown Client'}
+										</p>
 
-										<div>
-											<p class="text-xs text-muted-foreground mb-1">Due Date</p>
-											<p class="text-sm font-medium">
-												{invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '-'}
-											</p>
-										</div>
-
-										{#if invoice.paidDate}
-											<div>
-												<p class="text-xs text-muted-foreground mb-1">Paid Date</p>
-												<p class="text-sm font-medium text-green-600">
-													{new Date(invoice.paidDate).toLocaleDateString()}
+										<!-- Modern info grid with icons -->
+										<div class="grid gap-3 md:grid-cols-4">
+											<!-- Amount - Featured prominently -->
+											<div class="relative p-3 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/10 group-hover:border-primary/20 transition-all">
+												<div class="flex items-center gap-1.5 mb-1.5">
+													<CoinsIcon class="h-3.5 w-3.5 text-primary/60" />
+													<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</p>
+												</div>
+												<p class="text-2xl font-bold text-primary leading-tight">
+													{formatAmount(invoice.totalAmount, (invoice.currency || 'RON') as Currency)}
 												</p>
 											</div>
-										{/if}
-									</div>
-								</div>
 
-								<div class="flex items-center gap-2">
-									<Button variant="outline" size="icon">
-										<DownloadIcon class="h-4 w-4" />
-									</Button>
-									{#if invoice.status !== 'paid'}
-										<Button variant="outline" size="icon">
-											<SendIcon class="h-4 w-4" />
-										</Button>
-									{/if}
-									<DropdownMenu>
-										<DropdownMenuTrigger>
-											<Button variant="ghost" size="icon">
-												<MoreVerticalIcon class="h-4 w-4" />
-											</Button>
-										</DropdownMenuTrigger>
-										<DropdownMenuContent align="end">
-											<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}/edit`)}>
-												Edit
-											</DropdownMenuItem>
-											<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
-												View Details
-											</DropdownMenuItem>
-											{#if invoice.status !== 'paid'}
-												<DropdownMenuItem onclick={() => handleMarkAsPaid(invoice.id)}>Mark as Paid</DropdownMenuItem>
+											<!-- Issue Date -->
+											<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-all">
+												<div class="flex items-center gap-1.5 mb-1.5">
+													<CalendarIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+													<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Issue Date</p>
+												</div>
+												<p class="text-sm font-semibold text-foreground">
+													{#if invoice.issueDate && isValidDate(invoice.issueDate)}
+														{formatDate(invoice.issueDate)}
+													{:else}
+														<span class="text-muted-foreground font-normal">Not set</span>
+													{/if}
+												</p>
+											</div>
+
+											<!-- Due Date -->
+											<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-all">
+												<div class="flex items-center gap-1.5 mb-1.5">
+													<CalendarIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+													<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Due Date</p>
+												</div>
+												<p class="text-sm font-semibold text-foreground">
+													{#if invoice.dueDate && isValidDate(invoice.dueDate)}
+														{formatDate(invoice.dueDate)}
+													{:else}
+														<span class="text-muted-foreground font-normal">Not set</span>
+													{/if}
+												</p>
+											</div>
+
+											<!-- Paid Date (conditional) -->
+											{#if invoice.paidDate}
+												<div class="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+													<div class="flex items-center gap-1.5 mb-1.5">
+														<CalendarIcon class="h-3.5 w-3.5 text-green-600/60" />
+														<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Paid Date</p>
+													</div>
+													<p class="text-sm font-semibold text-green-600 dark:text-green-400">
+														{new Date(invoice.paidDate).toLocaleDateString()}
+													</p>
+												</div>
 											{/if}
-											<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteInvoice(invoice.id)}>
-												Delete
-											</DropdownMenuItem>
-										</DropdownMenuContent>
-									</DropdownMenu>
+										</div>
+									</div>
+
+									<!-- Action buttons with modern styling -->
+									<div class="flex items-center gap-1.5 flex-shrink-0">
+										<Button 
+											variant="outline" 
+											size="icon"
+											class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+										>
+											<DownloadIcon class="h-3.5 w-3.5" />
+										</Button>
+										{#if invoice.status !== 'paid'}
+											<Button 
+												variant="outline" 
+												size="icon"
+												class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+											>
+												<SendIcon class="h-3.5 w-3.5" />
+											</Button>
+										{/if}
+										<DropdownMenu>
+											<DropdownMenuTrigger>
+												<Button 
+													variant="ghost" 
+													size="icon"
+													class="h-8 w-8 hover:bg-muted transition-all"
+												>
+													<MoreVerticalIcon class="h-3.5 w-3.5" />
+												</Button>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end">
+												<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}/edit`)}>
+													Edit
+												</DropdownMenuItem>
+												<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>
+													View Details
+												</DropdownMenuItem>
+												{#if invoice.status !== 'paid'}
+													<DropdownMenuItem onclick={() => handleMarkAsPaid(invoice.id)}>Mark as Paid</DropdownMenuItem>
+												{/if}
+												<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteInvoice(invoice.id)}>
+													Delete
+												</DropdownMenuItem>
+											</DropdownMenuContent>
+										</DropdownMenu>
+									</div>
 								</div>
 							</div>
 						</Card>

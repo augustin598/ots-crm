@@ -2,6 +2,8 @@
 	import { getInvoice, markInvoiceAsPaid, sendInvoice, getInvoices } from '$lib/remotes/invoices.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getTransactions } from '$lib/remotes/banking.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -29,6 +31,9 @@
 	const invoice = $derived(invoiceQuery.current);
 	const loading = $derived(invoiceQuery.loading);
 
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	const clientQuery = $derived(invoice?.clientId ? getClient(invoice.clientId) : null);
 	const client = $derived(clientQuery?.current);
 
@@ -43,10 +48,12 @@
 	let { data }: { data: any } = $props();
 	const tenant = $derived(data?.tenant);
 
+	const displayInvoiceNumber = $derived(invoice ? formatInvoiceNumberDisplay(invoice, invoiceSettings) : '');
+
 	function getStatusVariant(status: string) {
 		switch (status) {
 			case 'paid':
-				return 'default';
+				return 'success';
 			case 'overdue':
 				return 'destructive';
 			case 'sent':
@@ -122,10 +129,33 @@
 		const parts = [client.address, client.city, client.county, client.postalCode].filter(Boolean);
 		return parts.join(', ') || '';
 	}
+
+	function isValidDate(date: Date | string | null | undefined): boolean {
+		if (!date) return false;
+		try {
+			const d = date instanceof Date ? date : new Date(date);
+			return !isNaN(d.getTime()) && d.getFullYear() > 1970;
+		} catch {
+			return false;
+		}
+	}
+
+	function formatDate(date: Date | string | null | undefined): string {
+		if (!date) return '-';
+		try {
+			const d = date instanceof Date ? date : new Date(date);
+			if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
+				return d.toLocaleDateString();
+			}
+		} catch {
+			// ignore
+		}
+		return '-';
+	}
 </script>
 
 <svelte:head>
-	<title>Invoice {invoice?.invoiceNumber || ''} - CRM</title>
+	<title>Invoice {displayInvoiceNumber || ''} - CRM</title>
 </svelte:head>
 
 <div class="space-y-6">
@@ -141,7 +171,7 @@
 			<div class="flex items-start justify-between">
 				<div>
 					<div class="flex items-center gap-3 mb-2">
-						<h1 class="text-3xl font-bold tracking-tight">{invoice.invoiceNumber}</h1>
+						<h1 class="text-3xl font-bold tracking-tight">{displayInvoiceNumber}</h1>
 						<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
 					</div>
 					<p class="text-lg text-muted-foreground">{client?.name || 'Unknown Client'}</p>
@@ -187,7 +217,7 @@
 						</div>
 						<div class="text-right">
 							<h3 class="text-3xl font-bold mb-2">INVOICE</h3>
-							<p class="text-muted-foreground">{invoice.invoiceNumber}</p>
+							<p class="text-muted-foreground">{displayInvoiceNumber}</p>
 						</div>
 					</div>
 
@@ -218,10 +248,10 @@
 										<span class="font-medium">{new Date(invoice.issueDate).toLocaleDateString()}</span>
 									</div>
 								{/if}
-								{#if invoice.dueDate}
+								{#if isValidDate(invoice.dueDate)}
 									<div class="flex justify-between">
 										<span class="text-muted-foreground">Due Date:</span>
-										<span class="font-medium">{new Date(invoice.dueDate).toLocaleDateString()}</span>
+										<span class="font-medium">{formatDate(invoice.dueDate)}</span>
 									</div>
 								{/if}
 								{#if invoice.paidDate}
@@ -324,12 +354,12 @@
 							<p class="text-2xl font-bold">{formatAmount(invoice?.totalAmount || 0, invoiceCurrency)}</p>
 						</div>
 						<Separator />
-						{#if invoice.dueDate}
+						{#if isValidDate(invoice.dueDate)}
 							<div class="flex items-center gap-2">
 								<Calendar class="h-4 w-4 text-muted-foreground" />
 								<div>
 									<p class="text-sm text-muted-foreground">Due Date</p>
-									<p class="font-medium">{new Date(invoice.dueDate).toLocaleDateString()}</p>
+									<p class="font-medium">{formatDate(invoice.dueDate)}</p>
 								</div>
 							</div>
 						{/if}

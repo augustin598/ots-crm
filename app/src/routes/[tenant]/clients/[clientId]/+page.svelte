@@ -4,6 +4,8 @@
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { getDocuments } from '$lib/remotes/documents.remote';
 	import { getClientCredit } from '$lib/remotes/banking.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -78,6 +80,9 @@
 
 	const creditQuery = getClientCredit(clientId);
 	const credit = $derived(creditQuery.current);
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
 </script>
 
 <svelte:head>
@@ -248,7 +253,7 @@
 										<FileText class="h-5 w-5 text-primary" />
 									</div>
 									<div class="flex-1">
-										<p class="font-medium">{invoice.invoiceNumber}</p>
+										<p class="font-medium">{formatInvoiceNumberDisplay(invoice, invoiceSettings)}</p>
 										<p class="text-sm text-muted-foreground">
 											Issued on {invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '—'}
 										</p>

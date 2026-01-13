@@ -1,1 +1,2 @@
-ALTER TABLE `document` DROP COLUMN `contract_template_id`;
+-- ALTER TABLE `document` DROP COLUMN `contract_template_id`;
+SELECT * FROM document;

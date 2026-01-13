@@ -7,6 +7,8 @@
 	} from '$lib/remotes/banking.remote';
 	import { getUserBankAccounts } from '$lib/remotes/user-bank-accounts.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -117,6 +119,9 @@
 	let selectedInvoiceId = $state<string>('');
 	let invoicesQuery = $derived(matchingTransactionId ? getInvoices({}) : null);
 	const invoices = $derived(invoicesQuery?.current || []);
+
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
 	let isMatchingDialogOpen = $state(false);
 	let matching = $state(false);
 
@@ -311,7 +316,7 @@
 						<SelectItem value="">Select an invoice...</SelectItem>
 						{#each invoices as invoice}
 							<SelectItem value={invoice.id}>
-								{invoice.invoiceNumber} - {formatAmount(invoice.totalAmount || 0, invoice.currency)}
+								{formatInvoiceNumberDisplay(invoice, invoiceSettings)} - {formatAmount(invoice.totalAmount || 0, invoice.currency)}
 							</SelectItem>
 						{/each}
 					</SelectContent>

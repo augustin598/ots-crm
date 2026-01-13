@@ -125,11 +125,45 @@ export function mapKeezInvoiceToCRM(
 		: 1900;
 
 	// Parse dates
-	const parseDate = (dateStr: string | undefined): Date | null => {
-		if (!dateStr) return null;
+	// Keez API returns dates in YYYYMMDD format as numbers (e.g., 20260112 = 2026-01-12)
+	const parseDate = (dateValue: string | number | undefined): Date | null => {
+		if (dateValue === null || dateValue === undefined) {
+			return null;
+		}
+		
 		try {
-			return new Date(dateStr);
-		} catch {
+			// Handle numeric format (YYYYMMDD) from Keez API
+			if (typeof dateValue === 'number') {
+				const dateNum = dateValue;
+				// Check if it's a valid YYYYMMDD format (8 digits)
+				if (dateNum >= 10000101 && dateNum <= 99991231) {
+					const dateStr = String(dateNum);
+					const year = parseInt(dateStr.substring(0, 4), 10);
+					const month = parseInt(dateStr.substring(4, 6), 10) - 1; // Month is 0-indexed
+					const day = parseInt(dateStr.substring(6, 8), 10);
+					
+					const date = new Date(year, month, day);
+					if (!isNaN(date.getTime()) && date.getFullYear() === year) {
+						return date;
+					}
+				}
+				return null;
+			}
+			
+			// Handle string format
+			const dateStrTrimmed = String(dateValue).trim();
+			if (!dateStrTrimmed || dateStrTrimmed === 'null' || dateStrTrimmed === 'undefined' || dateStrTrimmed === '0000-00-00') {
+				return null;
+			}
+			
+			const date = new Date(dateStrTrimmed);
+			// Check if date is valid and not epoch (1970-01-01)
+			if (!isNaN(date.getTime()) && date.getFullYear() > 1970) {
+				return date;
+			}
+			return null;
+		} catch (error) {
+			console.error(`[Keez Mapper] parseDate: Error parsing date:`, dateValue, error);
 			return null;
 		}
 	};
@@ -137,18 +171,71 @@ export function mapKeezInvoiceToCRM(
 	// Map line items - will be added later when invoice is created
 	const lineItems: Array<Omit<InvoiceLineItem, 'id' | 'createdAt'>> = [];
 
+	// Use documentDate from header if issueDate is not available in invoice
+	// documentDate is the field used in invoice list according to Keez documentation
+	// Try multiple sources: header documentDate, header issueDate, invoice issueDate
+	const issueDateSource = keezHeader.documentDate || keezHeader.issueDate || keezInvoice.issueDate;
+	const issueDate = parseDate(issueDateSource);
+	
+	// Use dueDate from header if not available in invoice
+	const dueDateSource = keezHeader.dueDate || keezInvoice.dueDate;
+	const dueDate = parseDate(dueDateSource);
+
+	// Log warnings only if dates are missing when sources exist
+	if (!issueDate && issueDateSource) {
+		console.warn(`[Keez Mapper] Could not parse issueDate. Source:`, issueDateSource, 'Type:', typeof issueDateSource);
+	}
+	if (!dueDate && dueDateSource) {
+		console.warn(`[Keez Mapper] Could not parse dueDate. Source:`, dueDateSource, 'Type:', typeof dueDateSource);
+	}
+
+	// Determine status based on remainingAmount
+	// If remainingAmount is 0 or undefined (and totalAmount matches), invoice is paid
+	// remainingAmount is in the same currency as the invoice
+	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = 'sent';
+	
+	if (keezHeader.remainingAmount !== undefined) {
+		// Convert remainingAmount to cents for comparison (Keez returns in main currency units)
+		const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
+		
+		if (remainingAmountCents === 0) {
+			// Invoice is fully paid
+			invoiceStatus = 'paid';
+		} else if (remainingAmountCents > 0) {
+			// Invoice has remaining amount - check if overdue
+			if (dueDate && dueDate < new Date()) {
+				invoiceStatus = 'overdue';
+			} else {
+				invoiceStatus = 'sent';
+			}
+		}
+	} else {
+		// If remainingAmount is not provided, use Keez status
+		// Keez status: "Valid" = sent, "Cancelled" = cancelled
+		if (keezHeader.status === 'Cancelled') {
+			invoiceStatus = 'cancelled';
+		} else if (keezHeader.status === 'Valid') {
+			// Check if overdue
+			if (dueDate && dueDate < new Date()) {
+				invoiceStatus = 'overdue';
+			} else {
+				invoiceStatus = 'sent';
+			}
+		}
+	}
+
 	return {
 		tenantId,
 		clientId: clientId || '',
 		invoiceNumber: keezHeader.number || keezHeader.externalId,
-		status: 'sent', // Keez invoices are typically already sent
+		status: invoiceStatus,
 		amount,
 		taxRate,
 		taxAmount,
 		totalAmount,
-		issueDate: parseDate(keezInvoice.issueDate),
-		dueDate: parseDate(keezInvoice.dueDate),
-		currency: keezInvoice.currency || 'RON',
+		issueDate,
+		dueDate,
+		currency: keezInvoice.currency || keezHeader.currency || 'RON',
 		notes: keezInvoice.notes || undefined,
 		keezInvoiceId: keezHeader.externalId || null,
 		keezExternalId: keezHeader.externalId || null,

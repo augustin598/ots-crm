@@ -21,6 +21,8 @@ export interface KeezAccessToken {
 
 export interface KeezInvoice {
 	externalId?: string;
+	series?: string; // Invoice series (e.g., "OTS")
+	number?: string; // Invoice number (e.g., "520")
 	partner?: KeezPartner;
 	issueDate: string; // YYYY-MM-DD
 	dueDate?: string; // YYYY-MM-DD
@@ -31,6 +33,10 @@ export interface KeezInvoice {
 	notes?: string;
 	paymentType?: string;
 	paymentDueDate?: string;
+	// Total amounts (may be present in API response)
+	netAmount?: number;
+	vatAmount?: number;
+	grossAmount?: number;
 }
 
 export interface KeezInvoiceDetail {
@@ -99,10 +105,11 @@ export interface KeezInvoiceListResponse {
 
 export interface KeezInvoiceHeader {
 	externalId: string;
-	number?: string;
+	number?: string | number; // Can be string or number
 	series?: string;
-	issueDate: string;
-	dueDate?: string;
+	documentDate?: string | number; // Data facturii din lista de facturi - format YYYYMMDD ca număr (e.g., 20260112)
+	issueDate?: string | number; // Pentru compatibilitate cu versiuni anterioare
+	dueDate?: string | number; // Format YYYYMMDD ca număr (e.g., 20260117)
 	partner?: {
 		name: string;
 		vatCode?: string;
@@ -110,6 +117,7 @@ export interface KeezInvoiceHeader {
 	totalAmount?: number;
 	currency?: string;
 	status?: string;
+	remainingAmount?: number; // Suma rămasă de plată (0 = factură plătită complet)
 }
 
 export interface KeezPartnerListResponse {
@@ -419,5 +427,53 @@ export class KeezClient {
 		});
 
 		return { externalId: response };
+	}
+
+	/**
+	 * Get next invoice number for a given series by fetching invoices from Keez
+	 * Returns the next number that should be used (max + 1)
+	 */
+	async getNextInvoiceNumber(series: string): Promise<number | null> {
+		try {
+			// Fetch invoices with the specified series
+			// We'll fetch a reasonable number to find the max
+			const response = await this.getInvoices({
+				count: 1000, // Fetch up to 1000 invoices to find max
+				filter: `series eq '${series}'`
+			});
+
+			if (!response.data || response.data.length === 0) {
+				// No invoices found with this series, start from 1
+				return 1;
+			}
+
+			// Find the maximum number for this series
+			let maxNumber = 0;
+			for (const invoice of response.data) {
+				if (invoice.series === series && invoice.number) {
+					// Extract numeric part from invoice number
+					// invoice.number can be string or number
+					const numberStr = String(invoice.number);
+					const numericMatch = numberStr.match(/(\d+)$/);
+					if (numericMatch) {
+						const num = parseInt(numericMatch[1], 10);
+						if (num > maxNumber) {
+							maxNumber = num;
+						}
+					} else if (typeof invoice.number === 'number') {
+						// If it's already a number, use it directly
+						if (invoice.number > maxNumber) {
+							maxNumber = invoice.number;
+						}
+					}
+				}
+			}
+
+			// Return next number (max + 1)
+			return maxNumber + 1;
+		} catch (error) {
+			console.error(`[Keez] Error getting next invoice number for series ${series}:`, error);
+			return null;
+		}
 	}
 }

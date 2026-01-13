@@ -12,6 +12,8 @@
 				destructive:
 					"bg-destructive [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/70 border-transparent text-white",
 				outline: "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+				success:
+					"bg-green-600 dark:bg-green-700 [a&]:hover:bg-green-700 dark:[a&]:hover:bg-green-800 focus-visible:ring-green-600/20 dark:focus-visible:ring-green-700/40 border-transparent text-white",
 			},
 		},
 		defaultVariants: {
