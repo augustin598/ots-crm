@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { CreditCard, TrendingUp, ArrowRight } from '@lucide/svelte';
+	import { CreditCard, TrendingUp, ArrowRight, Building2, Users } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 </script>
@@ -18,7 +18,7 @@
 		<p class="text-muted-foreground">Manage bank transactions, expenses, and invoice payments</p>
 	</div>
 
-	<div class="grid gap-6 md:grid-cols-2">
+	<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
 		<Card class="cursor-pointer hover:bg-accent transition-colors" onclick={() => goto(`/${tenantSlug}/banking/transactions`)}>
 			<CardHeader>
 				<CardTitle class="flex items-center gap-2">
@@ -52,6 +52,44 @@
 				</p>
 				<Button variant="outline" class="w-full">
 					View Expenses
+					<ArrowRight class="ml-2 h-4 w-4" />
+				</Button>
+			</CardContent>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-accent transition-colors" onclick={() => goto(`/${tenantSlug}/banking/suppliers`)}>
+			<CardHeader>
+				<CardTitle class="flex items-center gap-2">
+					<Building2 class="h-5 w-5" />
+					Suppliers
+				</CardTitle>
+				<CardDescription>Manage suppliers and vendors</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<p class="text-sm text-muted-foreground mb-4">
+					View and manage suppliers, link them to expenses, and track spending by supplier.
+				</p>
+				<Button variant="outline" class="w-full">
+					View Suppliers
+					<ArrowRight class="ml-2 h-4 w-4" />
+				</Button>
+			</CardContent>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-accent transition-colors" onclick={() => goto(`/${tenantSlug}/banking/users`)}>
+			<CardHeader>
+				<CardTitle class="flex items-center gap-2">
+					<Users class="h-5 w-5" />
+					User Spending
+				</CardTitle>
+				<CardDescription>Track spending per user</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<p class="text-sm text-muted-foreground mb-4">
+					View spending per user in the firm, manage user bank accounts, and track dividends/retrievals.
+				</p>
+				<Button variant="outline" class="w-full">
+					View Users
 					<ArrowRight class="ml-2 h-4 w-4" />
 				</Button>
 			</CardContent>

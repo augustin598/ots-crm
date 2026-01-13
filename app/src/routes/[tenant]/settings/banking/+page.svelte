@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { getBankAccounts, getBankConnectionUrl, connectBankAccount, disconnectBankAccount, syncTransactions } from '$lib/remotes/banking.remote';
+	import { getBankAccounts, getBankConnectionUrl, connectBankAccount, disconnectBankAccount, syncTransactions, syncBankAccounts } from '$lib/remotes/banking.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -8,6 +8,7 @@
 	import { Building2, Link2, RefreshCw, Trash2, AlertCircle } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import { untrack } from 'svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -20,6 +21,7 @@
 	let connectingBank = $state<string | null>(null);
 	let disconnectingAccount = $state<string | null>(null);
 	let syncingAccount = $state<string | null>(null);
+	let syncingBankAccounts = $state<string | null>(null);
 	let error = $state<string | null>(null);
 
 	// Check URL params for OAuth callback
@@ -41,7 +43,9 @@
 		}
 
 		if (code && bankName) {
-			handleOAuthCallback(code, bankName);
+			untrack(() => {
+				handleOAuthCallback(code, bankName);
+			});
 		}
 	});
 
@@ -105,13 +109,28 @@
 		error = null;
 
 		try {
-			await syncTransactions(accountId);
+			await syncTransactions({ bankAccountId: accountId });
 			// Refresh accounts to get updated lastSyncedAt
 			await accountsQuery.refresh();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to sync transactions';
 		} finally {
 			syncingAccount = null;
+		}
+	}
+
+	async function handleSyncBankAccounts(bankName: string) {
+		syncingBankAccounts = bankName;
+		error = null;
+
+		try {
+			await syncBankAccounts({ bankName });
+			// Refresh accounts to get updated account list
+			await accountsQuery.refresh();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to sync accounts';
+		} finally {
+			syncingBankAccounts = null;
 		}
 	}
 
@@ -186,6 +205,20 @@
 					</div>
 					<div class="flex items-center gap-2">
 						{#if isConnected}
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => handleSyncBankAccounts(bankName)}
+								disabled={syncingBankAccounts === bankName || loading}
+							>
+								{#if syncingBankAccounts === bankName}
+									<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+									Syncing...
+								{:else}
+									<RefreshCw class="mr-2 h-4 w-4" />
+									Sync Accounts
+								{/if}
+							</Button>
 							<Badge variant="default">Connected</Badge>
 						{:else}
 							<Button

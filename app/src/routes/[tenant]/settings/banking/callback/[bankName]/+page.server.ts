@@ -4,8 +4,7 @@ import { connectBankAccount } from '$lib/remotes/banking.remote';
 
 export const load: PageServerLoad = async (event) => {
 	const code = event.url.searchParams.get('code');
-	const state = event.url.searchParams.get('state');
-	const bankName = event.url.searchParams.get('bank');
+	const bankName = event.params.bankName;
 
 	if (!code || !bankName) {
 		throw redirect(302, `/${event.locals.tenant?.slug}/settings/banking?error=missing_parameters`);

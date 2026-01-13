@@ -83,7 +83,7 @@ export const getRevolutConfig = query(async () => {
 		.limit(1);
 
 	// Generate the expected redirect URI based on current URL
-	const expectedRedirectUri = `${event.url.origin}/${event.locals.tenant.slug}/settings/banking/callback`;
+	const expectedRedirectUri = `${event.url.origin}/${event.locals.tenant?.slug}/settings/banking/callback/revolut`;
 
 	if (!config) {
 		return {

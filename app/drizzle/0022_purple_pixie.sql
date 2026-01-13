@@ -1,0 +1,1 @@
+ALTER TABLE `transaction_match_rule` ADD `user_id` text REFERENCES user(id);

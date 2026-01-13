@@ -719,13 +719,66 @@ export const bankTransaction = sqliteTable('bank_transaction', {
 		.default(sql`current_date`)
 });
 
+export const supplier = sqliteTable('supplier', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	name: text('name').notNull(),
+	email: text('email'),
+	phone: text('phone'),
+	companyType: text('company_type'),
+	cui: text('cui'),
+	registrationNumber: text('registration_number'),
+	tradeRegister: text('trade_register'),
+	vatNumber: text('vat_number'),
+	legalRepresentative: text('legal_representative'),
+	iban: text('iban'),
+	bankName: text('bank_name'),
+	address: text('address'),
+	city: text('city'),
+	county: text('county'),
+	postalCode: text('postal_code'),
+	country: text('country').default('România'),
+	notes: text('notes'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const userBankAccount = sqliteTable('user_bank_account', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	iban: text('iban').notNull(),
+	bankName: text('bank_name'),
+	accountName: text('account_name'),
+	currency: text('currency').notNull().default('RON'),
+	isActive: boolean('is_active').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const expense = sqliteTable('expense', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
 	bankTransactionId: text('bank_transaction_id'), // References bankTransaction.id (defined before)
+	supplierId: text('supplier_id').references(() => supplier.id),
 	clientId: text('client_id').references(() => client.id),
+	userId: text('user_id').references(() => user.id), // User who made this expense
 	projectId: text('project_id').references(() => project.id),
 	category: text('category'),
 	description: text('description').notNull(),
@@ -735,6 +788,7 @@ export const expense = sqliteTable('expense', {
 	vatRate: integer('vat_rate'), // in cents, e.g., 1900 = 19%
 	vatAmount: integer('vat_amount'), // in cents
 	receiptPath: text('receipt_path'), // File path for receipt upload
+	invoicePath: text('invoice_path'), // File path for invoice upload
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -764,6 +818,33 @@ export const transactionInvoiceMatch = sqliteTable('transaction_invoice_match', 
 	matchedByUserId: text('matched_by_user_id').references(() => user.id)
 });
 
+export const transactionMatchRule = sqliteTable('transaction_match_rule', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	// What this rule matches to
+	matchType: text('match_type').notNull(), // 'supplier' | 'client' | 'user'
+	supplierId: text('supplier_id').references(() => supplier.id),
+	clientId: text('client_id').references(() => client.id),
+	userId: text('user_id').references(() => user.id),
+	// Matching criteria (learned from transactions)
+	counterpartIban: text('counterpart_iban'), // Normalized IBAN for bank transfers
+	counterpartName: text('counterpart_name'), // Merchant/supplier name for card payments
+	descriptionPattern: text('description_pattern'), // Pattern extracted from description
+	referencePattern: text('reference_pattern'), // Pattern from transaction reference
+	// Metadata
+	matchCount: integer('match_count').notNull().default(0), // How many times this rule matched
+	lastMatchedAt: timestamp('last_matched_at', { withTimezone: true, mode: 'date' }),
+	createdByUserId: text('created_by_user_id').references(() => user.id), // Who created the rule
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -780,7 +861,8 @@ export const userRelations = relations(user, ({ many }) => ({
 	createdTasks: many(task, {
 		relationName: 'createdTasks'
 	}),
-	workHours: many(userWorkHours)
+	workHours: many(userWorkHours),
+	bankAccounts: many(userBankAccount)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -811,7 +893,9 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	bankTransactions: many(bankTransaction),
 	expenses: many(expense),
 	transactionInvoiceMatches: many(transactionInvoiceMatch),
-	userWorkHours: many(userWorkHours)
+	userWorkHours: many(userWorkHours),
+	suppliers: many(supplier),
+	userBankAccounts: many(userBankAccount)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -835,7 +919,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	documents: many(document),
 	services: many(service),
 	invoices: many(invoice),
-	expenses: many(expense)
+	expenses: many(expense),
+	matchRules: many(transactionMatchRule)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -1188,6 +1273,26 @@ export const bankTransactionRelations = relations(bankTransaction, ({ one, many 
 	invoiceMatches: many(transactionInvoiceMatch)
 }));
 
+export const supplierRelations = relations(supplier, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [supplier.tenantId],
+		references: [tenant.id]
+	}),
+	expenses: many(expense),
+	matchRules: many(transactionMatchRule)
+}));
+
+export const userBankAccountRelations = relations(userBankAccount, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [userBankAccount.tenantId],
+		references: [tenant.id]
+	}),
+	user: one(user, {
+		fields: [userBankAccount.userId],
+		references: [user.id]
+	})
+}));
+
 export const expenseRelations = relations(expense, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [expense.tenantId],
@@ -1196,6 +1301,10 @@ export const expenseRelations = relations(expense, ({ one }) => ({
 	bankTransaction: one(bankTransaction, {
 		fields: [expense.bankTransactionId],
 		references: [bankTransaction.id]
+	}),
+	supplier: one(supplier, {
+		fields: [expense.supplierId],
+		references: [supplier.id]
 	}),
 	client: one(client, {
 		fields: [expense.clientId],
@@ -1226,6 +1335,29 @@ export const transactionInvoiceMatchRelations = relations(transactionInvoiceMatc
 	}),
 	matchedBy: one(user, {
 		fields: [transactionInvoiceMatch.matchedByUserId],
+		references: [user.id]
+	})
+}));
+
+export const transactionMatchRuleRelations = relations(transactionMatchRule, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [transactionMatchRule.tenantId],
+		references: [tenant.id]
+	}),
+	supplier: one(supplier, {
+		fields: [transactionMatchRule.supplierId],
+		references: [supplier.id]
+	}),
+	client: one(client, {
+		fields: [transactionMatchRule.clientId],
+		references: [client.id]
+	}),
+	user: one(user, {
+		fields: [transactionMatchRule.userId],
+		references: [user.id]
+	}),
+	createdBy: one(user, {
+		fields: [transactionMatchRule.createdByUserId],
 		references: [user.id]
 	})
 }));
@@ -1293,5 +1425,9 @@ export type BankTransaction = typeof bankTransaction.$inferSelect;
 export type NewBankTransaction = typeof bankTransaction.$inferInsert;
 export type Expense = typeof expense.$inferSelect;
 export type NewExpense = typeof expense.$inferInsert;
+export type Supplier = typeof supplier.$inferSelect;
+export type NewSupplier = typeof supplier.$inferInsert;
+export type UserBankAccount = typeof userBankAccount.$inferSelect;
+export type NewUserBankAccount = typeof userBankAccount.$inferInsert;
 export type TransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferSelect;
 export type NewTransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferInsert;

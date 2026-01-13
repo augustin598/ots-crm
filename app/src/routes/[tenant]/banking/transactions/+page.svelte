@@ -1,17 +1,32 @@
 <script lang="ts">
-	import { getTransactions, getBankAccounts, matchTransactionToInvoice, unmatchTransactionFromInvoice } from '$lib/remotes/banking.remote';
+	import {
+		getTransactions,
+		getBankAccounts,
+		matchTransactionToInvoice,
+		unmatchTransactionFromInvoice
+	} from '$lib/remotes/banking.remote';
+	import { getUserBankAccounts } from '$lib/remotes/user-bank-accounts.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
+	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getClients } from '$lib/remotes/clients.remote';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '$lib/components/ui/dialog';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
-	import { ArrowLeft, Filter, Link2, Unlink, RefreshCw } from '@lucide/svelte';
+	import { ArrowLeft, Filter, Link2, Unlink } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import BankingTransactionTableView from '$lib/components/banking-transaction-table-view.svelte';
+	import type { BankTransaction } from '$lib/server/db/schema';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -21,18 +36,81 @@
 	let toDate = $state<string>('');
 	let matchedFilter = $state<'all' | 'matched' | 'unmatched'>('all');
 	let expenseFilter = $state<'all' | 'expense' | 'income'>('all');
+	let sortBy = $state<string | null>(null);
+	let sortDir = $state<'asc' | 'desc'>('desc');
 
-	const accountsQuery = getBankAccounts();
+	const accountsQuery = $derived(getBankAccounts());
 	const accounts = $derived(accountsQuery.current || []);
 
-	const transactionsQuery = getTransactions({
-		bankAccountId: selectedAccountId || undefined,
-		fromDate: fromDate || undefined,
-		toDate: toDate || undefined,
-		matched: matchedFilter === 'all' ? undefined : matchedFilter === 'matched',
-		isExpense: expenseFilter === 'all' ? undefined : expenseFilter === 'expense'
+	const usersQuery = $derived(getTenantUsers());
+	const users = $derived(usersQuery.current || []);
+
+	const clientsQuery = $derived(getClients());
+	const clients = $derived(clientsQuery.current || []);
+
+	const userBankAccountsQuery = $derived(getUserBankAccounts({}));
+	const userBankAccounts = $derived(userBankAccountsQuery.current || []);
+
+	// Build maps
+	const accountMap = $derived(
+		new Map(accounts.map((acc) => [acc.id, acc.accountName || acc.iban]))
+	);
+	const userMap = $derived(
+		new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]))
+	);
+	const clientMap = $derived(new Map(clients.map((c) => [c.id, c.name])));
+
+	// Build IBAN to user map for matching (normalized IBANs)
+	const ibanToUserMap = $derived.by(() => {
+		const map = new Map<string, string>();
+		for (const account of userBankAccounts) {
+			if (account.iban && account.isActive) {
+				const normalizedIban = account.iban.replace(/\s/g, '').toUpperCase();
+				map.set(normalizedIban, account.userId);
+			}
+		}
+		return map;
 	});
-	const transactions = $derived(transactionsQuery.current || []);
+
+	const transactionsQuery = $derived(
+		getTransactions({
+			bankAccountId: selectedAccountId || undefined,
+			fromDate: fromDate || undefined,
+			toDate: toDate || undefined,
+			matched: matchedFilter === 'all' ? undefined : matchedFilter === 'matched',
+			isExpense: expenseFilter === 'all' ? undefined : expenseFilter === 'expense'
+		})
+	);
+	const allTransactions = $derived(transactionsQuery.current || []);
+
+	// Sort transactions
+	const transactions = $derived(
+		allTransactions.toSorted((a, b) => {
+			let aVal: any;
+			let bVal: any;
+
+			switch (sortBy) {
+				case 'date':
+					aVal = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime();
+					bVal = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime();
+					break;
+				case 'description':
+					aVal = (a.description || a.reference || '').toLowerCase();
+					bVal = (b.description || b.reference || '').toLowerCase();
+					break;
+				case 'amount':
+					aVal = a.amount;
+					bVal = b.amount;
+					break;
+				default:
+					return 0;
+			}
+
+			if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+			if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+			return 0;
+		})
+	);
 
 	// Manual matching
 	let matchingTransactionId = $state<string | null>(null);
@@ -42,8 +120,23 @@
 	let isMatchingDialogOpen = $state(false);
 	let matching = $state(false);
 
-	async function handleMatch(transactionId: string) {
-		matchingTransactionId = transactionId;
+	function handleSort(column: string, direction: 'asc' | 'desc') {
+		sortBy = column;
+		sortDir = direction;
+	}
+
+	function handleTransactionClick(transaction: BankTransaction) {
+		// Could open a detail dialog or navigate
+	}
+
+	function handleViewExpense(transaction: BankTransaction) {
+		if (transaction.expenseId) {
+			goto(`/${tenantSlug}/banking/expenses`);
+		}
+	}
+
+	function handleMatchInvoice(transaction: BankTransaction) {
+		matchingTransactionId = transaction.id;
 		isMatchingDialogOpen = true;
 		selectedInvoiceId = '';
 	}
@@ -68,24 +161,16 @@
 		}
 	}
 
-	async function handleUnmatch(transactionId: string) {
+	async function handleUnmatchInvoice(transaction: BankTransaction) {
 		if (!confirm('Are you sure you want to unmatch this transaction from the invoice?')) {
 			return;
 		}
 
 		try {
-			await unmatchTransactionFromInvoice(transactionId).updates(transactionsQuery);
+			await unmatchTransactionFromInvoice(transaction.id).updates(transactionsQuery);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to unmatch transaction');
 		}
-	}
-
-	function getStatusVariant(matched: boolean) {
-		return matched ? 'default' : 'secondary';
-	}
-
-	function formatCurrency(amount: number, currency: string): string {
-		return formatAmount(amount, currency as Currency);
 	}
 </script>
 
@@ -114,11 +199,17 @@
 			</CardTitle>
 		</CardHeader>
 		<CardContent>
-			<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-5">
 				<div class="space-y-2">
 					<Label for="account">Bank Account</Label>
-					<Select value={selectedAccountId} onValueChange={(value: any) => (selectedAccountId = value)}>
-						<SelectTrigger id="account" />
+					<Select
+						type="single"
+						value={selectedAccountId}
+						onValueChange={(value: any) => (selectedAccountId = value)}
+					>
+						<SelectTrigger id="account">
+							{selectedAccountId ? accountMap.get(selectedAccountId) : 'All Accounts'}
+						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="">All Accounts</SelectItem>
 							{#each accounts as account}
@@ -140,8 +231,14 @@
 
 				<div class="space-y-2">
 					<Label for="matched">Match Status</Label>
-					<Select value={matchedFilter} onValueChange={(value: any) => (matchedFilter = value as any)}>
-						<SelectTrigger id="matched" />
+					<Select
+						type="single"
+						value={matchedFilter}
+						onValueChange={(value: any) => (matchedFilter = value as any)}
+					>
+						<SelectTrigger id="matched">
+							{matchedFilter === 'all' ? 'All' : matchedFilter === 'matched' ? 'Matched' : 'Unmatched'}
+						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="all">All</SelectItem>
 							<SelectItem value="matched">Matched</SelectItem>
@@ -152,8 +249,14 @@
 
 				<div class="space-y-2">
 					<Label for="expense">Type</Label>
-					<Select value={expenseFilter} onValueChange={(value: any) => (expenseFilter = value as any)}>
-						<SelectTrigger id="expense" />
+					<Select
+						type="single"
+						value={expenseFilter}
+						onValueChange={(value: any) => (expenseFilter = value as any)}
+					>
+						<SelectTrigger id="expense">
+							{expenseFilter === 'all' ? 'All' : expenseFilter === 'income' ? 'Income' : 'Expense'}
+						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="all">All</SelectItem>
 							<SelectItem value="income">Income</SelectItem>
@@ -170,58 +273,21 @@
 			<CardTitle>Transactions ({transactions.length})</CardTitle>
 		</CardHeader>
 		<CardContent>
-			<div class="space-y-4">
-				{#each transactions as transaction}
-					<div class="flex items-center justify-between rounded-lg border p-4">
-						<div class="flex-1">
-							<div class="flex items-center gap-3">
-								<div>
-									<p class="font-semibold">
-										{transaction.description || transaction.reference || 'No description'}
-									</p>
-									<p class="text-sm text-muted-foreground">
-										{new Date(transaction.date).toLocaleDateString()} • {transaction.counterpartName || transaction.counterpartIban || 'Unknown'}
-									</p>
-								</div>
-								<Badge variant={getStatusVariant(!!transaction.matchedInvoiceId)}>
-									{transaction.matchedInvoiceId ? 'Matched' : 'Unmatched'}
-								</Badge>
-								{#if transaction.isExpense}
-									<Badge variant="destructive">Expense</Badge>
-								{/if}
-							</div>
-						</div>
-						<div class="flex items-center gap-4">
-							<div class="text-right">
-								<p class="font-semibold {transaction.amount < 0 ? 'text-red-600' : 'text-green-600'}">
-									{transaction.amount < 0 ? '-' : '+'}{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
-								</p>
-							</div>
-							<div class="flex items-center gap-2">
-								{#if transaction.matchedInvoiceId}
-									<Button
-										variant="outline"
-										size="sm"
-										onclick={() => goto(`/${tenantSlug}/invoices/${transaction.matchedInvoiceId}`)}
-									>
-										View Invoice
-									</Button>
-									<Button variant="outline" size="sm" onclick={() => handleUnmatch(transaction.id)}>
-										<Unlink class="h-4 w-4" />
-									</Button>
-								{:else if !transaction.isExpense}
-									<Button variant="outline" size="sm" onclick={() => handleMatch(transaction.id)}>
-										<Link2 class="h-4 w-4" />
-										Match
-									</Button>
-								{/if}
-							</div>
-						</div>
-					</div>
-				{:else}
-					<p class="text-center text-muted-foreground py-8">No transactions found</p>
-				{/each}
-			</div>
+			<BankingTransactionTableView
+				{transactions}
+				{accountMap}
+				{userMap}
+				{ibanToUserMap}
+				{clientMap}
+				{tenantSlug}
+				{sortBy}
+				{sortDir}
+				onSortChange={handleSort}
+				onTransactionClick={handleTransactionClick}
+				onViewExpense={handleViewExpense}
+				onMatchInvoice={handleMatchInvoice}
+				onUnmatchInvoice={handleUnmatchInvoice}
+			/>
 		</CardContent>
 	</Card>
 </div>
@@ -235,13 +301,17 @@
 		<div class="space-y-4">
 			<div class="space-y-2">
 				<Label for="invoice">Invoice</Label>
-				<Select value={selectedInvoiceId} onValueChange={(value: any) => (selectedInvoiceId = value)}>
+				<Select
+					type="single"
+					value={selectedInvoiceId}
+					onValueChange={(value: any) => (selectedInvoiceId = value)}
+				>
 					<SelectTrigger id="invoice" />
 					<SelectContent>
 						<SelectItem value="">Select an invoice...</SelectItem>
 						{#each invoices as invoice}
 							<SelectItem value={invoice.id}>
-								{invoice.invoiceNumber} - {formatCurrency(invoice.totalAmount || 0, invoice.currency)}
+								{invoice.invoiceNumber} - {formatAmount(invoice.totalAmount || 0, invoice.currency)}
 							</SelectItem>
 						{/each}
 					</SelectContent>

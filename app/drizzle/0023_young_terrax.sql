@@ -1,0 +1,1 @@
+ALTER TABLE `expense` ADD `user_id` text REFERENCES user(id);

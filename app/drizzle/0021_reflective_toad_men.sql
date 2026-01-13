@@ -1,0 +1,20 @@
+CREATE TABLE `transaction_match_rule` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`match_type` text NOT NULL,
+	`supplier_id` text,
+	`client_id` text,
+	`counterpart_iban` text,
+	`counterpart_name` text,
+	`description_pattern` text,
+	`reference_pattern` text,
+	`match_count` integer DEFAULT 0 NOT NULL,
+	`last_matched_at` timestamp,
+	`created_by_user_id` text,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`supplier_id`) REFERENCES `supplier`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
+);

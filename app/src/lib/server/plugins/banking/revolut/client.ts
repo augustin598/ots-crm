@@ -73,6 +73,21 @@ export class RevolutClient extends BaseBankClient {
 	}
 
 	/**
+	 * Extract domain from redirect URI for JWT iss field
+	 * According to Revolut docs, iss should be the domain (e.g., "example.com"),
+	 * not the full URI (e.g., "https://example.com/callback")
+	 */
+	private getDomainFromUri(uri: string): string {
+		try {
+			const url = new URL(uri);
+			return url.hostname + (url.port ? `:${url.port}` : '');
+		} catch {
+			// Fallback: simple regex extraction
+			return uri.replace(/^https?:\/\//, '').split('/')[0];
+		}
+	}
+
+	/**
 	 * Generate JWT client assertion for Revolut API
 	 * The JWT must be signed with RS256 using the private key
 	 */
@@ -81,7 +96,7 @@ export class RevolutClient extends BaseBankClient {
 		const exp = now + 3600; // 1 hour expiration
 
 		const payload = {
-			iss: this.redirectUri, // Must match redirect URI configured in Revolut
+			iss: this.getDomainFromUri(this.redirectUri), // Domain from redirect URI (e.g., "example.com")
 			sub: this.clientId,
 			aud: 'https://revolut.com',
 			exp: exp
@@ -272,13 +287,50 @@ export class RevolutClient extends BaseBankClient {
 				throw new Error('Invalid response format: expected array of accounts');
 			}
 
-			return (response || []).map((acc: any) => ({
-				id: acc.id,
-				accountId: acc.id,
-				iban: acc.iban || acc.account_number || '', // Revolut may not always provide IBAN
-				accountName: acc.name || '',
-				currency: acc.currency || 'EUR'
-			}));
+			const accounts = response || [];
+
+			// Fetch bank details for each account in parallel
+			const bankDetailsPromises = accounts.map(async (acc: any) => {
+				try {
+					const bankDetailsResponse = await this.apiRequest<any>(
+						accessToken,
+						`/accounts/${acc.id}/bank-details`
+					);
+					// Bank details returns an array, get the first item if available
+					if (Array.isArray(bankDetailsResponse) && bankDetailsResponse.length > 0) {
+						return { accountId: acc.id, bankDetails: bankDetailsResponse[0] };
+					}
+					return { accountId: acc.id, bankDetails: null };
+				} catch (error) {
+					// If bank details can't be fetched, continue without them
+					return { accountId: acc.id, bankDetails: null };
+				}
+			});
+
+			const bankDetailsResults = await Promise.allSettled(bankDetailsPromises);
+
+			// Create a map of account ID to bank details
+			const bankDetailsMap = new Map<string, any>();
+			bankDetailsResults.forEach((result) => {
+				if (result.status === 'fulfilled' && result.value.bankDetails) {
+					bankDetailsMap.set(result.value.accountId, result.value.bankDetails);
+				}
+			});
+
+			// Map accounts with bank details
+			return accounts.map((acc: any) => {
+				const bankDetails = bankDetailsMap.get(acc.id);
+				// Use IBAN from bank details if available, otherwise fall back to account data
+				const iban = bankDetails?.iban || acc.iban || acc.account_number || '';
+
+				return {
+					id: acc.id,
+					accountId: acc.id,
+					iban: iban,
+					accountName: acc.name || '',
+					currency: acc.currency || 'EUR'
+				};
+			});
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('401')) {
 				throw new Error(
@@ -317,23 +369,78 @@ export class RevolutClient extends BaseBankClient {
 			const response = await this.apiRequest<any>(accessToken, endpoint);
 
 			// Transform Revolut API response to our format
-			// Revolut returns array of transactions: [{ id, created_at, updated_at, completed_at, state, amount, currency, ... }]
+			// Revolut returns array of transactions with legs array: [{ id, type, state, created_at, completed_at, legs: [{ amount, currency, description, ... }], merchant?, ... }]
 			if (!Array.isArray(response)) {
 				throw new Error('Invalid response format: expected array of transactions');
 			}
 
-			return (response || []).map((txn: any) => ({
-				transactionId: txn.id,
-				amount: Math.round((txn.amount?.value || txn.amount || 0) * 100), // Convert to cents (amounts may be negative)
-				currency: txn.amount?.currency || txn.currency || 'EUR',
-				date: new Date(txn.completed_at || txn.created_at || txn.date),
-				description: txn.description || txn.merchant?.name || txn.reference || '',
-				reference: txn.reference || txn.leg_id,
-				counterpartIban: txn.counterparty?.account?.iban,
-				counterpartName:
-					txn.counterparty?.account?.name || txn.counterparty?.name || txn.merchant?.name,
-				category: txn.merchant?.category || txn.tag
-			}));
+			return (response || [])
+				.filter((txn: any) => {
+					// Only process transactions with at least one leg
+					return txn.legs && Array.isArray(txn.legs) && txn.legs.length > 0;
+				})
+				.flatMap((txn: any) => {
+					// Map each leg to a separate transaction (most transactions have 1 leg, but some may have multiple)
+					return txn.legs.map((leg: any) => {
+						// Use bill_amount and bill_currency if available, otherwise use amount and currency
+						const amount = leg.bill_amount ?? leg.amount ?? 0;
+						const currency = leg.bill_currency ?? leg.currency ?? 'EUR';
+
+						// Build description from various sources
+						let description = leg.description || '';
+						if (!description && txn.merchant?.name) {
+							description = txn.merchant.name;
+						}
+						if (!description && txn.reference) {
+							description = txn.reference;
+						}
+						if (!description && leg.counterparty?.name) {
+							description = leg.counterparty.name;
+						}
+
+						// Get counterpart information
+						let counterpartIban: string | undefined;
+						let counterpartName: string | undefined;
+
+						if (leg.counterparty) {
+							// Counterparty info from leg
+							if (leg.counterparty.account_type === 'revolut') {
+								// Revolut account - no IBAN available
+								counterpartName = leg.counterparty.name;
+							} else if (leg.counterparty.account_type === 'external') {
+								// External account
+								counterpartIban = leg.counterparty.iban;
+								counterpartName = leg.counterparty.name;
+							}
+						}
+
+						// Merchant name takes precedence for counterpart name
+						if (txn.merchant?.name) {
+							counterpartName = txn.merchant.name;
+						}
+
+						// Use completed_at if available, otherwise created_at
+						const date = txn.completed_at || txn.created_at || txn.updated_at;
+
+						// Build reference from transaction reference or request_id
+						const reference = txn.reference || txn.request_id || leg.leg_id;
+
+						// Category from merchant
+						const category = txn.merchant?.category_code;
+
+						return {
+							transactionId: `${txn.id}-${leg.leg_id}`, // Include leg_id to make unique if multiple legs
+							amount: Math.round(amount * 100), // Convert to cents (amounts may be negative)
+							currency: currency,
+							date: new Date(date),
+							description: description || '',
+							reference: reference,
+							counterpartIban: counterpartIban,
+							counterpartName: counterpartName,
+							category: category
+						};
+					});
+				});
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('401')) {
 				throw new Error(
