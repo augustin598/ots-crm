@@ -2,6 +2,7 @@ import { getPluginRegistry } from './registry';
 import { getPluginManager } from './manager';
 import { smartBillPlugin } from './smartbill/plugin';
 import { keezPlugin } from './keez/plugin';
+import { anafSpvPlugin } from './anaf-spv/plugin';
 import { bankingRevolutPlugin } from './banking/revolut/plugin';
 import { bankingTransilvaniaPlugin } from './banking/transilvania/plugin';
 import { bankingBCRPlugin } from './banking/bcr/plugin';
@@ -23,6 +24,9 @@ export async function initializePlugins(): Promise<void> {
 	// Register Keez plugin
 	registry.register(keezPlugin);
 
+	// Register ANAF SPV plugin
+	registry.register(anafSpvPlugin);
+
 	// Register Banking plugins
 	registry.register(bankingRevolutPlugin);
 	registry.register(bankingTransilvaniaPlugin);
@@ -31,6 +35,7 @@ export async function initializePlugins(): Promise<void> {
 	// Load plugin from database and ensure plugins are registered
 	await ensureSmartBillPluginInDatabase();
 	await ensureKeezPluginInDatabase();
+	await ensureAnafSpvPluginInDatabase();
 	await ensureBankingPluginsInDatabase();
 
 	// Initialize all registered plugins
@@ -93,6 +98,36 @@ async function ensureKeezPluginInDatabase(): Promise<void> {
 		}
 	} catch (error) {
 		console.error('[Plugins] Failed to ensure Keez plugin:', error);
+		// Don't throw - allow app to continue
+	}
+}
+
+/**
+ * Ensure ANAF SPV plugin exists in database
+ */
+async function ensureAnafSpvPluginInDatabase(): Promise<void> {
+	try {
+		const [existing] = await db
+			.select()
+			.from(table.plugin)
+			.where(eq(table.plugin.name, 'anaf-spv'))
+			.limit(1);
+
+		if (!existing) {
+			const pluginId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.plugin).values({
+				id: pluginId,
+				name: 'anaf-spv',
+				displayName: 'ANAF SPV Integration',
+				description: 'Integrate with ANAF SPV (Sistemul Privat Virtual) for Romanian e-factura management and syncing',
+				version: '1.0.0',
+				isActive: true,
+				config: {}
+			});
+			console.log('[Plugins] Created ANAF SPV plugin in database');
+		}
+	} catch (error) {
+		console.error('[Plugins] Failed to ensure ANAF SPV plugin:', error);
 		// Don't throw - allow app to continue
 	}
 }

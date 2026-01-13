@@ -371,6 +371,7 @@ export const invoice = sqliteTable('invoice', {
 	smartbillNumber: text('smartbill_number'),
 	keezInvoiceId: text('keez_invoice_id'),
 	keezExternalId: text('keez_external_id'),
+	spvId: text('spv_id'), // ANAF SPV invoice ID
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -618,6 +619,48 @@ export const keezInvoiceSync = sqliteTable('keez_invoice_sync', {
 	keezInvoiceId: text('keez_invoice_id').notNull(),
 	keezExternalId: text('keez_external_id'),
 	syncDirection: text('sync_direction').notNull(), // 'push', 'pull', 'both'
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+	syncStatus: text('sync_status').notNull().default('pending'), // 'pending', 'synced', 'error'
+	errorMessage: text('error_message'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const anafSpvIntegration = sqliteTable('anaf_spv_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	clientId: text('client_id'), // encrypted
+	clientSecret: text('client_secret'), // encrypted
+	accessToken: text('access_token'), // encrypted, nullable for OAuth flow
+	refreshToken: text('refresh_token'), // encrypted, nullable for OAuth flow
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const anafSpvInvoiceSync = sqliteTable('anaf_spv_invoice_sync', {
+	id: text('id').primaryKey(),
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	spvId: text('spv_id').notNull(), // ANAF SPV invoice ID
+	syncDirection: text('sync_direction').notNull(), // 'pull', 'push'
 	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
 	syncStatus: text('sync_status').notNull().default('pending'), // 'pending', 'synced', 'error'
 	errorMessage: text('error_message'),
@@ -1141,6 +1184,7 @@ export const invoiceRelations = relations(invoice, ({ one, many }) => ({
 	lineItems: many(invoiceLineItem),
 	smartbillSync: many(smartbillInvoiceSync),
 	keezSync: many(keezInvoiceSync),
+	anafSpvSync: many(anafSpvInvoiceSync),
 	matchedTransactions: many(bankTransaction),
 	transactionMatches: many(transactionInvoiceMatch)
 }));
@@ -1272,6 +1316,24 @@ export const keezInvoiceSyncRelations = relations(keezInvoiceSync, ({ one }) => 
 	}),
 	tenant: one(tenant, {
 		fields: [keezInvoiceSync.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const anafSpvIntegrationRelations = relations(anafSpvIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [anafSpvIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const anafSpvInvoiceSyncRelations = relations(anafSpvInvoiceSync, ({ one }) => ({
+	invoice: one(invoice, {
+		fields: [anafSpvInvoiceSync.invoiceId],
+		references: [invoice.id]
+	}),
+	tenant: one(tenant, {
+		fields: [anafSpvInvoiceSync.tenantId],
 		references: [tenant.id]
 	})
 }));
@@ -1485,6 +1547,10 @@ export type KeezInvoiceSync = typeof keezInvoiceSync.$inferSelect;
 export type NewKeezInvoiceSync = typeof keezInvoiceSync.$inferInsert;
 export type KeezClientSync = typeof keezClientSync.$inferSelect;
 export type NewKeezClientSync = typeof keezClientSync.$inferInsert;
+export type AnafSpvIntegration = typeof anafSpvIntegration.$inferSelect;
+export type NewAnafSpvIntegration = typeof anafSpvIntegration.$inferInsert;
+export type AnafSpvInvoiceSync = typeof anafSpvInvoiceSync.$inferSelect;
+export type NewAnafSpvInvoiceSync = typeof anafSpvInvoiceSync.$inferInsert;
 export type RevolutIntegration = typeof revolutIntegration.$inferSelect;
 export type NewRevolutIntegration = typeof revolutIntegration.$inferInsert;
 export type BankAccount = typeof bankAccount.$inferSelect;
