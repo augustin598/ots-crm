@@ -5,6 +5,7 @@
 	import { logout } from '$lib/remotes/auth.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import FolderKanbanIcon from '@lucide/svelte/icons/folder-kanban';
@@ -22,6 +23,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
+	import { Toaster } from '$lib/components/ui/sonner';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -230,3 +232,6 @@
 		</main>
 	</SidebarInset>
 </SidebarProvider>
+{#if browser}
+	<Toaster />
+{/if}

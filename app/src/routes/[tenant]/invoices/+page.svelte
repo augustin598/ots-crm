@@ -4,8 +4,10 @@
 		createInvoice,
 		deleteInvoice,
 		markInvoiceAsPaid,
-		getInvoice
+		getInvoice,
+		sendInvoice
 	} from '$lib/remotes/invoices.remote';
+	import { toast } from 'svelte-sonner';
 	import {
 		getRecurringInvoices,
 		createRecurringInvoice,
@@ -59,9 +61,12 @@
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import CoinsIcon from '@lucide/svelte/icons/coins';
-	import { goto } from '$app/navigation';
+import FileTextIcon from '@lucide/svelte/icons/file-text';
+import CoinsIcon from '@lucide/svelte/icons/coins';
+import MailIcon from '@lucide/svelte/icons/mail';
+import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
+import XCircleIcon from '@lucide/svelte/icons/x-circle';
+import { goto } from '$app/navigation';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -289,6 +294,35 @@
 			await markInvoiceAsPaid(invoiceId).updates(invoicesQuery, getInvoices({}));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to mark invoice as paid');
+		}
+	}
+
+	async function handleSendInvoice(invoiceId: string) {
+		try {
+			// Get the invoice to find the client
+			const invoice = invoices.find((inv) => inv.id === invoiceId);
+			if (!invoice) {
+				toast.error('Invoice not found');
+				return;
+			}
+
+			// Get the client to check for email
+			const client = clients.find((c) => c.id === invoice.clientId);
+			if (!client || !client.email) {
+				toast.error('Clientul nu are email configurat. Nu se poate trimite factura.');
+				return;
+			}
+
+			// Send the invoice
+			await sendInvoice(invoiceId).updates(invoicesQuery);
+			toast.success('Factura a fost trimisă cu succes!');
+		} catch (e) {
+			const errorMessage = e instanceof Error ? e.message : 'Failed to send invoice';
+			if (errorMessage.includes('email not found') || errorMessage.includes('email')) {
+				toast.error('Clientul nu are email configurat. Nu se poate trimite factura.');
+			} else {
+				toast.error(errorMessage);
+			}
 		}
 	}
 
@@ -912,6 +946,38 @@
 													</p>
 												</div>
 											{/if}
+
+											<!-- Email Status (conditional) -->
+											{#if invoice.lastEmailSentAt || invoice.lastEmailStatus}
+												<div class="p-3 rounded-lg {invoice.lastEmailStatus === 'sent' ? 'bg-green-500/10 border border-green-500/20' : invoice.lastEmailStatus === 'failed' ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/30 border border-border/50'} group-hover:bg-muted/50 transition-all">
+													<div class="flex items-center gap-1.5 mb-1.5">
+														{#if invoice.lastEmailStatus === 'sent'}
+															<CheckCircleIcon class="h-3.5 w-3.5 text-green-600/60" />
+														{:else if invoice.lastEmailStatus === 'failed'}
+															<XCircleIcon class="h-3.5 w-3.5 text-red-600/60" />
+														{:else}
+															<MailIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+														{/if}
+														<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email</p>
+													</div>
+													<div class="space-y-0.5">
+														<p class="text-sm font-semibold {invoice.lastEmailStatus === 'sent' ? 'text-green-600 dark:text-green-400' : invoice.lastEmailStatus === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-foreground'}">
+															{#if invoice.lastEmailStatus === 'sent'}
+																Trimis
+															{:else if invoice.lastEmailStatus === 'failed'}
+																Eșuat
+															{:else}
+																Pending
+															{/if}
+														</p>
+														{#if invoice.lastEmailSentAt}
+															<p class="text-xs text-muted-foreground">
+																{formatDate(invoice.lastEmailSentAt)}
+															</p>
+														{/if}
+													</div>
+												</div>
+											{/if}
 										</div>
 									</div>
 
@@ -929,6 +995,7 @@
 												variant="outline" 
 												size="icon"
 												class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+												onclick={() => handleSendInvoice(invoice.id)}
 											>
 												<SendIcon class="h-3.5 w-3.5" />
 											</Button>

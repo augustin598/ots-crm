@@ -363,6 +363,8 @@ export const invoice = sqliteTable('invoice', {
 	issueDate: timestamp('issue_date', { withTimezone: true, mode: 'date' }),
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
 	paidDate: timestamp('paid_date', { withTimezone: true, mode: 'date' }),
+	lastEmailSentAt: timestamp('last_email_sent_at', { withTimezone: true, mode: 'date' }),
+	lastEmailStatus: text('last_email_status'), // 'sent', 'failed', 'pending'
 	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	notes: text('notes'),
 	smartbillSeries: text('smartbill_series'),

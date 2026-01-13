@@ -548,28 +548,48 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	}
 
 	// Update status to 'sent' if it's currently 'draft'
+	const updateData: {
+		status?: string;
+		lastEmailSentAt?: Date;
+		lastEmailStatus?: string;
+		updatedAt: Date;
+	} = {
+		updatedAt: new Date()
+	};
+
 	if (existing.status === 'draft') {
-		await db
-			.update(table.invoice)
-			.set({
-				status: 'sent',
-				updatedAt: new Date()
-			})
-			.where(eq(table.invoice.id, invoiceId));
+		updateData.status = 'sent';
 	}
 
 	// Send email to client only if enabled
 	if (invoiceEmailsEnabled && client?.email) {
 		try {
 			await sendInvoiceEmail(invoiceId, client.email);
+			// Email sent successfully
+			updateData.lastEmailSentAt = new Date();
+			updateData.lastEmailStatus = 'sent';
 		} catch (error) {
 			console.error('Failed to send invoice email:', error);
+			// Email failed but invoice can still be marked as sent
+			updateData.lastEmailSentAt = new Date();
+			updateData.lastEmailStatus = 'failed';
 			// Don't throw - allow invoice to be marked as sent even if email fails
 			// The email error is logged for debugging
 		}
 	} else if (!invoiceEmailsEnabled) {
 		console.log('Invoice emails are disabled for this tenant. Skipping email send.');
+		// When emails are disabled, we still mark as sent but don't set email tracking
+		updateData.lastEmailStatus = 'sent';
+	} else if (!client?.email) {
+		// No email configured for client
+		updateData.lastEmailStatus = 'failed';
 	}
+
+	// Update invoice with status and email tracking
+	await db
+		.update(table.invoice)
+		.set(updateData)
+		.where(eq(table.invoice.id, invoiceId));
 
 	return { success: true };
 });

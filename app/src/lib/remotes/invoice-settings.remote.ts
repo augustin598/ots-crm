@@ -89,6 +89,9 @@ export const updateInvoiceSettings = command(
 					smartbillSeries: data.smartbillSeries !== undefined ? data.smartbillSeries : undefined,
 					smartbillStartNumber: data.smartbillStartNumber !== undefined ? data.smartbillStartNumber : undefined,
 					smartbillAutoSync: data.smartbillAutoSync !== undefined ? data.smartbillAutoSync : undefined,
+					keezSeries: data.keezSeries !== undefined ? data.keezSeries : undefined,
+					keezStartNumber: data.keezStartNumber !== undefined ? data.keezStartNumber : undefined,
+					keezAutoSync: data.keezAutoSync !== undefined ? data.keezAutoSync : undefined,
 					defaultCurrency: data.defaultCurrency !== undefined ? data.defaultCurrency : undefined,
 					invoiceEmailsEnabled: data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
 					updatedAt: new Date()

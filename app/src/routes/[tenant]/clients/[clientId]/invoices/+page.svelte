@@ -105,25 +105,36 @@
 					<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-primary/80 to-primary/60"></div>
 					
 					<div class="p-4 pt-5">
+						<!-- Header with invoice number, status and View Details button -->
+						<div class="flex items-center justify-between gap-4 mb-4">
+							<div class="flex items-center gap-2 flex-wrap">
+								<div class="flex items-center gap-1.5">
+									<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+										<FileTextIcon class="h-3.5 w-3.5 text-primary" />
+									</div>
+									<h3 class="text-lg font-bold tracking-tight text-foreground">
+										{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
+									</h3>
+								</div>
+								<Badge 
+									variant={getStatusColor(invoice.status)} 
+									class="text-xs font-semibold px-2 py-0.5 shadow-sm"
+								>
+									{getStatusIcon(invoice.status)} {invoice.status}
+								</Badge>
+							</div>
+							<Button 
+								variant="outline" 
+								size="sm"
+								class="border-2 hover:border-primary/50 hover:bg-primary/5 transition-all flex-shrink-0" 
+								onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}
+							>
+								View Details
+							</Button>
+						</div>
+
 						<div class="flex items-start justify-between gap-4">
 							<div class="flex-1 min-w-0">
-								<!-- Header with invoice number and status -->
-								<div class="flex items-center gap-2 mb-2 flex-wrap">
-									<div class="flex items-center gap-1.5">
-										<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
-											<FileTextIcon class="h-3.5 w-3.5 text-primary" />
-										</div>
-										<h3 class="text-lg font-bold tracking-tight text-foreground">
-											{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
-										</h3>
-									</div>
-									<Badge 
-										variant={getStatusColor(invoice.status)} 
-										class="text-xs font-semibold px-2 py-0.5 shadow-sm"
-									>
-										{getStatusIcon(invoice.status)} {invoice.status}
-									</Badge>
-								</div>
 
 								<!-- Modern info grid with icons -->
 								<div class="grid gap-3 md:grid-cols-4">
@@ -186,17 +197,6 @@
 									{/if}
 								</div>
 							</div>
-						</div>
-
-						<!-- View Details button -->
-						<div class="mt-4 pt-4 border-t border-border/50">
-							<Button 
-								variant="outline" 
-								class="w-full sm:w-auto border-2 hover:border-primary/50 hover:bg-primary/5 transition-all" 
-								onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}
-							>
-								View Details
-							</Button>
 						</div>
 					</div>
 				</Card>
