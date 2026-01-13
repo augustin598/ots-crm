@@ -190,7 +190,11 @@ export class AnafSpvClient {
 	 * Refresh access token using refresh token
 	 * Uses HTTP Basic Auth as required by ANAF
 	 */
-	async refreshAccessToken(): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
+	async refreshAccessToken(): Promise<{
+		accessToken: string;
+		refreshToken: string;
+		expiresAt: Date;
+	}> {
 		if (!this.clientId || !this.clientSecret) {
 			throw new Error('Client ID and secret are required for token refresh');
 		}
@@ -259,11 +263,7 @@ export class AnafSpvClient {
 	/**
 	 * Make authenticated API request with retry logic
 	 */
-	private async request<T>(
-		endpoint: string,
-		options: RequestInit = {},
-		retries = 3
-	): Promise<T> {
+	private async request<T>(endpoint: string, options: RequestInit = {}, retries = 3): Promise<T> {
 		const token = await this.getAccessToken();
 		const url = `${this.baseUrl}${endpoint}`;
 
@@ -307,7 +307,10 @@ export class AnafSpvClient {
 					return JSON.parse(text) as T;
 				}
 
-				if (contentType.includes('application/zip') || contentType.includes('application/x-zip-compressed')) {
+				if (
+					contentType.includes('application/zip') ||
+					contentType.includes('application/x-zip-compressed')
+				) {
 					return response.arrayBuffer() as unknown as T;
 				}
 
@@ -331,7 +334,11 @@ export class AnafSpvClient {
 	 * @param filter - "P" for suppliers (received), "T" for sent
 	 * @param days - Number of days to look back (default: 60)
 	 */
-	async getInvoicesFromSpv(vatId: string, filter: 'P' | 'T' = 'P', days = 60): Promise<AnafSpvInvoiceMessage[]> {
+	async getInvoicesFromSpv(
+		vatId: string,
+		filter: 'P' | 'T' = 'P',
+		days = 60
+	): Promise<AnafSpvInvoiceMessage[]> {
 		// Remove RO prefix if present
 		const cui = vatId.replace(/^RO/i, '');
 
@@ -401,37 +408,31 @@ export class AnafSpvClient {
 		isExternal = false
 	): Promise<AnafSpvUploadResponse> {
 		// Remove RO prefix if present
-		const cui = vatId.replace(/^RO/i, '');
-
-		const params = new URLSearchParams({
-			standard: 'UBL',
-			cif: cui
-		});
-
-		if (isExternal) {
-			params.append('extern', 'DA');
-		}
-
-		const response = await this.request<string>(`/upload?${params.toString()}`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/xml; charset=utf-8'
-			},
-			body: xmlData
-		});
-
-		// Parse XML response
-		const parser = new DOMParser();
-		const doc = parser.parseFromString(response, 'application/xml');
-		const indexElement = doc.documentElement;
-
-		if (!indexElement || !indexElement.getAttribute('index_incarcare')) {
-			throw new Error('Invalid response from SPV upload');
-		}
-
-		return {
-			index_incarcare: indexElement.getAttribute('index_incarcare') || ''
-		};
+		// const cui = vatId.replace(/^RO/i, '');
+		// const params = new URLSearchParams({
+		// 	standard: 'UBL',
+		// 	cif: cui
+		// });
+		// if (isExternal) {
+		// 	params.append('extern', 'DA');
+		// }
+		// const response = await this.request<string>(`/upload?${params.toString()}`, {
+		// 	method: 'POST',
+		// 	headers: {
+		// 		'Content-Type': 'application/xml; charset=utf-8'
+		// 	},
+		// 	body: xmlData
+		// });
+		// // Parse XML response
+		// const parser = new DOMParser();
+		// const doc = parser.parseFromString(response, 'application/xml');
+		// const indexElement = doc.documentElement;
+		// if (!indexElement || !indexElement.getAttribute('index_incarcare')) {
+		// 	throw new Error('Invalid response from SPV upload');
+		// }
+		// return {
+		// 	index_incarcare: indexElement.getAttribute('index_incarcare') || ''
+		// };
 	}
 
 	/**
