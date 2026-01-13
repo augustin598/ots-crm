@@ -24,15 +24,15 @@
 	// Query states using nuqs-svelte
 	const statuses = useQueryState(
 		'status',
-		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled']))
+		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval']))
 	);
 	const priorities = useQueryState(
 		'priority',
 		parseAsArrayOf(parseAsStringEnum(['low', 'medium', 'high', 'urgent']))
 	);
-	const assignees = useQueryState('assignee', parseAsArrayOf(parseAsString.withDefault('')));
-	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString.withDefault('')));
-	const milestoneIds = useQueryState('milestone', parseAsArrayOf(parseAsString.withDefault('')));
+	const assignees = useQueryState('assignee', parseAsArrayOf(parseAsString));
+	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString));
+	const milestoneIds = useQueryState('milestone', parseAsArrayOf(parseAsString));
 	const search = useQueryState('search', parseAsString.withDefault(''));
 	const dueDate = useQueryState('dueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth']));
 

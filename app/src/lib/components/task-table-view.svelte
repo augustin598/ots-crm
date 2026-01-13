@@ -150,7 +150,7 @@
 				{#each tasks as task}
 					{@const projectName = task.projectId ? projectMap.get(task.projectId) || 'No project' : 'No project'}
 					<TableRow class="cursor-pointer hover:bg-accent/50" onclick={() => onTaskClick(task)}>
-						<TableCell class="font-medium">{task.title}</TableCell>
+						<TableCell class="font-medium max-w-[300px] truncate">{task.title}</TableCell>
 						<TableCell>
 							<span class="capitalize">{formatStatus(task.status || 'todo')}</span>
 						</TableCell>

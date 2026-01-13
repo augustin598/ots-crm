@@ -67,6 +67,11 @@ export const getTasks = query(
 
 		let conditions: any = eq(table.task.tenantId, event.locals.tenant.id);
 
+		// If user is a client user, filter by their client ID
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(conditions, eq(table.task.clientId, event.locals.client.id)) as any;
+		}
+
 		// Project filter
 		if (filters.projectId) {
 			const projectIds = Array.isArray(filters.projectId) ? filters.projectId : [filters.projectId];
@@ -219,7 +224,15 @@ export const createTask = command(taskSchema, async (data) => {
 	}
 
 	const taskId = generateTaskId();
-	const status = data.status || 'todo';
+	// If client user, set status to pending-approval, otherwise use provided status or default to 'todo'
+	const status = event.locals.isClientUser
+		? 'pending-approval'
+		: data.status || 'todo';
+	
+	// If client user, set clientId from context
+	const clientId = event.locals.isClientUser && event.locals.client
+		? event.locals.client.id
+		: data.clientId || null;
 
 	// Get the highest position for this status to assign next position
 	const [maxPositionResult] = await db
@@ -233,7 +246,7 @@ export const createTask = command(taskSchema, async (data) => {
 		id: taskId,
 		tenantId: event.locals.tenant.id,
 		projectId: data.projectId || null,
-		clientId: data.clientId || null,
+		clientId: clientId,
 		milestoneId: data.milestoneId || null,
 		title: data.title,
 		description: data.description || null,
@@ -307,6 +320,23 @@ export const updateTask = command(
 
 		if (!existing) {
 			throw new Error('Task not found');
+		}
+
+		// If client user, restrict updates
+		if (event.locals.isClientUser && event.locals.client) {
+			// Client users can only update their own tasks
+			if (existing.clientId !== event.locals.client.id) {
+				throw new Error('Unauthorized - you can only update your own tasks');
+			}
+
+			// Client users can only update limited fields (title, description, dueDate)
+			// Remove restricted fields
+			delete updateData.status;
+			delete updateData.priority;
+			delete updateData.assignedToUserId;
+			delete updateData.projectId;
+			delete updateData.milestoneId;
+			delete updateData.clientId;
 		}
 
 		const oldAssigneeId = existing.assignedToUserId;
@@ -730,3 +760,93 @@ export const isWatchingTask = query(v.pipe(v.string(), v.minLength(1)), async (t
 
 	return { isWatching: !!watcher };
 });
+
+/**
+ * Approve a task (change status from pending-approval to todo or specified status)
+ */
+export const approveTask = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		newStatus: v.optional(v.string())
+	}),
+	async ({ taskId, newStatus }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Only tenant users (not client users) can approve tasks
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized - only administrators can approve tasks');
+		}
+
+		const [existing] = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Task not found');
+		}
+
+		if (existing.status !== 'pending-approval') {
+			throw new Error('Task is not pending approval');
+		}
+
+		// Update status to newStatus or default to 'todo'
+		const status = newStatus || 'todo';
+
+		await db
+			.update(table.task)
+			.set({
+				status,
+				updatedAt: new Date()
+			})
+			.where(eq(table.task.id, taskId));
+
+		return { success: true, taskId };
+	}
+);
+
+/**
+ * Reject a task (change status to cancelled)
+ */
+export const rejectTask = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (taskId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Only tenant users (not client users) can reject tasks
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized - only administrators can reject tasks');
+		}
+
+		const [existing] = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Task not found');
+		}
+
+		if (existing.status !== 'pending-approval') {
+			throw new Error('Task is not pending approval');
+		}
+
+		await db
+			.update(table.task)
+			.set({
+				status: 'cancelled',
+				updatedAt: new Date()
+			})
+			.where(eq(table.task.id, taskId));
+
+		return { success: true, taskId };
+	}
+);

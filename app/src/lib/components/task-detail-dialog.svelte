@@ -2,6 +2,7 @@
 	import { getTaskComments, createTaskComment } from '$lib/remotes/task-comments.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { approveTask, rejectTask } from '$lib/remotes/tasks.remote';
 	import { goto } from '$app/navigation';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -9,7 +10,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Separator } from '$lib/components/ui/separator';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
-	import { Calendar, User, MessageSquare, Edit } from '@lucide/svelte';
+	import { Calendar, User, MessageSquare, Edit, Check, X } from '@lucide/svelte';
 	import type { Task } from '$lib/server/db/schema';
 
 	interface Props {
@@ -24,6 +25,7 @@
 	let isEditOpen = $state(false);
 	let newComment = $state('');
 	let commentLoading = $state(false);
+	let approvalLoading = $state(false);
 
 	const commentsQuery = $derived(task ? getTaskComments(task.id) : null);
 	const comments = $derived(commentsQuery?.current || []);
@@ -79,6 +81,37 @@
 			commentLoading = false;
 		}
 	}
+
+	async function handleApprove() {
+		if (!task) return;
+		approvalLoading = true;
+		try {
+			await approveTask({ taskId: task.id });
+			onOpenChange(false);
+			// Refresh the page or task list
+			window.location.reload();
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to approve task');
+		} finally {
+			approvalLoading = false;
+		}
+	}
+
+	async function handleReject() {
+		if (!task) return;
+		if (!confirm('Are you sure you want to reject this task?')) return;
+		approvalLoading = true;
+		try {
+			await rejectTask(task.id);
+			onOpenChange(false);
+			// Refresh the page or task list
+			window.location.reload();
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to reject task');
+		} finally {
+			approvalLoading = false;
+		}
+	}
 </script>
 
 {#if task}
@@ -101,19 +134,46 @@
 								<p class="text-sm text-muted-foreground mt-2">{projectMap.get(task.projectId)}</p>
 							</a>
 						{/if}
-						<div class="flex items-center gap-2 mt-3">
-							<Badge variant={getPriorityBadgeVariant(task.priority || 'medium')}>
-								{task.priority || 'medium'}
+					<div class="flex items-center gap-2 mt-3">
+						<Badge variant={getPriorityBadgeVariant(task.priority || 'medium')}>
+							{task.priority || 'medium'}
+						</Badge>
+						<Badge variant="outline">{task.status}</Badge>
+						{#if task.status === 'pending-approval'}
+							<Badge variant="secondary" class="bg-yellow-100 text-yellow-700">
+								Awaiting Approval
 							</Badge>
-							<Badge variant="outline">{task.status}</Badge>
-						</div>
+						{/if}
 					</div>
+				</div>
+				<div class="flex items-center gap-2">
+					{#if task.status === 'pending-approval'}
+						<Button
+							variant="default"
+							size="sm"
+							onclick={handleApprove}
+							disabled={approvalLoading}
+						>
+							<Check class="mr-2 h-4 w-4" />
+							Approve
+						</Button>
+						<Button
+							variant="destructive"
+							size="sm"
+							onclick={handleReject}
+							disabled={approvalLoading}
+						>
+							<X class="mr-2 h-4 w-4" />
+							Reject
+						</Button>
+					{/if}
 					<Button variant="outline" size="sm" onclick={() => (isEditOpen = true)}>
 						<Edit class="mr-2 h-4 w-4" />
 						Edit
 					</Button>
 				</div>
-			</DialogHeader>
+			</div>
+		</DialogHeader>
 
 			<div class="space-y-6 mt-4">
 				{#if task.description}

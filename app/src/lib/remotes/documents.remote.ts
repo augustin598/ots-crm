@@ -26,7 +26,10 @@ export const getDocuments = query(
 
 		let conditions = eq(table.document.tenantId, event.locals.tenant.id);
 
-		if (filters.clientId) {
+		// If user is a client user, filter by their client ID
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(conditions, eq(table.document.clientId, event.locals.client.id)) as any;
+		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.document.clientId, filters.clientId)) as any;
 		}
 		if (filters.projectId) {
@@ -83,13 +86,17 @@ export const getDownloadUrl = query(v.pipe(v.string(), v.minLength(1)), async (d
 		throw new Error('Unauthorized');
 	}
 
-	const [document] = await db
-		.select()
-		.from(table.document)
-		.where(
-			and(eq(table.document.id, documentId), eq(table.document.tenantId, event.locals.tenant.id))
-		)
-		.limit(1);
+	let conditions: any = and(
+		eq(table.document.id, documentId),
+		eq(table.document.tenantId, event.locals.tenant.id)
+	);
+
+	// If user is a client user, ensure document belongs to their client
+	if (event.locals.isClientUser && event.locals.client) {
+		conditions = and(conditions, eq(table.document.clientId, event.locals.client.id)) as any;
+	}
+
+	const [document] = await db.select().from(table.document).where(conditions).limit(1);
 
 	if (!document) {
 		throw new Error('Document not found');

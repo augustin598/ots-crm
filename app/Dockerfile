@@ -1,7 +1,7 @@
 # Bun-based multi-stage Dockerfile for production deployment
 
 # ---- Base stage with Bun ----
-FROM oven/bun:slim AS base
+FROM oven/bun:1.3.5-slim AS base
 WORKDIR /usr/src/app
 
 # ---- Dependencies install (caching) ----
@@ -17,7 +17,7 @@ COPY app ./
 RUN bun run build
 
 # ---- Final production stage ----
-FROM oven/bun:slim AS production
+FROM oven/bun:1.3.5-slim AS production
 WORKDIR /usr/src/app
 
 # Copy production dependencies and build output

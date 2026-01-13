@@ -1,0 +1,103 @@
+<script lang="ts">
+	import type { PageData } from '../$types';
+	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from '$lib/components/ui/sidebar';
+	import { logout } from '$lib/remotes/auth.remote';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
+	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import Building2Icon from '@lucide/svelte/icons/building-2';
+	import { Button } from '$lib/components/ui/button';
+
+	let { data, children }: { data: PageData; children: any } = $props();
+
+	async function handleLogout() {
+		try {
+			await logout();
+			goto(`/client/${data.tenant?.slug}/login`);
+		} catch (e) {
+			console.error('Logout failed:', e);
+		}
+	}
+
+	const currentPath = $derived(page.url.pathname);
+	const tenantSlug = $derived(page.params.tenant);
+</script>
+
+<SidebarProvider>
+	<Sidebar>
+		<SidebarHeader>
+			<div class="flex items-center gap-3 px-2 py-2">
+				<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0">
+					<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+				</div>
+				<div class="flex-1 min-w-0">
+					<h2 class="text-sm font-semibold truncate">{data.tenant?.name || 'Client Portal'}</h2>
+					<p class="text-xs text-muted-foreground">Client Access</p>
+				</div>
+			</div>
+		</SidebarHeader>
+		<SidebarContent>
+			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath === `/client/${tenantSlug}/dashboard` || currentPath === `/client/${tenantSlug}`}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/dashboard" {...props}>
+								<LayoutDashboardIcon />
+								<span>Dashboard</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/tasks`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/tasks" {...props}>
+								<CheckSquareIcon />
+								<span>Tasks</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/contracts`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/contracts" {...props}>
+								<FileTextIcon />
+								<span>Contracts</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/invoices" {...props}>
+								<ReceiptIcon />
+								<span>Invoices</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+			</SidebarMenu>
+		</SidebarContent>
+		<SidebarFooter>
+			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton onclick={handleLogout} variant="outline">
+						<LogOutIcon />
+						<span>Logout</span>
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+			</SidebarMenu>
+		</SidebarFooter>
+	</Sidebar>
+	<SidebarInset>
+		<main class="flex-1 p-6">
+			{@render children()}
+		</main>
+	</SidebarInset>
+</SidebarProvider>
