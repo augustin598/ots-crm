@@ -30,7 +30,9 @@ async function generateInvoiceNumber(tenantId: string): Promise<string> {
 	const [integration] = await db
 		.select()
 		.from(table.keezIntegration)
-		.where(and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true)))
+		.where(
+			and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true))
+		)
 		.limit(1);
 
 	if (!integration) {
@@ -130,7 +132,10 @@ export const getInvoices = query(
 
 		let conditions = eq(table.invoice.tenantId, event.locals.tenant.id);
 
-		if (filters.clientId) {
+		// If user is a client user, filter by their client ID
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(conditions, eq(table.invoice.clientId, event.locals.client.id)) as any;
+		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.invoice.clientId, filters.clientId)) as any;
 		}
 		if (filters.projectId) {

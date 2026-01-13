@@ -194,7 +194,7 @@ export const task = sqliteTable('task', {
 	milestoneId: text('milestone_id').references(() => milestone.id),
 	title: text('title').notNull(),
 	description: text('description'),
-	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled'
+	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'
 	priority: text('priority').default('medium'), // 'low', 'medium', 'high', 'urgent'
 	position: integer('position'), // Position within status column for custom ordering
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
@@ -845,6 +845,41 @@ export const transactionMatchRule = sqliteTable('transaction_match_rule', {
 		.default(sql`current_date`)
 });
 
+export const clientUser = sqliteTable('client_user', {
+	id: text('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const magicLinkToken = sqliteTable('magic_link_token', {
+	id: text('id').primaryKey(),
+	token: text('token').notNull().unique(), // Hashed token
+	email: text('email').notNull(),
+	clientId: text('client_id').references(() => client.id), // Nullable for initial signup
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	used: boolean('used').notNull().default(false),
+	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -862,7 +897,8 @@ export const userRelations = relations(user, ({ many }) => ({
 		relationName: 'createdTasks'
 	}),
 	workHours: many(userWorkHours),
-	bankAccounts: many(userBankAccount)
+	bankAccounts: many(userBankAccount),
+	clientUsers: many(clientUser)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -895,7 +931,9 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	transactionInvoiceMatches: many(transactionInvoiceMatch),
 	userWorkHours: many(userWorkHours),
 	suppliers: many(supplier),
-	userBankAccounts: many(userBankAccount)
+	userBankAccounts: many(userBankAccount),
+	clientUsers: many(clientUser),
+	magicLinkTokens: many(magicLinkToken)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -920,7 +958,9 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	services: many(service),
 	invoices: many(invoice),
 	expenses: many(expense),
-	matchRules: many(transactionMatchRule)
+	matchRules: many(transactionMatchRule),
+	clientUsers: many(clientUser),
+	magicLinkTokens: many(magicLinkToken)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -1362,6 +1402,32 @@ export const transactionMatchRuleRelations = relations(transactionMatchRule, ({ 
 	})
 }));
 
+export const clientUserRelations = relations(clientUser, ({ one }) => ({
+	user: one(user, {
+		fields: [clientUser.userId],
+		references: [user.id]
+	}),
+	client: one(client, {
+		fields: [clientUser.clientId],
+		references: [client.id]
+	}),
+	tenant: one(tenant, {
+		fields: [clientUser.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const magicLinkTokenRelations = relations(magicLinkToken, ({ one }) => ({
+	client: one(client, {
+		fields: [magicLinkToken.clientId],
+		references: [client.id]
+	}),
+	tenant: one(tenant, {
+		fields: [magicLinkToken.tenantId],
+		references: [tenant.id]
+	})
+}));
+
 // Types
 export type Session = typeof session.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -1431,3 +1497,7 @@ export type UserBankAccount = typeof userBankAccount.$inferSelect;
 export type NewUserBankAccount = typeof userBankAccount.$inferInsert;
 export type TransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferSelect;
 export type NewTransactionInvoiceMatch = typeof transactionInvoiceMatch.$inferInsert;
+export type ClientUser = typeof clientUser.$inferSelect;
+export type NewClientUser = typeof clientUser.$inferInsert;
+export type MagicLinkToken = typeof magicLinkToken.$inferSelect;
+export type NewMagicLinkToken = typeof magicLinkToken.$inferInsert;

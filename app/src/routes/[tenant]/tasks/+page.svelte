@@ -28,7 +28,7 @@
 	// Filter states
 	const statuses = useQueryState(
 		'status',
-		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled']))
+		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval']))
 	);
 	const priorities = useQueryState(
 		'priority',
@@ -47,8 +47,8 @@
 		status: (statuses.current as string[] | null) && (statuses.current as string[]).length > 0 ? (statuses.current as string[]) : undefined,
 		priority: (priorities.current as string[] | null) && (priorities.current as string[]).length > 0 ? (priorities.current as string[]) : undefined,
 		assignee: (assignees.current as string[] | null) && (assignees.current as string[]).length > 0 ? (assignees.current as string[]) : undefined,
-		project: (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0 ? (projectIds.current as string[]) : undefined,
-		milestone: (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0 ? (milestoneIds.current as string[]) : undefined,
+		projectId: (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0 ? (projectIds.current as string[]) : undefined,
+		milestoneId: (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0 ? (milestoneIds.current as string[]) : undefined,
 		search: search.current || undefined,
 		dueDate: dueDate.current || undefined,
 		sortBy: sortBy.current || undefined,

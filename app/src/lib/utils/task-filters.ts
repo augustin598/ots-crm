@@ -2,10 +2,10 @@
  * Utility functions for task filtering and date calculations
  */
 
-export type TaskStatus = 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled';
+export type TaskStatus = 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
-export const TASK_STATUSES: TaskStatus[] = ['todo', 'in-progress', 'review', 'done', 'cancelled'];
+export const TASK_STATUSES: TaskStatus[] = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'];
 export const TASK_PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 
 /**

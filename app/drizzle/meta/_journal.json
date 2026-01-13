@@ -169,6 +169,13 @@
       "when": 1768250588014,
       "tag": "0023_young_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1768317913243,
+      "tag": "0024_pale_proteus",
+      "breakpoints": true
     }
   ]
 }

@@ -325,6 +325,109 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 }
 
 /**
+ * Send magic link email to client
+ */
+export async function sendMagicLinkEmail(
+	email: string,
+	token: string,
+	tenantSlug: string,
+	clientName: string
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	// Get tenant by slug
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.slug, tenantSlug))
+		.limit(1);
+
+	if (!tenant) {
+		throw new Error('Tenant not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(tenant.id);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
+
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenant.id))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
+	const tenantName = tenant.name || 'CRM';
+	const loginUrl = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(token)}`;
+
+	const mailOptions = {
+		from: `"${tenantName}" <${fromEmail}>`,
+		to: email,
+		subject: `Login to ${tenantName} Client Portal`,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Login to ${tenantName}</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: #2563eb; margin-top: 0;">Welcome to ${tenantName}</h1>
+					<p>Dear ${clientName},</p>
+					<p>You have requested access to the client portal for <strong>${tenantName}</strong>.</p>
+					<p>Click the button below to log in to your account. This link will expire in 24 hours.</p>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${loginUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Log In to Client Portal</a>
+					</div>
+					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+					<p style="font-size: 12px; color: #999; word-break: break-all;">${loginUrl}</p>
+					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
+						<p style="margin: 0; font-size: 14px; color: #856404;">
+							<strong>Security Notice:</strong> This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
+						</p>
+					</div>
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please contact your administrator.</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+			Welcome to ${tenantName}
+
+			Dear ${clientName},
+
+			You have requested access to the client portal for ${tenantName}.
+
+			Click the link below to log in to your account. This link will expire in 24 hours.
+
+			${loginUrl}
+
+			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
+
+			If you have any questions, please contact your administrator.
+		`
+	};
+
+	try {
+		await transporter.sendMail(mailOptions);
+		console.log(`Magic link email sent to ${email} for tenant ${tenantSlug}`);
+	} catch (error) {
+		console.error('Failed to send magic link email:', error);
+		throw new Error('Failed to send magic link email');
+	}
+}
+
+/**
  * Send task assignment email
  */
 export async function sendTaskAssignmentEmail(

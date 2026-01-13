@@ -38,7 +38,7 @@
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
 
-	const STATUSES = ['todo', 'in-progress', 'review', 'done'] as const;
+	const STATUSES = ['pending-approval', 'todo', 'in-progress', 'review', 'done'] as const;
 
 		// Optimistic updates
 	let optimisticTasks = $state<Task[]>(tasks);
@@ -46,6 +46,7 @@
 	// Group tasks by status and sort by position
 	const groupedTasks = $derived.by(() => {
 		const groups: Record<string, Task[]> = {
+			'pending-approval': [],
 			todo: [],
 			'in-progress': [],
 			review: [],
