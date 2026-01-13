@@ -4,7 +4,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { KeezClient } from './client';
 import { decrypt } from './crypto';
-import { mapInvoiceToKeez, generateNextInvoiceNumber } from './mapper';
+import { mapInvoiceToKeez, generateNextInvoiceNumber, mapKeezDetailsToLineItems } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function generateSyncId() {
@@ -85,19 +85,139 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			secret
 		});
 
+		console.log(`[Keez] Starting invoice sync for invoice ${invoice.id} with ${lineItems.length} line items`);
+
+		// Ensure all items exist in Keez before creating invoice
+		const itemExternalIds = new Map<string, string>();
+		const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+		const currency = invoice.currency || settings?.defaultCurrency || 'RON';
+
+		for (const lineItem of lineItems) {
+			// Generate code for item (similar to WHMCS implementation)
+			const itemCode = `CRM_${lineItem.id}`;
+			
+			console.log(`[Keez] Checking item ${itemCode} for line item ${lineItem.id}`);
+
+			// Check if item exists in Keez by code
+			let keezItem = await keezClient.getItemByCode(itemCode);
+
+			if (!keezItem) {
+				// Item doesn't exist, create it
+				console.log(`[Keez] Item ${itemCode} not found, creating new item in Keez`);
+				
+				try {
+					const newItem = await keezClient.createItem({
+						code: itemCode,
+						name: lineItem.description || 'Item',
+						description: lineItem.description || undefined,
+						currencyCode: currency,
+						measureUnitId: 1, // Default to "Buc" (1)
+						vatRate: vatPercent,
+						isActive: true,
+						categoryExternalId: 'MISCSRV' // Required category (Misc Services)
+					});
+
+					console.log(`[Keez] Created item ${itemCode} with externalId: ${newItem.externalId}`);
+					itemExternalIds.set(lineItem.id, newItem.externalId);
+				} catch (itemError) {
+					console.error(`[Keez] Failed to create item ${itemCode}:`, itemError);
+					// Try to continue with item ID as fallback
+					itemExternalIds.set(lineItem.id, lineItem.id);
+				}
+			} else {
+				// Item exists, use its externalId
+				console.log(`[Keez] Found existing item ${itemCode} with externalId: ${keezItem.externalId}`);
+				itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
+			}
+		}
+
+		// If no line items, we'll create a generic item in the mapper
+		if (lineItems.length === 0) {
+			console.log(`[Keez] Invoice ${invoice.id} has no line items, will create generic item in mapper`);
+		}
+
 		// Generate external ID (use invoice ID or generate one)
 		const externalId = invoice.keezExternalId || invoice.id;
 
-		// Map invoice to Keez format
+		// Get the latest invoice number from Keez for this series to ensure we use the correct next number
+		// This is important because other invoices might have been created in Keez since we generated the number
+		let invoiceSeries: string | undefined;
+		let invoiceNumber: string | undefined;
+		
+		if (settings?.keezSeries) {
+			invoiceSeries = settings.keezSeries.trim();
+			console.log(`[Keez] Checking latest invoice number in Keez for series: ${invoiceSeries}`);
+			
+			try {
+				const nextNumber = await keezClient.getNextInvoiceNumber(invoiceSeries);
+				if (nextNumber !== null) {
+					invoiceNumber = String(nextNumber);
+					console.log(`[Keez] Next invoice number from Keez for series ${invoiceSeries}: ${invoiceNumber}`);
+				} else {
+					// Fallback: use the number from invoice or start number
+					if (invoice.invoiceNumber) {
+						const match = invoice.invoiceNumber.match(/(\d+)$/);
+						if (match) {
+							invoiceNumber = match[1];
+						}
+					}
+					if (!invoiceNumber && settings.keezStartNumber) {
+						invoiceNumber = settings.keezStartNumber;
+					}
+					console.log(`[Keez] Using fallback number: ${invoiceNumber}`);
+				}
+			} catch (error) {
+				console.warn(`[Keez] Failed to get next invoice number from Keez, using invoice number:`, error);
+				// Fallback: extract number from invoice number
+				if (invoice.invoiceNumber) {
+					const match = invoice.invoiceNumber.match(/(\d+)$/);
+					if (match) {
+						invoiceNumber = match[1];
+					}
+				}
+				if (!invoiceNumber && settings.keezStartNumber) {
+					invoiceNumber = settings.keezStartNumber;
+				}
+			}
+		}
+
+		// Map invoice to Keez format with updated mapper
+		// Pass the series and number we got from Keez to ensure correct numbering
 		const keezInvoice = mapInvoiceToKeez(
 			{ ...invoice, lineItems },
 			client,
 			tenant,
-			externalId
+			externalId,
+			settings,
+			itemExternalIds
 		);
 
+		// Override series and number with the ones we got from Keez
+		if (invoiceSeries && invoiceNumber) {
+			keezInvoice.series = invoiceSeries;
+			keezInvoice.number = invoiceNumber;
+			console.log(`[Keez] Using series: ${invoiceSeries}, number: ${invoiceNumber} for invoice ${invoice.id}`);
+		}
+
+		console.log(`[Keez] Mapped invoice to Keez format with ${keezInvoice.invoiceDetails.length} details`);
+
 		// Create invoice in Keez
-		const response = await keezClient.createInvoice(keezInvoice);
+		console.log(`[Keez] Creating invoice in Keez with externalId: ${externalId}`);
+		console.log(`[Keez] Invoice data:`, JSON.stringify({
+			series: keezInvoice.series,
+			number: keezInvoice.number,
+			currency: keezInvoice.currencyCode,
+			detailsCount: keezInvoice.invoiceDetails.length
+		}));
+
+		let response;
+		try {
+			response = await keezClient.createInvoice(keezInvoice);
+			console.log(`[Keez] Invoice created successfully in Keez with externalId: ${response.externalId}`);
+		} catch (createError) {
+			console.error(`[Keez] Failed to create invoice in Keez:`, createError);
+			throw createError; // Re-throw to be caught by outer try-catch
+		}
 
 		// Fetch the created invoice from Keez to get all actual data (number, series, VAT, currency, dates, etc.)
 		let keezInvoiceData: any = null;
@@ -161,35 +281,77 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			}
 		}
 
-		// Extract and update dates from Keez
-		if (keezInvoiceData?.issueDate) {
+		// Helper function to parse YYYYMMDD format dates from Keez
+		const parseKeezDate = (dateValue: string | number | undefined): Date | null => {
+			if (!dateValue) return null;
+			
 			try {
-				const issueDate = new Date(keezInvoiceData.issueDate);
-				if (!isNaN(issueDate.getTime())) {
-					updateData.issueDate = issueDate;
+				// Handle numeric format (YYYYMMDD) from Keez API
+				if (typeof dateValue === 'number') {
+					const dateNum = dateValue;
+					// Check if it's a valid YYYYMMDD format (8 digits)
+					if (dateNum >= 10000101 && dateNum <= 99991231) {
+						const dateStr = String(dateNum);
+						const year = parseInt(dateStr.substring(0, 4), 10);
+						const month = parseInt(dateStr.substring(4, 6), 10) - 1; // Month is 0-indexed
+						const day = parseInt(dateStr.substring(6, 8), 10);
+						
+						const date = new Date(year, month, day);
+						if (!isNaN(date.getTime()) && date.getFullYear() === year) {
+							return date;
+						}
+					}
+					return null;
 				}
-			} catch (e) {
-				console.warn(`[Keez] Invalid issue date from Keez:`, keezInvoiceData.issueDate);
+				
+				// Handle string format (YYYYMMDD or YYYY-MM-DD)
+				const dateStrTrimmed = String(dateValue).trim();
+				if (!dateStrTrimmed || dateStrTrimmed === 'null' || dateStrTrimmed === 'undefined' || dateStrTrimmed === '0000-00-00') {
+					return null;
+				}
+				
+				// Try YYYYMMDD format first
+				if (/^\d{8}$/.test(dateStrTrimmed)) {
+					const year = parseInt(dateStrTrimmed.substring(0, 4), 10);
+					const month = parseInt(dateStrTrimmed.substring(4, 6), 10) - 1;
+					const day = parseInt(dateStrTrimmed.substring(6, 8), 10);
+					const date = new Date(year, month, day);
+					if (!isNaN(date.getTime()) && date.getFullYear() === year) {
+						return date;
+					}
+				}
+				
+				// Try standard date format
+				const date = new Date(dateStrTrimmed);
+				if (!isNaN(date.getTime()) && date.getFullYear() > 1970) {
+					return date;
+				}
+				
+				return null;
+			} catch (error) {
+				console.warn(`[Keez] Error parsing date:`, dateValue, error);
+				return null;
+			}
+		};
+
+		// Extract and update dates from Keez
+		if (keezInvoiceData?.issueDate || keezInvoiceHeader?.documentDate || keezInvoiceHeader?.issueDate) {
+			const issueDateSource = keezInvoiceData?.issueDate || keezInvoiceHeader?.documentDate || keezInvoiceHeader?.issueDate;
+			const issueDate = parseKeezDate(issueDateSource);
+			if (issueDate) {
+				updateData.issueDate = issueDate;
+			} else {
+				console.warn(`[Keez] Could not parse issue date from Keez:`, issueDateSource);
 			}
 		}
 
-		if (keezInvoiceData?.dueDate) {
-			try {
-				// Check if dueDate is a valid non-empty string
-				const dueDateStr = String(keezInvoiceData.dueDate).trim();
-				if (dueDateStr && dueDateStr !== 'null' && dueDateStr !== 'undefined' && dueDateStr !== '0000-00-00') {
-					const dueDate = new Date(dueDateStr);
-					// Check if date is valid and not epoch (1970-01-01)
-					if (!isNaN(dueDate.getTime()) && dueDate.getFullYear() > 1970) {
-						updateData.dueDate = dueDate;
-					} else {
-						console.warn(`[Keez] Invalid due date from Keez (epoch or invalid):`, keezInvoiceData.dueDate);
-					}
-				} else {
-					console.warn(`[Keez] Invalid due date from Keez (empty or null string):`, keezInvoiceData.dueDate);
-				}
-			} catch (e) {
-				console.warn(`[Keez] Invalid due date from Keez:`, keezInvoiceData.dueDate);
+		if (keezInvoiceData?.dueDate || keezInvoiceHeader?.dueDate) {
+			const dueDateSource = keezInvoiceData?.dueDate || keezInvoiceHeader?.dueDate;
+			const dueDate = parseKeezDate(dueDateSource);
+			if (dueDate) {
+				updateData.dueDate = dueDate;
+			} else {
+				console.warn(`[Keez] Could not parse due date from Keez:`, dueDateSource);
 			}
 		}
 
@@ -234,6 +396,35 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			.set(updateData)
 			.where(eq(table.invoice.id, invoice.id));
 
+		// Extract and save invoice line items from Keez
+		if (keezInvoiceData?.invoiceDetails && Array.isArray(keezInvoiceData.invoiceDetails) && keezInvoiceData.invoiceDetails.length > 0) {
+			try {
+				// Delete existing line items for this invoice (to avoid duplicates)
+				await db
+					.delete(table.invoiceLineItem)
+					.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
+
+				// Convert Keez invoice details to line items
+				const lineItemsData = mapKeezDetailsToLineItems(
+					keezInvoiceData.invoiceDetails,
+					invoice.id
+				);
+
+				// Insert new line items with generated IDs
+				if (lineItemsData.length > 0) {
+					const lineItemsToInsert = lineItemsData.map((item) => ({
+						...item,
+						id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
+					}));
+					await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
+					console.log(`[Keez] Added ${lineItemsToInsert.length} line items from Keez for invoice ${invoice.id}`);
+				}
+			} catch (error) {
+				console.error(`[Keez] Failed to save line items for invoice ${invoice.id}:`, error);
+				// Don't fail the entire sync if line items fail
+			}
+		}
+
 		// Get updated invoice for sync record
 		const [updatedInvoice] = await db
 			.select()
@@ -274,9 +465,15 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			})
 			.where(eq(table.keezIntegration.id, integration.id));
 
-		console.log(`[Keez] Successfully synced invoice ${invoice.id} to Keez`);
+		console.log(`[Keez] Successfully synced invoice ${invoice.id} to Keez with externalId: ${response.externalId}`);
 	} catch (error) {
-		console.error(`[Keez] Failed to sync invoice ${invoice.id} to Keez:`, error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorStack = error instanceof Error ? error.stack : undefined;
+		
+		console.error(`[Keez] Failed to sync invoice ${invoice.id} to Keez:`, errorMessage);
+		if (errorStack) {
+			console.error(`[Keez] Error stack:`, errorStack);
+		}
 
 		// Store error in sync record
 		try {

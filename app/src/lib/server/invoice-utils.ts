@@ -1,12 +1,86 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from './plugins/hooks';
+import { generateKeezInvoiceNumber, extractInvoiceNumber } from '$lib/utils/invoice';
+import { KeezClient } from './plugins/keez/client';
+import { decrypt } from './plugins/keez/crypto';
+import { generateNextInvoiceNumber } from './plugins/keez/mapper';
 
 function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
+}
+
+/**
+ * Generate invoice number based on Keez settings if configured
+ * Falls back to default format if Keez is not configured
+ */
+export async function generateInvoiceNumber(tenantId: string): Promise<string> {
+	// Check if Keez integration is active
+	const [integration] = await db
+		.select()
+		.from(table.keezIntegration)
+		.where(
+			and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true))
+		)
+		.limit(1);
+
+	if (!integration) {
+		// No Keez integration, use default format
+		return `INV-${Date.now()}`;
+	}
+
+	// Get invoice settings
+	const [settings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
+	if (!settings?.keezSeries) {
+		// Keez series not configured, use default format
+		return `INV-${Date.now()}`;
+	}
+
+	const series = settings.keezSeries.trim();
+	if (!series) {
+		return `INV-${Date.now()}`;
+	}
+
+	// Try to get next number from Keez API
+	try {
+		const secret = decrypt(tenantId, integration.secret);
+		const keezClient = new KeezClient({
+			clientEid: integration.clientEid,
+			applicationId: integration.applicationId,
+			secret
+		});
+
+		const nextNumber = await keezClient.getNextInvoiceNumber(series);
+		if (nextNumber !== null) {
+			return generateKeezInvoiceNumber(series, nextNumber);
+		}
+	} catch (error) {
+		console.warn(`[Invoice] Failed to get next number from Keez, using fallback:`, error);
+	}
+
+	// Fallback: use last synced number or start number
+	let nextNum: string;
+	if (settings.keezLastSyncedNumber) {
+		// Extract numeric part and increment
+		const numericPart = extractInvoiceNumber(settings.keezLastSyncedNumber);
+		nextNum = generateNextInvoiceNumber(numericPart);
+	} else if (settings.keezStartNumber) {
+		// Use start number
+		nextNum = extractInvoiceNumber(settings.keezStartNumber);
+	} else {
+		// No start number, default to 1
+		nextNum = '1';
+	}
+
+	return generateKeezInvoiceNumber(series, nextNum);
 }
 
 /**
@@ -85,8 +159,8 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 	const taxAmount = Math.round((amount * taxRate) / 10000);
 	const totalAmount = amount + taxAmount;
 
-	// Generate invoice number
-	const invoiceNumber = `INV-${Date.now()}`;
+	// Generate invoice number (with Keez series if configured)
+	const invoiceNumber = await generateInvoiceNumber(recurringInvoice.tenantId);
 	const invoiceId = generateInvoiceId();
 
 	// Create invoice

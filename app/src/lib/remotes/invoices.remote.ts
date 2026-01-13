@@ -6,10 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { sendInvoiceEmail } from '$lib/server/email';
-import { generateKeezInvoiceNumber, extractInvoiceNumber } from '$lib/utils/invoice';
-import { KeezClient } from '$lib/server/plugins/keez/client';
-import { decrypt } from '$lib/server/plugins/keez/crypto';
-import { generateNextInvoiceNumber } from '$lib/server/plugins/keez/mapper';
+import { generateInvoiceNumber } from '$lib/server/invoice-utils';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -21,75 +18,6 @@ function generateInvoiceId() {
 	return encodeBase32LowerCase(bytes);
 }
 
-/**
- * Generate invoice number based on Keez settings if configured
- * Falls back to default format if Keez is not configured
- */
-async function generateInvoiceNumber(tenantId: string): Promise<string> {
-	// Check if Keez integration is active
-	const [integration] = await db
-		.select()
-		.from(table.keezIntegration)
-		.where(
-			and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true))
-		)
-		.limit(1);
-
-	if (!integration) {
-		// No Keez integration, use default format
-		return `INV-${Date.now()}`;
-	}
-
-	// Get invoice settings
-	const [settings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, tenantId))
-		.limit(1);
-
-	if (!settings?.keezSeries) {
-		// Keez series not configured, use default format
-		return `INV-${Date.now()}`;
-	}
-
-	const series = settings.keezSeries.trim();
-	if (!series) {
-		return `INV-${Date.now()}`;
-	}
-
-	// Try to get next number from Keez API
-	try {
-		const secret = decrypt(tenantId, integration.secret);
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
-
-		const nextNumber = await keezClient.getNextInvoiceNumber(series);
-		if (nextNumber !== null) {
-			return generateKeezInvoiceNumber(series, nextNumber);
-		}
-	} catch (error) {
-		console.warn(`[Invoice] Failed to get next number from Keez, using fallback:`, error);
-	}
-
-	// Fallback: use last synced number or start number
-	let nextNum: string;
-	if (settings.keezLastSyncedNumber) {
-		// Extract numeric part and increment
-		const numericPart = extractInvoiceNumber(settings.keezLastSyncedNumber);
-		nextNum = generateNextInvoiceNumber(numericPart);
-	} else if (settings.keezStartNumber) {
-		// Use start number
-		nextNum = extractInvoiceNumber(settings.keezStartNumber);
-	} else {
-		// No start number, default to 1
-		nextNum = '1';
-	}
-
-	return generateKeezInvoiceNumber(series, nextNum);
-}
 
 export const getInvoice = query(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
 	const event = getRequestEvent();

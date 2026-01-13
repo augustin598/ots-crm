@@ -24,15 +24,19 @@ export interface KeezInvoice {
 	series?: string; // Invoice series (e.g., "OTS")
 	number?: string; // Invoice number (e.g., "520")
 	partner?: KeezPartner;
-	issueDate: string; // YYYY-MM-DD
-	dueDate?: string; // YYYY-MM-DD
-	deliveryDate?: string; // YYYY-MM-DD
-	currency?: string; // 'RON', 'EUR', etc.
+	documentDate?: string; // YYYYMMDD format
+	issueDate: string; // YYYYMMDD format (was YYYY-MM-DD, but Keez API uses YYYYMMDD)
+	dueDate?: string; // YYYYMMDD format
+	deliveryDate?: string; // YYYYMMDD format
+	currency?: string; // 'RON', 'EUR', etc. (legacy field)
+	currencyCode?: string; // 'RON', 'EUR', etc. (preferred field)
 	exchangeRate?: number;
+	vatOnCollection?: boolean; // TVA la încasare
+	paymentTypeId?: number; // Payment type ID (1 = default, 3 = bank transfer, 6 = payment processor)
+	paymentType?: string; // Legacy field
+	paymentDueDate?: string;
 	invoiceDetails: KeezInvoiceDetail[];
 	notes?: string;
-	paymentType?: string;
-	paymentDueDate?: string;
 	// Total amounts (may be present in API response)
 	netAmount?: number;
 	vatAmount?: number;
@@ -123,6 +127,28 @@ export interface KeezInvoiceHeader {
 export interface KeezPartnerListResponse {
 	partners: KeezPartner[];
 	total?: number;
+}
+
+export interface KeezItem {
+	externalId?: string;
+	code?: string;
+	name: string;
+	description?: string;
+	currencyCode?: string;
+	measureUnitId?: number;
+	vatRate?: number;
+	isActive?: boolean;
+	categoryExternalId?: string;
+}
+
+export interface KeezItemListResponse {
+	data?: KeezItem[];
+	total?: number;
+	recordsCount?: number;
+}
+
+export interface KeezItemResponse {
+	externalId: string;
 }
 
 export class KeezClient {
@@ -430,47 +456,151 @@ export class KeezClient {
 	}
 
 	/**
+	 * Get list of items (articles)
+	 */
+	async getItems(filters?: {
+		offset?: number;
+		count?: number;
+		order?: string;
+		filter?: string;
+	}): Promise<KeezItemListResponse> {
+		const params = new URLSearchParams();
+		if (filters?.offset !== undefined) params.append('offset', filters.offset.toString());
+		if (filters?.count !== undefined) params.append('count', filters.count.toString());
+		if (filters?.order) params.append('order', filters.order);
+		if (filters?.filter) params.append('filter', filters.filter);
+
+		const queryString = params.toString();
+		const endpoint = `/${this.clientEid}/items${queryString ? `?${queryString}` : ''}`;
+
+		return this.request<KeezItemListResponse>(endpoint, {
+			method: 'GET'
+		});
+	}
+
+	/**
+	 * Get single item by externalId
+	 */
+	async getItem(externalId: string): Promise<KeezItem> {
+		return this.request<KeezItem>(`/${this.clientEid}/items/${externalId}`, {
+			method: 'GET'
+		});
+	}
+
+	/**
+	 * Get item by code
+	 */
+	async getItemByCode(code: string): Promise<KeezItem | null> {
+		try {
+			const response = await this.getItems({
+				count: 1000,
+				filter: `code eq '${code}'`
+			});
+
+			if (response.data && response.data.length > 0) {
+				return response.data[0];
+			}
+
+			return null;
+		} catch (error) {
+			console.error(`[Keez] Error getting item by code ${code}:`, error);
+			return null;
+		}
+	}
+
+	/**
+	 * Create item (article)
+	 */
+	async createItem(item: KeezItem): Promise<KeezItemResponse> {
+		const response = await this.request<string | { externalId: string }>(
+			`/${this.clientEid}/items`,
+			{
+				method: 'POST',
+				body: JSON.stringify(item)
+			}
+		);
+
+		// Keez returns externalId as a string or object
+		if (typeof response === 'string') {
+			return { externalId: response };
+		}
+		if (response && typeof response === 'object' && 'externalId' in response) {
+			return { externalId: response.externalId };
+		}
+		// Fallback: try to extract from response
+		return { externalId: String(response) };
+	}
+
+	/**
+	 * Update item
+	 */
+	async updateItem(externalId: string, item: KeezItem): Promise<void> {
+		await this.request(`/${this.clientEid}/items/${externalId}`, {
+			method: 'PUT',
+			body: JSON.stringify(item)
+		});
+	}
+
+	/**
 	 * Get next invoice number for a given series by fetching invoices from Keez
 	 * Returns the next number that should be used (max + 1)
+	 * Example: If last invoice is "OTS 520", returns 521
 	 */
 	async getNextInvoiceNumber(series: string): Promise<number | null> {
 		try {
-			// Fetch invoices with the specified series
-			// We'll fetch a reasonable number to find the max
+			// Fetch invoices with the specified series, ordered by number descending to get the latest first
 			const response = await this.getInvoices({
 				count: 1000, // Fetch up to 1000 invoices to find max
-				filter: `series eq '${series}'`
+				filter: `series eq '${series}'`,
+				order: 'number desc' // Order by number descending to get latest first
 			});
 
 			if (!response.data || response.data.length === 0) {
 				// No invoices found with this series, start from 1
+				console.log(`[Keez] No invoices found for series ${series}, starting from 1`);
 				return 1;
 			}
 
 			// Find the maximum number for this series
 			let maxNumber = 0;
 			for (const invoice of response.data) {
-				if (invoice.series === series && invoice.number) {
+				if (invoice.series === series && invoice.number !== undefined && invoice.number !== null) {
 					// Extract numeric part from invoice number
-					// invoice.number can be string or number
-					const numberStr = String(invoice.number);
-					const numericMatch = numberStr.match(/(\d+)$/);
-					if (numericMatch) {
-						const num = parseInt(numericMatch[1], 10);
-						if (num > maxNumber) {
-							maxNumber = num;
-						}
-					} else if (typeof invoice.number === 'number') {
+					// invoice.number can be string (e.g., "520") or number (e.g., 520)
+					let num: number;
+					
+					if (typeof invoice.number === 'number') {
 						// If it's already a number, use it directly
-						if (invoice.number > maxNumber) {
-							maxNumber = invoice.number;
+						num = invoice.number;
+					} else {
+						// If it's a string, extract numeric part
+						const numberStr = String(invoice.number).trim();
+						// Try to match the entire string as a number, or extract numeric part
+						if (/^\d+$/.test(numberStr)) {
+							// Entire string is numeric
+							num = parseInt(numberStr, 10);
+						} else {
+							// Extract numeric part from end (e.g., "OTS 520" -> "520")
+							const numericMatch = numberStr.match(/(\d+)$/);
+							if (numericMatch) {
+								num = parseInt(numericMatch[1], 10);
+							} else {
+								// No numeric part found, skip this invoice
+								continue;
+							}
 						}
+					}
+					
+					if (!isNaN(num) && num > maxNumber) {
+						maxNumber = num;
 					}
 				}
 			}
 
 			// Return next number (max + 1)
-			return maxNumber + 1;
+			const nextNumber = maxNumber + 1;
+			console.log(`[Keez] Found max invoice number ${maxNumber} for series ${series}, next number: ${nextNumber}`);
+			return nextNumber;
 		} catch (error) {
 			console.error(`[Keez] Error getting next invoice number for series ${series}:`, error);
 			return null;

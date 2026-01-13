@@ -482,7 +482,7 @@ import { goto } from '$app/navigation';
 	// Keez sync state
 	let syncingInvoices = $state(false);
 	let syncError = $state<string | null>(null);
-	let syncResult = $state<{ imported: number; skipped: number } | null>(null);
+	let syncResult = $state<{ imported: number; updated: number; skipped: number } | null>(null);
 
 	async function handleSyncInvoices() {
 		syncingInvoices = true;
@@ -493,7 +493,7 @@ import { goto } from '$app/navigation';
 			const result = await syncInvoicesFromKeez({}).updates(invoicesQuery, keezStatusQuery);
 
 			if (result.success) {
-				syncResult = { imported: result.imported, skipped: result.skipped };
+				syncResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
 				setTimeout(() => {
 					syncResult = null;
 				}, 5000);
@@ -831,7 +831,7 @@ import { goto } from '$app/navigation';
 	{#if syncResult}
 		<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
 			<p class="text-sm text-green-800 dark:text-green-200">
-				Sync completed: {syncResult.imported} imported, {syncResult.skipped} skipped
+				Sync completed: {syncResult.imported} imported{syncResult.updated > 0 ? `, ${syncResult.updated} updated` : ''}{syncResult.skipped > 0 ? `, ${syncResult.skipped} skipped` : ''}
 			</p>
 		</div>
 	{/if}
@@ -946,38 +946,6 @@ import { goto } from '$app/navigation';
 													</p>
 												</div>
 											{/if}
-
-											<!-- Email Status (conditional) -->
-											{#if invoice.lastEmailSentAt || invoice.lastEmailStatus}
-												<div class="p-3 rounded-lg {invoice.lastEmailStatus === 'sent' ? 'bg-green-500/10 border border-green-500/20' : invoice.lastEmailStatus === 'failed' ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/30 border border-border/50'} group-hover:bg-muted/50 transition-all">
-													<div class="flex items-center gap-1.5 mb-1.5">
-														{#if invoice.lastEmailStatus === 'sent'}
-															<CheckCircleIcon class="h-3.5 w-3.5 text-green-600/60" />
-														{:else if invoice.lastEmailStatus === 'failed'}
-															<XCircleIcon class="h-3.5 w-3.5 text-red-600/60" />
-														{:else}
-															<MailIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
-														{/if}
-														<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email</p>
-													</div>
-													<div class="space-y-0.5">
-														<p class="text-sm font-semibold {invoice.lastEmailStatus === 'sent' ? 'text-green-600 dark:text-green-400' : invoice.lastEmailStatus === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-foreground'}">
-															{#if invoice.lastEmailStatus === 'sent'}
-																Trimis
-															{:else if invoice.lastEmailStatus === 'failed'}
-																Eșuat
-															{:else}
-																Pending
-															{/if}
-														</p>
-														{#if invoice.lastEmailSentAt}
-															<p class="text-xs text-muted-foreground">
-																{formatDate(invoice.lastEmailSentAt)}
-															</p>
-														{/if}
-													</div>
-												</div>
-											{/if}
 										</div>
 									</div>
 
@@ -990,7 +958,8 @@ import { goto } from '$app/navigation';
 										>
 											<DownloadIcon class="h-3.5 w-3.5" />
 										</Button>
-										{#if invoice.status !== 'paid'}
+									{#if invoice.status !== 'paid'}
+										<div class="relative flex items-center gap-1">
 											<Button 
 												variant="outline" 
 												size="icon"
@@ -999,7 +968,17 @@ import { goto } from '$app/navigation';
 											>
 												<SendIcon class="h-3.5 w-3.5" />
 											</Button>
-										{/if}
+											{#if invoice.lastEmailStatus}
+												<div class="absolute -right-1 -top-1 flex items-center justify-center">
+													{#if invoice.lastEmailStatus === 'sent'}
+														<CheckCircleIcon class="h-3 w-3 text-green-600 dark:text-green-400 bg-white dark:bg-background rounded-full" />
+													{:else if invoice.lastEmailStatus === 'failed'}
+														<XCircleIcon class="h-3 w-3 text-red-600 dark:text-red-400 bg-white dark:bg-background rounded-full" />
+													{/if}
+												</div>
+											{/if}
+										</div>
+									{/if}
 										<DropdownMenu>
 											<DropdownMenuTrigger>
 												<Button 

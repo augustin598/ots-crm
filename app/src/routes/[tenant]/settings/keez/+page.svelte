@@ -34,7 +34,7 @@
 	// Import states
 	let importingClients = $state(false);
 	let syncingInvoices = $state(false);
-	let importResult = $state<{ imported: number; skipped: number } | null>(null);
+	let importResult = $state<{ imported: number; updated?: number; skipped: number } | null>(null);
 	let importError = $state<string | null>(null);
 
 	async function handleConnect() {
@@ -98,7 +98,7 @@
 			const result = await importClientsFromKeez({}).updates(getClients());
 
 			if (result.success) {
-				importResult = { imported: result.imported, skipped: result.skipped };
+				importResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
 				success = true;
 				setTimeout(() => {
 					success = false;
@@ -254,7 +254,7 @@
 			{#if success && importResult}
 				<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
 					<p class="text-sm text-green-800 dark:text-green-200">
-						Successfully imported {importResult.imported} item{importResult.imported === 1 ? '' : 's'}{importResult.skipped > 0 ? `, ${importResult.skipped} skipped` : ''}!
+						Successfully imported {importResult.imported} item{importResult.imported === 1 ? '' : 's'}{importResult.updated && importResult.updated > 0 ? `, ${importResult.updated} updated` : ''}{importResult.skipped > 0 ? `, ${importResult.skipped} skipped` : ''}!
 					</p>
 				</div>
 			{:else if success}

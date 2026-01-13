@@ -189,6 +189,13 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 		throw new Error('Keez integration not connected');
 	}
 
+	// Get invoice settings
+	const [settings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+		.limit(1);
+
 	// Get tenant and client
 	const [tenant] = await db
 		.select()
@@ -224,8 +231,85 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 	// Use existing external ID or generate one
 	const externalId = invoice.keezExternalId || invoice.id;
 
+	// Ensure all items exist in Keez before creating invoice
+	const itemExternalIds = new Map<string, string>();
+	const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+	const currency = invoice.currency || settings?.defaultCurrency || 'RON';
+
+	for (const lineItem of lineItems) {
+		const itemCode = `CRM_${lineItem.id}`;
+		let keezItem = await keezClient.getItemByCode(itemCode);
+
+		if (!keezItem) {
+			try {
+				const newItem = await keezClient.createItem({
+					code: itemCode,
+					name: lineItem.description || 'Item',
+					description: lineItem.description || undefined,
+					currencyCode: currency,
+					measureUnitId: 1,
+					vatRate: vatPercent,
+					isActive: true,
+					categoryExternalId: 'MISCSRV'
+				});
+				itemExternalIds.set(lineItem.id, newItem.externalId);
+			} catch (itemError) {
+				console.error(`[Keez] Failed to create item ${itemCode}:`, itemError);
+				itemExternalIds.set(lineItem.id, lineItem.id);
+			}
+		} else {
+			itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
+		}
+	}
+
+	// Get the latest invoice number from Keez for this series
+	let invoiceSeries: string | undefined;
+	let invoiceNumber: string | undefined;
+	
+	if (settings?.keezSeries) {
+		invoiceSeries = settings.keezSeries.trim();
+		try {
+			const nextNumber = await keezClient.getNextInvoiceNumber(invoiceSeries);
+			if (nextNumber !== null) {
+				invoiceNumber = String(nextNumber);
+			} else if (invoice.invoiceNumber) {
+				const match = invoice.invoiceNumber.match(/(\d+)$/);
+				if (match) {
+					invoiceNumber = match[1];
+				}
+			}
+			if (!invoiceNumber && settings.keezStartNumber) {
+				invoiceNumber = settings.keezStartNumber;
+			}
+		} catch (error) {
+			console.warn(`[Keez] Failed to get next invoice number from Keez:`, error);
+			if (invoice.invoiceNumber) {
+				const match = invoice.invoiceNumber.match(/(\d+)$/);
+				if (match) {
+					invoiceNumber = match[1];
+				}
+			}
+			if (!invoiceNumber && settings.keezStartNumber) {
+				invoiceNumber = settings.keezStartNumber;
+			}
+		}
+	}
+
 	// Map and create invoice
-	const keezInvoice = mapInvoiceToKeez({ ...invoice, lineItems }, client, tenant, externalId);
+	const keezInvoice = mapInvoiceToKeez(
+		{ ...invoice, lineItems },
+		client,
+		tenant,
+		externalId,
+		settings,
+		itemExternalIds
+	);
+
+	// Override series and number with the ones we got from Keez
+	if (invoiceSeries && invoiceNumber) {
+		keezInvoice.series = invoiceSeries;
+		keezInvoice.number = invoiceNumber;
+	}
 
 	const response = await keezClient.createInvoice(keezInvoice);
 
@@ -524,7 +608,47 @@ export const syncInvoicesFromKeez = command(
 		}
 
 		let imported = 0;
+		let updated = 0;
 		let skipped = 0;
+
+		// Helper function to parse Keez date format (YYYYMMDD as number or string)
+		const parseKeezDate = (dateValue: string | number | undefined): Date | null => {
+			if (dateValue === null || dateValue === undefined) {
+				return null;
+			}
+			
+			try {
+				// Handle numeric format (YYYYMMDD) from Keez API
+				if (typeof dateValue === 'number') {
+					const dateNum = dateValue;
+					if (dateNum >= 10000101 && dateNum <= 99991231) {
+						const dateStr = String(dateNum);
+						const year = parseInt(dateStr.substring(0, 4), 10);
+						const month = parseInt(dateStr.substring(4, 6), 10) - 1;
+						const day = parseInt(dateStr.substring(6, 8), 10);
+						
+						const date = new Date(year, month, day);
+						if (!isNaN(date.getTime()) && date.getFullYear() === year) {
+							return date;
+						}
+					}
+					return null;
+				}
+				
+				const dateStrTrimmed = String(dateValue).trim();
+				if (!dateStrTrimmed || dateStrTrimmed === 'null' || dateStrTrimmed === 'undefined' || dateStrTrimmed === '0000-00-00') {
+					return null;
+				}
+				
+				const date = new Date(dateStrTrimmed);
+				if (!isNaN(date.getTime()) && date.getFullYear() > 1970) {
+					return date;
+				}
+				return null;
+			} catch (e) {
+				return null;
+			}
+		};
 
 		// Import each invoice
 		for (const invoiceHeader of response.data || []) {
@@ -541,45 +665,6 @@ export const syncInvoicesFromKeez = command(
 
 				// If invoice exists, update it with latest data from Keez
 				if (existing) {
-					// Helper function to parse Keez date format (YYYYMMDD as number or string)
-					const parseKeezDate = (dateValue: string | number | undefined): Date | null => {
-						if (dateValue === null || dateValue === undefined) {
-							return null;
-						}
-						
-						try {
-							// Handle numeric format (YYYYMMDD) from Keez API
-							if (typeof dateValue === 'number') {
-								const dateNum = dateValue;
-								if (dateNum >= 10000101 && dateNum <= 99991231) {
-									const dateStr = String(dateNum);
-									const year = parseInt(dateStr.substring(0, 4), 10);
-									const month = parseInt(dateStr.substring(4, 6), 10) - 1;
-									const day = parseInt(dateStr.substring(6, 8), 10);
-									
-									const date = new Date(year, month, day);
-									if (!isNaN(date.getTime()) && date.getFullYear() === year) {
-										return date;
-									}
-								}
-								return null;
-							}
-							
-							const dateStrTrimmed = String(dateValue).trim();
-							if (!dateStrTrimmed || dateStrTrimmed === 'null' || dateStrTrimmed === 'undefined' || dateStrTrimmed === '0000-00-00') {
-								return null;
-							}
-							
-							const date = new Date(dateStrTrimmed);
-							if (!isNaN(date.getTime()) && date.getFullYear() > 1970) {
-								return date;
-							}
-							return null;
-						} catch (e) {
-							return null;
-						}
-					};
-
 					// Parse dates from header
 					const issueDateSource = invoiceHeader.documentDate || invoiceHeader.issueDate || keezInvoice.issueDate;
 					const parsedIssueDate = parseKeezDate(issueDateSource);
@@ -604,7 +689,31 @@ export const syncInvoicesFromKeez = command(
 						}
 					}
 
-					// Update existing invoice with dates and status
+					// Calculate totals from Keez invoice details
+					let keezNetAmount = 0;
+					let keezVatAmount = 0;
+					let keezGrossAmount = 0;
+					let keezTaxRate: number | null = null;
+
+					if (keezInvoice.invoiceDetails && Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
+						for (const detail of keezInvoice.invoiceDetails) {
+							// Use currency amounts if available, otherwise use RON amounts
+							const netAmount = detail.netAmountCurrency ?? detail.netAmount ?? 0;
+							const vatAmount = detail.vatAmountCurrency ?? detail.vatAmount ?? 0;
+							const grossAmount = detail.grossAmountCurrency ?? detail.grossAmount ?? 0;
+
+							keezNetAmount += netAmount;
+							keezVatAmount += vatAmount;
+							keezGrossAmount += grossAmount;
+
+							// Get VAT rate from first detail (assuming all details have same VAT rate)
+							if (keezTaxRate === null && detail.vatPercent !== undefined && detail.vatPercent !== null) {
+								keezTaxRate = detail.vatPercent;
+							}
+						}
+					}
+
+					// Update existing invoice with all data from Keez
 					const updateData: any = {
 						updatedAt: new Date()
 					};
@@ -635,12 +744,90 @@ export const syncInvoicesFromKeez = command(
 						updateData.currency = invoiceHeader.currency;
 					}
 
+					// Update totals from Keez invoice details
+					if (keezNetAmount > 0 || keezVatAmount > 0 || keezGrossAmount > 0) {
+						updateData.amount = Math.round(keezNetAmount * 100);
+						updateData.taxAmount = Math.round(keezVatAmount * 100);
+						updateData.totalAmount = Math.round(keezGrossAmount * 100);
+					}
+
+					// Update tax rate (convert from percentage to cents: 19% -> 1900)
+					if (keezTaxRate !== null) {
+						updateData.taxRate = Math.round(keezTaxRate * 100);
+					}
+
+					// Update notes if available
+					if (keezInvoice.notes) {
+						updateData.notes = keezInvoice.notes;
+					}
+
 					await db
 						.update(table.invoice)
 						.set(updateData)
 						.where(eq(table.invoice.id, existing.id));
 
-					skipped++;
+					// Update line items from Keez
+					if (keezInvoice.invoiceDetails && Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
+						try {
+							// Delete existing line items for this invoice
+							await db
+								.delete(table.invoiceLineItem)
+								.where(eq(table.invoiceLineItem.invoiceId, existing.id));
+
+							// Convert Keez invoice details to line items
+							const lineItemsData = mapKeezDetailsToLineItems(
+								keezInvoice.invoiceDetails,
+								existing.id
+							);
+
+							// Insert new line items with generated IDs
+							if (lineItemsData.length > 0) {
+								const lineItemsToInsert = lineItemsData.map((item) => ({
+									...item,
+									id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
+								}));
+								await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
+								console.log(`[Keez] Updated ${lineItemsToInsert.length} line items for invoice ${existing.id}`);
+							}
+						} catch (error) {
+							console.error(`[Keez] Failed to update line items for invoice ${existing.id}:`, error);
+							// Don't fail the entire update if line items fail
+						}
+					}
+
+					// Update or create sync record
+					const [existingSync] = await db
+						.select()
+						.from(table.keezInvoiceSync)
+						.where(eq(table.keezInvoiceSync.invoiceId, existing.id))
+						.limit(1);
+
+					if (existingSync) {
+						await db
+							.update(table.keezInvoiceSync)
+							.set({
+								keezInvoiceId: invoiceHeader.externalId,
+								keezExternalId: invoiceHeader.externalId,
+								syncDirection: 'pull',
+								syncStatus: 'synced',
+								lastSyncedAt: new Date()
+							})
+							.where(eq(table.keezInvoiceSync.id, existingSync.id));
+					} else {
+						const syncId = generateSyncId();
+						await db.insert(table.keezInvoiceSync).values({
+							id: syncId,
+							invoiceId: existing.id,
+							tenantId: event.locals.tenant.id,
+							keezInvoiceId: invoiceHeader.externalId,
+							keezExternalId: invoiceHeader.externalId,
+							syncDirection: 'pull',
+							syncStatus: 'synced',
+							lastSyncedAt: new Date()
+						});
+					}
+
+					updated++;
 					continue;
 				}
 
@@ -759,7 +946,7 @@ export const syncInvoicesFromKeez = command(
 			})
 			.where(eq(table.keezIntegration.tenantId, event.locals.tenant.id));
 
-		return { success: true, imported, skipped };
+		return { success: true, imported, updated, skipped };
 	}
 );
 

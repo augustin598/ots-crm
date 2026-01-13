@@ -346,7 +346,21 @@
 					<CardContent class="space-y-4">
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Status</p>
-							<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
+							<div class="flex items-center gap-2">
+								<Badge variant={getStatusVariant(invoice.status)}>
+									{#if invoice.status === 'sent' && invoice.lastEmailStatus === 'sent'}
+										<Mail class="mr-1 h-3 w-3" />
+									{/if}
+									{invoice.status}
+								</Badge>
+							</div>
+							{#if invoice.lastEmailSentAt && invoice.lastEmailStatus}
+								<div class="mt-2">
+									<p class="text-xs text-muted-foreground">
+										Email {invoice.lastEmailStatus === 'sent' ? 'trimis' : invoice.lastEmailStatus === 'failed' ? 'eșuat' : 'pending'} pe {formatDate(invoice.lastEmailSentAt)}
+									</p>
+								</div>
+							{/if}
 						</div>
 						<Separator />
 						<div>
