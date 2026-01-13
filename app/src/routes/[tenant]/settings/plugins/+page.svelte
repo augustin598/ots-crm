@@ -186,6 +186,22 @@
 							</div>
 						</CardContent>
 					{/if}
+					{#if plugin.name === 'anaf-spv'}
+						<CardContent>
+							<Separator class="mb-4" />
+							<div class="space-y-2">
+								<p class="text-sm font-medium">ANAF SPV Integration</p>
+								<p class="text-sm text-muted-foreground">
+									Configure your ANAF SPV credentials.
+								</p>
+								{#if isEnabled}
+									<Button variant="outline" size="sm" href="/{tenantSlug}/settings/anaf-spv">
+										Configure ANAF SPV
+									</Button>
+								{/if}
+							</div>
+						</CardContent>
+					{/if}
 				</Card>
 			{/each}
 		</div>

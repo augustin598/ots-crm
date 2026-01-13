@@ -154,24 +154,21 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) => {
 	// For now, we'll skip auto-updating SPV invoices on update
 	// This prevents overwriting SPV data unintentionally
-	const { invoice } = event;
-
-	// Check if invoice has SPV sync
-	const [sync] = await db
-		.select()
-		.from(table.anafSpvInvoiceSync)
-		.where(
-			and(
-				eq(table.anafSpvInvoiceSync.invoiceId, invoice.id),
-				eq(table.anafSpvInvoiceSync.syncStatus, 'synced')
-			)
-		)
-		.limit(1);
-
-	if (!sync) {
-		return; // Not synced to SPV, skip
-	}
-
+	// const { invoice } = event;
+	// // Check if invoice has SPV sync
+	// const [sync] = await db
+	// 	.select()
+	// 	.from(table.anafSpvInvoiceSync)
+	// 	.where(
+	// 		and(
+	// 			eq(table.anafSpvInvoiceSync.invoiceId, invoice.id),
+	// 			eq(table.anafSpvInvoiceSync.syncStatus, 'synced')
+	// 		)
+	// 	)
+	// 	.limit(1);
+	// if (!sync) {
+	// 	return; // Not synced to SPV, skip
+	// }
 	// TODO: Implement update sync if needed
 	// For now, we'll leave it as manual sync only
 };
