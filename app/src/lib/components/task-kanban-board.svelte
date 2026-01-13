@@ -219,7 +219,7 @@
 	}
 </script>
 
-<div class="grid gap-6 lg:grid-cols-4 overflow-x-auto pb-4">
+<div class="grid gap-6 lg:grid-cols-5 overflow-x-auto pb-4">
 	{#each STATUSES as status}
 		{@const statusTasks = groupedTasks[status] || []}
 		<div class="flex flex-col min-w-[280px]">

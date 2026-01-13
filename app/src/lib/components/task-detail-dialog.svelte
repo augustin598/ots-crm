@@ -116,7 +116,7 @@
 
 {#if task}
 	<Dialog bind:open onOpenChange={onOpenChange}>
-		<DialogContent class="max-w-3xl max-h-[90vh] overflow-y-auto">
+		<DialogContent class="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
 			<DialogHeader>
 				<div class="flex items-start justify-between">
 					<div class="flex-1">
