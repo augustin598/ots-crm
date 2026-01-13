@@ -176,6 +176,13 @@
       "when": 1768317913243,
       "tag": "0024_pale_proteus",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1768318805033,
+      "tag": "0025_safe_lockjaw",
+      "breakpoints": true
     }
   ]
 }
