@@ -31,6 +31,7 @@
 	let keezStartNumber = $state(settings?.keezStartNumber || '');
 	let keezAutoSync = $state(settings?.keezAutoSync || false);
 	let defaultCurrency = $state<Currency>((settings?.defaultCurrency || 'RON') as Currency);
+	let defaultTaxRate = $state(settings?.defaultTaxRate ?? 19);
 	let invoiceEmailsEnabled = $state(settings?.invoiceEmailsEnabled ?? true);
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
@@ -46,6 +47,7 @@
 			keezStartNumber = settings.keezStartNumber || '';
 			keezAutoSync = settings.keezAutoSync || false;
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
+			defaultTaxRate = settings.defaultTaxRate ?? 19;
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
 		}
 	});
@@ -64,6 +66,7 @@
 				keezStartNumber: keezStartNumber || undefined,
 				keezAutoSync,
 				defaultCurrency: defaultCurrency || undefined,
+				defaultTaxRate: defaultTaxRate !== undefined ? defaultTaxRate : undefined,
 				invoiceEmailsEnabled
 			}).updates(settingsQuery);
 			saveSuccess = true;
@@ -268,6 +271,23 @@
 						<p class="text-xs text-muted-foreground">
 							Default currency for new invoices. You can change the currency for individual invoices
 							when creating them.
+						</p>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="defaultTaxRate">Default VAT Tax Rate (%)</Label>
+						<Input
+							id="defaultTaxRate"
+							type="number"
+							min="0"
+							max="100"
+							step="0.01"
+							bind:value={defaultTaxRate}
+							placeholder="19"
+						/>
+						<p class="text-xs text-muted-foreground">
+							Default VAT tax rate (as percentage) for new invoices and line items. This will be
+							automatically applied when creating invoices unless overridden.
 						</p>
 					</div>
 

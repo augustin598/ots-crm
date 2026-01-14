@@ -481,6 +481,7 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	keezLastSyncedNumber: text('keez_last_synced_number'),
 	keezAutoSync: boolean('keez_auto_sync').notNull().default(false),
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
+	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()

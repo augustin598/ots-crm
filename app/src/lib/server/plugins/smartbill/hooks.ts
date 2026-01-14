@@ -37,11 +37,14 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			.where(eq(table.invoiceSettings.tenantId, tenantId))
 			.limit(1);
 
-		if (!settings || !settings.smartbillAutoSync) {
-			return; // Auto-sync not enabled
+		// Sync when plugin is active (autoSync check is optional - if plugin is active, sync)
+		// Only check autoSync if settings exist, otherwise proceed with sync
+		if (settings && settings.smartbillAutoSync === false) {
+			// If autoSync is explicitly disabled, respect that
+			return;
 		}
 
-		if (!settings.smartbillSeries || !settings.smartbillStartNumber) {
+		if (!settings || !settings.smartbillSeries || !settings.smartbillStartNumber) {
 			console.warn(`[SmartBill] Invoice settings not configured for tenant ${tenantId}`);
 			return;
 		}

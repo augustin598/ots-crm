@@ -34,6 +34,7 @@ export const getInvoiceSettings = query(async () => {
 			keezLastSyncedNumber: null,
 			keezAutoSync: false,
 			defaultCurrency: 'RON',
+			defaultTaxRate: 19,
 			invoiceEmailsEnabled: true
 		};
 	}
@@ -48,6 +49,7 @@ export const getInvoiceSettings = query(async () => {
 		keezLastSyncedNumber: settings.keezLastSyncedNumber,
 		keezAutoSync: settings.keezAutoSync,
 		defaultCurrency: settings.defaultCurrency || 'RON',
+		defaultTaxRate: settings.defaultTaxRate ?? 19,
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true
 	};
 });
@@ -61,6 +63,7 @@ export const updateInvoiceSettings = command(
 		keezStartNumber: v.optional(v.string()),
 		keezAutoSync: v.optional(v.boolean()),
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
+		defaultTaxRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))), // VAT percentage (0-100)
 		invoiceEmailsEnabled: v.optional(v.boolean())
 	}),
 	async (data) => {
@@ -93,6 +96,7 @@ export const updateInvoiceSettings = command(
 					keezStartNumber: data.keezStartNumber !== undefined ? data.keezStartNumber : undefined,
 					keezAutoSync: data.keezAutoSync !== undefined ? data.keezAutoSync : undefined,
 					defaultCurrency: data.defaultCurrency !== undefined ? data.defaultCurrency : undefined,
+					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
 					invoiceEmailsEnabled: data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
 					updatedAt: new Date()
 				})
@@ -112,6 +116,7 @@ export const updateInvoiceSettings = command(
 				keezLastSyncedNumber: null,
 				keezAutoSync: data.keezAutoSync ?? false,
 				defaultCurrency: data.defaultCurrency || 'RON',
+				defaultTaxRate: data.defaultTaxRate ?? 19,
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true
 			});
 		}

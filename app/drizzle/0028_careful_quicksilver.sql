@@ -1,0 +1,1 @@
+ALTER TABLE `invoice_settings` ADD `default_tax_rate` integer DEFAULT 19 NOT NULL;
