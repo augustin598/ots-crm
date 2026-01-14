@@ -132,4 +132,11 @@ export abstract class BaseBankClient implements BankClient {
 		fromDate?: Date,
 		toDate?: Date
 	): Promise<BankTransaction[]>;
+
+	/**
+	 * Revoke token (optional - to be implemented by banks that support it)
+	 */
+	async revokeToken(token: string): Promise<void> {
+		throw new Error('Token revocation not implemented for this bank');
+	}
 }

@@ -1,14 +1,11 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { getBankAccounts, getBankConnectionUrl, connectBankAccount, disconnectBankAccount, syncTransactions, syncBankAccounts } from '$lib/remotes/banking.remote';
+	import { getBankAccounts, getBankConnectionUrl, disconnectBankAccount, syncTransactions, syncBankAccounts } from '$lib/remotes/banking.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Separator } from '$lib/components/ui/separator';
 	import { Building2, Link2, RefreshCw, Trash2, AlertCircle } from '@lucide/svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { untrack } from 'svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -23,50 +20,28 @@
 	let syncingAccount = $state<string | null>(null);
 	let syncingBankAccounts = $state<string | null>(null);
 	let error = $state<string | null>(null);
+	let success = $state<string | null>(null);
 
-	// Check URL params for OAuth callback
+	// Check URL params for success/error messages from OAuth callback
 	$effect(() => {
 		const urlParams = new URLSearchParams(window.location.search);
-		const code = urlParams.get('code');
-		const bankName = urlParams.get('bank');
 		const errorParam = urlParams.get('error');
+		const successParam = urlParams.get('success');
 
 		if (errorParam) {
-			error = errorParam === 'missing_parameters' 
-				? 'Missing required parameters from bank authorization'
-				: errorParam === 'connection_failed'
-				? 'Failed to connect bank account'
-				: 'An error occurred';
-			
+			error = decodeURIComponent(errorParam);
 			// Clear error from URL
 			window.history.replaceState({}, '', window.location.pathname);
 		}
 
-		if (code && bankName) {
-			untrack(() => {
-				handleOAuthCallback(code, bankName);
-			});
+		if (successParam) {
+			success = successParam === 'connected' ? 'Bank account connected successfully!' : null;
+			// Clear success from URL
+			window.history.replaceState({}, '', window.location.pathname);
+			// Refresh accounts to show newly connected account
+			accountsQuery.refresh();
 		}
 	});
-
-	async function handleOAuthCallback(code: string, bankName: string) {
-		connectingBank = bankName;
-		error = null;
-
-		try {
-			await connectBankAccount({
-				bankName,
-				authorizationCode: code
-			});
-			await accountsQuery.refresh();
-			connectingBank = null;
-			// Clear code from URL
-			window.history.replaceState({}, '', window.location.pathname);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to connect bank account';
-			connectingBank = null;
-		}
-	}
 
 	async function handleConnectBank(bankName: string) {
 		connectingBank = bankName;
@@ -168,6 +143,16 @@
 				<div class="flex items-center gap-2 text-red-800">
 					<AlertCircle class="h-5 w-5" />
 					<p>{error}</p>
+				</div>
+			</CardContent>
+		</Card>
+	{/if}
+
+	{#if success}
+		<Card class="border-green-200 bg-green-50">
+			<CardContent class="pt-6">
+				<div class="flex items-center gap-2 text-green-800">
+					<p>{success}</p>
 				</div>
 			</CardContent>
 		</Card>

@@ -202,6 +202,7 @@
 							</div>
 						</CardContent>
 					{/if}
+					
 				</Card>
 			{/each}
 		</div>

@@ -41,4 +41,5 @@ export interface BankClient {
 		fromDate?: Date,
 		toDate?: Date
 	): Promise<BankTransaction[]>;
+	revokeToken?(token: string): Promise<void>;
 }
