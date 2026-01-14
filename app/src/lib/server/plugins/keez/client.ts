@@ -130,15 +130,16 @@ export interface KeezPartnerListResponse {
 }
 
 export interface KeezItem {
-	externalId?: string;
-	code?: string;
+	categoryExternalId: string;
+	categoryName: string;
+	code: string;
+	currencyCode: string;
+	externalId: string;
+	isActive: boolean;
+	isStockable: boolean;
+	lastPrice: number;
+	measureUnitId: number;
 	name: string;
-	description?: string;
-	currencyCode?: string;
-	measureUnitId?: number;
-	vatRate?: number;
-	isActive?: boolean;
-	categoryExternalId?: string;
 }
 
 export interface KeezItemListResponse {
@@ -463,7 +464,7 @@ export class KeezClient {
 		count?: number;
 		order?: string;
 		filter?: string;
-	}): Promise<KeezItemListResponse> {
+	}): Promise<KeezItem[]> {
 		const params = new URLSearchParams();
 		if (filters?.offset !== undefined) params.append('offset', filters.offset.toString());
 		if (filters?.count !== undefined) params.append('count', filters.count.toString());
@@ -473,7 +474,7 @@ export class KeezClient {
 		const queryString = params.toString();
 		const endpoint = `/${this.clientEid}/items${queryString ? `?${queryString}` : ''}`;
 
-		return this.request<KeezItemListResponse>(endpoint, {
+		return this.request<KeezItem[]>(endpoint, {
 			method: 'GET'
 		});
 	}
@@ -497,8 +498,8 @@ export class KeezClient {
 				filter: `code eq '${code}'`
 			});
 
-			if (response.data && response.data.length > 0) {
-				return response.data[0];
+			if (response && response.length > 0) {
+				return response[0];
 			}
 
 			return null;

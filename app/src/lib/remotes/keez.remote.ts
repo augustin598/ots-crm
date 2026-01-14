@@ -156,6 +156,126 @@ export const getKeezStatus = query(async () => {
 	};
 });
 
+export const getKeezItems = query(
+	v.object({
+		offset: v.optional(v.number()),
+		count: v.optional(v.number()),
+		filter: v.optional(v.string())
+	}),
+	async (filters) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Get integration
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			return {
+				data: [],
+				total: 0,
+				recordsCount: 0
+			};
+		}
+
+		// Decrypt secret
+		const secret = decrypt(event.locals.tenant.id, integration.secret);
+
+		// Create Keez client
+		const keezClient = new KeezClient({
+			clientEid: integration.clientEid,
+			applicationId: integration.applicationId,
+			secret
+		});
+
+		// Get items from Keez
+		const response = await keezClient.getItems({
+			offset: filters.offset,
+			count: filters.count || 100,
+			filter: filters.filter
+		});
+
+
+		return {
+			data: response || [],
+			total: response.length || 0,
+			recordsCount: response.length || 0
+		};
+	}
+);
+
+export const createKeezItem = command(
+	v.object({
+		name: v.pipe(v.string(), v.minLength(1)),
+		code: v.optional(v.string()),
+		description: v.optional(v.string()),
+		currencyCode: v.optional(v.string()),
+		measureUnitId: v.optional(v.number()),
+		vatRate: v.optional(v.number()),
+		isActive: v.optional(v.boolean()),
+		categoryExternalId: v.optional(v.string())
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Get integration
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Keez integration not connected');
+		}
+
+		// Decrypt secret
+		const secret = decrypt(event.locals.tenant.id, integration.secret);
+
+		// Create Keez client
+		const keezClient = new KeezClient({
+			clientEid: integration.clientEid,
+			applicationId: integration.applicationId,
+			secret
+		});
+
+		// Create item in Keez
+		const response = await keezClient.createItem({
+			name: data.name,
+			code: data.code,
+			description: data.description,
+			currencyCode: data.currencyCode,
+			measureUnitId: data.measureUnitId,
+			vatRate: data.vatRate,
+			isActive: data.isActive !== undefined ? data.isActive : true,
+			categoryExternalId: data.categoryExternalId
+		});
+
+		return {
+			success: true,
+			externalId: response.externalId
+		};
+	}
+);
+
 export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {

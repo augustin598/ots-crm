@@ -102,11 +102,8 @@ export const createInvoiceFromService = command(
 		const invoiceId = generateInvoiceId();
 
 		const amount = service.price || 0;
-		const taxRate = 1900; // 19% VAT
-		const taxAmount = Math.round((amount * taxRate) / 10000);
-		const totalAmount = amount + taxAmount;
 
-		// Get default currency from invoice settings
+		// Get default currency and tax rate from invoice settings
 		const [invoiceSettings] = await db
 			.select()
 			.from(table.invoiceSettings)
@@ -114,6 +111,10 @@ export const createInvoiceFromService = command(
 			.limit(1);
 
 		const currency = invoiceSettings?.defaultCurrency || 'RON';
+		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+		const taxRate = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
+		const taxAmount = Math.round((amount * taxRate) / 10000);
+		const totalAmount = amount + taxAmount;
 
 		const newInvoice = {
 			id: invoiceId,
@@ -148,13 +149,21 @@ export const createInvoiceFromService = command(
 	}
 );
 
+const lineItemSchema = v.object({
+	description: v.pipe(v.string(), v.minLength(1)),
+	quantity: v.number(),
+	rate: v.number(), // in currency units (will be converted to cents)
+	taxRate: v.optional(v.number()) // as percentage (will be converted to cents)
+});
+
 export const createInvoice = command(
 	v.object({
 		clientId: v.pipe(v.string(), v.minLength(1)),
 		projectId: v.optional(v.string()),
 		serviceId: v.optional(v.string()),
-		amount: v.number(),
-		taxRate: v.optional(v.number()),
+		amount: v.optional(v.number()), // Legacy support - will be calculated from lineItems if provided
+		taxRate: v.optional(v.number()), // Legacy support
+		lineItems: v.optional(v.array(lineItemSchema)), // New: array of line items
 		status: v.optional(v.string()),
 		issueDate: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
@@ -167,7 +176,7 @@ export const createInvoice = command(
 			throw new Error('Unauthorized');
 		}
 
-		// Get default currency from invoice settings
+		// Get default currency and tax rate from invoice settings
 		const [invoiceSettings] = await db
 			.select()
 			.from(table.invoiceSettings)
@@ -175,15 +184,51 @@ export const createInvoice = command(
 			.limit(1);
 
 		const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
+		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+		const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
 
 		// Generate invoice number (with Keez series if configured)
 		const invoiceNumber = await generateInvoiceNumber(event.locals.tenant.id);
 		const invoiceId = generateInvoiceId();
 
-		const amount = Math.round(data.amount * 100); // Convert to cents
-		const taxRate = data.taxRate ? Math.round(data.taxRate * 100) : 1900; // Default 19%
-		const taxAmount = Math.round((amount * taxRate) / 10000);
-		const totalAmount = amount + taxAmount;
+		let amount = 0;
+		let taxRate = defaultTaxRateCents; // Use default from settings
+		let taxAmount = 0;
+		let totalAmount = 0;
+
+		// Calculate from line items if provided, otherwise use legacy amount
+		if (data.lineItems && data.lineItems.length > 0) {
+			// Calculate totals from line items
+			let subtotal = 0;
+			let totalTax = 0;
+
+			for (const item of data.lineItems) {
+				const itemRate = Math.round(item.rate * 100); // Convert to cents
+				const itemAmount = Math.round(itemRate * item.quantity);
+				subtotal += itemAmount;
+
+				// Use item's tax rate if provided, otherwise use default from settings
+				const itemTaxRate = item.taxRate ? Math.round(item.taxRate * 100) : defaultTaxRateCents;
+				const itemTax = Math.round((itemAmount * itemTaxRate) / 10000);
+				totalTax += itemTax;
+			}
+
+			amount = subtotal;
+			taxAmount = totalTax;
+			totalAmount = amount + taxAmount;
+			// Use first line item's tax rate as invoice tax rate, or default from settings
+			taxRate = data.lineItems[0]?.taxRate ? Math.round(data.lineItems[0].taxRate * 100) : defaultTaxRateCents;
+		} else if (data.amount !== undefined) {
+			// Legacy support: single amount
+			amount = Math.round(data.amount * 100); // Convert to cents
+			taxRate = data.taxRate ? Math.round(data.taxRate * 100) : defaultTaxRateCents; // Use default from settings
+			taxAmount = Math.round((amount * taxRate) / 10000);
+			totalAmount = amount + taxAmount;
+		} else {
+			throw new Error('Either lineItems or amount must be provided');
+		}
+
+		const invoiceStatus = (data.status || 'draft') as 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
 
 		const newInvoice = {
 			id: invoiceId,
@@ -192,7 +237,7 @@ export const createInvoice = command(
 			projectId: data.projectId || null,
 			serviceId: data.serviceId || null,
 			invoiceNumber,
-			status: (data.status || 'draft') as const,
+			status: invoiceStatus,
 			amount,
 			taxRate,
 			taxAmount,
@@ -206,13 +251,57 @@ export const createInvoice = command(
 			createdByUserId: event.locals.user.id
 		};
 
-		await db.insert(table.invoice).values(newInvoice);
+		// Use transaction to create invoice and line items
+		await db.transaction(async (tx) => {
+			await tx.insert(table.invoice).values(newInvoice);
 
-		// Emit invoice.created hook
+			// Insert line items if provided
+			if (data.lineItems && data.lineItems.length > 0) {
+				const lineItemsToInsert = data.lineItems.map((item) => {
+					const itemRate = Math.round(item.rate * 100); // Convert to cents
+					const itemAmount = Math.round(itemRate * item.quantity);
+
+					return {
+						id: generateInvoiceLineItemId(),
+						invoiceId,
+						description: item.description,
+						quantity: item.quantity,
+						rate: itemRate,
+						amount: itemAmount
+					};
+				});
+
+				await tx.insert(table.invoiceLineItem).values(lineItemsToInsert);
+			} else {
+				// Create a default line item from the amount (legacy support)
+				await tx.insert(table.invoiceLineItem).values({
+					id: generateInvoiceLineItemId(),
+					invoiceId,
+					description: data.notes || 'Professional Services',
+					quantity: 1,
+					rate: amount,
+					amount: amount
+				});
+			}
+		});
+
+		// Get the full invoice with line items for hooks
+		const [fullInvoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(eq(table.invoice.id, invoiceId))
+			.limit(1);
+
+		const lineItems = await db
+			.select()
+			.from(table.invoiceLineItem)
+			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+		// Emit invoice.created hook (plugins will handle sync when active)
 		const hooks = getHooksManager();
 		await hooks.emit({
 			type: 'invoice.created',
-			invoice: newInvoice as any,
+			invoice: { ...fullInvoice, lineItems } as any,
 			tenantId: event.locals.tenant.id,
 			userId: event.locals.user.id
 		});
@@ -258,10 +347,10 @@ export const updateInvoice = command(
 		}
 
 		// Recalculate amounts if amount or taxRate changed
-		let amount = existing.amount;
-		let taxRate = existing.taxRate;
-		let taxAmount = existing.taxAmount;
-		let totalAmount = existing.totalAmount;
+		let amount = existing.amount || 0;
+		let taxRate = existing.taxRate || 1900;
+		let taxAmount = existing.taxAmount || 0;
+		let totalAmount = existing.totalAmount || 0;
 
 		if (updateData.amount !== undefined) {
 			amount = Math.round(updateData.amount * 100);

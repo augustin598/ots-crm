@@ -15,6 +15,7 @@
 		value = $bindable<number | string | undefined>(undefined),
 		placeholder = 'Select option...',
 		searchPlaceholder = 'Search...',
+		onValueChange,
 		disabled = false,
 		class: className
 	}: {
@@ -22,6 +23,7 @@
 		value?: number | string | undefined;
 		placeholder?: string;
 		searchPlaceholder?: string;
+		onValueChange?: (value: number | string | undefined) => void;
 		disabled?: boolean;
 		class?: string;
 	} = $props();
@@ -52,6 +54,7 @@
 		value = option.value;
 		open = false;
 		searchQuery = '';
+		onValueChange?.(option.value);
 	}
 </script>
 

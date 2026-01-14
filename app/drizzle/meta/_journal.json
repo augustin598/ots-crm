@@ -197,6 +197,13 @@
       "when": 1768321096912,
       "tag": "0027_oval_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1768404535539,
+      "tag": "0028_careful_quicksilver",
+      "breakpoints": true
     }
   ]
 }

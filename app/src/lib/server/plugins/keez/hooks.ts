@@ -37,11 +37,14 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			.where(eq(table.invoiceSettings.tenantId, tenantId))
 			.limit(1);
 
-		if (!settings || !settings.keezAutoSync) {
-			return; // Auto-sync not enabled
+		// Sync when plugin is active (autoSync check is optional - if plugin is active, sync)
+		// Only check autoSync if settings exist, otherwise proceed with sync
+		if (settings && settings.keezAutoSync === false) {
+			// If autoSync is explicitly disabled, respect that
+			return;
 		}
 
-		if (!settings.keezSeries || !settings.keezStartNumber) {
+		if (!settings || !settings.keezSeries || !settings.keezStartNumber) {
 			console.warn(`[Keez] Invoice settings not configured for tenant ${tenantId}`);
 			return;
 		}
