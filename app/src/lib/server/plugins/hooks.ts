@@ -1,23 +1,63 @@
 import type { HookEvent, HookHandler, HooksManager } from './types';
 
 /**
+ * Handler registration info for tracking by plugin
+ */
+type HandlerRegistration = {
+	handler: HookHandler;
+	pluginId: string;
+};
+
+/**
  * Hooks manager implementation
  */
 class HooksManagerImpl implements HooksManager {
 	private handlers: Map<string, Set<HookHandler>> = new Map();
+	private handlerRegistrations: Map<HookHandler, HandlerRegistration> = new Map();
 
 	/**
 	 * Register a hook handler for a specific event type
 	 */
-	on<T extends HookEvent>(eventType: T['type'], handler: HookHandler<T>): void {
+	on<T extends HookEvent>(eventType: T['type'], handler: HookHandler<T>, pluginId?: string): void {
 		if (!this.handlers.has(eventType)) {
 			this.handlers.set(eventType, new Set());
 		}
 		this.handlers.get(eventType)!.add(handler as HookHandler);
+
+		// Track handler registration by plugin ID if provided
+		if (pluginId) {
+			this.handlerRegistrations.set(handler as HookHandler, {
+				handler: handler as HookHandler,
+				pluginId
+			});
+		}
+	}
+
+	/**
+	 * Clear all handlers for a specific plugin
+	 */
+	clearPluginHandlers(pluginId: string): void {
+		const handlersToRemove: HookHandler[] = [];
+
+		// Find all handlers registered by this plugin
+		for (const [handler, registration] of this.handlerRegistrations.entries()) {
+			if (registration.pluginId === pluginId) {
+				handlersToRemove.push(handler);
+			}
+		}
+
+		// Remove handlers from all event types
+		for (const handler of handlersToRemove) {
+			for (const handlers of this.handlers.values()) {
+				handlers.delete(handler);
+			}
+			this.handlerRegistrations.delete(handler);
+		}
 	}
 
 	/**
 	 * Emit an event and call all registered handlers
+	 * If any handler fails, the error is thrown and propagated
 	 */
 	async emit<T extends HookEvent>(event: T): Promise<void> {
 		const eventType = event.type;
@@ -27,17 +67,11 @@ class HooksManagerImpl implements HooksManager {
 			return;
 		}
 
-		// Execute all handlers in parallel, but don't fail if one fails
-		const promises = Array.from(handlers).map(async (handler) => {
-			try {
-				await handler(event);
-			} catch (error) {
-				console.error(`[Hooks] Error in handler for ${eventType}:`, error);
-				// Don't throw - continue with other handlers
-			}
-		});
+		// Execute all handlers in parallel
+		// If any handler fails, the error is thrown and propagated
+		const promises = Array.from(handlers).map((handler) => handler(event));
 
-		await Promise.allSettled(promises);
+		await Promise.all(promises);
 	}
 
 	/**
@@ -48,6 +82,7 @@ class HooksManagerImpl implements HooksManager {
 		if (handlers) {
 			handlers.delete(handler as HookHandler);
 		}
+		this.handlerRegistrations.delete(handler as HookHandler);
 	}
 
 	/**
@@ -62,6 +97,7 @@ class HooksManagerImpl implements HooksManager {
 	 */
 	clearAll(): void {
 		this.handlers.clear();
+		this.handlerRegistrations.clear();
 	}
 }
 

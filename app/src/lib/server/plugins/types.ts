@@ -1,4 +1,4 @@
-import type { Invoice } from '$lib/server/db/schema';
+import type { Invoice, InvoiceLineItem } from '$lib/server/db/schema';
 
 /**
  * Plugin configuration type
@@ -10,14 +10,14 @@ export type PluginConfig = Record<string, unknown>;
  */
 export type InvoiceCreatedEvent = {
 	type: 'invoice.created';
-	invoice: Invoice;
+	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	tenantId: string;
 	userId: string;
 };
 
 export type InvoiceUpdatedEvent = {
 	type: 'invoice.updated';
-	invoice: Invoice;
+	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	previousInvoice: Invoice;
 	tenantId: string;
 	userId: string;
@@ -25,14 +25,14 @@ export type InvoiceUpdatedEvent = {
 
 export type InvoiceDeletedEvent = {
 	type: 'invoice.deleted';
-	invoice: Invoice;
+	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	tenantId: string;
 	userId: string;
 };
 
 export type InvoiceStatusChangedEvent = {
 	type: 'invoice.status.changed';
-	invoice: Invoice;
+	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	previousStatus: string;
 	newStatus: string;
 	tenantId: string;
@@ -41,7 +41,7 @@ export type InvoiceStatusChangedEvent = {
 
 export type InvoicePaidEvent = {
 	type: 'invoice.paid';
-	invoice: Invoice;
+	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	tenantId: string;
 	userId: string;
 };
@@ -77,7 +77,8 @@ export interface Plugin {
  * Hooks manager interface
  */
 export interface HooksManager {
-	on<T extends HookEvent>(eventType: T['type'], handler: HookHandler<T>): void;
+	on<T extends HookEvent>(eventType: T['type'], handler: HookHandler<T>, pluginId?: string): void;
 	emit<T extends HookEvent>(event: T): Promise<void>;
 	off<T extends HookEvent>(eventType: T['type'], handler: HookHandler<T>): void;
+	clearPluginHandlers(pluginId: string): void;
 }

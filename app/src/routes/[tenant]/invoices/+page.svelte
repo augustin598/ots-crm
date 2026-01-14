@@ -1,7 +1,6 @@
 <script lang="ts">
 	import {
 		getInvoices,
-		createInvoice,
 		deleteInvoice,
 		markInvoiceAsPaid,
 		getInvoice,
@@ -23,6 +22,8 @@
 	import { syncInvoicesFromKeez, getKeezStatus } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
+	import { useQueryState } from 'nuqs-svelte';
+	import { parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
 	import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -47,8 +48,9 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Switch } from '$lib/components/ui/switch';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
+	import { Switch } from '$lib/components/ui/switch';
+	import InvoiceFilters from '$lib/components/invoice-filters.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import SendIcon from '@lucide/svelte/icons/send';
@@ -70,7 +72,30 @@ import { goto } from '$app/navigation';
 
 	const tenantSlug = $derived(page.params.tenant);
 
-	const invoicesQuery = getInvoices({});
+	// Filter states
+	const statuses = useQueryState(
+		'status',
+		parseAsArrayOf(parseAsStringEnum(['draft', 'sent', 'paid', 'overdue', 'cancelled']))
+	);
+	const clientIds = useQueryState('client', parseAsArrayOf(parseAsString));
+	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString));
+	const serviceIds = useQueryState('service', parseAsArrayOf(parseAsString));
+	const search = useQueryState('search', parseAsString.withDefault(''));
+	const issueDate = useQueryState('issueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth', 'lastMonth']));
+	const dueDate = useQueryState('dueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth']));
+
+	// Build filter params for getInvoices
+	const filterParams = $derived({
+		status: (statuses.current as string[] | null) && (statuses.current as string[]).length > 0 ? (statuses.current as string[]) : undefined,
+		clientId: (clientIds.current as string[] | null) && (clientIds.current as string[]).length > 0 ? (clientIds.current as string[]) : undefined,
+		projectId: (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0 ? (projectIds.current as string[]) : undefined,
+		serviceId: (serviceIds.current as string[] | null) && (serviceIds.current as string[]).length > 0 ? (serviceIds.current as string[]) : undefined,
+		search: search.current || undefined,
+		issueDate: issueDate.current || undefined,
+		dueDate: dueDate.current || undefined
+	});
+
+	const invoicesQuery = $derived(getInvoices(filterParams));
 	const invoices = $derived(invoicesQuery.current || []);
 	const invoicesLoading = $derived(invoicesQuery.loading);
 	const invoicesError = $derived(invoicesQuery.error);
@@ -105,17 +130,6 @@ import { goto } from '$app/navigation';
 		...services.map((s) => ({ value: s.id, label: s.name }))
 	]);
 
-	// Invoice dialog state
-	let isInvoiceDialogOpen = $state(false);
-	let formClientId = $state('');
-	let formProjectId = $state('');
-	let formAmount = $state('');
-	let formCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
-	let formIssueDate = $state(new Date().toISOString().split('T')[0]);
-	let formDueDate = $state('');
-	let formStatus = $state('draft');
-	let formLoading = $state(false);
-	let formError = $state<string | null>(null);
 
 	// Recurring invoice dialog state
 	let isRecurringDialogOpen = $state(false);
@@ -142,7 +156,6 @@ import { goto } from '$app/navigation';
 	// Update currency when settings load
 	$effect(() => {
 		if (invoiceSettings?.defaultCurrency) {
-			formCurrency = invoiceSettings.defaultCurrency as Currency;
 			recurringCurrency = invoiceSettings.defaultCurrency as Currency;
 		}
 	});
@@ -158,13 +171,6 @@ import { goto } from '$app/navigation';
 		}
 	});
 
-	$effect(() => {
-		if (formDueDate === '' && formIssueDate) {
-			const date = new Date(formIssueDate);
-			date.setDate(date.getDate() + 30);
-			formDueDate = date.toISOString().split('T')[0];
-		}
-	});
 
 	function getStatusColor(status: string) {
 		switch (status) {
@@ -236,46 +242,6 @@ import { goto } from '$app/navigation';
 		}
 	}
 
-	// Invoice handlers
-	async function handleCreateInvoice() {
-		if (!formClientId) {
-			formError = 'Please select a client';
-			return;
-		}
-		if (!formAmount) {
-			formError = 'Please enter an amount';
-			return;
-		}
-
-		formLoading = true;
-		formError = null;
-
-		try {
-			await createInvoice({
-				clientId: formClientId,
-				projectId: formProjectId || undefined,
-				amount: parseFloat(formAmount),
-				currency: formCurrency || undefined,
-				status: formStatus || undefined,
-				issueDate: formIssueDate || undefined,
-				dueDate: formDueDate || undefined
-			}).updates(invoicesQuery);
-
-			// Reset form
-			formClientId = '';
-			formProjectId = '';
-			formAmount = '';
-			formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
-			formIssueDate = new Date().toISOString().split('T')[0];
-			formDueDate = '';
-			formStatus = 'draft';
-			isInvoiceDialogOpen = false;
-		} catch (e) {
-			formError = e instanceof Error ? e.message : 'Failed to create invoice';
-		} finally {
-			formLoading = false;
-		}
-	}
 
 	async function handleDeleteInvoice(invoiceId: string) {
 		if (!confirm('Are you sure you want to delete this invoice?')) {
@@ -532,293 +498,12 @@ import { goto } from '$app/navigation';
 					{/if}
 				</Button>
 			{/if}
-			<Dialog bind:open={isRecurringDialogOpen}>
-				<DialogTrigger>
-					<Button variant="outline" onclick={() => openRecurringDialog()}>
-						<RepeatIcon class="mr-2 h-4 w-4" />
-						New Recurring Invoice
-					</Button>
-				</DialogTrigger>
-				<DialogContent class="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-					<DialogHeader>
-						<DialogTitle>
-							{isEditingRecurring ? 'Edit Recurring Invoice' : 'Create Recurring Invoice'}
-						</DialogTitle>
-						<DialogDescription>
-							{isEditingRecurring
-								? 'Update recurring invoice template'
-								: 'Create a template for automatically generating invoices'}
-						</DialogDescription>
-					</DialogHeader>
-					<div class="grid gap-4 py-4">
-						<div class="grid gap-2">
-							<Label for="recurringName">Name *</Label>
-							<Input
-								id="recurringName"
-								bind:value={recurringName}
-								placeholder="e.g., Monthly Subscription"
-								required
-							/>
-						</div>
-						<div class="grid gap-2">
-							<Label for="recurringClient">Client *</Label>
-							<Combobox
-								bind:value={recurringClientId}
-								options={clientOptions}
-								placeholder="Select a client"
-								searchPlaceholder="Search clients..."
-							/>
-						</div>
-						<div class="grid gap-2">
-							<Label for="recurringProject">Project</Label>
-							<Combobox
-								bind:value={recurringProjectId}
-								options={projectOptions}
-								placeholder="Select a project (optional)"
-								searchPlaceholder="Search projects..."
-							/>
-						</div>
-						<div class="grid gap-2">
-							<Label for="recurringService">Service</Label>
-							<Select type="single" bind:value={recurringServiceId}>
-								<SelectTrigger>
-									{#if recurringServiceId}
-										{services.find((s) => s.id === recurringServiceId)?.name || 'Select a service'}
-									{:else}
-										Select a service (optional)
-									{/if}
-								</SelectTrigger>
-								<SelectContent>
-									{#each serviceOptions as option}
-										<SelectItem value={option.value}>{option.label}</SelectItem>
-									{/each}
-								</SelectContent>
-							</Select>
-							<p class="text-xs text-muted-foreground">
-								If selected, amount and currency will be pre-filled from the service
-							</p>
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="recurringAmount">Amount *</Label>
-								<Input
-									id="recurringAmount"
-									bind:value={recurringAmount}
-									type="number"
-									step="0.01"
-									required
-								/>
-							</div>
-							<div class="grid gap-2">
-								<Label for="recurringCurrency">Currency</Label>
-								<Select type="single" bind:value={recurringCurrency}>
-									<SelectTrigger>{recurringCurrency}</SelectTrigger>
-									<SelectContent>
-										{#each CURRENCIES as curr}
-											<SelectItem value={curr}>{curr}</SelectItem>
-										{/each}
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-						<div class="grid gap-2">
-							<Label for="recurringTaxRate">Tax Rate (%)</Label>
-							<Input id="recurringTaxRate" bind:value={recurringTaxRate} type="number" step="0.01" />
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="recurringType">Recurring Type *</Label>
-								<Select type="single" bind:value={recurringType}>
-									<SelectTrigger>
-										{recurringType.charAt(0).toUpperCase() + recurringType.slice(1)}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="daily">Daily</SelectItem>
-										<SelectItem value="weekly">Weekly</SelectItem>
-										<SelectItem value="monthly">Monthly</SelectItem>
-										<SelectItem value="yearly">Yearly</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="grid gap-2">
-								<Label for="recurringInterval">Interval *</Label>
-								<Input
-									id="recurringInterval"
-									bind:value={recurringInterval}
-									type="number"
-									min="1"
-									required
-								/>
-								<p class="text-xs text-muted-foreground">e.g., 2 = every 2 {recurringType}s</p>
-							</div>
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="recurringStartDate">Start Date *</Label>
-								<Input id="recurringStartDate" bind:value={recurringStartDate} type="date" required />
-							</div>
-							<div class="grid gap-2">
-								<Label for="recurringEndDate">End Date</Label>
-								<Input id="recurringEndDate" bind:value={recurringEndDate} type="date" />
-								<p class="text-xs text-muted-foreground">Leave empty for no end date</p>
-							</div>
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="recurringIssueDateOffset">Issue Date Offset (days)</Label>
-								<Input
-									id="recurringIssueDateOffset"
-									bind:value={recurringIssueDateOffset}
-									type="number"
-									placeholder="0"
-								/>
-								<p class="text-xs text-muted-foreground">
-									Days to add to generation date for issue date
-								</p>
-							</div>
-							<div class="grid gap-2">
-								<Label for="recurringDueDateOffset">Due Date Offset (days)</Label>
-								<Input
-									id="recurringDueDateOffset"
-									bind:value={recurringDueDateOffset}
-									type="number"
-									placeholder="30"
-								/>
-								<p class="text-xs text-muted-foreground">Days to add to issue date for due date</p>
-							</div>
-						</div>
-						<div class="grid gap-2">
-							<Label for="recurringNotes">Notes</Label>
-							<Textarea
-								id="recurringNotes"
-								bind:value={recurringNotes}
-								placeholder="Optional notes for generated invoices"
-							/>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="recurringIsActive" bind:checked={recurringIsActive} />
-							<Label for="recurringIsActive" class="cursor-pointer">Active</Label>
-							<p class="text-sm text-muted-foreground">
-								Inactive recurring invoices will not generate new invoices
-							</p>
-						</div>
-					</div>
-					{#if recurringError}
-						<div class="rounded-md bg-red-50 p-3">
-							<p class="text-sm text-red-800">{recurringError}</p>
-						</div>
-					{/if}
-					<DialogFooter>
-						<Button variant="outline" onclick={closeRecurringDialog}>Cancel</Button>
-						<Button
-							onclick={handleCreateRecurringInvoice}
-							disabled={recurringFormLoading || !recurringName || !recurringClientId || !recurringAmount || !recurringStartDate}
-						>
-							{recurringFormLoading ? (isEditingRecurring ? 'Saving...' : 'Creating...') : (isEditingRecurring ? 'Save Changes' : 'Create Recurring Invoice')}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+		
 
-			<Dialog bind:open={isInvoiceDialogOpen}>
-				<DialogTrigger>
-					<Button>
-						<PlusIcon class="mr-2 h-4 w-4" />
-						New Invoice
-					</Button>
-				</DialogTrigger>
-				<DialogContent class="sm:max-w-[600px]">
-					<DialogHeader>
-						<DialogTitle>Create New Invoice</DialogTitle>
-						<DialogDescription>Generate a new invoice for a client</DialogDescription>
-					</DialogHeader>
-					<div class="grid gap-4 py-4">
-						<div class="grid gap-2">
-							<Label for="client">Client</Label>
-							<Combobox
-								bind:value={formClientId}
-								options={clientOptions}
-								placeholder="Select a client"
-								searchPlaceholder="Search clients..."
-							/>
-						</div>
-						<div class="grid gap-2">
-							<Label for="project">Project (Optional)</Label>
-							<Combobox
-								bind:value={formProjectId}
-								options={projectOptions}
-								placeholder="Select a project (optional)"
-								searchPlaceholder="Search projects..."
-							/>
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="amount">Amount</Label>
-								<Input id="amount" type="number" bind:value={formAmount} placeholder="15000" step="0.01" />
-							</div>
-							<div class="grid gap-2">
-								<Label for="currency">Currency</Label>
-								<Select type="single" bind:value={formCurrency}>
-									<SelectTrigger id="currency">{formCurrency}</SelectTrigger>
-									<SelectContent>
-										{#each CURRENCIES as curr}
-											<SelectItem value={curr}>{curr}</SelectItem>
-										{/each}
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="grid gap-2">
-								<Label for="issueDate">Issue Date</Label>
-								<Input id="issueDate" type="date" bind:value={formIssueDate} />
-							</div>
-							<div class="grid gap-2">
-								<Label for="dueDate">Due Date</Label>
-								<Input id="dueDate" type="date" bind:value={formDueDate} />
-							</div>
-						</div>
-						<div class="grid gap-2">
-							<Label for="status">Status</Label>
-							<Select type="single" bind:value={formStatus}>
-								<SelectTrigger id="status">
-									{#if formStatus === 'draft'}
-										Draft
-									{:else if formStatus === 'sent'}
-										Sent
-									{:else if formStatus === 'paid'}
-										Paid
-									{:else if formStatus === 'overdue'}
-										Overdue
-									{:else if formStatus === 'cancelled'}
-										Cancelled
-									{:else}
-										Select status
-									{/if}
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="draft">Draft</SelectItem>
-									<SelectItem value="sent">Sent</SelectItem>
-									<SelectItem value="paid">Paid</SelectItem>
-									<SelectItem value="overdue">Overdue</SelectItem>
-									<SelectItem value="cancelled">Cancelled</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-					</div>
-					{#if formError}
-						<div class="rounded-md bg-red-50 p-3">
-							<p class="text-sm text-red-800">{formError}</p>
-						</div>
-					{/if}
-					<DialogFooter>
-						<Button variant="outline" onclick={() => (isInvoiceDialogOpen = false)}>Cancel</Button>
-						<Button onclick={handleCreateInvoice} disabled={formLoading}>
-							{formLoading ? 'Creating...' : 'Create Invoice'}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<Button onclick={() => goto(`/${tenantSlug}/invoices/new`)}>
+				<PlusIcon class="mr-2 h-4 w-4" />
+				New Invoice
+			</Button>
 		</div>
 	</div>
 
@@ -843,6 +528,12 @@ import { goto } from '$app/navigation';
 		</TabsList>
 
 		<TabsContent value="invoices" class="space-y-4">
+			<InvoiceFilters
+				clients={clients.map((c) => ({ id: c.id, name: c.name }))}
+				projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+				services={services.map((s) => ({ id: s.id, name: s.name }))}
+			/>
+
 			{#if invoicesLoading}
 				<p>Loading invoices...</p>
 			{:else if invoicesError}
@@ -854,7 +545,7 @@ import { goto } from '$app/navigation';
 			{:else if invoices.length === 0}
 				<Card>
 					<div class="p-6 text-center">
-						<p class="text-muted-foreground">No invoices yet. Get started by creating your first invoice.</p>
+						<p class="text-muted-foreground">No invoices found. {search.current ? 'Try adjusting your filters.' : 'Get started by creating your first invoice.'}</p>
 					</div>
 				</Card>
 			{:else}
@@ -1086,7 +777,7 @@ import { goto } from '$app/navigation';
 											<PlayIcon class="mr-2 h-4 w-4" />
 											Generate Now
 										</DropdownMenuItem>
-										<DropdownMenuItem onclick={() => openRecurringDialog(recurringInvoice.id)}>
+										<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/invoices/recurring/${recurringInvoice.id}`)}>
 											<EditIcon class="mr-2 h-4 w-4" />
 											Edit
 										</DropdownMenuItem>

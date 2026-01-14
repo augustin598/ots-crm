@@ -1,0 +1,1 @@
+ALTER TABLE `invoice` ADD `tax_application_type` text;

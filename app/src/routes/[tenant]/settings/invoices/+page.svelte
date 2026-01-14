@@ -27,6 +27,9 @@
 	let smartbillSeries = $state(settings?.smartbillSeries || '');
 	let smartbillStartNumber = $state(settings?.smartbillStartNumber || '');
 	let smartbillAutoSync = $state(settings?.smartbillAutoSync || false);
+	let smartbillTaxNameApply = $state(settings?.smartbillTaxNameApply || '');
+	let smartbillTaxNameNone = $state(settings?.smartbillTaxNameNone || '');
+	let smartbillTaxNameReverse = $state(settings?.smartbillTaxNameReverse || '');
 	let keezSeries = $state(settings?.keezSeries || '');
 	let keezStartNumber = $state(settings?.keezStartNumber || '');
 	let keezAutoSync = $state(settings?.keezAutoSync || false);
@@ -43,6 +46,9 @@
 			smartbillSeries = settings.smartbillSeries || '';
 			smartbillStartNumber = settings.smartbillStartNumber || '';
 			smartbillAutoSync = settings.smartbillAutoSync || false;
+			smartbillTaxNameApply = settings.smartbillTaxNameApply || '';
+			smartbillTaxNameNone = settings.smartbillTaxNameNone || '';
+			smartbillTaxNameReverse = settings.smartbillTaxNameReverse || '';
 			keezSeries = settings.keezSeries || '';
 			keezStartNumber = settings.keezStartNumber || '';
 			keezAutoSync = settings.keezAutoSync || false;
@@ -62,6 +68,9 @@
 				smartbillSeries: smartbillSeries || undefined,
 				smartbillStartNumber: smartbillStartNumber || undefined,
 				smartbillAutoSync,
+				smartbillTaxNameApply: smartbillTaxNameApply || undefined,
+				smartbillTaxNameNone: smartbillTaxNameNone || undefined,
+				smartbillTaxNameReverse: smartbillTaxNameReverse || undefined,
 				keezSeries: keezSeries || undefined,
 				keezStartNumber: keezStartNumber || undefined,
 				keezAutoSync,
@@ -180,6 +189,55 @@
 								</p>
 							</div>
 							<Switch id="smartbillAutoSync" bind:checked={smartbillAutoSync} />
+						</div>
+
+						<Separator />
+
+						<div class="space-y-4">
+							<h3 class="text-sm font-semibold">Tax Name Mappings</h3>
+							<p class="text-xs text-muted-foreground">
+								Configure the tax names to send to SmartBill for each tax application type. Leave empty to
+								use default values (Normala, Neimpozabil, Taxare inversa).
+							</p>
+
+							<div class="space-y-2">
+								<Label for="smartbillTaxNameApply">Tax Name for "Apply Tax"</Label>
+								<Input
+									id="smartbillTaxNameApply"
+									bind:value={smartbillTaxNameApply}
+									type="text"
+									placeholder="Normala"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Tax name sent to SmartBill when "Apply Tax" is selected (default: "Normala")
+								</p>
+							</div>
+
+							<div class="space-y-2">
+								<Label for="smartbillTaxNameNone">Tax Name for "Do Not Apply Tax"</Label>
+								<Input
+									id="smartbillTaxNameNone"
+									bind:value={smartbillTaxNameNone}
+									type="text"
+									placeholder="Neimpozabil"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Tax name sent to SmartBill when "Do Not Apply Tax" is selected (default: "Neimpozabil")
+								</p>
+							</div>
+
+							<div class="space-y-2">
+								<Label for="smartbillTaxNameReverse">Tax Name for "Reverse Tax"</Label>
+								<Input
+									id="smartbillTaxNameReverse"
+									bind:value={smartbillTaxNameReverse}
+									type="text"
+									placeholder="Taxare inversa"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Tax name sent to SmartBill when "Reverse Tax" is selected (default: "Taxare inversa")
+								</p>
+							</div>
 						</div>
 					</CardContent>
 				</Card>

@@ -1,4 +1,10 @@
-import type { Invoice, InvoiceLineItem, Client, Tenant, InvoiceSettings } from '$lib/server/db/schema';
+import type {
+	Invoice,
+	InvoiceLineItem,
+	Client,
+	Tenant,
+	InvoiceSettings
+} from '$lib/server/db/schema';
 import type {
 	KeezInvoice,
 	KeezInvoiceDetail,
@@ -20,76 +26,83 @@ export function mapInvoiceToKeez(
 	itemExternalIds?: Map<string, string> // Map of lineItem.id -> Keez itemExternalId
 ): KeezInvoice {
 	// Helper function to map Romanian county name to ISO code
-	const mapRomanianCounty = (countyName: string | null | undefined, country: string | null | undefined): string | undefined => {
-		if (!countyName || !country || country.toUpperCase() !== 'ROMÂNIA' && country.toUpperCase() !== 'RO') {
+	const mapRomanianCounty = (
+		countyName: string | null | undefined,
+		country: string | null | undefined
+	): string | undefined => {
+		if (
+			!countyName ||
+			!country ||
+			(country.toUpperCase() !== 'ROMÂNIA' && country.toUpperCase() !== 'RO')
+		) {
 			return undefined;
 		}
 
 		const countyMap: Record<string, string> = {
-			'ALBA': 'RO-AB',
-			'ARAD': 'RO-AR',
-			'ARGEŞ': 'RO-AG',
-			'ARGES': 'RO-AG',
-			'BACĂU': 'RO-BC',
-			'BACAU': 'RO-BC',
-			'BIHOR': 'RO-BH',
+			ALBA: 'RO-AB',
+			ARAD: 'RO-AR',
+			ARGEŞ: 'RO-AG',
+			ARGES: 'RO-AG',
+			BACĂU: 'RO-BC',
+			BACAU: 'RO-BC',
+			BIHOR: 'RO-BH',
 			'BISTRIŢA-NĂSĂUD': 'RO-BN',
 			'BISTRITA-NASĂUD': 'RO-BN',
-			'BOTOŞANI': 'RO-BT',
-			'BOTOSANI': 'RO-BT',
-			'BRĂILA': 'RO-BR',
-			'BRAILA': 'RO-BR',
-			'BRAŞOV': 'RO-BV',
-			'BRASOV': 'RO-BV',
-			'BUCUREŞTI': 'RO-B',
-			'BUCURESTI': 'RO-B',
-			'BUZĂU': 'RO-BZ',
-			'BUZAU': 'RO-BZ',
-			'CĂLĂRAŞI': 'RO-CL',
-			'CALARASI': 'RO-CL',
+			BOTOŞANI: 'RO-BT',
+			BOTOSANI: 'RO-BT',
+			BRĂILA: 'RO-BR',
+			BRAILA: 'RO-BR',
+			BRAŞOV: 'RO-BV',
+			BRASOV: 'RO-BV',
+			BUCUREŞTI: 'RO-B',
+			BUCURESTI: 'RO-B',
+			BUZĂU: 'RO-BZ',
+			BUZAU: 'RO-BZ',
+			CĂLĂRAŞI: 'RO-CL',
+			CALARASI: 'RO-CL',
 			'CARAŞ-SEVERIN': 'RO-CS',
 			'CARAS-SEVERIN': 'RO-CS',
-			'CLUJ': 'RO-CJ',
-			'CONSTANŢA': 'RO-CT',
-			'CONSTANTA': 'RO-CT',
-			'COVASNA': 'RO-CV',
-			'DÂMBOVIŢA': 'RO-DB',
-			'DAMBOVITA': 'RO-DB',
-			'DOLJ': 'RO-DJ',
-			'GALAŢI': 'RO-GL',
-			'GALATI': 'RO-GL',
-			'GIURGIU': 'RO-GR',
-			'GORJ': 'RO-GJ',
-			'HARGHITA': 'RO-HR',
-			'HUNEDOARA': 'RO-HD',
-			'IALOMIŢA': 'RO-IL',
-			'IALOMITA': 'RO-IL',
-			'IAŞI': 'RO-IS',
-			'IASI': 'RO-IS',
-			'ILFOV': 'RO-IF',
-			'MARAMUREŞ': 'RO-MM',
-			'MARAMURES': 'RO-MM',
-			'MEHEDINŢI': 'RO-MH',
-			'MEHEDINTI': 'RO-MH',
-			'MUREŞ': 'RO-MS',
-			'MURES': 'RO-MS',
-			'NEAMŢ': 'RO-NT',
-			'NEAMT': 'RO-NT',
-			'OLT': 'RO-OT',
-			'PRAHOVA': 'RO-PH',
-			'SĂLAJ': 'RO-SJ',
-			'SALAJ': 'RO-SJ',
+			CLUJ: 'RO-CJ',
+			CONSTANŢA: 'RO-CT',
+			CONSTANTA: 'RO-CT',
+			COVASNA: 'RO-CV',
+			DÂMBOVIŢA: 'RO-DB',
+			DAMBOVITA: 'RO-DB',
+			DOLJ: 'RO-DJ',
+			GALAŢI: 'RO-GL',
+			GALATI: 'RO-GL',
+			GIURGIU: 'RO-GR',
+			GORJ: 'RO-GJ',
+			HARGHITA: 'RO-HR',
+			HUNEDOARA: 'RO-HD',
+			IALOMIŢA: 'RO-IL',
+			IALOMITA: 'RO-IL',
+			IAŞI: 'RO-IS',
+			IASI: 'RO-IS',
+			ILFOV: 'RO-IF',
+			MARAMUREŞ: 'RO-MM',
+			MARAMURES: 'RO-MM',
+			MEHEDINŢI: 'RO-MH',
+			MEHEDINTI: 'RO-MH',
+			MUREŞ: 'RO-MS',
+			MURES: 'RO-MS',
+			NEAMŢ: 'RO-NT',
+			NEAMT: 'RO-NT',
+			OLT: 'RO-OT',
+			PRAHOVA: 'RO-PH',
+			SĂLAJ: 'RO-SJ',
+			SALAJ: 'RO-SJ',
 			'SATU MARE': 'RO-SM',
-			'SIBIU': 'RO-SB',
-			'SUCEAVA': 'RO-SV',
-			'TELEORMAN': 'RO-TR',
-			'TIMIŞ': 'RO-TM',
-			'TIMIS': 'RO-TM',
-			'TULCEA': 'RO-TL',
-			'VÂLCEA': 'RO-VL',
-			'VALCEA': 'RO-VL',
-			'VASLUI': 'RO-VS',
-			'VRANCEA': 'RO-VN'
+			SIBIU: 'RO-SB',
+			SUCEAVA: 'RO-SV',
+			TELEORMAN: 'RO-TR',
+			TIMIŞ: 'RO-TM',
+			TIMIS: 'RO-TM',
+			TULCEA: 'RO-TL',
+			VÂLCEA: 'RO-VL',
+			VALCEA: 'RO-VL',
+			VASLUI: 'RO-VS',
+			VRANCEA: 'RO-VN'
 		};
 
 		const countyUpper = countyName.toUpperCase().trim();
@@ -99,7 +112,7 @@ export function mapInvoiceToKeez(
 	// Helper function to get county name from code
 	const getCountyName = (countyCode: string | undefined): string | undefined => {
 		if (!countyCode) return undefined;
-		
+
 		const countyNames: Record<string, string> = {
 			'RO-AB': 'Alba',
 			'RO-AR': 'Arad',
@@ -150,10 +163,13 @@ export function mapInvoiceToKeez(
 
 	// Map partner data according to Keez API format
 	const countyCode = mapRomanianCounty(client.county, client.country);
-	
+
 	// Determine country code and name
 	const clientCountry = client.country || 'România';
-	const isRomania = clientCountry === 'România' || clientCountry === 'RO' || clientCountry.toUpperCase() === 'ROMANIA';
+	const isRomania =
+		clientCountry === 'România' ||
+		clientCountry === 'RO' ||
+		clientCountry.toUpperCase() === 'ROMANIA';
 	const countryCode = isRomania ? 'RO' : undefined;
 	const countryName = isRomania ? 'România' : clientCountry;
 
@@ -166,7 +182,7 @@ export function mapInvoiceToKeez(
 		countryCode: countryCode || 'RO', // Default to RO if not specified
 		countryName: countryName,
 		countyCode: countyCode,
-		countyName: countyCode ? getCountyName(countyCode) : (client.county || undefined),
+		countyName: countyCode ? getCountyName(countyCode) : client.county || undefined,
 		cityName: client.city || undefined,
 		addressDetails: client.address || undefined,
 		postalCode: client.postalCode || undefined,
@@ -177,108 +193,234 @@ export function mapInvoiceToKeez(
 		bankName: client.bankName || undefined
 	};
 
-	// Get currency and exchange rate
-	const currency = invoice.currency || settings?.defaultCurrency || 'RON';
+	// Get currency and exchange rate - use invoiceCurrency if available
+	const currency =
+		invoice.invoiceCurrency || invoice.currency || settings?.defaultCurrency || 'RON';
 	const isRON = currency === 'RON';
-	const exchangeRate = isRON ? 1 : 4.82; // Default exchange rate for non-RON currencies (can be configured later)
 
-	// Calculate VAT rate in percentage (from cents: 1900 -> 19%)
-	const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+	// Parse exchange rate from string format "1,0000" or use default
+	let exchangeRate = isRON ? 1 : 4.82; // Default exchange rate for non-RON currencies
+	if (invoice.exchangeRate) {
+		// Parse exchange rate string (e.g., "1,0000" -> 1.0 or "4,9500" -> 4.95)
+		const parsedRate = parseFloat(invoice.exchangeRate.replace(',', '.'));
+		if (!isNaN(parsedRate) && parsedRate > 0) {
+			exchangeRate = parsedRate;
+		}
+	}
 
 	// Map invoice details from line items - conform to Keez API format
-	const details: KeezInvoiceDetail[] = invoice.lineItems.length > 0
-		? invoice.lineItems.map((item) => {
-			// Get item external ID from map or use item ID as fallback
-			const itemExternalId = itemExternalIds?.get(item.id) || item.id;
+	const details: KeezInvoiceDetail[] =
+		invoice.lineItems.length > 0
+			? invoice.lineItems.map((item) => {
+					// Get item external ID from map or use item ID as fallback
+					const itemExternalId =
+						itemExternalIds?.get(item.id) || item.keezItemExternalId || item.id;
 
-			// Convert amounts from cents to decimal
-			const unitPriceCents = item.rate;
-			const amountCents = item.amount || (item.rate * item.quantity);
-			const quantity = item.quantity || 1;
+					// Use per-item tax rate if available, otherwise use invoice tax rate
+					const itemTaxRateCents = item.taxRate ?? invoice.taxRate ?? 1900;
+					const itemVatPercent = itemTaxRateCents / 100;
 
-			// Calculate amounts in RON (base currency)
-			const unitPriceRON = unitPriceCents / 100;
-			const originalNetAmountRON = amountCents / 100;
-			const originalVatAmountRON = Math.round((originalNetAmountRON * vatPercent / 100) * 100) / 100;
-			const originalGrossAmountRON = originalNetAmountRON + originalVatAmountRON;
+					// Use item currency if available, otherwise use invoice currency
+					const itemCurrency = item.currency || currency;
+					const itemIsRON = itemCurrency === 'RON';
 
-			// Calculate amounts in invoice currency (if not RON)
-			let originalNetAmountCurrency: number | undefined;
-			let originalVatAmountCurrency: number | undefined;
-			let originalGrossAmountCurrency: number | undefined;
-			let unitPriceCurrency: number | undefined;
+					// Convert amounts from cents to decimal
+					const unitPriceCents = item.rate;
+					let amountCents = item.amount || item.rate * item.quantity;
+					const quantity = item.quantity || 1;
 
-			if (!isRON) {
-				unitPriceCurrency = Math.round((unitPriceRON * exchangeRate) * 10000) / 10000;
-				originalNetAmountCurrency = Math.round((originalNetAmountRON * exchangeRate) * 100) / 100;
-				originalVatAmountCurrency = Math.round((originalVatAmountRON * exchangeRate) * 100) / 100;
-				originalGrossAmountCurrency = Math.round((originalGrossAmountRON * exchangeRate) * 100) / 100;
-			}
+					// Calculate item subtotal before discounts
+					const itemSubtotalCents = item.rate * item.quantity;
 
-			// For now, no discounts - so net/vat/gross amounts equal original amounts
-			const netAmountRON = originalNetAmountRON;
-			const vatAmountRON = originalVatAmountRON;
-			const grossAmountRON = originalGrossAmountRON;
+					// Apply item-level discount if present
+					let itemDiscountCents = 0;
+					let itemDiscountType: 'Percent' | 'Value' | undefined;
+					if (
+						item.discountType &&
+						item.discount !== null &&
+						item.discount !== undefined &&
+						item.discount > 0
+					) {
+						if (item.discountType === 'percent') {
+							itemDiscountCents = Math.round((itemSubtotalCents * item.discount) / 100);
+							itemDiscountType = 'Percent';
+						} else if (item.discountType === 'fixed') {
+							itemDiscountCents = Math.round(item.discount * 100); // Convert to cents
+							itemDiscountType = 'Value';
+						}
+						// Update amount after discount
+						amountCents = itemSubtotalCents - itemDiscountCents;
+					}
 
-			const detail: KeezInvoiceDetail = {
-				itemExternalId,
-				itemName: item.description || 'Item',
-				itemDescription: item.description || undefined,
-				measureUnitId: '1', // Default to "Buc" (1) - Keez API expects string
-				quantity: Math.round(quantity * 100) / 100, // 2 decimals
-				unitPrice: Math.round(unitPriceRON * 10000) / 10000, // 4 decimals
-				unitPriceCurrency: unitPriceCurrency ? Math.round(unitPriceCurrency * 10000) / 10000 : undefined,
-				vatPercent: Math.round(vatPercent * 100) / 100, // 2 decimals
-				originalNetAmount: Math.round(originalNetAmountRON * 100) / 100, // 2 decimals
-				originalVatAmount: Math.round(originalVatAmountRON * 100) / 100, // 2 decimals
-				netAmount: Math.round(netAmountRON * 100) / 100, // 2 decimals
-				vatAmount: Math.round(vatAmountRON * 100) / 100, // 2 decimals
-				grossAmount: Math.round(grossAmountRON * 100) / 100, // 2 decimals
-				originalNetAmountCurrency: originalNetAmountCurrency ? Math.round(originalNetAmountCurrency * 100) / 100 : undefined,
-				originalVatAmountCurrency: originalVatAmountCurrency ? Math.round(originalVatAmountCurrency * 100) / 100 : undefined,
-				netAmountCurrency: originalNetAmountCurrency ? Math.round(originalNetAmountCurrency * 100) / 100 : undefined,
-				vatAmountCurrency: originalVatAmountCurrency ? Math.round(originalVatAmountCurrency * 100) / 100 : undefined,
-				grossAmountCurrency: originalGrossAmountCurrency ? Math.round(originalGrossAmountCurrency * 100) / 100 : undefined
-			};
+					// Calculate amounts in RON (base currency)
+					const unitPriceRON = unitPriceCents / 100;
+					const originalNetAmountRON = itemSubtotalCents / 100;
+					const discountNetValueRON = itemDiscountCents / 100;
+					const netAmountRON = amountCents / 100;
+					const originalVatAmountRON =
+						Math.round(((originalNetAmountRON * itemVatPercent) / 100) * 100) / 100;
+					const discountVatValueRON =
+						Math.round(((discountNetValueRON * itemVatPercent) / 100) * 100) / 100;
+					const vatAmountRON = Math.round(((netAmountRON * itemVatPercent) / 100) * 100) / 100;
+					const originalGrossAmountRON = originalNetAmountRON + originalVatAmountRON;
+					const grossAmountRON = netAmountRON + vatAmountRON;
 
-			return detail;
-		})
-		: [
-			// If no line items, create a generic one from invoice totals
-			{
-				itemExternalId: invoice.id,
-				itemName: 'Invoice Total',
-				itemDescription: invoice.notes || undefined,
-				measureUnitId: '1',
-				quantity: 1,
-				unitPrice: Math.round(((invoice.amount || 0) / 100) * 10000) / 10000,
-				unitPriceCurrency: !isRON ? Math.round((((invoice.amount || 0) / 100) * exchangeRate) * 10000) / 10000 : undefined,
-				vatPercent: Math.round(vatPercent * 100) / 100,
-				originalNetAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
-				originalVatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
-				netAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
-				vatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
-				grossAmount: Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100,
-				originalNetAmountCurrency: !isRON ? Math.round((((invoice.amount || 0) / 100) * exchangeRate) * 100) / 100 : undefined,
-				originalVatAmountCurrency: !isRON ? Math.round((((invoice.taxAmount || 0) / 100) * exchangeRate) * 100) / 100 : undefined,
-				netAmountCurrency: !isRON ? Math.round((((invoice.amount || 0) / 100) * exchangeRate) * 100) / 100 : undefined,
-				vatAmountCurrency: !isRON ? Math.round((((invoice.taxAmount || 0) / 100) * exchangeRate) * 100) / 100 : undefined,
-				grossAmountCurrency: !isRON ? Math.round((((invoice.totalAmount || 0) / 100) * exchangeRate) * 100) / 100 : undefined
-			}
-		];
+					// Calculate amounts in invoice currency (if not RON)
+					let originalNetAmountCurrency: number | undefined;
+					let originalVatAmountCurrency: number | undefined;
+					let originalGrossAmountCurrency: number | undefined;
+					let discountNetValueCurrency: number | undefined;
+					let discountVatValueCurrency: number | undefined;
+					let netAmountCurrency: number | undefined;
+					let vatAmountCurrency: number | undefined;
+					let grossAmountCurrency: number | undefined;
+					let unitPriceCurrency: number | undefined;
+
+					if (!itemIsRON) {
+						// Use exchange rate for item currency conversion
+						const itemExchangeRate = itemCurrency !== currency ? exchangeRate : 1;
+						unitPriceCurrency = Math.round(unitPriceRON * itemExchangeRate * 10000) / 10000;
+						originalNetAmountCurrency =
+							Math.round(originalNetAmountRON * itemExchangeRate * 100) / 100;
+						discountNetValueCurrency =
+							discountNetValueRON > 0
+								? Math.round(discountNetValueRON * itemExchangeRate * 100) / 100
+								: undefined;
+						netAmountCurrency = Math.round(netAmountRON * itemExchangeRate * 100) / 100;
+						originalVatAmountCurrency =
+							Math.round(originalVatAmountRON * itemExchangeRate * 100) / 100;
+						discountVatValueCurrency =
+							discountVatValueRON > 0
+								? Math.round(discountVatValueRON * itemExchangeRate * 100) / 100
+								: undefined;
+						vatAmountCurrency = Math.round(vatAmountRON * itemExchangeRate * 100) / 100;
+						originalGrossAmountCurrency =
+							Math.round(originalGrossAmountRON * itemExchangeRate * 100) / 100;
+						grossAmountCurrency = Math.round(grossAmountRON * itemExchangeRate * 100) / 100;
+					}
+
+					// Map unit of measure - Keez uses measureUnitId as string (1 = "Buc")
+					// We can extend this mapping later if needed
+					let measureUnitId = '1'; // Default to "Buc"
+					if (item.unitOfMeasure) {
+						// Map common unit of measures to Keez IDs
+						const unitMap: Record<string, string> = {
+							Pcs: '1',
+							Buc: '1',
+							Hours: '2',
+							Days: '3'
+						};
+						measureUnitId = unitMap[item.unitOfMeasure] || '1';
+					}
+
+					// Build item description with note if available
+					let itemDescription = item.description || 'Item';
+					if (item.note) {
+						itemDescription = `${itemDescription}${itemDescription !== item.note ? ` - ${item.note}` : ''}`;
+					}
+
+					const detail: KeezInvoiceDetail = {
+						itemExternalId,
+						itemName: item.description || 'Item',
+						itemDescription: itemDescription !== item.description ? itemDescription : undefined,
+						measureUnitId,
+						quantity: Math.round(quantity * 100) / 100, // 2 decimals
+						unitPrice: Math.round(unitPriceRON * 10000) / 10000, // 4 decimals
+						unitPriceCurrency: unitPriceCurrency
+							? Math.round(unitPriceCurrency * 10000) / 10000
+							: undefined,
+						vatPercent: Math.round(itemVatPercent * 100) / 100, // 2 decimals
+						discountType: itemDiscountType,
+						discountPercent:
+							itemDiscountType === 'Percent' && item.discount
+								? Math.round(item.discount * 100) / 100
+								: undefined,
+						originalNetAmount: Math.round(originalNetAmountRON * 100) / 100, // 2 decimals
+						originalVatAmount: Math.round(originalVatAmountRON * 100) / 100, // 2 decimals
+						discountNetValue:
+							discountNetValueRON > 0 ? Math.round(discountNetValueRON * 100) / 100 : undefined,
+						discountVatValue:
+							discountVatValueRON > 0 ? Math.round(discountVatValueRON * 100) / 100 : undefined,
+						netAmount: Math.round(netAmountRON * 100) / 100, // 2 decimals
+						vatAmount: Math.round(vatAmountRON * 100) / 100, // 2 decimals
+						grossAmount: Math.round(grossAmountRON * 100) / 100, // 2 decimals
+						originalNetAmountCurrency: originalNetAmountCurrency
+							? Math.round(originalNetAmountCurrency * 100) / 100
+							: undefined,
+						originalVatAmountCurrency: originalVatAmountCurrency
+							? Math.round(originalVatAmountCurrency * 100) / 100
+							: undefined,
+						discountNetValueCurrency: discountNetValueCurrency
+							? Math.round(discountNetValueCurrency * 100) / 100
+							: undefined,
+						discountVatValueCurrency: discountVatValueCurrency
+							? Math.round(discountVatValueCurrency * 100) / 100
+							: undefined,
+						netAmountCurrency: netAmountCurrency
+							? Math.round(netAmountCurrency * 100) / 100
+							: undefined,
+						vatAmountCurrency: vatAmountCurrency
+							? Math.round(vatAmountCurrency * 100) / 100
+							: undefined,
+						grossAmountCurrency: grossAmountCurrency
+							? Math.round(grossAmountCurrency * 100) / 100
+							: undefined
+					};
+
+					return detail;
+				})
+			: [
+					// If no line items, create a generic one from invoice totals
+					{
+						itemExternalId: invoice.id,
+						itemName: 'Invoice Total',
+						itemDescription: invoice.notes || undefined,
+						measureUnitId: '1',
+						quantity: 1,
+						unitPrice: Math.round(((invoice.amount || 0) / 100) * 10000) / 10000,
+						unitPriceCurrency: !isRON
+							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 10000) / 10000
+							: undefined,
+						vatPercent: Math.round(itemVatPercent * 100) / 100,
+						originalNetAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
+						originalVatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
+						netAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
+						vatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
+						grossAmount: Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100,
+						originalNetAmountCurrency: !isRON
+							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 100) / 100
+							: undefined,
+						originalVatAmountCurrency: !isRON
+							? Math.round(((invoice.taxAmount || 0) / 100) * exchangeRate * 100) / 100
+							: undefined,
+						netAmountCurrency: !isRON
+							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 100) / 100
+							: undefined,
+						vatAmountCurrency: !isRON
+							? Math.round(((invoice.taxAmount || 0) / 100) * exchangeRate * 100) / 100
+							: undefined,
+						grossAmountCurrency: !isRON
+							? Math.round(((invoice.totalAmount || 0) / 100) * exchangeRate * 100) / 100
+							: undefined
+					}
+				];
 
 	// Format dates to YYYYMMDD (numeric format for Keez API)
 	const formatDateYYYYMMDD = (date: Date | null | undefined): string => {
 		if (!date) {
 			const today = new Date();
-			return today.getFullYear().toString() +
+			return (
+				today.getFullYear().toString() +
 				(today.getMonth() + 1).toString().padStart(2, '0') +
-				today.getDate().toString().padStart(2, '0');
+				today.getDate().toString().padStart(2, '0')
+			);
 		}
 		const d = date instanceof Date ? date : new Date(date);
-		return d.getFullYear().toString() +
+		return (
+			d.getFullYear().toString() +
 			(d.getMonth() + 1).toString().padStart(2, '0') +
-			d.getDate().toString().padStart(2, '0');
+			d.getDate().toString().padStart(2, '0')
+		);
 	};
 
 	// Extract invoice number and series
@@ -300,6 +442,28 @@ export function mapInvoiceToKeez(
 		}
 	}
 
+	// Handle invoice-level discounts
+	let invoiceDiscountType: 'Percent' | 'Value' | undefined;
+	let invoiceDiscountPercent: number | undefined;
+	let invoiceDiscountValue: number | undefined;
+
+	if (
+		invoice.discountType &&
+		invoice.discountType !== 'none' &&
+		invoice.discountValue !== null &&
+		invoice.discountValue !== undefined
+	) {
+		if (invoice.discountType === 'percent') {
+			invoiceDiscountType = 'Percent';
+			// discountValue is stored in basis points (e.g., 1500 = 15%), convert to percentage
+			invoiceDiscountPercent = invoice.discountValue / 100;
+		} else if (invoice.discountType === 'value') {
+			invoiceDiscountType = 'Value';
+			// discountValue is stored in cents, convert to RON
+			invoiceDiscountValue = invoice.discountValue / 100;
+		}
+	}
+
 	const keezInvoice: KeezInvoice = {
 		externalId,
 		series,
@@ -312,8 +476,11 @@ export function mapInvoiceToKeez(
 		currencyCode: currency,
 		currency: currency,
 		exchangeRate: !isRON ? Math.round(exchangeRate * 10000) / 10000 : undefined,
-		vatOnCollection: false, // Can be configured from settings if needed
+		vatOnCollection: invoice.vatOnCollection || false,
 		paymentTypeId: 1, // Default payment type (can be configured)
+		discountType: invoiceDiscountType,
+		discountPercent: invoiceDiscountPercent,
+		discountValue: invoiceDiscountValue,
 		invoiceDetails: details,
 		notes: invoice.notes || undefined
 	};
@@ -365,7 +532,7 @@ export function mapKeezInvoiceToCRM(
 		if (dateValue === null || dateValue === undefined) {
 			return null;
 		}
-		
+
 		try {
 			// Handle numeric format (YYYYMMDD) from Keez API
 			if (typeof dateValue === 'number') {
@@ -376,7 +543,7 @@ export function mapKeezInvoiceToCRM(
 					const year = parseInt(dateStr.substring(0, 4), 10);
 					const month = parseInt(dateStr.substring(4, 6), 10) - 1; // Month is 0-indexed
 					const day = parseInt(dateStr.substring(6, 8), 10);
-					
+
 					const date = new Date(year, month, day);
 					if (!isNaN(date.getTime()) && date.getFullYear() === year) {
 						return date;
@@ -384,13 +551,18 @@ export function mapKeezInvoiceToCRM(
 				}
 				return null;
 			}
-			
+
 			// Handle string format
 			const dateStrTrimmed = String(dateValue).trim();
-			if (!dateStrTrimmed || dateStrTrimmed === 'null' || dateStrTrimmed === 'undefined' || dateStrTrimmed === '0000-00-00') {
+			if (
+				!dateStrTrimmed ||
+				dateStrTrimmed === 'null' ||
+				dateStrTrimmed === 'undefined' ||
+				dateStrTrimmed === '0000-00-00'
+			) {
 				return null;
 			}
-			
+
 			const date = new Date(dateStrTrimmed);
 			// Check if date is valid and not epoch (1970-01-01)
 			if (!isNaN(date.getTime()) && date.getFullYear() > 1970) {
@@ -411,28 +583,38 @@ export function mapKeezInvoiceToCRM(
 	// Try multiple sources: header documentDate, header issueDate, invoice issueDate
 	const issueDateSource = keezHeader.documentDate || keezHeader.issueDate || keezInvoice.issueDate;
 	const issueDate = parseDate(issueDateSource);
-	
+
 	// Use dueDate from header if not available in invoice
 	const dueDateSource = keezHeader.dueDate || keezInvoice.dueDate;
 	const dueDate = parseDate(dueDateSource);
 
 	// Log warnings only if dates are missing when sources exist
 	if (!issueDate && issueDateSource) {
-		console.warn(`[Keez Mapper] Could not parse issueDate. Source:`, issueDateSource, 'Type:', typeof issueDateSource);
+		console.warn(
+			`[Keez Mapper] Could not parse issueDate. Source:`,
+			issueDateSource,
+			'Type:',
+			typeof issueDateSource
+		);
 	}
 	if (!dueDate && dueDateSource) {
-		console.warn(`[Keez Mapper] Could not parse dueDate. Source:`, dueDateSource, 'Type:', typeof dueDateSource);
+		console.warn(
+			`[Keez Mapper] Could not parse dueDate. Source:`,
+			dueDateSource,
+			'Type:',
+			typeof dueDateSource
+		);
 	}
 
 	// Determine status based on remainingAmount
 	// If remainingAmount is 0 or undefined (and totalAmount matches), invoice is paid
 	// remainingAmount is in the same currency as the invoice
 	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = 'sent';
-	
+
 	if (keezHeader.remainingAmount !== undefined) {
 		// Convert remainingAmount to cents for comparison (Keez returns in main currency units)
 		const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
-		
+
 		if (remainingAmountCents === 0) {
 			// Invoice is fully paid
 			invoiceStatus = 'paid';
@@ -542,8 +724,8 @@ export function mapKeezDetailsToLineItems(
 	return details.map((detail) => {
 		// Use itemName as primary source (Keez API uses this), fallback to itemDescription
 		const description = detail.itemName || detail.itemDescription || 'Item';
-		
-		// Calculate amount: prefer netAmountCurrency if available (invoice currency), 
+
+		// Calculate amount: prefer netAmountCurrency if available (invoice currency),
 		// otherwise use netAmount (RON), or calculate from unitPrice * quantity
 		let amount: number;
 		if (detail.netAmountCurrency !== undefined && detail.netAmountCurrency !== null) {
@@ -554,18 +736,56 @@ export function mapKeezDetailsToLineItems(
 			// Fallback: calculate from unitPrice * quantity
 			amount = (detail.unitPrice || 0) * (detail.quantity || 1);
 		}
-		
+
 		// Use unitPriceCurrency if available (invoice currency), otherwise use unitPrice
-		const unitPrice = detail.unitPriceCurrency !== undefined && detail.unitPriceCurrency !== null
-			? detail.unitPriceCurrency
-			: (detail.unitPrice || 0);
-		
+		const unitPrice =
+			detail.unitPriceCurrency !== undefined && detail.unitPriceCurrency !== null
+				? detail.unitPriceCurrency
+				: detail.unitPrice || 0;
+
+		// Extract tax rate from vatPercent (convert from percentage to cents: 19 -> 1900)
+		const taxRate = detail.vatPercent ? Math.round(detail.vatPercent * 100) : null;
+
+		// Extract discount information
+		let discountType: string | null = null;
+		let discount: number | null = null;
+		if (detail.discountType) {
+			discountType = detail.discountType === 'Percent' ? 'percent' : 'fixed';
+			if (detail.discountPercent !== undefined) {
+				discount = detail.discountPercent;
+			} else if (detail.discountNetValue !== undefined && detail.originalNetAmount) {
+				// Calculate discount percentage from discount value
+				discount = (detail.discountNetValue / detail.originalNetAmount) * 100;
+			}
+		}
+
+		// Map unit of measure - reverse mapping from Keez measureUnitId
+		const unitMap: Record<string, string> = {
+			'1': 'Pcs',
+			'2': 'Hours',
+			'3': 'Days'
+		};
+		const unitOfMeasure = unitMap[detail.measureUnitId] || null;
+
+		// Extract note from itemDescription if it's different from itemName
+		const note =
+			detail.itemDescription && detail.itemDescription !== detail.itemName
+				? detail.itemDescription.replace(detail.itemName, '').replace(/^[\s-]+/, '')
+				: null;
+
 		return {
 			invoiceId,
 			description,
 			quantity: detail.quantity || 1,
 			rate: Math.round(unitPrice * 100), // Convert to cents
-			amount: Math.round(amount * 100) // Convert to cents
+			amount: Math.round(amount * 100), // Convert to cents
+			taxRate,
+			discountType,
+			discount: discount ? Math.round(discount * 100) : null, // Convert to cents if fixed, or keep as percentage
+			note,
+			currency: null, // Currency is at invoice level
+			unitOfMeasure,
+			keezItemExternalId: detail.itemExternalId || null
 		};
 	});
 }

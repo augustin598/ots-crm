@@ -254,13 +254,19 @@ export const syncInvoiceToSmartBill = command(
 		const invoiceNumber =
 			invoice.smartbillNumber || generateNextInvoiceNumber(settings.smartbillLastSyncedNumber);
 
-		// Map and create invoice
+		// Map and create invoice with tax name mappings from settings
+		const taxNameMappings = {
+			apply: settings?.smartbillTaxNameApply || null,
+			none: settings?.smartbillTaxNameNone || null,
+			reverse: settings?.smartbillTaxNameReverse || null
+		};
 		const smartBillInvoice = mapInvoiceToSmartBill(
 			{ ...invoice, lineItems },
 			client,
 			tenant,
 			settings.smartbillSeries,
-			invoiceNumber
+			invoiceNumber,
+			taxNameMappings
 		);
 
 		const response = await smartBillClient.createInvoice(smartBillInvoice);

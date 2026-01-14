@@ -3,6 +3,8 @@ import { env } from '$env/dynamic/private';
 import { processRecurringInvoices } from './tasks/recurring-invoices';
 import { processTaskReminders } from './tasks/task-reminders';
 import { processDailyWorkReminders } from './tasks/daily-work-reminders';
+import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
+import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -53,7 +55,9 @@ type TaskHandler = (params: Record<string, any>) => Promise<any>;
 const taskHandlers: Record<string, TaskHandler> = {
 	recurring_invoices: processRecurringInvoices,
 	task_reminders: processTaskReminders,
-	daily_work_reminders: processDailyWorkReminders
+	daily_work_reminders: processDailyWorkReminders,
+	spv_invoice_sync: processSpvInvoiceSync,
+	revolut_transaction_sync: processRevolutTransactionSync
 };
 
 /**
@@ -164,6 +168,42 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled daily work reminders: every hour at minute 0');
+
+	// Schedule SPV invoice sync job to run daily at 3:00 AM
+	schedulerQueue.add(
+		'spv-invoice-sync',
+		{
+			type: 'spv_invoice_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 3 * * *', // Every day at 3:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'spv-invoice-sync'
+		}
+	);
+
+	console.log('Scheduled SPV invoice sync: daily at 3:00 AM');
+
+	// Schedule Revolut transaction sync job to run daily at 3:00 AM
+	schedulerQueue.add(
+		'revolut-transaction-sync',
+		{
+			type: 'revolut_transaction_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 3 * * *', // Every day at 3:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'revolut-transaction-sync'
+		}
+	);
+
+	console.log('Scheduled Revolut transaction sync: daily at 3:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };

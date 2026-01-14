@@ -367,6 +367,16 @@ export const invoice = sqliteTable('invoice', {
 	lastEmailStatus: text('last_email_status'), // 'sent', 'failed', 'pending'
 	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	notes: text('notes'),
+	invoiceSeries: text('invoice_series'), // User-entered invoice series
+	invoiceCurrency: text('invoice_currency'), // Invoice display currency (separate from calculation currency)
+	paymentTerms: text('payment_terms'), // Payment terms (e.g., "Net 15", "Net 30")
+	paymentMethod: text('payment_method'), // Payment method (e.g., "Bank Transfer", "Card", "Cash")
+	exchangeRate: text('exchange_rate'), // Exchange rate as string (e.g., "1,0000")
+	vatOnCollection: boolean('vat_on_collection').default(false), // VAT on collection flag
+	isCreditNote: boolean('is_credit_note').default(false), // Credit note flag
+	taxApplicationType: text('tax_application_type'), // 'apply', 'none', 'reverse' - for SmartBill tax name mapping
+	discountType: text('discount_type'), // 'none', 'percent', 'value'
+	discountValue: integer('discount_value'), // Discount amount in cents
 	smartbillSeries: text('smartbill_series'),
 	smartbillNumber: text('smartbill_number'),
 	keezInvoiceId: text('keez_invoice_id'),
@@ -388,10 +398,18 @@ export const invoiceLineItem = sqliteTable('invoice_line_item', {
 	invoiceId: text('invoice_id')
 		.notNull()
 		.references(() => invoice.id, { onDelete: 'cascade' }),
+	serviceId: text('service_id').references(() => service.id), // Service ID if item came from a service
 	description: text('description').notNull(),
 	quantity: integer('quantity').notNull().default(1),
 	rate: integer('rate').notNull(), // in cents
 	amount: integer('amount').notNull(), // in cents (quantity * rate)
+	taxRate: integer('tax_rate'), // Tax rate in cents per item (e.g., 1900 = 19%)
+	discountType: text('discount_type'), // 'percent', 'fixed', or null
+	discount: integer('discount'), // Discount amount in cents
+	note: text('note'), // Item-specific note
+	currency: text('currency'), // Item currency (for multi-currency invoices)
+	unitOfMeasure: text('unit_of_measure'), // Unit of measure (e.g., "Pcs", "Hours", "Days")
+	keezItemExternalId: text('keez_item_external_id'), // Keez item external ID reference
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
@@ -420,6 +438,7 @@ export const recurringInvoice = sqliteTable('recurring_invoice', {
 	issueDateOffset: integer('issue_date_offset').notNull().default(0), // days offset for issue date
 	dueDateOffset: integer('due_date_offset').notNull().default(30), // days offset for due date
 	notes: text('notes'),
+	lineItemsJson: text('line_items_json'), // JSON string of line items
 	isActive: boolean('is_active').notNull().default(true),
 	createdByUserId: text('created_by_user_id')
 		.notNull()
@@ -476,6 +495,9 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	smartbillStartNumber: text('smartbill_start_number'),
 	smartbillLastSyncedNumber: text('smartbill_last_synced_number'),
 	smartbillAutoSync: boolean('smartbill_auto_sync').notNull().default(false),
+	smartbillTaxNameApply: text('smartbill_tax_name_apply'), // Tax name for 'apply' type (default: 'Normala')
+	smartbillTaxNameNone: text('smartbill_tax_name_none'), // Tax name for 'none' type (default: 'Neimpozabil')
+	smartbillTaxNameReverse: text('smartbill_tax_name_reverse'), // Tax name for 'reverse' type (default: 'Taxare inversa')
 	keezSeries: text('keez_series'),
 	keezStartNumber: text('keez_start_number'),
 	keezLastSyncedNumber: text('keez_last_synced_number'),
@@ -654,10 +676,8 @@ export const anafSpvIntegration = sqliteTable('anaf_spv_integration', {
 
 export const anafSpvInvoiceSync = sqliteTable('anaf_spv_invoice_sync', {
 	id: text('id').primaryKey(),
-	invoiceId: text('invoice_id')
-		.references(() => invoice.id, { onDelete: 'cascade' }), // For push operations (our invoices to SPV)
-	expenseId: text('expense_id')
-		.references(() => expense.id, { onDelete: 'cascade' }), // For pull operations (expenses from SPV)
+	invoiceId: text('invoice_id').references(() => invoice.id, { onDelete: 'cascade' }), // For push operations (our invoices to SPV)
+	expenseId: text('expense_id').references(() => expense.id, { onDelete: 'cascade' }), // For pull operations (expenses from SPV)
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),

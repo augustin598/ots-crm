@@ -1,5 +1,5 @@
 import type { Plugin, PluginConfig, HooksManager } from '../types';
-import { onInvoiceCreated, onInvoiceUpdated } from './hooks';
+import { onInvoiceCreated, onInvoiceUpdated, onInvoiceDeleted } from './hooks';
 
 export class SmartBillPlugin implements Plugin {
 	id = 'smartbill';
@@ -17,6 +17,7 @@ export class SmartBillPlugin implements Plugin {
 		// Register hook handlers
 		hooks.on('invoice.created', onInvoiceCreated);
 		hooks.on('invoice.updated', onInvoiceUpdated);
+		hooks.on('invoice.deleted', onInvoiceDeleted);
 	}
 
 	async onEnable(tenantId: string): Promise<void> {

@@ -20,11 +20,23 @@ class PluginManager {
 
 	/**
 	 * Register hooks for a plugin
+	 * Clears existing handlers for the plugin before registering new ones to prevent duplicates
 	 */
 	registerPluginHooks(plugin: Plugin): void {
 		const hooks = getHooksManager();
 		try {
-			plugin.registerHooks(hooks);
+			// Clear existing handlers for this plugin to prevent duplicates in development/hot reload
+			hooks.clearPluginHandlers(plugin.id);
+
+			// Create a wrapper that passes plugin ID to the hooks manager
+			const hooksWithPluginId: HooksManager = {
+				on: (eventType, handler) => hooks.on(eventType, handler, plugin.id),
+				emit: (event) => hooks.emit(event),
+				off: (eventType, handler) => hooks.off(eventType, handler),
+				clearPluginHandlers: (pluginId) => hooks.clearPluginHandlers(pluginId)
+			};
+
+			plugin.registerHooks(hooksWithPluginId);
 		} catch (error) {
 			console.error(`[PluginManager] Failed to register hooks for plugin ${plugin.id}:`, error);
 			throw error;
@@ -38,7 +50,10 @@ class PluginManager {
 		try {
 			await plugin.onEnable(tenantId);
 		} catch (error) {
-			console.error(`[PluginManager] Failed to enable plugin ${plugin.id} for tenant ${tenantId}:`, error);
+			console.error(
+				`[PluginManager] Failed to enable plugin ${plugin.id} for tenant ${tenantId}:`,
+				error
+			);
 			throw error;
 		}
 	}
@@ -50,7 +65,10 @@ class PluginManager {
 		try {
 			await plugin.onDisable(tenantId);
 		} catch (error) {
-			console.error(`[PluginManager] Failed to disable plugin ${plugin.id} for tenant ${tenantId}:`, error);
+			console.error(
+				`[PluginManager] Failed to disable plugin ${plugin.id} for tenant ${tenantId}:`,
+				error
+			);
 			throw error;
 		}
 	}

@@ -2,11 +2,11 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, inArray, like, sql, lt, gte, lte, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { sendInvoiceEmail } from '$lib/server/email';
-import { generateInvoiceNumber } from '$lib/server/invoice-utils';
+import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -17,7 +17,6 @@ function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
 }
-
 
 export const getInvoice = query(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
 	const event = getRequestEvent();
@@ -48,9 +47,13 @@ export const getInvoice = query(v.pipe(v.string(), v.minLength(1)), async (invoi
 
 export const getInvoices = query(
 	v.object({
-		clientId: v.optional(v.string()),
-		projectId: v.optional(v.string()),
-		serviceId: v.optional(v.string())
+		clientId: v.optional(v.union([v.string(), v.array(v.string())])),
+		projectId: v.optional(v.union([v.string(), v.array(v.string())])),
+		serviceId: v.optional(v.union([v.string(), v.array(v.string())])),
+		status: v.optional(v.union([v.string(), v.array(v.string())])),
+		search: v.optional(v.string()),
+		issueDate: v.optional(v.string()), // 'overdue', 'today', 'thisWeek', 'thisMonth', or date range
+		dueDate: v.optional(v.string()) // 'overdue', 'today', 'thisWeek', 'thisMonth', or date range
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -58,22 +61,133 @@ export const getInvoices = query(
 			throw new Error('Unauthorized');
 		}
 
-		let conditions = eq(table.invoice.tenantId, event.locals.tenant.id);
+		let conditions: any = eq(table.invoice.tenantId, event.locals.tenant.id);
 
 		// If user is a client user, filter by their client ID
 		if (event.locals.isClientUser && event.locals.client) {
 			conditions = and(conditions, eq(table.invoice.clientId, event.locals.client.id)) as any;
 		} else if (filters.clientId) {
-			conditions = and(conditions, eq(table.invoice.clientId, filters.clientId)) as any;
-		}
-		if (filters.projectId) {
-			conditions = and(conditions, eq(table.invoice.projectId, filters.projectId)) as any;
-		}
-		if (filters.serviceId) {
-			conditions = and(conditions, eq(table.invoice.serviceId, filters.serviceId)) as any;
+			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
+			conditions = and(conditions, inArray(table.invoice.clientId, clientIds)) as any;
 		}
 
-		return await db.select().from(table.invoice).where(conditions);
+		// Project filter
+		if (filters.projectId) {
+			const projectIds = Array.isArray(filters.projectId) ? filters.projectId : [filters.projectId];
+			conditions = and(conditions, inArray(table.invoice.projectId, projectIds)) as any;
+		}
+
+		// Service filter
+		if (filters.serviceId) {
+			const serviceIds = Array.isArray(filters.serviceId) ? filters.serviceId : [filters.serviceId];
+			conditions = and(conditions, inArray(table.invoice.serviceId, serviceIds)) as any;
+		}
+
+		// Status filter
+		if (filters.status) {
+			const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+			conditions = and(conditions, inArray(table.invoice.status, statuses)) as any;
+		}
+
+		// Search filter (invoice number)
+		if (filters.search) {
+			const searchPattern = `%${filters.search}%`;
+			conditions = and(conditions, like(table.invoice.invoiceNumber, searchPattern)) as any;
+		}
+
+		// Issue date filter
+		if (filters.issueDate) {
+			const now = new Date();
+			now.setHours(0, 0, 0, 0);
+			const todayEnd = new Date(now);
+			todayEnd.setHours(23, 59, 59, 999);
+
+			if (filters.issueDate === 'overdue') {
+				// For issue date, "overdue" doesn't make sense, so we'll skip it
+			} else if (filters.issueDate === 'today') {
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.issueDate, now), lte(table.invoice.issueDate, todayEnd))
+				) as any;
+			} else if (filters.issueDate === 'thisWeek') {
+				const weekEnd = new Date(now);
+				weekEnd.setDate(weekEnd.getDate() + 7);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.issueDate, now), lte(table.invoice.issueDate, weekEnd))
+				) as any;
+			} else if (filters.issueDate === 'thisMonth') {
+				const monthEnd = new Date(now);
+				monthEnd.setMonth(monthEnd.getMonth() + 1);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.issueDate, now), lte(table.invoice.issueDate, monthEnd))
+				) as any;
+			} else if (filters.issueDate === 'lastMonth') {
+				const lastMonthStart = new Date(now);
+				lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+				lastMonthStart.setDate(1);
+				lastMonthStart.setHours(0, 0, 0, 0);
+				const lastMonthEnd = new Date(now);
+				lastMonthEnd.setDate(0); // Last day of previous month
+				lastMonthEnd.setHours(23, 59, 59, 999);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.issueDate, lastMonthStart), lte(table.invoice.issueDate, lastMonthEnd))
+				) as any;
+			} else if (filters.issueDate.startsWith('dateRange:')) {
+				const [startStr, endStr] = filters.issueDate.replace('dateRange:', '').split(':');
+				const startDate = new Date(startStr);
+				const endDate = new Date(endStr);
+				endDate.setHours(23, 59, 59, 999);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.issueDate, startDate), lte(table.invoice.issueDate, endDate))
+				) as any;
+			}
+		}
+
+		// Due date filter
+		if (filters.dueDate) {
+			const now = new Date();
+			now.setHours(0, 0, 0, 0);
+			const todayEnd = new Date(now);
+			todayEnd.setHours(23, 59, 59, 999);
+
+			if (filters.dueDate === 'overdue') {
+				conditions = and(conditions, lt(table.invoice.dueDate, now)) as any;
+			} else if (filters.dueDate === 'today') {
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.dueDate, now), lte(table.invoice.dueDate, todayEnd))
+				) as any;
+			} else if (filters.dueDate === 'thisWeek') {
+				const weekEnd = new Date(now);
+				weekEnd.setDate(weekEnd.getDate() + 7);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.dueDate, now), lte(table.invoice.dueDate, weekEnd))
+				) as any;
+			} else if (filters.dueDate === 'thisMonth') {
+				const monthEnd = new Date(now);
+				monthEnd.setMonth(monthEnd.getMonth() + 1);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.dueDate, now), lte(table.invoice.dueDate, monthEnd))
+				) as any;
+			} else if (filters.dueDate.startsWith('dateRange:')) {
+				const [startStr, endStr] = filters.dueDate.replace('dateRange:', '').split(':');
+				const startDate = new Date(startStr);
+				const endDate = new Date(endStr);
+				endDate.setHours(23, 59, 59, 999);
+				conditions = and(
+					conditions,
+					and(gte(table.invoice.dueDate, startDate), lte(table.invoice.dueDate, endDate))
+				) as any;
+			}
+		}
+
+		return await db.select().from(table.invoice).where(conditions).orderBy(desc(table.invoice.updatedAt));
 	}
 );
 
@@ -153,7 +267,14 @@ const lineItemSchema = v.object({
 	description: v.pipe(v.string(), v.minLength(1)),
 	quantity: v.number(),
 	rate: v.number(), // in currency units (will be converted to cents)
-	taxRate: v.optional(v.number()) // as percentage (will be converted to cents)
+	taxRate: v.optional(v.number()), // as percentage (will be converted to cents)
+	discountType: v.optional(v.string()), // 'percent', 'fixed', or empty
+	discount: v.optional(v.number()), // discount amount
+	note: v.optional(v.string()), // item-specific note
+	currency: v.optional(v.string()), // item currency
+	unitOfMeasure: v.optional(v.string()), // unit of measure
+	keezItemExternalId: v.optional(v.string()), // Keez item external ID
+	serviceId: v.optional(v.string()) // Service ID if item came from a service
 });
 
 export const createInvoice = command(
@@ -168,7 +289,18 @@ export const createInvoice = command(
 		issueDate: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
 		notes: v.optional(v.string()),
-		currency: v.optional(v.string()) // 'RON', 'EUR', 'USD', etc.
+		currency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
+		invoiceSeries: v.optional(v.string()), // User-entered invoice series
+		invoiceNumber: v.optional(v.string()), // User-entered invoice number
+		invoiceCurrency: v.optional(v.string()), // Invoice display currency
+		paymentTerms: v.optional(v.string()), // Payment terms
+		paymentMethod: v.optional(v.string()), // Payment method
+		exchangeRate: v.optional(v.string()), // Exchange rate as string
+		vatOnCollection: v.optional(v.boolean()), // VAT on collection flag
+		isCreditNote: v.optional(v.boolean()), // Credit note flag
+		taxApplicationType: v.optional(v.string()), // 'apply', 'none', 'reverse' - for SmartBill tax name mapping
+		discountType: v.optional(v.string()), // 'none', 'percent', 'value'
+		discountValue: v.optional(v.number()) // Discount amount
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -187,8 +319,45 @@ export const createInvoice = command(
 		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
 		const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
 
-		// Generate invoice number (with Keez series if configured)
-		const invoiceNumber = await generateInvoiceNumber(event.locals.tenant.id);
+		// Use user-provided invoice series and number if provided, otherwise auto-generate
+		let invoiceNumber: string;
+		if (data.invoiceSeries && data.invoiceNumber) {
+			// User provided both series and number - use as-is
+			invoiceNumber = `${data.invoiceSeries} ${data.invoiceNumber}`.trim();
+		} else if (data.invoiceSeries && !data.invoiceNumber) {
+			// User provided only series, get next number from plugin settings
+			const nextNumber = await getNextInvoiceNumberFromPlugin(
+				event.locals.tenant.id,
+				data.invoiceSeries
+			);
+			if (nextNumber) {
+				invoiceNumber = nextNumber;
+			} else {
+				// No matching plugin found, use series with default number
+				invoiceNumber = `${data.invoiceSeries} 1`;
+			}
+		} else if (data.invoiceNumber) {
+			// User provided only number, use series from settings if available
+			const series = invoiceSettings?.keezSeries || invoiceSettings?.smartbillSeries || '';
+			if (series) {
+				// Get next number from plugin for this series, but replace with user's number
+				const nextNumber = await getNextInvoiceNumberFromPlugin(event.locals.tenant.id, series);
+				if (nextNumber) {
+					// Replace the number part with user's number while keeping the format
+					// Handle both "SERIES NUMBER" and "SERIES-NUMBER" formats
+					invoiceNumber = nextNumber.replace(/\d+$/, data.invoiceNumber);
+				} else {
+					// Fallback: use series with user's number
+					invoiceNumber = `${series} ${data.invoiceNumber}`.trim();
+				}
+			} else {
+				// No series configured, use just the number
+				invoiceNumber = data.invoiceNumber;
+			}
+		} else {
+			// Auto-generate invoice number (with plugin series if configured)
+			invoiceNumber = await generateInvoiceNumber(event.locals.tenant.id);
+		}
 		const invoiceId = generateInvoiceId();
 
 		let amount = 0;
@@ -198,26 +367,58 @@ export const createInvoice = command(
 
 		// Calculate from line items if provided, otherwise use legacy amount
 		if (data.lineItems && data.lineItems.length > 0) {
-			// Calculate totals from line items
+			// Calculate totals from line items with discounts
 			let subtotal = 0;
 			let totalTax = 0;
 
 			for (const item of data.lineItems) {
 				const itemRate = Math.round(item.rate * 100); // Convert to cents
-				const itemAmount = Math.round(itemRate * item.quantity);
-				subtotal += itemAmount;
+				let itemSubtotal = Math.round(itemRate * item.quantity);
 
-				// Use item's tax rate if provided, otherwise use default from settings
-				const itemTaxRate = item.taxRate ? Math.round(item.taxRate * 100) : defaultTaxRateCents;
-				const itemTax = Math.round((itemAmount * itemTaxRate) / 10000);
-				totalTax += itemTax;
+				// Apply item-level discount if present
+				if (item.discountType && item.discount !== undefined) {
+					let itemDiscount = 0;
+					if (item.discountType === 'percent') {
+						itemDiscount = Math.round((itemSubtotal * item.discount) / 100);
+					} else if (item.discountType === 'fixed') {
+						itemDiscount = Math.round(item.discount * 100); // Convert to cents
+					}
+					itemSubtotal -= itemDiscount;
+				}
+
+				subtotal += itemSubtotal;
+
+				// Only calculate tax if taxApplicationType is 'apply'
+				if (data.taxApplicationType === 'apply') {
+					// Use item's tax rate if provided, otherwise use default from settings
+					const itemTaxRate = item.taxRate ? Math.round(item.taxRate * 100) : defaultTaxRateCents;
+					const itemTax = Math.round((itemSubtotal * itemTaxRate) / 10000);
+					totalTax += itemTax;
+				}
+			}
+
+			// Apply invoice-level discount if present
+			let discountAmount = 0;
+			if (data.discountType && data.discountType !== 'none' && data.discountValue !== undefined) {
+				if (data.discountType === 'percent') {
+					discountAmount = Math.round((subtotal * data.discountValue) / 100);
+				} else if (data.discountType === 'value') {
+					discountAmount = Math.round(data.discountValue * 100); // Convert to cents
+				}
+				subtotal -= discountAmount;
 			}
 
 			amount = subtotal;
 			taxAmount = totalTax;
 			totalAmount = amount + taxAmount;
-			// Use first line item's tax rate as invoice tax rate, or default from settings
-			taxRate = data.lineItems[0]?.taxRate ? Math.round(data.lineItems[0].taxRate * 100) : defaultTaxRateCents;
+			// Only set tax rate if taxApplicationType is 'apply'
+			if (data.taxApplicationType === 'apply') {
+				taxRate = data.lineItems[0]?.taxRate
+					? Math.round(data.lineItems[0].taxRate * 100)
+					: defaultTaxRateCents;
+			} else {
+				taxRate = 0; // No tax for 'none' or 'reverse'
+			}
 		} else if (data.amount !== undefined) {
 			// Legacy support: single amount
 			amount = Math.round(data.amount * 100); // Convert to cents
@@ -228,7 +429,26 @@ export const createInvoice = command(
 			throw new Error('Either lineItems or amount must be provided');
 		}
 
-		const invoiceStatus = (data.status || 'draft') as 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+		const invoiceStatus = (data.status || 'draft') as
+			| 'draft'
+			| 'sent'
+			| 'paid'
+			| 'overdue'
+			| 'cancelled';
+
+		// Calculate invoice-level discount value in cents
+		// For percentage discounts, store the percentage value as-is (e.g., 15 for 15%)
+		// For value discounts, store in cents
+		let discountValueCents: number | null = null;
+		if (data.discountType && data.discountType !== 'none' && data.discountValue !== undefined) {
+			if (data.discountType === 'percent') {
+				// Store percentage as-is (e.g., 15 for 15%)
+				// We'll multiply by 10000 to store as integer (15% = 1500, representing 15.00%)
+				discountValueCents = Math.round(data.discountValue * 100); // Store as basis points (15% = 1500)
+			} else if (data.discountType === 'value') {
+				discountValueCents = Math.round(data.discountValue * 100); // Convert to cents
+			}
+		}
 
 		const newInvoice = {
 			id: invoiceId,
@@ -248,6 +468,16 @@ export const createInvoice = command(
 				? new Date(data.dueDate)
 				: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
 			notes: data.notes || null,
+			invoiceSeries: data.invoiceSeries || null,
+			invoiceCurrency: data.invoiceCurrency || null,
+			paymentTerms: data.paymentTerms || null,
+			paymentMethod: data.paymentMethod || null,
+			exchangeRate: data.exchangeRate || null,
+			vatOnCollection: data.vatOnCollection || false,
+			isCreditNote: data.isCreditNote || false,
+			taxApplicationType: data.taxApplicationType || null,
+			discountType: data.discountType || null,
+			discountValue: discountValueCents,
 			createdByUserId: event.locals.user.id
 		};
 
@@ -259,15 +489,36 @@ export const createInvoice = command(
 			if (data.lineItems && data.lineItems.length > 0) {
 				const lineItemsToInsert = data.lineItems.map((item) => {
 					const itemRate = Math.round(item.rate * 100); // Convert to cents
-					const itemAmount = Math.round(itemRate * item.quantity);
+					let itemAmount = Math.round(itemRate * item.quantity);
+
+					// Calculate item discount if present
+					let itemDiscountCents: number | null = null;
+					if (item.discountType && item.discount !== undefined) {
+						if (item.discountType === 'percent') {
+							itemDiscountCents = Math.round((itemAmount * item.discount) / 100);
+						} else if (item.discountType === 'fixed') {
+							itemDiscountCents = Math.round(item.discount * 100); // Convert to cents
+						}
+						if (itemDiscountCents) {
+							itemAmount -= itemDiscountCents;
+						}
+					}
 
 					return {
 						id: generateInvoiceLineItemId(),
 						invoiceId,
+						serviceId: item.serviceId || null,
 						description: item.description,
 						quantity: item.quantity,
 						rate: itemRate,
-						amount: itemAmount
+						amount: itemAmount,
+						taxRate: item.taxRate ? Math.round(item.taxRate * 100) : null,
+						discountType: item.discountType || null,
+						discount: itemDiscountCents,
+						note: item.note || null,
+						currency: item.currency || null,
+						unitOfMeasure: item.unitOfMeasure || null,
+						keezItemExternalId: item.keezItemExternalId || null
 					};
 				});
 
@@ -297,14 +548,24 @@ export const createInvoice = command(
 			.from(table.invoiceLineItem)
 			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
 
-		// Emit invoice.created hook (plugins will handle sync when active)
+		// Emit invoice.created hook (after database transaction)
+		// If hook fails, rollback by deleting the invoice
 		const hooks = getHooksManager();
-		await hooks.emit({
-			type: 'invoice.created',
-			invoice: { ...fullInvoice, lineItems } as any,
-			tenantId: event.locals.tenant.id,
-			userId: event.locals.user.id
-		});
+		try {
+			await hooks.emit({
+				type: 'invoice.created',
+				invoice: { ...fullInvoice, lineItems } as any,
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id
+			});
+		} catch (error) {
+			// Rollback: delete the invoice and line items if hook fails
+			await db.transaction(async (tx) => {
+				await tx.delete(table.invoiceLineItem).where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+				await tx.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+			});
+			throw error;
+		}
 
 		return { success: true, invoiceId };
 	}
@@ -393,36 +654,61 @@ export const updateInvoice = command(
 			.limit(1);
 
 		if (updatedInvoice) {
-			// Emit invoice.updated hook
+			// Emit invoice.updated hook (after database update)
+			// If hook fails, rollback by restoring previous invoice state
 			const hooks = getHooksManager();
-			await hooks.emit({
-				type: 'invoice.updated',
-				invoice: updatedInvoice as any,
-				previousInvoice: previousInvoice as any,
-				tenantId: event.locals.tenant.id,
-				userId: event.locals.user.id
-			});
-
-			// Emit status changed hook if status changed
-			if (updateData.status && updateData.status !== existing.status) {
+			try {
 				await hooks.emit({
-					type: 'invoice.status.changed',
+					type: 'invoice.updated',
 					invoice: updatedInvoice as any,
-					previousStatus: existing.status,
-					newStatus: updateData.status,
+					previousInvoice: previousInvoice as any,
 					tenantId: event.locals.tenant.id,
 					userId: event.locals.user.id
 				});
 
-				// Emit paid hook if status changed to paid
-				if (updateData.status === 'paid') {
+				// Emit status changed hook if status changed
+				if (updateData.status && updateData.status !== existing.status) {
 					await hooks.emit({
-						type: 'invoice.paid',
+						type: 'invoice.status.changed',
 						invoice: updatedInvoice as any,
+						previousStatus: existing.status,
+						newStatus: updateData.status,
 						tenantId: event.locals.tenant.id,
 						userId: event.locals.user.id
 					});
+
+					// Emit paid hook if status changed to paid
+					if (updateData.status === 'paid') {
+						await hooks.emit({
+							type: 'invoice.paid',
+							invoice: updatedInvoice as any,
+							tenantId: event.locals.tenant.id,
+							userId: event.locals.user.id
+						});
+					}
 				}
+			} catch (error) {
+				// Rollback: restore invoice to previous state
+				await db
+					.update(table.invoice)
+					.set({
+						clientId: previousInvoice.clientId,
+						projectId: previousInvoice.projectId,
+						serviceId: previousInvoice.serviceId,
+						amount: previousInvoice.amount,
+						taxRate: previousInvoice.taxRate,
+						taxAmount: previousInvoice.taxAmount,
+						totalAmount: previousInvoice.totalAmount,
+						currency: previousInvoice.currency,
+						status: previousInvoice.status,
+						issueDate: previousInvoice.issueDate,
+						dueDate: previousInvoice.dueDate,
+						paidDate: previousInvoice.paidDate,
+						notes: previousInvoice.notes,
+						updatedAt: new Date()
+					})
+					.where(eq(table.invoice.id, invoiceId));
+				throw error;
 			}
 		}
 
@@ -447,9 +733,7 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 		throw new Error('Invoice not found');
 	}
 
-	await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
-
-	// Emit invoice.deleted hook
+	// Emit invoice.deleted hook (before database deletion)
 	const hooks = getHooksManager();
 	await hooks.emit({
 		type: 'invoice.deleted',
@@ -457,6 +741,8 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 		tenantId: event.locals.tenant.id,
 		userId: event.locals.user.id
 	});
+
+	await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
 
 	return { success: true };
 });
@@ -608,10 +894,7 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	}
 
 	// Update invoice with status and email tracking
-	await db
-		.update(table.invoice)
-		.set(updateData)
-		.where(eq(table.invoice.id, invoiceId));
+	await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoiceId));
 
 	return { success: true };
 });

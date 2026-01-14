@@ -99,17 +99,20 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 		'AccountingSupplierParty'
 	)[0];
 	const supplierPartyInfo = supplierParty?.getElementsByTagNameNS(UBL_NS.cac, 'Party')[0];
-	const supplierName = getText(supplierPartyInfo, 'Name', UBL_NS.cbc);
 	const supplierLegalEntity = supplierPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyLegalEntity'
 	)[0];
-	const supplierVatId = getText(supplierLegalEntity, 'CompanyID', UBL_NS.cbc);
+	// Supplier name comes from PartyLegalEntity -> RegistrationName
+	const supplierName = getText(supplierLegalEntity, 'RegistrationName', UBL_NS.cbc);
+	// CompanyID in PartyLegalEntity is the registration number (e.g., "J3318002021")
+	const supplierRegistrationNumber = getText(supplierLegalEntity, 'CompanyID', UBL_NS.cbc);
 	const supplierTaxScheme = supplierPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyTaxScheme'
 	)[0];
-	const supplierTaxId = getText(supplierTaxScheme, 'CompanyID', UBL_NS.cbc);
+	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO44938033")
+	const supplierVatId = getText(supplierTaxScheme, 'CompanyID', UBL_NS.cbc);
 
 	const supplierAddress = supplierPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const supplierStreet = getText(supplierAddress, 'StreetName', UBL_NS.cbc);
@@ -131,12 +134,18 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 		'AccountingCustomerParty'
 	)[0];
 	const customerPartyInfo = customerParty?.getElementsByTagNameNS(UBL_NS.cac, 'Party')[0];
-	const customerName = getText(customerPartyInfo, 'Name', UBL_NS.cbc);
 	const customerLegalEntity = customerPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyLegalEntity'
 	)[0];
-	const customerVatId = getText(customerLegalEntity, 'CompanyID', UBL_NS.cbc);
+	// Customer name comes from PartyLegalEntity -> RegistrationName
+	const customerName = getText(customerLegalEntity, 'RegistrationName', UBL_NS.cbc);
+	const customerTaxScheme = customerPartyInfo?.getElementsByTagNameNS(
+		UBL_NS.cac,
+		'PartyTaxScheme'
+	)[0];
+	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO39988493")
+	const customerVatId = getText(customerTaxScheme, 'CompanyID', UBL_NS.cbc);
 
 	const customerAddress = customerPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const customerStreet = getText(customerAddress, 'StreetName', UBL_NS.cbc);
@@ -158,14 +167,18 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 
 	for (let i = 0; i < invoiceLines.length; i++) {
 		const line = invoiceLines[i];
-		const description = getText(line, 'Name', UBL_NS.cbc);
 		const quantity = getNumber(line, 'InvoicedQuantity', UBL_NS.cbc);
 		const lineExtensionAmount = getNumber(line, 'LineExtensionAmount', UBL_NS.cbc);
+
+		const item = line.getElementsByTagNameNS(UBL_NS.cac, 'Item')[0];
+		// Description comes from Item -> Name
+		const description = getText(item, 'Name', UBL_NS.cbc);
 
 		const price = line.getElementsByTagNameNS(UBL_NS.cac, 'Price')[0];
 		const unitPrice = getNumber(price, 'PriceAmount', UBL_NS.cbc);
 
-		const taxCategory = line.getElementsByTagNameNS(UBL_NS.cac, 'ClassifiedTaxCategory')[0];
+		// Tax category is inside Item
+		const taxCategory = item?.getElementsByTagNameNS(UBL_NS.cac, 'ClassifiedTaxCategory')[0];
 		const taxRate = getNumber(taxCategory, 'Percent', UBL_NS.cbc);
 
 		lineItems.push({
@@ -188,7 +201,7 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 		supplier: {
 			name: supplierName,
 			vatId: supplierVatId,
-			taxId: supplierTaxId || undefined,
+			taxId: supplierRegistrationNumber || undefined,
 			address: supplierStreet || undefined,
 			city: supplierCity || undefined,
 			county: supplierCounty || undefined,

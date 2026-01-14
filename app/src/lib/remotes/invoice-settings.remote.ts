@@ -29,6 +29,9 @@ export const getInvoiceSettings = query(async () => {
 			smartbillStartNumber: null,
 			smartbillLastSyncedNumber: null,
 			smartbillAutoSync: false,
+			smartbillTaxNameApply: null,
+			smartbillTaxNameNone: null,
+			smartbillTaxNameReverse: null,
 			keezSeries: null,
 			keezStartNumber: null,
 			keezLastSyncedNumber: null,
@@ -44,6 +47,9 @@ export const getInvoiceSettings = query(async () => {
 		smartbillStartNumber: settings.smartbillStartNumber,
 		smartbillLastSyncedNumber: settings.smartbillLastSyncedNumber,
 		smartbillAutoSync: settings.smartbillAutoSync,
+		smartbillTaxNameApply: settings.smartbillTaxNameApply,
+		smartbillTaxNameNone: settings.smartbillTaxNameNone,
+		smartbillTaxNameReverse: settings.smartbillTaxNameReverse,
 		keezSeries: settings.keezSeries,
 		keezStartNumber: settings.keezStartNumber,
 		keezLastSyncedNumber: settings.keezLastSyncedNumber,
@@ -59,6 +65,9 @@ export const updateInvoiceSettings = command(
 		smartbillSeries: v.optional(v.string()),
 		smartbillStartNumber: v.optional(v.string()),
 		smartbillAutoSync: v.optional(v.boolean()),
+		smartbillTaxNameApply: v.optional(v.string()), // Tax name for 'apply' type
+		smartbillTaxNameNone: v.optional(v.string()), // Tax name for 'none' type
+		smartbillTaxNameReverse: v.optional(v.string()), // Tax name for 'reverse' type
 		keezSeries: v.optional(v.string()),
 		keezStartNumber: v.optional(v.string()),
 		keezAutoSync: v.optional(v.boolean()),
@@ -90,14 +99,23 @@ export const updateInvoiceSettings = command(
 				.update(table.invoiceSettings)
 				.set({
 					smartbillSeries: data.smartbillSeries !== undefined ? data.smartbillSeries : undefined,
-					smartbillStartNumber: data.smartbillStartNumber !== undefined ? data.smartbillStartNumber : undefined,
-					smartbillAutoSync: data.smartbillAutoSync !== undefined ? data.smartbillAutoSync : undefined,
+					smartbillStartNumber:
+						data.smartbillStartNumber !== undefined ? data.smartbillStartNumber : undefined,
+					smartbillAutoSync:
+						data.smartbillAutoSync !== undefined ? data.smartbillAutoSync : undefined,
+					smartbillTaxNameApply:
+						data.smartbillTaxNameApply !== undefined ? data.smartbillTaxNameApply : undefined,
+					smartbillTaxNameNone:
+						data.smartbillTaxNameNone !== undefined ? data.smartbillTaxNameNone : undefined,
+					smartbillTaxNameReverse:
+						data.smartbillTaxNameReverse !== undefined ? data.smartbillTaxNameReverse : undefined,
 					keezSeries: data.keezSeries !== undefined ? data.keezSeries : undefined,
 					keezStartNumber: data.keezStartNumber !== undefined ? data.keezStartNumber : undefined,
 					keezAutoSync: data.keezAutoSync !== undefined ? data.keezAutoSync : undefined,
 					defaultCurrency: data.defaultCurrency !== undefined ? data.defaultCurrency : undefined,
 					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
-					invoiceEmailsEnabled: data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
+					invoiceEmailsEnabled:
+						data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
 					updatedAt: new Date()
 				})
 				.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id));
@@ -111,6 +129,9 @@ export const updateInvoiceSettings = command(
 				smartbillStartNumber: data.smartbillStartNumber || null,
 				smartbillLastSyncedNumber: null,
 				smartbillAutoSync: data.smartbillAutoSync ?? false,
+				smartbillTaxNameApply: data.smartbillTaxNameApply || null,
+				smartbillTaxNameNone: data.smartbillTaxNameNone || null,
+				smartbillTaxNameReverse: data.smartbillTaxNameReverse || null,
 				keezSeries: data.keezSeries || null,
 				keezStartNumber: data.keezStartNumber || null,
 				keezLastSyncedNumber: null,
