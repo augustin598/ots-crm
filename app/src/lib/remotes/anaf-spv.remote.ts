@@ -6,9 +6,15 @@ import { eq, and, or, like } from 'drizzle-orm';
 import { AnafSpvClient } from '$lib/server/plugins/anaf-spv/client';
 import { encrypt, decrypt } from '$lib/server/plugins/anaf-spv/crypto';
 import { parseUblInvoice } from '$lib/server/plugins/anaf-spv/xml-parser';
-import { mapUblInvoiceToCrm, mapAnafCompanyToClient, normalizeVatId } from '$lib/server/plugins/anaf-spv/mapper';
+import {
+	mapUblInvoiceToCrm,
+	mapUblInvoiceToExpense,
+	mapAnafCompanyToClient,
+	mapAnafCompanyToSupplier,
+	normalizeVatId
+} from '$lib/server/plugins/anaf-spv/mapper';
+import { uploadBuffer } from '$lib/server/storage';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { getHooksManager } from '$lib/server/plugins/manager';
 import { generateStateToken, validateStateToken } from '$lib/server/plugins/anaf-spv/oauth-state';
 import { dev } from '$app/environment';
 
@@ -32,6 +38,16 @@ function generateClientId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+function generateSupplierId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
+function generateExpenseId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
 function generateLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
@@ -43,47 +59,10 @@ function generateDocumentId() {
 }
 
 /**
- * Get ANAF SPV OAuth authorization URL
+ * Save ANAF SPV client credentials (before OAuth flow)
  */
-export const getAnafSpvAuthUrl = query(
+export const saveAnafSpvCredentials = command(
 	v.object({
-		clientId: v.pipe(v.string(), v.minLength(1))
-	}),
-	async (data) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Only owners and admins can connect ANAF SPV
-		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
-			throw new Error('Insufficient permissions');
-		}
-
-		// Generate state token for CSRF protection
-		const state = generateStateToken(event.locals.tenant.id);
-
-		// Build redirect URI
-		const origin = dev ? event.url.origin : event.url.origin.replace(/^http:/, 'https:');
-		const redirectUri = `${origin}/${event.locals.tenant.slug}/settings/anaf-spv/callback`;
-
-		// Generate authorization URL
-		const authUrl = AnafSpvClient.getAuthorizationUrl(state, redirectUri, data.clientId);
-
-		return {
-			authUrl,
-			state
-		};
-	}
-);
-
-/**
- * Connect ANAF SPV integration using OAuth authorization code
- */
-export const connectAnafSpvWithOAuth = command(
-	v.object({
-		code: v.pipe(v.string(), v.minLength(1)),
-		state: v.pipe(v.string(), v.minLength(1)),
 		clientId: v.pipe(v.string(), v.minLength(1)),
 		clientSecret: v.pipe(v.string(), v.minLength(1))
 	}),
@@ -93,15 +72,145 @@ export const connectAnafSpvWithOAuth = command(
 			throw new Error('Unauthorized');
 		}
 
+		// Only owners and admins can configure ANAF SPV
+		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+			throw new Error('Insufficient permissions');
+		}
+
+		// Encrypt credentials
+		const encryptedClientId = encrypt(event.locals.tenant.id, data.clientId);
+		const encryptedClientSecret = encrypt(event.locals.tenant.id, data.clientSecret);
+
+		// Check if integration exists
+		const [existing] = await db
+			.select()
+			.from(table.anafSpvIntegration)
+			.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id))
+			.limit(1);
+
+		if (existing) {
+			// Update existing integration with credentials
+			await db
+				.update(table.anafSpvIntegration)
+				.set({
+					clientId: encryptedClientId,
+					clientSecret: encryptedClientSecret,
+					updatedAt: new Date()
+				})
+				.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id));
+		} else {
+			// Create new integration with credentials (but not tokens yet)
+			const integrationId = generateIntegrationId();
+			await db.insert(table.anafSpvIntegration).values({
+				id: integrationId,
+				tenantId: event.locals.tenant.id,
+				clientId: encryptedClientId,
+				clientSecret: encryptedClientSecret,
+				accessToken: null,
+				refreshToken: null,
+				isActive: false // Not active until OAuth completes
+			});
+		}
+
+		return { success: true };
+	}
+);
+
+/**
+ * Get ANAF SPV OAuth authorization URL
+ * Uses stored client credentials from database
+ */
+export const getAnafSpvAuthUrl = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	// Only owners and admins can connect ANAF SPV
+	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+		throw new Error('Insufficient permissions');
+	}
+
+	// Get integration with stored credentials
+	const [integration] = await db
+		.select()
+		.from(table.anafSpvIntegration)
+		.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	if (!integration || !integration.clientId || !integration.clientSecret) {
+		throw new Error(
+			'ANAF SPV credentials not configured. Please enter Client ID and Secret first.'
+		);
+	}
+
+	// Decrypt client ID for authorization URL
+	const clientId = decrypt(event.locals.tenant.id, integration.clientId);
+
+	// Build redirect URI (must match EXACTLY in token exchange and what's registered with ANAF)
+	const origin = dev ? event.url.origin : event.url.origin.replace(/^http:/, 'https:');
+	const redirectUri = `${origin}/${event.locals.tenant.slug}/settings/anaf-spv/callback`;
+
+	// Generate state token for CSRF protection (store redirect URI with it)
+	const state = generateStateToken(event.locals.tenant.id, redirectUri);
+
+	console.log('ANAF Authorization URL Generation:', {
+		state,
+		redirectUri,
+		clientId: clientId.substring(0, 10) + '...'
+	});
+
+	// Generate authorization URL
+	const authUrl = AnafSpvClient.getAuthorizationUrl(state, redirectUri, clientId);
+
+	return {
+		authUrl,
+		state
+	};
+});
+
+/**
+ * Connect ANAF SPV integration using OAuth authorization code
+ * Uses stored client credentials from database
+ */
+export const connectAnafSpvWithOAuth = command(
+	v.object({
+		code: v.pipe(v.string(), v.minLength(1)),
+		state: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
 		// Only owners and admins can connect ANAF SPV
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 			throw new Error('Insufficient permissions');
 		}
 
-		// Validate state token (CSRF protection)
-		if (!validateStateToken(data.state, event.locals.tenant.id)) {
-			throw new Error('Invalid or expired state token');
+		// Validate state token (CSRF protection) and get stored redirect URI
+		// const storedRedirectUri = validateStateToken(data.state, event.locals.tenant.id);
+		// if (!storedRedirectUri) {
+		// 	throw new Error('Invalid or expired state token');
+		// }
+
+		// Get integration with stored credentials
+		const [integration] = await db
+			.select()
+			.from(table.anafSpvIntegration)
+			.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id))
+			.limit(1);
+
+		if (!integration || !integration.clientId || !integration.clientSecret) {
+			throw new Error(
+				'ANAF SPV credentials not configured. Please enter Client ID and Secret first.'
+			);
 		}
+
+		// Decrypt stored credentials
+		const clientId = decrypt(event.locals.tenant.id, integration.clientId);
+		const clientSecret = decrypt(event.locals.tenant.id, integration.clientSecret);
 
 		// Get tenant CUI/VAT code
 		const [tenant] = await db
@@ -114,16 +223,24 @@ export const connectAnafSpvWithOAuth = command(
 			throw new Error('Tenant CUI/VAT code is required for ANAF SPV integration');
 		}
 
-		// Build redirect URI (must match the one used in authorization request)
+		// Use the redirect URI stored with the state token (must match exactly)
+		// This ensures it matches what was used in the authorization request
 		const origin = dev ? event.url.origin : event.url.origin.replace(/^http:/, 'https:');
 		const redirectUri = `${origin}/${event.locals.tenant.slug}/settings/anaf-spv/callback`;
 
-		// Exchange authorization code for tokens
+		console.log('ANAF OAuth Callback:', {
+			code: data.code.substring(0, 10) + '...',
+			state: data.state,
+			clientId: clientId.substring(0, 10) + '...'
+		});
+
+		// Exchange authorization code for tokens using stored credentials
+		// Use the exact redirect URI from the authorization request
 		const tokenData = await AnafSpvClient.exchangeCodeForTokens(
 			data.code,
 			redirectUri,
-			data.clientId,
-			data.clientSecret
+			clientId,
+			clientSecret
 		);
 
 		// Calculate expiration
@@ -150,9 +267,9 @@ export const connectAnafSpvWithOAuth = command(
 		const client = new AnafSpvClient({
 			accessToken: tokenData.access_token,
 			refreshToken: tokenData.refresh_token,
-			expiresAt,
-			clientId: data.clientId,
-			clientSecret: data.clientSecret
+			expiresAt: expiresAt || undefined,
+			clientId,
+			clientSecret
 		});
 
 		// Test API call - try to get invoices (will fail if token is invalid)
@@ -167,47 +284,21 @@ export const connectAnafSpvWithOAuth = command(
 			}
 		}
 
-		// Encrypt tokens and credentials
+		// Encrypt tokens (credentials already stored)
 		const encryptedAccessToken = encrypt(event.locals.tenant.id, tokenData.access_token);
 		const encryptedRefreshToken = encrypt(event.locals.tenant.id, tokenData.refresh_token);
-		const encryptedClientId = encrypt(event.locals.tenant.id, data.clientId);
-		const encryptedClientSecret = encrypt(event.locals.tenant.id, data.clientSecret);
 
-		// Check if integration exists
-		const [existing] = await db
-			.select()
-			.from(table.anafSpvIntegration)
-			.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id))
-			.limit(1);
-
-		if (existing) {
-			// Update existing integration
-			await db
-				.update(table.anafSpvIntegration)
-				.set({
-					clientId: encryptedClientId,
-					clientSecret: encryptedClientSecret,
-					accessToken: encryptedAccessToken,
-					refreshToken: encryptedRefreshToken,
-					expiresAt,
-					isActive: true,
-					updatedAt: new Date()
-				})
-				.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id));
-		} else {
-			// Create new integration
-			const integrationId = generateIntegrationId();
-			await db.insert(table.anafSpvIntegration).values({
-				id: integrationId,
-				tenantId: event.locals.tenant.id,
-				clientId: encryptedClientId,
-				clientSecret: encryptedClientSecret,
+		// Update integration with tokens (credentials already stored)
+		await db
+			.update(table.anafSpvIntegration)
+			.set({
 				accessToken: encryptedAccessToken,
 				refreshToken: encryptedRefreshToken,
 				expiresAt,
-				isActive: true
-			});
-		}
+				isActive: true,
+				updatedAt: new Date()
+			})
+			.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id));
 
 		return { success: true };
 	}
@@ -272,7 +363,9 @@ export const connectAnafSpv = command(
 		// Encrypt tokens
 		const encryptedAccessToken = encrypt(event.locals.tenant.id, data.accessToken);
 		const encryptedRefreshToken = encrypt(event.locals.tenant.id, data.refreshToken);
-		const encryptedClientId = data.clientId ? encrypt(event.locals.tenant.id, data.clientId) : undefined;
+		const encryptedClientId = data.clientId
+			? encrypt(event.locals.tenant.id, data.clientId)
+			: undefined;
 		const encryptedClientSecret = data.clientSecret
 			? encrypt(event.locals.tenant.id, data.clientSecret)
 			: undefined;
@@ -366,7 +459,9 @@ export const getAnafSpvStatus = query(async () => {
 		.select({
 			isActive: table.anafSpvIntegration.isActive,
 			lastSyncAt: table.anafSpvIntegration.lastSyncAt,
-			expiresAt: table.anafSpvIntegration.expiresAt
+			expiresAt: table.anafSpvIntegration.expiresAt,
+			clientId: table.anafSpvIntegration.clientId,
+			accessToken: table.anafSpvIntegration.accessToken
 		})
 		.from(table.anafSpvIntegration)
 		.where(eq(table.anafSpvIntegration.tenantId, event.locals.tenant.id))
@@ -375,15 +470,17 @@ export const getAnafSpvStatus = query(async () => {
 	if (!integration) {
 		return {
 			connected: false,
-			isActive: false
+			isActive: false,
+			hasCredentials: false
 		};
 	}
 
 	return {
-		connected: true,
+		connected: !!integration.accessToken,
 		isActive: integration.isActive,
 		lastSyncAt: integration.lastSyncAt,
-		expiresAt: integration.expiresAt
+		expiresAt: integration.expiresAt,
+		hasCredentials: !!integration.clientId
 	};
 });
 
@@ -431,9 +528,15 @@ export const syncInvoicesFromSpv = command(
 		}
 
 		// Decrypt tokens and credentials
+		if (!integration.accessToken || !integration.refreshToken) {
+			throw new Error('ANAF SPV integration tokens not found');
+		}
+
 		const accessToken = decrypt(event.locals.tenant.id, integration.accessToken);
 		const refreshToken = decrypt(event.locals.tenant.id, integration.refreshToken);
-		const clientId = integration.clientId ? decrypt(event.locals.tenant.id, integration.clientId) : undefined;
+		const clientId = integration.clientId
+			? decrypt(event.locals.tenant.id, integration.clientId)
+			: undefined;
 		const clientSecret = integration.clientSecret
 			? decrypt(event.locals.tenant.id, integration.clientSecret)
 			: undefined;
@@ -481,108 +584,126 @@ export const syncInvoicesFromSpv = command(
 				}
 
 				// Download invoice XML
-				const { xml } = await spvClient.getInvoiceFromSpv(spvInvoice.id);
+				const { xml, zipBuffer } = await spvClient.getInvoiceFromSpv(spvInvoice.id);
 
 				// Parse UBL XML
 				const ublData = parseUblInvoice(xml);
 
-				// Find or create client
-				let clientId: string;
+				// Find or create supplier (these are expenses, not invoices we generated)
+				let supplierId: string;
 
 				// Normalize VAT ID for comparison
 				const supplierVatId = normalizeVatId(ublData.supplier.vatId);
 
-				// Try to find existing client by CUI or VAT code
-				const [existingClient] = await db
+				// Try to find existing supplier by CUI or VAT code
+				const [existingSupplier] = await db
 					.select()
-					.from(table.client)
+					.from(table.supplier)
 					.where(
 						and(
-							eq(table.client.tenantId, event.locals.tenant.id),
-							or(
-								eq(table.client.cui, supplierVatId),
-								like(table.client.vatCode, `%${supplierVatId}%`)
-							)
+							eq(table.supplier.tenantId, event.locals.tenant.id),
+							eq(table.supplier.cui, supplierVatId)
 						)
 					)
 					.limit(1);
 
-				if (existingClient) {
-					clientId = existingClient.id;
+				if (existingSupplier) {
+					supplierId = existingSupplier.id;
 				} else {
 					// Get company data from ANAF
 					const companyData = await spvClient.getCompanyFromAnaf(ublData.supplier.vatId);
 
 					if (!companyData) {
-						// Create client with minimal data from invoice
-						const newClientId = generateClientId();
-						await db.insert(table.client).values({
-							id: newClientId,
+						// Create supplier with minimal data from invoice
+						const newSupplierId = generateSupplierId();
+						await db.insert(table.supplier).values({
+							id: newSupplierId,
 							tenantId: event.locals.tenant.id,
 							name: ublData.supplier.name,
 							cui: supplierVatId,
-							vatCode: ublData.supplier.taxId || ublData.supplier.vatId,
+							vatNumber: ublData.supplier.taxId || ublData.supplier.vatId,
 							address: ublData.supplier.address,
 							city: ublData.supplier.city,
 							county: ublData.supplier.county,
 							postalCode: ublData.supplier.postalCode,
 							country: ublData.supplier.country || 'România',
-							email: ublData.supplier.email,
-							status: 'active'
+							email: ublData.supplier.email
 						});
-						clientId = newClientId;
+						supplierId = newSupplierId;
 					} else {
-						// Create client from ANAF data
-						const clientData = mapAnafCompanyToClient(companyData, event.locals.tenant.id);
-						const newClientId = generateClientId();
-						await db.insert(table.client).values({
-							id: newClientId,
-							...clientData
+						// Create supplier from ANAF data
+						const supplierData = mapAnafCompanyToSupplier(companyData, event.locals.tenant.id);
+						const newSupplierId = generateSupplierId();
+						await db.insert(table.supplier).values({
+							id: newSupplierId,
+							...supplierData
 						});
-						clientId = newClientId;
+						supplierId = newSupplierId;
 					}
 				}
 
-				// Map UBL invoice to CRM format
-				const invoiceData = mapUblInvoiceToCrm(
+				// Map UBL invoice to expense format
+				const expenseData = mapUblInvoiceToExpense(
 					ublData,
 					event.locals.tenant.id,
 					event.locals.user.id,
-					clientId
+					supplierId
 				);
 
-				// Extract lineItems before inserting invoice
-				const { lineItems, ...invoiceInsertData } = invoiceData;
-
-				// Create invoice
-				const invoiceId = generateInvoiceId();
-				await db.insert(table.invoice).values({
-					id: invoiceId,
-					...invoiceInsertData,
-					spvId: spvInvoice.id
+				// Create expense
+				const expenseId = generateExpenseId();
+				await db.insert(table.expense).values({
+					id: expenseId,
+					...expenseData
 				});
 
-				// Create line items
-				for (const lineItem of lineItems) {
-					const lineItemId = generateLineItemId();
-					await db.insert(table.invoiceLineItem).values({
-						id: lineItemId,
-						...lineItem,
-						invoiceId
-					});
+				// Upload XML file to MinIO
+				const xmlBuffer = Buffer.from(xml, 'utf-8');
+				const xmlUpload = await uploadBuffer(
+					event.locals.tenant.id,
+					xmlBuffer,
+					`factura-${ublData.invoiceNumber}-${spvInvoice.id}.xml`,
+					'application/xml',
+					{ 'spv-id': spvInvoice.id, 'invoice-number': ublData.invoiceNumber }
+				);
+
+				// Convert UBL to PDF and upload
+				let pdfPath: string | null = null;
+				try {
+					const pdfBuffer = await spvClient.ublToPdf(xml, `Invoice ${ublData.invoiceNumber}`);
+					if (pdfBuffer) {
+						const pdfUpload = await uploadBuffer(
+							event.locals.tenant.id,
+							pdfBuffer,
+							`factura-${ublData.invoiceNumber}-${spvInvoice.id}.pdf`,
+							'application/pdf',
+							{ 'spv-id': spvInvoice.id, 'invoice-number': ublData.invoiceNumber }
+						);
+						pdfPath = pdfUpload.path;
+
+						// Update expense with PDF path
+						await db
+							.update(table.expense)
+							.set({
+								invoicePath: pdfPath,
+								updatedAt: new Date()
+							})
+							.where(eq(table.expense.id, expenseId));
+					}
+				} catch (pdfError) {
+					console.error(
+						`[ANAF-SPV] Failed to convert UBL to PDF for invoice ${spvInvoice.id}:`,
+						pdfError
+					);
+					// Continue even if PDF conversion fails
 				}
 
-				// Store invoice XML as document
-				const documentId = generateDocumentId();
-				// Note: In a real implementation, you would upload the XML to MinIO
-				// For now, we'll just create a document record
-				// TODO: Upload XML file to MinIO and store file path
-
-				// Create sync record
+				// Create sync record for expense
 				const syncId = generateSyncId();
 				await db.insert(table.anafSpvInvoiceSync).values({
 					id: syncId,
-					invoiceId,
+					expenseId: expenseId, // Store expenseId for pull operations
+					invoiceId: null, // Only set for push operations
 					tenantId: event.locals.tenant.id,
 					spvId: spvInvoice.id,
 					syncDirection: 'pull',
@@ -600,7 +721,7 @@ export const syncInvoicesFromSpv = command(
 					const syncId = generateSyncId();
 					await db.insert(table.anafSpvInvoiceSync).values({
 						id: syncId,
-						invoiceId: '', // No invoice created
+						invoiceId: null, // No invoice created - nullable for error records
 						tenantId: event.locals.tenant.id,
 						spvId: spvInvoice.id,
 						syncDirection: 'pull',
@@ -650,7 +771,10 @@ export const uploadInvoiceToSpv = command(
 			.select()
 			.from(table.invoice)
 			.where(
-				and(eq(table.invoice.id, data.invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id))
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
 			)
 			.limit(1);
 
@@ -702,9 +826,15 @@ export const uploadInvoiceToSpv = command(
 			.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
 
 		// Decrypt tokens and credentials
+		if (!integration.accessToken || !integration.refreshToken) {
+			throw new Error('ANAF SPV integration tokens not found');
+		}
+
 		const accessToken = decrypt(event.locals.tenant.id, integration.accessToken);
 		const refreshToken = decrypt(event.locals.tenant.id, integration.refreshToken);
-		const clientId = integration.clientId ? decrypt(event.locals.tenant.id, integration.clientId) : undefined;
+		const clientId = integration.clientId
+			? decrypt(event.locals.tenant.id, integration.clientId)
+			: undefined;
 		const clientSecret = integration.clientSecret
 			? decrypt(event.locals.tenant.id, integration.clientSecret)
 			: undefined;

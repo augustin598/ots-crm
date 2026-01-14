@@ -654,8 +654,9 @@ export const anafSpvIntegration = sqliteTable('anaf_spv_integration', {
 export const anafSpvInvoiceSync = sqliteTable('anaf_spv_invoice_sync', {
 	id: text('id').primaryKey(),
 	invoiceId: text('invoice_id')
-		.notNull()
-		.references(() => invoice.id, { onDelete: 'cascade' }),
+		.references(() => invoice.id, { onDelete: 'cascade' }), // For push operations (our invoices to SPV)
+	expenseId: text('expense_id')
+		.references(() => expense.id, { onDelete: 'cascade' }), // For pull operations (expenses from SPV)
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
@@ -834,6 +835,7 @@ export const expense = sqliteTable('expense', {
 	vatAmount: integer('vat_amount'), // in cents
 	receiptPath: text('receipt_path'), // File path for receipt upload
 	invoicePath: text('invoice_path'), // File path for invoice upload
+	isPaid: boolean('is_paid').notNull().default(false), // Whether the expense has been paid (linked to a bank transaction)
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -869,10 +871,12 @@ export const transactionMatchRule = sqliteTable('transaction_match_rule', {
 		.notNull()
 		.references(() => tenant.id),
 	// What this rule matches to
-	matchType: text('match_type').notNull(), // 'supplier' | 'client' | 'user'
+	matchType: text('match_type').notNull(), // 'supplier' | 'client' | 'user' | 'expense'
 	supplierId: text('supplier_id').references(() => supplier.id),
 	clientId: text('client_id').references(() => client.id),
 	userId: text('user_id').references(() => user.id),
+	expenseId: text('expense_id').references(() => expense.id), // For expense matching rules
+	amount: integer('amount'), // Expense amount in cents (for expense matching rules)
 	// Matching criteria (learned from transactions)
 	counterpartIban: text('counterpart_iban'), // Normalized IBAN for bank transfers
 	counterpartName: text('counterpart_name'), // Merchant/supplier name for card payments
@@ -1332,6 +1336,10 @@ export const anafSpvInvoiceSyncRelations = relations(anafSpvInvoiceSync, ({ one 
 		fields: [anafSpvInvoiceSync.invoiceId],
 		references: [invoice.id]
 	}),
+	expense: one(expense, {
+		fields: [anafSpvInvoiceSync.expenseId],
+		references: [expense.id]
+	}),
 	tenant: one(tenant, {
 		fields: [anafSpvInvoiceSync.tenantId],
 		references: [tenant.id]
@@ -1459,6 +1467,10 @@ export const transactionMatchRuleRelations = relations(transactionMatchRule, ({ 
 	user: one(user, {
 		fields: [transactionMatchRule.userId],
 		references: [user.id]
+	}),
+	expense: one(expense, {
+		fields: [transactionMatchRule.expenseId],
+		references: [expense.id]
 	}),
 	createdBy: one(user, {
 		fields: [transactionMatchRule.createdByUserId],

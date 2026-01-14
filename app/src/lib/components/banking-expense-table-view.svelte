@@ -110,6 +110,7 @@
 					</button>
 				</TableHead>
 				<TableHead>Category</TableHead>
+				<TableHead>Status</TableHead>
 				<TableHead>Invoice</TableHead>
 				<TableHead class="w-[50px]"></TableHead>
 			</TableRow>
@@ -117,7 +118,7 @@
 		<TableBody>
 			{#if expenses.length === 0}
 				<TableRow>
-					<TableCell colspan={7} class="text-center text-muted-foreground py-8">
+					<TableCell colspan={8} class="text-center text-muted-foreground py-8">
 						No expenses found
 					</TableCell>
 				</TableRow>
@@ -148,6 +149,13 @@
 								<Badge variant="secondary">{expense.category}</Badge>
 							{:else}
 								<span class="text-muted-foreground text-sm">-</span>
+							{/if}
+						</TableCell>
+						<TableCell>
+							{#if expense.isPaid}
+								<Badge variant="default" class="bg-green-600">Paid</Badge>
+							{:else}
+								<Badge variant="secondary">Unpaid</Badge>
 							{/if}
 						</TableCell>
 						<TableCell>

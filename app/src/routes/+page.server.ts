@@ -14,6 +14,10 @@ export const load: PageServerLoad = async (event) => {
 
 	// If user has one tenant, redirect to it
 	if (tenants.length === 1) {
+		const redirectUrl = event.url.searchParams.get('redirect');
+		if (redirectUrl) {
+			throw redirect(302, decodeURIComponent(redirectUrl));
+		}
 		throw redirect(302, `/${tenants[0].slug}`);
 	}
 

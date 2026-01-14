@@ -1,4 +1,11 @@
-import type { Invoice, InvoiceLineItem, Client, Tenant } from '$lib/server/db/schema';
+import type {
+	Invoice,
+	InvoiceLineItem,
+	Client,
+	Tenant,
+	Expense,
+	Supplier
+} from '$lib/server/db/schema';
 import type { ParsedUblInvoice } from './xml-parser';
 import type { AnafCompanyData } from './client';
 
@@ -10,7 +17,9 @@ export function mapUblInvoiceToCrm(
 	tenantId: string,
 	userId: string,
 	clientId: string
-): Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'> & { lineItems: Omit<InvoiceLineItem, 'id' | 'createdAt'>[] } {
+): Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'> & {
+	lineItems: Omit<InvoiceLineItem, 'id' | 'createdAt'>[];
+} {
 	// Parse dates
 	const issueDate = new Date(ublData.issueDate);
 	const dueDate = new Date(ublData.dueDate);
@@ -189,6 +198,88 @@ export function mapAnafCompanyToClient(
 		companyType: undefined,
 		notes: undefined,
 		isActive: anafData.status
+	};
+}
+
+/**
+ * Map parsed UBL invoice to CRM expense format
+ * Used when syncing invoices from SPV (these are expenses, not invoices we generated)
+ */
+export function mapUblInvoiceToExpense(
+	ublData: ParsedUblInvoice,
+	tenantId: string,
+	userId: string,
+	supplierId: string
+): Omit<Expense, 'id' | 'createdAt' | 'updatedAt'> {
+	// Parse date
+	const expenseDate = new Date(ublData.issueDate);
+
+	// Convert amounts to cents
+	const amount = Math.round(ublData.total * 100); // Total amount including tax
+	const vatAmount = Math.round(ublData.taxAmount * 100);
+
+	// Determine VAT rate from line items or calculate from amounts
+	let vatRate: number | null = null;
+	if (ublData.lineItems[0]?.taxRate) {
+		vatRate = Math.round(ublData.lineItems[0].taxRate * 100); // Convert percentage to cents (19% = 1900)
+	} else if (ublData.subTotal > 0 && ublData.taxAmount > 0) {
+		// Calculate VAT rate from amounts
+		const calculatedRate = (ublData.taxAmount / ublData.subTotal) * 100;
+		vatRate = Math.round(calculatedRate * 100); // Convert to cents
+	}
+
+	// Create description from invoice number and line items
+	const lineItemsDesc = ublData.lineItems
+		.map((item) => `${item.description} (${item.quantity}x)`)
+		.join(', ');
+	const description = `Factură ${ublData.invoiceNumber}${lineItemsDesc ? ` - ${lineItemsDesc}` : ''}`;
+
+	return {
+		tenantId,
+		supplierId,
+		clientId: null,
+		projectId: null,
+		bankTransactionId: null,
+		userId: null,
+		category: null,
+		description,
+		amount,
+		currency: ublData.currency || 'RON',
+		date: expenseDate,
+		vatRate,
+		vatAmount,
+		receiptPath: null,
+		invoicePath: null, // Will be set when PDF is uploaded
+		createdByUserId: userId
+	};
+}
+
+/**
+ * Map ANAF company data to supplier format
+ */
+export function mapAnafCompanyToSupplier(
+	anafData: AnafCompanyData,
+	tenantId: string
+): Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'> {
+	return {
+		tenantId,
+		name: anafData.name,
+		email: null,
+		phone: anafData.phone || null,
+		address: anafData.address || null,
+		city: anafData.city || null,
+		county: anafData.county || null,
+		postalCode: anafData.postal_code || null,
+		country: anafData.country || 'România',
+		cui: anafData.vat_id.replace(/^RO/i, ''), // Store without RO prefix
+		vatNumber: anafData.tax_id || anafData.vat_id, // Use tax_id if available, otherwise vat_id
+		registrationNumber: anafData.reg_no || null,
+		tradeRegister: anafData.reg_no || null,
+		legalRepresentative: null,
+		iban: null,
+		bankName: null,
+		companyType: null,
+		notes: null
 	};
 }
 

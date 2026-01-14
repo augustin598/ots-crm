@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		getAnafSpvStatus,
+		saveAnafSpvCredentials,
 		getAnafSpvAuthUrl,
 		connectAnafSpvWithOAuth,
 		disconnectAnafSpv,
@@ -18,9 +19,11 @@
 
 	const tenantSlug = $derived(page.params.tenant);
 
-	const statusQuery = getAnafSpvStatus();
+	const statusQuery = $derived(getAnafSpvStatus());
 	const status = $derived(statusQuery.current);
 	const loading = $derived(statusQuery.loading);
+
+	$inspect('status', status);
 
 	let connecting = $state(false);
 	let disconnecting = $state(false);
@@ -31,6 +34,7 @@
 	let clientId = $state('');
 	let clientSecret = $state('');
 	let showingCredentials = $state(false);
+	const hasCredentials = $derived(status?.hasCredentials ?? false);
 
 	// Sync states
 	let syncing = $state(false);
@@ -44,7 +48,6 @@
 		const code = urlParams.get('code');
 		const state = urlParams.get('state');
 		const errorParam = urlParams.get('error');
-
 		if (errorParam) {
 			error = decodeURIComponent(errorParam);
 			// Clear error from URL
@@ -59,28 +62,17 @@
 	});
 
 	async function handleOAuthCallback(code: string, state: string) {
-		if (!clientId || !clientSecret) {
-			error = 'Client ID and Secret are required. Please enter them first.';
-			showingCredentials = true;
-			// Clear code from URL
-			window.history.replaceState({}, '', window.location.pathname);
-			return;
-		}
-
 		connecting = true;
 		error = null;
 		success = false;
 
 		try {
-			await connectAnafSpvWithOAuth({
+			// Connect using stored credentials (no need to pass them)
+			const result = await connectAnafSpvWithOAuth({
 				code,
-				state,
-				clientId,
-				clientSecret
+				state
 			}).updates(statusQuery);
-			clientId = '';
-			clientSecret = '';
-			showingCredentials = false;
+			console.log('result', result);
 			success = true;
 			// Clear code from URL
 			window.history.replaceState({}, '', window.location.pathname);
@@ -88,6 +80,7 @@
 				success = false;
 			}, 3000);
 		} catch (e) {
+			console.error('error', e);
 			error = e instanceof Error ? e.message : 'Failed to connect to ANAF SPV';
 		} finally {
 			connecting = false;
@@ -95,10 +88,13 @@
 	}
 
 	async function handleConnect() {
-		if (!clientId || !clientSecret) {
-			error = 'Client ID and Secret are required';
-			showingCredentials = true;
-			return;
+		// If credentials are not already saved, we need them in the form
+		if (!hasCredentials) {
+			if (!clientId || !clientSecret) {
+				error = 'Client ID and Secret are required';
+				showingCredentials = true;
+				return;
+			}
 		}
 
 		connecting = true;
@@ -106,15 +102,28 @@
 		success = false;
 
 		try {
-			const authUrlQuery = await getAnafSpvAuthUrl({ clientId });
-			const result = authUrlQuery;
+			// Only save credentials if they're not already saved
+			if (!hasCredentials) {
+				await saveAnafSpvCredentials({
+					clientId,
+					clientSecret
+				});
+				// Clear credentials from form (they're now stored)
+				clientId = '';
+				clientSecret = '';
+				showingCredentials = false;
+			}
 
+			// Get authorization URL (uses stored credentials)
+			const authUrlQuery = await getAnafSpvAuthUrl();
+			const result = authUrlQuery;
+			console.log('result', result);
 			if (result?.authUrl) {
 				// Redirect to ANAF authorization page
-				window.location.href = result.authUrl;
+				window.open(result.authUrl, '_blank');
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to get authorization URL';
+			error = e instanceof Error ? e.message : 'Failed to connect to ANAF SPV';
 			connecting = false;
 		}
 	}
@@ -322,7 +331,7 @@
 		</CardHeader>
 		<CardContent>
 			<div class="space-y-6">
-				{#if !showingCredentials}
+				{#if !hasCredentials && !showingCredentials}
 					<div class="space-y-4">
 						<p class="text-sm text-muted-foreground">
 							To connect ANAF SPV, you need to register an OAuth application with ANAF and obtain
@@ -331,6 +340,26 @@
 						</p>
 						<Button type="button" variant="outline" onclick={() => (showingCredentials = true)}>
 							Enter Client Credentials
+						</Button>
+					</div>
+				{:else if hasCredentials && !showingCredentials}
+					<div class="space-y-4">
+						<p class="text-sm text-muted-foreground">
+							Client credentials are already configured. Click the button below to connect with ANAF.
+						</p>
+						<Button type="button" variant="default" onclick={handleConnect} disabled={connecting}>
+							{connecting ? 'Connecting...' : 'Connect with ANAF'}
+							{#if !connecting}
+								<ExternalLink class="h-4 w-4 ml-2" />
+							{/if}
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							onclick={() => (showingCredentials = true)}
+							class="ml-2"
+						>
+							Update Credentials
 						</Button>
 					</div>
 				{:else}

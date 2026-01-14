@@ -42,6 +42,8 @@
 		onSortChange: (sortBy: string, sortDir: 'asc' | 'desc') => void;
 		onTransactionClick: (transaction: TransactionWithExpenseUser) => void;
 		onViewExpense: (transaction: TransactionWithExpenseUser) => void;
+		onCreateExpense: (transaction: TransactionWithExpenseUser) => void;
+		onLinkToExpense: (transaction: TransactionWithExpenseUser) => void;
 		onMatchInvoice: (transaction: TransactionWithExpenseUser) => void;
 		onUnmatchInvoice: (transaction: TransactionWithExpenseUser) => void;
 	};
@@ -58,6 +60,8 @@
 		onSortChange,
 		onTransactionClick,
 		onViewExpense,
+		onCreateExpense,
+		onLinkToExpense,
 		onMatchInvoice,
 		onUnmatchInvoice
 	}: Props = $props();
@@ -224,6 +228,13 @@
 									{#if transaction.expenseId}
 										<DropdownMenuItem onclick={() => onViewExpense(transaction)}>
 											View Expense
+										</DropdownMenuItem>
+									{:else if transaction.isExpense}
+										<DropdownMenuItem onclick={() => onCreateExpense(transaction)}>
+											Create Expense
+										</DropdownMenuItem>
+										<DropdownMenuItem onclick={() => onLinkToExpense(transaction)}>
+											Link to Existing Expense
 										</DropdownMenuItem>
 									{/if}
 									{#if transaction.matchedInvoiceId}

@@ -8,7 +8,11 @@ import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	if (event.locals.user) {
-		return redirect(302, '/admin');
+		const redirectUrl = event.url.searchParams.get('redirect');
+		if (redirectUrl) {
+			return redirect(302, decodeURIComponent(redirectUrl));
+		}
+		return redirect(302, '/');
 	}
 	return {};
 };
@@ -49,7 +53,12 @@ export const actions: Actions = {
 		const session = await auth.createSession(sessionToken, existingUser.id);
 		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
 
-		return redirect(302, '/admin');
+		const redirectUrl = event.url.searchParams.get('redirect');
+		if (redirectUrl) {
+			return redirect(302, decodeURIComponent(redirectUrl));
+		}
+
+		return redirect(302, '/');
 	}
 };
 

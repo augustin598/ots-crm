@@ -1,7 +1,8 @@
 const DEFAULT_BASE_URL = 'https://api.anaf.ro/prod/FCTEL/rest';
 const DEFAULT_TOKEN_URL = 'https://logincert.anaf.ro/anaf-oauth2/v1/token';
 const DEFAULT_AUTHORIZE_URL = 'https://logincert.anaf.ro/anaf-oauth2/v1/authorize';
-const ANAF_COMPANY_API_URL = 'https://webservicesp.anaf.ro/PlatitorTvaRest/api/v8/ws/tva';
+const ANAF_COMPANY_API_URL =
+	process.env.ANAF_API_URL || 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva';
 
 export interface AnafSpvClientConfig {
 	accessToken: string;
@@ -86,12 +87,14 @@ export class AnafSpvClient {
 		clientId: string,
 		scope = ''
 	): string {
-		const params = new URLSearchParams({
-			client_id: clientId,
-			redirect_uri: redirectUri,
-			response_type: 'code',
-			state: state
-		});
+		// Ensure redirect_uri is properly encoded
+		const params = new URLSearchParams();
+		params.append('client_id', clientId);
+		params.append('redirect_uri', redirectUri);
+		params.append('response_type', 'code');
+		params.append('state', state);
+		// Include token_content_type in authorization URL to match PHP implementation
+		params.append('token_content_type', 'jwt');
 
 		if (scope) {
 			params.append('scope', scope);
@@ -113,28 +116,82 @@ export class AnafSpvClient {
 		clientId: string,
 		clientSecret: string
 	): Promise<AnafTokenResponse> {
+		// Build form parameters - ensure redirect_uri matches exactly
+		// Note: redirect_uri must match EXACTLY what was used in authorization request
+		// and what's registered with ANAF (character-for-character match)
+		// Match Python implementation parameter order: redirect_uri, grant_type, code, token_content_type
+		const params = new URLSearchParams();
+		params.append('redirect_uri', redirectUri); // First, like Python
+		params.append('grant_type', 'authorization_code');
+		params.append('code', code);
+		params.append('token_content_type', 'jwt'); // Required by ANAF
+
+		const bodyString = params.toString();
+		const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+		// Log request details for debugging (without sensitive data)
+		console.log('ANAF Token Exchange Request:', {
+			url: DEFAULT_TOKEN_URL,
+			method: 'POST',
+			redirect_uri: redirectUri,
+			code_length: code.length,
+			code_preview: code.substring(0, 20) + '...',
+			body_preview: bodyString.substring(0, 100) + '...'
+		});
+
 		const response = await fetch(DEFAULT_TOKEN_URL, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
-				Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
+				Authorization: `Basic ${basicAuth}`
 			},
-			body: new URLSearchParams({
-				grant_type: 'authorization_code',
-				code: code,
-				redirect_uri: redirectUri,
-				token_content_type: 'jwt' // Required by ANAF
-			})
+			body: bodyString
 		});
 
 		if (!response.ok) {
-			const errorText = await response.text();
-			throw new Error(`ANAF OAuth token exchange error: ${response.status} ${errorText}`);
+			let errorMessage = `ANAF OAuth token exchange error: ${response.status}`;
+			let errorDetails: unknown = null;
+
+			try {
+				const errorData = await response.json();
+				errorDetails = errorData;
+				console.error('ANAF Error Response (JSON):', errorData);
+				errorMessage = errorData.error_description || errorData.error || errorMessage;
+				if (errorData.error) {
+					errorMessage = `${errorMessage} (${errorData.error})`;
+				}
+			} catch {
+				try {
+					const errorText = await response.text();
+					errorDetails = errorText;
+					console.error('ANAF Error Response (text):', errorText);
+					if (errorText) {
+						errorMessage = `${errorMessage}: ${errorText}`;
+					}
+				} catch (e) {
+					console.error('ANAF Error Response (could not read):', e);
+				}
+			}
+
+			// Provide more helpful error message for common issues
+			if (response.status === 500 && errorMessage.includes('server_error')) {
+				const helpfulMessage = `ANAF returned a 500 server error. This usually means:
+- The authorization code may have expired or already been used (codes expire quickly)
+- The client credentials (Client ID/Secret) may be incorrect
+- The redirect_uri may not match what's registered with ANAF (though you confirmed it matches)
+- There may be an issue on ANAF's server side
+
+Original error: ${errorMessage}`;
+				throw new Error(helpfulMessage);
+			}
+
+			throw new Error(errorMessage);
 		}
 
 		const data = await response.json();
 
 		if (!data.access_token) {
+			console.error('ANAF Token Response (missing access_token):', data);
 			throw new Error('Invalid token response: missing access_token');
 		}
 
@@ -199,17 +256,19 @@ export class AnafSpvClient {
 			throw new Error('Client ID and secret are required for token refresh');
 		}
 
+		const params = new URLSearchParams({
+			grant_type: 'refresh_token',
+			refresh_token: this.refreshToken,
+			token_content_type: 'jwt' // Required by ANAF
+		});
+
 		const response = await fetch(this.tokenUrl, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
 			},
-			body: new URLSearchParams({
-				grant_type: 'refresh_token',
-				refresh_token: this.refreshToken,
-				token_content_type: 'jwt' // Required by ANAF
-			})
+			body: params.toString()
 		});
 
 		if (!response.ok) {
@@ -436,24 +495,82 @@ export class AnafSpvClient {
 	}
 
 	/**
+	 * Convert UBL XML to PDF using ANAF API
+	 * @param ubl - UBL XML content
+	 * @param metadata - Metadata for logging (optional)
+	 * @param timeoutOverride - Timeout override in seconds (optional)
+	 * @returns PDF content as Buffer or null if conversion fails
+	 */
+	async ublToPdf(ubl: string, metadata = '', timeoutOverride?: number): Promise<Buffer | null> {
+		// Remove xsi:schemaLocation attribute if present (ANAF API requirement)
+		let cleanUbl = ubl;
+		if (ubl.includes('xsi:schemaLocation')) {
+			cleanUbl = ubl.replace(/(xsi:schemaLocation\s*=\s*["'][^"']*["'])/gi, '');
+			cleanUbl = cleanUbl.replace(/\s{2,}/g, ' ');
+		}
+
+		const token = await this.getAccessToken();
+		const url = `${this.baseUrl}/transformare/FACT1/DA`;
+
+		try {
+			const response = await fetch(url, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'Content-Type': 'text/plain'
+				},
+				body: cleanUbl,
+				signal: timeoutOverride ? AbortSignal.timeout(timeoutOverride * 1000) : undefined
+			});
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				console.error(`[ANAF-SPV] UBL to PDF conversion failed: ${response.status} ${errorText}`);
+				return null;
+			}
+
+			const pdfBuffer = Buffer.from(await response.arrayBuffer());
+
+			// Check if response is actually a PDF (starts with %PDF)
+			if (pdfBuffer.toString('ascii', 0, 4) === '%PDF') {
+				return pdfBuffer;
+			}
+
+			console.error(`[ANAF-SPV] Bad content format, expected PDF (UBL2PDF) - ${metadata}`);
+			console.error(`[ANAF-SPV] Response preview: ${pdfBuffer.toString('utf-8', 0, 200)}`);
+			return null;
+		} catch (error) {
+			console.error(`[ANAF-SPV] UBL to PDF conversion error:`, error);
+			return null;
+		}
+	}
+
+	/**
 	 * Get company data from ANAF
+	 * Uses the same API endpoint and logic as getCompanyData from anaf.remote.ts
 	 * @param cui - Company CUI (without RO prefix)
 	 */
 	async getCompanyFromAnaf(cui: string): Promise<AnafCompanyData | null> {
-		// Remove RO prefix if present
-		const cleanCui = cui.replace(/^RO/i, '');
+		// Remove RO prefix if present and ensure it's numeric
+		const cleanCui = cui.replace(/^RO/i, '').trim();
 
-		const date = new Date();
-		const currentDate = date.toISOString().split('T')[0];
+		if (!/^\d+$/.test(cleanCui)) {
+			return null;
+		}
 
-		const payload = [{ cui: cleanCui, data: currentDate }];
+		const requestBody = [
+			{
+				cui: parseInt(cleanCui),
+				data: new Date().toISOString().split('T')[0] // YYYY-MM-DD format
+			}
+		];
 
 		const response = await fetch(ANAF_COMPANY_API_URL, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify(payload)
+			body: JSON.stringify(requestBody)
 		});
 
 		if (!response.ok) {
@@ -466,17 +583,18 @@ export class AnafSpvClient {
 			return null;
 		}
 
-		const foundData = data.found[0];
-		const dateGenerale = foundData.date_generale || {};
-		const adresaSediu = foundData.adresa_sediu_social || {};
-		const inregistrareTva = foundData.inregistrare_scop_Tva || {};
-		const stareInactiv = foundData.stare_inactiv || {};
+		const company = data.found[0];
+		const dateGenerale = company.date_generale || {};
+		const adresaSediu = company.adresa_sediu_social || {};
+		const inregistrareTva = company.inregistrare_scop_Tva || {};
+		const stareInactiv = company.stare_inactiv || {};
 
+		// Map to AnafCompanyData format
 		return {
 			name: dateGenerale.denumire || '',
 			address: dateGenerale.adresa || '',
 			country: 'România',
-			vat_id: dateGenerale.cui || '',
+			vat_id: String(dateGenerale.cui || ''),
 			reg_no: dateGenerale.nrRegCom || '',
 			phone: dateGenerale.telefon || undefined,
 			status: !stareInactiv.statusInactivi,

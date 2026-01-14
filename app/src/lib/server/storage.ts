@@ -86,6 +86,38 @@ export async function getDownloadUrl(filePath: string, expirySeconds = 3600): Pr
 }
 
 /**
+ * Upload a buffer to MinIO
+ */
+export async function uploadBuffer(
+	tenantId: string,
+	buffer: Buffer,
+	fileName: string,
+	mimeType: string,
+	metadata?: Record<string, string>
+): Promise<{ path: string; size: number; mimeType: string }> {
+	try {
+		await ensureBucket();
+
+		const client = getMinioClient();
+		const filePath = `${tenantId}/${Date.now()}-${fileName}`;
+
+		await client.putObject(BUCKET_NAME, filePath, buffer, buffer.length, {
+			'Content-Type': mimeType,
+			...metadata
+		});
+
+		return {
+			path: filePath,
+			size: buffer.length,
+			mimeType
+		};
+	} catch (error) {
+		console.error('Error uploading buffer:', error);
+		throw error;
+	}
+}
+
+/**
  * Delete a file from MinIO
  */
 export async function deleteFile(filePath: string): Promise<void> {

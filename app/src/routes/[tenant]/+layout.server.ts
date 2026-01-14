@@ -7,7 +7,8 @@ import { eq } from 'drizzle-orm';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (!event.locals.user) {
-		throw redirect(302, '/login');
+		const redirectUrl = event.url.pathname + event.url.search;
+		throw redirect(302, '/login?redirect=' + encodeURIComponent(redirectUrl));
 	}
 
 	const tenantSlug = event.params.tenant;

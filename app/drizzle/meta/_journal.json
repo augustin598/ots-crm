@@ -197,6 +197,20 @@
       "when": 1768321096912,
       "tag": "0027_oval_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1768337734332,
+      "tag": "0028_needy_microchip",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1768339934913,
+      "tag": "0029_equal_reavers",
+      "breakpoints": true
     }
   ]
 }

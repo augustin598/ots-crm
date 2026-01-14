@@ -8,13 +8,14 @@ export const load: PageServerLoad = async (event) => {
 	const errorDescription = event.url.searchParams.get('error_description');
 
 	if (!event.locals.user || !event.locals.tenant) {
-		throw redirect(302, '/login');
+		redirect(302, '/login');
+		return;
 	}
 
 	// Handle OAuth errors
 	if (error) {
 		const errorMsg = errorDescription || error;
-		throw redirect(
+		redirect(
 			302,
 			`/${event.locals.tenant.slug}/settings/anaf-spv?error=${encodeURIComponent(errorMsg)}`
 		);
@@ -22,14 +23,14 @@ export const load: PageServerLoad = async (event) => {
 
 	// Check for required parameters
 	if (!code || !state) {
-		throw redirect(
+		redirect(
 			302,
 			`/${event.locals.tenant.slug}/settings/anaf-spv?error=${encodeURIComponent('Missing required parameters from ANAF authorization')}`
 		);
 	}
 
 	// Redirect to settings page with code and state for processing
-	throw redirect(
+	redirect(
 		302,
 		`/${event.locals.tenant.slug}/settings/anaf-spv?code=${code}&state=${encodeURIComponent(state)}`
 	);

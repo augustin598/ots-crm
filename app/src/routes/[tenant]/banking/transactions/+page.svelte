@@ -3,7 +3,10 @@
 		getTransactions,
 		getBankAccounts,
 		matchTransactionToInvoice,
-		unmatchTransactionFromInvoice
+		unmatchTransactionFromInvoice,
+		createExpense,
+		updateExpense,
+		getExpenses
 	} from '$lib/remotes/banking.remote';
 	import { getUserBankAccounts } from '$lib/remotes/user-bank-accounts.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
@@ -137,6 +140,71 @@
 	function handleViewExpense(transaction: BankTransaction) {
 		if (transaction.expenseId) {
 			goto(`/${tenantSlug}/banking/expenses`);
+		}
+	}
+
+	let creatingExpenseTransaction = $state<BankTransaction | null>(null);
+	let isCreateExpenseDialogOpen = $state(false);
+	let creatingExpense = $state(false);
+
+	function handleCreateExpense(transaction: BankTransaction) {
+		creatingExpenseTransaction = transaction;
+		isCreateExpenseDialogOpen = true;
+	}
+
+	async function handleConfirmCreateExpense() {
+		if (!creatingExpenseTransaction) return;
+
+		creatingExpense = true;
+		try {
+			await createExpense({
+				bankTransactionId: creatingExpenseTransaction.id,
+				description: creatingExpenseTransaction.description || creatingExpenseTransaction.reference || 'Expense from transaction',
+				amount: Math.abs(creatingExpenseTransaction.amount) / 100, // Convert from cents
+				currency: creatingExpenseTransaction.currency,
+				date: creatingExpenseTransaction.date instanceof Date 
+					? creatingExpenseTransaction.date.toISOString().split('T')[0]
+					: new Date(creatingExpenseTransaction.date).toISOString().split('T')[0]
+			}).updates(transactionsQuery);
+			isCreateExpenseDialogOpen = false;
+			creatingExpenseTransaction = null;
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to create expense');
+		} finally {
+			creatingExpense = false;
+		}
+	}
+
+	// Manual linking to expense
+	let linkingTransaction = $state<BankTransaction | null>(null);
+	let selectedExpenseId = $state<string>('');
+	let expensesQuery = $derived(linkingTransaction ? getExpenses({}) : null);
+	const availableExpenses = $derived(expensesQuery?.current || []);
+	let isLinkExpenseDialogOpen = $state(false);
+	let linkingExpense = $state(false);
+
+	function handleLinkToExpense(transaction: BankTransaction) {
+		linkingTransaction = transaction;
+		isLinkExpenseDialogOpen = true;
+		selectedExpenseId = '';
+	}
+
+	async function handleConfirmLinkExpense() {
+		if (!linkingTransaction || !selectedExpenseId) return;
+
+		linkingExpense = true;
+		try {
+			await updateExpense({
+				expenseId: selectedExpenseId,
+				bankTransactionId: linkingTransaction.id
+			}).updates(transactionsQuery);
+			isLinkExpenseDialogOpen = false;
+			linkingTransaction = null;
+			selectedExpenseId = '';
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to link transaction to expense');
+		} finally {
+			linkingExpense = false;
 		}
 	}
 
@@ -290,6 +358,8 @@
 				onSortChange={handleSort}
 				onTransactionClick={handleTransactionClick}
 				onViewExpense={handleViewExpense}
+				onCreateExpense={handleCreateExpense}
+				onLinkToExpense={handleLinkToExpense}
 				onMatchInvoice={handleMatchInvoice}
 				onUnmatchInvoice={handleUnmatchInvoice}
 			/>
@@ -316,7 +386,7 @@
 						<SelectItem value="">Select an invoice...</SelectItem>
 						{#each invoices as invoice}
 							<SelectItem value={invoice.id}>
-								{formatInvoiceNumberDisplay(invoice, invoiceSettings)} - {formatAmount(invoice.totalAmount || 0, invoice.currency)}
+								{formatInvoiceNumberDisplay(invoice, invoiceSettings)} - {formatAmount(invoice.totalAmount || 0, invoice.currency as Currency)}
 							</SelectItem>
 						{/each}
 					</SelectContent>
@@ -326,6 +396,109 @@
 				<Button variant="outline" onclick={() => (isMatchingDialogOpen = false)}>Cancel</Button>
 				<Button onclick={handleConfirmMatch} disabled={!selectedInvoiceId || matching}>
 					{matching ? 'Matching...' : 'Match'}
+				</Button>
+			</div>
+		</div>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={isCreateExpenseDialogOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Create Expense from Transaction</DialogTitle>
+			<DialogDescription>
+				Create an expense linked to this bank transaction
+			</DialogDescription>
+		</DialogHeader>
+		<div class="space-y-4">
+			{#if creatingExpenseTransaction}
+				<div class="space-y-2">
+					<Label>Description</Label>
+					<p class="text-sm text-muted-foreground">
+						{creatingExpenseTransaction.description || creatingExpenseTransaction.reference || 'Expense from transaction'}
+					</p>
+				</div>
+				<div class="space-y-2">
+					<Label>Amount</Label>
+					<p class="text-sm font-semibold">
+						{formatAmount(Math.abs(creatingExpenseTransaction.amount), creatingExpenseTransaction.currency as Currency)}
+					</p>
+				</div>
+				<div class="space-y-2">
+					<Label>Date</Label>
+					<p class="text-sm text-muted-foreground">
+						{creatingExpenseTransaction.date instanceof Date 
+							? creatingExpenseTransaction.date.toLocaleDateString('ro-RO')
+							: new Date(creatingExpenseTransaction.date).toLocaleDateString('ro-RO')}
+					</p>
+				</div>
+			{/if}
+			<div class="flex justify-end gap-2">
+				<Button variant="outline" onclick={() => (isCreateExpenseDialogOpen = false)} disabled={creatingExpense}>
+					Cancel
+				</Button>
+				<Button onclick={handleConfirmCreateExpense} disabled={creatingExpense}>
+					{creatingExpense ? 'Creating...' : 'Create Expense'}
+				</Button>
+			</div>
+		</div>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={isLinkExpenseDialogOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Link Transaction to Expense</DialogTitle>
+			<DialogDescription>
+				Select an existing expense to link this transaction to
+			</DialogDescription>
+		</DialogHeader>
+		<div class="space-y-4">
+			{#if linkingTransaction}
+				<div class="space-y-2">
+					<Label>Transaction Details</Label>
+					<div class="text-sm space-y-1">
+						<p><strong>Description:</strong> {linkingTransaction.description || linkingTransaction.reference || 'No description'}</p>
+						<p><strong>Amount:</strong> {formatAmount(Math.abs(linkingTransaction.amount), linkingTransaction.currency as Currency)}</p>
+						<p><strong>Date:</strong> {linkingTransaction.date instanceof Date 
+							? linkingTransaction.date.toLocaleDateString('ro-RO')
+							: new Date(linkingTransaction.date).toLocaleDateString('ro-RO')}</p>
+					</div>
+				</div>
+			{/if}
+			<div class="space-y-2">
+				<Label for="expense">Expense</Label>
+				<Select
+					type="single"
+					value={selectedExpenseId}
+					onValueChange={(value: any) => (selectedExpenseId = value)}
+				>
+					<SelectTrigger id="expense" />
+					<SelectContent>
+						<SelectItem value="">Select an expense...</SelectItem>
+						{#each availableExpenses.filter(e => !e.bankTransactionId) as expense}
+							<SelectItem value={expense.id}>
+								{expense.description} - {formatAmount(expense.amount, expense.currency as Currency)} 
+								({new Date(expense.date).toLocaleDateString('ro-RO')})
+								{#if expense.isPaid}
+									<span class="text-green-600"> (Paid)</span>
+								{:else}
+									<span class="text-gray-500"> (Unpaid)</span>
+								{/if}
+							</SelectItem>
+						{/each}
+					</SelectContent>
+				</Select>
+				<p class="text-xs text-muted-foreground">
+					Only showing unpaid expenses. The expense will be marked as paid when linked.
+				</p>
+			</div>
+			<div class="flex justify-end gap-2">
+				<Button variant="outline" onclick={() => (isLinkExpenseDialogOpen = false)} disabled={linkingExpense}>
+					Cancel
+				</Button>
+				<Button onclick={handleConfirmLinkExpense} disabled={!selectedExpenseId || linkingExpense}>
+					{linkingExpense ? 'Linking...' : 'Link Expense'}
 				</Button>
 			</div>
 		</div>

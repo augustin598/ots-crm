@@ -6,6 +6,7 @@
 interface StateToken {
 	state: string;
 	tenantId: string;
+	redirectUri: string;
 	expiresAt: Date;
 }
 
@@ -29,13 +30,14 @@ setInterval(() => {
 /**
  * Generate and store a state token
  */
-export function generateStateToken(tenantId: string): string {
+export function generateStateToken(tenantId: string, redirectUri: string): string {
 	const state = crypto.randomUUID();
 	const expiresAt = new Date(Date.now() + STATE_EXPIRY);
 
 	stateTokens.set(state, {
 		state,
 		tenantId,
+		redirectUri,
 		expiresAt
 	});
 
@@ -44,28 +46,32 @@ export function generateStateToken(tenantId: string): string {
 
 /**
  * Validate and consume a state token
+ * Returns the redirect URI if valid, null otherwise
  */
-export function validateStateToken(state: string, tenantId: string): boolean {
+export function validateStateToken(state: string, tenantId: string): string | null {
 	const token = stateTokens.get(state);
 
 	if (!token) {
-		return false;
+		return null;
 	}
 
 	// Check expiration
 	if (token.expiresAt < new Date()) {
 		stateTokens.delete(state);
-		return false;
+		return null;
 	}
 
 	// Check tenant match
 	if (token.tenantId !== tenantId) {
-		return false;
+		return null;
 	}
+
+	// Get redirect URI before consuming
+	const redirectUri = token.redirectUri;
 
 	// Consume token (one-time use)
 	stateTokens.delete(state);
-	return true;
+	return redirectUri;
 }
 
 /**

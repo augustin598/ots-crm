@@ -3,6 +3,8 @@
  * Based on UBL 2.1 and Romanian CIUS-RO specification
  */
 
+import { DOMParser } from '@xmldom/xmldom';
+
 const UBL_NS = {
 	ubl: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
 	cac: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
@@ -58,9 +60,9 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 	const doc = parser.parseFromString(xml, 'application/xml');
 
 	// Check for parsing errors
-	const parserError = doc.querySelector('parsererror');
+	const parserError = doc.getElementsByTagName('parsererror')[0];
 	if (parserError) {
-		throw new Error(`XML parsing error: ${parserError.textContent}`);
+		throw new Error(`XML parsing error: ${parserError.textContent || 'Unknown parsing error'}`);
 	}
 
 	// Helper to get text content with namespace
@@ -109,10 +111,7 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 	)[0];
 	const supplierTaxId = getText(supplierTaxScheme, 'CompanyID', UBL_NS.cbc);
 
-	const supplierAddress = supplierPartyInfo?.getElementsByTagNameNS(
-		UBL_NS.cac,
-		'PostalAddress'
-	)[0];
+	const supplierAddress = supplierPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const supplierStreet = getText(supplierAddress, 'StreetName', UBL_NS.cbc);
 	const supplierCity = getText(supplierAddress, 'CityName', UBL_NS.cbc);
 	const supplierCounty = getText(supplierAddress, 'CountrySubentity', UBL_NS.cbc);
@@ -139,10 +138,7 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 	)[0];
 	const customerVatId = getText(customerLegalEntity, 'CompanyID', UBL_NS.cbc);
 
-	const customerAddress = customerPartyInfo?.getElementsByTagNameNS(
-		UBL_NS.cac,
-		'PostalAddress'
-	)[0];
+	const customerAddress = customerPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const customerStreet = getText(customerAddress, 'StreetName', UBL_NS.cbc);
 	const customerCity = getText(customerAddress, 'CityName', UBL_NS.cbc);
 	const customerCounty = getText(customerAddress, 'CountrySubentity', UBL_NS.cbc);
@@ -293,9 +289,7 @@ export function generateUblInvoice(
 	if (supplier.taxId) {
 		xmlParts.push(`<cbc:TaxCurrencyCode>${invoice.currency}</cbc:TaxCurrencyCode>`);
 	} else {
-		xmlParts.push(
-			'<cbc:Note>Regim special de scutire pentru intreprinderile mici</cbc:Note>'
-		);
+		xmlParts.push('<cbc:Note>Regim special de scutire pentru intreprinderile mici</cbc:Note>');
 	}
 
 	// Supplier Party
@@ -390,7 +384,9 @@ export function generateUblInvoice(
 
 	// Tax Total
 	xmlParts.push('<cac:TaxTotal>');
-	xmlParts.push(`<cbc:TaxAmount currencyID="${invoice.currency}">${formatNumber(invoice.taxAmount)}</cbc:TaxAmount>`);
+	xmlParts.push(
+		`<cbc:TaxAmount currencyID="${invoice.currency}">${formatNumber(invoice.taxAmount)}</cbc:TaxAmount>`
+	);
 
 	// Tax subtotals for each line item
 	for (let i = 0; i < lineItems.length; i++) {
@@ -441,7 +437,9 @@ export function generateUblInvoice(
 		const item = lineItems[i];
 		xmlParts.push('<cac:InvoiceLine>');
 		xmlParts.push(`<cbc:ID>${i + 1}</cbc:ID>`);
-		xmlParts.push(`<cbc:InvoicedQuantity unitCode="XZZ">${formatNumber(item.quantity)}</cbc:InvoicedQuantity>`);
+		xmlParts.push(
+			`<cbc:InvoicedQuantity unitCode="XZZ">${formatNumber(item.quantity)}</cbc:InvoicedQuantity>`
+		);
 		xmlParts.push(
 			`<cbc:LineExtensionAmount currencyID="${invoice.currency}">${formatNumber(item.amount)}</cbc:LineExtensionAmount>`
 		);
@@ -461,7 +459,9 @@ export function generateUblInvoice(
 		xmlParts.push(
 			`<cbc:PriceAmount currencyID="${invoice.currency}">${formatNumber(item.unitPrice)}</cbc:PriceAmount>`
 		);
-		xmlParts.push(`<cbc:BaseQuantity unitCode="XZZ">${formatNumber(item.quantity)}</cbc:BaseQuantity>`);
+		xmlParts.push(
+			`<cbc:BaseQuantity unitCode="XZZ">${formatNumber(item.quantity)}</cbc:BaseQuantity>`
+		);
 		xmlParts.push('</cac:Price>');
 		xmlParts.push('</cac:InvoiceLine>');
 	}

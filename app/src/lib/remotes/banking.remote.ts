@@ -272,6 +272,169 @@ async function findMatchingRule(
 	return matchedRules[0].rule;
 }
 
+// Create or update an expense matching rule from a transaction
+async function createExpenseMatchRuleFromTransaction(
+	transaction: typeof table.bankTransaction.$inferSelect,
+	expenseId: string,
+	expenseAmount: number, // in cents
+	tenantId: string,
+	userId: string
+): Promise<void> {
+	const normalizedIban = normalizeIban(transaction.counterpartIban);
+	const descriptionPattern = extractDescriptionPattern(transaction.description);
+	const referencePattern = extractDescriptionPattern(transaction.reference);
+
+	// Check if a similar rule already exists for this expense
+	const existingRules = await db
+		.select()
+		.from(table.transactionMatchRule)
+		.where(
+			and(
+				eq(table.transactionMatchRule.tenantId, tenantId),
+				eq(table.transactionMatchRule.matchType, 'expense'),
+				eq(table.transactionMatchRule.expenseId, expenseId)
+			)
+		);
+
+	// Try to find an existing rule that matches
+	let existingRule = existingRules.find((rule) => {
+		// IBAN match
+		if (normalizedIban && rule.counterpartIban) {
+			if (normalizeIban(rule.counterpartIban) === normalizedIban) return true;
+		}
+		// Counterpart name match
+		if (transaction.counterpartName && rule.counterpartName) {
+			if (fuzzyMatch(transaction.counterpartName, rule.counterpartName)) return true;
+		}
+		// Description pattern match
+		if (descriptionPattern && rule.descriptionPattern) {
+			if (fuzzyMatch(descriptionPattern, rule.descriptionPattern)) return true;
+		}
+		return false;
+	});
+
+	if (existingRule) {
+		// Update existing rule - merge criteria and increment match count
+		const updateData: any = {
+			matchCount: sql`${table.transactionMatchRule.matchCount} + 1`,
+			lastMatchedAt: new Date(),
+			updatedAt: new Date()
+		};
+
+		// Merge additional criteria if missing
+		if (normalizedIban && !existingRule.counterpartIban) {
+			updateData.counterpartIban = normalizedIban;
+		}
+		if (transaction.counterpartName && !existingRule.counterpartName) {
+			updateData.counterpartName = transaction.counterpartName;
+		}
+		if (descriptionPattern && !existingRule.descriptionPattern) {
+			updateData.descriptionPattern = descriptionPattern;
+		}
+		if (referencePattern && !existingRule.referencePattern) {
+			updateData.referencePattern = referencePattern;
+		}
+
+		await db
+			.update(table.transactionMatchRule)
+			.set(updateData)
+			.where(eq(table.transactionMatchRule.id, existingRule.id));
+	} else {
+		// Create new rule
+		const ruleId = generateMatchRuleId();
+		await db.insert(table.transactionMatchRule).values({
+			id: ruleId,
+			tenantId,
+			matchType: 'expense',
+			expenseId,
+			amount: expenseAmount,
+			counterpartIban: normalizedIban,
+			counterpartName: transaction.counterpartName || null,
+			descriptionPattern,
+			referencePattern,
+			matchCount: 1,
+			lastMatchedAt: new Date(),
+			createdByUserId: userId,
+			createdAt: new Date(),
+			updatedAt: new Date()
+		});
+	}
+}
+
+// Find expense matching rule for a transaction
+async function findExpenseMatchingRule(
+	transaction: typeof table.bankTransaction.$inferSelect,
+	tenantId: string
+): Promise<typeof table.transactionMatchRule.$inferSelect | null> {
+	const normalizedIban = normalizeIban(transaction.counterpartIban);
+	const descriptionPattern = extractDescriptionPattern(transaction.description);
+	const referencePattern = extractDescriptionPattern(transaction.reference);
+
+	// Get all expense matching rules for this tenant
+	const rules = await db
+		.select()
+		.from(table.transactionMatchRule)
+		.where(
+			and(
+				eq(table.transactionMatchRule.tenantId, tenantId),
+				eq(table.transactionMatchRule.matchType, 'expense')
+			)
+		);
+
+	if (rules.length === 0) return null;
+
+	// Score each rule
+	const scoredRules = rules.map((rule) => {
+		let score = 0;
+		let matched = false;
+
+		// IBAN match (highest priority)
+		if (normalizedIban && rule.counterpartIban) {
+			if (normalizeIban(rule.counterpartIban) === normalizedIban) {
+				score += 100;
+				matched = true;
+			}
+		}
+
+		// Counterpart name match (high priority)
+		if (transaction.counterpartName && rule.counterpartName) {
+			if (fuzzyMatch(transaction.counterpartName, rule.counterpartName)) {
+				score += 50;
+				matched = true;
+			}
+		}
+
+		// Description pattern match (medium priority)
+		if (descriptionPattern && rule.descriptionPattern) {
+			if (fuzzyMatch(descriptionPattern, rule.descriptionPattern)) {
+				score += 25;
+				matched = true;
+			}
+		}
+
+		// Reference pattern match (low priority)
+		if (referencePattern && rule.referencePattern) {
+			if (fuzzyMatch(referencePattern, rule.referencePattern)) {
+				score += 10;
+				matched = true;
+			}
+		}
+
+		// Boost score by matchCount (rules that matched more are preferred)
+		score += Math.min(rule.matchCount, 20); // Cap at 20 to not overpower other factors
+
+		return { rule, score, matched };
+	});
+
+	// Filter to only matched rules and sort by score
+	const matchedRules = scoredRules.filter((r) => r.matched).sort((a, b) => b.score - a.score);
+
+	if (matchedRules.length === 0) return null;
+
+	// Return the highest scoring rule
+	return matchedRules[0].rule;
+}
+
 // Connection Management
 
 export const getBankAccounts = query(async () => {
@@ -804,53 +967,153 @@ export const syncTransactions = command(
 
 				if (!newTransaction) continue;
 
-				// Auto-create expense for negative transactions
+				// Handle negative transactions (expenses)
 				if (txn.amount < 0) {
-					const expenseId = generateExpenseId();
-					await db.insert(table.expense).values({
-						id: expenseId,
-						tenantId: event.locals.tenant.id,
-						bankTransactionId: transactionDbId,
-						description: txn.description || txn.reference || 'Expense from transaction',
-						amount: Math.abs(txn.amount), // Store as positive value
-						currency: txn.currency,
-						date: txn.date,
-						createdByUserId: event.locals.user.id
-					});
+					const transactionAmount = Math.abs(txn.amount); // Convert to positive (in cents)
 
-					// Link transaction to expense
-					await db
-						.update(table.bankTransaction)
-						.set({
-							expenseId: expenseId,
-							updatedAt: new Date()
-						})
-						.where(eq(table.bankTransaction.id, transactionDbId));
+					// Find existing unpaid expenses with exact amount and currency match
+					const matchingExpenses = await db
+						.select()
+						.from(table.expense)
+						.where(
+							and(
+								eq(table.expense.tenantId, event.locals.tenant.id),
+								eq(table.expense.amount, transactionAmount),
+								eq(table.expense.currency, txn.currency), // Also match currency
+								isNull(table.expense.bankTransactionId) // Only unpaid expenses
+							)
+						);
 
-					// Auto-link expense to supplier using matching rules
-					const matchingRule = await findMatchingRule(
-						newTransaction,
-						event.locals.tenant.id,
-						'supplier'
-					);
-					if (matchingRule && matchingRule.supplierId) {
+					if (matchingExpenses.length === 1) {
+						// Exactly one match - link transaction to the matched expense
+						const matchedExpense = matchingExpenses[0];
+
+						// Link transaction to expense
+						await db
+							.update(table.bankTransaction)
+							.set({
+								expenseId: matchedExpense.id,
+								updatedAt: new Date()
+							})
+							.where(eq(table.bankTransaction.id, transactionDbId));
+
+						// Update expense - link transaction and mark as paid
 						await db
 							.update(table.expense)
 							.set({
-								supplierId: matchingRule.supplierId,
+								bankTransactionId: transactionDbId,
+								isPaid: true,
 								updatedAt: new Date()
 							})
-							.where(eq(table.expense.id, expenseId));
+							.where(eq(table.expense.id, matchedExpense.id));
 
-						// Increment match count and update last matched timestamp
-						await db
-							.update(table.transactionMatchRule)
-							.set({
-								matchCount: sql`${table.transactionMatchRule.matchCount} + 1`,
-								lastMatchedAt: new Date(),
-								updatedAt: new Date()
-							})
-							.where(eq(table.transactionMatchRule.id, matchingRule.id));
+						// Create matching rule for future auto-linking
+						await createExpenseMatchRuleFromTransaction(
+							newTransaction,
+							matchedExpense.id,
+							matchedExpense.amount,
+							event.locals.tenant.id,
+							event.locals.user.id
+						);
+
+						// Auto-link expense to supplier using matching rules
+						const matchingRule = await findMatchingRule(
+							newTransaction,
+							event.locals.tenant.id,
+							'supplier'
+						);
+						if (matchingRule && matchingRule.supplierId) {
+							await db
+								.update(table.expense)
+								.set({
+									supplierId: matchingRule.supplierId,
+									updatedAt: new Date()
+								})
+								.where(eq(table.expense.id, matchedExpense.id));
+
+							// Increment match count and update last matched timestamp
+							await db
+								.update(table.transactionMatchRule)
+								.set({
+									matchCount: sql`${table.transactionMatchRule.matchCount} + 1`,
+									lastMatchedAt: new Date(),
+									updatedAt: new Date()
+								})
+								.where(eq(table.transactionMatchRule.id, matchingRule.id));
+						}
+					} else if (matchingExpenses.length > 1) {
+						// Multiple expenses with same amount - try to use matching rules
+						const matchingRule = await findExpenseMatchingRule(
+							newTransaction,
+							event.locals.tenant.id
+						);
+						if (matchingRule && matchingRule.expenseId) {
+							// Check if the matched expense is in our list and still unpaid
+							const matchedExpense = matchingExpenses.find(
+								(e) => e.id === matchingRule.expenseId && !e.bankTransactionId
+							);
+							if (matchedExpense) {
+								// Link to the expense identified by matching rule
+								await db
+									.update(table.bankTransaction)
+									.set({
+										expenseId: matchedExpense.id,
+										updatedAt: new Date()
+									})
+									.where(eq(table.bankTransaction.id, transactionDbId));
+
+								// Update expense - link transaction and mark as paid
+								await db
+									.update(table.expense)
+									.set({
+										bankTransactionId: transactionDbId,
+										isPaid: true,
+										updatedAt: new Date()
+									})
+									.where(eq(table.expense.id, matchedExpense.id));
+
+								// Update matching rule match count
+								await db
+									.update(table.transactionMatchRule)
+									.set({
+										matchCount: sql`${table.transactionMatchRule.matchCount} + 1`,
+										lastMatchedAt: new Date(),
+										updatedAt: new Date()
+									})
+									.where(eq(table.transactionMatchRule.id, matchingRule.id));
+
+								// Auto-link expense to supplier using matching rules
+								const supplierMatchingRule = await findMatchingRule(
+									newTransaction,
+									event.locals.tenant.id,
+									'supplier'
+								);
+								if (supplierMatchingRule && supplierMatchingRule.supplierId) {
+									await db
+										.update(table.expense)
+										.set({
+											supplierId: supplierMatchingRule.supplierId,
+											updatedAt: new Date()
+										})
+										.where(eq(table.expense.id, matchedExpense.id));
+
+									// Increment match count and update last matched timestamp
+									await db
+										.update(table.transactionMatchRule)
+										.set({
+											matchCount: sql`${table.transactionMatchRule.matchCount} + 1`,
+											lastMatchedAt: new Date(),
+											updatedAt: new Date()
+										})
+										.where(eq(table.transactionMatchRule.id, supplierMatchingRule.id));
+								}
+							}
+							// If rule points to expense not in list or already paid, don't auto-link
+						}
+						// If no matching rule or rule doesn't help, don't create expense - leave unlinked
+					} else {
+						// No matching expenses - don't create expense - leave transaction unlinked
+						// Transaction remains available for manual linking later
 					}
 				} else if (newTransaction) {
 					// For incoming transactions, try to match to client using matching rules
@@ -1226,6 +1489,7 @@ export const createExpense = command(
 		const amount = Math.round(data.amount * 100); // Convert to cents
 		const vatRate = data.vatRate ? Math.round(data.vatRate * 100) : null;
 		const vatAmount = vatRate ? Math.round((amount * vatRate) / 10000) : null;
+		const isPaid = !!data.bankTransactionId; // Mark as paid if transaction is linked
 
 		await db.insert(table.expense).values({
 			id: expenseId,
@@ -1241,6 +1505,7 @@ export const createExpense = command(
 			date: new Date(data.date),
 			vatRate,
 			vatAmount,
+			isPaid,
 			createdByUserId: event.locals.user.id
 		});
 
@@ -1253,6 +1518,28 @@ export const createExpense = command(
 					updatedAt: new Date()
 				})
 				.where(eq(table.bankTransaction.id, data.bankTransactionId));
+
+			// Create matching rule for future auto-linking
+			const [transaction] = await db
+				.select()
+				.from(table.bankTransaction)
+				.where(
+					and(
+						eq(table.bankTransaction.id, data.bankTransactionId),
+						eq(table.bankTransaction.tenantId, event.locals.tenant.id)
+					)
+				)
+				.limit(1);
+
+			if (transaction) {
+				await createExpenseMatchRuleFromTransaction(
+					transaction,
+					expenseId,
+					amount,
+					event.locals.tenant.id,
+					event.locals.user.id
+				);
+			}
 		}
 
 		// Auto-link to supplier using matching rules if supplierId not provided
@@ -1329,6 +1616,7 @@ export const createExpense = command(
 export const updateExpense = command(
 	v.object({
 		expenseId: v.string(),
+		bankTransactionId: v.optional(v.string()),
 		supplierId: v.optional(v.string()),
 		clientId: v.optional(v.string()),
 		projectId: v.optional(v.string()),
@@ -1397,6 +1685,79 @@ export const updateExpense = command(
 					: vatRate && existing.amount
 						? Math.round((existing.amount * vatRate) / 10000)
 						: null;
+		}
+
+		// Handle bankTransactionId linking/unlinking
+		if (updateData.bankTransactionId !== undefined) {
+			const previousTransactionId = existing.bankTransactionId;
+			const newTransactionId = updateData.bankTransactionId || null;
+
+			// Unlink previous transaction if it exists
+			if (previousTransactionId && previousTransactionId !== newTransactionId) {
+				await db
+					.update(table.bankTransaction)
+					.set({
+						expenseId: null,
+						updatedAt: new Date()
+					})
+					.where(eq(table.bankTransaction.id, previousTransactionId));
+			}
+
+			// Link new transaction if provided
+			if (newTransactionId) {
+				// Verify transaction belongs to tenant
+				const [transaction] = await db
+					.select()
+					.from(table.bankTransaction)
+					.where(
+						and(
+							eq(table.bankTransaction.id, newTransactionId),
+							eq(table.bankTransaction.tenantId, event.locals.tenant.id)
+						)
+					)
+					.limit(1);
+
+				if (!transaction) {
+					throw new Error('Transaction not found');
+				}
+
+				// Unlink transaction from any other expense
+				if (transaction.expenseId && transaction.expenseId !== expenseId) {
+					await db
+						.update(table.expense)
+						.set({
+							bankTransactionId: null,
+							isPaid: false,
+							updatedAt: new Date()
+						})
+						.where(eq(table.expense.id, transaction.expenseId));
+				}
+
+				// Link transaction to this expense
+				await db
+					.update(table.bankTransaction)
+					.set({
+						expenseId: expenseId,
+						updatedAt: new Date()
+					})
+					.where(eq(table.bankTransaction.id, newTransactionId));
+
+				updateValues.bankTransactionId = newTransactionId;
+				updateValues.isPaid = true;
+
+				// Create matching rule for future auto-linking
+				await createExpenseMatchRuleFromTransaction(
+					transaction,
+					expenseId,
+					updateValues.amount || existing.amount,
+					event.locals.tenant.id,
+					event.locals.user.id
+				);
+			} else {
+				// Unlinking transaction
+				updateValues.bankTransactionId = null;
+				updateValues.isPaid = false;
+			}
 		}
 
 		await db.update(table.expense).set(updateValues).where(eq(table.expense.id, expenseId));
