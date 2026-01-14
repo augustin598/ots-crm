@@ -17,6 +17,7 @@ function generateSyncId() {
  */
 export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) => {
 	const { invoice, tenantId } = event;
+	console.log(`[Keez] Invoice created event:`, invoice);
 
 	try {
 		// Check if Keez integration is active for tenant

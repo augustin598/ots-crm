@@ -364,20 +364,28 @@ class KeezInvoiceService {
 
     /**
      * Asigură că articolul există în Keez, îl creează dacă nu există
+     * Creează articole în ambele monede (EUR și RON) pentru compatibilitate
      */
-    public function ensureArticleExists($code, $description, $settings, $vatRate = null) {
+    public function ensureArticleExists($code, $description, $settings, $vatRate = null, $currencyCode = null) {
         logActivity("Keez: Checking if article exists: {$code}");
 
-        // Check if article exists by code
+        // Use provided currency or default from settings
+        $targetCurrency = $currencyCode ?: $settings['default_currency'];
+        
+        // Check if article exists by code and currency
         $articles = $this->getArticles();
         logActivity("Keez: Retrieved " . count($articles) . " articles from Keez");
 
         $existingArticle = null;
         foreach ($articles as $article) {
             if (isset($article['code']) && $article['code'] === $code) {
-                $existingArticle = $article;
-                logActivity("Keez: Found existing article: {$code} with externalId: {$article['externalId']}");
-                break;
+                // Check if currency matches or if we need to create for this currency
+                $articleCurrency = $article['currencyCode'] ?? $settings['default_currency'];
+                if ($articleCurrency === $targetCurrency) {
+                    $existingArticle = $article;
+                    logActivity("Keez: Found existing article: {$code} with currency {$targetCurrency} and externalId: {$article['externalId']}");
+                    break;
+                }
             }
         }
 
@@ -385,7 +393,7 @@ class KeezInvoiceService {
             return $existingArticle['externalId']; // Return existing article's external ID
         }
 
-        logActivity("Keez: Article {$code} not found, creating new one");
+        logActivity("Keez: Article {$code} with currency {$targetCurrency} not found, creating new one");
 
         // Use provided VAT rate or fallback to settings
         $articleVatRate = $vatRate !== null ? $vatRate : $settings['tva_fix'];
@@ -395,7 +403,7 @@ class KeezInvoiceService {
         $articleData = [
             'code' => $code,
             'name' => substr($description, 0, 100), // Limit name length
-            'currencyCode' => $settings['default_currency'],
+            'currencyCode' => $targetCurrency,
             'measureUnitId' => 1, // Buc
             'vatRate' => $articleVatRate, // Use calculated VAT rate based on country
             'isActive' => true,
@@ -408,7 +416,47 @@ class KeezInvoiceService {
         logActivity("Keez: Article creation result: " . json_encode($result));
 
         if ($result && isset($result['externalId'])) {
-            logActivity("Keez article created successfully: {$code} - {$description} - externalId: {$result['externalId']}");
+            logActivity("Keez article created successfully: {$code} - {$description} - currency: {$targetCurrency} - externalId: {$result['externalId']}");
+            
+            // Create article in the other currency as well (EUR and RON)
+            $otherCurrencies = ['EUR', 'RON'];
+            foreach ($otherCurrencies as $otherCurrency) {
+                if ($otherCurrency !== $targetCurrency) {
+                    // Check if article already exists in this currency
+                    $existsInOtherCurrency = false;
+                    foreach ($articles as $article) {
+                        if (isset($article['code']) && $article['code'] === $code) {
+                            $articleCurrency = $article['currencyCode'] ?? $settings['default_currency'];
+                            if ($articleCurrency === $otherCurrency) {
+                                $existsInOtherCurrency = true;
+                                logActivity("Keez: Article {$code} already exists in currency {$otherCurrency}");
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!$existsInOtherCurrency) {
+                        logActivity("Keez: Creating article {$code} in additional currency: {$otherCurrency}");
+                        $otherCurrencyArticleData = [
+                            'code' => $code,
+                            'name' => substr($description, 0, 100),
+                            'currencyCode' => $otherCurrency,
+                            'measureUnitId' => 1,
+                            'vatRate' => $articleVatRate,
+                            'isActive' => true,
+                            'categoryExternalId' => 'MISCSRV'
+                        ];
+                        
+                        $otherResult = $this->createArticle($otherCurrencyArticleData);
+                        if ($otherResult && isset($otherResult['externalId'])) {
+                            logActivity("Keez article created successfully in {$otherCurrency}: {$code} - externalId: {$otherResult['externalId']}");
+                        } else {
+                            logActivity("Keez: Failed to create article {$code} in currency {$otherCurrency}");
+                        }
+                    }
+                }
+            }
+            
             return $result['externalId'];
         }
 
@@ -982,16 +1030,21 @@ class KeezInvoiceService {
             }
 
             // Asigură că toate articolele există în Keez înainte de creare factură
+            // Determină moneda facturii pentru a crea articolele în moneda corectă
+            $invoiceCurrencyCode = $this->getCurrencyCode($invoiceData['currency']);
+            logActivity("Keez: Invoice currency detected: {$invoiceCurrencyCode}");
+            
             $articleCodes = [];
             foreach ($invoiceData['items'] as $item) {
                 $code = 'WHMCS_' . ($item['relid'] ?: $item['id']); // Generate code like WHMCS_123
                 $description = $item['description'];
-                logActivity("Keez: Ensuring article exists: {$code} - {$description}");
+                logActivity("Keez: Ensuring article exists: {$code} - {$description} - currency: {$invoiceCurrencyCode}");
 
-                $articleExternalId = $this->ensureArticleExists($code, $description, $this->settings, $vatRate);
+                // Creează articolul în moneda facturii (va crea automat și în cealaltă monedă dacă nu există)
+                $articleExternalId = $this->ensureArticleExists($code, $description, $this->settings, $vatRate, $invoiceCurrencyCode);
                 if ($articleExternalId) {
                     $articleCodes[$item['id']] = $articleExternalId;
-                    logActivity("Keez: Article ensured, externalId: {$articleExternalId} for code: {$code}");
+                    logActivity("Keez: Article ensured, externalId: {$articleExternalId} for code: {$code} in currency: {$invoiceCurrencyCode}");
                 } else {
                     logActivity("Keez: Failed to ensure article exists: {$code} - {$description}");
                     // Don't continue if article creation failed - this will cause invoice creation to fail
@@ -1134,6 +1187,9 @@ class KeezInvoiceService {
         // Moneda și curs
         $currencyCode = $this->getCurrencyCode($invoice['currency']);
         
+        // Determine if invoice currency is RON or other (EUR, USD, etc.)
+        $isRON = ($currencyCode === 'RON');
+        
         // Get exchange rate from WHMCS currency configuration
         $exchangeRate = 1; // Default for base currency
         try {
@@ -1146,16 +1202,16 @@ class KeezInvoiceService {
                 logActivity("Keez: Found exchange rate in WHMCS - Currency: {$currencyCode}, Rate: {$exchangeRate}");
             } else {
                 // Fallback to manual rates
-                $exchangeRate = $currencyCode === 'RON' ? 1 : 4.82;
+                $exchangeRate = $isRON ? 1 : 4.82;
                 logActivity("Keez: Using fallback exchange rate - Currency: {$currencyCode}, Rate: {$exchangeRate}");
             }
         } catch (Exception $e) {
             // Fallback to manual rates
-            $exchangeRate = $currencyCode === 'RON' ? 1 : 4.82;
+            $exchangeRate = $isRON ? 1 : 4.82;
             logActivity("Keez: Error getting exchange rate, using fallback - Currency: {$currencyCode}, Rate: {$exchangeRate}, Error: " . $e->getMessage());
         }
         
-        logActivity("Keez: Currency detection - Invoice currency ID: {$invoice['currency']}, Currency code: {$currencyCode}, Exchange rate: {$exchangeRate}");
+        logActivity("Keez: Currency detection - Invoice currency ID: {$invoice['currency']}, Currency code: {$currencyCode}, Is RON: " . ($isRON ? 'YES' : 'NO') . ", Exchange rate: {$exchangeRate}");
 
         // Determină dacă se aplică TVA (doar pentru țările UE, EXCEPT Cyprus for digital services)
         $countryCode = strtoupper($invoice['country'] ?? 'RO');
@@ -1168,18 +1224,43 @@ class KeezInvoiceService {
         logActivity("Keez: VAT calculation - Country: {$countryCode}, Should apply VAT: " . ($shouldApplyVAT ? 'YES' : 'NO') . ", VAT Rate: {$vatRate}% - TIMESTAMP: " . date('Y-m-d H:i:s'));
 
         // Calculează totaluri - pentru țări non-UE, recalculează fără TVA
+        // Note: Amounts from WHMCS are in invoice currency (EUR if invoice is EUR, RON if invoice is RON)
         if (!$shouldApplyVAT) {
             // Pentru țări non-UE, totalul din WHMCS este deja fără TVA
-            $netAmount = (float)$invoice['total'];  // Totalul este netul
-            $vatAmount = 0;                         // Fără TVA
-            $grossAmount = (float)$invoice['total']; // Totalul este și brutul
-            logActivity("Keez: Non-EU country - Recalculated totals without VAT - Net: {$netAmount}, VAT: {$vatAmount}, Gross: {$grossAmount}");
+            $netAmountCurrency = (float)$invoice['total'];  // Totalul este netul (în moneda facturii)
+            $vatAmountCurrency = 0;                         // Fără TVA
+            $grossAmountCurrency = (float)$invoice['total']; // Totalul este și brutul (în moneda facturii)
+            
+            // Convert to RON if invoice is not in RON
+            if ($isRON) {
+                $netAmount = $netAmountCurrency;
+                $vatAmount = $vatAmountCurrency;
+                $grossAmount = $grossAmountCurrency;
+            } else {
+                $netAmount = round($netAmountCurrency * $exchangeRate, 2);
+                $vatAmount = round($vatAmountCurrency * $exchangeRate, 2);
+                $grossAmount = round($grossAmountCurrency * $exchangeRate, 2);
+            }
+            
+            logActivity("Keez: Non-EU country - Currency: {$currencyCode}, Net Currency: {$netAmountCurrency}, Net RON: {$netAmount}, VAT: {$vatAmount}, Gross: {$grossAmount}");
         } else {
             // Pentru țările UE, folosește valorile normale din WHMCS
-            $netAmount = (float)$invoice['subtotal'];
-            $vatAmount = (float)$invoice['tax'];
-            $grossAmount = (float)$invoice['total'];
-            logActivity("Keez: EU country - Using WHMCS totals - Subtotal: {$netAmount}, Tax: {$vatAmount}, Total: {$grossAmount}");
+            $netAmountCurrency = (float)$invoice['subtotal']; // În moneda facturii
+            $vatAmountCurrency = (float)$invoice['tax'];      // În moneda facturii
+            $grossAmountCurrency = (float)$invoice['total'];  // În moneda facturii
+            
+            // Convert to RON if invoice is not in RON
+            if ($isRON) {
+                $netAmount = $netAmountCurrency;
+                $vatAmount = $vatAmountCurrency;
+                $grossAmount = $grossAmountCurrency;
+            } else {
+                $netAmount = round($netAmountCurrency * $exchangeRate, 2);
+                $vatAmount = round($vatAmountCurrency * $exchangeRate, 2);
+                $grossAmount = round($grossAmountCurrency * $exchangeRate, 2);
+            }
+            
+            logActivity("Keez: EU country - Currency: {$currencyCode}, Subtotal Currency: {$netAmountCurrency}, Subtotal RON: {$netAmount}, Tax Currency: {$vatAmountCurrency}, Tax RON: {$vatAmount}, Total Currency: {$grossAmountCurrency}, Total RON: {$grossAmount}");
         }
 
         // Obține metoda de plată din transaction în loc de invoice
@@ -1239,13 +1320,55 @@ class KeezInvoiceService {
         // Pregătește articolele
         $invoiceDetails = [];
         foreach ($invoice['items'] as $item) {
-            $itemNetAmount = (float)$item['amount'];
+            // Amounts from WHMCS are in invoice currency (EUR if invoice is EUR, RON if invoice is RON)
+            $itemNetAmountCurrency = (float)$item['amount'];
             $itemVatRate = $vatRate;  // Use calculated VAT rate based on country
-            $itemVatAmount = round($itemNetAmount * $itemVatRate / 100, 2);
-            $itemGrossAmount = $itemNetAmount + $itemVatAmount;
+            $itemVatAmountCurrency = round($itemNetAmountCurrency * $itemVatRate / 100, 2);
+            $itemGrossAmountCurrency = $itemNetAmountCurrency + $itemVatAmountCurrency;
             $quantity = (int)$item['qty'];  // Fixed quantity of 1
+            
+            // Calculate unit price in invoice currency
+            $unitPriceCurrency = round($itemNetAmountCurrency / $quantity, 2);
 
-            logActivity("Keez: Article calculation - Net: {$itemNetAmount}, VAT Rate: {$itemVatRate}%, VAT Amount: {$itemVatAmount}, Gross: {$itemGrossAmount}");
+            // Calculate amounts in RON (base currency)
+            // If invoice is in RON, amounts are already in RON
+            // If invoice is in EUR (or other), convert to RON using exchange rate
+            if ($isRON) {
+                // Invoice is in RON - amounts are already in RON
+                $itemNetAmountRON = $itemNetAmountCurrency;
+                $itemVatAmountRON = $itemVatAmountCurrency;
+                $itemGrossAmountRON = $itemGrossAmountCurrency;
+                $unitPriceRON = $unitPriceCurrency;
+                
+                // For RON invoices, currency fields can be same as RON or undefined
+                $originalNetAmountCurrency = $itemNetAmountCurrency;
+                $originalVatAmountCurrency = $itemVatAmountCurrency;
+                $originalGrossAmountCurrency = $itemGrossAmountCurrency;
+                $netAmountCurrency = $itemNetAmountCurrency;
+                $vatAmountCurrency = $itemVatAmountCurrency;
+                $grossAmountCurrency = $itemGrossAmountCurrency;
+                $unitPriceCurrencyField = $unitPriceCurrency;
+            } else {
+                // Invoice is in EUR (or other currency) - convert to RON
+                // Exchange rate: 1 EUR = exchangeRate RON
+                // So: RON = EUR * exchangeRate
+                $itemNetAmountRON = round($itemNetAmountCurrency * $exchangeRate, 2);
+                $itemVatAmountRON = round($itemVatAmountCurrency * $exchangeRate, 2);
+                $itemGrossAmountRON = round($itemGrossAmountCurrency * $exchangeRate, 2);
+                $unitPriceRON = round($unitPriceCurrency * $exchangeRate, 4); // 4 decimals for unit price
+                
+                // Currency amounts are the original EUR amounts
+                $originalNetAmountCurrency = $itemNetAmountCurrency;
+                $originalVatAmountCurrency = $itemVatAmountCurrency;
+                $originalGrossAmountCurrency = $itemGrossAmountCurrency;
+                $netAmountCurrency = $itemNetAmountCurrency;
+                $vatAmountCurrency = $itemVatAmountCurrency;
+                $grossAmountCurrency = $itemGrossAmountCurrency;
+                $unitPriceCurrencyField = $unitPriceCurrency;
+            }
+
+            logActivity("Keez: Article calculation - Currency: {$currencyCode}, Exchange Rate: {$exchangeRate}");
+            logActivity("Keez: Article - Net RON: {$itemNetAmountRON}, Net Currency: {$itemNetAmountCurrency}, VAT Rate: {$itemVatRate}%");
 
             // Use the article external ID from the created articles
             $itemExternalId = isset($articleCodes[$item['id']]) ? $articleCodes[$item['id']] : strval($item['relid'] ?: $item['id']);
@@ -1254,18 +1377,19 @@ class KeezInvoiceService {
                 'itemExternalId' => $itemExternalId,
                 'measureUnitId' => 1, // Buc
                 'quantity' => $quantity,
-                'unitPrice' => round($itemNetAmount / $quantity, 2),
+                'unitPrice' => round($unitPriceRON, 4), // RON amount, 4 decimals
+                'unitPriceCurrency' => $isRON ? null : round($unitPriceCurrencyField, 4), // Currency amount, 4 decimals (only if not RON)
                 'vatPercent' => $itemVatRate,
-                'originalNetAmount' => round($itemNetAmount, 2),
-                'originalNetAmountCurrency' => round($itemNetAmount, 2),
-                'originalVatAmount' => round($itemVatAmount, 2),
-                'originalVatAmountCurrency' => round($itemVatAmount, 2),
-                'netAmount' => round($itemNetAmount, 2),
-                'netAmountCurrency' => round($itemNetAmount, 2),
-                'vatAmount' => round($itemVatAmount, 2),
-                'vatAmountCurrency' => round($itemVatAmount, 2),
-                'grossAmount' => round($itemGrossAmount, 2),
-                'grossAmountCurrency' => round($itemGrossAmount, 2),
+                'originalNetAmount' => round($itemNetAmountRON, 2), // RON amount
+                'originalNetAmountCurrency' => $isRON ? round($originalNetAmountCurrency, 2) : round($originalNetAmountCurrency, 2), // Currency amount
+                'originalVatAmount' => round($itemVatAmountRON, 2), // RON amount
+                'originalVatAmountCurrency' => $isRON ? round($originalVatAmountCurrency, 2) : round($originalVatAmountCurrency, 2), // Currency amount
+                'netAmount' => round($itemNetAmountRON, 2), // RON amount
+                'netAmountCurrency' => $isRON ? round($netAmountCurrency, 2) : round($netAmountCurrency, 2), // Currency amount
+                'vatAmount' => round($itemVatAmountRON, 2), // RON amount
+                'vatAmountCurrency' => $isRON ? round($vatAmountCurrency, 2) : round($vatAmountCurrency, 2), // Currency amount
+                'grossAmount' => round($itemGrossAmountRON, 2), // RON amount
+                'grossAmountCurrency' => $isRON ? round($grossAmountCurrency, 2) : round($grossAmountCurrency, 2), // Currency amount
                 'itemDescription' => $articleNote,
             ];
         }
@@ -1274,22 +1398,60 @@ class KeezInvoiceService {
         if (empty($invoiceDetails)) {
             $quantity = 1;
             $fallbackVatRate = $vatRate; // Use the calculated VAT rate based on country
+            
+            // The totals ($netAmount, $vatAmount, $grossAmount) are already calculated correctly above
+            // They are in RON if invoice is RON, or converted to RON if invoice is EUR
+            // But we need to also track the original currency amounts
+            
+            if ($isRON) {
+                // Invoice is in RON - amounts are already in RON
+                $fallbackNetAmountRON = $netAmount;
+                $fallbackVatAmountRON = $vatAmount;
+                $fallbackGrossAmountRON = $grossAmount;
+                $fallbackUnitPriceRON = round($netAmount / $quantity, 2);
+                
+                // For RON invoices, currency fields are same as RON
+                $fallbackNetAmountCurrency = $netAmount;
+                $fallbackVatAmountCurrency = $vatAmount;
+                $fallbackGrossAmountCurrency = $grossAmount;
+                $fallbackUnitPriceCurrency = $fallbackUnitPriceRON;
+            } else {
+                // Invoice is in EUR (or other currency)
+                // The $netAmount, $vatAmount, $grossAmount are already converted to RON above
+                // But we need the original currency amounts
+                // Since totals were calculated from WHMCS invoice totals, we need to reverse the conversion
+                // Original currency amount = RON amount / exchangeRate
+                $fallbackNetAmountCurrency = round($netAmount / $exchangeRate, 2);
+                $fallbackVatAmountCurrency = round($vatAmount / $exchangeRate, 2);
+                $fallbackGrossAmountCurrency = round($grossAmount / $exchangeRate, 2);
+                $fallbackUnitPriceCurrency = round($fallbackNetAmountCurrency / $quantity, 2);
+                
+                // RON amounts are already calculated correctly above
+                $fallbackNetAmountRON = $netAmount;
+                $fallbackVatAmountRON = $vatAmount;
+                $fallbackGrossAmountRON = $grossAmount;
+                $fallbackUnitPriceRON = round($netAmount / $quantity, 4); // 4 decimals for unit price
+            }
+            
+            logActivity("Keez: Fallback item - Currency: {$currencyCode}, Net RON: {$fallbackNetAmountRON}, Net Currency: {$fallbackNetAmountCurrency}");
+            
             $invoiceDetails[] = [
                 'itemExternalId' => strval($invoice['id']),
                 'measureUnitId' => 1,
                 'quantity' => $quantity,
-                'unitPrice' => round($netAmount / $quantity, 2),
+                'unitPrice' => round($fallbackUnitPriceRON, 4), // RON amount, 4 decimals
+                'unitPriceCurrency' => $isRON ? null : round($fallbackUnitPriceCurrency, 4), // Currency amount, 4 decimals (only if not RON)
                 'vatPercent' => $fallbackVatRate,
-                'originalNetAmount' => round($netAmount, 2),
-                'originalNetAmountCurrency' => round($netAmount, 2),
-                'originalVatAmount' => round($vatAmount, 2),
-                'originalVatAmountCurrency' => round($vatAmount, 2),
-                'netAmount' => round($netAmount, 2),
-                'netAmountCurrency' => round($netAmount, 2),
-                'vatAmount' => round($vatAmount, 2),
-                'vatAmountCurrency' => round($vatAmount, 2),
-                'grossAmount' => round($grossAmount, 2),
-                'grossAmountCurrency' => round($grossAmount, 2),
+                'originalNetAmount' => round($fallbackNetAmountRON, 2), // RON amount
+                'originalNetAmountCurrency' => round($fallbackNetAmountCurrency, 2), // Currency amount
+                'originalVatAmount' => round($fallbackVatAmountRON, 2), // RON amount
+                'originalVatAmountCurrency' => round($fallbackVatAmountCurrency, 2), // Currency amount
+                'netAmount' => round($fallbackNetAmountRON, 2), // RON amount
+                'netAmountCurrency' => round($fallbackNetAmountCurrency, 2), // Currency amount
+                'vatAmount' => round($fallbackVatAmountRON, 2), // RON amount
+                'vatAmountCurrency' => round($fallbackVatAmountCurrency, 2), // Currency amount
+                'grossAmount' => round($fallbackGrossAmountRON, 2), // RON amount
+                'grossAmountCurrency' => round($fallbackGrossAmountCurrency, 2), // Currency amount
                 'itemDescription' => $articleNote,
             ];
         }
@@ -1297,6 +1459,13 @@ class KeezInvoiceService {
         // Mapează județul pentru România
         $countyCode = $this->mapRomanianCounty($invoice['state'], $invoice['country']);
 
+        // Calculate currency amounts for invoice totals
+        // $netAmountCurrency, $vatAmountCurrency, $grossAmountCurrency are already set above
+        // They contain the original currency amounts from WHMCS
+        // $netAmount, $vatAmount, $grossAmount contain the RON amounts (converted if needed)
+        
+        logActivity("Keez: Invoice totals - Currency: {$currencyCode}, Net RON: {$netAmount}, Net Currency: {$netAmountCurrency}, Gross RON: {$grossAmount}, Gross Currency: {$grossAmountCurrency}");
+        
         return [
             'series' => $settings['factura_serie'],
             'number' => $invoiceNumber, // Doar dacă nu există deja în serie
@@ -1304,17 +1473,17 @@ class KeezInvoiceService {
             'dueDate' => $dueDate,
             'vatOnCollection' => $settings['tva_incasare'],
             'currencyCode' => $currencyCode,
-            'exchangeRate' => round($exchangeRate, 4),
-            'originalNetAmount' => round($netAmount, 2),
-            'originalNetAmountCurrency' => round($netAmount, 2),
-            'originalVatAmount' => round($vatAmount, 2),
-            'originalVatAmountCurrency' => round($vatAmount, 2),
-            'netAmount' => round($netAmount, 2),
-            'netAmountCurrency' => round($netAmount, 2),
-            'vatAmount' => round($vatAmount, 2),
-            'vatAmountCurrency' => round($vatAmount, 2),
-            'grossAmount' => round($grossAmount, 2),
-            'grossAmountCurrency' => round($grossAmount, 2),
+            'exchangeRate' => $isRON ? null : round($exchangeRate, 4), // Only set exchange rate if not RON
+            'originalNetAmount' => round($netAmount, 2), // RON amount
+            'originalNetAmountCurrency' => round($netAmountCurrency, 2), // Currency amount (original from WHMCS)
+            'originalVatAmount' => round($vatAmount, 2), // RON amount
+            'originalVatAmountCurrency' => round($vatAmountCurrency, 2), // Currency amount (original from WHMCS)
+            'netAmount' => round($netAmount, 2), // RON amount
+            'netAmountCurrency' => round($netAmountCurrency, 2), // Currency amount (original from WHMCS)
+            'vatAmount' => round($vatAmount, 2), // RON amount
+            'vatAmountCurrency' => round($vatAmountCurrency, 2), // Currency amount (original from WHMCS)
+            'grossAmount' => round($grossAmount, 2), // RON amount
+            'grossAmountCurrency' => round($grossAmountCurrency, 2), // Currency amount (original from WHMCS)
             'paymentTypeId' => $paymentTypeId,
             'partner' => [
                 'isLegalPerson' => $isPJ,
@@ -2719,6 +2888,10 @@ function keez_create_invoice_articles($invoiceId) {
         echo '<h6>Procesare articole pentru factură ' . htmlspecialchars($invoiceData['invoicenum']) . ':</h6>';
         echo '<ul class="list-group mb-3">';
 
+        // Determină moneda facturii pentru a crea articolele în moneda corectă
+        $invoiceCurrencyCode = $service->getCurrencyCode($invoiceData['currency']);
+        logActivity("Keez: Creating articles for invoice with currency: {$invoiceCurrencyCode}");
+
         foreach ($invoiceData['items'] as $item) {
             $code = 'WHMCS_' . ($item['relid'] ?: $item['id']);
             $description = $item['description'];
@@ -2729,9 +2902,10 @@ function keez_create_invoice_articles($invoiceId) {
             if ($service->articleExistsInKeez($code)) {
                 echo ' <span class="badge bg-warning">Deja există</span>';
             } else {
-                $result = $service->ensureArticleExists($code, $description, KeezConfig::getSettings());
+                // Creează articolul în moneda facturii (va crea automat și în cealaltă monedă dacă nu există)
+                $result = $service->ensureArticleExists($code, $description, KeezConfig::getSettings(), null, $invoiceCurrencyCode);
                 if ($result) {
-                    echo ' <span class="badge bg-success">Creat cu succes</span>';
+                    echo ' <span class="badge bg-success">Creat cu succes (EUR și RON)</span>';
                     $createdCount++;
                 } else {
                     echo ' <span class="badge bg-danger">Eroare la creare</span>';
