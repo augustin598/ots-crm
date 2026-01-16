@@ -239,6 +239,13 @@
       "when": 1768423831360,
       "tag": "0033_optimal_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1768555092854,
+      "tag": "0034_natural_puff_adder",
+      "breakpoints": true
     }
   ]
 }

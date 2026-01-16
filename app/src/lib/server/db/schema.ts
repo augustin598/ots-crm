@@ -950,6 +950,18 @@ export const magicLinkToken = sqliteTable('magic_link_token', {
 		.default(sql`current_date`)
 });
 
+export const adminMagicLinkToken = sqliteTable('admin_magic_link_token', {
+	id: text('id').primaryKey(),
+	token: text('token').notNull().unique(), // Hashed token
+	email: text('email').notNull(),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	used: boolean('used').notNull().default(false),
+	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -1602,3 +1614,5 @@ export type ClientUser = typeof clientUser.$inferSelect;
 export type NewClientUser = typeof clientUser.$inferInsert;
 export type MagicLinkToken = typeof magicLinkToken.$inferSelect;
 export type NewMagicLinkToken = typeof magicLinkToken.$inferInsert;
+export type AdminMagicLinkToken = typeof adminMagicLinkToken.$inferSelect;
+export type NewAdminMagicLinkToken = typeof adminMagicLinkToken.$inferInsert;

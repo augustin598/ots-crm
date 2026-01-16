@@ -428,6 +428,82 @@ export async function sendMagicLinkEmail(
 }
 
 /**
+ * Send admin magic link email
+ */
+export async function sendAdminMagicLinkEmail(
+	email: string,
+	token: string,
+	userName: string
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	// Use default transporter (not tenant-specific for admin login)
+	const transporter = getDefaultTransporter();
+
+	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+	const appName = 'CRM Admin';
+	const loginUrl = `${baseUrl}/login/verify?token=${encodeURIComponent(token)}`;
+
+	const mailOptions = {
+		from: `"${appName}" <${fromEmail}>`,
+		to: email,
+		subject: `Login to ${appName}`,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Login to ${appName}</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: #2563eb; margin-top: 0;">Welcome to ${appName}</h1>
+					<p>Dear ${userName},</p>
+					<p>You have requested a magic link to log in to your admin account.</p>
+					<p>Click the button below to log in. This link will expire in 24 hours.</p>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${loginUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Log In to Admin Panel</a>
+					</div>
+					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+					<p style="font-size: 12px; color: #999; word-break: break-all;">${loginUrl}</p>
+					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
+						<p style="margin: 0; font-size: 14px; color: #856404;">
+							<strong>Security Notice:</strong> This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
+						</p>
+					</div>
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please contact your administrator.</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+			Welcome to ${appName}
+
+			Dear ${userName},
+
+			You have requested a magic link to log in to your admin account.
+
+			Click the link below to log in. This link will expire in 24 hours.
+
+			${loginUrl}
+
+			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
+
+			If you have any questions, please contact your administrator.
+		`
+	};
+
+	try {
+		await transporter.sendMail(mailOptions);
+		console.log(`Admin magic link email sent to ${email}`);
+	} catch (error) {
+		console.error('Failed to send admin magic link email:', error);
+		throw new Error('Failed to send magic link email');
+	}
+}
+
+/**
  * Send task assignment email
  */
 export async function sendTaskAssignmentEmail(

@@ -2,14 +2,16 @@ import * as v from 'valibot';
 import { command, query } from '$app/server';
 import { lucia } from '../server/lucia';
 import { db } from '../server/db';
-import { user } from '../server/db/schema';
+import { user, adminMagicLinkToken } from '../server/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
 import { hash, verify } from '@node-rs/argon2';
-import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
+import { sha256 } from '@oslojs/crypto/sha2';
 import { randomBytes } from 'crypto';
 import { env } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import type { User } from '../server/db/schema';
+import { sendAdminMagicLinkEmail } from '../server/email';
 
 function generateUserId(): string {
 	const bytes = randomBytes(15);
@@ -19,6 +21,17 @@ function generateUserId(): string {
 function generateToken(): string {
 	return randomBytes(32).toString('hex');
 }
+
+function generateMagicLinkToken(): string {
+	const bytes = randomBytes(32);
+	return encodeBase64url(bytes);
+}
+
+function hashToken(token: string): string {
+	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
+}
+
+const MAGIC_LINK_EXPIRY_HOURS = 24;
 
 /**
  * Register a new user
@@ -177,6 +190,147 @@ export const getCurrentUser = query(
 		} catch (error) {
 			console.error('Get current user error:', error);
 			return { user: null, error: 'Failed to get current user' };
+		}
+	}
+);
+
+/**
+ * Request magic link for admin login
+ */
+export const requestMagicLink = command(
+	v.object({
+		email: v.pipe(v.string(), v.email('Invalid email address'))
+	}),
+	async ({ email }): Promise<{ success: boolean; message: string; error?: string }> => {
+		try {
+			// Check if user exists (but don't reveal if they don't for security)
+			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+
+			if (!userRecord) {
+				// Don't reveal if email exists - return success message anyway
+				return {
+					success: true,
+					message: 'If an account exists with this email, a magic link has been sent.'
+				};
+			}
+
+			// Generate magic link token
+			const plainToken = generateMagicLinkToken();
+			const hashedToken = hashToken(plainToken);
+			const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+			const tokenId = encodeBase32LowerCase(randomBytes(15));
+
+			// Store token in database
+			await db.insert(adminMagicLinkToken).values({
+				id: tokenId,
+				token: hashedToken,
+				email,
+				expiresAt,
+				used: false
+			});
+
+			// Send magic link email
+			try {
+				await sendAdminMagicLinkEmail(
+					email,
+					plainToken,
+					userRecord.firstName + ' ' + userRecord.lastName
+				);
+			} catch (emailError) {
+				console.error('Failed to send magic link email:', emailError);
+				// Don't throw - token is created, user can request another link
+				return {
+					success: false,
+					message: 'Failed to send email. Please try again later.',
+					error: 'Email send failed'
+				};
+			}
+
+			return {
+				success: true,
+				message: 'Magic link sent to your email. Please check your inbox.'
+			};
+		} catch (error) {
+			console.error('Request magic link error:', error);
+			const message = error instanceof Error ? error.message : 'Request failed';
+			return { success: false, message, error: message };
+		}
+	}
+);
+
+/**
+ * Verify magic link token and create session
+ */
+export const verifyMagicLink = command(
+	v.object({
+		token: v.pipe(v.string(), v.minLength(1, 'Token is required'))
+	}),
+	async ({ token }): Promise<{ success: boolean; error?: string }> => {
+		try {
+			// Hash the provided token
+			const hashedToken = hashToken(token);
+
+			// Find token in database
+			const [tokenRecord] = await db
+				.select()
+				.from(adminMagicLinkToken)
+				.where(and(eq(adminMagicLinkToken.token, hashedToken), eq(adminMagicLinkToken.used, false)))
+				.limit(1);
+
+			if (!tokenRecord) {
+				return { success: false, error: 'Invalid or expired token' };
+			}
+
+			// Check if token is expired
+			if (Date.now() >= tokenRecord.expiresAt.getTime()) {
+				// Mark as used even though expired
+				await db
+					.update(adminMagicLinkToken)
+					.set({ used: true, usedAt: new Date() })
+					.where(eq(adminMagicLinkToken.id, tokenRecord.id));
+				return { success: false, error: 'Token has expired. Please request a new magic link.' };
+			}
+
+			// Mark token as used
+			await db
+				.update(adminMagicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(eq(adminMagicLinkToken.id, tokenRecord.id));
+
+			// Find user by email
+			const [userRecord] = await db
+				.select()
+				.from(user)
+				.where(eq(user.email, tokenRecord.email))
+				.limit(1);
+
+			if (!userRecord) {
+				return { success: false, error: 'User not found' };
+			}
+
+			// Create session with Lucia
+			const session = await lucia.createSession(userRecord.id, {
+				email: userRecord.email,
+				firstName: userRecord.firstName,
+				lastName: userRecord.lastName
+			});
+
+			// Set session cookie
+			const event = getRequestEvent();
+			if (event) {
+				const sessionCookie = lucia.createSessionCookie(session.id);
+				event.cookies.set(sessionCookie.name, sessionCookie.value, {
+					path: '.',
+					...sessionCookie.attributes
+				});
+			}
+
+			return { success: true };
+		} catch (error) {
+			console.error('Verify magic link error:', error);
+			const message = error instanceof Error ? error.message : 'Verification failed';
+			return { success: false, error: message };
 		}
 	}
 );
