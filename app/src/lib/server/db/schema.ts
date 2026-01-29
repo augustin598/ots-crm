@@ -126,6 +126,25 @@ export const client = sqliteTable('client', {
 		.default(sql`current_date`)
 });
 
+export const partner = sqliteTable('partner', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	partnerTenantId: text('partner_tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const project = sqliteTable('project', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -143,6 +162,22 @@ export const project = sqliteTable('project', {
 		.notNull()
 		.default(sql`current_date`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const projectPartner = sqliteTable('project_partner', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => project.id),
+	partnerId: text('partner_id')
+		.notNull()
+		.references(() => partner.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
 });
@@ -994,6 +1029,7 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	tenantUsers: many(tenantUser),
 	clients: many(client),
 	projects: many(project),
+	partners: many(partner),
 	tasks: many(task),
 	milestones: many(milestone),
 	documents: many(document),
@@ -1034,6 +1070,7 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 		fields: [client.tenantId],
 		references: [tenant.id]
 	}),
+	partners: many(partner),
 	projects: many(project),
 	tasks: many(task),
 	documents: many(document),
@@ -1054,6 +1091,7 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 		fields: [project.clientId],
 		references: [client.id]
 	}),
+	partners: many(projectPartner),
 	tasks: many(task),
 	milestones: many(milestone),
 	documents: many(document),

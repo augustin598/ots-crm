@@ -1,7 +1,7 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { syncSpvInvoicesForTenant } from '../../plugins/anaf-spv/sync';
+import { syncSpvInvoicesForTenant, syncSentInvoicesFromSpv } from '../../plugins/anaf-spv/sync';
 
 /**
  * Process SPV invoice sync - finds all tenants with active SPV integrations
@@ -23,6 +23,7 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 				success: true,
 				tenantsProcessed: 0,
 				totalImported: 0,
+				totalUpdated: 0,
 				totalSkipped: 0,
 				totalErrors: 0
 			};
@@ -30,6 +31,7 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 
 		let tenantsProcessed = 0;
 		let totalImported = 0;
+		let totalUpdated = 0;
 		let totalSkipped = 0;
 		let totalErrors = 0;
 		const errors: Array<{ tenantId: string; error: string }> = [];
@@ -39,15 +41,22 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 			try {
 				console.log(`[SPV-Sync] Syncing invoices for tenant ${integration.tenantId}...`);
 
-				const result = await syncSpvInvoicesForTenant(integration.tenantId, 'P', 2); // 'P' for received invoices, 2 days
+				// Sync received invoices (expenses from suppliers)
+				console.log(`[SPV-Sync] Syncing received invoices (expenses) for tenant ${integration.tenantId}...`);
+				const receivedResult = await syncSpvInvoicesForTenant(integration.tenantId, 'P', 2); // 'P' for received invoices, 2 days
+
+				// Sync sent invoices (invoices you created and sent to clients)
+				console.log(`[SPV-Sync] Syncing sent invoices for tenant ${integration.tenantId}...`);
+				const sentResult = await syncSentInvoicesFromSpv(integration.tenantId, 2); // 2 days
 
 				tenantsProcessed++;
-				totalImported += result.imported;
-				totalSkipped += result.skipped;
-				totalErrors += result.errors;
+				totalImported += receivedResult.imported + sentResult.imported;
+				totalUpdated += receivedResult.updated + sentResult.updated;
+				totalSkipped += receivedResult.skipped + sentResult.skipped;
+				totalErrors += receivedResult.errors + sentResult.errors;
 
 				console.log(
-					`[SPV-Sync] Tenant ${integration.tenantId}: ${result.imported} imported, ${result.skipped} skipped, ${result.errors} errors`
+					`[SPV-Sync] Tenant ${integration.tenantId}: ${receivedResult.imported + sentResult.imported} imported, ${receivedResult.updated + sentResult.updated} updated (${receivedResult.imported} received, ${sentResult.imported} sent), ${receivedResult.skipped + sentResult.skipped} skipped, ${receivedResult.errors + sentResult.errors} errors`
 				);
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -64,13 +73,14 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 		}
 
 		console.log(
-			`[SPV-Sync] Completed: ${tenantsProcessed} tenants processed, ${totalImported} invoices imported, ${totalSkipped} skipped, ${totalErrors} errors`
+			`[SPV-Sync] Completed: ${tenantsProcessed} tenants processed, ${totalImported} invoices imported, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalErrors} errors`
 		);
 
 		return {
 			success: true,
 			tenantsProcessed,
 			totalImported,
+			totalUpdated,
 			totalSkipped,
 			totalErrors,
 			errors: errors.length > 0 ? errors : undefined
@@ -81,6 +91,7 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 			success: false,
 			tenantsProcessed: 0,
 			totalImported: 0,
+			totalUpdated: 0,
 			totalSkipped: 0,
 			totalErrors: 0,
 			error: 'Failed to process SPV invoice sync'

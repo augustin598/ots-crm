@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { getClient, updateClient, getClients } from '$lib/remotes/clients.remote';
+	import {
+		getClient,
+		updateClient,
+		getClients,
+		getClientPartnerInfo,
+		setClientPartnerStatus
+	} from '$lib/remotes/clients.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -9,6 +15,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Switch } from '$lib/components/ui/switch';
+	import { untrack } from 'svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
@@ -17,12 +25,17 @@
 	const client = $derived(clientQuery.current);
 	const loading = $derived(clientQuery.loading);
 
+	const partnerInfoQuery = $derived(getClientPartnerInfo(clientId));
+	const partnerInfo = $derived(partnerInfoQuery.current);
+
 	let name = $state('');
 	let email = $state('');
 	let phone = $state('');
 	let saving = $state(false);
 	let loadingAnaf = $state(false);
 	let error = $state<string | null>(null);
+
+	let isPartner = $state(false);
 
 	// Romanian legal data
 	let companyType = $state('');
@@ -62,6 +75,14 @@
 		}
 	});
 
+	$effect(() => {
+		if (partnerInfo) {
+			untrack(() => {
+			isPartner = partnerInfo.isPartner;
+			});
+		}
+	});
+
 	async function handleAnafLookup() {
 		if (!cui) {
 			error = 'Please enter a CUI first';
@@ -94,6 +115,8 @@
 	}
 
 	async function handleSubmit() {
+		if (!clientId) return;
+
 		saving = true;
 		error = null;
 
@@ -118,6 +141,11 @@
 				country: country || undefined,
 				notes: notes || undefined
 			}).updates(clientQuery, getClient(clientId), getClients());
+
+			await setClientPartnerStatus({
+				clientId,
+				isPartner
+			});
 
 			goto(`/${tenantSlug}/clients/${clientId}`);
 		} catch (e) {
@@ -239,6 +267,24 @@
 						<div class="space-y-2">
 							<Label for="country">Country</Label>
 							<Input id="country" bind:value={country} type="text" />
+						</div>
+
+						<div class="flex items-center justify-between pt-2">
+							<div class="space-y-0.5">
+								<Label for="isPartner">Partner</Label>
+								<p class="text-xs text-muted-foreground">
+									{#if partnerInfo?.canBePartner}
+										Share this client with tenant {partnerInfo.partnerTenantName}
+									{:else}
+										Set VAT number to match another tenant to enable partner sharing.
+									{/if}
+								</p>
+							</div>
+							<Switch
+								id="isPartner"
+								bind:checked={isPartner}
+								disabled={!partnerInfo?.canBePartner}
+							/>
 						</div>
 					</div>
 

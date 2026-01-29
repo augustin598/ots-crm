@@ -23,27 +23,39 @@ const taskSchema = v.object({
 	assignedToUserId: v.optional(v.string())
 });
 
-export const getTask = query(
-	v.pipe(v.string(), v.minLength(1)),
-	async (taskId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
+export const getTask = query(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
 
-		const [task] = await db
-			.select()
-			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-			.limit(1);
+	const [task] = await db
+		.select()
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+		.limit(1);
 
-		if (!task) {
-			throw new Error('Task not found');
-		}
-
+	if (task) {
 		return task;
 	}
-);
+
+	// Check shared task
+	const [sharedTask] = await db
+		.select({ task: table.task })
+		.from(table.task)
+		.innerJoin(table.projectPartner, eq(table.task.projectId, table.projectPartner.projectId))
+		.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+		.where(
+			and(eq(table.task.id, taskId), eq(table.partner.partnerTenantId, event.locals.tenant.id))
+		)
+		.limit(1);
+
+	if (sharedTask) {
+		return sharedTask.task;
+	}
+
+	throw new Error('Task not found');
+});
 
 export const getTasks = query(
 	v.object({
@@ -65,7 +77,22 @@ export const getTasks = query(
 			throw new Error('Unauthorized');
 		}
 
-		let conditions: any = eq(table.task.tenantId, event.locals.tenant.id);
+		// Get shared project IDs
+		const sharedProjects = await db
+			.select({ id: table.projectPartner.projectId })
+			.from(table.projectPartner)
+			.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+			.where(eq(table.partner.partnerTenantId, event.locals.tenant.id));
+
+		const sharedProjectIds = sharedProjects.map((p) => p.id);
+
+		let conditions: any =
+			sharedProjectIds.length > 0
+				? or(
+						eq(table.task.tenantId, event.locals.tenant.id),
+						inArray(table.task.projectId, sharedProjectIds)
+					)
+				: eq(table.task.tenantId, event.locals.tenant.id);
 
 		// If user is a client user, filter by their client ID
 		if (event.locals.isClientUser && event.locals.client) {
@@ -115,10 +142,7 @@ export const getTasks = query(
 			const searchPattern = `%${filters.search}%`;
 			conditions = and(
 				conditions,
-				or(
-					like(table.task.title, searchPattern),
-					like(table.task.description, searchPattern)
-				)
+				or(like(table.task.title, searchPattern), like(table.task.description, searchPattern))
 			) as any;
 		}
 
@@ -175,7 +199,7 @@ export const getTasks = query(
 		}
 
 		// Build query
-		let queryBuilder = db.select().from(table.task).where(conditions);
+		let queryBuilder: any = db.select().from(table.task).where(conditions);
 
 		// Sorting
 		if (filters.sortBy) {
@@ -223,28 +247,69 @@ export const createTask = command(taskSchema, async (data) => {
 		throw new Error('Unauthorized');
 	}
 
+	let targetTenantId = event.locals.tenant.id;
+
+	if (data.projectId) {
+		// Check local project
+		const [project] = await db
+			.select()
+			.from(table.project)
+			.where(
+				and(
+					eq(table.project.id, data.projectId),
+					eq(table.project.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (project) {
+			targetTenantId = project.tenantId;
+		} else {
+			// Check shared project
+			const [sharedProject] = await db
+				.select({ tenantId: table.project.tenantId })
+				.from(table.projectPartner)
+				.innerJoin(table.project, eq(table.projectPartner.projectId, table.project.id))
+				.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+				.where(
+					and(
+						eq(table.projectPartner.projectId, data.projectId),
+						eq(table.partner.partnerTenantId, event.locals.tenant.id)
+					)
+				)
+				.limit(1);
+
+			if (sharedProject) {
+				targetTenantId = sharedProject.tenantId;
+			} else {
+				throw new Error('Project not found');
+			}
+		}
+	}
+
 	const taskId = generateTaskId();
 	// If client user, set status to pending-approval, otherwise use provided status or default to 'todo'
-	const status = event.locals.isClientUser
-		? 'pending-approval'
-		: data.status || 'todo';
-	
+	const status = event.locals.isClientUser ? 'pending-approval' : data.status || 'todo';
+
 	// If client user, set clientId from context
-	const clientId = event.locals.isClientUser && event.locals.client
-		? event.locals.client.id
-		: data.clientId || null;
+	const clientId =
+		event.locals.isClientUser && event.locals.client
+			? event.locals.client.id
+			: data.clientId || null;
 
 	// Get the highest position for this status to assign next position
 	const [maxPositionResult] = await db
-		.select({ maxPosition: sql<number>`coalesce(max(${table.task.position}), -1)`.as('maxPosition') })
+		.select({
+			maxPosition: sql<number>`coalesce(max(${table.task.position}), -1)`.as('maxPosition')
+		})
 		.from(table.task)
-		.where(and(eq(table.task.tenantId, event.locals.tenant.id), eq(table.task.status, status)));
+		.where(and(eq(table.task.tenantId, targetTenantId), eq(table.task.status, status)));
 
 	const nextPosition = (maxPositionResult?.maxPosition ?? -1) + 1;
 
 	await db.insert(table.task).values({
 		id: taskId,
-		tenantId: event.locals.tenant.id,
+		tenantId: targetTenantId,
 		projectId: data.projectId || null,
 		clientId: clientId,
 		milestoneId: data.milestoneId || null,
@@ -264,7 +329,7 @@ export const createTask = command(taskSchema, async (data) => {
 		id: watcherId,
 		taskId,
 		userId: event.locals.user.id,
-		tenantId: event.locals.tenant.id
+		tenantId: targetTenantId
 	});
 
 	// If task is assigned, auto-watch for assignee and send assignment email
@@ -275,7 +340,7 @@ export const createTask = command(taskSchema, async (data) => {
 			id: assigneeWatcherId,
 			taskId,
 			userId: data.assignedToUserId,
-			tenantId: event.locals.tenant.id
+			tenantId: targetTenantId
 		});
 
 		// Get assignee email
@@ -312,11 +377,26 @@ export const updateTask = command(
 
 		const { taskId, ...updateData } = data;
 
-		const [existing] = await db
+		let [existing] = await db
 			.select()
 			.from(table.task)
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
 			.limit(1);
+
+		if (!existing) {
+			// Check shared
+			const [sharedTask] = await db
+				.select({ task: table.task })
+				.from(table.task)
+				.innerJoin(table.projectPartner, eq(table.task.projectId, table.projectPartner.projectId))
+				.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+				.where(
+					and(eq(table.task.id, taskId), eq(table.partner.partnerTenantId, event.locals.tenant.id))
+				)
+				.limit(1);
+
+			if (sharedTask) existing = sharedTask.task;
+		}
 
 		if (!existing) {
 			throw new Error('Task not found');
@@ -363,7 +443,7 @@ export const updateTask = command(
 					and(
 						eq(table.taskWatcher.taskId, taskId),
 						eq(table.taskWatcher.userId, newAssigneeId),
-						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
+						eq(table.taskWatcher.tenantId, existing.tenantId)
 					)
 				)
 				.limit(1);
@@ -374,7 +454,7 @@ export const updateTask = command(
 					id: assigneeWatcherId,
 					taskId,
 					userId: newAssigneeId,
-					tenantId: event.locals.tenant.id
+					tenantId: existing.tenantId
 				});
 			}
 
@@ -410,7 +490,8 @@ export const updateTask = command(
 
 			if (assignee?.email) {
 				try {
-					const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
+					const assigneeName =
+						`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
 					await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
 				} catch (error) {
 					console.error('Failed to send task assignment email:', error);
@@ -547,50 +628,47 @@ export const updateTaskPosition = command(
 	}
 );
 
-export const deleteTask = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (taskId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Get task to know its status and position
-		const [task] = await db
-			.select()
-			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!task) {
-			throw new Error('Task not found');
-		}
-
-		// Use transaction to update positions after deletion
-		await db.transaction(async (tx) => {
-			// Delete the task
-			await tx.delete(table.task).where(eq(table.task.id, taskId));
-
-			// Decrease positions of tasks after the deleted task's position
-			if (task.status && task.position !== null) {
-				await tx
-					.update(table.task)
-					.set({
-						position: sql`${table.task.position} - 1`
-					})
-					.where(
-						and(
-							eq(table.task.tenantId, event.locals.tenant.id),
-							eq(table.task.status, task.status),
-							sql`${table.task.position} > ${task.position}`
-						)
-					);
-			}
-		});
-
-		return { success: true };
+export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	// Get task to know its status and position
+	const [task] = await db
+		.select()
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!task) {
+		throw new Error('Task not found');
+	}
+
+	// Use transaction to update positions after deletion
+	await db.transaction(async (tx) => {
+		// Delete the task
+		await tx.delete(table.task).where(eq(table.task.id, taskId));
+
+		// Decrease positions of tasks after the deleted task's position
+		if (task.status && task.position !== null) {
+			await tx
+				.update(table.task)
+				.set({
+					position: sql`${table.task.position} - 1`
+				})
+				.where(
+					and(
+						eq(table.task.tenantId, event.locals.tenant.id),
+						eq(table.task.status, task.status),
+						sql`${table.task.position} > ${task.position}`
+					)
+				);
+		}
+	});
+
+	return { success: true };
+});
 
 /**
  * Watch a task - receive notifications for task changes
@@ -812,41 +890,38 @@ export const approveTask = command(
 /**
  * Reject a task (change status to cancelled)
  */
-export const rejectTask = command(
-	v.pipe(v.string(), v.minLength(1)),
-	async (taskId) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Only tenant users (not client users) can reject tasks
-		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized - only administrators can reject tasks');
-		}
-
-		const [existing] = await db
-			.select()
-			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!existing) {
-			throw new Error('Task not found');
-		}
-
-		if (existing.status !== 'pending-approval') {
-			throw new Error('Task is not pending approval');
-		}
-
-		await db
-			.update(table.task)
-			.set({
-				status: 'cancelled',
-				updatedAt: new Date()
-			})
-			.where(eq(table.task.id, taskId));
-
-		return { success: true, taskId };
+export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
 	}
-);
+
+	// Only tenant users (not client users) can reject tasks
+	if (event.locals.isClientUser) {
+		throw new Error('Unauthorized - only administrators can reject tasks');
+	}
+
+	const [existing] = await db
+		.select()
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!existing) {
+		throw new Error('Task not found');
+	}
+
+	if (existing.status !== 'pending-approval') {
+		throw new Error('Task is not pending approval');
+	}
+
+	await db
+		.update(table.task)
+		.set({
+			status: 'cancelled',
+			updatedAt: new Date()
+		})
+		.where(eq(table.task.id, taskId));
+
+	return { success: true, taskId };
+});

@@ -1,6 +1,12 @@
 <script lang="ts">
-	import { getProject, updateProject, getProjects } from '$lib/remotes/projects.remote';
-	import { getClients } from '$lib/remotes/clients.remote';
+	import {
+		getProject,
+		updateProject,
+		getProjects,
+		getProjectPartners,
+		updateProjectPartner
+	} from '$lib/remotes/projects.remote';
+	import { getClients, getTenantPartners } from '$lib/remotes/clients.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { CURRENCIES, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
@@ -21,7 +27,20 @@
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
 
+	const tenantPartnersQuery = getTenantPartners();
+	const tenantPartners = $derived(tenantPartnersQuery.current || []);
+
+	const projectPartnersQuery = $derived(getProjectPartners(projectId));
+	const projectPartners = $derived(projectPartnersQuery.current);
+
 	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+
+	const partnerOptions = $derived(
+		tenantPartners.map((p) => ({
+			value: p.id,
+			label: `${p.clientName} – ${p.partnerTenantName}`
+		}))
+	);
 
 	const invoiceSettingsQuery = getInvoiceSettings();
 	const invoiceSettings = $derived(invoiceSettingsQuery.current);
@@ -37,6 +56,9 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
+	let partnerId = $state('');
+	let partnerInitialized = $state(false);
+
 	$effect(() => {
 		if (project) {
 			name = project.name || '';
@@ -47,6 +69,18 @@
 			endDate = project.endDate ? new Date(project.endDate).toISOString().split('T')[0] : '';
 			budget = project.budget ? (project.budget / 100).toString() : '';
 			currency = (project.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
+		}
+	});
+
+	$effect(() => {
+		if (!partnerInitialized && projectPartners) {
+			if (projectPartners.length > 0) {
+				const first = projectPartners[0];
+				partnerId = first.partnerId;
+			} else {
+				partnerId = '';
+			}
+			partnerInitialized = true;
 		}
 	});
 
@@ -72,6 +106,11 @@
 				budget: budget ? parseFloat(budget) : undefined,
 				currency: currency || undefined
 			}).updates(projectQuery, getProject(projectId!), getProjects(undefined));
+
+			await updateProjectPartner({
+				projectId: projectId!,
+				partnerId: partnerId || undefined
+			}).updates(getProjectPartners(projectId!));
 
 			goto(`/${tenantSlug}/projects/${projectId}`);
 		} catch (e) {
@@ -106,6 +145,15 @@
 							options={clientOptions}
 							placeholder="Select a client (optional)"
 							searchPlaceholder="Search clients..."
+						/>
+					</div>
+					<div class="space-y-2">
+						<Label for="partnerId">Partner</Label>
+						<Combobox
+							bind:value={partnerId}
+							options={partnerOptions}
+							placeholder="Select a partner (optional)"
+							searchPlaceholder="Search partners..."
 						/>
 					</div>
 					<div class="space-y-2">

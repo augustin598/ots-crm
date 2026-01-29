@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { getProject, getProjectTeamMembers, updateProjectTeamMembers } from '$lib/remotes/projects.remote';
+	import {
+		getProject,
+		getProjectTeamMembers,
+		updateProjectTeamMembers,
+		getProjectPartners
+	} from '$lib/remotes/projects.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getMilestones, createMilestone, updateMilestone, deleteMilestone } from '$lib/remotes/milestones.remote';
@@ -65,6 +70,11 @@
 	// Get team members for the project
 	const teamMembersQuery = $derived(getProjectTeamMembers(projectId));
 	const teamMembers = $derived(teamMembersQuery.current || []);
+
+	// Get project partners
+	const projectPartnersQuery = $derived(getProjectPartners(projectId));
+	const projectPartners = $derived(projectPartnersQuery.current || []);
+	const activePartner = $derived(projectPartners[0]);
 
 	// Get all tenant users for the edit dialog
 	const tenantUsersQuery = getTenantUsers();
@@ -310,6 +320,40 @@
 						</p>
 					</div>
 				</div>
+			</Card>
+		</div>
+
+		<!-- Stakeholders Section -->
+		<div class="grid gap-4 md:grid-cols-2 mb-6">
+			<Card class="p-6">
+				<h3 class="text-lg font-semibold mb-4">Client</h3>
+				{#if client}
+					<div class="space-y-1">
+						<p class="font-semibold">{client.name}</p>
+						{#if client.email}
+							<p class="text-sm text-muted-foreground">{client.email}</p>
+						{/if}
+						{#if client.phone}
+							<p class="text-sm text-muted-foreground">{client.phone}</p>
+						{/if}
+					</div>
+				{:else}
+					<p class="text-muted-foreground">No client assigned.</p>
+				{/if}
+			</Card>
+
+			<Card class="p-6">
+				<h3 class="text-lg font-semibold mb-4">Partner</h3>
+				{#if activePartner}
+					<div class="space-y-1">
+						<p class="font-semibold">{activePartner.clientName}</p>
+						<p class="text-sm text-muted-foreground">
+							Shared with: <span class="font-medium">{activePartner.partnerTenantName}</span>
+						</p>
+					</div>
+				{:else}
+					<p class="text-muted-foreground">No partner assigned.</p>
+				{/if}
 			</Card>
 		</div>
 

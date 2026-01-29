@@ -5,7 +5,8 @@
 		getAnafSpvAuthUrl,
 		connectAnafSpvWithOAuth,
 		disconnectAnafSpv,
-		syncInvoicesFromSpv
+		syncInvoicesFromSpv,
+		syncSentInvoicesFromSpv
 	} from '$lib/remotes/anaf-spv.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -38,9 +39,9 @@
 
 	// Sync states
 	let syncing = $state(false);
-	let syncFilter = $state<'P' | 'T'>('P');
+	let syncFilter = $state<'P' | 'T' | 'both'>('P');
 	let syncDays = $state(60);
-	let syncResult = $state<{ imported: number; skipped: number; errors: number } | null>(null);
+	let syncResult = $state<{ imported: number; updated: number; skipped: number; errors: number } | null>(null);
 
 	// Handle OAuth callback from URL parameters
 	$effect(() => {
@@ -155,15 +156,49 @@
 		syncResult = null;
 
 		try {
-			const result = await syncInvoicesFromSpv({
-				filter: syncFilter,
-				days: syncDays
-			});
-			syncResult = {
-				imported: result.imported,
-				skipped: result.skipped,
-				errors: result.errors
-			};
+			if (syncFilter === 'both') {
+				// Sync both received and sent invoices
+				const [receivedResult, sentResult] = await Promise.all([
+					syncInvoicesFromSpv({
+						filter: 'P',
+						days: syncDays
+					}),
+					syncSentInvoicesFromSpv({
+						days: syncDays
+					})
+				]);
+				
+				syncResult = {
+					imported: receivedResult.imported + sentResult.imported,
+					updated: receivedResult.updated + sentResult.updated,
+					skipped: receivedResult.skipped + sentResult.skipped,
+					errors: receivedResult.errors + sentResult.errors
+				};
+			} else if (syncFilter === 'T') {
+				// Sync only sent invoices
+				const result = await syncSentInvoicesFromSpv({
+					days: syncDays
+				});
+				syncResult = {
+					imported: result.imported,
+					updated: result.updated,
+					skipped: result.skipped,
+					errors: result.errors
+				};
+			} else {
+				// Sync only received invoices (default 'P')
+				const result = await syncInvoicesFromSpv({
+					filter: 'P',
+					days: syncDays
+				});
+				syncResult = {
+					imported: result.imported,
+					updated: result.updated || 0,
+					skipped: result.skipped,
+					errors: result.errors
+				};
+			}
+			
 			success = true;
 			setTimeout(() => {
 				success = false;
@@ -239,8 +274,9 @@
 				<div class="space-y-4">
 					<h3 class="text-lg font-semibold">Sync Invoices from SPV</h3>
 					<p class="text-sm text-muted-foreground">
-						Download invoices from ANAF SPV. Choose to sync invoices from suppliers (received) or
-						sent invoices.
+						Download invoices from ANAF SPV. Choose to sync received invoices (creates expenses & suppliers),
+						sent invoices (creates invoices & clients), or both. Client and supplier data is automatically
+						updated with latest information from each invoice.
 					</p>
 
 					<div class="space-y-4">
@@ -252,8 +288,9 @@
 								disabled={syncing}
 								class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
 							>
-								<option value="P">From Suppliers (Received)</option>
-								<option value="T">Sent Invoices</option>
+								<option value="P">From Suppliers (Received) - Creates Expenses</option>
+								<option value="T">Sent Invoices - Creates Invoices & Clients</option>
+								<option value="both">Both (Received & Sent)</option>
 							</select>
 						</div>
 
@@ -302,7 +339,7 @@
 			{#if success && syncResult}
 				<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
 					<p class="text-sm text-green-800 dark:text-green-200">
-						Successfully synced {syncResult.imported} invoice{syncResult.imported === 1 ? '' : 's'}
+						Successfully synced: {syncResult.imported} new, {syncResult.updated} updated
 						{syncResult.skipped > 0 ? `, ${syncResult.skipped} skipped` : ''}
 						{syncResult.errors > 0 ? `, ${syncResult.errors} error${syncResult.errors === 1 ? '' : 's'}` : ''}!
 					</p>

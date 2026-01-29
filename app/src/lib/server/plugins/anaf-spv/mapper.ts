@@ -35,13 +35,25 @@ export function mapUblInvoiceToCrm(
 		: 1900;
 
 	// Map line items
-	const lineItems = ublData.lineItems.map((item) => ({
-		invoiceId: '', // Will be set after invoice is created
-		description: item.description,
-		quantity: item.quantity,
-		rate: Math.round(item.unitPrice * 100), // Convert to cents
-		amount: Math.round(item.amount * 100) // Convert to cents
-	}));
+	const lineItems = ublData.lineItems.map((item, index) => {
+		const lineItemData = {
+			invoiceId: '', // Will be set after invoice is created
+			description: item.description,
+			quantity: item.quantity,
+			rate: Math.round(item.unitPrice * 100), // Convert to cents
+			amount: Math.round(item.amount * 100), // Convert to cents
+			taxRate: item.taxRate !== undefined && item.taxRate !== null ? Math.round(item.taxRate * 100) : null // Convert percentage to basis points (21% = 2100)
+		};
+		
+		// Log tax rate conversion for debugging
+		if (item.taxRate !== undefined && item.taxRate !== null) {
+			console.log(`[UBL Mapper] Line item ${index + 1}: Tax rate ${item.taxRate}% → ${lineItemData.taxRate} basis points`);
+		} else {
+			console.log(`[UBL Mapper] Line item ${index + 1}: No tax rate found in UBL data`);
+		}
+		
+		return lineItemData;
+	});
 
 	return {
 		tenantId,
@@ -176,28 +188,30 @@ export function mapCrmInvoiceToUbl(
  */
 export function mapAnafCompanyToClient(
 	anafData: AnafCompanyData,
-	tenantId: string
+	tenantId: string,
+	bankInfo?: { iban?: string; bankName?: string }
 ): Omit<Client, 'id' | 'createdAt' | 'updatedAt'> {
 	return {
 		tenantId,
 		name: anafData.name,
-		email: undefined,
-		phone: anafData.phone || undefined,
-		address: anafData.address || undefined,
-		city: anafData.city || undefined,
-		county: anafData.county || undefined,
-		postalCode: anafData.postalCode || undefined,
-		country: anafData.country || 'România',
+		email: null,
+		phone: anafData.phone || null,
+		status: anafData.status ? 'active' : 'prospect',
+		companyType: null,
 		cui: anafData.vat_id.replace(/^RO/i, ''), // Store without RO prefix
-		vatCode: anafData.tax_id || anafData.vat_id, // Use tax_id if available, otherwise vat_id
-		registrationNumber: anafData.reg_no || undefined,
-		tradeRegister: undefined,
-		legalRepresentative: undefined,
-		iban: undefined,
-		bankName: undefined,
-		companyType: undefined,
-		notes: undefined,
-		isActive: anafData.status
+		registrationNumber: anafData.reg_no || null,
+		tradeRegister: null,
+		vatNumber: anafData.tax_id || anafData.vat_id, // Use tax_id if available, otherwise vat_id
+		legalRepresentative: null,
+		iban: bankInfo?.iban || null,
+		bankName: bankInfo?.bankName || null,
+		address: anafData.address || null,
+		city: anafData.city || null,
+		county: anafData.county || null,
+		postalCode: anafData.postal_code || null,
+		country: anafData.country || 'România',
+		keezPartnerId: null,
+		notes: null
 	};
 }
 
@@ -259,7 +273,8 @@ export function mapUblInvoiceToExpense(
  */
 export function mapAnafCompanyToSupplier(
 	anafData: AnafCompanyData,
-	tenantId: string
+	tenantId: string,
+	bankInfo?: { iban?: string; bankName?: string }
 ): Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'> {
 	return {
 		tenantId,
@@ -276,8 +291,8 @@ export function mapAnafCompanyToSupplier(
 		registrationNumber: anafData.reg_no || null,
 		tradeRegister: anafData.reg_no || null,
 		legalRepresentative: null,
-		iban: null,
-		bankName: null,
+		iban: bankInfo?.iban || null,
+		bankName: bankInfo?.bankName || null,
 		companyType: null,
 		notes: null
 	};
@@ -290,4 +305,13 @@ export function mapAnafCompanyToSupplier(
 export function normalizeVatId(vatId: string): string {
 	// Remove RO prefix and return clean CUI
 	return vatId.replace(/^RO/i, '').trim();
+}
+
+/**
+ * Normalize invoice number for comparison
+ * Handles different formats like NTS00144 vs NTS-00144
+ */
+export function normalizeInvoiceNumber(invoiceNumber: string): string {
+	// Remove all dashes and spaces for comparison
+	return invoiceNumber.replace(/[-\s]/g, '').toUpperCase();
 }

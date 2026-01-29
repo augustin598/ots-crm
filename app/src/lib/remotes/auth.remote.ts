@@ -12,6 +12,9 @@ import { env } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import type { User } from '../server/db/schema';
 import { sendAdminMagicLinkEmail } from '../server/email';
+import { verifyAdminMagicLinkToken } from '../server/auth';
+import { generateSessionToken, createSession, setSessionTokenCookie, invalidateSession, deleteSessionTokenCookie } from '../server/auth';
+
 
 function generateUserId(): string {
 	const bytes = randomBytes(15);
@@ -116,21 +119,12 @@ export const login = command(
 				return { success: false, error: 'Invalid email or password' };
 			}
 
-			// Create session with Lucia
-			const session = await lucia.createSession(userRecord.id, {
-				email: userRecord.email,
-				firstName: userRecord.firstName,
-				lastName: userRecord.lastName
-			});
-
-			// Set session cookie
+			// Create session with custom auth system (not Lucia)
 			const event = getRequestEvent();
 			if (event) {
-				const sessionCookie = lucia.createSessionCookie(session.id);
-				event.cookies.set(sessionCookie.name, sessionCookie.value, {
-					path: '.',
-					...sessionCookie.attributes
-				});
+				const sessionToken = generateSessionToken();
+				const session = await createSession(sessionToken, userRecord.id);
+				setSessionTokenCookie(event, sessionToken, session.expiresAt);
 			}
 
 			return { success: true, user: userRecord };
@@ -151,15 +145,10 @@ export const logout = command(v.void(), async (): Promise<{ success: boolean; er
 			return { success: false, error: 'No active session' };
 		}
 
-		// Invalidate session with Lucia
-		await lucia.invalidateSession(event.locals.session.id);
+		await invalidateSession(event.locals.session.id);
 
 		// Clear session cookie
-		const sessionCookie = lucia.createBlankSessionCookie();
-		event.cookies.set(sessionCookie.name, sessionCookie.value, {
-			path: '.',
-			...sessionCookie.attributes
-		});
+		deleteSessionTokenCookie(event);
 
 		return { success: true };
 	} catch (error) {
@@ -268,65 +257,9 @@ export const verifyMagicLink = command(
 	}),
 	async ({ token }): Promise<{ success: boolean; error?: string }> => {
 		try {
-			// Hash the provided token
-			const hashedToken = hashToken(token);
-
-			// Find token in database
-			const [tokenRecord] = await db
-				.select()
-				.from(adminMagicLinkToken)
-				.where(and(eq(adminMagicLinkToken.token, hashedToken), eq(adminMagicLinkToken.used, false)))
-				.limit(1);
-
-			if (!tokenRecord) {
-				return { success: false, error: 'Invalid or expired token' };
-			}
-
-			// Check if token is expired
-			if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-				// Mark as used even though expired
-				await db
-					.update(adminMagicLinkToken)
-					.set({ used: true, usedAt: new Date() })
-					.where(eq(adminMagicLinkToken.id, tokenRecord.id));
-				return { success: false, error: 'Token has expired. Please request a new magic link.' };
-			}
-
-			// Mark token as used
-			await db
-				.update(adminMagicLinkToken)
-				.set({ used: true, usedAt: new Date() })
-				.where(eq(adminMagicLinkToken.id, tokenRecord.id));
-
-			// Find user by email
-			const [userRecord] = await db
-				.select()
-				.from(user)
-				.where(eq(user.email, tokenRecord.email))
-				.limit(1);
-
-			if (!userRecord) {
-				return { success: false, error: 'User not found' };
-			}
-
-			// Create session with Lucia
-			const session = await lucia.createSession(userRecord.id, {
-				email: userRecord.email,
-				firstName: userRecord.firstName,
-				lastName: userRecord.lastName
-			});
-
-			// Set session cookie
 			const event = getRequestEvent();
-			if (event) {
-				const sessionCookie = lucia.createSessionCookie(session.id);
-				event.cookies.set(sessionCookie.name, sessionCookie.value, {
-					path: '.',
-					...sessionCookie.attributes
-				});
-			}
-
-			return { success: true };
+			// Use the server-side helper function
+			return await verifyAdminMagicLinkToken(token, event || undefined);
 		} catch (error) {
 			console.error('Verify magic link error:', error);
 			const message = error instanceof Error ? error.message : 'Verification failed';

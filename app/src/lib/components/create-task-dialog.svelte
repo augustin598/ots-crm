@@ -20,9 +20,11 @@
 		defaultProjectId?: string;
 		defaultClientId?: string;
 		defaultMilestoneId?: string;
+		defaultDueDate?: string;
+		isClient?: boolean;
 	}
 
-	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId }: Props = $props();
+	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, isClient = false }: Props = $props();
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
@@ -61,7 +63,7 @@
 	let projectId = $state(defaultProjectId || '');
 	let milestoneId = $state(defaultMilestoneId || '');
 	let previousProjectId = $state(defaultProjectId || '');
-	let status = $state('todo');
+	let status = $state(isClient ? 'pending-approval' : 'todo');
 	let priority = $state('medium');
 	let assignedToUserId = $state('');
 	let dueDate = $state('');
@@ -84,10 +86,10 @@
 			projectId = defaultProjectId || '';
 			previousProjectId = defaultProjectId || '';
 			milestoneId = defaultMilestoneId || '';
-			status = 'todo';
+			status = isClient ? 'pending-approval' : 'todo';
 			priority = 'medium';
 			assignedToUserId = '';
-			dueDate = '';
+			dueDate = defaultDueDate || '';
 			error = null;
 		}
 	});
@@ -148,15 +150,17 @@
 				<Label for="description">Description</Label>
 				<Textarea id="description" bind:value={description} placeholder="Add details about the task..." />
 			</div>
-			<div class="grid gap-2">
-				<Label for="client">Client</Label>
-				<Combobox
-					bind:value={clientId}
-					options={clientOptions}
-					placeholder="Select a client (optional)"
-					searchPlaceholder="Search clients..."
-				/>
-			</div>
+			{#if !isClient}
+				<div class="grid gap-2">
+					<Label for="client">Client</Label>
+					<Combobox
+						bind:value={clientId}
+						options={clientOptions}
+						placeholder="Select a client (optional)"
+						searchPlaceholder="Search clients..."
+					/>
+				</div>
+			{/if}
 			<div class="grid gap-2">
 				<Label for="project">Project</Label>
 				<Combobox
@@ -187,30 +191,32 @@
 				</div>
 			{/if}
 			<div class="grid grid-cols-2 gap-4">
-				<div class="grid gap-2">
-					<Label for="status">Status</Label>
-					<Select type="single" bind:value={status}>
-						<SelectTrigger id="status">
-							{#if status === 'todo'}
-								To Do
-							{:else if status === 'in-progress'}
-								In Progress
-							{:else if status === 'review'}
-								Review
-							{:else if status === 'done'}
-								Done
-							{:else}
-								Select status
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="todo">To Do</SelectItem>
-							<SelectItem value="in-progress">In Progress</SelectItem>
-							<SelectItem value="review">Review</SelectItem>
-							<SelectItem value="done">Done</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
+				{#if !isClient}
+					<div class="grid gap-2">
+						<Label for="status">Status</Label>
+						<Select type="single" bind:value={status}>
+							<SelectTrigger id="status">
+								{#if status === 'todo'}
+									To Do
+								{:else if status === 'in-progress'}
+									In Progress
+								{:else if status === 'review'}
+									Review
+								{:else if status === 'done'}
+									Done
+								{:else}
+									Select status
+								{/if}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="todo">To Do</SelectItem>
+								<SelectItem value="in-progress">In Progress</SelectItem>
+								<SelectItem value="review">Review</SelectItem>
+								<SelectItem value="done">Done</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+				{/if}
 				<div class="grid gap-2">
 					<Label for="priority">Priority</Label>
 					<Select type="single" bind:value={priority}>
@@ -237,28 +243,30 @@
 				</div>
 			</div>
 			<div class="grid grid-cols-2 gap-4">
-				<div class="grid gap-2">
-					<Label for="assignee">Assignee</Label>
-					<Select type="single" bind:value={assignedToUserId}>
-						<SelectTrigger id="assignee">
-							{#if assignedToUserId && userMap.has(assignedToUserId)}
-								{userMap.get(assignedToUserId)}
-							{:else if assignedToUserId}
-								{assignedToUserId.substring(0, 8)}...
-							{:else}
-								Select a user
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="">None</SelectItem>
-							{#each users as user}
-								<SelectItem value={user.id}>
-									{`${user.firstName} ${user.lastName}`.trim() || user.email}
-								</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
-				</div>
+				{#if !isClient}
+					<div class="grid gap-2">
+						<Label for="assignee">Assignee</Label>
+						<Select type="single" bind:value={assignedToUserId}>
+							<SelectTrigger id="assignee">
+								{#if assignedToUserId && userMap.has(assignedToUserId)}
+									{userMap.get(assignedToUserId)}
+								{:else if assignedToUserId}
+									{assignedToUserId.substring(0, 8)}...
+								{:else}
+									Select a user
+								{/if}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="">None</SelectItem>
+								{#each users as user}
+									<SelectItem value={user.id}>
+										{`${user.firstName} ${user.lastName}`.trim() || user.email}
+									</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+					</div>
+				{/if}
 				<div class="grid gap-2">
 					<Label for="dueDate">Due Date</Label>
 					<Input id="dueDate" type="date" bind:value={dueDate} />

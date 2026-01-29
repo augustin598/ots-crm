@@ -1,9 +1,10 @@
 import type { RequestEvent } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+import { lucia } from './lucia';
 
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
@@ -75,7 +76,10 @@ export async function invalidateSession(sessionId: string) {
 export function setSessionTokenCookie(event: RequestEvent, token: string, expiresAt: Date) {
 	event.cookies.set(sessionCookieName, token, {
 		expires: expiresAt,
-		path: '/'
+		path: '/',
+		httpOnly: true,
+		sameSite: 'lax',
+		secure: event.url.protocol === 'https:'
 	});
 }
 
@@ -83,4 +87,80 @@ export function deleteSessionTokenCookie(event: RequestEvent) {
 	event.cookies.delete(sessionCookieName, {
 		path: '/'
 	});
+}
+
+/**
+ * Server-side helper function to verify admin magic link token
+ * This can be called from both server load functions and commands
+ */
+export async function verifyAdminMagicLinkToken(
+	token: string,
+	event?: RequestEvent
+): Promise<{ success: boolean; error?: string }> {
+	function hashToken(token: string): string {
+		return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
+	}
+
+	try {
+		// Hash the provided token
+		const hashedToken = hashToken(token);
+
+		// Find token in database
+		const [tokenRecord] = await db
+			.select()
+			.from(table.adminMagicLinkToken)
+			.where(
+				and(
+					eq(table.adminMagicLinkToken.token, hashedToken),
+					eq(table.adminMagicLinkToken.used, false)
+				)
+			)
+			.limit(1);
+
+		if (!tokenRecord) {
+			return { success: false, error: 'Invalid or expired token' };
+		}
+
+		// Check if token is expired
+		if (Date.now() >= tokenRecord.expiresAt.getTime()) {
+			// Mark as used even though expired
+			await db
+				.update(table.adminMagicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(eq(table.adminMagicLinkToken.id, tokenRecord.id));
+			return { success: false, error: 'Token has expired. Please request a new magic link.' };
+		}
+
+		// Mark token as used
+		await db
+			.update(table.adminMagicLinkToken)
+			.set({ used: true, usedAt: new Date() })
+			.where(eq(table.adminMagicLinkToken.id, tokenRecord.id));
+
+		// Find user by email
+		const [userRecord] = await db
+			.select()
+			.from(table.user)
+			.where(eq(table.user.email, tokenRecord.email))
+			.limit(1);
+
+		if (!userRecord) {
+			return { success: false, error: 'User not found' };
+		}
+
+		// Create session with Lucia
+
+		// Set session cookie if event is provided
+		if (event) {
+			const sessionToken = generateSessionToken();
+			const session = await createSession(sessionToken, userRecord.id);
+			setSessionTokenCookie(event, sessionToken, session.expiresAt);
+		}
+
+		return { success: true };
+	} catch (error) {
+		console.error('Verify admin magic link error:', error);
+		const message = error instanceof Error ? error.message : 'Verification failed';
+		return { success: false, error: message };
+	}
 }

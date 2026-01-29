@@ -101,6 +101,7 @@
 
 <CreateTaskDialog
 	open={createDialogOpen}
+	isClient={true}
 	onSuccess={() => {
 		createDialogOpen = false;
 		tasksQuery.refresh();

@@ -32,16 +32,21 @@ export interface ParsedUblInvoice {
 		postalCode?: string;
 		country?: string;
 		email?: string;
+		iban?: string;
+		bankName?: string;
 	};
 	customer: {
 		name: string;
 		vatId: string;
+		taxId?: string;
 		address?: string;
 		city?: string;
 		county?: string;
 		postalCode?: string;
 		country?: string;
 		email?: string;
+		iban?: string;
+		bankName?: string;
 	};
 	lineItems: Array<{
 		description: string;
@@ -99,20 +104,32 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 		'AccountingSupplierParty'
 	)[0];
 	const supplierPartyInfo = supplierParty?.getElementsByTagNameNS(UBL_NS.cac, 'Party')[0];
+	
+	// Try to get CUI from PartyIdentification first (more reliable)
+	const supplierPartyIdentification = supplierPartyInfo?.getElementsByTagNameNS(
+		UBL_NS.cac,
+		'PartyIdentification'
+	)[0];
+	const supplierCuiFromIdentification = getText(supplierPartyIdentification, 'ID', UBL_NS.cbc);
+	
 	const supplierLegalEntity = supplierPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyLegalEntity'
 	)[0];
 	// Supplier name comes from PartyLegalEntity -> RegistrationName
 	const supplierName = getText(supplierLegalEntity, 'RegistrationName', UBL_NS.cbc);
-	// CompanyID in PartyLegalEntity is the registration number (e.g., "J3318002021")
+	// CompanyID in PartyLegalEntity is the registration number (e.g., "J2016002611238")
 	const supplierRegistrationNumber = getText(supplierLegalEntity, 'CompanyID', UBL_NS.cbc);
+	
 	const supplierTaxScheme = supplierPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyTaxScheme'
 	)[0];
-	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO44938033")
-	const supplierVatId = getText(supplierTaxScheme, 'CompanyID', UBL_NS.cbc);
+	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO2864518")
+	const supplierVatIdFromTaxScheme = getText(supplierTaxScheme, 'CompanyID', UBL_NS.cbc);
+	
+	// Use PartyIdentification CUI if available, otherwise use TaxScheme VAT ID
+	const supplierVatId = supplierCuiFromIdentification || supplierVatIdFromTaxScheme;
 
 	const supplierAddress = supplierPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const supplierStreet = getText(supplierAddress, 'StreetName', UBL_NS.cbc);
@@ -128,24 +145,60 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 	const supplierContact = supplierPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'Contact')[0];
 	const supplierEmail = getText(supplierContact, 'ElectronicMail', UBL_NS.cbc);
 
+	// Get payment means (bank information) - typically belongs to supplier/payee
+	const paymentMeans = doc.documentElement.getElementsByTagNameNS(UBL_NS.cac, 'PaymentMeans')[0];
+	const payeeFinancialAccount = paymentMeans?.getElementsByTagNameNS(
+		UBL_NS.cac,
+		'PayeeFinancialAccount'
+	)[0];
+	const supplierIban = getText(payeeFinancialAccount, 'ID', UBL_NS.cbc);
+	const supplierBankName = getText(payeeFinancialAccount, 'Name', UBL_NS.cbc);
+
 	// Get customer party
 	const customerParty = doc.documentElement.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'AccountingCustomerParty'
 	)[0];
 	const customerPartyInfo = customerParty?.getElementsByTagNameNS(UBL_NS.cac, 'Party')[0];
+	
 	const customerLegalEntity = customerPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyLegalEntity'
 	)[0];
 	// Customer name comes from PartyLegalEntity -> RegistrationName
 	const customerName = getText(customerLegalEntity, 'RegistrationName', UBL_NS.cbc);
+	// CompanyID in PartyLegalEntity is the registration number (e.g., "J07/297/2022")
+	const customerRegistrationNumber = getText(customerLegalEntity, 'CompanyID', UBL_NS.cbc);
+	
 	const customerTaxScheme = customerPartyInfo?.getElementsByTagNameNS(
 		UBL_NS.cac,
 		'PartyTaxScheme'
 	)[0];
-	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO39988493")
-	const customerVatId = getText(customerTaxScheme, 'CompanyID', UBL_NS.cbc);
+	// CompanyID in PartyTaxScheme is the VAT ID (e.g., "RO44938033") - THIS IS THE CORRECT ONE
+	const customerVatIdFromTaxScheme = getText(customerTaxScheme, 'CompanyID', UBL_NS.cbc);
+	
+	// PartyIdentification might exist but could contain registration number
+	const customerPartyIdentification = customerPartyInfo?.getElementsByTagNameNS(
+		UBL_NS.cac,
+		'PartyIdentification'
+	)[0];
+	const customerIdFromIdentification = getText(customerPartyIdentification, 'ID', UBL_NS.cbc);
+	
+	// ALWAYS prefer PartyTaxScheme CompanyID (the VAT ID), only use PartyIdentification if it starts with RO (is a VAT ID)
+	let customerVatId = customerVatIdFromTaxScheme;
+	if (!customerVatId && customerIdFromIdentification && /^RO\d+$/i.test(customerIdFromIdentification)) {
+		// Only use PartyIdentification if it looks like a VAT ID (RO + numbers)
+		customerVatId = customerIdFromIdentification;
+	} else if (!customerVatId && customerIdFromIdentification && /^\d+$/.test(customerIdFromIdentification)) {
+		// Or if it's just numbers (CUI without RO prefix)
+		customerVatId = customerIdFromIdentification;
+	}
+	
+	// If still no VAT ID found, use whatever we have (but log warning)
+	if (!customerVatId) {
+		customerVatId = customerIdFromIdentification || '';
+		console.warn(`[UBL Parser] No valid VAT ID found for customer ${customerName}, using: ${customerVatId}`);
+	}
 
 	const customerAddress = customerPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];
 	const customerStreet = getText(customerAddress, 'StreetName', UBL_NS.cbc);
@@ -171,22 +224,25 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 		const lineExtensionAmount = getNumber(line, 'LineExtensionAmount', UBL_NS.cbc);
 
 		const item = line.getElementsByTagNameNS(UBL_NS.cac, 'Item')[0];
-		// Description comes from Item -> Name
-		const description = getText(item, 'Name', UBL_NS.cbc);
+		// Try to get Description first (more detailed), fall back to Name
+		const itemDescription = getText(item, 'Description', UBL_NS.cbc);
+		const itemName = getText(item, 'Name', UBL_NS.cbc);
+		const description = itemDescription || itemName;
 
 		const price = line.getElementsByTagNameNS(UBL_NS.cac, 'Price')[0];
 		const unitPrice = getNumber(price, 'PriceAmount', UBL_NS.cbc);
 
 		// Tax category is inside Item
 		const taxCategory = item?.getElementsByTagNameNS(UBL_NS.cac, 'ClassifiedTaxCategory')[0];
-		const taxRate = getNumber(taxCategory, 'Percent', UBL_NS.cbc);
+		const taxRateText = getText(taxCategory, 'Percent', UBL_NS.cbc);
+		const taxRate = taxRateText ? parseFloat(taxRateText) : undefined;
 
 		lineItems.push({
 			description,
 			quantity,
 			unitPrice,
 			amount: lineExtensionAmount,
-			taxRate: taxRate || undefined
+			taxRate: taxRate !== undefined ? taxRate : undefined
 		});
 	}
 
@@ -207,17 +263,22 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 			county: supplierCounty || undefined,
 			postalCode: supplierPostalCode || undefined,
 			country: supplierCountry || undefined,
-			email: supplierEmail || undefined
+			email: supplierEmail || undefined,
+			iban: supplierIban || undefined,
+			bankName: supplierBankName || undefined
 		},
 		customer: {
 			name: customerName,
 			vatId: customerVatId,
+			taxId: customerRegistrationNumber || undefined,
 			address: customerStreet || undefined,
 			city: customerCity || undefined,
 			county: customerCounty || undefined,
 			postalCode: customerPostalCode || undefined,
 			country: customerCountry || undefined,
-			email: customerEmail || undefined
+			email: customerEmail || undefined,
+			iban: undefined, // Customer bank info not typically in invoice
+			bankName: undefined
 		},
 		lineItems
 	};
@@ -296,7 +357,9 @@ export function generateUblInvoice(
 	xmlParts.push(`<cbc:ID>${escapeXml(invoice.invoiceNumber)}</cbc:ID>`);
 	xmlParts.push(`<cbc:IssueDate>${formatDate(invoice.issueDate)}</cbc:IssueDate>`);
 	xmlParts.push(`<cbc:DueDate>${formatDate(invoice.dueDate)}</cbc:DueDate>`);
+	// 380 = Commercial invoice, 751 = Invoice information for accounting purposes
 	xmlParts.push(`<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>`);
+	xmlParts.push(`<cbc:TaxPointDate>${formatDate(invoice.issueDate)}</cbc:TaxPointDate>`);
 	xmlParts.push(`<cbc:DocumentCurrencyCode>${invoice.currency}</cbc:DocumentCurrencyCode>`);
 
 	if (supplier.taxId) {
@@ -308,7 +371,11 @@ export function generateUblInvoice(
 	// Supplier Party
 	xmlParts.push('<cac:AccountingSupplierParty>');
 	xmlParts.push('<cac:Party>');
-	xmlParts.push(`<cac:PartyName><cbc:Name>${escapeXml(supplier.name)}</cbc:Name></cac:PartyName>`);
+	
+	// PartyIdentification with CUI/VAT ID
+	xmlParts.push('<cac:PartyIdentification>');
+	xmlParts.push(`<cbc:ID>${escapeXml(supplier.vatId)}</cbc:ID>`);
+	xmlParts.push('</cac:PartyIdentification>');
 
 	if (supplier.address || supplier.city || supplier.county || supplier.postalCode) {
 		xmlParts.push('<cac:PostalAddress>');
@@ -330,16 +397,18 @@ export function generateUblInvoice(
 		xmlParts.push('</cac:PostalAddress>');
 	}
 
-	if (supplier.taxId) {
-		xmlParts.push('<cac:PartyTaxScheme>');
-		xmlParts.push(`<cbc:CompanyID>${escapeXml(supplier.taxId)}</cbc:CompanyID>`);
-		xmlParts.push('<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>');
-		xmlParts.push('</cac:PartyTaxScheme>');
-	}
+	// PartyTaxScheme with VAT ID
+	xmlParts.push('<cac:PartyTaxScheme>');
+	xmlParts.push(`<cbc:CompanyID>${escapeXml(supplier.vatId)}</cbc:CompanyID>`);
+	xmlParts.push('<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>');
+	xmlParts.push('</cac:PartyTaxScheme>');
 
 	xmlParts.push('<cac:PartyLegalEntity>');
 	xmlParts.push(`<cbc:RegistrationName>${escapeXml(supplier.name)}</cbc:RegistrationName>`);
-	xmlParts.push(`<cbc:CompanyID>${escapeXml(supplier.vatId)}</cbc:CompanyID>`);
+	if (supplier.taxId) {
+		// CompanyID in PartyLegalEntity is the registration number (e.g., "J2016002611238")
+		xmlParts.push(`<cbc:CompanyID>${escapeXml(supplier.taxId)}</cbc:CompanyID>`);
+	}
 	xmlParts.push('</cac:PartyLegalEntity>');
 
 	if (supplier.email) {
@@ -354,7 +423,9 @@ export function generateUblInvoice(
 	// Customer Party
 	xmlParts.push('<cac:AccountingCustomerParty>');
 	xmlParts.push('<cac:Party>');
-	xmlParts.push(`<cac:PartyName><cbc:Name>${escapeXml(customer.name)}</cbc:Name></cac:PartyName>`);
+	
+	// Customer doesn't typically have PartyIdentification in SPV format
+	// Only PartyTaxScheme and PartyLegalEntity
 
 	if (customer.address || customer.city || customer.county || customer.postalCode) {
 		xmlParts.push('<cac:PostalAddress>');
@@ -376,9 +447,14 @@ export function generateUblInvoice(
 		xmlParts.push('</cac:PostalAddress>');
 	}
 
+	// PartyTaxScheme with VAT ID for customer
+	xmlParts.push('<cac:PartyTaxScheme>');
+	xmlParts.push(`<cbc:CompanyID>${escapeXml(customer.vatId)}</cbc:CompanyID>`);
+	xmlParts.push('<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>');
+	xmlParts.push('</cac:PartyTaxScheme>');
+
 	xmlParts.push('<cac:PartyLegalEntity>');
 	xmlParts.push(`<cbc:RegistrationName>${escapeXml(customer.name)}</cbc:RegistrationName>`);
-	xmlParts.push(`<cbc:CompanyID>${escapeXml(customer.vatId)}</cbc:CompanyID>`);
 	xmlParts.push('</cac:PartyLegalEntity>');
 
 	if (customer.email) {
@@ -458,6 +534,7 @@ export function generateUblInvoice(
 		);
 
 		xmlParts.push('<cac:Item>');
+		xmlParts.push(`<cbc:Description>${escapeXml(item.description)}</cbc:Description>`);
 		xmlParts.push(`<cbc:Name>${escapeXml(item.description)}</cbc:Name>`);
 		xmlParts.push('<cac:ClassifiedTaxCategory>');
 		xmlParts.push(`<cbc:ID>${supplier.taxId ? 'S' : 'O'}</cbc:ID>`);

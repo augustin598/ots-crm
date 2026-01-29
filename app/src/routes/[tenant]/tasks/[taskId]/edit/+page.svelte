@@ -15,13 +15,13 @@
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const taskId = $derived(page.params.taskId);
+	const taskId = $derived(page.params.taskId ?? '');
 
 	const taskQuery = getTask(taskId);
 	const task = $derived(taskQuery.current);
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
-	const projectsQuery = getProjects();
+	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 
 	const clientOptions = $derived([

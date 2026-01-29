@@ -1,0 +1,1 @@
+ok now add a feature, the partners feature, what do i mean, if i have a client that matched another tenant vat id, add a switch to it in the editing client page, where i can make it a partner, and when it s a partner save it into another table of partners, and in the project settings i should be able to have a combobox which is used to share the tasks with that partner

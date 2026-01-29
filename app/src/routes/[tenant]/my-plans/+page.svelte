@@ -185,6 +185,82 @@
 		if (!selectedDayForDialog) return '';
 		return formatDateKey(selectedDayForDialog);
 	});
+
+	// Drag and drop state
+	let draggedTask = $state<Task | null>(null);
+	let dragOverDate = $state<string | null>(null);
+	let isDragging = $state(false);
+
+	function handleDragStart(e: DragEvent, task: Task) {
+		if (!(e.target instanceof HTMLElement)) return;
+		draggedTask = task;
+		isDragging = true;
+		e.dataTransfer!.effectAllowed = 'move';
+		e.dataTransfer!.dropEffect = 'move';
+		if (e.target) {
+			e.target.style.opacity = '0.5';
+		}
+	}
+
+	function handleDragEnd(e: DragEvent) {
+		isDragging = false;
+		draggedTask = null;
+		dragOverDate = null;
+		if (e.target instanceof HTMLElement) {
+			e.target.style.opacity = '1';
+		}
+	}
+
+	function handleDragOver(e: DragEvent, date: DateValue) {
+		e.preventDefault();
+		const dateKey = formatDateKey(date);
+		if (dragOverDate !== dateKey) {
+			dragOverDate = dateKey;
+		}
+		e.dataTransfer!.dropEffect = 'move';
+	}
+
+	function handleDragLeave(e: DragEvent) {
+		// Only clear if we're leaving the drop target, not entering a child
+		// implementation detail: simplified for now, usually needs check for relatedTarget
+	}
+
+	async function handleDrop(e: DragEvent, date: DateValue) {
+		e.preventDefault();
+		const dateKey = formatDateKey(date);
+		dragOverDate = null;
+		
+		if (!draggedTask) return;
+		
+		// Don't do anything if dropping on same day
+		if (draggedTask.dueDate) {
+			const currentDueDate = new Date(draggedTask.dueDate).toISOString().split('T')[0];
+			if (currentDueDate === dateKey) {
+				handleDragEnd(e);
+				return;
+			}
+		}
+
+		const taskId = draggedTask.id;
+		const taskTitle = draggedTask.title;
+		
+		// Optimistic update (optional, but good for UX)
+		// For now we rely on the server response to refresh the view
+		// since tasksQuery is reactive
+		
+		try {
+			await updateTask({
+				taskId,
+				dueDate: dateKey,
+				title: taskTitle
+			}).updates(tasksQuery);
+		} catch (e) {
+			console.error('Failed to move task', e);
+			// Optionally show error toast
+		} finally {
+			handleDragEnd(e);
+		}
+	}
 </script>
 
 <div class="flex flex-col h-[calc(100vh-6rem)]">
@@ -247,6 +323,7 @@
 																{@const dayTasks = getTasksForDate(date)}
 																{@const isSelected = date.year === selectedDate.year && date.month === selectedDate.month && date.day === selectedDate.day}
 																{@const isToday = date.year === todayDate.year && date.month === todayDate.month && date.day === todayDate.day}
+																{@const isDragOver = dragOverDate === formatDateKey(date)}
 																<CalendarComponents.Cell {date} month={month.value} class="h-auto! min-h-[180px] w-full border border-border/50">
 																	<ContextMenu.Root>
 																		<ContextMenu.Trigger>
@@ -254,8 +331,10 @@
 																			<button
 																				{...props}
 																				type="button"
-																				class="group relative flex flex-col items-start w-full min-h-[180px] h-full p-2 cursor-pointer hover:bg-accent/50 rounded-md transition-all {isSelected ? 'bg-primary/10 ring-2 ring-primary ring-offset-1' : ''} {isToday && !isSelected ? 'bg-accent/30 ring-1 ring-primary/50' : ''} {!isEqualMonth(date, month.value) ? 'opacity-40' : ''}"
+																				class="group relative flex flex-col items-start w-full min-h-[180px] h-full p-2 cursor-pointer hover:bg-accent/50 rounded-md transition-all {isSelected ? 'bg-primary/10 ring-2 ring-primary ring-offset-1' : ''} {isToday && !isSelected ? 'bg-accent/30 ring-1 ring-primary/50' : ''} {!isEqualMonth(date, month.value) ? 'opacity-40' : ''} {isDragOver ? 'bg-primary/20 ring-2 ring-primary border-primary' : ''}"
 																				onclick={() => handleDateClick(date)}
+																				ondragover={(e) => handleDragOver(e, date)}
+																				ondrop={(e) => handleDrop(e, date)}
 																			>
 																				<div class="flex items-center justify-between w-full mb-1.5">
 																					<span class="text-sm font-semibold {isSelected ? 'text-primary' : isToday && !isSelected ? 'text-primary font-bold' : 'text-foreground'}">
@@ -276,9 +355,15 @@
 																					<div class="flex flex-col gap-1 w-full flex-1 min-h-0">
 																						{#each dayTasks.slice(0, 6) as task}
 																							<div
-																								class="text-xs text-start px-2 py-1 rounded-md truncate font-medium shadow-sm border border-current/20 cursor-pointer hover:opacity-80 text-wrap transition-opacity {getPriorityColor(task.priority || 'medium')}"
+																								class="text-xs text-start px-2 py-1 rounded-md truncate font-medium shadow-sm border border-current/20 cursor-grab active:cursor-grabbing hover:opacity-80 text-wrap transition-opacity {getPriorityColor(task.priority || 'medium')}"
 																								title={task.title}
+																								draggable={true}
+																								ondragstart={(e) => handleDragStart(e, task)}
+																								ondragend={handleDragEnd}
 																								onclick={(e) => handleTaskClick(task, e)}
+																								role="button"
+																								tabindex="0"
+																								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleTaskClick(task, e as unknown as MouseEvent)}
 																							>
 																								{task.title}
 																							</div>
@@ -290,7 +375,12 @@
 																						{/if}
 																					</div>
 																				{:else}
-																					<div class="flex-1"></div>
+																					<div class="flex-1 w-full"
+																						ondragover={(e) => handleDragOver(e, date)}
+																						ondrop={(e) => handleDrop(e, date)}
+																						role="application" 
+																						aria-label="Drop zone"
+																					></div>
 																				{/if}
 																			</button>
 																			{/snippet}
@@ -332,6 +422,7 @@
 	open={isCreateDialogOpen}
 	onOpenChange={(open) => (isCreateDialogOpen = open)}
 	onSuccess={handleCreateSuccess}
+	defaultDueDate={selectedDateStr}
 />
 
 <Dialog bind:open={isAssignTasksDialogOpen}>

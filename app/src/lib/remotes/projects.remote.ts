@@ -15,6 +15,11 @@ function generateProjectUserId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+function generateProjectPartnerId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
 const projectSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
 	description: v.optional(v.string()),
@@ -40,7 +45,29 @@ export const getProjects = query(
 			conditions = and(conditions, eq(table.project.clientId, clientId)) as any;
 		}
 
-		return await db.select().from(table.project).where(conditions);
+		const ownedProjects = await db.select().from(table.project).where(conditions);
+
+		const sharedProjects = await db
+			.select({
+				project: table.project
+			})
+			.from(table.project)
+			.innerJoin(table.projectPartner, eq(table.project.id, table.projectPartner.projectId))
+			.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+			.where(eq(table.partner.partnerTenantId, event.locals.tenant.id));
+
+		// If clientId is provided, we filter shared projects too?
+		// Typically shared projects might not match the *partner's* client list logic,
+		// but if the user is filtering by a client ID, they probably mean *their* client.
+		// However, the project belongs to the *other* tenant's client.
+		// So filtering shared projects by clientId (which is an ID from the *current* tenant) doesn't make sense
+		// unless we mapped clients, which we don't.
+		// So we only return shared projects if clientId is NOT provided.
+		if (clientId) {
+			return ownedProjects;
+		}
+
+		return [...ownedProjects, ...sharedProjects.map((p) => p.project)];
 	}
 );
 
@@ -56,11 +83,29 @@ export const getProject = query(v.pipe(v.string(), v.minLength(1)), async (proje
 		.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
 		.limit(1);
 
-	if (!project) {
-		throw new Error('Project not found');
+	if (project) {
+		return project;
 	}
 
-	return project;
+	// Check if shared
+	const [sharedProject] = await db
+		.select({ project: table.project })
+		.from(table.project)
+		.innerJoin(table.projectPartner, eq(table.project.id, table.projectPartner.projectId))
+		.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+		.where(
+			and(
+				eq(table.project.id, projectId),
+				eq(table.partner.partnerTenantId, event.locals.tenant.id)
+			)
+		)
+		.limit(1);
+
+	if (sharedProject) {
+		return sharedProject.project;
+	}
+
+	throw new Error('Project not found');
 });
 
 export const createProject = command(projectSchema, async (data) => {
@@ -243,6 +288,44 @@ export const getProjectTeamMembers = query(
 	}
 );
 
+export const getProjectPartners = query(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [project] = await db
+		.select()
+		.from(table.project)
+		.where(and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!project) {
+		throw new Error('Project not found');
+	}
+
+	const partners = await db
+		.select({
+			id: table.projectPartner.id,
+			projectId: table.projectPartner.projectId,
+			partnerId: table.projectPartner.partnerId,
+			clientName: table.client.name,
+			partnerTenantName: table.tenant.name
+		})
+		.from(table.projectPartner)
+		.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+		.innerJoin(table.client, eq(table.partner.clientId, table.client.id))
+		.innerJoin(table.tenant, eq(table.partner.partnerTenantId, table.tenant.id))
+		.where(
+			and(
+				eq(table.projectPartner.projectId, projectId),
+				eq(table.projectPartner.tenantId, event.locals.tenant.id)
+			)
+		);
+
+	return partners;
+});
+
 export const updateProjectTeamMembers = command(
 	v.object({
 		projectId: v.pipe(v.string(), v.minLength(1)),
@@ -284,16 +367,15 @@ export const updateProjectTeamMembers = command(
 			}
 		}
 
+		const tenantId = event.locals.tenant.id;
+
 		// Use transaction to delete existing and insert new relationships
 		await db.transaction(async (tx) => {
 			// Delete existing project-user relationships
 			await tx
 				.delete(table.projectUser)
 				.where(
-					and(
-						eq(table.projectUser.projectId, projectId),
-						eq(table.projectUser.tenantId, event.locals.tenant.id)
-					)
+					and(eq(table.projectUser.projectId, projectId), eq(table.projectUser.tenantId, tenantId))
 				);
 
 			// Insert new relationships
@@ -301,11 +383,76 @@ export const updateProjectTeamMembers = command(
 				await tx.insert(table.projectUser).values(
 					userIds.map((userId) => ({
 						id: generateProjectUserId(),
-						tenantId: event.locals.tenant.id,
+						tenantId: tenantId,
 						projectId,
 						userId
 					}))
 				);
+			}
+		});
+
+		return { success: true };
+	}
+);
+
+export const updateProjectPartner = command(
+	v.object({
+		projectId: v.pipe(v.string(), v.minLength(1)),
+		partnerId: v.optional(v.pipe(v.string(), v.minLength(1)))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const { projectId, partnerId } = data;
+
+		const [project] = await db
+			.select()
+			.from(table.project)
+			.where(
+				and(eq(table.project.id, projectId), eq(table.project.tenantId, event.locals.tenant.id))
+			)
+			.limit(1);
+
+		if (!project) {
+			throw new Error('Project not found');
+		}
+
+		if (partnerId) {
+			const [partner] = await db
+				.select()
+				.from(table.partner)
+				.where(
+					and(eq(table.partner.id, partnerId), eq(table.partner.tenantId, event.locals.tenant.id))
+				)
+				.limit(1);
+
+			if (!partner) {
+				throw new Error('Partner not found');
+			}
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(table.projectPartner)
+				.where(
+					and(
+						eq(table.projectPartner.projectId, projectId),
+						eq(table.projectPartner.tenantId, tenantId)
+					)
+				);
+
+			if (partnerId) {
+				await tx.insert(table.projectPartner).values({
+					id: generateProjectPartnerId(),
+					tenantId: tenantId,
+					projectId,
+					partnerId
+				});
 			}
 		});
 

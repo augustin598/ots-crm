@@ -21,6 +21,8 @@
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import SunIcon from '@lucide/svelte/icons/sun';
+	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -39,6 +41,10 @@
 	const currentPath = $derived(page.url.pathname);
 	const tenantSlug = $derived(page.params.tenant);
 	let switcherOpen = $state(false);
+
+	const toggleTheme = () => {
+		document.documentElement.classList.toggle('dark');
+	}
 </script>
 
 <SidebarProvider>
@@ -217,6 +223,15 @@
 		</SidebarContent>
 		<SidebarFooter>
 			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton onclick={toggleTheme} variant="outline">
+						<div class="relative size-4">
+							<SunIcon class="absolute size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+							<MoonIcon class="absolute size-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+						</div>
+						<span>Toggle Theme</span>
+					</SidebarMenuButton>
+				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton onclick={handleLogout} variant="outline">
 						<LogOutIcon />
