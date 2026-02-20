@@ -1,0 +1,22 @@
+CREATE TABLE `seo_link` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`client_id` text NOT NULL,
+	`press_trust` text,
+	`month` text NOT NULL,
+	`keyword` text NOT NULL,
+	`link_type` text,
+	`link_attribute` text DEFAULT 'dofollow' NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`article_url` text NOT NULL,
+	`price` integer,
+	`currency` text DEFAULT 'RON' NOT NULL,
+	`anchor_text` text,
+	`project_id` text,
+	`notes` text,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON UPDATE no action ON DELETE no action
+);

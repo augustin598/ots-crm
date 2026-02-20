@@ -16,6 +16,7 @@
 	import BriefcaseIcon from '@lucide/svelte/icons/briefcase';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+import LinkIcon from '@lucide/svelte/icons/link';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
@@ -205,6 +206,16 @@
 							<a href="/{tenantSlug}/banking" {...props}>
 								<CreditCardIcon />
 								<span>Banking</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/seo-links`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/seo-links" {...props}>
+								<LinkIcon />
+								<span>Linkuri SEO</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

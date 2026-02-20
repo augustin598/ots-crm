@@ -950,6 +950,34 @@ export const transactionMatchRule = sqliteTable('transaction_match_rule', {
 		.default(sql`current_date`)
 });
 
+export const seoLink = sqliteTable('seo_link', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	pressTrust: text('press_trust'), // Trust de presă - platforma (e.g. "Gândul", "Adevărul")
+	month: text('month').notNull(), // Format YYYY-MM (luna plasării)
+	keyword: text('keyword').notNull(),
+	linkType: text('link_type'), // 'article', 'guest-post', 'press-release', 'directory', 'other'
+	linkAttribute: text('link_attribute').notNull().default('dofollow'), // 'dofollow', 'nofollow'
+	status: text('status').notNull().default('pending'), // 'pending', 'submitted', 'published', 'rejected'
+	articleUrl: text('article_url').notNull(),
+	price: integer('price'), // in cents
+	currency: text('currency').notNull().default('RON'),
+	anchorText: text('anchor_text'), // Textul ancorat al linkului
+	projectId: text('project_id').references(() => project.id),
+	notes: text('notes'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const clientUser = sqliteTable('client_user', {
 	id: text('id').primaryKey(),
 	userId: text('user_id')
@@ -1051,7 +1079,8 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	suppliers: many(supplier),
 	userBankAccounts: many(userBankAccount),
 	clientUsers: many(clientUser),
-	magicLinkTokens: many(magicLinkToken)
+	magicLinkTokens: many(magicLinkToken),
+	seoLinks: many(seoLink)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -1079,7 +1108,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	expenses: many(expense),
 	matchRules: many(transactionMatchRule),
 	clientUsers: many(clientUser),
-	magicLinkTokens: many(magicLinkToken)
+	magicLinkTokens: many(magicLinkToken),
+	seoLinks: many(seoLink)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -1098,7 +1128,23 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 	services: many(service),
 	invoices: many(invoice),
 	expenses: many(expense),
-	projectUsers: many(projectUser)
+	projectUsers: many(projectUser),
+	seoLinks: many(seoLink)
+}));
+
+export const seoLinkRelations = relations(seoLink, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [seoLink.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [seoLink.clientId],
+		references: [client.id]
+	}),
+	project: one(project, {
+		fields: [seoLink.projectId],
+		references: [project.id]
+	})
 }));
 
 export const milestoneRelations = relations(milestone, ({ one, many }) => ({
@@ -1654,3 +1700,5 @@ export type MagicLinkToken = typeof magicLinkToken.$inferSelect;
 export type NewMagicLinkToken = typeof magicLinkToken.$inferInsert;
 export type AdminMagicLinkToken = typeof adminMagicLinkToken.$inferSelect;
 export type NewAdminMagicLinkToken = typeof adminMagicLinkToken.$inferInsert;
+export type SeoLink = typeof seoLink.$inferSelect;
+export type NewSeoLink = typeof seoLink.$inferInsert;

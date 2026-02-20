@@ -253,6 +253,13 @@
       "when": 1768760583633,
       "tag": "0035_familiar_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1771580984586,
+      "tag": "0036_bent_miracleman",
+      "breakpoints": true
     }
   ]
 }
