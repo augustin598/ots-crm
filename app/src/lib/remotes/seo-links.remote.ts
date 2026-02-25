@@ -123,6 +123,64 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 	return { success: true, seoLinkId };
 });
 
+const createSeoLinksBulkSchema = v.object({
+	clientId: v.pipe(v.string(), v.minLength(1, 'Client is required')),
+	pressTrust: v.optional(v.string()),
+	month: v.pipe(v.string(), v.minLength(1, 'Luna este obligatorie')),
+	keyword: v.pipe(v.string(), v.minLength(1, 'Cuvântul cheie este obligatoriu')),
+	linkType: v.optional(v.picklist(['article', 'guest-post', 'press-release', 'directory', 'other'])),
+	linkAttribute: v.optional(v.picklist(['dofollow', 'nofollow'])),
+	status: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
+	articleUrls: v.pipe(
+		v.array(v.pipe(v.string(), v.minLength(1))),
+		v.minLength(1, 'Introduceți cel puțin un URL articol')
+	),
+	targetUrl: v.optional(v.string()),
+	price: v.optional(v.number()),
+	currency: v.optional(v.string()),
+	anchorText: v.optional(v.string()),
+	projectId: v.optional(v.string()),
+	notes: v.optional(v.string())
+});
+
+export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
+
+	const values = data.articleUrls.map((articleUrl) => ({
+		id: generateSeoLinkId(),
+		tenantId: event.locals.tenant!.id,
+		clientId: data.clientId,
+		pressTrust: data.pressTrust || null,
+		month: data.month,
+		keyword: data.keyword,
+		linkType: data.linkType || null,
+		linkAttribute: data.linkAttribute || 'dofollow',
+		status: data.status || 'pending',
+		articleUrl,
+		targetUrl: data.targetUrl || null,
+		price: data.price != null ? Math.round(data.price * 100) : null,
+		currency,
+		anchorText: data.anchorText || null,
+		projectId: data.projectId || null,
+		notes: data.notes || null
+	}));
+
+	await db.insert(table.seoLink).values(values);
+
+	return { success: true, created: values.length };
+});
+
 export const getSeoLink = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (seoLinkId) => {

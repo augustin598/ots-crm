@@ -2,6 +2,7 @@
 	import {
 		getSeoLinks,
 		createSeoLink,
+		createSeoLinksBulk,
 		updateSeoLink,
 		deleteSeoLink,
 		importSeoLinksFromFile,
@@ -120,6 +121,8 @@
 	let formLinkAttribute = $state('dofollow');
 	let formStatus = $state('pending');
 	let formArticleUrl = $state('');
+	let formArticleUrlsBulk = $state('');
+	let formBulkMode = $state(false);
 	let formTargetUrl = $state('');
 	let formPrice = $state('');
 	let formCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
@@ -188,6 +191,10 @@
 		if (invoiceSettings?.defaultCurrency && !isEditing) {
 			formCurrency = invoiceSettings.defaultCurrency as Currency;
 		}
+	});
+
+	$effect(() => {
+		if (formBulkMode) showAdvanced = true;
 	});
 
 	$effect(() => {
@@ -288,6 +295,8 @@
 		formLinkAttribute = 'dofollow';
 		formStatus = 'pending';
 		formArticleUrl = '';
+		formArticleUrlsBulk = '';
+		formBulkMode = false;
 		formTargetUrl = '';
 		formPrice = '';
 		formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
@@ -301,6 +310,10 @@
 
 	function openAddDialog() {
 		resetForm();
+		// Pre-completează clientul din filtru dacă e deja selectat
+		if (filterClientId) {
+			formClientId = filterClientId;
+		}
 		isDialogOpen = true;
 	}
 
@@ -334,8 +347,25 @@
 		return `https://${u}`;
 	}
 
+	function parseBulkArticleUrls(text: string): string[] {
+		return text
+			.split(/[\r\n]+/)
+			.map((s) => s.trim())
+			.filter(Boolean)
+			.map((u) => (u.startsWith('http://') || u.startsWith('https://') ? u : `https://${u}`));
+	}
+
 	async function handleSubmit() {
-		if (!formClientId || !formMonth || !formKeyword || !formArticleUrl) {
+		if (formBulkMode) {
+			const urls = parseBulkArticleUrls(formArticleUrlsBulk);
+			if (!formClientId || !formMonth || !formKeyword || urls.length === 0) {
+				formError =
+					urls.length === 0
+						? 'Introduceți cel puțin un URL articol (câte unul pe linie)'
+						: 'Client, luna și cuvântul cheie sunt obligatorii';
+				return;
+			}
+		} else if (!formClientId || !formMonth || !formKeyword || !formArticleUrl) {
 			formError = 'Client, luna, cuvântul cheie și linkul articol sunt obligatorii';
 			return;
 		}
@@ -344,6 +374,29 @@
 		formError = null;
 
 		try {
+			if (formBulkMode) {
+				const urls = parseBulkArticleUrls(formArticleUrlsBulk);
+				await createSeoLinksBulk({
+					clientId: formClientId,
+					pressTrust: formPressTrust || undefined,
+					month: formMonth,
+					keyword: formKeyword,
+					linkType: parseLinkType(formLinkType),
+					linkAttribute: formLinkAttribute as 'dofollow' | 'nofollow',
+					status: formStatus as 'pending' | 'submitted' | 'published' | 'rejected',
+					articleUrls: urls,
+					targetUrl: formTargetUrl ? normalizeTargetUrl(formTargetUrl) : undefined,
+					price: formPrice ? parseFloat(formPrice) : undefined,
+					currency: formCurrency,
+					anchorText: formAnchorText || undefined,
+					projectId: formProjectId || undefined,
+					notes: formNotes || undefined
+				}).updates(seoLinksQuery);
+				toast.success(`${urls.length} linkuri adăugate`);
+				resetForm();
+				isDialogOpen = false;
+				return;
+			}
 			if (isEditing && editingId) {
 				await updateSeoLink({
 					seoLinkId: editingId,
@@ -799,24 +852,51 @@
 					<!-- Câmpuri principale: Client, URL articol, URL client -->
 					<div class="grid gap-2">
 						<Label for="clientId">Client (companie) *</Label>
-						<Combobox
-							bind:value={formClientId}
-							options={clientOptions}
-							placeholder="Selectați clientul"
-							searchPlaceholder="Căutați clienți..."
-						/>
+						{#if formClientId}
+							<div class="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 py-2 text-sm">
+								{clientMap.get(formClientId) || formClientId}
+							</div>
+						{:else}
+							<Combobox
+								bind:value={formClientId}
+								options={clientOptions}
+								placeholder="Selectați clientul"
+								searchPlaceholder="Căutați clienți..."
+							/>
+						{/if}
 					</div>
 					<div class="grid gap-2">
-						<Label for="articleUrl">URL articol *</Label>
-						<Input
-							id="articleUrl"
-							bind:value={formArticleUrl}
-							placeholder="https://www.bzi.ro/articol-..."
-							type="url"
-						/>
-						<p class="text-xs text-muted-foreground">
-							Linkul unde este plasat backlinkul (ex: bzi.ro, libertatea.ro)
-						</p>
+						<div class="flex items-center justify-between gap-2">
+							<Label for="articleUrl">URL articol *</Label>
+							{#if !isEditing}
+								<label class="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+									<Checkbox bind:checked={formBulkMode} />
+									Adaugă linkuri în bulk
+								</label>
+							{/if}
+						</div>
+						{#if formBulkMode}
+							<Textarea
+								id="articleUrl"
+								bind:value={formArticleUrlsBulk}
+								placeholder="Un URL pe linie, ex:&#10;https://bzi.ro/articol-1&#10;https://libertatea.ro/articol-2"
+								rows={6}
+								class="font-mono text-sm"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Introduceți un URL pe linie. Linkurile unde sunt plasate backlinkurile (ex: bzi.ro, libertatea.ro)
+							</p>
+						{:else}
+							<Input
+								id="articleUrl"
+								bind:value={formArticleUrl}
+								placeholder="https://www.bzi.ro/articol-..."
+								type="url"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Linkul unde este plasat backlinkul (ex: bzi.ro, libertatea.ro)
+							</p>
+						{/if}
 					</div>
 					<div class="grid gap-2">
 						<Label for="targetUrl">URL client *</Label>
@@ -831,7 +911,7 @@
 						</p>
 					</div>
 
-					{#if !isEditing}
+					{#if !isEditing && !formBulkMode}
 						<Button
 							type="button"
 							variant="secondary"
@@ -986,7 +1066,15 @@
 						Anulare
 					</Button>
 					<Button onclick={handleSubmit} disabled={formLoading}>
-						{formLoading ? 'Se salvează...' : isEditing ? 'Salvează' : 'Adaugă'}
+						{#if formLoading}
+							Se salvează...
+						{:else if isEditing}
+							Salvează
+						{:else if formBulkMode}
+							Adaugă {parseBulkArticleUrls(formArticleUrlsBulk).length || 0} linkuri
+						{:else}
+							Adaugă
+						{/if}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
