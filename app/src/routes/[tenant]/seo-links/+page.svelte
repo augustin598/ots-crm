@@ -41,6 +41,7 @@
 		Table,
 		TableBody,
 		TableCell,
+		TableFooter,
 		TableHead,
 		TableHeader,
 		TableRow
@@ -77,23 +78,38 @@
 	import TagIcon from '@lucide/svelte/icons/tag';
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import BanknoteIcon from '@lucide/svelte/icons/banknote';
-	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
+	import {
+		Collapsible,
+		CollapsibleContent,
+		CollapsibleTrigger
+	} from '$lib/components/ui/collapsible';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import SeoLinkUrlCell from '$lib/components/seo-link-url-cell.svelte';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import * as Popover from '$lib/components/ui/popover';
+	import { CalendarDate, type DateValue } from '@internationalized/date';
 
 	const tenantSlug = $derived(page.params.tenant);
 
 	// Filters
 	let filterClientId = $state('');
-	let filterMonth = $state('');
+	let filterMonth = $state(''); // Implicit: Toate lunile
+	let filterDateOpen = $state(false);
+	let filterDateValue = $state<DateValue | undefined>(undefined);
 	let filterStatus = $state('');
 	let filterCheckStatus = $state('');
+	let filterTargetUrl = $state('');
 
 	const filterParams = $derived({
 		clientId: filterClientId || undefined,
 		month: filterMonth || undefined,
 		status: filterStatus || undefined,
-		checkStatus: filterCheckStatus || undefined
+		checkStatus: filterCheckStatus || undefined,
+		targetUrl: filterTargetUrl?.trim() || undefined
 	});
 
 	const seoLinksQuery = $derived(getSeoLinks(filterParams));
@@ -124,6 +140,7 @@
 	let formArticleUrlsBulk = $state('');
 	let formBulkMode = $state(false);
 	let formTargetUrl = $state('');
+	let formArticlePublishedAt = $state<string | null>(null);
 	let formPrice = $state('');
 	let formCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
 	let formAnchorText = $state('');
@@ -164,6 +181,9 @@
 	let showAdvanced = $state(false);
 	let extractingTargetUrlId = $state<string | null>(null);
 
+	// Report collapsible state
+	let reportOpen = $state(false);
+
 	// Inline row state
 	let isAddingInlineRow = $state(false);
 	let rowPressTrust = $state('');
@@ -186,6 +206,22 @@
 		{ value: '', label: 'Niciunul' },
 		...projects.map((p) => ({ value: p.id, label: p.name }))
 	]);
+
+	$effect(() => {
+		if (filterMonth) {
+			const [y, m] = filterMonth.split('-').map(Number);
+			if (y && m) filterDateValue = new CalendarDate(y, m, 1);
+		} else {
+			filterDateValue = undefined;
+		}
+	});
+
+	$effect(() => {
+		if (filterDateValue) {
+			const mm = `${filterDateValue.year}-${String(filterDateValue.month).padStart(2, '0')}`;
+			if (filterMonth !== mm) filterMonth = mm;
+		}
+	});
 
 	$effect(() => {
 		if (invoiceSettings?.defaultCurrency && !isEditing) {
@@ -298,6 +334,7 @@
 		formArticleUrlsBulk = '';
 		formBulkMode = false;
 		formTargetUrl = '';
+		formArticlePublishedAt = null;
 		formPrice = '';
 		formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
 		formAnchorText = '';
@@ -329,6 +366,7 @@
 		formStatus = link.status || 'pending';
 		formArticleUrl = link.articleUrl;
 		formTargetUrl = link.targetUrl || '';
+		formArticlePublishedAt = link.articlePublishedAt || null;
 		formPrice = link.price != null ? String(link.price / 100) : '';
 		formCurrency = (link.currency || 'RON') as Currency;
 		formAnchorText = link.anchorText || '';
@@ -358,11 +396,11 @@
 	async function handleSubmit() {
 		if (formBulkMode) {
 			const urls = parseBulkArticleUrls(formArticleUrlsBulk);
-			if (!formClientId || !formMonth || !formKeyword || urls.length === 0) {
+			if (!formClientId || !formMonth || urls.length === 0) {
 				formError =
 					urls.length === 0
 						? 'Introduceți cel puțin un URL articol (câte unul pe linie)'
-						: 'Client, luna și cuvântul cheie sunt obligatorii';
+						: 'Client și luna sunt obligatorii';
 				return;
 			}
 		} else if (!formClientId || !formMonth || !formKeyword || !formArticleUrl) {
@@ -380,10 +418,10 @@
 					clientId: formClientId,
 					pressTrust: formPressTrust || undefined,
 					month: formMonth,
-					keyword: formKeyword,
+					keyword: '—',
 					linkType: parseLinkType(formLinkType),
 					linkAttribute: formLinkAttribute as 'dofollow' | 'nofollow',
-					status: formStatus as 'pending' | 'submitted' | 'published' | 'rejected',
+					status: 'published',
 					articleUrls: urls,
 					targetUrl: formTargetUrl ? normalizeTargetUrl(formTargetUrl) : undefined,
 					price: formPrice ? parseFloat(formPrice) : undefined,
@@ -408,6 +446,7 @@
 					linkAttribute: formLinkAttribute as 'dofollow' | 'nofollow',
 					status: formStatus as 'pending' | 'submitted' | 'published' | 'rejected',
 					articleUrl: formArticleUrl,
+					articlePublishedAt: formArticlePublishedAt || undefined,
 					targetUrl: formTargetUrl ? normalizeTargetUrl(formTargetUrl) : undefined,
 					price: formPrice ? parseFloat(formPrice) : undefined,
 					currency: formCurrency,
@@ -416,7 +455,7 @@
 					notes: formNotes || undefined
 				}).updates(seoLinksQuery);
 			} else {
-				await createSeoLink({
+				const result = await createSeoLink({
 					clientId: formClientId,
 					pressTrust: formPressTrust || undefined,
 					month: formMonth,
@@ -425,6 +464,7 @@
 					linkAttribute: formLinkAttribute as 'dofollow' | 'nofollow',
 					status: formStatus as 'pending' | 'submitted' | 'published' | 'rejected',
 					articleUrl: formArticleUrl,
+					articlePublishedAt: formArticlePublishedAt || undefined,
 					targetUrl: formTargetUrl ? normalizeTargetUrl(formTargetUrl) : undefined,
 					price: formPrice ? parseFloat(formPrice) : undefined,
 					currency: formCurrency,
@@ -432,6 +472,16 @@
 					projectId: formProjectId || undefined,
 					notes: formNotes || undefined
 				}).updates(seoLinksQuery);
+				if (result?.seoLinkId) {
+					try {
+						await checkSeoLink(result.seoLinkId).updates(seoLinksQuery);
+						toast.success('Link adăugat și verificat');
+					} catch {
+						toast.success('Link adăugat (verificarea a eșuat)');
+					}
+				} else {
+					toast.success('Link adăugat');
+				}
 			}
 			resetForm();
 			isDialogOpen = false;
@@ -486,6 +536,28 @@
 			rejected: 'Refuzat'
 		};
 		return labels[status] || status;
+	}
+
+	function formatArticleDate(iso: string): string {
+		try {
+			const d = new Date(iso);
+			if (isNaN(d.getTime())) return iso;
+			return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+		} catch {
+			return iso;
+		}
+	}
+
+	function getPublicationDateDisplay(link: (typeof seoLinks)[0]): string | null {
+		if (link.articlePublishedAt) return formatArticleDate(link.articlePublishedAt);
+		if (link.status === 'published' && link.month) {
+			const [y, m] = link.month.split('-').map(Number);
+			if (y && m) {
+				const d = new Date(y, m - 1, 1);
+				return d.toLocaleDateString('ro-RO', { month: 'short', year: 'numeric' });
+			}
+		}
+		return null;
 	}
 
 	const validLinkTypes = ['article', 'guest-post', 'press-release', 'directory', 'other'] as const;
@@ -635,8 +707,8 @@
 	async function handleSavePrice(link: (typeof seoLinks)[0], value: string, currency?: Currency) {
 		editingPriceId = null;
 		editingPriceValue = '';
-		const num = value.trim() ? parseFloat(value.replace(',', '.')) : undefined;
-		if (num !== undefined && (Number.isNaN(num) || num < 0)) return;
+		const num = value.trim() ? parseFloat(value.replace(',', '.')) : null;
+		if (num != null && (Number.isNaN(num) || num < 0)) return;
 		const curr = currency ?? editingPriceCurrency;
 		try {
 			await updateSeoLink({
@@ -644,7 +716,7 @@
 				price: num,
 				currency: curr
 			}).updates(seoLinksQuery);
-			if (num !== undefined) toast.success('Preț actualizat');
+			toast.success(num != null ? 'Preț actualizat' : 'Preț eliminat');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
 		}
@@ -667,6 +739,7 @@
 			formAnchorText = result.anchorText || formAnchorText;
 			formLinkType = result.linkType || formLinkType;
 			if (result.targetUrl) formTargetUrl = result.targetUrl;
+			if (result.articlePublishedAt) formArticlePublishedAt = result.articlePublishedAt;
 			showAdvanced = true;
 		} catch (e) {
 			extractError = e instanceof Error ? e.message : 'Extragere eșuată';
@@ -682,6 +755,211 @@
 			['unreachable', 'timeout', 'error'].includes(l.lastCheckStatus || '')
 		).length,
 		neverChecked: seoLinks.filter((l) => !l.lastCheckedAt).length
+	});
+
+	const totalByCurrency = $derived.by(() => {
+		const sums: Record<string, number> = {};
+		for (const link of seoLinks) {
+			if (link.price != null && link.price > 0) {
+				const curr = (link.currency || 'RON') as Currency;
+				sums[curr] = (sums[curr] ?? 0) + link.price;
+			}
+		}
+		return Object.entries(sums).map(([curr, cents]) => ({ currency: curr as Currency, cents }));
+	});
+
+	const priceReport = $derived.by(() => {
+		const byCurrency: Record<
+			string,
+			{ total: number; count: number; min: number; max: number; avg: number }
+		> = {};
+		for (const link of seoLinks) {
+			if (link.price != null && link.price > 0) {
+				const curr = (link.currency || 'RON') as Currency;
+				if (!byCurrency[curr]) {
+					byCurrency[curr] = { total: 0, count: 0, min: link.price, max: link.price, avg: 0 };
+				}
+				const r = byCurrency[curr];
+				r.total += link.price;
+				r.count += 1;
+				r.min = Math.min(r.min, link.price);
+				r.max = Math.max(r.max, link.price);
+			}
+		}
+		for (const r of Object.values(byCurrency)) {
+			r.avg = r.count > 0 ? Math.round(r.total / r.count) : 0;
+		}
+		return Object.entries(byCurrency).map(([currency, data]) => ({
+			currency: currency as Currency,
+			...data
+		}));
+	});
+
+	// SEO Analysis Report - requires at least 2 links
+	const MIN_LINKS_FOR_REPORT = 2;
+	const GENERIC_ANCHOR_PATTERNS = [
+		'aici',
+		'click',
+		'click aici',
+		'site',
+		'website',
+		'link',
+		'citeste',
+		'citeste mai mult',
+		'mai mult'
+	];
+
+	const seoReport = $derived.by(() => {
+		try {
+			if (seoLinks.length < MIN_LINKS_FOR_REPORT) {
+				return null;
+			}
+
+			// Keyword density: group by normalized keyword, count, percentage
+			const keywordCounts = new Map<string, { count: number; displayKeyword: string }>();
+			for (const link of seoLinks) {
+				const kw = (link.keyword ?? '').toString().trim();
+				if (!kw) continue;
+				const normalized = kw.toLowerCase();
+				const displayKeyword = kw;
+			const existing = keywordCounts.get(normalized);
+			if (existing) {
+				existing.count++;
+			} else {
+				keywordCounts.set(normalized, { count: 1, displayKeyword });
+			}
+		}
+		const totalLinks = seoLinks.length;
+		const keywordDensity = Array.from(keywordCounts.entries())
+			.map(([norm, { count, displayKeyword }]) => ({
+				keyword: displayKeyword,
+				count,
+				percent: Math.round((count / totalLinks) * 100)
+			}))
+			.sort((a, b) => b.count - a.count);
+
+		// Anchor diversity: anchor = anchorText || keyword
+		type AnchorType = 'exact' | 'partial' | 'branded' | 'generic';
+		const anchorTypes: Record<AnchorType, number> = {
+			exact: 0,
+			partial: 0,
+			branded: 0,
+			generic: 0
+		};
+		const uniqueAnchors = new Set<string>();
+
+		function isUrlLike(text: string): boolean {
+			return /^https?:\/\//i.test(text) || /^[a-z0-9-]+\.[a-z]{2,}/i.test(text);
+		}
+
+		function isGenericAnchor(anchor: string): boolean {
+			const lower = anchor.trim().toLowerCase();
+			if (isUrlLike(anchor)) return true;
+			return GENERIC_ANCHOR_PATTERNS.some((p) => lower === p || lower.includes(p));
+		}
+
+		for (const link of seoLinks) {
+			const anchor = ((link.anchorText ?? link.keyword) ?? '').toString().trim();
+			const anchorNorm = anchor.toLowerCase();
+			const keywordNorm = ((link.keyword ?? '').toString().trim()).toLowerCase();
+			uniqueAnchors.add(anchorNorm);
+
+			const clientName = link.clientId ? clientById.get(link.clientId)?.name : null;
+			const clientNameNorm = clientName?.trim().toLowerCase() ?? '';
+
+			// Classify into exactly one type (priority order)
+			if (isGenericAnchor(anchor)) {
+				anchorTypes.generic++;
+			} else if (clientNameNorm && anchorNorm.includes(clientNameNorm)) {
+				anchorTypes.branded++;
+			} else if (anchorNorm === keywordNorm) {
+				anchorTypes.exact++;
+			} else {
+				anchorTypes.partial++;
+			}
+		}
+
+		const diversityRatio = uniqueAnchors.size / totalLinks;
+		const exactMatchPct = (anchorTypes.exact / totalLinks) * 100;
+		const emptyAnchorPct =
+			(seoLinks.filter((l) => !l.anchorText?.trim()).length / totalLinks) * 100;
+
+		// Over-optimization risk: 0-100
+		const risk =
+			(exactMatchPct / 100) * 40 +
+			(emptyAnchorPct / 100) * 30 +
+			(1 - diversityRatio) * 30;
+		const riskScore = Math.round(Math.min(100, Math.max(0, risk)));
+		const riskLevel: 'low' | 'medium' | 'high' =
+			riskScore <= 30 ? 'low' : riskScore <= 60 ? 'medium' : 'high';
+
+		// Recommendations
+		const recommendations: string[] = [];
+		if (riskLevel === 'high') {
+			recommendations.push('Reduceți procentul de anchor exact match');
+		}
+		if (anchorTypes.branded === 0 && totalLinks > 0) {
+			recommendations.push('Adăugați anchoruri branded (nume companie)');
+		}
+		const topKeywordPercent = keywordDensity[0]?.percent ?? 0;
+		if (topKeywordPercent > 40) {
+			recommendations.push('Diversificați cuvintele cheie');
+		}
+		if (diversityRatio < 0.5) {
+			recommendations.push('Folosiți mai multe variații de anchor text');
+		}
+
+		return {
+			keywordDensity,
+			anchorDiversity: {
+				exact: anchorTypes.exact,
+				partial: anchorTypes.partial,
+				branded: anchorTypes.branded,
+				generic: anchorTypes.generic,
+				uniqueAnchors: uniqueAnchors.size,
+				totalLinks
+			},
+			overOptRisk: { score: riskScore, level: riskLevel },
+			recommendations
+		};
+		} catch (err) {
+			console.error('seoReport error:', err);
+			return null;
+		}
+	});
+
+	const riskStyles = $derived.by(() => {
+		const level = seoReport?.overOptRisk?.level;
+		if (!level) return null;
+		if (level === 'low')
+			return {
+				card: 'border-emerald-200/80 bg-gradient-to-br from-emerald-50 to-teal-50/60 dark:border-emerald-500/40 dark:from-emerald-950/30 dark:to-teal-950/20',
+				ring: 'ring-emerald-400/30',
+				circleBg: 'from-emerald-500 to-teal-600',
+				circleRing: 'ring-emerald-400/50',
+				circleTrack: 'stroke-emerald-200/50 dark:stroke-emerald-800/40',
+				circleFill: 'stroke-white',
+				badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
+			};
+		if (level === 'medium')
+			return {
+				card: 'border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/60 dark:border-amber-500/40 dark:from-amber-950/30 dark:to-orange-950/20',
+				ring: 'ring-amber-400/30',
+				circleBg: 'from-amber-500 to-orange-600',
+				circleRing: 'ring-amber-400/50',
+				circleTrack: 'stroke-amber-200/50 dark:stroke-amber-800/40',
+				circleFill: 'stroke-white',
+				badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
+			};
+		return {
+			card: 'border-rose-200/80 bg-gradient-to-br from-rose-50 to-red-50/60 dark:border-rose-500/40 dark:from-rose-950/30 dark:to-red-950/20',
+			ring: 'ring-rose-400/30',
+			circleBg: 'from-rose-500 to-red-600',
+			circleRing: 'ring-rose-400/50',
+			circleTrack: 'stroke-rose-200/50 dark:stroke-rose-800/40',
+			circleFill: 'stroke-white',
+			badge: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300'
+		};
 	});
 
 	const selectedIdsArray = $derived(Array.from(selectedIds));
@@ -712,6 +990,18 @@
 			return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
 		} catch {
 			return '';
+		}
+	}
+
+	function getPressTrustDisplay(link: { pressTrust: string | null; articleUrl: string }): string {
+		if (link.pressTrust?.trim()) return link.pressTrust;
+		try {
+			const host = new URL(link.articleUrl).hostname.replace(/^www\./, '');
+			const base = host.split('.')[0] || '';
+			if (base.length <= 3) return base.toUpperCase();
+			return base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
+		} catch {
+			return '—';
 		}
 	}
 </script>
@@ -907,9 +1197,16 @@
 							type="text"
 						/>
 						<p class="text-xs text-muted-foreground">
-							Domeniul sau pagina clientului unde pointează linkul
+							Domeniul sau pagina clientului unde pointează linkul. Orice format: heylux.ro, https://www.heylux.ro, http://heylux.ro etc.
 						</p>
 					</div>
+
+					{#if formBulkMode}
+						<div class="grid gap-2">
+							<Label for="monthBulk">Lună *</Label>
+							<Input id="monthBulk" type="month" bind:value={formMonth} />
+						</div>
+					{/if}
 
 					{#if !isEditing && !formBulkMode}
 						<Button
@@ -932,7 +1229,8 @@
 						{/if}
 					{/if}
 
-					<!-- Detalii suplimentare -->
+					<!-- Detalii suplimentare (ascuns în modul bulk) -->
+					{#if !formBulkMode}
 					<Collapsible bind:open={showAdvanced}>
 						<CollapsibleTrigger>
 							<Button type="button" variant="ghost" size="sm">
@@ -1055,6 +1353,7 @@
 							</div>
 						</CollapsibleContent>
 					</Collapsible>
+					{/if}
 				</div>
 				{#if formError}
 					<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
@@ -1084,23 +1383,80 @@
 
 	<!-- Stats -->
 	{#if !loading && seoLinks.length > 0}
-		<div class="grid gap-3 md:grid-cols-4">
-			<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
-				<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Total afișate</p>
-				<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.total}</p>
+		<div class="space-y-4">
+			<div class="grid gap-3 md:grid-cols-4">
+				<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
+					<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Total afișate</p>
+					<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.total}</p>
+				</div>
+				<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
+					<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Publicate</p>
+					<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.published}</p>
+				</div>
+				<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
+					<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Cu probleme</p>
+					<p class="mt-0.5 text-xl font-semibold tabular-nums text-destructive">{stats.withProblems}</p>
+				</div>
+				<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
+					<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Neverificate</p>
+					<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.neverChecked}</p>
+				</div>
 			</div>
-			<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
-				<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Publicate</p>
-				<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.published}</p>
-			</div>
-			<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
-				<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Cu probleme</p>
-				<p class="mt-0.5 text-xl font-semibold tabular-nums text-destructive">{stats.withProblems}</p>
-			</div>
-			<div class="rounded-xl border border-border/40 bg-card/50 px-4 py-3.5">
-				<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/90">Neverificate</p>
-				<p class="mt-0.5 text-xl font-semibold tabular-nums">{stats.neverChecked}</p>
-			</div>
+			{#if priceReport.length > 0}
+				<div class="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+					<div class="px-4 py-3 border-b border-border bg-muted/50 flex flex-wrap items-center justify-between gap-3">
+						<h3 class="text-sm font-semibold flex items-center gap-2 text-foreground">
+							<BanknoteIcon class="h-4 w-4" />
+							Raport prețuri articole
+						</h3>
+						<div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+							{#if filterClientId}
+								<span class="font-medium text-foreground/90">Client: {clientMap.get(filterClientId) || filterClientId}</span>
+							{/if}
+							{#if filterMonth}
+								<span class="font-medium text-foreground/90">
+									Lună: {new Date(filterMonth + '-01').toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}
+								</span>
+							{/if}
+							{#if filterTargetUrl?.trim()}
+								<span class="font-medium text-foreground/90">URL: {filterTargetUrl.trim()}</span>
+							{/if}
+							{#if !filterClientId && !filterMonth && !filterTargetUrl?.trim()}
+								<span>Toate datele</span>
+							{/if}
+						</div>
+					</div>
+					<div class="p-4">
+						<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+							{#each priceReport as { currency, total, count, avg, min, max }}
+								<div class="rounded-lg border border-border bg-card p-4 space-y-3 shadow-sm">
+									<p class="text-xs font-semibold uppercase tracking-wider text-foreground/80">
+										{CURRENCY_LABELS[currency] || currency}
+									</p>
+									<div class="space-y-2 text-sm">
+										<div class="flex justify-between items-baseline">
+											<span class="text-muted-foreground">Total</span>
+											<span class="font-semibold tabular-nums text-foreground">{formatAmount(total, currency)}</span>
+										</div>
+										<div class="flex justify-between items-baseline">
+											<span class="text-muted-foreground">Articole cu preț</span>
+											<span class="font-medium tabular-nums text-foreground">{count}</span>
+										</div>
+										<div class="flex justify-between items-baseline">
+											<span class="text-muted-foreground">Medie / articol</span>
+											<span class="font-semibold tabular-nums text-foreground">{formatAmount(avg, currency)}</span>
+										</div>
+										<div class="flex justify-between items-baseline text-xs pt-1 border-t border-border/40">
+											<span class="text-muted-foreground">Min / Max</span>
+											<span class="tabular-nums text-foreground/90">{formatAmount(min, currency)} / {formatAmount(max, currency)}</span>
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					</div>
+				</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -1131,13 +1487,49 @@
 			</Select>
 		</div>
 		<div>
-			<Label class="text-xs text-muted-foreground">Lună</Label>
-			<Input
-				type="month"
-				bind:value={filterMonth}
-				placeholder="Toate lunile"
-				class="max-w-[180px]"
-			/>
+			<Label class="text-xs text-muted-foreground">Data publicare</Label>
+			<Popover.Root bind:open={filterDateOpen}>
+				<Popover.Trigger>
+					{#snippet child({ props })}
+						<Button
+							{...props}
+							variant="outline"
+							class="w-[180px] justify-start text-start font-normal"
+						>
+							<CalendarIcon class="mr-2 size-4 shrink-0 opacity-50" />
+							{filterMonth
+								? (() => {
+										const [y, m] = filterMonth.split('-').map(Number);
+										const d = new Date(y, m - 1, 1);
+										return d.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+									})()
+								: 'Toate lunile'}
+						</Button>
+					{/snippet}
+				</Popover.Trigger>
+				<Popover.Content class="w-auto p-0" align="start">
+					<div class="flex flex-col">
+						<Calendar
+							type="single"
+							bind:value={filterDateValue}
+							onValueChange={() => (filterDateOpen = false)}
+							locale="ro-RO"
+							captionLayout="dropdown"
+						/>
+						<Button
+							variant="ghost"
+							class="rounded-t-none border-t text-muted-foreground"
+							onclick={() => {
+								filterMonth = '';
+								filterDateValue = undefined;
+								filterDateOpen = false;
+							}}
+						>
+							Toate lunile
+						</Button>
+					</div>
+				</Popover.Content>
+			</Popover.Root>
 		</div>
 		<div class="min-w-[160px]">
 			<Label class="text-xs text-muted-foreground">Status</Label>
@@ -1192,7 +1584,202 @@
 				</SelectContent>
 			</Select>
 		</div>
+		<div class="min-w-[220px]">
+			<Label class="text-xs text-muted-foreground">URL client</Label>
+			<Input
+				bind:value={filterTargetUrl}
+				placeholder="heylux.ro, https://www.heylux.ro..."
+				class="font-mono text-sm"
+			/>
+			<p class="text-[10px] text-muted-foreground mt-0.5">
+				Orice format: www, fără www, http/https
+			</p>
+		</div>
 	</div>
+
+	<!-- Raport analiză SEO -->
+	{#if !loading && seoLinks.length >= MIN_LINKS_FOR_REPORT && seoReport}
+		<Collapsible bind:open={reportOpen}>
+			<div
+				class="overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-b from-card to-card/80 shadow-sm ring-1 ring-black/5 dark:ring-white/5"
+			>
+				<CollapsibleTrigger
+					class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-muted/30"
+				>
+					<div class="flex items-center gap-3">
+						<div
+							class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+						>
+							<BarChart3Icon class="h-4 w-4" />
+						</div>
+						<div>
+							<h3 class="font-semibold text-foreground">Raport analiză SEO</h3>
+							<p class="text-xs text-muted-foreground">
+								Densitate keywords · Diversitate anchoruri · Risc over-optimization
+							</p>
+						</div>
+					</div>
+					{#if reportOpen}
+						<ChevronUpIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+					{:else}
+						<ChevronDownIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+					{/if}
+				</CollapsibleTrigger>
+				<CollapsibleContent>
+					<div class="border-t border-border/40 px-5 pb-5 pt-4">
+						<div class="grid gap-6 lg:grid-cols-2">
+							<!-- Keyword density - bar chart style -->
+							<div class="space-y-3">
+								<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Densitatea cuvintelor cheie
+								</h4>
+								<div class="space-y-3">
+									{#each seoReport.keywordDensity as row}
+										<div class="group">
+											<div class="mb-1 flex items-baseline justify-between gap-2">
+												<span class="truncate text-sm font-medium text-foreground">{row.keyword}</span>
+												<span class="shrink-0 text-xs tabular-nums text-muted-foreground">
+													{row.count} linkuri · {row.percent}%
+												</span>
+											</div>
+											<div
+												class="h-2 overflow-hidden rounded-full bg-muted/60"
+												role="progressbar"
+												aria-valuenow={row.percent}
+												aria-valuemin="0"
+												aria-valuemax="100"
+											>
+												<div
+													class="h-full rounded-full bg-primary/80 transition-all duration-500 ease-out"
+													style="width: {row.percent}%"
+												></div>
+											</div>
+										</div>
+									{/each}
+								</div>
+							</div>
+
+							<!-- Anchor diversity + Risk -->
+							<div class="space-y-4">
+								<!-- Risk score - design modern cu culori pe nivel -->
+								{#if riskStyles}
+								<div
+									class="flex items-center gap-5 rounded-2xl border-2 p-5 shadow-sm backdrop-blur-sm {riskStyles.card} {riskStyles.ring} ring-2"
+								>
+									<div
+										class="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br {riskStyles.circleBg} shadow-lg {riskStyles.circleRing} ring-2"
+									>
+										<svg class="h-16 w-16 -rotate-90 absolute" viewBox="0 0 36 36">
+											<path
+												class="fill-none {riskStyles.circleTrack}"
+												stroke-width="2.5"
+												d="M18 2.5 a 15.5 15.5 0 0 1 0 31 a 15.5 15.5 0 0 1 0 -31"
+											/>
+											<path
+												class="transition-all duration-700 ease-out {riskStyles.circleFill}"
+												stroke-width="2.5"
+												stroke-linecap="round"
+												stroke-dasharray={`${seoReport.overOptRisk.score * 0.97} 97`}
+												d="M18 2.5 a 15.5 15.5 0 0 1 0 31 a 15.5 15.5 0 0 1 0 -31"
+											/>
+										</svg>
+										<span class="relative z-10 text-lg font-bold tabular-nums text-white drop-shadow-sm">
+											{seoReport.overOptRisk.score}
+										</span>
+									</div>
+									<div class="flex flex-1 flex-col gap-1">
+										<p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/90">
+											Risc over-optimization
+										</p>
+										<span
+											class="inline-flex w-fit items-center rounded-lg px-3 py-1 text-sm font-bold {riskStyles.badge}"
+										>
+											{seoReport.overOptRisk.level === 'low'
+												? 'Scăzut'
+												: seoReport.overOptRisk.level === 'medium'
+													? 'Mediu'
+													: 'Ridicat'}
+										</span>
+									</div>
+								</div>
+								{/if}
+
+								<!-- Anchor diversity -->
+								<div class="space-y-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+										Diversitatea anchorurilor
+									</h4>
+									<p class="text-sm text-muted-foreground">
+										<span class="font-medium text-foreground">{seoReport.anchorDiversity.uniqueAnchors}</span>
+										anchoruri unice din
+										<span class="font-medium text-foreground">{seoReport.anchorDiversity.totalLinks}</span>
+										total
+									</p>
+									<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+										<div
+											class="rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-center"
+										>
+											<p class="text-lg font-semibold tabular-nums text-foreground">
+												{seoReport.anchorDiversity.exact}
+											</p>
+											<p class="text-[11px] text-muted-foreground">Exact</p>
+										</div>
+										<div
+											class="rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-center"
+										>
+											<p class="text-lg font-semibold tabular-nums text-foreground">
+												{seoReport.anchorDiversity.partial}
+											</p>
+											<p class="text-[11px] text-muted-foreground">Parțial</p>
+										</div>
+										<div
+											class="rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-center"
+										>
+											<p class="text-lg font-semibold tabular-nums text-foreground">
+												{seoReport.anchorDiversity.branded}
+											</p>
+											<p class="text-[11px] text-muted-foreground">Branded</p>
+										</div>
+										<div
+											class="rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-center"
+										>
+											<p class="text-lg font-semibold tabular-nums text-foreground">
+												{seoReport.anchorDiversity.generic}
+											</p>
+											<p class="text-[11px] text-muted-foreground">Generic</p>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Recommendations -->
+						{#if seoReport.recommendations.length > 0}
+							<div class="mt-6 space-y-2">
+								<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Recomandări
+								</h4>
+								<div class="flex flex-wrap gap-2">
+									{#each seoReport.recommendations as rec}
+										<span
+											class="inline-flex items-center gap-2 rounded-xl border border-border/60 bg-muted/40 px-4 py-2 text-sm font-medium text-foreground/90 dark:bg-muted/20"
+										>
+											<span class="text-primary">→</span>
+											{rec}
+										</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				</CollapsibleContent>
+			</div>
+		</Collapsible>
+	{:else if !loading && seoLinks.length > 0 && seoLinks.length < MIN_LINKS_FOR_REPORT}
+		<p class="text-sm text-muted-foreground">
+			Nu există suficiente date pentru analiză (minim {MIN_LINKS_FOR_REPORT} linkuri).
+		</p>
+	{/if}
 
 	{#if loading}
 		<p class="text-muted-foreground">Se încarcă...</p>
@@ -1222,6 +1809,22 @@
 								<span class="inline-flex items-center gap-1.5">
 									<HashIcon class="h-3.5 w-3.5 shrink-0" />
 									Nr.
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Număr</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													Numărul de ordine al link-ului în listă.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
@@ -1234,36 +1837,135 @@
 								<span class="inline-flex items-center gap-1.5">
 									<KeyIcon class="h-3.5 w-3.5 shrink-0" />
 									Cuvânt cheie
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Cuvânt cheie</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													Cuvântul cheie pentru care a fost optimizat anchor text-ul link-ului. Este extras din textul vizibil al link-ului pe pagină.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<TargetIcon class="h-3.5 w-3.5 shrink-0" />
 									URL țintă
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">URL țintă</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													URL-ul site-ului tău către care face link articolul. Este pagina de destinație a backlink-ului.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<FileTextIcon class="h-3.5 w-3.5 shrink-0" />
 									Link articol
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Link articol</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													URL-ul articolului pe care este publicat link-ul către site-ul tău. Este sursa backlink-ului.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<CircleDotIcon class="h-3.5 w-3.5 shrink-0" />
-									Status
+									Status / Data publicare
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Status</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													<strong class="text-foreground">În așteptare</strong> — în lucru. <strong class="text-foreground">Trimis</strong> — articol trimis. <strong class="text-foreground">Publicat</strong> — live pe site. <strong class="text-foreground">Refuzat</strong> — respins. Data este extrasă din articol.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<TagIcon class="h-3.5 w-3.5 shrink-0" />
 									Tip
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Dofollow vs Nofollow</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													<strong class="text-foreground">Dofollow</strong> — link transmite autoritate către site-ul țintă; Google urmărește link-ul pentru SEO.
+												</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed mt-1">
+													<strong class="text-foreground">Nofollow</strong> — link nu transmite link equity; Google nu îl urmărește pentru ranking.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<CheckCircle2Icon class="h-3.5 w-3.5 shrink-0" />
 									Check
+									<TooltipProvider>
+										<Tooltip>
+											<TooltipTrigger>
+												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
+											</TooltipTrigger>
+											<TooltipContent
+												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
+												arrowClasses="!bg-popover"
+											>
+												<p class="font-semibold text-sm mb-1.5 text-foreground">Verificare link</p>
+												<p class="text-[13px] text-foreground/90 leading-relaxed">
+													<strong class="text-foreground">OK</strong> — link accesibil. <strong class="text-foreground">Redirect</strong> — redirecționare. <strong class="text-foreground">Unreachable</strong> — inaccesibil. <strong class="text-foreground">Neverificat</strong> — încă neverificat.
+												</p>
+											</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
 								</span>
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
@@ -1388,13 +2090,13 @@
 										{#if link.articleUrl}
 											<img
 												src={getFaviconUrl(link.articleUrl)}
-												alt={link.pressTrust || 'Logo'}
+												alt={getPressTrustDisplay(link)}
 												class="h-5 w-5 shrink-0 rounded-md object-contain bg-muted/40"
 												loading="lazy"
 												onerror={(e) => (e.currentTarget.style.display = 'none')}
 											/>
 										{/if}
-										<span class="text-[13px] font-medium text-foreground/90">{link.pressTrust || '—'}</span>
+										<span class="text-[13px] font-medium text-foreground/90">{getPressTrustDisplay(link)}</span>
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
@@ -1411,15 +2113,20 @@
 									<SeoLinkUrlCell url={link.articleUrl} maxChars={45} />
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
-									<Badge variant={getStatusBadge(link.status)} class="text-[11px] h-5 rounded-full px-2 font-normal">
-										{getStatusLabel(link.status)}
-									</Badge>
+									{@const pubDate = getPublicationDateDisplay(link)}
+									<div class="flex items-center gap-1.5">
+										<Badge variant={getStatusBadge(link.status)} class="text-[11px] h-5 rounded-full px-2 font-normal w-fit">
+											{getStatusLabel(link.status)}
+										</Badge>
+										{#if pubDate}
+											<Badge variant="secondary" class="text-[11px] h-5 rounded-full px-2 font-normal w-fit text-muted-foreground">
+												{pubDate}
+											</Badge>
+										{/if}
+									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
 									<div class="flex flex-col gap-0.5">
-										{#if link.linkType}
-											<span class="text-[11px] text-muted-foreground uppercase tracking-wide">{getLinkTypeLabel(link.linkType)}</span>
-										{/if}
 										{#if link.lastCheckDofollow}
 											<Badge variant={link.lastCheckDofollow === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
 												{link.lastCheckDofollow}
@@ -1430,18 +2137,25 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
-									<TooltipProvider>
-										<Tooltip>
-											<TooltipTrigger>
-												<Badge variant={getCheckStatusBadge(link).variant} class="text-[11px] h-5 rounded-full px-2 font-normal">
-													{getCheckStatusBadge(link).label}
-												</Badge>
-											</TooltipTrigger>
-											<TooltipContent>
-												<p>{getCheckTooltip(link)}</p>
-											</TooltipContent>
-										</Tooltip>
-									</TooltipProvider>
+									<div class="flex items-center gap-1.5">
+										<TooltipProvider>
+											<Tooltip>
+												<TooltipTrigger>
+													<Badge variant={getCheckStatusBadge(link).variant} class="text-[11px] h-5 rounded-full px-2 font-normal">
+														{getCheckStatusBadge(link).label}
+													</Badge>
+												</TooltipTrigger>
+												<TooltipContent>
+													<p>{getCheckTooltip(link)}</p>
+												</TooltipContent>
+											</Tooltip>
+										</TooltipProvider>
+										{#if link.lastCheckedAt}
+											<Badge variant="secondary" class="text-[11px] h-5 rounded-full px-2 font-normal w-fit text-muted-foreground">
+												{formatArticleDate(link.lastCheckedAt instanceof Date ? link.lastCheckedAt.toISOString() : String(link.lastCheckedAt))}
+											</Badge>
+										{/if}
+									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 text-[13px] align-middle">
 									{#if editingPriceId === link.id}
@@ -1535,6 +2249,21 @@
 							</TableRow>
 						{/each}
 					</TableBody>
+					<TableFooter>
+						<TableRow class="border-t-2 border-border/60 bg-muted/30 hover:bg-muted/30 font-medium">
+							<TableCell colspan={9} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
+								Total preț
+							</TableCell>
+							<TableCell class="px-3 py-3.5 text-[13px] font-semibold">
+								{#if totalByCurrency.length > 0}
+									{totalByCurrency.map(({ currency, cents }) => formatAmount(cents, currency as Currency)).join(' · ')}
+								{:else}
+									—
+								{/if}
+							</TableCell>
+							<TableCell class="py-3.5 pr-5"></TableCell>
+						</TableRow>
+					</TableFooter>
 				</Table>
 			</div>
 		</div>

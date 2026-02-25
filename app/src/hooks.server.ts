@@ -135,3 +135,7 @@ export const init = async () => {
 };
 
 export const handle: Handle = handleAuth;
+
+export const handleError = ({ error, event, status }) => {
+	console.error(`[${status}]`, event.url.pathname, error);
+};

@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, or, isNull, inArray } from 'drizzle-orm';
+import { eq, and, desc, or, isNull, isNotNull, inArray, like } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
 
@@ -25,8 +25,29 @@ const seoLinkSchema = v.object({
 	linkAttribute: v.optional(v.picklist(['dofollow', 'nofollow'])),
 	status: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
 	articleUrl: v.pipe(v.string(), v.minLength(1, 'Linkul articolului este obligatoriu')),
+	articlePublishedAt: v.optional(v.string()),
 	targetUrl: v.optional(v.string()),
 	price: v.optional(v.number()),
+	currency: v.optional(v.string()),
+	anchorText: v.optional(v.string()),
+	projectId: v.optional(v.string()),
+	notes: v.optional(v.string())
+});
+
+/** Schema for partial updates - all fields optional except seoLinkId */
+const updateSeoLinkSchema = v.object({
+	seoLinkId: v.pipe(v.string(), v.minLength(1)),
+	clientId: v.optional(v.pipe(v.string(), v.minLength(1))),
+	pressTrust: v.optional(v.string()),
+	month: v.optional(v.pipe(v.string(), v.minLength(1))),
+	keyword: v.optional(v.pipe(v.string(), v.minLength(1))),
+	linkType: v.optional(v.picklist(['article', 'guest-post', 'press-release', 'directory', 'other'])),
+	linkAttribute: v.optional(v.picklist(['dofollow', 'nofollow'])),
+	status: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
+	articleUrl: v.optional(v.pipe(v.string(), v.minLength(1))),
+	articlePublishedAt: v.optional(v.nullable(v.string())),
+	targetUrl: v.optional(v.string()),
+	price: v.optional(v.nullable(v.number())),
 	currency: v.optional(v.string()),
 	anchorText: v.optional(v.string()),
 	projectId: v.optional(v.string()),
@@ -38,7 +59,8 @@ export const getSeoLinks = query(
 		clientId: v.optional(v.string()),
 		month: v.optional(v.string()),
 		status: v.optional(v.string()),
-		checkStatus: v.optional(v.string()) // 'ok' | 'problem' | 'never' - for filtering by link check result
+		checkStatus: v.optional(v.string()), // 'ok' | 'problem' | 'never' - for filtering by link check result
+		targetUrl: v.optional(v.string()) // URL client - filtrare după domeniu root (acceptă orice format: https/heylux.ro, www.heylux.ro, etc.)
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -54,8 +76,16 @@ export const getSeoLinks = query(
 		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 		}
+		// Filtru după data publicării - articlePublishedAt sau month (fallback)
 		if (filters.month) {
-			conditions = and(conditions, eq(table.seoLink.month, filters.month)) as typeof conditions;
+			const monthPrefix = filters.month + '%';
+			conditions = and(
+				conditions,
+				or(
+					and(isNotNull(table.seoLink.articlePublishedAt), like(table.seoLink.articlePublishedAt, monthPrefix)),
+					and(isNull(table.seoLink.articlePublishedAt), eq(table.seoLink.month, filters.month))
+				)!
+			) as typeof conditions;
 		}
 		if (filters.status) {
 			conditions = and(conditions, eq(table.seoLink.status, filters.status)) as typeof conditions;
@@ -75,13 +105,59 @@ export const getSeoLinks = query(
 			conditions = and(conditions, eq(table.seoLink.lastCheckStatus, 'ok')) as typeof conditions;
 		}
 
-		const links = await db
+		let links = await db
 			.select()
 			.from(table.seoLink)
 			.where(conditions)
 			.orderBy(desc(table.seoLink.month), desc(table.seoLink.createdAt));
 
+		// Filtrare după URL client (domeniu root) - acceptă orice format: https://heylux.ro, www.heylux.ro, http://heylux.ro etc.
+		if (filters.targetUrl?.trim()) {
+			const filterRoot = extractDomainFromUrl(filters.targetUrl.trim());
+			if (filterRoot) {
+				links = links.filter((link) => {
+					if (!link.targetUrl) return false;
+					const linkRoot = extractDomainFromUrl(link.targetUrl);
+					return linkRoot === filterRoot;
+				});
+			}
+		}
+
 		return links;
+	}
+);
+
+/** Returnează luna (YYYY-MM) a primului articol publicat pentru un client, fără filtru de lună.
+ * Folosește articlePublishedAt; dacă lipsește, folosește câmpul month ca fallback. */
+export const getFirstPublishedMonthForClient = query(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const conditions = and(
+			eq(table.seoLink.tenantId, event.locals.tenant.id),
+			eq(table.seoLink.clientId, clientId)
+		);
+
+		const links = await db
+			.select({
+				articlePublishedAt: table.seoLink.articlePublishedAt,
+				month: table.seoLink.month
+			})
+			.from(table.seoLink)
+			.where(conditions);
+
+		const months: string[] = [];
+		for (const l of links) {
+			if (l.articlePublishedAt) months.push(l.articlePublishedAt.slice(0, 7));
+			else if (l.month) months.push(l.month);
+		}
+		if (months.length === 0) return null;
+
+		return months.reduce((a, b) => (a < b ? a : b));
 	}
 );
 
@@ -112,6 +188,7 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		linkAttribute: data.linkAttribute || 'dofollow',
 		status: data.status || 'pending',
 		articleUrl: data.articleUrl,
+		articlePublishedAt: data.articlePublishedAt || null,
 		targetUrl: data.targetUrl || null,
 		price: data.price != null ? Math.round(data.price * 100) : null,
 		currency,
@@ -208,11 +285,7 @@ export const getSeoLink = query(
 	}
 );
 
-export const updateSeoLink = command(
-	v.object({
-		seoLinkId: v.pipe(v.string(), v.minLength(1)),
-		...seoLinkSchema.entries
-	}),
+export const updateSeoLink = command(updateSeoLinkSchema,
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
@@ -247,10 +320,14 @@ export const updateSeoLink = command(
 				linkAttribute: updateData.linkAttribute ?? existing.linkAttribute,
 				status: updateData.status ?? existing.status,
 				articleUrl: updateData.articleUrl ?? existing.articleUrl,
+				articlePublishedAt:
+					updateData.articlePublishedAt !== undefined ? updateData.articlePublishedAt || null : existing.articlePublishedAt,
 				targetUrl: updateData.targetUrl !== undefined ? updateData.targetUrl || null : existing.targetUrl,
 				price:
-					updateData.price != null
-						? Math.round(updateData.price * 100)
+					updateData.price !== undefined
+						? updateData.price != null
+							? Math.round(updateData.price * 100)
+							: null
 						: existing.price,
 				currency: updateData.currency ?? existing.currency,
 				anchorText:
@@ -333,10 +410,22 @@ interface ExtractedLink {
 	anchorText: string;
 }
 
+/** Extrage textul vizibil din HTML (elimină tag-uri, colapsează spații) */
+function extractVisibleText(html: string): string {
+	return html
+		.replace(/<script[\s\S]*?<\/script>/gi, '')
+		.replace(/<style[\s\S]*?<\/style>/gi, '')
+		.replace(/<[^>]+>/g, ' ')
+		.replace(/&nbsp;/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
 /** Extrage toate linkurile către root (domeniu + subdomenii + pagini) și returnează cel mai specific */
 function extractLinksToRootFromHtml(html: string, rootDomain: string): ExtractedLink[] {
 	const results: ExtractedLink[] = [];
-	const linkRegex = /<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+	// href poate fi oriunde în tag, conținut poate avea tag-uri nested (ex: <strong>LiveJasmin</strong>)
+	const linkRegex = /<a\s[^>]*\bhref\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a\s*>/gi;
 	let match: RegExpExecArray | null;
 	while ((match = linkRegex.exec(html)) !== null) {
 		const href = match[1];
@@ -344,12 +433,13 @@ function extractLinksToRootFromHtml(html: string, rootDomain: string): Extracted
 		if (href && hrefBelongsToRoot(href, rootDomain)) {
 			results.push({
 				url: normalizeHref(href),
-				anchorText: stripHtml(inner)
+				anchorText: extractVisibleText(inner)
 			});
 		}
 	}
+	// Fallback: linkuri cu conținut simplu (fără tag-uri nested)
 	if (results.length === 0) {
-		const altRegex = /<a[^>]+href=["']([^"']*)["'][^>]*>([^<]+)<\/a>/gi;
+		const altRegex = /<a[^>]+href=["']([^"']*)["'][^>]*>([^<]+)<\/a\s*>/gi;
 		let altMatch: RegExpExecArray | null;
 		while ((altMatch = altRegex.exec(html)) !== null) {
 			const href = altMatch[1];
@@ -364,10 +454,15 @@ function extractLinksToRootFromHtml(html: string, rootDomain: string): Extracted
 	return results;
 }
 
-/** Alege cel mai specific URL (cea mai lungă cale) din lista de linkuri */
+/** Alege cel mai specific URL și cuvântul cheie - preferă linkuri cu anchor text semnificativ */
 function pickBestTargetUrl(links: ExtractedLink[]): { url: string; keyword: string } {
 	if (links.length === 0) return { url: '', keyword: '' };
-	const sorted = [...links].sort((a, b) => {
+	const hasGoodAnchor = (l: ExtractedLink) =>
+		l.anchorText && l.anchorText.length > 2 && l.anchorText.length < 200;
+	// Preferă linkuri cu anchor text semnificativ (ex: "LiveJasmin" în <a><strong>LiveJasmin</strong></a>)
+	const withKeyword = links.filter(hasGoodAnchor);
+	const toSort = withKeyword.length > 0 ? withKeyword : links;
+	const sorted = [...toSort].sort((a, b) => {
 		try {
 			const pathA = new URL(a.url).pathname.length;
 			const pathB = new URL(b.url).pathname.length;
@@ -377,10 +472,9 @@ function pickBestTargetUrl(links: ExtractedLink[]): { url: string; keyword: stri
 		}
 	});
 	const best = sorted[0];
-	const keyword =
-		best.anchorText && best.anchorText.length > 2 && best.anchorText.length < 200
-			? best.anchorText
-			: sorted.find((l) => l.anchorText && l.anchorText.length > 2)?.anchorText || '';
+	const keyword = hasGoodAnchor(best)
+		? best.anchorText
+		: sorted.find(hasGoodAnchor)?.anchorText || '';
 	return { url: best.url, keyword };
 }
 
@@ -392,6 +486,50 @@ function extractPressTrustFromUrl(articleUrl: string): string {
 		return base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
 	} catch {
 		return '';
+	}
+}
+
+/** Extrage data publicării articolului din HTML (meta tags, time, JSON-LD) */
+function extractArticlePublishedDate(html: string): string | null {
+	// 1. Meta article:published_time / og:published_time
+	const metaMatch = html.match(
+		/<meta[^>]*(?:property|name)=["'](?:article:published_time|og:published_time)["'][^>]*content=["']([^"']+)["']/i
+	) || html.match(
+		/<meta[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:article:published_time|og:published_time)["']/i
+	);
+	if (metaMatch?.[1]) {
+		const d = parseDateToIso(metaMatch[1]);
+		if (d) return d;
+	}
+	// 2. <time datetime="...">
+	const timeMatch = html.match(/<time[^>]*datetime=["']([^"']+)["']/i);
+	if (timeMatch?.[1]) {
+		const d = parseDateToIso(timeMatch[1]);
+		if (d) return d;
+	}
+	// 3. JSON-LD datePublished
+	const jsonLdMatch = html.match(/"datePublished"\s*:\s*"([^"]+)"/);
+	if (jsonLdMatch?.[1]) {
+		const d = parseDateToIso(jsonLdMatch[1]);
+		if (d) return d;
+	}
+	// 4. Meta dc.date / publication
+	const dcMatch = html.match(/<meta[^>]*(?:name|property)=["'](?:dc\.date|date|publication_date)["'][^>]*content=["']([^"']+)["']/i)
+		|| html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*(?:name|property)=["'](?:dc\.date|date)["']/i);
+	if (dcMatch?.[1]) {
+		const d = parseDateToIso(dcMatch[1]);
+		if (d) return d;
+	}
+	return null;
+}
+
+function parseDateToIso(val: string): string | null {
+	try {
+		const d = new Date(val);
+		if (isNaN(d.getTime())) return null;
+		return d.toISOString().slice(0, 19) + 'Z';
+	} catch {
+		return null;
 	}
 }
 
@@ -444,13 +582,15 @@ export const extractSeoLinkData = command(
 
 		const pressTrust = extractPressTrustFromUrl(data.articleUrl);
 		const linkType = 'article';
+		const articlePublishedAt = extractArticlePublishedDate(html);
 
 		return {
 			keyword: keyword || '',
 			anchorText: anchorText || keyword,
 			pressTrust,
 			linkType,
-			targetUrl: extractedTargetUrl || (data.clientUrl.startsWith('http') ? data.clientUrl : `https://${data.clientUrl}`)
+			targetUrl: extractedTargetUrl || (data.clientUrl.startsWith('http') ? data.clientUrl : `https://${data.clientUrl}`),
+			articlePublishedAt: articlePublishedAt || undefined
 		};
 	}
 );
@@ -529,7 +669,8 @@ export const extractTargetUrlForSeoLink = command(
 		}
 
 		const links = extractLinksToRootFromHtml(html, clientDomain);
-		const { url: extractedTargetUrl } = pickBestTargetUrl(links);
+		const { url: extractedTargetUrl, keyword: extractedKeyword } = pickBestTargetUrl(links);
+		const articlePublishedAt = extractArticlePublishedDate(html);
 
 		if (!extractedTargetUrl) {
 			throw new Error(`Nu s-a găsit niciun link către ${clientDomain} în articol`);
@@ -537,10 +678,18 @@ export const extractTargetUrlForSeoLink = command(
 
 		await db
 			.update(table.seoLink)
-			.set({ targetUrl: extractedTargetUrl, updatedAt: new Date() })
+			.set({
+				targetUrl: extractedTargetUrl,
+				...(extractedKeyword && {
+					keyword: extractedKeyword,
+					anchorText: extractedKeyword
+				}),
+				...(articlePublishedAt && { articlePublishedAt }),
+				updatedAt: new Date()
+			})
 			.where(eq(table.seoLink.id, seoLinkId));
 
-		return { success: true, targetUrl: extractedTargetUrl };
+		return { success: true, targetUrl: extractedTargetUrl, keyword: extractedKeyword, articlePublishedAt };
 	}
 );
 
@@ -572,8 +721,9 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 		if (filters.clientId) {
 			conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 		}
+		// Filtru după data publicării (articlePublishedAt)
 		if (filters.month) {
-			conditions = and(conditions, eq(table.seoLink.month, filters.month)) as typeof conditions;
+			conditions = and(conditions, like(table.seoLink.articlePublishedAt, filters.month + '%')) as typeof conditions;
 		}
 	}
 
@@ -638,8 +788,9 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 				continue;
 			}
 
-			const links = extractLinksToRootFromHtml(html, clientDomain);
-			const { url: extractedTargetUrl } = pickBestTargetUrl(links);
+			const extractedLinks = extractLinksToRootFromHtml(html, clientDomain);
+			const { url: extractedTargetUrl, keyword: extractedKeyword } = pickBestTargetUrl(extractedLinks);
+			const articlePublishedAt = extractArticlePublishedDate(html);
 
 			if (!extractedTargetUrl) {
 				errors.push({ id: link.id, error: `Nu s-a găsit link către ${clientDomain} în articol` });
@@ -648,7 +799,15 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 
 			await db
 				.update(table.seoLink)
-				.set({ targetUrl: extractedTargetUrl, updatedAt: new Date() })
+				.set({
+					targetUrl: extractedTargetUrl,
+					...(extractedKeyword && {
+						keyword: extractedKeyword,
+						anchorText: extractedKeyword
+					}),
+					...(articlePublishedAt && { articlePublishedAt }),
+					updatedAt: new Date()
+				})
 				.where(eq(table.seoLink.id, link.id));
 
 			results.push({ id: link.id, targetUrl: extractedTargetUrl });
@@ -844,8 +1003,9 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 	if (filters.clientId) {
 		conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 	}
+	// Filtru după data publicării (articlePublishedAt)
 	if (filters.month) {
-		conditions = and(conditions, eq(table.seoLink.month, filters.month)) as typeof conditions;
+		conditions = and(conditions, like(table.seoLink.articlePublishedAt, filters.month + '%')) as typeof conditions;
 	}
 	if (filters.seoLinkIds?.length) {
 		conditions = and(conditions, inArray(table.seoLink.id, filters.seoLinkIds)) as typeof conditions;

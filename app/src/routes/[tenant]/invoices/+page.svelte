@@ -460,6 +460,7 @@ import { goto } from '$app/navigation';
 
 			if (result.success) {
 				syncResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
+				await invoicesQuery.refresh();
 				setTimeout(() => {
 					syncResult = null;
 				}, 5000);

@@ -780,8 +780,17 @@ export const syncInvoicesFromKeez = command(
 					.where(eq(table.invoice.keezExternalId, invoiceHeader.externalId))
 					.limit(1);
 
-				// Get full invoice details
-				const keezInvoice = await keezClient.getInvoice(invoiceHeader.externalId);
+				// Get full invoice details (skip if 404 - invoice may have been deleted in Keez)
+				let keezInvoice;
+				try {
+					keezInvoice = await keezClient.getInvoice(invoiceHeader.externalId);
+				} catch (e) {
+					if (e instanceof Error && e.message === 'Not found') {
+						console.warn(`[Keez] Skipping invoice ${invoiceHeader.externalId} - not found in Keez (may have been deleted)`);
+						continue;
+					}
+					throw e;
+				}
 
 				// If invoice exists, update it with latest data from Keez
 				if (existing) {

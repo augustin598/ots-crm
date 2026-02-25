@@ -118,10 +118,12 @@
 		importResult = null;
 
 		try {
-			const result = await syncInvoicesFromKeez({}).updates(getInvoices({}));
+			const invoicesQuery = getInvoices({});
+			const result = await syncInvoicesFromKeez({}).updates(invoicesQuery);
 
 			if (result.success) {
 				importResult = { imported: result.imported, skipped: result.skipped };
+				await invoicesQuery.refresh();
 				success = true;
 				setTimeout(() => {
 					success = false;

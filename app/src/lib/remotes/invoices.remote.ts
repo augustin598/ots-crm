@@ -187,7 +187,7 @@ export const getInvoices = query(
 			}
 		}
 
-		return await db.select().from(table.invoice).where(conditions).orderBy(desc(table.invoice.updatedAt));
+		return await db.select().from(table.invoice).where(conditions).orderBy(desc(table.invoice.issueDate));
 	}
 );
 

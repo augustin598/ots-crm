@@ -966,6 +966,7 @@ export const seoLink = sqliteTable('seo_link', {
 	linkAttribute: text('link_attribute').notNull().default('dofollow'), // 'dofollow', 'nofollow'
 	status: text('status').notNull().default('pending'), // 'pending', 'submitted', 'published', 'rejected'
 	articleUrl: text('article_url').notNull(),
+	articlePublishedAt: text('article_published_at'), // Data publicării articolului (ISO 8601), extrasă din articol
 	targetUrl: text('target_url'), // URL-ul paginii clientului unde pointează linkul
 	price: integer('price'), // in cents
 	currency: text('currency').notNull().default('RON'),
