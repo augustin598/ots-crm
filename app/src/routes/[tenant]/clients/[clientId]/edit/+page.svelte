@@ -31,6 +31,7 @@
 	let name = $state('');
 	let email = $state('');
 	let phone = $state('');
+	let website = $state('');
 	let saving = $state(false);
 	let loadingAnaf = $state(false);
 	let error = $state<string | null>(null);
@@ -58,6 +59,7 @@
 			name = client.name || '';
 			email = client.email || '';
 			phone = client.phone || '';
+			website = client.website || '';
 			companyType = client.companyType || '';
 			cui = client.cui || '';
 			registrationNumber = client.registrationNumber || '';
@@ -126,6 +128,7 @@
 				name,
 				email: email || undefined,
 				phone: phone || undefined,
+				website: website || undefined,
 				companyType: companyType || undefined,
 				cui: cui || undefined,
 				registrationNumber: registrationNumber || undefined,
@@ -194,6 +197,11 @@
 								<Label for="phone">Phone</Label>
 								<Input id="phone" bind:value={phone} type="tel" />
 							</div>
+						</div>
+						<div class="space-y-2">
+							<Label for="website">Website</Label>
+							<Input id="website" bind:value={website} type="url" placeholder="glemis.ro sau https://www.glemis.ro" />
+							<p class="text-xs text-muted-foreground">Folosit pentru extragerea URL țintă din linkurile SEO</p>
 						</div>
 					</div>
 

@@ -24,6 +24,11 @@
 				<a href="/register">
 					<Button variant="outline" class="w-full">Register</Button>
 				</a>
+				<a href="/login?reset=1" class="block">
+					<Button variant="ghost" class="w-full text-muted-foreground hover:text-foreground">
+						Forgot password?
+					</Button>
+				</a>
 			</CardContent>
 		</Card>
 	{:else if !data.tenants || data.tenants.length === 0}

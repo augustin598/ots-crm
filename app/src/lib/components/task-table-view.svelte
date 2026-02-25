@@ -17,7 +17,7 @@
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import type { Task } from '$lib/server/db/schema';
-	import { formatStatus } from './task-kanban-utils';
+	import { formatStatus, getStatusColor } from './task-kanban-utils';
 	import { formatPriority, getPriorityColor } from '$lib/utils/task-filters';
 
 	type Props = {
@@ -152,7 +152,9 @@
 					<TableRow class="cursor-pointer hover:bg-accent/50" onclick={() => onTaskClick(task)}>
 						<TableCell class="font-medium max-w-[300px] truncate">{task.title}</TableCell>
 						<TableCell>
-							<span class="capitalize">{formatStatus(task.status || 'todo')}</span>
+							<span class={`text-xs font-medium px-2 py-1 rounded capitalize ${getStatusColor(task.status || 'todo')}`}>
+								{formatStatus(task.status || 'todo')}
+							</span>
 						</TableCell>
 						<TableCell>
 							<span class={`text-xs font-medium px-2 py-1 rounded ${getPriorityColor(task.priority || 'medium')}`}>

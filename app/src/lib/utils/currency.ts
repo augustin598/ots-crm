@@ -12,6 +12,13 @@ export const CURRENCY_SYMBOLS: Record<Currency, string> = {
 	USD: '$'
 };
 
+/** User-friendly labels for currency dropdowns */
+export const CURRENCY_LABELS: Record<Currency, string> = {
+	RON: 'Lei (RON)',
+	EUR: 'Euro (EUR)',
+	USD: 'USD'
+};
+
 export const CURRENCY_FORMATS: Record<Currency, Intl.NumberFormatOptions> = {
 	RON: {
 		style: 'currency',

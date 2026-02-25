@@ -102,6 +102,7 @@ export const client = sqliteTable('client', {
 	name: text('name').notNull(),
 	email: text('email'),
 	phone: text('phone'),
+	website: text('website'),
 	status: text('status').default('prospect'), // 'prospect', 'active', 'inactive'
 	companyType: text('company_type'),
 	cui: text('cui'),
@@ -965,17 +966,37 @@ export const seoLink = sqliteTable('seo_link', {
 	linkAttribute: text('link_attribute').notNull().default('dofollow'), // 'dofollow', 'nofollow'
 	status: text('status').notNull().default('pending'), // 'pending', 'submitted', 'published', 'rejected'
 	articleUrl: text('article_url').notNull(),
+	targetUrl: text('target_url'), // URL-ul paginii clientului unde pointează linkul
 	price: integer('price'), // in cents
 	currency: text('currency').notNull().default('RON'),
 	anchorText: text('anchor_text'), // Textul ancorat al linkului
 	projectId: text('project_id').references(() => project.id),
 	notes: text('notes'),
+	// Link check status (last verification result)
+	lastCheckedAt: timestamp('last_checked_at', { withTimezone: true, mode: 'date' }),
+	lastCheckStatus: text('last_check_status'), // 'ok' | 'unreachable' | 'timeout' | 'redirect' | 'error'
+	lastCheckHttpCode: integer('last_check_http_code'),
+	lastCheckError: text('last_check_error'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
+});
+
+export const seoLinkCheck = sqliteTable('seo_link_check', {
+	id: text('id').primaryKey(),
+	seoLinkId: text('seo_link_id')
+		.notNull()
+		.references(() => seoLink.id, { onDelete: 'cascade' }),
+	checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	status: text('status').notNull(), // 'ok' | 'unreachable' | 'timeout' | 'redirect' | 'error'
+	httpCode: integer('http_code'),
+	responseTimeMs: integer('response_time_ms'),
+	errorMessage: text('error_message')
 });
 
 export const clientUser = sqliteTable('client_user', {
@@ -1017,6 +1038,20 @@ export const adminMagicLinkToken = sqliteTable('admin_magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
 	email: text('email').notNull(),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	used: boolean('used').notNull().default(false),
+	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const passwordResetToken = sqliteTable('password_reset_token', {
+	id: text('id').primaryKey(),
+	token: text('token').notNull().unique(), // Hashed token
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
 	used: boolean('used').notNull().default(false),
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
@@ -1132,7 +1167,7 @@ export const projectRelations = relations(project, ({ one, many }) => ({
 	seoLinks: many(seoLink)
 }));
 
-export const seoLinkRelations = relations(seoLink, ({ one }) => ({
+export const seoLinkRelations = relations(seoLink, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [seoLink.tenantId],
 		references: [tenant.id]
@@ -1144,6 +1179,14 @@ export const seoLinkRelations = relations(seoLink, ({ one }) => ({
 	project: one(project, {
 		fields: [seoLink.projectId],
 		references: [project.id]
+	}),
+	checks: many(seoLinkCheck)
+}));
+
+export const seoLinkCheckRelations = relations(seoLinkCheck, ({ one }) => ({
+	seoLink: one(seoLink, {
+		fields: [seoLinkCheck.seoLinkId],
+		references: [seoLink.id]
 	})
 }));
 
@@ -1702,3 +1745,5 @@ export type AdminMagicLinkToken = typeof adminMagicLinkToken.$inferSelect;
 export type NewAdminMagicLinkToken = typeof adminMagicLinkToken.$inferInsert;
 export type SeoLink = typeof seoLink.$inferSelect;
 export type NewSeoLink = typeof seoLink.$inferInsert;
+export type SeoLinkCheck = typeof seoLinkCheck.$inferSelect;
+export type NewSeoLinkCheck = typeof seoLinkCheck.$inferInsert;

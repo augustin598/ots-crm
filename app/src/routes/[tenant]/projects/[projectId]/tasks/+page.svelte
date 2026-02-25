@@ -21,6 +21,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
+	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
 	import { Plus, Calendar, Users, MoreVertical } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -48,9 +49,6 @@
 		}
 	}
 
-	function formatStatus(status: string) {
-		return status.replace('-', ' ');
-	}
 
 	async function handleChangeStatus(taskId: string) {
 		selectedTaskId = taskId;
@@ -121,7 +119,7 @@
 										{task.priority}
 									</Badge>
 								{/if}
-								<Badge variant="outline">{formatStatus(task.status)}</Badge>
+								<Badge variant={getStatusBadgeVariant(task.status)}>{formatStatus(task.status)}</Badge>
 							</div>
 							{#if task.description}
 								<p class="text-sm text-muted-foreground mb-3">{task.description}</p>

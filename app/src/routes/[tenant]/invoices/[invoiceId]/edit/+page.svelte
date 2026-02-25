@@ -11,7 +11,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
-	import { CURRENCIES, type Currency } from '$lib/utils/currency';
+	import { CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -154,11 +154,11 @@
 							<Label for="currency">Currency</Label>
 							<Select type="single" bind:value={currency}>
 								<SelectTrigger>
-									{currency}
+									{CURRENCY_LABELS[currency]}
 								</SelectTrigger>
 								<SelectContent>
 									{#each CURRENCIES as curr}
-										<SelectItem value={curr}>{curr}</SelectItem>
+										<SelectItem value={curr}>{CURRENCY_LABELS[curr]}</SelectItem>
 									{/each}
 								</SelectContent>
 							</Select>

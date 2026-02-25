@@ -2,7 +2,7 @@
 	import { getServices, createService, deleteService } from '$lib/remotes/services.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
+	import { formatAmount, CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -249,11 +249,11 @@
 						<Label for="currency">Currency</Label>
 						<Select type="single" bind:value={formCurrency}>
 							<SelectTrigger id="currency">
-								{formCurrency}
+								{CURRENCY_LABELS[formCurrency]}
 							</SelectTrigger>
 							<SelectContent>
 								{#each CURRENCIES as curr}
-									<SelectItem value={curr}>{curr}</SelectItem>
+									<SelectItem value={curr}>{CURRENCY_LABELS[curr]}</SelectItem>
 								{/each}
 							</SelectContent>
 						</Select>

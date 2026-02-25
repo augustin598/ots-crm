@@ -10,6 +10,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Separator } from '$lib/components/ui/separator';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
+	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
 	import { Calendar, User, MessageSquare, Edit, Check, X } from '@lucide/svelte';
 	import type { Task } from '$lib/server/db/schema';
 
@@ -138,12 +139,7 @@
 						<Badge variant={getPriorityBadgeVariant(task.priority || 'medium')}>
 							{task.priority || 'medium'}
 						</Badge>
-						<Badge variant="outline">{task.status}</Badge>
-						{#if task.status === 'pending-approval'}
-							<Badge variant="secondary" class="bg-yellow-100 text-yellow-700">
-								Awaiting Approval
-							</Badge>
-						{/if}
+						<Badge variant={getStatusBadgeVariant(task.status)}>{formatStatus(task.status || 'todo')}</Badge>
 					</div>
 				</div>
 				<div class="flex items-center gap-2">

@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { command, query } from '$app/server';
 import { lucia } from '../server/lucia';
 import { db } from '../server/db';
-import { user, adminMagicLinkToken } from '../server/db/schema';
+import { user, adminMagicLinkToken, passwordResetToken } from '../server/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
 import { hash, verify } from '@node-rs/argon2';
 import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
@@ -11,7 +11,7 @@ import { randomBytes } from 'crypto';
 import { env } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import type { User } from '../server/db/schema';
-import { sendAdminMagicLinkEmail } from '../server/email';
+import { sendAdminMagicLinkEmail, sendPasswordResetEmail } from '../server/email';
 import { verifyAdminMagicLinkToken } from '../server/auth';
 import { generateSessionToken, createSession, setSessionTokenCookie, invalidateSession, deleteSessionTokenCookie } from '../server/auth';
 
@@ -158,6 +158,47 @@ export const logout = command(v.void(), async (): Promise<{ success: boolean; er
 });
 
 /**
+ * Change password for the current logged-in user
+ */
+export const changePassword = command(
+	v.object({
+		currentPassword: v.pipe(v.string(), v.minLength(1, 'Current password is required')),
+		newPassword: v.pipe(v.string(), v.minLength(6, 'New password must be at least 6 characters'))
+	}),
+	async ({ currentPassword, newPassword }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user) {
+			throw new Error('Not authenticated');
+		}
+
+		const [userRecord] = await db.select().from(user).where(eq(user.id, event.locals.user.id)).limit(1);
+		if (!userRecord) {
+			throw new Error('User not found');
+		}
+
+		const validPassword = await verify(userRecord.passwordHash, currentPassword, {
+			memoryCost: 19456,
+			timeCost: 2,
+			outputLen: 32,
+			parallelism: 1
+		});
+
+		if (!validPassword) {
+			throw new Error('Parola curentă este incorectă');
+		}
+
+		const passwordHash = await hash(newPassword, {
+			memoryCost: 19456,
+			timeCost: 2,
+			outputLen: 32,
+			parallelism: 1
+		});
+
+		await db.update(user).set({ passwordHash }).where(eq(user.id, event.locals.user.id));
+	}
+);
+
+/**
  * Get current user
  */
 export const getCurrentUser = query(
@@ -265,5 +306,113 @@ export const verifyMagicLink = command(
 			const message = error instanceof Error ? error.message : 'Verification failed';
 			return { success: false, error: message };
 		}
+	}
+);
+
+const PASSWORD_RESET_EXPIRY_HOURS = 1;
+
+/**
+ * Request password reset - sends email with reset link
+ */
+export const requestPasswordReset = command(
+	v.object({
+		email: v.pipe(v.string(), v.email('Invalid email address'))
+	}),
+	async ({ email }): Promise<{ success: boolean; message: string; error?: string }> => {
+		try {
+			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+
+			if (!userRecord) {
+				return {
+					success: true,
+					message: 'If an account exists with this email, a password reset link has been sent.'
+				};
+			}
+
+			const plainToken = generateMagicLinkToken();
+			const hashedToken = hashToken(plainToken);
+			const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000);
+			const tokenId = encodeBase32LowerCase(randomBytes(15));
+
+			await db.insert(passwordResetToken).values({
+				id: tokenId,
+				token: hashedToken,
+				userId: userRecord.id,
+				expiresAt
+			});
+
+			try {
+				await sendPasswordResetEmail(
+					email,
+					plainToken,
+					userRecord.firstName + ' ' + userRecord.lastName
+				);
+			} catch (emailError) {
+				console.error('Failed to send password reset email:', emailError);
+				return {
+					success: false,
+					message: 'Failed to send email. Please try again later.',
+					error: 'Email send failed'
+				};
+			}
+
+			return {
+				success: true,
+				message: 'If an account exists with this email, a password reset link has been sent.'
+			};
+		} catch (error) {
+			console.error('Request password reset error:', error);
+			return {
+				success: false,
+				message: 'Request failed',
+				error: error instanceof Error ? error.message : 'Request failed'
+			};
+		}
+	}
+);
+
+/**
+ * Reset password with token from email
+ */
+export const resetPasswordWithToken = command(
+	v.object({
+		token: v.pipe(v.string(), v.minLength(1, 'Token is required')),
+		newPassword: v.pipe(v.string(), v.minLength(6, 'New password must be at least 6 characters'))
+	}),
+	async ({ token, newPassword }) => {
+		const hashedToken = hashToken(token);
+
+		const [tokenRecord] = await db
+			.select()
+			.from(passwordResetToken)
+			.where(eq(passwordResetToken.token, hashedToken))
+			.limit(1);
+
+		if (!tokenRecord) {
+			throw new Error('Invalid or expired reset link. Please request a new one.');
+		}
+
+		if (tokenRecord.used) {
+			throw new Error('This reset link has already been used. Please request a new one.');
+		}
+
+		if (new Date() > tokenRecord.expiresAt) {
+			throw new Error('This reset link has expired. Please request a new one.');
+		}
+
+		const passwordHash = await hash(newPassword, {
+			memoryCost: 19456,
+			timeCost: 2,
+			outputLen: 32,
+			parallelism: 1
+		});
+
+		await db.transaction(async (tx) => {
+			await tx.update(user).set({ passwordHash }).where(eq(user.id, tokenRecord.userId));
+			await tx
+				.update(passwordResetToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(eq(passwordResetToken.id, tokenRecord.id));
+		});
 	}
 );

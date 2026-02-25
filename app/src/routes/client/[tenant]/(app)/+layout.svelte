@@ -8,6 +8,7 @@
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import Link2Icon from '@lucide/svelte/icons/link-2';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
@@ -83,6 +84,16 @@
 							<a href="/client/{tenantSlug}/invoices" {...props}>
 								<ReceiptIcon />
 								<span>Invoices</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/backlinks`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/backlinks" {...props}>
+								<Link2Icon />
+								<span>Backlinks</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

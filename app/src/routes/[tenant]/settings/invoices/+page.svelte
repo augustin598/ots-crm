@@ -8,7 +8,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Receipt } from '@lucide/svelte';
-	import { CURRENCIES, type Currency } from '$lib/utils/currency';
+	import { CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
@@ -318,11 +318,11 @@
 						<Label for="defaultCurrency">Default Currency</Label>
 						<Select type="single" bind:value={defaultCurrency}>
 							<SelectTrigger>
-								{defaultCurrency}
+								{CURRENCY_LABELS[defaultCurrency]}
 							</SelectTrigger>
 							<SelectContent>
 								{#each CURRENCIES as curr}
-									<SelectItem value={curr}>{curr}</SelectItem>
+									<SelectItem value={curr}>{CURRENCY_LABELS[curr]}</SelectItem>
 								{/each}
 							</SelectContent>
 						</Select>

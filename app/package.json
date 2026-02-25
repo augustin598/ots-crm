@@ -22,7 +22,8 @@
 		"db:seed": "bun --bun scripts/seed.ts",
 		"db:create-admin": "bun --bun scripts/create-admin.ts",
 		"import:smartbill": "bun --bun scripts/import-smartbill-excel.ts",
-		"test:anaf-oauth": "bun --bun scripts/test-anaf-oauth.ts"
+		"test:anaf-oauth": "bun --bun scripts/test-anaf-oauth.ts",
+		"test:smtp": "bun --bun scripts/test-smtp.ts"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.0",
