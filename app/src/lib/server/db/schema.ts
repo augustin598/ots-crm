@@ -99,7 +99,8 @@ export const client = sqliteTable('client', {
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
-	name: text('name').notNull(),
+	name: text('name').notNull(), // Alias / display name (editable by user)
+	businessName: text('business_name'), // Official name from Keez/ANAF
 	email: text('email'),
 	phone: text('phone'),
 	website: text('website'),

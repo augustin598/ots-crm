@@ -2,10 +2,13 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { getCompanyData } from '$lib/remotes/anaf.remote';
-import { normalizeVatId } from '$lib/server/plugins/anaf-spv/mapper';
+
+async function getNormalizeVatId() {
+	const { normalizeVatId } = await import('$lib/server/plugins/anaf-spv/mapper');
+	return normalizeVatId;
+}
 
 function generateClientId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -19,6 +22,7 @@ function generatePartnerId() {
 
 const clientSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
+	businessName: v.optional(v.string()),
 	email: v.optional(v.pipe(v.string(), v.email('Invalid email'))),
 	phone: v.optional(v.string()),
 	website: v.optional(v.string()),
@@ -40,17 +44,57 @@ const clientSchema = v.object({
 });
 
 export const getClients = query(async () => {
+	try {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const clients = await db
+			.select()
+			.from(table.client)
+			.where(eq(table.client.tenantId, event.locals.tenant.id));
+
+		return clients;
+	} catch (e) {
+		console.error('[getClients]', e);
+		throw e instanceof Error ? e : new Error(String(e));
+	}
+});
+
+/** Returns array of { clientId, firstDate } for first invoice per client. Used for "Joined" display. */
+export const getClientFirstInvoiceDates = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
 
-	const clients = await db
-		.select()
-		.from(table.client)
-		.where(eq(table.client.tenantId, event.locals.tenant.id));
+	try {
+		const rows = await db
+			.select({
+				clientId: table.invoice.clientId,
+				firstDate: sql<string>`MIN(${table.invoice.issueDate})`.as('first_date')
+			})
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.tenantId, event.locals.tenant.id),
+					sql`${table.invoice.issueDate} IS NOT NULL`
+				)
+			)
+			.groupBy(table.invoice.clientId);
 
-	return clients;
+		return rows
+			.filter((r) => r.clientId && r.firstDate != null)
+			.map((r) => {
+				const fd = r.firstDate;
+				const iso = typeof fd === 'string' ? fd : fd instanceof Date ? fd.toISOString() : null;
+				return iso ? { clientId: r.clientId!, firstDate: iso } : null;
+			})
+			.filter((x): x is { clientId: string; firstDate: string } => x != null);
+	} catch {
+		return [];
+	}
 });
 
 export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
@@ -72,6 +116,60 @@ export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (client
 	return client;
 });
 
+/** Fetches website HTML and extracts logo URL from common selectors (site-logo-img, custom-logo, etc.) */
+export const getLogoFromWebsite = query(v.pipe(v.string(), v.minLength(1)), async (websiteUrl) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+	let html: string;
+	try {
+		const res = await fetch(url, {
+			headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CRM-Bot/1.0)' },
+			signal: AbortSignal.timeout(8000)
+		});
+		if (!res.ok) return null;
+		html = await res.text();
+	} catch {
+		return null;
+	}
+
+	const { parse } = await import('node-html-parser');
+	const root = parse(html);
+	const baseUrl = new URL(url);
+
+	const selectors = [
+		'.site-logo-img img',
+		'.custom-logo-link img',
+		'.custom-logo',
+		'#logo img',
+		'.logo img',
+		'.header-logo img',
+		'[class*="site-logo"] img',
+		'[class*="custom-logo"]',
+		'[id*="logo"] img',
+		'[class*="logo"] img'
+	];
+
+	for (const sel of selectors) {
+		const el = root.querySelector(sel);
+		if (!el) continue;
+		const src = el.getAttribute('src') || el.getAttribute('data-src');
+		if (!src) continue;
+		try {
+			const absolute = new URL(src, baseUrl).href;
+			if (absolute.startsWith('http') && /\.(png|jpg|jpeg|gif|webp|svg)(\?|$)/i.test(absolute)) {
+				return absolute;
+			}
+		} catch {
+			// skip invalid URLs
+		}
+	}
+	return null;
+});
+
 export const createClient = command(clientSchema, async (data) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
@@ -84,6 +182,7 @@ export const createClient = command(clientSchema, async (data) => {
 		id: clientId,
 		tenantId: event.locals.tenant.id,
 		name: data.name,
+		businessName: data.businessName || null,
 		email: data.email || null,
 		phone: data.phone || null,
 		website: data.website || null,
@@ -131,10 +230,11 @@ export const updateClient = command(
 			throw new Error('Client not found');
 		}
 
+		const { clientId: _cid, ...rest } = updateData;
 		await db
 			.update(table.client)
 			.set({
-				...updateData,
+				...rest,
 				updatedAt: new Date()
 			})
 			.where(eq(table.client.id, clientId));
@@ -175,6 +275,7 @@ export const getClientPartnerInfo = query(
 		let matchedTenant: (typeof table.tenant.$inferSelect) | null = null;
 
 		if (client.vatNumber) {
+			const normalizeVatId = await getNormalizeVatId();
 			const normalizedVat = normalizeVatId(client.vatNumber);
 			const tenants = await db.select().from(table.tenant);
 
@@ -265,6 +366,7 @@ export const setClientPartnerStatus = command(
 			throw new Error('Client has no VAT number set');
 		}
 
+		const normalizeVatId = await getNormalizeVatId();
 		const normalizedVat = normalizeVatId(client.vatNumber);
 		const tenants = await db.select().from(table.tenant);
 

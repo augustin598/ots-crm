@@ -7,7 +7,6 @@
 		deleteSeoLink,
 		importSeoLinksFromFile,
 		checkSeoLink,
-		checkSeoLinksBatch,
 		extractSeoLinkData,
 		extractTargetUrlForSeoLink,
 		extractTargetUrlBatch
@@ -16,6 +15,8 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { formatAmount, CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
+	import { getFaviconUrl } from '$lib/utils';
+	import ClientLogo from '$lib/components/client-logo.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -89,28 +90,66 @@
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import ScanSearchIcon from '@lucide/svelte/icons/scan-search';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import CircleXIcon from '@lucide/svelte/icons/circle-x';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import StopCircleIcon from '@lucide/svelte/icons/stop-circle';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import FilterIcon from '@lucide/svelte/icons/filter';
+	import XIcon from '@lucide/svelte/icons/x';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import * as Popover from '$lib/components/ui/popover';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
 
 	const tenantSlug = $derived(page.params.tenant);
 
-	// Filters
+	// Filters — primare
 	let filterClientId = $state('');
-	let filterMonth = $state(''); // Implicit: Toate lunile
+	let filterMonth = $state('');
 	let filterDateOpen = $state(false);
 	let filterDateValue = $state<DateValue | undefined>(undefined);
 	let filterStatus = $state('');
 	let filterCheckStatus = $state('');
-	let filterTargetUrl = $state('');
+	// Filters — avansate
+	let filterLinkType = $state('');
+	let filterLinkAttribute = $state('');
+	let filterPressTrust = $state('');
+	let filterSearch = $state('');
+	let advancedOpen = $state(false);
 
 	const filterParams = $derived({
 		clientId: filterClientId || undefined,
 		month: filterMonth || undefined,
 		status: filterStatus || undefined,
 		checkStatus: filterCheckStatus || undefined,
-		targetUrl: filterTargetUrl?.trim() || undefined
+		linkType: filterLinkType || undefined,
+		linkAttribute: filterLinkAttribute || undefined,
+		pressTrust: filterPressTrust.trim() || undefined,
+		search: filterSearch.trim() || undefined
 	});
+
+	// Câte filtre avansate sunt active
+	const advancedActiveCount = $derived(
+		[filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterSearch.trim()].filter(Boolean).length
+	);
+	// Câte filtre totale sunt active
+	const totalActiveFilters = $derived(
+		[filterClientId, filterMonth, filterStatus, filterCheckStatus,
+		 filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterSearch.trim()].filter(Boolean).length
+	);
+
+	function resetAllFilters() {
+		filterClientId = '';
+		filterMonth = '';
+		filterDateValue = undefined;
+		filterStatus = '';
+		filterCheckStatus = '';
+		filterLinkType = '';
+		filterLinkAttribute = '';
+		filterPressTrust = '';
+		filterSearch = '';
+	}
 
 	const seoLinksQuery = $derived(getSeoLinks(filterParams));
 	const seoLinks = $derived(seoLinksQuery.current || []);
@@ -164,9 +203,6 @@
 	// Link check state
 	let checkingId = $state<string | null>(null);
 
-	// Verify batch state (extract + check combined)
-	let verifyingBatch = $state(false);
-
 	// Selection state
 	let selectedIds = $state<Set<string>>(new Set());
 
@@ -183,6 +219,114 @@
 
 	// Report collapsible state
 	let reportOpen = $state(false);
+
+	// ── Scan Backlinks dialog ──────────────────────────────────────────────────
+	type ScanResult = {
+		id: string;
+		keyword: string;
+		articleUrl: string;
+		targetUrl: string | null;
+		clientId: string;
+		status: string;
+		httpCode: number | null;
+	};
+	let isScanDialogOpen = $state(false);
+	let scanClientId = $state('');
+	let scanMode = $state<'all' | 'unchecked' | 'problems'>('unchecked');
+	let scanRunning = $state(false);
+	let scanCurrent = $state(0);
+	let scanTotal = $state(0);
+	let scanResults = $state<ScanResult[]>([]);
+	let scanDone = $state(false);
+	let scanAborted = $state(false);
+	let scanCurrentUrl = $state('');
+
+	const scanQueryParams = $derived({
+		clientId: scanClientId || undefined,
+		checkStatus:
+			scanMode === 'unchecked' ? 'never' : scanMode === 'problems' ? 'problem' : undefined
+	});
+	const scanLinksQuery = $derived(getSeoLinks(scanQueryParams));
+	const scanLinks = $derived(scanLinksQuery.current || []);
+	const scanProgressPct = $derived(scanTotal > 0 ? Math.round((scanCurrent / scanTotal) * 100) : 0);
+	const scanOkCount = $derived(scanResults.filter((r) => r.status === 'ok').length);
+	const scanProblemCount = $derived(scanResults.filter((r) => r.status !== 'ok').length);
+
+	function openScanDialog() {
+		scanClientId = filterClientId;
+		scanMode = 'unchecked';
+		scanRunning = false;
+		scanCurrent = 0;
+		scanTotal = 0;
+		scanResults = [];
+		scanDone = false;
+		scanAborted = false;
+		scanCurrentUrl = '';
+		isScanDialogOpen = true;
+	}
+
+	function abortScan() {
+		scanAborted = true;
+	}
+
+	async function handleStartScan() {
+		const linksToScan = [...scanLinks];
+		if (linksToScan.length === 0) {
+			toast.error('Nu există linkuri de verificat cu filtrele selectate');
+			return;
+		}
+		scanRunning = true;
+		scanCurrent = 0;
+		scanTotal = linksToScan.length;
+		scanResults = [];
+		scanDone = false;
+		scanAborted = false;
+
+		for (const link of linksToScan) {
+			if (scanAborted) break;
+			scanCurrentUrl = link.articleUrl;
+			try {
+				const result = await checkSeoLink(link.id).updates(seoLinksQuery);
+				scanResults = [
+					...scanResults,
+					{
+						id: link.id,
+						keyword: link.keyword,
+						articleUrl: link.articleUrl,
+						targetUrl: link.targetUrl ?? null,
+						clientId: link.clientId,
+						status: result.status,
+						httpCode: result.httpCode
+					}
+				];
+			} catch {
+				scanResults = [
+					...scanResults,
+					{
+						id: link.id,
+						keyword: link.keyword,
+						articleUrl: link.articleUrl,
+						targetUrl: link.targetUrl ?? null,
+						clientId: link.clientId,
+						status: 'error',
+						httpCode: null
+					}
+				];
+			}
+			scanCurrent++;
+			if (scanCurrent < linksToScan.length && !scanAborted) {
+				await new Promise((r) => setTimeout(r, 600));
+			}
+		}
+
+		scanRunning = false;
+		scanDone = true;
+		scanCurrentUrl = '';
+		if (!scanAborted) {
+			toast.success(`Scanare completă: ${scanOkCount} OK, ${scanProblemCount} cu probleme`);
+		}
+	}
+	// ──────────────────────────────────────────────────────────────────────────
 
 	// Inline row state
 	let isAddingInlineRow = $state(false);
@@ -654,45 +798,6 @@
 		}
 	}
 
-	async function handleVerifyAll() {
-		if (someSelected && selectedIdsArray.length === 0) {
-			alert('Selectați cel puțin un link');
-			return;
-		}
-		if (!someSelected && seoLinks.length === 0) {
-			return;
-		}
-		verifyingBatch = true;
-		try {
-			const extractResult = await extractTargetUrlBatch({
-				clientId: filterClientId || undefined,
-				month: filterMonth || undefined,
-				seoLinkIds: someSelected ? selectedIdsArray : undefined
-			}).updates(seoLinksQuery);
-			if (extractResult.extracted > 0) {
-				toast.success(
-					extractResult.failed > 0
-						? `Extragere: ${extractResult.extracted} reușite, ${extractResult.failed} eșuate`
-						: `Extragere reușită: ${extractResult.extracted} URL-uri țintă`
-				);
-			}
-			if (extractResult.failed > 0 && extractResult.errors?.length) {
-				const msg = extractResult.errors.slice(0, 3).map((e) => e.error).join('; ');
-				toast.error(msg + (extractResult.errors.length > 3 ? '...' : ''));
-			}
-			await checkSeoLinksBatch({
-				clientId: filterClientId || undefined,
-				month: filterMonth || undefined,
-				seoLinkIds: someSelected ? selectedIdsArray : undefined
-			}).updates(seoLinksQuery);
-			toast.success('Verificare finalizată');
-		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Verificare eșuată');
-		} finally {
-			verifyingBatch = false;
-		}
-	}
-
 	async function handleExtractTargetUrl(seoLinkId: string) {
 		extractingTargetUrlId = seoLinkId;
 		try {
@@ -984,15 +1089,6 @@
 		}
 	}
 
-	function getFaviconUrl(articleUrl: string): string {
-		try {
-			const host = new URL(articleUrl).hostname.replace(/^www\./, '');
-			return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
-		} catch {
-			return '';
-		}
-	}
-
 	function getPressTrustDisplay(link: { pressTrust: string | null; articleUrl: string }): string {
 		if (link.pressTrust?.trim()) return link.pressTrust;
 		try {
@@ -1021,15 +1117,10 @@
 		<div class="flex items-center gap-2">
 			<Button
 				variant="outline"
-				onclick={handleVerifyAll}
-				disabled={verifyingBatch || (someSelected ? selectedIdsArray.length === 0 : seoLinks.length === 0)}
+				onclick={openScanDialog}
 			>
-				{#if verifyingBatch}
-					Se verifică...
-				{:else}
-					<Link2Icon class="mr-2 h-4 w-4" />
-					{someSelected ? `Verifică linkuri (${selectedIdsArray.length})` : 'Verifică toate linkurile'}
-				{/if}
+				<ScanSearchIcon class="mr-2 h-4 w-4" />
+				Scanează Backlinks
 			</Button>
 			<Dialog bind:open={isImportDialogOpen}>
 				<DialogTrigger>
@@ -1381,6 +1472,32 @@
 		</div>
 	</div>
 
+	<!-- Client header cu logo website (când e selectat un client) -->
+	{#if filterClientId}
+		{@const selectedClient = clientById.get(filterClientId)}
+		{#if selectedClient}
+			<div class="mb-2 flex items-start justify-between">
+				<div class="flex items-center gap-4">
+					<ClientLogo website={selectedClient.website} name={selectedClient.name} size="lg" />
+					<div>
+						<h2 class="text-2xl font-bold tracking-tight">{selectedClient.name}</h2>
+						{#if selectedClient.website}
+							<a
+								href={selectedClient.website.startsWith('http') ? selectedClient.website : `https://${selectedClient.website}`}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-sm text-muted-foreground hover:text-primary hover:underline mt-0.5 inline-flex items-center gap-1"
+							>
+								{selectedClient.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+								<ExternalLinkIcon class="h-3 w-3" />
+							</a>
+						{/if}
+					</div>
+				</div>
+			</div>
+		{/if}
+	{/if}
+
 	<!-- Stats -->
 	{#if !loading && seoLinks.length > 0}
 		<div class="space-y-4">
@@ -1418,10 +1535,7 @@
 									Lună: {new Date(filterMonth + '-01').toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}
 								</span>
 							{/if}
-							{#if filterTargetUrl?.trim()}
-								<span class="font-medium text-foreground/90">URL: {filterTargetUrl.trim()}</span>
-							{/if}
-							{#if !filterClientId && !filterMonth && !filterTargetUrl?.trim()}
+							{#if !filterClientId && !filterMonth}
 								<span>Toate datele</span>
 							{/if}
 						</div>
@@ -1460,142 +1574,243 @@
 		</div>
 	{/if}
 
-	<!-- Filters -->
-	<div class="flex flex-wrap items-center gap-4">
-		<div class="min-w-[200px]">
-			<Label class="text-xs text-muted-foreground">Client</Label>
-			<Select
-				value={filterClientId || 'all'}
-				type="single"
-				onValueChange={(v: string | undefined) => {
-					filterClientId = v === 'all' ? '' : v || '';
-				}}
-			>
-				<SelectTrigger>
-					{#if filterClientId}
-						{clientMap.get(filterClientId) || 'Toți clienții'}
-					{:else}
-						Toți clienții
+	<!-- ── Filtre ───────────────────────────────────────────────────────────── -->
+	<div class="rounded-xl border bg-card shadow-sm">
+
+		<!-- Rândul principal: filtre primare pe toată lățimea -->
+		<div class="grid grid-cols-[2fr_1.5fr_auto_1fr_1fr_auto] gap-3 items-end p-4">
+
+			<!-- 1. Căutare — cel mai lat, prima coloană -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-muted-foreground">Caută</p>
+				<div class="relative">
+					<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+					<Input bind:value={filterSearch} placeholder="keyword, anchor, URL articol..." class="pl-8 h-9 text-sm" />
+				</div>
+			</div>
+
+			<!-- 2. Client -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-muted-foreground">Client</p>
+				<Select value={filterClientId || 'all'} type="single" onValueChange={(v) => { filterClientId = v === 'all' ? '' : v || ''; }}>
+					<SelectTrigger class="h-9">
+						{filterClientId ? (clientMap.get(filterClientId) || 'Toți clienții') : 'Toți clienții'}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="all">Toți clienții</SelectItem>
+						{#each clients as c}
+							<SelectItem value={c.id}>{c.name}</SelectItem>
+						{/each}
+					</SelectContent>
+				</Select>
+			</div>
+
+			<!-- 3. Lună — lățime fixă (date picker) -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-muted-foreground">Lună</p>
+				<Popover.Root bind:open={filterDateOpen}>
+					<Popover.Trigger>
+						{#snippet child({ props })}
+							<Button {...props} variant="outline" class="w-[168px] h-9 justify-start text-start font-normal text-sm">
+								<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+								{filterMonth
+									? (() => { const [y, m] = filterMonth.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ro-RO', { month: 'short', year: 'numeric' }); })()
+									: 'Toate lunile'}
+							</Button>
+						{/snippet}
+					</Popover.Trigger>
+					<Popover.Content class="w-auto p-0" align="start">
+						<div class="flex flex-col">
+							<Calendar type="single" bind:value={filterDateValue} onValueChange={() => (filterDateOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+							<Button variant="ghost" class="rounded-t-none border-t text-muted-foreground text-sm" onclick={() => { filterMonth = ''; filterDateValue = undefined; filterDateOpen = false; }}>
+								Toate lunile
+							</Button>
+						</div>
+					</Popover.Content>
+				</Popover.Root>
+			</div>
+
+			<!-- 4. Status -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-muted-foreground">Status</p>
+				<Select value={filterStatus || 'all'} type="single" onValueChange={(v) => { filterStatus = v === 'all' ? '' : v || ''; }}>
+					<SelectTrigger class="h-9">
+						{filterStatus ? getStatusLabel(filterStatus) : 'Toate'}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="all">Toate</SelectItem>
+						<SelectItem value="pending">În așteptare</SelectItem>
+						<SelectItem value="submitted">Trimis</SelectItem>
+						<SelectItem value="published">Publicat</SelectItem>
+						<SelectItem value="rejected">Refuzat</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
+
+			<!-- 5. Verificare -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-muted-foreground">Verificare link</p>
+				<Select value={filterCheckStatus || 'all'} type="single" onValueChange={(v) => { filterCheckStatus = v === 'all' ? '' : v || ''; }}>
+					<SelectTrigger class="h-9">
+						{#if filterCheckStatus === 'problem'}Cu probleme
+						{:else if filterCheckStatus === 'never'}Neverificate
+						{:else if filterCheckStatus === 'ok'}OK
+						{:else}Toate{/if}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="all">Toate</SelectItem>
+						<SelectItem value="ok">OK</SelectItem>
+						<SelectItem value="problem">Cu probleme</SelectItem>
+						<SelectItem value="never">Neverificate</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
+
+			<!-- 6. Buton Avansat — dreapta, aliniat jos cu inputurile -->
+			<div class="space-y-1.5">
+				<p class="text-xs font-medium text-transparent select-none">·</p>
+				<Button
+					variant={advancedOpen || advancedActiveCount > 0 ? 'secondary' : 'outline'}
+					onclick={() => (advancedOpen = !advancedOpen)}
+					class="h-9 gap-1.5 px-3"
+				>
+					<FilterIcon class="h-3.5 w-3.5" />
+					Avansat
+					{#if advancedActiveCount > 0}
+						<span class="inline-flex items-center justify-center h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">
+							{advancedActiveCount}
+						</span>
 					{/if}
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value="all">Toți clienții</SelectItem>
-					{#each clients as c}
-						<SelectItem value={c.id}>{c.name}</SelectItem>
-					{/each}
-				</SelectContent>
-			</Select>
+					{#if advancedOpen}
+						<ChevronUpIcon class="h-3.5 w-3.5 opacity-50" />
+					{:else}
+						<ChevronDownIcon class="h-3.5 w-3.5 opacity-50" />
+					{/if}
+				</Button>
+			</div>
 		</div>
-		<div>
-			<Label class="text-xs text-muted-foreground">Data publicare</Label>
-			<Popover.Root bind:open={filterDateOpen}>
-				<Popover.Trigger>
-					{#snippet child({ props })}
-						<Button
-							{...props}
-							variant="outline"
-							class="w-[180px] justify-start text-start font-normal"
-						>
-							<CalendarIcon class="mr-2 size-4 shrink-0 opacity-50" />
-							{filterMonth
-								? (() => {
-										const [y, m] = filterMonth.split('-').map(Number);
-										const d = new Date(y, m - 1, 1);
-										return d.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
-									})()
-								: 'Toate lunile'}
-						</Button>
-					{/snippet}
-				</Popover.Trigger>
-				<Popover.Content class="w-auto p-0" align="start">
-					<div class="flex flex-col">
-						<Calendar
-							type="single"
-							bind:value={filterDateValue}
-							onValueChange={() => (filterDateOpen = false)}
-							locale="ro-RO"
-							captionLayout="dropdown"
-						/>
-						<Button
-							variant="ghost"
-							class="rounded-t-none border-t text-muted-foreground"
-							onclick={() => {
-								filterMonth = '';
-								filterDateValue = undefined;
-								filterDateOpen = false;
-							}}
-						>
-							Toate lunile
-						</Button>
+
+		<!-- Filtre avansate — colapsabil, cu separator -->
+		{#if advancedOpen}
+			<div class="border-t px-4 py-3 bg-muted/30">
+				<div class="grid grid-cols-3 gap-3">
+					<!-- Tip link -->
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium text-muted-foreground">Tip link</p>
+						<Select value={filterLinkType || 'all'} type="single" onValueChange={(v) => { filterLinkType = v === 'all' ? '' : v || ''; }}>
+							<SelectTrigger class="h-9">
+								{#if filterLinkType === 'article'}Articol
+								{:else if filterLinkType === 'guest-post'}Guest post
+								{:else if filterLinkType === 'press-release'}Comunicat presă
+								{:else if filterLinkType === 'directory'}Director
+								{:else if filterLinkType === 'other'}Altul
+								{:else}Toate tipurile{/if}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Toate tipurile</SelectItem>
+								<SelectItem value="article">Articol</SelectItem>
+								<SelectItem value="guest-post">Guest post</SelectItem>
+								<SelectItem value="press-release">Comunicat presă</SelectItem>
+								<SelectItem value="directory">Director</SelectItem>
+								<SelectItem value="other">Altul</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
-				</Popover.Content>
-			</Popover.Root>
-		</div>
-		<div class="min-w-[160px]">
-			<Label class="text-xs text-muted-foreground">Status</Label>
-			<Select
-				value={filterStatus || 'all'}
-				type="single"
-				onValueChange={(v: string | undefined) => {
-					filterStatus = v === 'all' ? '' : v || '';
-				}}
-			>
-				<SelectTrigger>
-					{#if filterStatus}
-						{getStatusLabel(filterStatus)}
-					{:else}
-						Toate
+
+					<!-- Atribut link -->
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium text-muted-foreground">Atribut link</p>
+						<Select value={filterLinkAttribute || 'all'} type="single" onValueChange={(v) => { filterLinkAttribute = v === 'all' ? '' : v || ''; }}>
+							<SelectTrigger class="h-9">
+								{#if filterLinkAttribute === 'dofollow'}Dofollow
+								{:else if filterLinkAttribute === 'nofollow'}Nofollow
+								{:else}Dofollow + Nofollow{/if}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Dofollow + Nofollow</SelectItem>
+								<SelectItem value="dofollow">Dofollow</SelectItem>
+								<SelectItem value="nofollow">Nofollow</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					<!-- Platformă presă -->
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium text-muted-foreground">Platformă presă</p>
+						<Input bind:value={filterPressTrust} placeholder="ex: Gândul, Adevărul..." class="h-9 text-sm" />
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Footer card: chips filtre active + counter + reset -->
+		{#if totalActiveFilters > 0 || !loading}
+			<div class="flex flex-wrap items-center gap-2 border-t px-4 py-2.5 bg-muted/20">
+
+				<!-- Chips filtre active -->
+				{#if filterSearch.trim()}
+					<button onclick={() => (filterSearch = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						🔍 "{filterSearch.trim()}" <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterClientId}
+					<button onclick={() => (filterClientId = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						{clientMap.get(filterClientId) ?? 'Client'} <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterMonth}
+					<button onclick={() => { filterMonth = ''; filterDateValue = undefined; }} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						📅 {(() => { const [y, m] = filterMonth.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' }); })()}
+						<XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterStatus}
+					<button onclick={() => (filterStatus = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						{getStatusLabel(filterStatus)} <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterCheckStatus}
+					<button onclick={() => (filterCheckStatus = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						{filterCheckStatus === 'ok' ? '✅ OK' : filterCheckStatus === 'problem' ? '❌ Cu probleme' : '○ Neverificate'} <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterLinkType}
+					<button onclick={() => (filterLinkType = '')} class="inline-flex items-center gap-1 rounded-full border bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2.5 py-0.5 text-xs font-medium hover:opacity-75 transition-opacity">
+						{filterLinkType === 'article' ? 'Articol' : filterLinkType === 'guest-post' ? 'Guest post' : filterLinkType === 'press-release' ? 'Comunicat' : filterLinkType === 'directory' ? 'Director' : 'Altul'}
+						<XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterLinkAttribute}
+					<button onclick={() => (filterLinkAttribute = '')} class="inline-flex items-center gap-1 rounded-full border bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-2.5 py-0.5 text-xs font-medium hover:opacity-75 transition-opacity">
+						{filterLinkAttribute === 'dofollow' ? 'Dofollow' : 'Nofollow'} <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterPressTrust.trim()}
+					<button onclick={() => (filterPressTrust = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						📰 "{filterPressTrust.trim()}" <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+
+				<!-- Counter + Reset — împins la dreapta -->
+				<div class="ml-auto flex items-center gap-3 shrink-0">
+					{#if !loading}
+						<span class="text-xs text-muted-foreground tabular-nums">
+							<span class="font-medium text-foreground">{seoLinks.length}</span>
+							{seoLinks.length === 1 ? 'link' : 'linkuri'}
+						</span>
 					{/if}
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value="all">Toate</SelectItem>
-					<SelectItem value="pending">În așteptare</SelectItem>
-					<SelectItem value="submitted">Trimis</SelectItem>
-					<SelectItem value="published">Publicat</SelectItem>
-					<SelectItem value="rejected">Refuzat</SelectItem>
-				</SelectContent>
-			</Select>
-		</div>
-		<div class="min-w-[160px]">
-			<Label class="text-xs text-muted-foreground">Verificare</Label>
-			<Select
-				value={filterCheckStatus || 'all'}
-				type="single"
-				onValueChange={(v: string | undefined) => {
-					filterCheckStatus = v === 'all' ? '' : v || '';
-				}}
-			>
-				<SelectTrigger>
-					{#if filterCheckStatus === 'problem'}
-						Cu probleme
-					{:else if filterCheckStatus === 'never'}
-						Neverificate
-					{:else if filterCheckStatus === 'ok'}
-						OK
-					{:else}
-						Toate
+					{#if totalActiveFilters > 0}
+						<button onclick={resetAllFilters} class="text-xs text-muted-foreground hover:text-destructive underline underline-offset-2 transition-colors">
+							Resetează tot
+						</button>
 					{/if}
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value="all">Toate</SelectItem>
-					<SelectItem value="ok">OK</SelectItem>
-					<SelectItem value="problem">Cu probleme</SelectItem>
-					<SelectItem value="never">Neverificate</SelectItem>
-				</SelectContent>
-			</Select>
-		</div>
-		<div class="min-w-[220px]">
-			<Label class="text-xs text-muted-foreground">URL client</Label>
-			<Input
-				bind:value={filterTargetUrl}
-				placeholder="heylux.ro, https://www.heylux.ro..."
-				class="font-mono text-sm"
-			/>
-			<p class="text-[10px] text-muted-foreground mt-0.5">
-				Orice format: www, fără www, http/https
-			</p>
-		</div>
+				</div>
+
+			</div>
+		{/if}
+
 	</div>
+	<!-- ────────────────────────────────────────────────────────────────────── -->
 
 	<!-- Raport analiză SEO -->
 	{#if !loading && seoLinks.length >= MIN_LINKS_FOR_REPORT && seoReport}
@@ -2089,7 +2304,7 @@
 									<div class="flex items-center gap-2.5">
 										{#if link.articleUrl}
 											<img
-												src={getFaviconUrl(link.articleUrl)}
+												src={getFaviconUrl(link.articleUrl, 32)}
 												alt={getPressTrustDisplay(link)}
 												class="h-5 w-5 shrink-0 rounded-md object-contain bg-muted/40"
 												loading="lazy"
@@ -2269,3 +2484,294 @@
 		</div>
 	{/if}
 </div>
+
+<!-- ── Dialog Scanează Backlinks ───────────────────────────────────────────── -->
+<Dialog bind:open={isScanDialogOpen}>
+	<DialogContent class="sm:max-w-2xl">
+		<DialogHeader>
+			<DialogTitle class="flex items-center gap-2">
+				<ScanSearchIcon class="h-5 w-5" />
+				Scanează Backlinks
+			</DialogTitle>
+			<DialogDescription>
+				Verifică statusul backlink-urilor clienților: accesibilitate, cod HTTP și atribut dofollow/nofollow.
+			</DialogDescription>
+		</DialogHeader>
+
+		<!-- Setup – înainte de pornire -->
+		{#if !scanRunning && !scanDone}
+			<div class="space-y-4 py-2">
+				<!-- Client -->
+				<div class="space-y-1.5">
+					<Label>Client</Label>
+					<Combobox
+						bind:value={scanClientId}
+						options={[{ value: '', label: 'Toți clienții' }, ...clientOptions]}
+						placeholder="Selectați un client sau lăsați pentru toți"
+						searchPlaceholder="Căutați clienți..."
+					/>
+				</div>
+
+				<!-- Mod scanare -->
+				<div class="space-y-1.5">
+					<Label>Linkuri de verificat</Label>
+					<Select type="single" bind:value={scanMode}>
+						<SelectTrigger class="w-full">
+							{#if scanMode === 'unchecked'}
+								Niciodată verificate
+							{:else if scanMode === 'problems'}
+								Cu probleme (erori, timeout, inaccessibile)
+							{:else}
+								Toate linkurile
+							{/if}
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="unchecked">Niciodată verificate</SelectItem>
+							<SelectItem value="problems">Cu probleme (erori, timeout, inaccessibile)</SelectItem>
+							<SelectItem value="all">Toate linkurile</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+
+				<!-- Preview count -->
+				{#if scanLinksQuery.loading}
+					<p class="text-sm text-muted-foreground">Se încarcă lista...</p>
+				{:else}
+					<div class="rounded-md border bg-muted/40 px-4 py-3">
+						<p class="text-sm font-medium">
+							{#if scanLinks.length === 0}
+								<span class="text-muted-foreground">Nu există linkuri cu filtrele selectate.</span>
+							{:else}
+								<span class="text-foreground">{scanLinks.length} linkuri</span>
+								<span class="text-muted-foreground"> vor fi scanate</span>
+								{#if scanLinks.length > 20}
+									<span class="text-muted-foreground ml-1">
+										(estimat ~{Math.ceil((scanLinks.length * 600) / 60000)} min)
+									</span>
+								{/if}
+							{/if}
+						</p>
+					</div>
+				{/if}
+			</div>
+
+			<DialogFooter>
+				<Button variant="outline" onclick={() => (isScanDialogOpen = false)}>Anulare</Button>
+				<Button
+					onclick={handleStartScan}
+					disabled={scanLinks.length === 0 || scanLinksQuery.loading}
+				>
+					<ScanSearchIcon class="mr-2 h-4 w-4" />
+					Pornește Scanarea
+				</Button>
+			</DialogFooter>
+		{/if}
+
+		<!-- În desfășurare -->
+		{#if scanRunning}
+			<div class="space-y-4 py-2">
+				<!-- Progress bar -->
+				<div class="space-y-2">
+					<div class="flex items-center justify-between text-sm">
+						<span class="font-medium">Progres scanare</span>
+						<span class="text-muted-foreground">{scanCurrent} / {scanTotal}</span>
+					</div>
+					<div class="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+						<div
+							class="h-2.5 rounded-full bg-primary transition-all duration-300"
+							style="width: {scanProgressPct}%"
+						></div>
+					</div>
+					<p class="text-xs text-muted-foreground truncate" title={scanCurrentUrl}>
+						Se verifică: {scanCurrentUrl || '...'}
+					</p>
+				</div>
+
+				<!-- Rezultate live -->
+				{#if scanResults.length > 0}
+					<div class="max-h-60 overflow-y-auto rounded-md border">
+						<table class="w-full text-sm">
+							<thead class="sticky top-0 bg-muted/80 backdrop-blur">
+								<tr>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">Keyword</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">URL Țintă</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">HTTP</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y">
+								{#each [...scanResults].reverse() as result}
+									<tr class="hover:bg-muted/30">
+										<td class="px-3 py-2 truncate max-w-[140px]" title={result.keyword}>
+											{result.keyword}
+										</td>
+										<td class="px-3 py-2 max-w-[160px]">
+											{#if result.targetUrl}
+												<a
+													href={result.targetUrl}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="inline-flex items-center gap-1 text-blue-600 hover:underline truncate max-w-[150px] text-xs"
+													title={result.targetUrl}
+												>
+													<ExternalLinkIcon class="h-3 w-3 shrink-0" />
+													{result.targetUrl.replace(/^https?:\/\//, '').slice(0, 30)}{result.targetUrl.length > 37 ? '…' : ''}
+												</a>
+											{:else}
+												<span class="text-muted-foreground text-xs">—</span>
+											{/if}
+										</td>
+										<td class="px-3 py-2">
+											{#if result.status === 'ok'}
+												<span class="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+													<CircleCheckIcon class="h-3.5 w-3.5" />
+													OK
+												</span>
+											{:else}
+												<span class="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+													<CircleXIcon class="h-3.5 w-3.5" />
+													{result.status}
+												</span>
+											{/if}
+										</td>
+										<td class="px-3 py-2 text-muted-foreground">
+											{result.httpCode ?? '—'}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+
+			<DialogFooter>
+				<Button variant="destructive" onclick={abortScan}>
+					<StopCircleIcon class="mr-2 h-4 w-4" />
+					Oprește Scanarea
+				</Button>
+			</DialogFooter>
+		{/if}
+
+		<!-- Rezultate finale -->
+		{#if scanDone}
+			<div class="space-y-4 py-2">
+				<!-- Sumar -->
+				<div class="grid grid-cols-3 gap-3">
+					<div class="rounded-lg border bg-green-50 dark:bg-green-900/20 p-3 text-center">
+						<p class="text-2xl font-bold text-green-700 dark:text-green-400">{scanOkCount}</p>
+						<p class="text-xs text-green-600 dark:text-green-500 mt-0.5">Accesibile</p>
+					</div>
+					<div class="rounded-lg border bg-red-50 dark:bg-red-900/20 p-3 text-center">
+						<p class="text-2xl font-bold text-red-700 dark:text-red-400">{scanProblemCount}</p>
+						<p class="text-xs text-red-600 dark:text-red-500 mt-0.5">Cu probleme</p>
+					</div>
+					<div class="rounded-lg border bg-muted/40 p-3 text-center">
+						<p class="text-2xl font-bold text-foreground">{scanResults.length}</p>
+						<p class="text-xs text-muted-foreground mt-0.5">
+							{scanAborted ? 'Scanate (oprit)' : 'Total scanate'}
+						</p>
+					</div>
+				</div>
+
+				<!-- Tabel rezultate detaliate -->
+				{#if scanResults.length > 0}
+					<div class="max-h-72 overflow-y-auto rounded-md border">
+						<table class="w-full text-sm">
+							<thead class="sticky top-0 bg-muted/80 backdrop-blur">
+								<tr>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">Keyword</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">URL Articol</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">URL Țintă</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+									<th class="px-3 py-2 text-left font-medium text-muted-foreground">HTTP</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y">
+								{#each scanResults as result}
+									<tr class="hover:bg-muted/30">
+										<td class="px-3 py-2 max-w-[120px]" title={result.keyword}>
+											<span class="block truncate">{result.keyword}</span>
+											{#if !scanClientId}
+												<span class="block text-xs text-muted-foreground truncate">{clientMap.get(result.clientId) ?? ''}</span>
+											{/if}
+										</td>
+										<td class="px-3 py-2 max-w-[160px]">
+											<a
+												href={result.articleUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="inline-flex items-center gap-1 text-blue-600 hover:underline truncate max-w-[150px] text-xs"
+												title={result.articleUrl}
+											>
+												<ExternalLinkIcon class="h-3 w-3 shrink-0" />
+												{result.articleUrl.replace(/^https?:\/\//, '').slice(0, 30)}{result.articleUrl.length > 37 ? '…' : ''}
+											</a>
+										</td>
+										<td class="px-3 py-2 max-w-[160px]">
+											{#if result.targetUrl}
+												<a
+													href={result.targetUrl}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="inline-flex items-center gap-1 text-blue-600 hover:underline truncate max-w-[150px] text-xs"
+													title={result.targetUrl}
+												>
+													<ExternalLinkIcon class="h-3 w-3 shrink-0" />
+													{result.targetUrl.replace(/^https?:\/\//, '').slice(0, 30)}{result.targetUrl.length > 37 ? '…' : ''}
+												</a>
+											{:else}
+												<span class="text-muted-foreground text-xs">—</span>
+											{/if}
+										</td>
+										<td class="px-3 py-2">
+											{#if result.status === 'ok'}
+												<Badge variant="outline" class="border-green-300 bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400 gap-1">
+													<CircleCheckIcon class="h-3 w-3" />
+													OK
+												</Badge>
+											{:else if result.status === 'timeout'}
+												<Badge variant="outline" class="border-yellow-300 bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 gap-1">
+													<CircleXIcon class="h-3 w-3" />
+													Timeout
+												</Badge>
+											{:else if result.status === 'unreachable'}
+												<Badge variant="outline" class="border-red-300 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 gap-1">
+													<CircleXIcon class="h-3 w-3" />
+													Inaccesibil
+												</Badge>
+											{:else}
+												<Badge variant="outline" class="border-red-300 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 gap-1">
+													<CircleXIcon class="h-3 w-3" />
+													{result.status}
+												</Badge>
+											{/if}
+										</td>
+										<td class="px-3 py-2 text-muted-foreground tabular-nums">
+											{result.httpCode ?? '—'}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+
+			<DialogFooter class="gap-2">
+				<Button variant="outline" onclick={() => (isScanDialogOpen = false)}>Închide</Button>
+				<Button
+					onclick={() => {
+						scanDone = false;
+						scanResults = [];
+						scanCurrent = 0;
+						scanTotal = 0;
+					}}
+				>
+					<ScanSearchIcon class="mr-2 h-4 w-4" />
+					Scanează din nou
+				</Button>
+			</DialogFooter>
+		{/if}
+	</DialogContent>
+</Dialog>

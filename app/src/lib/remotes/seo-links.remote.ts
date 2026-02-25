@@ -59,8 +59,11 @@ export const getSeoLinks = query(
 		clientId: v.optional(v.string()),
 		month: v.optional(v.string()),
 		status: v.optional(v.string()),
-		checkStatus: v.optional(v.string()), // 'ok' | 'problem' | 'never' - for filtering by link check result
-		targetUrl: v.optional(v.string()) // URL client - filtrare după domeniu root (acceptă orice format: https/heylux.ro, www.heylux.ro, etc.)
+		checkStatus: v.optional(v.string()), // 'ok' | 'problem' | 'never'
+		linkType: v.optional(v.string()),    // 'article' | 'guest-post' | 'press-release' | 'directory' | 'other'
+		linkAttribute: v.optional(v.string()), // 'dofollow' | 'nofollow'
+		pressTrust: v.optional(v.string()),  // partial match pe platforma de presă
+		search: v.optional(v.string())       // căutare în keyword, anchorText, articleUrl
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -104,24 +107,36 @@ export const getSeoLinks = query(
 		} else if (filters.checkStatus === 'ok') {
 			conditions = and(conditions, eq(table.seoLink.lastCheckStatus, 'ok')) as typeof conditions;
 		}
+		// Filtru tip link
+		if (filters.linkType) {
+			conditions = and(conditions, eq(table.seoLink.linkType, filters.linkType)) as typeof conditions;
+		}
+		// Filtru dofollow/nofollow
+		if (filters.linkAttribute) {
+			conditions = and(conditions, eq(table.seoLink.linkAttribute, filters.linkAttribute)) as typeof conditions;
+		}
+		// Filtru platformă presă (partial match, case-insensitive via LIKE)
+		if (filters.pressTrust?.trim()) {
+			conditions = and(conditions, like(table.seoLink.pressTrust, `%${filters.pressTrust.trim()}%`)) as typeof conditions;
+		}
+		// Căutare text în keyword, anchorText, articleUrl
+		if (filters.search?.trim()) {
+			const s = `%${filters.search.trim()}%`;
+			conditions = and(
+				conditions,
+				or(
+					like(table.seoLink.keyword, s),
+					like(table.seoLink.anchorText, s),
+					like(table.seoLink.articleUrl, s)
+				)!
+			) as typeof conditions;
+		}
 
-		let links = await db
+		const links = await db
 			.select()
 			.from(table.seoLink)
 			.where(conditions)
 			.orderBy(desc(table.seoLink.month), desc(table.seoLink.createdAt));
-
-		// Filtrare după URL client (domeniu root) - acceptă orice format: https://heylux.ro, www.heylux.ro, http://heylux.ro etc.
-		if (filters.targetUrl?.trim()) {
-			const filterRoot = extractDomainFromUrl(filters.targetUrl.trim());
-			if (filterRoot) {
-				links = links.filter((link) => {
-					if (!link.targetUrl) return false;
-					const linkRoot = extractDomainFromUrl(link.targetUrl);
-					return linkRoot === filterRoot;
-				});
-			}
-		}
 
 		return links;
 	}
@@ -520,6 +535,29 @@ function extractArticlePublishedDate(html: string): string | null {
 		const d = parseDateToIso(dcMatch[1]);
 		if (d) return d;
 	}
+	// 5. <dt>Publicat</dt><dd>...</dd> (pattern CMS românesc)
+	const dtPublicatMatch = html.match(/<dt[^>]*>\s*Publicat\s*<\/dt>\s*<dd[^>]*>([^<]+)/i);
+	if (dtPublicatMatch?.[1]) {
+		const raw = dtPublicatMatch[1].trim();
+		const d = parseDateToIso(raw) ?? parseRomanianRelativeDate(raw) ?? parseRomanianAbsoluteDate(raw);
+		if (d) return d;
+	}
+	// 6. <dt>Modificat</dt><dd>...</dd> (fallback când nu există dată publicare)
+	const dtModificatMatch = html.match(/<dt[^>]*>\s*Modific[aă]t\s*<\/dt>\s*<dd[^>]*>([^<]+)/i);
+	if (dtModificatMatch?.[1]) {
+		const raw = dtModificatMatch[1].trim();
+		const d = parseDateToIso(raw) ?? parseRomanianRelativeDate(raw) ?? parseRomanianAbsoluteDate(raw);
+		if (d) return d;
+	}
+	// 7. Elemente cu class date/time/posted ce conțin text cu dată
+	const classDateMatch = html.match(
+		/class=["'][^"']*(?:dat[ae]|entry-date|post(?:ed|date|ing)|creat|public)[^"']*["'][^>]*>\s*([^<]{5,60})/i
+	);
+	if (classDateMatch?.[1]) {
+		const raw = classDateMatch[1].trim();
+		const d = parseDateToIso(raw) ?? parseRomanianRelativeDate(raw) ?? parseRomanianAbsoluteDate(raw);
+		if (d) return d;
+	}
 	return null;
 }
 
@@ -531,6 +569,88 @@ function parseDateToIso(val: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+/** Parsează o dată relativă în română ("acum 3 ani si 1 luna", "acum 2 luni" etc.) */
+function parseRomanianRelativeDate(val: string): string | null {
+	const s = val.trim();
+	const now = new Date();
+
+	// "acum X ani si/și Y luni/luna/lună"
+	const m1 = s.match(/acum\s+(\d+)\s+ani?\s+(?:si|și)\s+(\d+)\s+lun[aăi]/i);
+	if (m1) {
+		const d = new Date(now);
+		d.setFullYear(d.getFullYear() - parseInt(m1[1]));
+		d.setMonth(d.getMonth() - parseInt(m1[2]));
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	// "acum X ani"
+	const m2 = s.match(/acum\s+(\d+)\s+ani?(?:\s|$)/i);
+	if (m2) {
+		const d = new Date(now);
+		d.setFullYear(d.getFullYear() - parseInt(m2[1]));
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	// "acum X luni/luna/lună"
+	const m3 = s.match(/acum\s+(\d+)\s+lun[aăi]/i);
+	if (m3) {
+		const d = new Date(now);
+		d.setMonth(d.getMonth() - parseInt(m3[1]));
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	// "acum X săptămâni/saptamani"
+	const m4 = s.match(/acum\s+(\d+)\s+s[aă]pt[aă]m[aâ]ni?/i);
+	if (m4) {
+		const d = new Date(now);
+		d.setDate(d.getDate() - parseInt(m4[1]) * 7);
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	// "acum X zile"
+	const m5 = s.match(/acum\s+(\d+)\s+zile?/i);
+	if (m5) {
+		const d = new Date(now);
+		d.setDate(d.getDate() - parseInt(m5[1]));
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	// "acum o zi"
+	if (/acum\s+o\s+zi/i.test(s)) {
+		const d = new Date(now);
+		d.setDate(d.getDate() - 1);
+		return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+	}
+	return null;
+}
+
+/** Parsează o dată absolută în română ("25 mai 2023", "mai 2023", "25.05.2023") */
+function parseRomanianAbsoluteDate(val: string): string | null {
+	const MONTHS: Record<string, number> = {
+		ian: 1, feb: 2, mar: 3, apr: 4, mai: 5, iun: 6,
+		iul: 7, aug: 8, sep: 9, oct: 10, noi: 11, dec: 12
+	};
+	const MON_PAT =
+		'(ian(?:uarie)?|feb(?:ruarie)?|mar(?:tie)?|apr(?:ilie)?|mai|iun(?:ie)?|iul(?:ie)?|aug(?:ust)?|sep(?:tembrie)?|oct(?:ombrie)?|noi(?:embrie)?|dec(?:embrie)?)';
+
+	// "25 mai 2023" / "25 mai, 2023"
+	const m1 = val.match(new RegExp(`(\\d{1,2})\\s+${MON_PAT}[.,]?\\s*(\\d{4})`, 'i'));
+	if (m1) {
+		const key = m1[2].toLowerCase().slice(0, 3);
+		const month = MONTHS[key];
+		if (month) {
+			const d = new Date(parseInt(m1[3]), month - 1, parseInt(m1[1]));
+			return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+		}
+	}
+	// "mai 2023" (lună + an)
+	const m2 = val.match(new RegExp(`${MON_PAT}\\s+(\\d{4})`, 'i'));
+	if (m2) {
+		const key = m2[1].toLowerCase().slice(0, 3);
+		const month = MONTHS[key];
+		if (month) {
+			const d = new Date(parseInt(m2[2]), month - 1, 1);
+			return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+		}
+	}
+	return null;
 }
 
 function stripHtml(html: string): string {
@@ -825,6 +945,40 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 const LINK_CHECK_USER_AGENT =
 	'Mozilla/5.0 (compatible; SEOBacklinkChecker/1.0; +https://example.com)';
 
+/** Extrage atributul dofollow/nofollow dintr-un HTML deja încărcat. */
+function extractDofollowFromHtml(
+	html: string,
+	targetUrl: string,
+	articleUrl: string
+): 'dofollow' | 'nofollow' | null {
+	const targetUrlNorm = targetUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+	const linkRegex = /<a\s+([^>]*)>/gi;
+	let m: RegExpExecArray | null;
+	while ((m = linkRegex.exec(html)) !== null) {
+		const attrs = m[1];
+		const hrefM = attrs.match(/href\s*=\s*["']([^"']*)["']/i);
+		if (!hrefM) continue;
+		let href = hrefM[1].trim();
+		if (href.startsWith('//')) href = 'https:' + href;
+		else if (href.startsWith('/')) {
+			try {
+				const base = new URL(articleUrl);
+				href = base.origin + href;
+			} catch { continue; }
+		} else if (!href.startsWith('http')) {
+			try {
+				href = new URL(href, articleUrl).href;
+			} catch { continue; }
+		}
+		const hrefNorm = href.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+		if (!hrefNorm.includes(targetUrlNorm) && !targetUrlNorm.includes(hrefNorm)) continue;
+		const relM = attrs.match(/rel\s*=\s*["']([^"']*)["']/i);
+		const rel = (relM ? relM[1] : '').toLowerCase();
+		return rel.includes('nofollow') ? 'nofollow' : 'dofollow';
+	}
+	return null;
+}
+
 /** Verifică dacă linkul către targetUrl din articol are rel="nofollow". Returnează 'dofollow'|'nofollow' sau null dacă nu s-a găsit. */
 async function verifyDofollowFromPage(
 	articleUrl: string,
@@ -843,30 +997,7 @@ async function verifyDofollowFromPage(
 		clearTimeout(timeoutId);
 		if (!res.ok) return null;
 		const html = await res.text();
-
-		const targetUrlNorm = targetUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-		const linkRegex = /<a\s+([^>]*)>/gi;
-		let m: RegExpExecArray | null;
-		while ((m = linkRegex.exec(html)) !== null) {
-			const attrs = m[1];
-			const hrefM = attrs.match(/href\s*=\s*["']([^"']*)["']/i);
-			if (!hrefM) continue;
-			let href = hrefM[1].trim();
-			if (href.startsWith('//')) href = 'https:' + href;
-			else if (href.startsWith('/')) {
-				const base = new URL(articleUrl);
-				href = base.origin + href;
-			} else if (!href.startsWith('http')) {
-				href = new URL(href, articleUrl).href;
-			}
-			const hrefNorm = href.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-			if (!hrefNorm.includes(targetUrlNorm) && !targetUrlNorm.includes(hrefNorm)) continue;
-
-			const relM = attrs.match(/rel\s*=\s*["']([^"']*)["']/i);
-			const rel = (relM ? relM[1] : '').toLowerCase();
-			return rel.includes('nofollow') ? 'nofollow' : 'dofollow';
-		}
-		return null;
+		return extractDofollowFromHtml(html, targetUrl, articleUrl);
 	} catch {
 		if (timeoutId) clearTimeout(timeoutId);
 		return null;
@@ -951,8 +1082,34 @@ export const checkSeoLink = command(
 		const now = new Date();
 
 		let lastCheckDofollow: 'dofollow' | 'nofollow' | null = null;
-		if (result.status === 'ok' && link.targetUrl) {
-			lastCheckDofollow = await verifyDofollowFromPage(link.articleUrl, link.targetUrl);
+		let newArticlePublishedAt: string | null = null;
+
+		// Dacă linkul e accesibil și avem nevoie de HTML (dofollow sau dată publicare lipsă),
+		// facem un singur GET request în loc de două separate.
+		if (result.status === 'ok' && (link.targetUrl || !link.articlePublishedAt)) {
+			let timeoutId: ReturnType<typeof setTimeout> | undefined;
+			try {
+				const controller = new AbortController();
+				timeoutId = setTimeout(() => controller.abort(), 15000);
+				const htmlRes = await fetch(link.articleUrl, {
+					method: 'GET',
+					redirect: 'follow',
+					signal: controller.signal,
+					headers: { 'User-Agent': EXTRACT_USER_AGENT }
+				});
+				clearTimeout(timeoutId);
+				if (htmlRes.ok) {
+					const html = await htmlRes.text();
+					if (link.targetUrl) {
+						lastCheckDofollow = extractDofollowFromHtml(html, link.targetUrl, link.articleUrl);
+					}
+					if (!link.articlePublishedAt) {
+						newArticlePublishedAt = extractArticlePublishedDate(html);
+					}
+				}
+			} catch {
+				if (timeoutId) clearTimeout(timeoutId);
+			}
 		}
 
 		await db
@@ -965,6 +1122,8 @@ export const checkSeoLink = command(
 				lastCheckDofollow: lastCheckDofollow,
 				// Sincronizează linkAttribute (tip dofollow/nofollow) cu rezultatul verificării
 				...(lastCheckDofollow && { linkAttribute: lastCheckDofollow }),
+				// Actualizează data publicării dacă lipsea și am reușit să o extragem
+				...(newArticlePublishedAt && { articlePublishedAt: newArticlePublishedAt }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));

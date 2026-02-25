@@ -281,6 +281,13 @@
       "when": 1772014942576,
       "tag": "0039_soft_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1772046215787,
+      "tag": "0040_third_centennial",
+      "breakpoints": true
     }
   ]
 }

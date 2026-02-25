@@ -12,6 +12,7 @@
 	import { Progress } from '$lib/components/ui/progress/index';
 
 	let name = $state('');
+	let businessName = $state('');
 	let email = $state('');
 	let phone = $state('');
 	let website = $state('');
@@ -65,6 +66,7 @@
 			const data = await getCompanyData(cui);
 
 			// Map ANAF data to form fields
+			businessName = data.denumire || businessName;
 			name = data.denumire || name;
 			registrationNumber = data.nrRegCom || registrationNumber;
 			iban = data.iban || iban;
@@ -93,6 +95,7 @@
 		try {
 			const result = await createClient({
 				name,
+				businessName: businessName || undefined,
 				email: email || undefined,
 				phone: phone || undefined,
 				website: website || undefined,

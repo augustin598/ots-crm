@@ -11,6 +11,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { Pencil as Edit, ArrowLeft } from '@lucide/svelte';
+	import ClientLogo from '$lib/components/client-logo.svelte';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -20,16 +21,6 @@
 
 	const clientQuery = getClient(clientId);
 	const client = $derived(clientQuery.current);
-	const initials = $derived(
-		client?.name
-			? client.name
-					.split(' ')
-					.filter(Boolean)
-					.map((n) => n[0]?.toUpperCase() || '')
-					.join('')
-					.slice(0, 2)
-			: ''
-	);
 
 	// Counts for tabs
 	const projectsQuery = getProjects(clientId);
@@ -73,12 +64,7 @@
 
 		<div class="flex items-start justify-between">
 			<div class="flex items-center gap-4">
-				<div
-					class="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground text-2xl font-bold"
-					aria-hidden="true"
-				>
-					{initials}
-				</div>
+				<ClientLogo website={client?.website} name={client?.name ?? 'Client'} size="lg" />
 				<div>
 					<h1 class="text-3xl font-bold tracking-tight">{client?.name || 'Client'}</h1>
 					{#if client?.companyType}

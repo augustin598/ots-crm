@@ -29,6 +29,7 @@
 	const partnerInfo = $derived(partnerInfoQuery.current);
 
 	let name = $state('');
+	let businessName = $state('');
 	let email = $state('');
 	let phone = $state('');
 	let website = $state('');
@@ -57,6 +58,7 @@
 	$effect(() => {
 		if (client) {
 			name = client.name || '';
+			businessName = client.businessName || '';
 			email = client.email || '';
 			phone = client.phone || '';
 			website = client.website || '';
@@ -96,7 +98,8 @@
 
 		try {
 			const data = await getCompanyData(cui);
-			name = data.denumire || name;
+			businessName = data.denumire || businessName;
+			if (!name) name = data.denumire || name;
 			registrationNumber = data.nrRegCom || registrationNumber;
 			iban = data.iban || iban;
 			companyType = data.forma_juridica || companyType;
@@ -126,6 +129,7 @@
 			await updateClient({
 				clientId,
 				name,
+				businessName: businessName || undefined,
 				email: email || undefined,
 				phone: phone || undefined,
 				website: website || undefined,
@@ -185,8 +189,11 @@
 					<div class="space-y-4">
 						<h3 class="text-lg font-semibold">Basic Information</h3>
 						<div class="space-y-2">
-							<Label for="name">Name *</Label>
-							<Input id="name" bind:value={name} type="text" required />
+							<Label for="name">Display name (alias) *</Label>
+							<Input id="name" bind:value={name} type="text" required placeholder="Ex: Meduza Agency" />
+							{#if businessName && businessName !== name}
+								<p class="text-xs text-muted-foreground">Denumire oficială: {businessName}</p>
+							{/if}
 						</div>
 						<div class="grid grid-cols-2 gap-4">
 							<div class="space-y-2">

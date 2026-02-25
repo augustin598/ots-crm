@@ -671,6 +671,7 @@ export function mapKeezPartnerToClient(
 	return {
 		tenantId,
 		name: keezPartner.partnerName,
+		businessName: keezPartner.partnerName,
 		status: 'active',
 		companyType: keezPartner.isLegalPerson ? 'SRL' : null, // Default to SRL for legal entities
 		cui: keezPartner.identificationNumber || null,
@@ -697,7 +698,7 @@ export function mapKeezPartnerToClient(
  */
 export function mapClientToKeezPartner(client: Client): KeezPartner {
 	return {
-		partnerName: client.name,
+		partnerName: client.businessName || client.name,
 		taxAttribute: client.vatNumber || client.cui || undefined,
 		registrationNumber: client.registrationNumber || undefined,
 		addressDetails: client.address || undefined,

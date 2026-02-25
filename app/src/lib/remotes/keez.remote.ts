@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { KeezClient } from '$lib/server/plugins/keez/client';
 import { encrypt, decrypt } from '$lib/server/plugins/keez/crypto';
 import {
@@ -963,13 +963,17 @@ export const syncInvoicesFromKeez = command(
 				// Find or create client
 				let clientId: string | null = null;
 				if (keezInvoice.partner?.partnerName) {
+					const partnerName = keezInvoice.partner.partnerName;
 					const [existingClient] = await db
 						.select()
 						.from(table.client)
 						.where(
 							and(
-								eq(table.client.name, keezInvoice.partner.partnerName),
-								eq(table.client.tenantId, event.locals.tenant.id)
+								eq(table.client.tenantId, event.locals.tenant.id),
+								or(
+									eq(table.client.name, partnerName),
+									eq(table.client.businessName, partnerName)
+								)
 							)
 						)
 						.limit(1);
@@ -1137,8 +1141,11 @@ export const importClientsFromKeez = command(
 						.from(table.client)
 						.where(
 							and(
-								eq(table.client.name, partner.partnerName),
-								eq(table.client.tenantId, event.locals.tenant.id)
+								eq(table.client.tenantId, event.locals.tenant.id),
+								or(
+									eq(table.client.name, partner.partnerName),
+									eq(table.client.businessName, partner.partnerName)
+								)
 							)
 						)
 						.limit(1);

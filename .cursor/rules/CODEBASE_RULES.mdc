@@ -253,28 +253,19 @@ const result = await db
 
 ### Migrations
 
-1. **Generate migrations** after schema changes:
+**Important:** All db commands run from the `app` directory (scripts are in `app/package.json`):
 
-   ```bash
-   pnpm db:generate
-   ```
+```bash
+cd app && bun run db:generate   # Generate migration
+cd app && bun run db:push       # Push schema (development)
+cd app && bun run db:migrate    # Run migrations (production)
+cd app && bun run db:studio     # Drizzle Studio
+```
 
-2. **Push schema changes** (development):
-
-   ```bash
-   pnpm db:push
-   ```
-
-3. **Run migrations** (production):
-
-   ```bash
-   pnpm db:migrate
-   ```
-
-4. **Open Drizzle Studio** (development):
-   ```bash
-   pnpm db:studio
-   ```
+1. **Generate migrations** after schema changes: `cd app && bun run db:generate`
+2. **Push schema changes** (development): `cd app && bun run db:push`
+3. **Run migrations** (production): `cd app && bun run db:migrate`
+4. **Open Drizzle Studio**: `cd app && bun run db:studio`
 
 ### Best Practices
 
@@ -1138,18 +1129,13 @@ Required environment variables:
 
 ### Database Migrations
 
+**Important:** Run from `app` directory (scripts are in `app/package.json`):
+
 ```bash
-# Generate migration after schema changes
-pnpm db:generate
-
-# Push schema changes (development)
-pnpm db:push
-
-# Run migrations (production)
-pnpm db:migrate
-
-# Open Drizzle Studio
-pnpm db:studio
+cd app && bun run db:generate   # Generate migration
+cd app && bun run db:push       # Push schema (development)
+cd app && bun run db:migrate    # Run migrations (production)
+cd app && bun run db:studio     # Drizzle Studio
 ```
 
 ### Common Patterns
