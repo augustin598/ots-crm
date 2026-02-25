@@ -666,6 +666,54 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 const LINK_CHECK_USER_AGENT =
 	'Mozilla/5.0 (compatible; SEOBacklinkChecker/1.0; +https://example.com)';
 
+/** Verifică dacă linkul către targetUrl din articol are rel="nofollow". Returnează 'dofollow'|'nofollow' sau null dacă nu s-a găsit. */
+async function verifyDofollowFromPage(
+	articleUrl: string,
+	targetUrl: string
+): Promise<'dofollow' | 'nofollow' | null> {
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const controller = new AbortController();
+		timeoutId = setTimeout(() => controller.abort(), 15000);
+		const res = await fetch(articleUrl, {
+			method: 'GET',
+			redirect: 'follow',
+			signal: controller.signal,
+			headers: { 'User-Agent': LINK_CHECK_USER_AGENT }
+		});
+		clearTimeout(timeoutId);
+		if (!res.ok) return null;
+		const html = await res.text();
+
+		const targetUrlNorm = targetUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+		const linkRegex = /<a\s+([^>]*)>/gi;
+		let m: RegExpExecArray | null;
+		while ((m = linkRegex.exec(html)) !== null) {
+			const attrs = m[1];
+			const hrefM = attrs.match(/href\s*=\s*["']([^"']*)["']/i);
+			if (!hrefM) continue;
+			let href = hrefM[1].trim();
+			if (href.startsWith('//')) href = 'https:' + href;
+			else if (href.startsWith('/')) {
+				const base = new URL(articleUrl);
+				href = base.origin + href;
+			} else if (!href.startsWith('http')) {
+				href = new URL(href, articleUrl).href;
+			}
+			const hrefNorm = href.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+			if (!hrefNorm.includes(targetUrlNorm) && !targetUrlNorm.includes(hrefNorm)) continue;
+
+			const relM = attrs.match(/rel\s*=\s*["']([^"']*)["']/i);
+			const rel = (relM ? relM[1] : '').toLowerCase();
+			return rel.includes('nofollow') ? 'nofollow' : 'dofollow';
+		}
+		return null;
+	} catch {
+		if (timeoutId) clearTimeout(timeoutId);
+		return null;
+	}
+}
+
 async function performLinkCheck(articleUrl: string): Promise<{
 	status: 'ok' | 'unreachable' | 'timeout' | 'redirect' | 'error';
 	httpCode: number | null;
@@ -743,6 +791,11 @@ export const checkSeoLink = command(
 		const result = await performLinkCheck(link.articleUrl);
 		const now = new Date();
 
+		let lastCheckDofollow: 'dofollow' | 'nofollow' | null = null;
+		if (result.status === 'ok' && link.targetUrl) {
+			lastCheckDofollow = await verifyDofollowFromPage(link.articleUrl, link.targetUrl);
+		}
+
 		await db
 			.update(table.seoLink)
 			.set({
@@ -750,6 +803,9 @@ export const checkSeoLink = command(
 				lastCheckStatus: result.status,
 				lastCheckHttpCode: result.httpCode,
 				lastCheckError: result.errorMessage,
+				lastCheckDofollow: lastCheckDofollow,
+				// Sincronizează linkAttribute (tip dofollow/nofollow) cu rezultatul verificării
+				...(lastCheckDofollow && { linkAttribute: lastCheckDofollow }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
@@ -809,6 +865,11 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 		const result = await performLinkCheck(link.articleUrl);
 		const now = new Date();
 
+		let lastCheckDofollow: 'dofollow' | 'nofollow' | null = null;
+		if (result.status === 'ok' && link.targetUrl) {
+			lastCheckDofollow = await verifyDofollowFromPage(link.articleUrl, link.targetUrl);
+		}
+
 		await db
 			.update(table.seoLink)
 			.set({
@@ -816,6 +877,9 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 				lastCheckStatus: result.status,
 				lastCheckHttpCode: result.httpCode,
 				lastCheckError: result.errorMessage,
+				lastCheckDofollow: lastCheckDofollow,
+				// Sincronizează linkAttribute (tip dofollow/nofollow) cu rezultatul verificării
+				...(lastCheckDofollow && { linkAttribute: lastCheckDofollow }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, link.id));

@@ -977,6 +977,7 @@ export const seoLink = sqliteTable('seo_link', {
 	lastCheckStatus: text('last_check_status'), // 'ok' | 'unreachable' | 'timeout' | 'redirect' | 'error'
 	lastCheckHttpCode: integer('last_check_http_code'),
 	lastCheckError: text('last_check_error'),
+	lastCheckDofollow: text('last_check_dofollow'), // 'dofollow' | 'nofollow' - verified from page, null = neverificat
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

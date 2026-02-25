@@ -1400,20 +1400,34 @@
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
 									<span class="text-[13px] text-foreground/85 line-clamp-2">{link.keyword}</span>
 								</TableCell>
-								<TableCell class="px-3 py-3.5 align-middle">
-									<div class="flex flex-col gap-0.5">
-										{#if link.linkType}
-											<span class="text-[11px] text-muted-foreground uppercase tracking-wide">{getLinkTypeLabel(link.linkType)}</span>
-										{/if}
-										<Badge variant={link.linkAttribute === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
-											{link.linkAttribute}
-										</Badge>
-									</div>
+								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle">
+									{#if link.targetUrl}
+										<SeoLinkUrlCell url={link.targetUrl} maxChars={35} />
+									{:else}
+										<span class="text-muted-foreground/90 text-[13px]">—</span>
+									{/if}
+								</TableCell>
+								<TableCell class="px-3 py-3.5 max-w-[200px] align-middle">
+									<SeoLinkUrlCell url={link.articleUrl} maxChars={45} />
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
 									<Badge variant={getStatusBadge(link.status)} class="text-[11px] h-5 rounded-full px-2 font-normal">
 										{getStatusLabel(link.status)}
 									</Badge>
+								</TableCell>
+								<TableCell class="px-3 py-3.5 align-middle">
+									<div class="flex flex-col gap-0.5">
+										{#if link.linkType}
+											<span class="text-[11px] text-muted-foreground uppercase tracking-wide">{getLinkTypeLabel(link.linkType)}</span>
+										{/if}
+										{#if link.lastCheckDofollow}
+											<Badge variant={link.lastCheckDofollow === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
+												{link.lastCheckDofollow}
+											</Badge>
+										{:else}
+											<span class="text-[12px] text-muted-foreground">Neverificat</span>
+										{/if}
+									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
 									<TooltipProvider>
@@ -1428,16 +1442,6 @@
 											</TooltipContent>
 										</Tooltip>
 									</TooltipProvider>
-								</TableCell>
-								<TableCell class="px-3 py-3.5 max-w-[200px] align-middle">
-									<SeoLinkUrlCell url={link.articleUrl} maxChars={45} />
-								</TableCell>
-								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle">
-									{#if link.targetUrl}
-										<SeoLinkUrlCell url={link.targetUrl} maxChars={35} />
-									{:else}
-										<span class="text-muted-foreground/90 text-[13px]">—</span>
-									{/if}
 								</TableCell>
 								<TableCell class="px-3 py-3.5 text-[13px] align-middle">
 									{#if editingPriceId === link.id}
