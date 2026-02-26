@@ -2,8 +2,7 @@ import type { HookHandler, InvoiceCreatedEvent, InvoiceUpdatedEvent } from '../t
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { KeezClient } from './client';
-import { decrypt } from './crypto';
+import { createKeezClientForTenant } from './factory';
 import { mapInvoiceToKeez, generateNextInvoiceNumber, mapKeezDetailsToLineItems } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
@@ -80,15 +79,8 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.from(table.invoiceLineItem)
 		.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
 
-	// Decrypt secret
-	const secret = decrypt(tenantId, integration.secret);
-
-	// Create Keez client
-	const keezClient = new KeezClient({
-		clientEid: integration.clientEid,
-		applicationId: integration.applicationId,
-		secret
-	});
+	// Create Keez client with DB token cache
+	const keezClient = await createKeezClientForTenant(tenantId, integration);
 
 	console.log(
 		`[Keez] Starting invoice sync for invoice ${invoice.id} with ${lineItems.length} line items`
@@ -553,30 +545,118 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 };
 
 /**
- * Handle invoice updated event - sync updates to Keez
+ * Handle invoice updated event - push updates to Keez
  */
 export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) => {
-	// For now, we'll skip auto-updating Keez invoices on update
-	// Users can manually sync if needed
-	// This prevents overwriting Keez data unintentionally
-	const { invoice } = event;
+	const { invoice, tenantId } = event;
 
-	// Check if invoice has Keez sync
-	const [sync] = await db
+	// Only push updates if the invoice was previously synced to Keez
+	if (!invoice.keezExternalId) {
+		return;
+	}
+
+	// Check if Keez integration is active
+	const [integration] = await db
 		.select()
-		.from(table.keezInvoiceSync)
+		.from(table.keezIntegration)
 		.where(
-			and(
-				eq(table.keezInvoiceSync.invoiceId, invoice.id),
-				eq(table.keezInvoiceSync.syncStatus, 'synced')
-			)
+			and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true))
 		)
 		.limit(1);
 
-	if (!sync) {
-		return; // Not synced to Keez, skip
+	if (!integration) {
+		return;
 	}
 
-	// TODO: Implement update sync if needed
-	// For now, we'll leave it as manual sync only
+	// Respect autoSync setting
+	const [settings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
+	if (settings && settings.keezAutoSync === false) {
+		return;
+	}
+
+	// Get tenant, client and line items
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantId))
+		.limit(1);
+
+	if (!tenant) {
+		console.error(`[Keez] Tenant not found: ${tenantId}`);
+		return;
+	}
+
+	const [client] = await db
+		.select()
+		.from(table.client)
+		.where(eq(table.client.id, invoice.clientId))
+		.limit(1);
+
+	if (!client) {
+		console.error(`[Keez] Client not found for invoice update: ${invoice.clientId}`);
+		return;
+	}
+
+	const lineItems = await db
+		.select()
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
+
+	try {
+		const keezClient = await createKeezClientForTenant(tenantId, integration);
+
+		// Map updated invoice to Keez format, preserving existing Keez external ID
+		const keezInvoice = mapInvoiceToKeez(
+			{ ...invoice, lineItems },
+			client,
+			tenant,
+			invoice.keezExternalId,
+			settings,
+			undefined // No item external ID mapping needed for updates
+		);
+
+		await keezClient.updateInvoice(invoice.keezExternalId, keezInvoice);
+
+		// Update sync record
+		const [existingSync] = await db
+			.select()
+			.from(table.keezInvoiceSync)
+			.where(eq(table.keezInvoiceSync.invoiceId, invoice.id))
+			.limit(1);
+
+		if (existingSync) {
+			await db
+				.update(table.keezInvoiceSync)
+				.set({ syncStatus: 'synced', lastSyncedAt: new Date() })
+				.where(eq(table.keezInvoiceSync.id, existingSync.id));
+		}
+
+		console.log(
+			`[Keez] Invoice ${invoice.id} updated in Keez (externalId: ${invoice.keezExternalId})`
+		);
+	} catch (error) {
+		console.error(`[Keez] Failed to update invoice ${invoice.id} in Keez:`, error);
+
+		// Mark sync as error
+		const [existingSync] = await db
+			.select()
+			.from(table.keezInvoiceSync)
+			.where(eq(table.keezInvoiceSync.invoiceId, invoice.id))
+			.limit(1);
+
+		if (existingSync) {
+			await db
+				.update(table.keezInvoiceSync)
+				.set({
+					syncStatus: 'error',
+					errorMessage: error instanceof Error ? error.message : 'Unknown error'
+				})
+				.where(eq(table.keezInvoiceSync.id, existingSync.id));
+		}
+	}
 };

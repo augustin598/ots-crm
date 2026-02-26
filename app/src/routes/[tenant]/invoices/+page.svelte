@@ -19,7 +19,7 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getServices } from '$lib/remotes/services.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { syncInvoicesFromKeez, getKeezStatus } from '$lib/remotes/keez.remote';
+	import { syncInvoicesFromKeez, getKeezStatus, createStornoInKeez } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
 	import { useQueryState } from 'nuqs-svelte';
@@ -471,6 +471,20 @@ import { goto } from '$app/navigation';
 			syncingInvoices = false;
 		}
 	}
+
+	async function handleCreateStorno(invoiceId: string) {
+		if (!confirm('Create a storno (credit note) for this invoice in Keez?')) {
+			return;
+		}
+
+		try {
+			const result = await createStornoInKeez({ invoiceId });
+			toast.success(`Storno created in Keez (ID: ${result.stornoExternalId})`);
+			await invoicesQuery.refresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to create storno in Keez');
+		}
+	}
 </script>
 
 <svelte:head>
@@ -569,12 +583,17 @@ import { goto } from '$app/navigation';
 													{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
 												</h3>
 											</div>
-											<Badge 
-												variant={getStatusColor(invoice.status)} 
+											<Badge
+												variant={getStatusColor(invoice.status)}
 												class="text-xs font-semibold px-2 py-0.5 shadow-sm"
 											>
 												{getStatusIcon(invoice.status)} {invoice.status}
 											</Badge>
+											{#if isKeezActive && invoice.keezExternalId}
+												<Badge variant="outline" class="text-xs px-2 py-0.5 border-green-500 text-green-600 dark:text-green-400">
+													Keez ✓
+												</Badge>
+											{/if}
 										</div>
 
 										<!-- Client name -->
@@ -690,6 +709,11 @@ import { goto } from '$app/navigation';
 												</DropdownMenuItem>
 												{#if invoice.status !== 'paid'}
 													<DropdownMenuItem onclick={() => handleMarkAsPaid(invoice.id)}>Mark as Paid</DropdownMenuItem>
+												{/if}
+												{#if isKeezActive && invoice.keezExternalId}
+													<DropdownMenuItem onclick={() => handleCreateStorno(invoice.id)}>
+														Storno în Keez
+													</DropdownMenuItem>
 												{/if}
 												<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteInvoice(invoice.id)}>
 													Delete

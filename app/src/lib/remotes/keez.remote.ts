@@ -2,9 +2,10 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient } from '$lib/server/plugins/keez/client';
 import { encrypt, decrypt } from '$lib/server/plugins/keez/crypto';
+import { createKeezClientForTenant } from '$lib/server/plugins/keez/factory';
 import {
 	mapInvoiceToKeez,
 	mapKeezInvoiceToCRM,
@@ -156,6 +157,32 @@ export const getKeezStatus = query(async () => {
 	};
 });
 
+export const getKeezSyncHistory = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const syncRecords = await db
+		.select({
+			id: table.keezInvoiceSync.id,
+			invoiceId: table.keezInvoiceSync.invoiceId,
+			invoiceNumber: table.invoice.invoiceNumber,
+			keezExternalId: table.keezInvoiceSync.keezExternalId,
+			syncDirection: table.keezInvoiceSync.syncDirection,
+			syncStatus: table.keezInvoiceSync.syncStatus,
+			lastSyncedAt: table.keezInvoiceSync.lastSyncedAt,
+			errorMessage: table.keezInvoiceSync.errorMessage
+		})
+		.from(table.keezInvoiceSync)
+		.leftJoin(table.invoice, eq(table.invoice.id, table.keezInvoiceSync.invoiceId))
+		.where(eq(table.keezInvoiceSync.tenantId, event.locals.tenant.id))
+		.orderBy(desc(table.keezInvoiceSync.lastSyncedAt))
+		.limit(20);
+
+	return syncRecords;
+});
+
 export const getKeezItems = query(
 	v.object({
 		offset: v.optional(v.number()),
@@ -188,15 +215,8 @@ export const getKeezItems = query(
 			};
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		// Get items from Keez
 		const response = await keezClient.getItems({
@@ -247,15 +267,8 @@ export const createKeezItem = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		// Create item in Keez
 		const response = await keezClient.createItem({
@@ -338,15 +351,8 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 		.from(table.invoiceLineItem)
 		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
 
-	// Decrypt secret
-	const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-	// Create Keez client
-	const keezClient = new KeezClient({
-		clientEid: integration.clientEid,
-		applicationId: integration.applicationId,
-		secret
-	});
+	// Create Keez client with DB token cache
+	const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 	// Use existing external ID or generate one
 	const externalId = invoice.keezExternalId || invoice.id;
@@ -705,15 +711,8 @@ export const syncInvoicesFromKeez = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		// Get invoices from Keez
 		const response = await keezClient.getInvoices({
@@ -1111,15 +1110,8 @@ export const importClientsFromKeez = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		// Get partners from Keez
 		const response = await keezClient.getPartners({
@@ -1219,15 +1211,8 @@ export const getInvoicePDFFromKeez = query(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		// Get PDF
 		const pdfBuffer = await keezClient.downloadInvoicePDF(data.keezInvoiceId);
@@ -1265,15 +1250,8 @@ export const validateInvoiceInKeez = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		await keezClient.validateInvoice(data.keezInvoiceId);
 
@@ -1307,15 +1285,8 @@ export const sendInvoiceToEFactura = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		await keezClient.sendToEFactura(data.keezInvoiceId);
 
@@ -1349,18 +1320,66 @@ export const cancelInvoiceInKeez = command(
 			throw new Error('Keez integration not connected');
 		}
 
-		// Decrypt secret
-		const secret = decrypt(event.locals.tenant.id, integration.secret);
-
-		// Create Keez client
-		const keezClient = new KeezClient({
-			clientEid: integration.clientEid,
-			applicationId: integration.applicationId,
-			secret
-		});
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		await keezClient.cancelInvoice(data.keezInvoiceId);
 
 		return { success: true };
+	}
+);
+
+export const createStornoInKeez = command(
+	v.object({
+		invoiceId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Get invoice and verify it has Keez external ID
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!invoice) {
+			throw new Error('Invoice not found');
+		}
+
+		if (!invoice.keezExternalId) {
+			throw new Error('Invoice is not synced with Keez');
+		}
+
+		// Get integration
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Keez integration not connected');
+		}
+
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+
+		const response = await keezClient.createStorno(invoice.keezExternalId);
+
+		return { success: true, stornoExternalId: response.externalId };
 	}
 );

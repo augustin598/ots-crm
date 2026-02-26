@@ -4,7 +4,8 @@
 		connectKeez,
 		disconnectKeez,
 		syncInvoicesFromKeez,
-		importClientsFromKeez
+		importClientsFromKeez,
+		getKeezSyncHistory
 	} from '$lib/remotes/keez.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
@@ -22,6 +23,9 @@
 	const statusQuery = getKeezStatus();
 	const status = $derived(statusQuery.current);
 	const loading = $derived(statusQuery.loading);
+
+	const syncHistoryQuery = getKeezSyncHistory();
+	const syncHistory = $derived(syncHistoryQuery.current ?? []);
 
 	let clientEid = $state('');
 	let applicationId = $state('');
@@ -235,6 +239,48 @@
 				</div>
 
 				<Separator />
+
+				{#if syncHistory.length > 0}
+					<div class="space-y-3">
+						<h3 class="text-sm font-semibold">Sync History (last 20)</h3>
+						<div class="rounded-md border overflow-hidden">
+							<table class="w-full text-xs">
+								<thead class="bg-muted">
+									<tr>
+										<th class="text-left p-2 font-medium">Invoice</th>
+										<th class="text-left p-2 font-medium">Direction</th>
+										<th class="text-left p-2 font-medium">Status</th>
+										<th class="text-left p-2 font-medium">Last Synced</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each syncHistory as record}
+										<tr class="border-t">
+											<td class="p-2">{record.invoiceNumber || record.invoiceId}</td>
+											<td class="p-2">
+												{#if record.syncDirection === 'push'}↑ Push{:else if record.syncDirection === 'pull'}↓ Pull{:else}↕ Both{/if}
+											</td>
+											<td class="p-2">
+												{#if record.syncStatus === 'synced'}
+													<span class="text-green-600 dark:text-green-400">✓ Synced</span>
+												{:else if record.syncStatus === 'error'}
+													<span class="text-red-600 dark:text-red-400" title={record.errorMessage || ''}>✗ Error</span>
+												{:else}
+													<span class="text-yellow-600">⏳ Pending</span>
+												{/if}
+											</td>
+											<td class="p-2 text-muted-foreground">
+												{record.lastSyncedAt ? new Date(record.lastSyncedAt).toLocaleString() : '—'}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</div>
+
+					<Separator />
+				{/if}
 
 				<div class="flex gap-2">
 					<Button variant="outline" onclick={handleDisconnect} disabled={disconnecting}>

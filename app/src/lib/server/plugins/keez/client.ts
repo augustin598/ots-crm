@@ -10,6 +10,10 @@ export interface KeezClientConfig {
 	baseUrl?: string;
 	tokenUrl?: string;
 	environment?: 'app' | 'sandbox'; // 'app' for production, 'sandbox' for testing
+	// Optional: pre-load cached token from DB to avoid extra token fetch per request
+	cachedTokenData?: { token: string; expiresAt: Date };
+	// Optional: callback to persist token after refresh (for DB caching)
+	onTokenRefreshed?: (token: string, expiresAt: Date) => Promise<void>;
 }
 
 export interface KeezAccessToken {
@@ -160,21 +164,33 @@ export class KeezClient {
 	private tokenUrl: string;
 	private cachedToken: string | null = null;
 	private tokenExpiresAt: Date | null = null;
+	private onTokenRefreshed?: (token: string, expiresAt: Date) => Promise<void>;
 
 	constructor(config: KeezClientConfig) {
 		this.clientEid = config.clientEid;
 		this.applicationId = config.applicationId;
 		this.secret = config.secret;
+		this.onTokenRefreshed = config.onTokenRefreshed;
 
 		const environment = config.environment || 'app';
 		const envPrefix = environment === 'sandbox' ? 'sandbox' : 'app';
 
 		this.baseUrl = config.baseUrl || `https://${envPrefix}.keez.ro/api/v1.0/public-api`;
 		this.tokenUrl = config.tokenUrl || `https://${envPrefix}.keez.ro/idp/connect/token`;
+
+		// Pre-load cached token from DB if provided (avoids extra token fetch per request)
+		if (config.cachedTokenData) {
+			const safetyBuffer = new Date(Date.now() + 60 * 1000); // 60s buffer
+			if (config.cachedTokenData.expiresAt > safetyBuffer) {
+				this.cachedToken = config.cachedTokenData.token;
+				this.tokenExpiresAt = config.cachedTokenData.expiresAt;
+			}
+		}
 	}
 
 	/**
-	 * Get OAuth 2.0 access token using client credentials flow
+	 * Get OAuth 2.0 access token using client credentials flow.
+	 * Checks in-memory cache first, then fetches a new token if needed.
 	 */
 	async getAccessToken(): Promise<string> {
 		// Check if we have a valid cached token
@@ -202,7 +218,7 @@ export class KeezClient {
 
 		const tokenData: KeezAccessToken = await response.json();
 
-		// Cache token
+		// Cache token in memory
 		this.cachedToken = tokenData.access_token;
 		const expiresIn = tokenData.expires_in || 3600; // Default to 1 hour
 		this.tokenExpiresAt = new Date(Date.now() + (expiresIn - 60) * 1000); // Subtract 60s for safety
@@ -210,6 +226,16 @@ export class KeezClient {
 		// Update base URL if provided in token response
 		if (tokenData.api_endpoint) {
 			this.baseUrl = tokenData.api_endpoint;
+		}
+
+		// Persist token via callback (e.g., to DB) if provided
+		if (this.onTokenRefreshed) {
+			try {
+				await this.onTokenRefreshed(this.cachedToken, this.tokenExpiresAt);
+			} catch (err) {
+				// Non-fatal: log but don't fail the request
+				console.warn('[Keez] Failed to persist token to DB:', err);
+			}
 		}
 
 		return this.cachedToken;
@@ -606,5 +632,23 @@ export class KeezClient {
 			console.error(`[Keez] Error getting next invoice number for series ${series}:`, error);
 			return null;
 		}
+	}
+
+	/**
+	 * Create storno (credit note) for an invoice
+	 */
+	async createStorno(externalId: string): Promise<KeezInvoiceResponse> {
+		const response = await this.request<string | { externalId: string }>(
+			`/${this.clientEid}/invoices/${externalId}/storno`,
+			{ method: 'POST' }
+		);
+
+		if (typeof response === 'string') {
+			return { externalId: response };
+		}
+		if (response && typeof response === 'object' && 'externalId' in response) {
+			return { externalId: response.externalId };
+		}
+		return { externalId: String(response) };
 	}
 }

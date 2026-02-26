@@ -5,6 +5,7 @@ import { processTaskReminders } from './tasks/task-reminders';
 import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
 import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
+import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -57,7 +58,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	task_reminders: processTaskReminders,
 	daily_work_reminders: processDailyWorkReminders,
 	spv_invoice_sync: processSpvInvoiceSync,
-	revolut_transaction_sync: processRevolutTransactionSync
+	revolut_transaction_sync: processRevolutTransactionSync,
+	keez_invoice_sync: processKeezInvoiceSync
 };
 
 /**
@@ -204,6 +206,24 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled Revolut transaction sync: daily at 3:00 AM');
+
+	// Schedule Keez invoice sync job to run daily at 4:00 AM
+	schedulerQueue.add(
+		'keez-invoice-sync',
+		{
+			type: 'keez_invoice_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 4 * * *', // Every day at 4:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'keez-invoice-sync'
+		}
+	);
+
+	console.log('Scheduled Keez invoice sync: daily at 4:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };
