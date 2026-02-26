@@ -34,6 +34,7 @@
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import XIcon from '@lucide/svelte/icons/x';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 
@@ -63,6 +64,13 @@
 	// Filter: selected client IDs. Empty = show all; non-empty = show only selected
 	let selectedClientIds = $state<string[]>([]);
 	let clientFilterPopoverOpen = $state(false);
+	let clientFilterSearch = $state('');
+
+	const popoverClients = $derived(
+		clientFilterSearch.trim()
+			? clients.filter((c) => c.name.toLowerCase().includes(clientFilterSearch.trim().toLowerCase()))
+			: clients
+	);
 
 	const filteredClients = $derived(
 		selectedClientIds.length === 0 ? clients : clients.filter((c) => selectedClientIds.includes(c.id))
@@ -218,51 +226,52 @@
 		{#if clients.length > 0}
 			<Popover bind:open={clientFilterPopoverOpen}>
 				<PopoverTrigger>
-					<Button variant="outline">
-						<FilterIcon class="mr-2 h-4 w-4" />
-						Filter clients
+					<Button variant="outline" class="h-9 gap-2 text-sm font-normal">
+						<FilterIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+						{#if selectedClientIds.length === 0}
+							Toți clienții
+						{:else if selectedClientIds.length === 1}
+							{clients.find((c) => c.id === selectedClientIds[0])?.name ?? 'Client'}
+						{:else}
+							{selectedClientIds.length} clienți selectați
+						{/if}
 						{#if selectedClientIds.length > 0}
-							<Badge variant="secondary" class="ml-2">
-								{selectedClientIds.length}
-							</Badge>
+							<Badge variant="secondary" class="ml-auto">{selectedClientIds.length}</Badge>
 						{/if}
 					</Button>
 				</PopoverTrigger>
-				<PopoverContent class="w-72 max-h-[320px] overflow-y-auto" align="end">
-					<div class="space-y-3">
-						<div class="flex items-center justify-between">
-							<Label>Show only selected clients</Label>
-							{#if selectedClientIds.length > 0}
-								<Button variant="ghost" size="sm" onclick={clearClientFilter}>
-									<XIcon class="mr-1 h-3 w-3" />
-									Clear
-								</Button>
-							{/if}
-						</div>
-						<p class="text-xs text-muted-foreground">
-							{#if selectedClientIds.length === 0}
-								Showing all clients. Select clients below to filter the list.
-							{:else}
-								Showing {selectedClientIds.length} of {clients.length} clients.
-							{/if}
-						</p>
-						<Button variant="outline" size="sm" class="w-full" onclick={selectAllClients}>
-							Select all
-						</Button>
-						<div class="space-y-2 pt-2 border-t">
-							{#each clients as client}
-								<div class="flex items-center space-x-2">
-									<Checkbox
-										checked={selectedClientIds.includes(client.id)}
-										onCheckedChange={() => toggleClient(client.id)}
-										id={`client-${client.id}`}
-									/>
-									<Label for={`client-${client.id}`} class="cursor-pointer flex-1 truncate">
-										{client.name}
-									</Label>
-								</div>
-							{/each}
-						</div>
+				<PopoverContent class="w-72 p-2" align="end">
+					<div class="flex items-center justify-between mb-2">
+						<p class="text-xs font-medium">Filtrează clienți</p>
+						{#if selectedClientIds.length > 0}
+							<button class="text-xs text-muted-foreground hover:text-foreground" onclick={clearClientFilter}>
+								Resetează
+							</button>
+						{/if}
+					</div>
+					<div class="relative mb-2">
+						<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+						<Input bind:value={clientFilterSearch} placeholder="Caută client..." class="pl-8 h-8 text-sm" />
+					</div>
+					<Button variant="outline" size="sm" class="w-full mb-2" onclick={selectAllClients}>
+						Selectează toți
+					</Button>
+					<p class="text-xs text-muted-foreground mb-1">
+						{selectedClientIds.length === 0 ? 'Toți clienții afișați' : `${selectedClientIds.length} din ${clients.length} selectați`}
+					</p>
+					<div class="max-h-[200px] overflow-y-auto space-y-0.5">
+						{#each popoverClients as client}
+							<div class="flex items-center space-x-2 rounded px-1 py-1 hover:bg-muted/50">
+								<Checkbox
+									checked={selectedClientIds.includes(client.id)}
+									onCheckedChange={() => toggleClient(client.id)}
+									id={`client-${client.id}`}
+								/>
+								<Label for={`client-${client.id}`} class="cursor-pointer flex-1 truncate text-sm font-normal">
+									{client.name}
+								</Label>
+							</div>
+						{/each}
 					</div>
 				</PopoverContent>
 			</Popover>

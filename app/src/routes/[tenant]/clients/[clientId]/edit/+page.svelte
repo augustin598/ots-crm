@@ -33,6 +33,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import XIcon from '@lucide/svelte/icons/x';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import { getFaviconUrl } from '$lib/utils';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
@@ -390,7 +391,16 @@
 													<StarIcon class="h-4 w-4 {w.isDefault ? 'fill-yellow-500' : ''}" />
 												</button>
 
-												<!-- Info -->
+												<!-- Favicon -->
+											<img
+												src={getFaviconUrl(w.url)}
+												alt=""
+												class="h-5 w-5 shrink-0 rounded-sm object-contain bg-muted/40"
+												loading="lazy"
+												onerror={(e) => (e.currentTarget.style.display = 'none')}
+											/>
+
+											<!-- Info -->
 												<div class="flex-1 min-w-0">
 													<div class="flex items-center gap-2">
 														{#if w.name}

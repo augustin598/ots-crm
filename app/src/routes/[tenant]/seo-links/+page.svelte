@@ -103,11 +103,15 @@
 	import { Calendar } from '$lib/components/ui/calendar';
 	import * as Popover from '$lib/components/ui/popover';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
+	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 
 	const tenantSlug = $derived(page.params.tenant);
 
 	// Filters — primare
-	let filterClientId = $state('');
+	let filterClientIds = $state<string[]>([]);
+	let clientFilterPopoverOpen = $state(false);
+	let clientFilterSearch = $state('');
 	let filterMonth = $state('');
 	let filterDateOpen = $state(false);
 	let filterDateValue = $state<DateValue | undefined>(undefined);
@@ -121,8 +125,10 @@
 	let filterSearch = $state('');
 	let advancedOpen = $state(false);
 
+	const STORAGE_KEY_CLIENTS = (tenant: string) => `crm-seo-links-clients-filter-${tenant}`;
+
 	const filterParams = $derived({
-		clientId: filterClientId || undefined,
+		clientIds: filterClientIds.length > 0 ? filterClientIds : undefined,
 		month: filterMonth || undefined,
 		status: filterStatus || undefined,
 		checkStatus: filterCheckStatus || undefined,
@@ -139,12 +145,12 @@
 	);
 	// Câte filtre totale sunt active
 	const totalActiveFilters = $derived(
-		[filterClientId, filterMonth, filterStatus, filterCheckStatus,
+		[(filterClientIds.length > 0 ? 'x' : ''), filterMonth, filterStatus, filterCheckStatus,
 		 filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterWebsiteId, filterSearch.trim()].filter(Boolean).length
 	);
 
 	function resetAllFilters() {
-		filterClientId = '';
+		filterClientIds = [];
 		filterMonth = '';
 		filterDateValue = undefined;
 		filterStatus = '';
@@ -155,6 +161,52 @@
 		filterWebsiteId = '';
 		filterSearch = '';
 	}
+
+	function toggleClient(clientId: string) {
+		if (filterClientIds.includes(clientId)) {
+			filterClientIds = filterClientIds.filter((id) => id !== clientId);
+		} else {
+			filterClientIds = [...filterClientIds, clientId];
+		}
+	}
+
+	function selectAllClients() {
+		filterClientIds = clients.map((c) => c.id);
+	}
+
+	function clearClientFilter() {
+		filterClientIds = [];
+		clientFilterPopoverOpen = false;
+	}
+
+	const popoverClients = $derived(
+		clientFilterSearch.trim()
+			? clients.filter((c) => c.name.toLowerCase().includes(clientFilterSearch.trim().toLowerCase()))
+			: clients
+	);
+
+	// Persistă filtrele client în localStorage
+	onMount(() => {
+		if (!browser || !tenantSlug) return;
+		try {
+			const stored = localStorage.getItem(STORAGE_KEY_CLIENTS(tenantSlug));
+			if (stored) {
+				const ids = JSON.parse(stored);
+				if (Array.isArray(ids) && ids.length > 0) filterClientIds = ids;
+			}
+		} catch {
+			// ignore invalid stored data
+		}
+	});
+
+	$effect(() => {
+		if (!browser || !tenantSlug) return;
+		if (filterClientIds.length > 0) {
+			localStorage.setItem(STORAGE_KEY_CLIENTS(tenantSlug), JSON.stringify(filterClientIds));
+		} else {
+			localStorage.removeItem(STORAGE_KEY_CLIENTS(tenantSlug));
+		}
+	});
 
 	const seoLinksQuery = $derived(getSeoLinks(filterParams));
 	const seoLinks = $derived(seoLinksQuery.current || []);
@@ -167,19 +219,19 @@
 	const clientById = $derived(new Map(clients.map((c) => [c.id, c])));
 
 	// Website queries for filter and form
-	const filterWebsitesQuery = $derived(filterClientId ? getClientWebsites(filterClientId) : null);
+	const filterWebsitesQuery = $derived(filterClientIds.length === 1 ? getClientWebsites(filterClientIds[0]) : null);
 	const filterWebsites = $derived(filterWebsitesQuery?.current || []);
 	const filterWebsiteMap = $derived(new Map(filterWebsites.map((w) => [w.id, w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')])));
 
-	// Reset filterWebsiteId when client changes
-	$effect(() => { if (!filterClientId) filterWebsiteId = ''; });
+	// Reset filterWebsiteId when client changes (only show website filter for single client)
+	$effect(() => { if (filterClientIds.length !== 1) filterWebsiteId = ''; });
 
 	// Init from URL params (?clientId=X&websiteId=Y)
 	$effect(() => {
 		const params = page.url.searchParams;
 		const qClient = params.get('clientId');
 		const qWebsite = params.get('websiteId');
-		if (qClient && !filterClientId) filterClientId = qClient;
+		if (qClient && filterClientIds.length === 0) filterClientIds = [qClient];
 		if (qWebsite && !filterWebsiteId) filterWebsiteId = qWebsite;
 	});
 
@@ -300,7 +352,7 @@
 	const scanProblemCount = $derived(scanResults.filter((r) => r.status !== 'ok').length);
 
 	function openScanDialog() {
-		scanClientId = filterClientId;
+		scanClientId = filterClientIds.length === 1 ? filterClientIds[0] : '';
 		scanMode = 'unchecked';
 		scanRunning = false;
 		scanCurrent = 0;
@@ -441,8 +493,8 @@
 	});
 
 	$effect(() => {
-		if (isAddingInlineRow && filterClientId && !rowTargetUrl) {
-			const c = clientById.get(filterClientId);
+		if (isAddingInlineRow && filterClientIds.length === 1 && !rowTargetUrl) {
+			const c = clientById.get(filterClientIds[0]);
 			if (c?.website) {
 				rowTargetUrl = c.website;
 			}
@@ -475,8 +527,8 @@
 	}
 
 	async function saveInlineRow() {
-		if (!filterClientId || !rowKeyword || !rowArticleUrl) {
-			rowError = 'Selectați clientul în filtre, apoi completați cuvântul cheie și linkul articol';
+		if (filterClientIds.length !== 1 || !rowKeyword || !rowArticleUrl) {
+			rowError = 'Selectați un singur client în filtre, apoi completați cuvântul cheie și linkul articol';
 			return;
 		}
 
@@ -487,7 +539,7 @@
 
 		try {
 			await createSeoLink({
-				clientId: filterClientId,
+				clientId: filterClientIds[0],
 				pressTrust: rowPressTrust || undefined,
 				month: monthToUse,
 				keyword: rowKeyword,
@@ -539,9 +591,9 @@
 
 	function openAddDialog() {
 		resetForm();
-		// Pre-completează clientul din filtru dacă e deja selectat
-		if (filterClientId) {
-			formClientId = filterClientId;
+		// Pre-completează clientul din filtru dacă e deja selectat (doar când e 1 client)
+		if (filterClientIds.length === 1) {
+			formClientId = filterClientIds[0];
 		}
 		// formWebsiteId se auto-selectează prin $effect când formWebsites se încarcă
 		isDialogOpen = true;
@@ -1285,7 +1337,7 @@
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-			<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading || !filterClientId}>
+			<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading || filterClientIds.length !== 1}>
 				<Rows3Icon class="mr-2 h-4 w-4" />
 				Adaugă rând
 			</Button>
@@ -1327,12 +1379,29 @@
 						<Label for="formWebsiteId">Website</Label>
 						<Select value={formWebsiteId || 'none'} type="single" onValueChange={(v) => { formWebsiteId = v === 'none' ? '' : v || ''; if (v && v !== 'none') { const w = formWebsites.find(x => x.id === v); if (w) formTargetUrl = w.url; } }}>
 							<SelectTrigger id="formWebsiteId" class="h-9">
-								{formWebsiteId ? (formWebsites.find(w => w.id === formWebsiteId)?.name || formWebsites.find(w => w.id === formWebsiteId)?.url.replace(/^https?:\/\//, '').replace(/^www\./, '') || 'Website') : 'Fără website selectat'}
+								{#if formWebsiteId}
+									{@const selW = formWebsites.find(w => w.id === formWebsiteId)}
+									{#if selW}
+										<span class="flex items-center gap-1.5 min-w-0">
+											<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+											<span class="truncate">{selW.name || selW.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}</span>
+										</span>
+									{:else}
+										Fără website selectat
+									{/if}
+								{:else}
+									Fără website selectat
+								{/if}
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="none">Fără website selectat</SelectItem>
 								{#each formWebsites as w}
-									<SelectItem value={w.id}>{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}{w.isDefault ? ' ★' : ''}</SelectItem>
+									<SelectItem value={w.id}>
+										<span class="flex items-center gap-2">
+											<img src={getFaviconUrl(w.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+											{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}{w.isDefault ? ' ★' : ''}
+										</span>
+									</SelectItem>
 								{/each}
 							</SelectContent>
 						</Select>
@@ -1577,9 +1646,9 @@
 		</div>
 	</div>
 
-	<!-- Client header cu logo website (când e selectat un client) -->
-	{#if filterClientId}
-		{@const selectedClient = clientById.get(filterClientId)}
+	<!-- Client header cu logo website (când e selectat exact un client) -->
+	{#if filterClientIds.length === 1}
+		{@const selectedClient = clientById.get(filterClientIds[0])}
 		{#if selectedClient}
 			<div class="mb-2 flex items-start justify-between">
 				<div class="flex items-center gap-4">
@@ -1632,15 +1701,17 @@
 							Raport prețuri articole
 						</h3>
 						<div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-							{#if filterClientId}
-								<span class="font-medium text-foreground/90">Client: {clientMap.get(filterClientId) || filterClientId}</span>
+							{#if filterClientIds.length === 1}
+								<span class="font-medium text-foreground/90">Client: {clientMap.get(filterClientIds[0]) || filterClientIds[0]}</span>
+							{:else if filterClientIds.length > 1}
+								<span class="font-medium text-foreground/90">{filterClientIds.length} clienți selectați</span>
 							{/if}
 							{#if filterMonth}
 								<span class="font-medium text-foreground/90">
 									Lună: {new Date(filterMonth + '-01').toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}
 								</span>
 							{/if}
-							{#if !filterClientId && !filterMonth}
+							{#if filterClientIds.length === 0 && !filterMonth}
 								<span>Toate datele</span>
 							{/if}
 						</div>
@@ -1697,17 +1768,59 @@
 			<!-- 2. Client -->
 			<div class="space-y-1.5">
 				<p class="text-xs font-medium text-muted-foreground">Client</p>
-				<Select value={filterClientId || 'all'} type="single" onValueChange={(v) => { filterClientId = v === 'all' ? '' : v || ''; }}>
-					<SelectTrigger class="h-9">
-						{filterClientId ? (clientMap.get(filterClientId) || 'Toți clienții') : 'Toți clienții'}
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="all">Toți clienții</SelectItem>
-						{#each clients as c}
-							<SelectItem value={c.id}>{c.name}</SelectItem>
-						{/each}
-					</SelectContent>
-				</Select>
+				<Popover.Root bind:open={clientFilterPopoverOpen}>
+					<Popover.Trigger>
+						{#snippet child({ props })}
+							<Button {...props} variant="outline" class="h-9 w-full justify-start font-normal text-sm gap-2">
+								<FilterIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+								{#if filterClientIds.length === 0}
+									Toți clienții
+								{:else if filterClientIds.length === 1}
+									{clientMap.get(filterClientIds[0]) ?? 'Client'}
+								{:else}
+									{filterClientIds.length} clienți selectați
+								{/if}
+								{#if filterClientIds.length > 0}
+									<Badge variant="secondary" class="ml-auto">{filterClientIds.length}</Badge>
+								{/if}
+							</Button>
+						{/snippet}
+					</Popover.Trigger>
+					<Popover.Content class="w-72 p-2" align="start">
+						<div class="flex items-center justify-between mb-2">
+							<p class="text-xs font-medium">Filtrează clienți</p>
+							{#if filterClientIds.length > 0}
+								<button class="text-xs text-muted-foreground hover:text-foreground" onclick={clearClientFilter}>
+									Resetează
+								</button>
+							{/if}
+						</div>
+						<div class="relative mb-2">
+							<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+							<Input bind:value={clientFilterSearch} placeholder="Caută client..." class="pl-8 h-8 text-sm" />
+						</div>
+						<Button variant="outline" size="sm" class="w-full mb-2" onclick={selectAllClients}>
+							Selectează toți
+						</Button>
+						<p class="text-xs text-muted-foreground mb-1">
+							{filterClientIds.length === 0 ? 'Toți clienții afișați' : `${filterClientIds.length} din ${clients.length} selectați`}
+						</p>
+						<div class="max-h-[200px] overflow-y-auto space-y-0.5">
+							{#each popoverClients as client}
+								<div class="flex items-center space-x-2 rounded px-1 py-1 hover:bg-muted/50">
+									<Checkbox
+										checked={filterClientIds.includes(client.id)}
+										onCheckedChange={() => toggleClient(client.id)}
+										id={`flt-client-${client.id}`}
+									/>
+									<Label for={`flt-client-${client.id}`} class="cursor-pointer flex-1 truncate text-sm font-normal">
+										{client.name}
+									</Label>
+								</div>
+							{/each}
+						</div>
+					</Popover.Content>
+				</Popover.Root>
 			</div>
 
 			<!-- 3. Lună — lățime fixă (date picker) -->
@@ -1802,21 +1915,38 @@
 					<!-- Website (apare doar când clientul e selectat) -->
 					<div class="space-y-1.5">
 						<p class="text-xs font-medium text-muted-foreground">Website</p>
-						{#if filterClientId && filterWebsites.length > 0}
+						{#if filterClientIds.length === 1 && filterWebsites.length > 0}
 							<Select value={filterWebsiteId || 'all'} type="single" onValueChange={(v) => { filterWebsiteId = v === 'all' ? '' : v || ''; }}>
 								<SelectTrigger class="h-9">
-									{filterWebsiteId ? (filterWebsiteMap.get(filterWebsiteId) || 'Website') : 'Toate website-urile'}
+									{#if filterWebsiteId}
+										{@const selW = filterWebsites.find(w => w.id === filterWebsiteId)}
+										{#if selW}
+											<span class="flex items-center gap-1.5 min-w-0">
+												<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+												<span class="truncate">{filterWebsiteMap.get(filterWebsiteId) || 'Website'}</span>
+											</span>
+										{:else}
+											{filterWebsiteMap.get(filterWebsiteId) || 'Website'}
+										{/if}
+									{:else}
+										Toate website-urile
+									{/if}
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="all">Toate website-urile</SelectItem>
 									{#each filterWebsites as w}
-										<SelectItem value={w.id}>{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}</SelectItem>
+										<SelectItem value={w.id}>
+											<span class="flex items-center gap-2">
+												<img src={getFaviconUrl(w.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+												{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+											</span>
+										</SelectItem>
 									{/each}
 								</SelectContent>
 							</Select>
 						{:else}
 							<div class="h-9 flex items-center px-3 rounded-md border border-dashed border-border text-xs text-muted-foreground">
-								{filterClientId ? 'Fără website-uri' : 'Selectați un client'}
+								{filterClientIds.length === 1 ? 'Fără website-uri' : 'Selectați un client'}
 							</div>
 						{/if}
 					</div>
@@ -1880,11 +2010,11 @@
 						🔍 "{filterSearch.trim()}" <XIcon class="h-3 w-3 opacity-60" />
 					</button>
 				{/if}
-				{#if filterClientId}
-					<button onclick={() => (filterClientId = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
-						{clientMap.get(filterClientId) ?? 'Client'} <XIcon class="h-3 w-3 opacity-60" />
+				{#each filterClientIds as cId}
+					<button onclick={() => { filterClientIds = filterClientIds.filter((id) => id !== cId); }} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						{clientMap.get(cId) ?? 'Client'} <XIcon class="h-3 w-3 opacity-60" />
 					</button>
-				{/if}
+				{/each}
 				{#if filterMonth}
 					<button onclick={() => { filterMonth = ''; filterDateValue = undefined; }} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
 						📅 {(() => { const [y, m] = filterMonth.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' }); })()}
@@ -2248,7 +2378,7 @@
 									</TooltipProvider>
 								</span>
 							</TableHead>
-							{#if filterClientId}
+							{#if filterClientIds.length === 1}
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									🌐 Website
@@ -2369,7 +2499,7 @@
 								<TableCell class="px-3 py-2 align-middle">
 									<Input bind:value={rowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
 								</TableCell>
-								{#if filterClientId}<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">—</TableCell>{/if}
+								{#if filterClientIds.length === 1}<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">—</TableCell>{/if}
 								<TableCell class="px-3 py-2 align-middle">
 									<Input bind:value={rowArticleUrl} placeholder="Link articol" class="h-8 text-[13px] w-full min-w-[10rem]" />
 								</TableCell>
@@ -2488,7 +2618,7 @@
 										<span class="text-muted-foreground/90 text-[13px]">—</span>
 									{/if}
 								</TableCell>
-								{#if filterClientId}
+								{#if filterClientIds.length === 1}
 								<TableCell class="px-3 py-3.5 align-middle">
 									{#if link.websiteId && filterWebsiteMap.has(link.websiteId)}
 										<span class="text-[13px] text-muted-foreground">{filterWebsiteMap.get(link.websiteId)}</span>

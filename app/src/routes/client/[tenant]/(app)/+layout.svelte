@@ -14,6 +14,7 @@
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { Button } from '$lib/components/ui/button';
+	import { getFaviconUrl } from '$lib/utils';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -37,11 +38,21 @@
 	<Sidebar>
 		<SidebarHeader>
 			<div class="flex items-center gap-3 px-2 py-2">
-				<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0">
-					<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+				<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0 overflow-hidden">
+					{#if data.defaultWebsiteUrl}
+						<img
+							src={getFaviconUrl(data.defaultWebsiteUrl, 64)}
+							alt=""
+							class="w-8 h-8 object-contain"
+							loading="lazy"
+							onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+						/>
+					{:else}
+						<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+					{/if}
 				</div>
 				<div class="flex-1 min-w-0">
-					<h2 class="text-sm font-semibold truncate">{data.tenant?.name || 'Client Portal'}</h2>
+					<h2 class="text-sm font-semibold truncate">{data.client?.businessName || data.client?.name || data.tenant?.name || 'Client Portal'}</h2>
 					<p class="text-xs text-muted-foreground">Client Access</p>
 				</div>
 			</div>

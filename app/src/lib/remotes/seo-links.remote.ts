@@ -59,6 +59,7 @@ const updateSeoLinkSchema = v.object({
 export const getSeoLinks = query(
 	v.object({
 		clientId: v.optional(v.string()),
+		clientIds: v.optional(v.array(v.string())),
 		websiteId: v.optional(v.string()),
 		month: v.optional(v.string()),
 		status: v.optional(v.string()),
@@ -79,6 +80,8 @@ export const getSeoLinks = query(
 		// Client portal: force filter by client
 		if (event.locals.isClientUser && event.locals.client) {
 			conditions = and(conditions, eq(table.seoLink.clientId, event.locals.client.id)) as typeof conditions;
+		} else if (filters.clientIds && filters.clientIds.length > 0) {
+			conditions = and(conditions, inArray(table.seoLink.clientId, filters.clientIds)) as typeof conditions;
 		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 		}
