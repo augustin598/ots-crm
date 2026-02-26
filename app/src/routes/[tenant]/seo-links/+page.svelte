@@ -1652,7 +1652,7 @@
 		{#if selectedClient}
 			<div class="mb-2 flex items-start justify-between">
 				<div class="flex items-center gap-4">
-					<ClientLogo website={selectedClient.website} name={selectedClient.name} size="lg" />
+					<ClientLogo website={selectedClient.defaultWebsiteUrl ?? selectedClient.website} name={selectedClient.name} size="lg" />
 					<div>
 						<h2 class="text-2xl font-bold tracking-tight">{selectedClient.name}</h2>
 						{#if selectedClient.website}

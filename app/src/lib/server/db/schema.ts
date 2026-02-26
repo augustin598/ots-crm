@@ -40,6 +40,7 @@ export const tenant = sqliteTable('tenant', {
 	id: text('id').primaryKey(),
 	name: text('name').notNull(),
 	slug: text('slug').notNull().unique(),
+	website: text('website'),
 	companyType: text('company_type'),
 	cui: text('cui').unique(),
 	registrationNumber: text('registration_number'),

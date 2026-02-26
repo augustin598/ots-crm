@@ -9,6 +9,7 @@ import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sendMagicLinkEmail } from '$lib/server/email';
 import { verifyMagicLinkToken } from '$lib/server/client-auth';
+import { env as publicEnv } from '$env/dynamic/public';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
 
@@ -162,6 +163,91 @@ export const requestMagicLink = command(
 			const message = error instanceof Error ? error.message : 'Request failed';
 			throw new Error(message);
 		}
+	}
+);
+
+/**
+ * Admin: Generate a magic link URL for a client (does not send email)
+ * Requires: client must have email set
+ */
+export const generateClientMagicLink = command(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const tenantSlug = event.locals.tenant.slug;
+
+		const [client] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!client) throw new Error('Client not found');
+		if (!client.email)
+			throw new Error(
+				'Clientul nu are email configurat. Adaugă un email înainte de a genera un magic link.'
+			);
+
+		const plainToken = generateMagicLinkToken();
+		const hashedToken = hashToken(plainToken);
+		const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+		await db.insert(table.magicLinkToken).values({
+			id: tokenId,
+			token: hashedToken,
+			email: client.email,
+			clientId: client.id,
+			tenantId,
+			expiresAt,
+			used: false
+		});
+
+		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
+		return { url, email: client.email, expiresAt };
+	}
+);
+
+/**
+ * Admin: Generate a new magic link and send it to the client's email
+ */
+export const sendClientMagicLinkEmail = command(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const tenantSlug = event.locals.tenant.slug;
+
+		const [client] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!client) throw new Error('Client not found');
+		if (!client.email) throw new Error('Clientul nu are email configurat.');
+
+		const plainToken = generateMagicLinkToken();
+		const hashedToken = hashToken(plainToken);
+		const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+		await db.insert(table.magicLinkToken).values({
+			id: tokenId,
+			token: hashedToken,
+			email: client.email,
+			clientId: client.id,
+			tenantId,
+			expiresAt,
+			used: false
+		});
+
+		await sendMagicLinkEmail(client.email, plainToken, tenantSlug, client.name);
+		return { sent: true, email: client.email };
 	}
 );
 

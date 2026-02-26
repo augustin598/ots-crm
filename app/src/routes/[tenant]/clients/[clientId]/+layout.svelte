@@ -12,6 +12,14 @@
 	import { goto } from '$app/navigation';
 	import { Pencil as Edit, ArrowLeft } from '@lucide/svelte';
 	import ClientLogo from '$lib/components/client-logo.svelte';
+	import { generateClientMagicLink, sendClientMagicLinkEmail } from '$lib/remotes/client-auth.remote';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import { toast } from 'svelte-sonner';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -44,6 +52,50 @@
 		{ id: 'seo', label: 'SEO', href: `/${tenantSlug}/clients/${clientId}/seo` }
 	]);
 
+	let magicLinkDialogOpen = $state(false);
+	let magicLinkUrl = $state('');
+	let magicLinkEmail = $state('');
+	let magicLinkLoading = $state(false);
+	let copied = $state(false);
+	let emailSending = $state(false);
+	let emailSent = $state(false);
+
+	async function handleOpenMagicLink() {
+		magicLinkLoading = true;
+		magicLinkUrl = '';
+		copied = false;
+		emailSent = false;
+		try {
+			const result = await generateClientMagicLink({ clientId });
+			magicLinkUrl = result.url;
+			magicLinkEmail = result.email;
+			magicLinkDialogOpen = true;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la generare');
+		} finally {
+			magicLinkLoading = false;
+		}
+	}
+
+	async function handleCopy() {
+		await navigator.clipboard.writeText(magicLinkUrl);
+		copied = true;
+		setTimeout(() => (copied = false), 2000);
+	}
+
+	async function handleSendEmail() {
+		emailSending = true;
+		try {
+			await sendClientMagicLinkEmail({ clientId });
+			emailSent = true;
+			toast.success(`Magic link trimis pe ${magicLinkEmail}`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la trimitere email');
+		} finally {
+			emailSending = false;
+		}
+	}
+
 	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/clients/${clientId}`) return 'overview';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
@@ -66,7 +118,7 @@
 
 		<div class="flex items-start justify-between">
 			<div class="flex items-center gap-4">
-				<ClientLogo website={client?.website} name={client?.name ?? 'Client'} size="lg" />
+				<ClientLogo website={client?.defaultWebsiteUrl ?? client?.website} name={client?.name ?? 'Client'} size="lg" />
 				<div>
 					<h1 class="text-3xl font-bold tracking-tight">{client?.name || 'Client'}</h1>
 					{#if client?.companyType}
@@ -82,14 +134,62 @@
 					</div>
 				</div>
 			</div>
-			<Button onclick={() => goto(`/${tenantSlug}/clients/${clientId}/edit`)}>
-				<Edit class="mr-2 h-4 w-4" />
-				Edit Client
-			</Button>
+			<div class="flex items-center gap-2">
+				<Button variant="outline" onclick={handleOpenMagicLink} disabled={magicLinkLoading}>
+					<SparklesIcon class="mr-2 h-4 w-4" />
+					{magicLinkLoading ? 'Se generează...' : 'Magic Link'}
+				</Button>
+				<Button onclick={() => goto(`/${tenantSlug}/clients/${clientId}/edit`)}>
+					<Edit class="mr-2 h-4 w-4" />
+					Edit Client
+				</Button>
+			</div>
 		</div>
 	</div>
 
-		<Tabs value={activeTab()} class="w-full">
+		<Dialog.Root bind:open={magicLinkDialogOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title class="flex items-center gap-2">
+					<SparklesIcon class="h-5 w-5 text-primary" />
+					Magic Link acces client
+				</Dialog.Title>
+				<Dialog.Description>
+					Link valabil 24 de ore, utilizabil o singură dată. Trimite-l clientului prin orice canal.
+				</Dialog.Description>
+			</Dialog.Header>
+			<div class="space-y-4 pt-2">
+				<div class="flex gap-2">
+					<Input value={magicLinkUrl} readonly class="text-xs font-mono" />
+					<Button variant="outline" size="icon" onclick={handleCopy} class="shrink-0">
+						{#if copied}
+							<CheckIcon class="h-4 w-4 text-green-500" />
+						{:else}
+							<CopyIcon class="h-4 w-4" />
+						{/if}
+					</Button>
+				</div>
+				{#if magicLinkEmail}
+					<Button variant="secondary" class="w-full gap-2" onclick={handleSendEmail} disabled={emailSending || emailSent}>
+						{#if emailSent}
+							<CheckIcon class="h-4 w-4 text-green-500" />
+							Trimis pe {magicLinkEmail}
+						{:else if emailSending}
+							Se trimite...
+						{:else}
+							<MailIcon class="h-4 w-4" />
+							Trimite pe email ({magicLinkEmail})
+						{/if}
+					</Button>
+				{/if}
+			</div>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (magicLinkDialogOpen = false)}>Închide</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+
+	<Tabs value={activeTab()} class="w-full">
 			<TabsList class="grid w-full grid-cols-5">
 				{#each tabs as tab}
 					<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>

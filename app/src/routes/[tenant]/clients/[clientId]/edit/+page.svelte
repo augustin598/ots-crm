@@ -33,6 +33,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import XIcon from '@lucide/svelte/icons/x';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { getFaviconUrl } from '$lib/utils';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -61,6 +62,13 @@
 	let editWebsiteName = $state('');
 	let editWebsiteUrl = $state('');
 	let savingWebsite = $state(false);
+
+	// Favicon refresh keys: websiteId → counter (forces img re-creation)
+	let faviconKeys = $state<Record<string, number>>({});
+
+	function handleRefreshLogo(websiteId: string) {
+		faviconKeys = { ...faviconKeys, [websiteId]: (faviconKeys[websiteId] ?? 0) + 1 };
+	}
 
 	let name = $state('');
 	let businessName = $state('');
@@ -392,13 +400,15 @@
 												</button>
 
 												<!-- Favicon -->
-											<img
-												src={getFaviconUrl(w.url)}
-												alt=""
-												class="h-5 w-5 shrink-0 rounded-sm object-contain bg-muted/40"
-												loading="lazy"
-												onerror={(e) => (e.currentTarget.style.display = 'none')}
-											/>
+												{#key (faviconKeys[w.id] ?? 0)}
+													<img
+														src={getFaviconUrl(w.url) + (faviconKeys[w.id] ? '&t=' + faviconKeys[w.id] : '')}
+														alt=""
+														class="h-5 w-5 shrink-0 rounded-sm object-contain bg-muted/40"
+														loading="lazy"
+														onerror={(e) => (e.currentTarget.style.display = 'none')}
+													/>
+												{/key}
 
 											<!-- Info -->
 												<div class="flex-1 min-w-0">
@@ -425,6 +435,16 @@
 
 												<!-- Actions (visible on hover) -->
 												<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+													<Button
+														type="button"
+														variant="ghost"
+														size="sm"
+														class="h-7 w-7 p-0"
+														title="Reîmprospătează logo"
+														onclick={() => handleRefreshLogo(w.id)}
+													>
+														<RefreshCwIcon class="h-3.5 w-3.5" />
+													</Button>
 													<Button
 														type="button"
 														variant="ghost"

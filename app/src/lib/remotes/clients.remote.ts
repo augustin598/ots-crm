@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 async function getNormalizeVatId() {
@@ -51,8 +51,18 @@ export const getClients = query(async () => {
 		}
 
 		const clients = await db
-			.select()
+			.select({
+				...getTableColumns(table.client),
+				defaultWebsiteUrl: table.clientWebsite.url
+			})
 			.from(table.client)
+			.leftJoin(
+				table.clientWebsite,
+				and(
+					eq(table.clientWebsite.clientId, table.client.id),
+					eq(table.clientWebsite.isDefault, true)
+				)
+			)
 			.where(eq(table.client.tenantId, event.locals.tenant.id));
 
 		return clients;
@@ -104,8 +114,18 @@ export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (client
 	}
 
 	const [client] = await db
-		.select()
+		.select({
+			...getTableColumns(table.client),
+			defaultWebsiteUrl: table.clientWebsite.url
+		})
 		.from(table.client)
+		.leftJoin(
+			table.clientWebsite,
+			and(
+				eq(table.clientWebsite.clientId, table.client.id),
+				eq(table.clientWebsite.isDefault, true)
+			)
+		)
 		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
 		.limit(1);
 

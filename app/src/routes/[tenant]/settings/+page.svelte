@@ -11,11 +11,14 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { X } from '@lucide/svelte';
+	import { getFaviconUrl } from '$lib/utils';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 
 	let { data }: { data: PageData } = $props();
 
 	let name = $state(data.tenant?.name || '');
 	let slug = $state(data.tenant?.slug || '');
+	let website = $state(data.tenant?.website || '');
 	let loading = $state(false);
 	let loadingAnaf = $state(false);
 	let error = $state<string | null>(null);
@@ -85,6 +88,7 @@
 			await updateTenantSettings({
 				name,
 				slug,
+				website: website || undefined,
 				companyType: companyType || undefined,
 				cui: cui || undefined,
 				registrationNumber: registrationNumber || undefined,
@@ -190,6 +194,26 @@
 						<Label for="slug">Slug (URL) *</Label>
 						<Input id="slug" bind:value={slug} type="text" required />
 						<p class="text-xs text-gray-500">This is used in your organization URL</p>
+					</div>
+					<div class="space-y-2">
+						<Label for="website">Website principal</Label>
+						<div class="flex items-center gap-2">
+							<div class="h-9 w-9 shrink-0 flex items-center justify-center rounded-md border bg-muted/40 overflow-hidden">
+								{#if website.trim()}
+									<img
+										src={getFaviconUrl(website.trim(), 32)}
+										alt=""
+										class="h-6 w-6 object-contain"
+										loading="lazy"
+										onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+									/>
+								{:else}
+									<GlobeIcon class="h-4 w-4 text-muted-foreground" />
+								{/if}
+							</div>
+							<Input id="website" bind:value={website} type="url" placeholder="https://example.com" />
+						</div>
+						<p class="text-xs text-gray-500">Logo-ul este preluat automat din website</p>
 					</div>
 				</div>
 

@@ -10,6 +10,19 @@ function generateClientWebsiteId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+/** Returnează toate website-urile tuturor clienților unui tenant (bulk, pentru listări) */
+export const getAllClientWebsites = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	return db
+		.select()
+		.from(table.clientWebsite)
+		.where(eq(table.clientWebsite.tenantId, event.locals.tenant.id));
+});
+
 /** Returnează toate website-urile unui client */
 export const getClientWebsites = query(
 	v.pipe(v.string(), v.minLength(1)),

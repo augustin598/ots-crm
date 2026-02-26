@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 const tenantSettingsSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
 	slug: v.pipe(v.string(), v.minLength(1, 'Slug is required')),
+	website: v.optional(v.string()),
 	companyType: v.optional(v.string()),
 	cui: v.optional(v.string()),
 	registrationNumber: v.optional(v.string()),

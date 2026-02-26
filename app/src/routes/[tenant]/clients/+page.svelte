@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getClients, getClientFirstInvoiceDates, createClient, updateClient, deleteClient } from '$lib/remotes/clients.remote';
+	import { getAllClientWebsites } from '$lib/remotes/client-websites.remote';
 	import ClientLogo from '$lib/components/client-logo.svelte';
+	import { getFaviconUrl } from '$lib/utils';
 	import { goto } from '$app/navigation';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -54,6 +56,26 @@
 			return map;
 		})()
 	);
+	const allWebsitesQuery = getAllClientWebsites();
+	const websitesByClient = $derived(
+		(() => {
+			const rows = allWebsitesQuery.current ?? [];
+			const map = new Map<string, typeof rows>();
+			for (const w of rows) {
+				const list = map.get(w.clientId) ?? [];
+				list.push(w);
+				map.set(w.clientId, list);
+			}
+			for (const list of map.values()) {
+				list.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+			}
+			return map;
+		})()
+	);
+
+	function websiteDisplayUrl(url: string): string {
+		try { return new URL(url).hostname; } catch { return url; }
+	}
 	const loading = $derived(clientsQuery.loading);
 	const error = $derived(clientsQuery.error);
 
@@ -371,7 +393,7 @@
 			<Card class="group flex flex-col rounded-xl border bg-card shadow-sm transition-all hover:shadow-md hover:border-primary/30 p-0 overflow-hidden">
 				<!-- Header: avatar + name + menu -->
 				<div class="flex items-start gap-4 p-5 pb-4">
-					<ClientLogo website={client.website} name={client.name} size="sm" />
+					<ClientLogo website={client.defaultWebsiteUrl ?? client.website} name={client.name} size="sm" />
 					<div class="min-w-0 flex-1">
 						{#if editingClientId === client.id}
 							<Input
@@ -397,11 +419,26 @@
 								{client.name}
 							</h3>
 						{/if}
-						{#if client.status}
-							<Badge variant={getStatusVariant(client.status)} class="mt-1.5 text-[11px] font-medium px-2 py-0.5">
-								{client.status}
-							</Badge>
-						{/if}
+						<div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+							{#if client.status}
+								<Badge variant={getStatusVariant(client.status)} class="text-[11px] font-medium px-2 py-0.5 shrink-0">
+									{client.status}
+								</Badge>
+							{/if}
+							{#each (websitesByClient.get(client.id) ?? []) as w (w.id)}
+								<a
+									href={w.url.startsWith('http') ? w.url : 'https://' + w.url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0"
+									title={w.url}
+									onclick={(e) => e.stopPropagation()}
+								>
+									<img src={getFaviconUrl(w.url, 16)} alt="" class="h-3.5 w-3.5 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
+									<span class="truncate max-w-[90px]">{websiteDisplayUrl(w.url)}</span>
+								</a>
+							{/each}
+						</div>
 					</div>
 					<DropdownMenu>
 						<DropdownMenuTrigger>

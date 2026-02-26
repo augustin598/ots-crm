@@ -25,7 +25,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { Button } from '$lib/components/ui/button';
-	import { cn } from '$lib/utils';
+	import { cn, getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
 
 	let { data, children }: { data: PageData; children: any } = $props();
@@ -56,8 +56,12 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					<PopoverTrigger
 						class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 					>
-						<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0">
-							<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+						<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0 overflow-hidden">
+							{#if data.tenant?.website}
+								<img src={getFaviconUrl(data.tenant.website, 64)} alt="" class="w-8 h-8 object-contain" loading="lazy" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+							{:else}
+								<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+							{/if}
 						</div>
 						<div class="flex-1 min-w-0">
 							<h2 class="text-sm font-semibold truncate">{data.tenant?.name || 'Organization'}</h2>
@@ -98,8 +102,12 @@ import LinkIcon from '@lucide/svelte/icons/link';
 				</Popover>
 			{:else}
 				<div class="flex items-center gap-3 px-2 py-2">
-					<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0">
-						<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+					<div class="flex items-center justify-center w-10 h-10 rounded-lg bg-sidebar-accent shrink-0 overflow-hidden">
+						{#if data.tenant?.website}
+							<img src={getFaviconUrl(data.tenant.website, 64)} alt="" class="w-8 h-8 object-contain" loading="lazy" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+						{:else}
+							<Building2Icon class="size-5 text-sidebar-accent-foreground" />
+						{/if}
 					</div>
 					<div class="flex-1 min-w-0">
 						<h2 class="text-sm font-semibold truncate">{data.tenant?.name || 'Organization'}</h2>
