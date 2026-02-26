@@ -5,6 +5,7 @@
 		createSeoLinksBulk,
 		updateSeoLink,
 		deleteSeoLink,
+		deleteSeoLinksBulk,
 		importSeoLinksFromFile,
 		checkSeoLink,
 		extractSeoLinkData,
@@ -169,8 +170,6 @@
 	const filterWebsitesQuery = $derived(filterClientId ? getClientWebsites(filterClientId) : null);
 	const filterWebsites = $derived(filterWebsitesQuery?.current || []);
 	const filterWebsiteMap = $derived(new Map(filterWebsites.map((w) => [w.id, w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')])));
-	const formWebsitesQuery = $derived(formClientId ? getClientWebsites(formClientId) : null);
-	const formWebsites = $derived(formWebsitesQuery?.current || []);
 
 	// Reset filterWebsiteId when client changes
 	$effect(() => { if (!filterClientId) filterWebsiteId = ''; });
@@ -212,6 +211,29 @@
 	let formLoading = $state(false);
 	let formError = $state<string | null>(null);
 
+	// Form website query (depends on formClientId $state)
+	const formWebsitesQuery = $derived(formClientId ? getClientWebsites(formClientId) : null);
+	const formWebsites = $derived(formWebsitesQuery?.current || []);
+
+	// Auto-selectează website-ul implicit când dialogul se deschide în modul add
+	$effect(() => {
+		if (isDialogOpen && !isEditing && formWebsites.length > 0 && !formWebsiteId) {
+			const defaultW = formWebsites.find((w) => w.isDefault) || formWebsites[0];
+			if (defaultW) {
+				formWebsiteId = defaultW.id;
+				if (!formTargetUrl) formTargetUrl = defaultW.url;
+			}
+		}
+	});
+
+	// Sincronizează formTargetUrl când formWebsiteId se schimbă programatic
+	$effect(() => {
+		if (formWebsiteId && formWebsites.length > 0) {
+			const w = formWebsites.find((x) => x.id === formWebsiteId);
+			if (w && !formTargetUrl) formTargetUrl = w.url;
+		}
+	});
+
 	// Import state
 	let isImportDialogOpen = $state(false);
 	let importFile = $state<File | null>(null);
@@ -221,6 +243,7 @@
 	let importResult = $state<{
 		imported: number;
 		skipped: number;
+		autoDetected?: number;
 		columnsFound?: string[];
 	} | null>(null);
 
@@ -516,13 +539,11 @@
 
 	function openAddDialog() {
 		resetForm();
-		// Pre-completează clientul și website-ul din filtru dacă e deja selectat
+		// Pre-completează clientul din filtru dacă e deja selectat
 		if (filterClientId) {
 			formClientId = filterClientId;
 		}
-		if (filterWebsiteId) {
-			formWebsiteId = filterWebsiteId;
-		}
+		// formWebsiteId se auto-selectează prin $effect când formWebsites se încarcă
 		isDialogOpen = true;
 	}
 
@@ -780,6 +801,7 @@
 				importResult = {
 					imported: result.imported,
 					skipped: result.skipped ?? 0,
+					autoDetected: result.autoDetected ?? 0,
 					columnsFound: result.columnsFound
 				};
 				importFile = null;
@@ -1121,6 +1143,24 @@
 		}
 	}
 
+	let bulkDeleteConfirm = $state(false);
+	let bulkDeleteLoading = $state(false);
+
+	async function handleBulkDelete() {
+		if (selectedIdsArray.length === 0) return;
+		bulkDeleteLoading = true;
+		try {
+			await deleteSeoLinksBulk(selectedIdsArray).updates(seoLinksQuery);
+			toast.success(`${selectedIdsArray.length} linkuri șterse`);
+			selectedIds = new Set();
+		} catch (e) {
+			toast.error('Eroare la ștergere');
+		} finally {
+			bulkDeleteLoading = false;
+			bulkDeleteConfirm = false;
+		}
+	}
+
 	function getPressTrustDisplay(link: { pressTrust: string | null; articleUrl: string }): string {
 		if (link.pressTrust?.trim()) return link.pressTrust;
 		try {
@@ -1165,20 +1205,24 @@
 					<DialogHeader>
 						<DialogTitle>Import linkuri SEO</DialogTitle>
 						<DialogDescription>
-							Încărcați un fișier Excel (.xlsx, .xls) sau CSV. Coloanele: Luna, TRUST, PENTRU (client), CUVANT CHEIE, LINK (URL țintă), Tip, STATUS, LINK ARTICOL (unde e plasat backlinkul).
+							Încărcați un fișier Excel (.xlsx, .xls) sau CSV cu una sau mai multe luni (sheet-uri). Coloanele: Luna, TRUST, PENTRU, CUVANT CHEIE, LINK CATRE, STATUS, LINK ARTICOL.
 						</DialogDescription>
 					</DialogHeader>
 					<div class="space-y-4 py-4">
 						<div class="space-y-2">
-							<Label>Client *</Label>
+							<Label>Client <span class="text-muted-foreground font-normal text-xs">(opțional)</span></Label>
 							<Combobox
 								bind:value={importClientId}
 								options={clientOptions}
-								placeholder="Selectați clientul pentru toate linkurile"
+								placeholder="Detectare automată din articol"
 								searchPlaceholder="Căutați clienți..."
 							/>
 							<p class="text-xs text-muted-foreground">
-								Toate linkurile vor fi asociate acestui client. Coloana PENTRU din fișier este ignorată.
+								{#if importClientId}
+									Toate linkurile fără coloana PENTRU vor fi asociate acestui client.
+								{:else}
+									Clientul și website-ul se detectează automat din linkurile fiecărui articol. Asigurați-vă că toți clienții au website-urile configurate.
+								{/if}
 							</p>
 						</div>
 						<div class="space-y-2">
@@ -1209,7 +1253,7 @@
 										: 'text-amber-800 dark:text-amber-300'}"
 								>
 									{importResult.imported > 0
-										? `Import reușit: ${importResult.imported} adăugate, ${importResult.skipped} omise.`
+										? `Import reușit: ${importResult.imported} adăugate${importResult.autoDetected ? ` (${importResult.autoDetected} cu website detectat automat)` : ''}, ${importResult.skipped} omise.`
 										: `Toate ${importResult.skipped} rândurile au fost omise.`}
 								</p>
 								{#if importResult.columnsFound?.length}
@@ -1235,7 +1279,7 @@
 						>
 							Anulare
 						</Button>
-						<Button onclick={handleImport} disabled={importLoading || !importFile || !importClientId}>
+						<Button onclick={handleImport} disabled={importLoading || !importFile}>
 							{importLoading ? 'Se importă...' : 'Importă'}
 						</Button>
 					</DialogFooter>
@@ -1281,7 +1325,7 @@
 					{#if formClientId && formWebsites.length > 0}
 					<div class="grid gap-2">
 						<Label for="formWebsiteId">Website</Label>
-						<Select value={formWebsiteId || 'none'} type="single" onValueChange={(v) => { formWebsiteId = v === 'none' ? '' : v || ''; if (v && v !== 'none') { const w = formWebsites.find(x => x.id === v); if (w && !formTargetUrl) formTargetUrl = w.url; } }}>
+						<Select value={formWebsiteId || 'none'} type="single" onValueChange={(v) => { formWebsiteId = v === 'none' ? '' : v || ''; if (v && v !== 'none') { const w = formWebsites.find(x => x.id === v); if (w) formTargetUrl = w.url; } }}>
 							<SelectTrigger id="formWebsiteId" class="h-9">
 								{formWebsiteId ? (formWebsites.find(w => w.id === formWebsiteId)?.name || formWebsites.find(w => w.id === formWebsiteId)?.url.replace(/^https?:\/\//, '').replace(/^www\./, '') || 'Website') : 'Fără website selectat'}
 							</SelectTrigger>
@@ -1329,16 +1373,28 @@
 						{/if}
 					</div>
 					<div class="grid gap-2">
-						<Label for="targetUrl">URL client *</Label>
-						<Input
-							id="targetUrl"
-							bind:value={formTargetUrl}
-							placeholder="glemis.ro sau https://www.glemis.ro/..."
-							type="text"
-						/>
-						<p class="text-xs text-muted-foreground">
-							Domeniul sau pagina clientului unde pointează linkul. Orice format: heylux.ro, https://www.heylux.ro, http://heylux.ro etc.
-						</p>
+						<div class="flex items-center justify-between">
+							<Label for="targetUrl">URL client {formWebsiteId ? '' : '*'}</Label>
+							{#if formWebsiteId}
+								<span class="text-xs text-muted-foreground">Auto din website selectat</span>
+							{/if}
+						</div>
+						{#if formWebsiteId}
+							<div class="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 py-2 text-sm font-mono text-muted-foreground truncate">
+								{formTargetUrl || '—'}
+							</div>
+							<p class="text-xs text-muted-foreground">URL preluat din website-ul selectat. Schimbă website-ul de mai sus pentru a-l modifica.</p>
+						{:else}
+							<Input
+								id="targetUrl"
+								bind:value={formTargetUrl}
+								placeholder="glemis.ro sau https://www.glemis.ro/..."
+								type="text"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Domeniul sau pagina clientului unde pointează linkul.
+							</p>
+						{/if}
 					</div>
 
 					{#if formBulkMode}
@@ -2083,6 +2139,30 @@
 			</div>
 		</Card>
 	{:else}
+
+	{#if someSelected}
+		<div class="flex items-center gap-3 rounded-lg border border-border bg-muted/60 px-4 py-2.5">
+			<span class="text-sm font-medium">{selectedIdsArray.length} selectate</span>
+			<div class="ml-auto flex items-center gap-2">
+				<Button variant="outline" size="sm" onclick={() => (selectedIds = new Set())}>
+					Anulează selecția
+				</Button>
+				{#if bulkDeleteConfirm}
+					<span class="text-sm text-muted-foreground">Sigur ștergi {selectedIdsArray.length} linkuri?</span>
+					<Button variant="outline" size="sm" onclick={() => (bulkDeleteConfirm = false)}>Nu</Button>
+					<Button variant="destructive" size="sm" onclick={handleBulkDelete} disabled={bulkDeleteLoading}>
+						{bulkDeleteLoading ? 'Se șterge...' : 'Da, șterge'}
+					</Button>
+				{:else}
+					<Button variant="destructive" size="sm" onclick={() => (bulkDeleteConfirm = true)}>
+						<TrashIcon class="mr-1.5 h-3.5 w-3.5" />
+						Șterge selecția
+					</Button>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 		<div class="rounded-2xl border border-border/40 bg-card/50 shadow-sm backdrop-blur-[2px] overflow-hidden">
 			<div class="overflow-x-auto">
 				<Table class="text-sm">

@@ -42,13 +42,15 @@ export const getClientWebsitesSeoStats = query(
 			throw new Error('Unauthorized');
 		}
 
+		const tenantId = event.locals.tenant.id;
+
 		const websites = await db
 			.select()
 			.from(table.clientWebsite)
 			.where(
 				and(
 					eq(table.clientWebsite.clientId, clientId),
-					eq(table.clientWebsite.tenantId, event.locals.tenant.id)
+					eq(table.clientWebsite.tenantId, tenantId)
 				)
 			);
 
@@ -68,7 +70,7 @@ export const getClientWebsitesSeoStats = query(
 					.where(
 						and(
 							eq(table.seoLink.websiteId, website.id),
-							eq(table.seoLink.tenantId, event.locals.tenant.id)
+							eq(table.seoLink.tenantId, tenantId)
 						)
 					);
 

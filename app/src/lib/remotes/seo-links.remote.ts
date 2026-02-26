@@ -397,6 +397,27 @@ export const deleteSeoLink = command(
 	}
 );
 
+export const deleteSeoLinksBulk = command(
+	v.array(v.pipe(v.string(), v.minLength(1))),
+	async (ids) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		if (ids.length === 0) return { deleted: 0 };
+
+		await db.delete(table.seoLink).where(
+			and(
+				inArray(table.seoLink.id, ids),
+				eq(table.seoLink.tenantId, event.locals.tenant.id)
+			)
+		);
+
+		return { deleted: ids.length };
+	}
+);
+
 const EXTRACT_USER_AGENT =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -1346,7 +1367,14 @@ export const importSeoLinksFromFile = command(
 
 		if (data.fileName.match(/\.(xls|xlsx)$/i)) {
 			const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-			parseFile(workbook.Sheets[workbook.SheetNames[0]]);
+			// Importă TOATE sheet-urile (nu doar primul)
+			const allRows: Record<string, unknown>[] = [];
+			for (const sheetName of workbook.SheetNames) {
+				rows = [];
+				parseFile(workbook.Sheets[sheetName]);
+				allRows.push(...rows);
+			}
+			rows = allRows;
 		} else if (data.fileName.match(/\.csv$/i)) {
 			const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
 			const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -1415,8 +1443,22 @@ export const importSeoLinksFromFile = command(
 			.limit(1);
 		const defaultCurrency = invoiceSettings?.defaultCurrency || 'RON';
 
+		// Construiește harta domain → {clientId, websiteId} pentru auto-detectare
+		const allWebsites = await db
+			.select()
+			.from(table.clientWebsite)
+			.where(eq(table.clientWebsite.tenantId, event.locals.tenant.id));
+		const domainToWebsite = new Map<string, { clientId: string; websiteId: string }>();
+		for (const w of allWebsites) {
+			const domain = extractDomainFromUrl(w.url);
+			if (domain && (!domainToWebsite.has(domain) || w.isDefault)) {
+				domainToWebsite.set(domain, { clientId: w.clientId, websiteId: w.id });
+			}
+		}
+
 		let imported = 0;
 		let skipped = 0;
+		let autoDetected = 0;
 
 		const normalize = (s: string) =>
 			s
@@ -1533,9 +1575,11 @@ export const importSeoLinksFromFile = command(
 					getVal(row, 'articleUrl2') ||
 					getVal(row, 'articleUrl3')
 				: findCol(row, ['LINK ARTICOL', 'Link articol', 'articleUrl', 'LINK_ARTICOL']);
-			const targetUrl = usePositional
+			const rawLinkCatre = usePositional
 				? getVal(row, 'targetUrl')
-				: findCol(row, ['LINK', 'Link', 'targetUrl', 'URL țintă']);
+				: findCol(row, ['LINK CATRE', 'LINK', 'Link', 'targetUrl', 'URL țină']);
+			// LINK CATRE poate fi text de ancoră (nu URL) — folosim doar dacă e URL real
+			const targetUrl = rawLinkCatre?.startsWith('http') ? rawLinkCatre : null;
 			const linkAttr = usePositional
 				? parseLinkAttribute(getVal(row, 'linkAttr'))
 				: parseLinkAttribute(findCol(row, ['Tip', 'Type', 'tip', 'DoFollow', 'Dofollow']));
@@ -1553,19 +1597,50 @@ export const importSeoLinksFromFile = command(
 				continue;
 			}
 
-			// Când defaultClientId e setat, folosește-l pentru toate rândurile
-			let clientId = data.defaultClientId
+			// Când defaultClientId e setat, folosește-l; altfel detectează din PENTRU sau articol
+			let clientId: string | null | undefined = data.defaultClientId
 				? data.defaultClientId
 				: clientName
-					? clientByName.get(clientName.toLowerCase())
+					? clientByName.get(clientName.toLowerCase().trim())
 					: null;
-			if (!clientId) {
-				skipped++;
-				continue;
-			}
 
-			// Verifică că clientul există
-			if (!clients.some((c) => c.id === clientId)) {
+			let websiteId: string | null = null;
+			let resolvedTargetUrl: string | null = targetUrl;
+			let resolvedAnchorText: string | null = null;
+			let wasAutoDetected = false;
+
+			// Auto-detectare websiteId (și clientId dacă lipsește) din articol
+			try {
+				const resp = await fetch(articleUrl, {
+					signal: AbortSignal.timeout(12000),
+					headers: { 'User-Agent': EXTRACT_USER_AGENT }
+				});
+				if (resp.ok) {
+					const html = await resp.text();
+					const linkRegex = /<a\s[^>]*href=["'](https?:[^"'\s#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+					let m: RegExpExecArray | null;
+					while ((m = linkRegex.exec(html)) !== null) {
+						const href = m[1];
+						const anchorText = m[2].replace(/<[^>]+>/g, '').trim();
+						if (!anchorText) continue;
+						const domain = extractDomainFromUrl(href);
+						const found = domainToWebsite.get(domain);
+						if (found) {
+							// Potrivire cu clientul cunoscut (sau orice client dacă clientId lipsește)
+							const clientMatches = !clientId || found.clientId === clientId;
+							if (clientMatches) {
+								if (!clientId) { clientId = found.clientId; wasAutoDetected = true; }
+								websiteId = found.websiteId;
+								if (!resolvedTargetUrl) resolvedTargetUrl = href;
+								resolvedAnchorText = anchorText;
+								break;
+							}
+						}
+					}
+				}
+			} catch { /* fetch eșuat — continuă cu datele din Excel */ }
+
+			if (!clientId || !clients.some((c) => c.id === clientId)) {
 				skipped++;
 				continue;
 			}
@@ -1577,6 +1652,7 @@ export const importSeoLinksFromFile = command(
 				id: seoLinkId,
 				tenantId: event.locals.tenant.id,
 				clientId,
+				websiteId: websiteId || null,
 				pressTrust: pressTrust || null,
 				month: monthVal,
 				keyword,
@@ -1584,13 +1660,14 @@ export const importSeoLinksFromFile = command(
 				linkAttribute: linkAttr as 'dofollow' | 'nofollow',
 				status: status as 'pending' | 'submitted' | 'published' | 'rejected',
 				articleUrl,
-				targetUrl: targetUrl || null,
+				targetUrl: resolvedTargetUrl || null,
+				anchorText: resolvedAnchorText || null,
 				price: null,
 				currency: defaultCurrency,
-				anchorText: null,
 				projectId: null,
 				notes: null
 			});
+			if (wasAutoDetected) autoDetected++;
 			imported++;
 		}
 
@@ -1598,6 +1675,7 @@ export const importSeoLinksFromFile = command(
 			success: true,
 			imported,
 			skipped,
+			autoDetected,
 			columnsFound: imported === 0 && skipped > 0 ? columnsFound : undefined
 		};
 	}
