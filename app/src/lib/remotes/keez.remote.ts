@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, or, desc } from 'drizzle-orm';
-import { KeezClient } from '$lib/server/plugins/keez/client';
+import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
 import { encrypt, decrypt } from '$lib/server/plugins/keez/crypto';
 import { createKeezClientForTenant } from '$lib/server/plugins/keez/factory';
 import {
@@ -183,6 +183,42 @@ export const getKeezSyncHistory = query(async () => {
 	return syncRecords;
 });
 
+export const getKeezNextInvoiceNumber = query(
+	v.object({
+		series: v.string()
+	}),
+	async (filters) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		if (!filters.series) {
+			return { nextNumber: null };
+		}
+
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			return { nextNumber: null };
+		}
+
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+		const nextNumber = await keezClient.getNextInvoiceNumber(filters.series);
+
+		return { nextNumber };
+	}
+);
+
 export const getKeezItems = query(
 	v.object({
 		offset: v.optional(v.number()),
@@ -273,13 +309,13 @@ export const createKeezItem = command(
 		// Create item in Keez
 		const response = await keezClient.createItem({
 			name: data.name,
-			code: data.code,
+			code: data.code || data.name,
 			description: data.description,
-			currencyCode: data.currencyCode,
-			measureUnitId: data.measureUnitId,
+			currencyCode: data.currencyCode || 'RON',
+			measureUnitId: data.measureUnitId ?? 1,
 			vatRate: data.vatRate,
 			isActive: data.isActive !== undefined ? data.isActive : true,
-			categoryExternalId: data.categoryExternalId
+			categoryExternalId: data.categoryExternalId || 'MISCSRV'
 		});
 
 		return {
@@ -434,7 +470,7 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 	// Override series and number with the ones we got from Keez
 	if (invoiceSeries && invoiceNumber) {
 		keezInvoice.series = invoiceSeries;
-		keezInvoice.number = invoiceNumber;
+		keezInvoice.number = parseInt(invoiceNumber, 10);
 	}
 
 	const response = await keezClient.createInvoice(keezInvoice);
@@ -1113,18 +1149,51 @@ export const importClientsFromKeez = command(
 		// Create Keez client with DB token cache
 		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
-		// Get partners from Keez
-		const response = await keezClient.getPartners({
-			offset: filters.offset,
-			count: filters.count || 100,
-			filter: filters.filter
-		});
-
 		let imported = 0;
 		let skipped = 0;
 
+		// Collect unique partners to import.
+		// Try the dedicated partners endpoint first; if it returns 404 (endpoint may not exist in some
+		// Keez API versions), fall back to extracting unique partners from invoice data.
+		let partnersToImport: KeezPartner[] = [];
+
+		try {
+			const partnersResponse = await keezClient.getPartners({
+				offset: filters.offset,
+				count: filters.count || 100,
+				filter: filters.filter
+			});
+			partnersToImport = partnersResponse.partners || [];
+		} catch (e) {
+			if (e instanceof Error && e.message === 'Not found') {
+				// Partners endpoint not available — extract unique partners from invoice full data
+				console.log('[Keez] Partners endpoint not available, extracting clients from invoice data');
+				const invoiceList = await keezClient.getInvoices({
+					count: filters.count || 100,
+					offset: filters.offset
+				});
+				const seenPartnerNames = new Set<string>();
+				for (const header of invoiceList.data || []) {
+					const headerPartnerName = header.partner?.name;
+					if (headerPartnerName && !seenPartnerNames.has(headerPartnerName)) {
+						seenPartnerNames.add(headerPartnerName);
+						try {
+							const fullInvoice = await keezClient.getInvoice(header.externalId);
+							if (fullInvoice.partner?.partnerName) {
+								partnersToImport.push(fullInvoice.partner);
+							}
+						} catch {
+							// Skip invoices where full details can't be fetched
+						}
+					}
+				}
+			} else {
+				throw e;
+			}
+		}
+
 		// Import each partner
-		for (const partner of response.partners || []) {
+		for (const partner of partnersToImport) {
 			try {
 				// Check if client already exists by partnerName (KeezPartner uses partnerName, not externalId)
 				if (partner.partnerName) {

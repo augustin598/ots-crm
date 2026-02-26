@@ -297,20 +297,32 @@ export function mapInvoiceToKeez(
 						originalGrossAmountCurrency =
 							Math.round(originalGrossAmountRON * itemExchangeRate * 100) / 100;
 						grossAmountCurrency = Math.round(grossAmountRON * itemExchangeRate * 100) / 100;
+					} else {
+						// For RON invoices, currency amounts are the same as RON amounts (Keez requires them)
+						originalNetAmountCurrency = originalNetAmountRON;
+						originalVatAmountCurrency = originalVatAmountRON;
+						originalGrossAmountCurrency = originalGrossAmountRON;
+						discountNetValueCurrency = discountNetValueRON > 0 ? discountNetValueRON : undefined;
+						discountVatValueCurrency = discountVatValueRON > 0 ? discountVatValueRON : undefined;
+						netAmountCurrency = netAmountRON;
+						vatAmountCurrency = vatAmountRON;
+						grossAmountCurrency = grossAmountRON;
 					}
 
-					// Map unit of measure - Keez uses measureUnitId as string (1 = "Buc")
-					// We can extend this mapping later if needed
-					let measureUnitId = '1'; // Default to "Buc"
+					// Map unit of measure - Keez uses measureUnitId as integer (1 = Buc)
+					let measureUnitId = 1; // Default to Buc
 					if (item.unitOfMeasure) {
-						// Map common unit of measures to Keez IDs
-						const unitMap: Record<string, string> = {
-							Pcs: '1',
-							Buc: '1',
-							Hours: '2',
-							Days: '3'
+						const unitMap: Record<string, number> = {
+							// Romanian shortNames (from Keez nomenclator)
+							Buc: 1, 'Luna om': 2, An: 3, Zi: 4, Ora: 5, Kg: 6, Km: 7,
+							KWh: 8, KW: 9, M: 10, L: 11, Min: 12, Luna: 13, Mp: 14,
+							Oz: 15, Per: 16, Trim: 17, T: 18, Sapt: 19, Mc: 20,
+							Cutie: 22, Pag: 23, Rola: 24, Coala: 25, Tambur: 26, Set: 27,
+							// English aliases
+							Pcs: 1, 'Man-month': 2, Year: 3, Day: 4, Hour: 5,
+							Hours: 5, Days: 4, Month: 13, Months: 13
 						};
-						measureUnitId = unitMap[item.unitOfMeasure] || '1';
+						measureUnitId = unitMap[item.unitOfMeasure] || 1;
 					}
 
 					// Build item description with note if available
@@ -369,76 +381,81 @@ export function mapInvoiceToKeez(
 
 					return detail;
 				})
-			: [
+			: (() => {
 					// If no line items, create a generic one from invoice totals
-					{
-						itemExternalId: invoice.id,
-						itemName: 'Invoice Total',
-						itemDescription: invoice.notes || undefined,
-						measureUnitId: '1',
-						quantity: 1,
-						unitPrice: Math.round(((invoice.amount || 0) / 100) * 10000) / 10000,
-						unitPriceCurrency: !isRON
-							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 10000) / 10000
-							: undefined,
-						vatPercent: Math.round(itemVatPercent * 100) / 100,
-						originalNetAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
-						originalVatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
-						netAmount: Math.round(((invoice.amount || 0) / 100) * 100) / 100,
-						vatAmount: Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100,
-						grossAmount: Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100,
-						originalNetAmountCurrency: !isRON
-							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 100) / 100
-							: undefined,
-						originalVatAmountCurrency: !isRON
-							? Math.round(((invoice.taxAmount || 0) / 100) * exchangeRate * 100) / 100
-							: undefined,
-						netAmountCurrency: !isRON
-							? Math.round(((invoice.amount || 0) / 100) * exchangeRate * 100) / 100
-							: undefined,
-						vatAmountCurrency: !isRON
-							? Math.round(((invoice.taxAmount || 0) / 100) * exchangeRate * 100) / 100
-							: undefined,
-						grossAmountCurrency: !isRON
-							? Math.round(((invoice.totalAmount || 0) / 100) * exchangeRate * 100) / 100
-							: undefined
-					}
-				];
+					const fallbackVatPercent = (invoice.taxRate ?? 1900) / 100;
+					const fallbackNetRON = Math.round(((invoice.amount || 0) / 100) * 100) / 100;
+					const fallbackVatRON = Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100;
+					const fallbackGrossRON = Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100;
+					const fallbackNetCurrency = isRON
+						? fallbackNetRON
+						: Math.round(fallbackNetRON * exchangeRate * 100) / 100;
+					const fallbackVatCurrency = isRON
+						? fallbackVatRON
+						: Math.round(fallbackVatRON * exchangeRate * 100) / 100;
+					const fallbackGrossCurrency = isRON
+						? fallbackGrossRON
+						: Math.round(fallbackGrossRON * exchangeRate * 100) / 100;
+					return [
+						{
+							itemExternalId: invoice.id,
+							itemName: 'Invoice Total',
+							itemDescription: invoice.notes || undefined,
+							measureUnitId: 1,
+							quantity: 1,
+							unitPrice: Math.round(fallbackNetRON * 10000) / 10000,
+							unitPriceCurrency: !isRON ? Math.round(fallbackNetCurrency * 10000) / 10000 : undefined,
+							vatPercent: Math.round(fallbackVatPercent * 100) / 100,
+							originalNetAmount: fallbackNetRON,
+							originalVatAmount: fallbackVatRON,
+							netAmount: fallbackNetRON,
+							vatAmount: fallbackVatRON,
+							grossAmount: fallbackGrossRON,
+							originalNetAmountCurrency: fallbackNetCurrency,
+							originalVatAmountCurrency: fallbackVatCurrency,
+							netAmountCurrency: fallbackNetCurrency,
+							vatAmountCurrency: fallbackVatCurrency,
+							grossAmountCurrency: fallbackGrossCurrency
+						}
+					];
+				})();
 
-	// Format dates to YYYYMMDD (numeric format for Keez API)
-	const formatDateYYYYMMDD = (date: Date | null | undefined): string => {
+	// Format dates to YYYYMMDD as integer (Keez API requires integer format, e.g., 20190102)
+	const formatDateYYYYMMDD = (date: Date | null | undefined): number => {
 		if (!date) {
 			const today = new Date();
-			return (
+			return parseInt(
 				today.getFullYear().toString() +
 				(today.getMonth() + 1).toString().padStart(2, '0') +
-				today.getDate().toString().padStart(2, '0')
+				today.getDate().toString().padStart(2, '0'),
+				10
 			);
 		}
 		const d = date instanceof Date ? date : new Date(date);
-		return (
+		return parseInt(
 			d.getFullYear().toString() +
 			(d.getMonth() + 1).toString().padStart(2, '0') +
-			d.getDate().toString().padStart(2, '0')
+			d.getDate().toString().padStart(2, '0'),
+			10
 		);
 	};
 
 	// Extract invoice number and series
 	let series: string | undefined;
-	let number: string | undefined;
+	let number: number | undefined;
 
 	if (settings?.keezSeries) {
 		series = settings.keezSeries.trim();
-		// Extract number from invoiceNumber (e.g., "OTS 520" -> "520")
+		// Extract number from invoiceNumber (e.g., "OTS 520" -> 520)
 		if (invoice.invoiceNumber) {
 			const match = invoice.invoiceNumber.match(/(\d+)$/);
 			if (match) {
-				number = match[1];
+				number = parseInt(match[1], 10);
 			} else if (settings.keezStartNumber) {
-				number = settings.keezStartNumber;
+				number = parseInt(settings.keezStartNumber, 10) || undefined;
 			}
 		} else if (settings.keezStartNumber) {
-			number = settings.keezStartNumber;
+			number = parseInt(settings.keezStartNumber, 10) || undefined;
 		}
 	}
 
@@ -464,6 +481,38 @@ export function mapInvoiceToKeez(
 		}
 	}
 
+	// Calculate invoice-level totals from details (required by Keez API)
+	const invoiceTotalNetRON = Math.round(details.reduce((s, d) => s + d.netAmount, 0) * 100) / 100;
+	const invoiceTotalVatRON = Math.round(details.reduce((s, d) => s + d.vatAmount, 0) * 100) / 100;
+	const invoiceTotalGrossRON = Math.round(details.reduce((s, d) => s + d.grossAmount, 0) * 100) / 100;
+	const invoiceTotalNetCurrency = Math.round(details.reduce((s, d) => s + (d.netAmountCurrency ?? d.netAmount), 0) * 100) / 100;
+	const invoiceTotalVatCurrency = Math.round(details.reduce((s, d) => s + (d.vatAmountCurrency ?? d.vatAmount), 0) * 100) / 100;
+	const invoiceTotalGrossCurrency = Math.round(details.reduce((s, d) => s + (d.grossAmountCurrency ?? d.grossAmount), 0) * 100) / 100;
+
+	// Map CRM paymentMethod to Keez paymentTypeId
+	// Keez payment types: 1=BFCash, 2=BFCard, 3=Bank, 4=ChitCash, 5=Ramburs, 6=ProcesatorPlati, 7=PlatformaDistributie, 8=VoucherVacantaCard, 9=VoucherVacantaTichet
+	const mapPaymentTypeId = (paymentMethod: string | null | undefined): number => {
+		if (!paymentMethod) return 3; // Default: Bank Transfer
+		const pm = paymentMethod.toLowerCase().trim();
+		// Exact Keez code matches
+		if (pm === 'bfcash') return 1;
+		if (pm === 'bfcard') return 2;
+		if (pm === 'chitcash' || pm === 'chitantacash') return 4;
+		if (pm === 'ramburs') return 5;
+		if (pm === 'procesatorplati') return 6;
+		if (pm === 'platformadistributie') return 7;
+		if (pm === 'vouchervacantacard') return 8;
+		if (pm === 'vouchervacantatichet') return 9;
+		// Fuzzy matches for legacy/external values
+		if (pm.includes('bank') || pm.includes('transfer') || pm.includes('virament')) return 3;
+		if (pm.includes('card')) return 2;
+		if (pm.includes('chitanta') || pm.includes('chit')) return 4;
+		if (pm.includes('numerar') || pm.includes('cash')) return 4;
+		if (pm.includes('payu') || pm.includes('netopia') || pm.includes('euplatesc') || pm.includes('online')) return 6;
+		if (pm.includes('emag') || pm.includes('platforma')) return 7;
+		return 3; // Default: Bank Transfer
+	};
+
 	const keezInvoice: KeezInvoice = {
 		externalId,
 		series,
@@ -477,10 +526,20 @@ export function mapInvoiceToKeez(
 		currency: currency,
 		exchangeRate: !isRON ? Math.round(exchangeRate * 10000) / 10000 : undefined,
 		vatOnCollection: invoice.vatOnCollection || false,
-		paymentTypeId: 1, // Default payment type (can be configured)
+		paymentTypeId: mapPaymentTypeId(invoice.paymentMethod),
 		discountType: invoiceDiscountType,
 		discountPercent: invoiceDiscountPercent,
 		discountValue: invoiceDiscountValue,
+		originalNetAmount: invoiceTotalNetRON,
+		originalVatAmount: invoiceTotalVatRON,
+		originalNetAmountCurrency: invoiceTotalNetCurrency,
+		originalVatAmountCurrency: invoiceTotalVatCurrency,
+		netAmount: invoiceTotalNetRON,
+		vatAmount: invoiceTotalVatRON,
+		grossAmount: invoiceTotalGrossRON,
+		netAmountCurrency: invoiceTotalNetCurrency,
+		vatAmountCurrency: invoiceTotalVatCurrency,
+		grossAmountCurrency: invoiceTotalGrossCurrency,
 		invoiceDetails: details,
 		notes: invoice.notes || undefined
 	};
@@ -689,6 +748,7 @@ export function mapKeezPartnerToClient(
 		iban: keezPartner.iban || null,
 		bankName: keezPartner.bankName || null,
 		keezPartnerId: keezPartner.partnerName || null,
+		website: null,
 		notes: null
 	};
 }
@@ -760,11 +820,12 @@ export function mapKeezDetailsToLineItems(
 			}
 		}
 
-		// Map unit of measure - reverse mapping from Keez measureUnitId
-		const unitMap: Record<string, string> = {
-			'1': 'Pcs',
-			'2': 'Hours',
-			'3': 'Days'
+		// Map unit of measure - reverse mapping from Keez measureUnitId (integer)
+		const unitMap: Record<number, string> = {
+			1: 'Buc', 2: 'Luna om', 3: 'An', 4: 'Zi', 5: 'Ora', 6: 'Kg', 7: 'Km',
+			8: 'KWh', 9: 'KW', 10: 'M', 11: 'L', 12: 'Min', 13: 'Luna', 14: 'Mp',
+			15: 'Oz', 16: 'Per', 17: 'Trim', 18: 'T', 19: 'Sapt', 20: 'Mc',
+			22: 'Cutie', 23: 'Pag', 24: 'Rola', 25: 'Coala', 26: 'Tambur', 27: 'Set'
 		};
 		const unitOfMeasure = unitMap[detail.measureUnitId] || null;
 
@@ -776,6 +837,7 @@ export function mapKeezDetailsToLineItems(
 
 		return {
 			invoiceId,
+			serviceId: null,
 			description,
 			quantity: detail.quantity || 1,
 			rate: Math.round(unitPrice * 100), // Convert to cents

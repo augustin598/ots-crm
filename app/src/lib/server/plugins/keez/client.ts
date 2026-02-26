@@ -26,12 +26,12 @@ export interface KeezAccessToken {
 export interface KeezInvoice {
 	externalId?: string;
 	series?: string; // Invoice series (e.g., "OTS")
-	number?: string; // Invoice number (e.g., "520")
+	number?: number; // Invoice number as integer (e.g., 520)
 	partner?: KeezPartner;
-	documentDate?: string; // YYYYMMDD format
-	issueDate: string; // YYYYMMDD format (was YYYY-MM-DD, but Keez API uses YYYYMMDD)
-	dueDate?: string; // YYYYMMDD format
-	deliveryDate?: string; // YYYYMMDD format
+	documentDate?: number; // YYYYMMDD format as integer (e.g., 20190102)
+	issueDate: number; // YYYYMMDD format as integer (Keez API requires integer, not string)
+	dueDate?: number; // YYYYMMDD format as integer
+	deliveryDate?: number; // YYYYMMDD format as integer
 	currency?: string; // 'RON', 'EUR', etc. (legacy field)
 	currencyCode?: string; // 'RON', 'EUR', etc. (preferred field)
 	exchangeRate?: number;
@@ -39,19 +39,29 @@ export interface KeezInvoice {
 	paymentTypeId?: number; // Payment type ID (1 = default, 3 = bank transfer, 6 = payment processor)
 	paymentType?: string; // Legacy field
 	paymentDueDate?: string;
+	discountType?: 'Percent' | 'Value';
+	discountPercent?: number;
+	discountValue?: number;
 	invoiceDetails: KeezInvoiceDetail[];
 	notes?: string;
-	// Total amounts (may be present in API response)
+	// Invoice-level totals (required by Keez API)
+	originalNetAmount?: number;
+	originalVatAmount?: number;
+	originalNetAmountCurrency?: number;
+	originalVatAmountCurrency?: number;
 	netAmount?: number;
 	vatAmount?: number;
 	grossAmount?: number;
+	netAmountCurrency?: number;
+	vatAmountCurrency?: number;
+	grossAmountCurrency?: number;
 }
 
 export interface KeezInvoiceDetail {
 	itemExternalId?: string; // Identificatorul Keez al articolului (externalId)
 	itemName: string; // Numele articolului
 	itemDescription?: string; // Descrierea articolului
-	measureUnitId: string; // Unitatea de măsură
+	measureUnitId: number; // Unitatea de măsură (integer: 1=Buc/Pcs, 2=Hours, 3=Days)
 	quantity: number; // Cantitatea articolului (Numeric 2 zecimale)
 	unitPrice: number; // Prețul articolului (Numeric 4 zecimale)
 	unitPriceCurrency?: number; // Prețul articolului în valuta facturii (Numeric 4 zecimale)
@@ -135,15 +145,17 @@ export interface KeezPartnerListResponse {
 
 export interface KeezItem {
 	categoryExternalId: string;
-	categoryName: string;
+	categoryName?: string;
 	code: string;
+	description?: string;
 	currencyCode: string;
-	externalId: string;
+	externalId?: string;
 	isActive: boolean;
-	isStockable: boolean;
-	lastPrice: number;
+	isStockable?: boolean;
+	lastPrice?: number;
 	measureUnitId: number;
 	name: string;
+	vatRate?: number;
 }
 
 export interface KeezItemListResponse {

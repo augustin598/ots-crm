@@ -7,10 +7,10 @@
 		createInvoice,
 		getInvoices
 	} from '$lib/remotes/invoices.remote';
+	import { getKeezItems, getKeezNextInvoiceNumber } from '$lib/remotes/keez.remote';
 	import { createRecurringInvoice } from '$lib/remotes/recurring-invoices.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { getPlugins } from '$lib/remotes/plugins.remote';
-	import { getKeezItems } from '$lib/remotes/keez.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -93,6 +93,15 @@
 				}
 	);
 	const keezItems = $derived(keezItemsQuery?.current?.data || []);
+
+	// Next invoice number from Keez (auto-filled when series is known)
+	const keezSeriesForQuery = $derived(isKeezActive && invoiceSettings?.keezSeries ? invoiceSettings.keezSeries : '');
+	let keezNextNumberQuery = $derived(
+		keezSeriesForQuery
+			? getKeezNextInvoiceNumber({ series: keezSeriesForQuery })
+			: { current: { nextNumber: null }, loading: false, error: null }
+	);
+	const keezNextNumber = $derived(keezNextNumberQuery?.current?.nextNumber ?? null);
 
 	// Form state
 	let clientId = $state('');
@@ -196,6 +205,9 @@
 
 	// Update form fields when settings load or plugins change
 	$effect(() => {
+		console.log('[invoice/new] invoiceSettings:', invoiceSettings);
+		console.log('[invoice/new] plugins:', { isKeezActive, isSmartbillActive });
+
 		if (invoiceSettings) {
 			// Set currency from settings
 			if (invoiceSettings.defaultCurrency) {
@@ -211,10 +223,14 @@
 		}
 
 		// Set invoice number based on active plugin (only if number is empty to avoid overwriting user input)
-		const number = defaultInvoiceNumber();
-		if (number && !invoiceNumber) {
+		// For Keez, prefer the live next number from API; fall back to settings start number
+		const keezLiveNumber = keezNextNumber !== null ? String(keezNextNumber) : null;
+		const number = isKeezActive ? (keezLiveNumber || defaultInvoiceNumber()) : defaultInvoiceNumber();
+		if (number) {
 			invoiceNumber = number;
 		}
+
+		console.log('[invoice/new] resolved series:', series, '| resolved number:', number, '| keezNextNumber:', keezNextNumber);
 	});
 
 	// Update exchange rate when currencies match
@@ -401,6 +417,20 @@
 	}
 
 	async function handleSubmit(status: 'draft' | 'sent' = 'draft') {
+		console.log('[invoice/new] handleSubmit', {
+			status,
+			clientId,
+			invoiceSeries,
+			invoiceNumber,
+			currency,
+			invoiceCurrency,
+			issueDate,
+			dueDate,
+			paymentTerms,
+			taxApplicationType,
+			lineItems
+		});
+
 		if (!clientId) {
 			error = 'Please select a client';
 			toast.error('Please select a client');
@@ -640,8 +670,8 @@
 					discountType: '',
 					discount: 0,
 					note: dialogItemNote,
-					currency: (keezItem.currencyCode as Currency) || currency,
-					unitOfMeasure: 'Pcs',
+					currency: (CURRENCIES.includes(keezItem.currencyCode as Currency) ? keezItem.currencyCode as Currency : currency),
+					unitOfMeasure: ({ 1: 'Buc', 2: 'Luna om', 3: 'An', 4: 'Zi', 5: 'Ora', 6: 'Kg', 7: 'Km', 8: 'KWh', 9: 'KW', 10: 'M', 11: 'L', 12: 'Min', 13: 'Luna', 14: 'Mp', 15: 'Oz', 16: 'Per', 17: 'Trim', 18: 'T', 19: 'Sapt', 20: 'Mc', 22: 'Cutie', 23: 'Pag', 24: 'Rola', 25: 'Coala', 26: 'Tambur', 27: 'Set' } as Record<number, string>)[keezItem.measureUnitId] || 'Buc',
 					keezItem: keezItem
 				};
 				lineItems = [...lineItems, newItem];
@@ -730,10 +760,7 @@
 	<!-- Main Content -->
 	<form
 		id="invoice-form"
-		onsubmit={(e) => {
-			e.preventDefault();
-			handleSubmit('sent');
-		}}
+		onsubmit={(e) => e.preventDefault()}
 		class="space-y-6"
 	>
 		<!-- Client and Invoice Details - Two Columns -->
@@ -845,7 +872,13 @@
 							</div>
 							<div class="space-y-2">
 								<Label>Number</Label>
-								<Input bind:value={invoiceNumber} placeholder="521" />
+								<Input
+									bind:value={invoiceNumber}
+									placeholder="521"
+									readonly={isKeezActive}
+									disabled={isKeezActive}
+									class={isKeezActive ? 'opacity-70 cursor-not-allowed' : ''}
+								/>
 							</div>
 							<div class="space-y-2">
 								<Label>Date</Label>
@@ -925,8 +958,14 @@
 									</SelectTrigger>
 									<SelectContent>
 										<SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-										<SelectItem value="Card">Card</SelectItem>
-										<SelectItem value="Cash">Cash</SelectItem>
+										<SelectItem value="BFCard">Bon Fiscal Card</SelectItem>
+										<SelectItem value="BFCash">Bon Fiscal Cash</SelectItem>
+										<SelectItem value="ChitCash">Chitanță Cash</SelectItem>
+										<SelectItem value="Ramburs">Ramburs</SelectItem>
+										<SelectItem value="ProcesatorPlati">Procesator Plăți</SelectItem>
+										<SelectItem value="PlatformaDistributie">Platformă Distribuție</SelectItem>
+										<SelectItem value="VoucherVacantaCard">Voucher Vacanță Card</SelectItem>
+										<SelectItem value="VoucherVacantaTichet">Voucher Vacanță Tichet</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>

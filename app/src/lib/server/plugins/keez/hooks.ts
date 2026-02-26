@@ -45,8 +45,10 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		return;
 	}
 
-	if (!settings || !settings.keezSeries || !settings.keezStartNumber) {
-		console.warn(`[Keez] Invoice settings not configured for tenant ${tenantId}`);
+	// Allow proceeding if the invoice itself has a series (even if keezSeries/keezStartNumber not set in settings)
+	const effectiveSeries = settings?.keezSeries || invoice.invoiceSeries;
+	if (!effectiveSeries) {
+		console.warn(`[Keez] Invoice settings not configured for tenant ${tenantId}: no keezSeries in settings and invoice has no invoiceSeries`);
 		return;
 	}
 
@@ -95,6 +97,16 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	const defaultVatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
 
 	for (const lineItem of lineItems) {
+		// If line item already has a Keez external ID (set on recurring invoice template items,
+		// copied to generated invoice line items), use it directly — no API call needed.
+		if (lineItem.keezItemExternalId) {
+			console.log(
+				`[Keez] Line item ${lineItem.id} has pre-configured keezItemExternalId: ${lineItem.keezItemExternalId}, using it directly`
+			);
+			itemExternalIds.set(lineItem.id, lineItem.keezItemExternalId);
+			continue;
+		}
+
 		// Generate code for item (similar to WHMCS implementation)
 		const itemCode = `CRM_${lineItem.id}`;
 
@@ -165,11 +177,10 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	let invoiceSeries: string | undefined;
 	let invoiceNumber: string | undefined;
 
-	// Check if invoice has invoiceSeries that matches Keez series
+	// Check if invoice has invoiceSeries that matches (or can substitute for) Keez series
 	if (
 		invoice.invoiceSeries &&
-		settings?.keezSeries &&
-		invoice.invoiceSeries.trim() === settings.keezSeries.trim()
+		(!settings?.keezSeries || invoice.invoiceSeries.trim() === settings.keezSeries.trim())
 	) {
 		// Invoice series matches Keez series, use it
 		invoiceSeries = invoice.invoiceSeries.trim();
@@ -248,7 +259,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// Override series and number with the ones we got from Keez
 	if (invoiceSeries && invoiceNumber) {
 		keezInvoice.series = invoiceSeries;
-		keezInvoice.number = invoiceNumber;
+		keezInvoice.number = parseInt(invoiceNumber, 10);
 		console.log(
 			`[Keez] Using series: ${invoiceSeries}, number: ${invoiceNumber} for invoice ${invoice.id}`
 		);
@@ -260,15 +271,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 
 	// Create invoice in Keez
 	console.log(`[Keez] Creating invoice in Keez with externalId: ${externalId}`);
-	console.log(
-		`[Keez] Invoice data:`,
-		JSON.stringify({
-			series: keezInvoice.series,
-			number: keezInvoice.number,
-			currency: keezInvoice.currencyCode,
-			detailsCount: keezInvoice.invoiceDetails.length
-		})
-	);
+	console.log(`[Keez] Full invoice JSON:`, JSON.stringify(keezInvoice, null, 2));
 
 	let response;
 	try {
@@ -278,7 +281,25 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		);
 	} catch (createError) {
 		console.error(`[Keez] Failed to create invoice in Keez:`, createError);
-		throw createError; // Re-throw to be caught by outer try-catch
+		// Do NOT re-throw — the CRM invoice must be preserved even if Keez sync fails.
+		// Record the failure so it can be retried manually.
+		const syncId = generateSyncId();
+		try {
+			await db.insert(table.keezInvoiceSync).values({
+				id: syncId,
+				invoiceId: invoice.id,
+				tenantId,
+				keezInvoiceId: 'error',
+				keezExternalId: null,
+				syncDirection: 'push',
+				lastSyncedAt: new Date(),
+				syncStatus: 'error',
+				errorMessage: createError instanceof Error ? createError.message : 'Failed to create invoice in Keez'
+			});
+		} catch (dbError) {
+			console.error(`[Keez] Failed to record sync error:`, dbError);
+		}
+		return; // Exit hook gracefully
 	}
 
 	// Fetch the created invoice from Keez to get all actual data (number, series, VAT, currency, dates, etc.)
