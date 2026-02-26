@@ -14,6 +14,7 @@
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { getClientWebsites } from '$lib/remotes/client-websites.remote';
 	import { formatAmount, CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
 	import { getFaviconUrl } from '$lib/utils';
 	import ClientLogo from '$lib/components/client-logo.svelte';
@@ -115,6 +116,7 @@
 	let filterLinkType = $state('');
 	let filterLinkAttribute = $state('');
 	let filterPressTrust = $state('');
+	let filterWebsiteId = $state('');
 	let filterSearch = $state('');
 	let advancedOpen = $state(false);
 
@@ -126,17 +128,18 @@
 		linkType: filterLinkType || undefined,
 		linkAttribute: filterLinkAttribute || undefined,
 		pressTrust: filterPressTrust.trim() || undefined,
+		websiteId: filterWebsiteId || undefined,
 		search: filterSearch.trim() || undefined
 	});
 
 	// Câte filtre avansate sunt active
 	const advancedActiveCount = $derived(
-		[filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterSearch.trim()].filter(Boolean).length
+		[filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterWebsiteId, filterSearch.trim()].filter(Boolean).length
 	);
 	// Câte filtre totale sunt active
 	const totalActiveFilters = $derived(
 		[filterClientId, filterMonth, filterStatus, filterCheckStatus,
-		 filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterSearch.trim()].filter(Boolean).length
+		 filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterWebsiteId, filterSearch.trim()].filter(Boolean).length
 	);
 
 	function resetAllFilters() {
@@ -148,6 +151,7 @@
 		filterLinkType = '';
 		filterLinkAttribute = '';
 		filterPressTrust = '';
+		filterWebsiteId = '';
 		filterSearch = '';
 	}
 
@@ -161,6 +165,25 @@
 	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 	const clientById = $derived(new Map(clients.map((c) => [c.id, c])));
 
+	// Website queries for filter and form
+	const filterWebsitesQuery = $derived(filterClientId ? getClientWebsites(filterClientId) : null);
+	const filterWebsites = $derived(filterWebsitesQuery?.current || []);
+	const filterWebsiteMap = $derived(new Map(filterWebsites.map((w) => [w.id, w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')])));
+	const formWebsitesQuery = $derived(formClientId ? getClientWebsites(formClientId) : null);
+	const formWebsites = $derived(formWebsitesQuery?.current || []);
+
+	// Reset filterWebsiteId when client changes
+	$effect(() => { if (!filterClientId) filterWebsiteId = ''; });
+
+	// Init from URL params (?clientId=X&websiteId=Y)
+	$effect(() => {
+		const params = page.url.searchParams;
+		const qClient = params.get('clientId');
+		const qWebsite = params.get('websiteId');
+		if (qClient && !filterClientId) filterClientId = qClient;
+		if (qWebsite && !filterWebsiteId) filterWebsiteId = qWebsite;
+	});
+
 	const invoiceSettingsQuery = getInvoiceSettings();
 	const invoiceSettings = $derived(invoiceSettingsQuery.current);
 
@@ -169,6 +192,7 @@
 	let isEditing = $state(false);
 	let editingId = $state<string | null>(null);
 	let formClientId = $state('');
+	let formWebsiteId = $state('');
 	let formPressTrust = $state('');
 	let formMonth = $state(new Date().toISOString().slice(0, 7)); // YYYY-MM
 	let formKeyword = $state('');
@@ -468,6 +492,7 @@
 		isEditing = false;
 		editingId = null;
 		formClientId = '';
+		formWebsiteId = '';
 		formPressTrust = '';
 		formMonth = new Date().toISOString().slice(0, 7);
 		formKeyword = '';
@@ -491,9 +516,12 @@
 
 	function openAddDialog() {
 		resetForm();
-		// Pre-completează clientul din filtru dacă e deja selectat
+		// Pre-completează clientul și website-ul din filtru dacă e deja selectat
 		if (filterClientId) {
 			formClientId = filterClientId;
+		}
+		if (filterWebsiteId) {
+			formWebsiteId = filterWebsiteId;
 		}
 		isDialogOpen = true;
 	}
@@ -502,6 +530,7 @@
 		isEditing = true;
 		editingId = link.id;
 		formClientId = link.clientId;
+		formWebsiteId = link.websiteId || '';
 		formPressTrust = link.pressTrust || '';
 		formMonth = link.month;
 		formKeyword = link.keyword;
@@ -560,6 +589,7 @@
 				const urls = parseBulkArticleUrls(formArticleUrlsBulk);
 				await createSeoLinksBulk({
 					clientId: formClientId,
+					websiteId: formWebsiteId || undefined,
 					pressTrust: formPressTrust || undefined,
 					month: formMonth,
 					keyword: '—',
@@ -583,6 +613,7 @@
 				await updateSeoLink({
 					seoLinkId: editingId,
 					clientId: formClientId,
+					websiteId: formWebsiteId || undefined,
 					pressTrust: formPressTrust || undefined,
 					month: formMonth,
 					keyword: formKeyword,
@@ -601,6 +632,7 @@
 			} else {
 				const result = await createSeoLink({
 					clientId: formClientId,
+					websiteId: formWebsiteId || undefined,
 					pressTrust: formPressTrust || undefined,
 					month: formMonth,
 					keyword: formKeyword,
@@ -828,8 +860,8 @@
 	}
 
 	async function handleExtract() {
-		if (!formArticleUrl || !formTargetUrl) {
-			extractError = 'Completează URL articol și URL client pentru extragere';
+		if (!formArticleUrl || (!formTargetUrl && !formWebsiteId)) {
+			extractError = 'Completează URL articol și URL client (sau selectează un website) pentru extragere';
 			return;
 		}
 		extractLoading = true;
@@ -837,7 +869,7 @@
 		try {
 			const result = await extractSeoLinkData({
 				articleUrl: formArticleUrl,
-				clientUrl: formTargetUrl
+				...(formWebsiteId ? { websiteId: formWebsiteId } : { clientUrl: formTargetUrl })
 			});
 			formKeyword = result.keyword || formKeyword;
 			formPressTrust = result.pressTrust || formPressTrust;
@@ -1246,6 +1278,23 @@
 							/>
 						{/if}
 					</div>
+					{#if formClientId && formWebsites.length > 0}
+					<div class="grid gap-2">
+						<Label for="formWebsiteId">Website</Label>
+						<Select value={formWebsiteId || 'none'} type="single" onValueChange={(v) => { formWebsiteId = v === 'none' ? '' : v || ''; if (v && v !== 'none') { const w = formWebsites.find(x => x.id === v); if (w && !formTargetUrl) formTargetUrl = w.url; } }}>
+							<SelectTrigger id="formWebsiteId" class="h-9">
+								{formWebsiteId ? (formWebsites.find(w => w.id === formWebsiteId)?.name || formWebsites.find(w => w.id === formWebsiteId)?.url.replace(/^https?:\/\//, '').replace(/^www\./, '') || 'Website') : 'Fără website selectat'}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="none">Fără website selectat</SelectItem>
+								{#each formWebsites as w}
+									<SelectItem value={w.id}>{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}{w.isDefault ? ' ★' : ''}</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+						<p class="text-xs text-muted-foreground">Website-ul clientului către care pointează backlinkul</p>
+					</div>
+					{/if}
 					<div class="grid gap-2">
 						<div class="flex items-center justify-between gap-2">
 							<Label for="articleUrl">URL articol *</Label>
@@ -1693,7 +1742,29 @@
 		<!-- Filtre avansate — colapsabil, cu separator -->
 		{#if advancedOpen}
 			<div class="border-t px-4 py-3 bg-muted/30">
-				<div class="grid grid-cols-3 gap-3">
+				<div class="grid grid-cols-4 gap-3">
+					<!-- Website (apare doar când clientul e selectat) -->
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium text-muted-foreground">Website</p>
+						{#if filterClientId && filterWebsites.length > 0}
+							<Select value={filterWebsiteId || 'all'} type="single" onValueChange={(v) => { filterWebsiteId = v === 'all' ? '' : v || ''; }}>
+								<SelectTrigger class="h-9">
+									{filterWebsiteId ? (filterWebsiteMap.get(filterWebsiteId) || 'Website') : 'Toate website-urile'}
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">Toate website-urile</SelectItem>
+									{#each filterWebsites as w}
+										<SelectItem value={w.id}>{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}</SelectItem>
+									{/each}
+								</SelectContent>
+							</Select>
+						{:else}
+							<div class="h-9 flex items-center px-3 rounded-md border border-dashed border-border text-xs text-muted-foreground">
+								{filterClientId ? 'Fără website-uri' : 'Selectați un client'}
+							</div>
+						{/if}
+					</div>
+
 					<!-- Tip link -->
 					<div class="space-y-1.5">
 						<p class="text-xs font-medium text-muted-foreground">Tip link</p>
@@ -1788,6 +1859,11 @@
 				{#if filterPressTrust.trim()}
 					<button onclick={() => (filterPressTrust = '')} class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
 						📰 "{filterPressTrust.trim()}" <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if filterWebsiteId}
+					<button onclick={() => (filterWebsiteId = '')} class="inline-flex items-center gap-1 rounded-full border bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 px-2.5 py-0.5 text-xs font-medium hover:opacity-75 transition-opacity">
+						🌐 {filterWebsiteMap.get(filterWebsiteId) ?? 'Website'} <XIcon class="h-3 w-3 opacity-60" />
 					</button>
 				{/if}
 
@@ -2092,6 +2168,13 @@
 									</TooltipProvider>
 								</span>
 							</TableHead>
+							{#if filterClientId}
+							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
+								<span class="inline-flex items-center gap-1.5">
+									🌐 Website
+								</span>
+							</TableHead>
+							{/if}
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
 									<FileTextIcon class="h-3.5 w-3.5 shrink-0" />
@@ -2206,6 +2289,7 @@
 								<TableCell class="px-3 py-2 align-middle">
 									<Input bind:value={rowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
 								</TableCell>
+								{#if filterClientId}<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">—</TableCell>{/if}
 								<TableCell class="px-3 py-2 align-middle">
 									<Input bind:value={rowArticleUrl} placeholder="Link articol" class="h-8 text-[13px] w-full min-w-[10rem]" />
 								</TableCell>
@@ -2324,6 +2408,15 @@
 										<span class="text-muted-foreground/90 text-[13px]">—</span>
 									{/if}
 								</TableCell>
+								{#if filterClientId}
+								<TableCell class="px-3 py-3.5 align-middle">
+									{#if link.websiteId && filterWebsiteMap.has(link.websiteId)}
+										<span class="text-[13px] text-muted-foreground">{filterWebsiteMap.get(link.websiteId)}</span>
+									{:else}
+										<span class="text-muted-foreground/50 text-[13px]">—</span>
+									{/if}
+								</TableCell>
+								{/if}
 								<TableCell class="px-3 py-3.5 max-w-[200px] align-middle">
 									<SeoLinkUrlCell url={link.articleUrl} maxChars={45} />
 								</TableCell>

@@ -18,6 +18,7 @@ function generateSeoLinkCheckId() {
 
 const seoLinkSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1, 'Client is required')),
+	websiteId: v.optional(v.string()),
 	pressTrust: v.optional(v.string()),
 	month: v.pipe(v.string(), v.minLength(1, 'Luna este obligatorie')), // YYYY-MM
 	keyword: v.pipe(v.string(), v.minLength(1, 'Cuvântul cheie este obligatoriu')),
@@ -38,6 +39,7 @@ const seoLinkSchema = v.object({
 const updateSeoLinkSchema = v.object({
 	seoLinkId: v.pipe(v.string(), v.minLength(1)),
 	clientId: v.optional(v.pipe(v.string(), v.minLength(1))),
+	websiteId: v.optional(v.nullable(v.string())),
 	pressTrust: v.optional(v.string()),
 	month: v.optional(v.pipe(v.string(), v.minLength(1))),
 	keyword: v.optional(v.pipe(v.string(), v.minLength(1))),
@@ -57,6 +59,7 @@ const updateSeoLinkSchema = v.object({
 export const getSeoLinks = query(
 	v.object({
 		clientId: v.optional(v.string()),
+		websiteId: v.optional(v.string()),
 		month: v.optional(v.string()),
 		status: v.optional(v.string()),
 		checkStatus: v.optional(v.string()), // 'ok' | 'problem' | 'never'
@@ -78,6 +81,10 @@ export const getSeoLinks = query(
 			conditions = and(conditions, eq(table.seoLink.clientId, event.locals.client.id)) as typeof conditions;
 		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
+		}
+		// Filtru după website
+		if (filters.websiteId) {
+			conditions = and(conditions, eq(table.seoLink.websiteId, filters.websiteId)) as typeof conditions;
 		}
 		// Filtru după data publicării - articlePublishedAt sau month (fallback)
 		if (filters.month) {
@@ -196,6 +203,7 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		id: seoLinkId,
 		tenantId: event.locals.tenant.id,
 		clientId: data.clientId,
+		websiteId: data.websiteId || null,
 		pressTrust: data.pressTrust || null,
 		month: data.month,
 		keyword: data.keyword,
@@ -217,6 +225,7 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 
 const createSeoLinksBulkSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1, 'Client is required')),
+	websiteId: v.optional(v.string()),
 	pressTrust: v.optional(v.string()),
 	month: v.pipe(v.string(), v.minLength(1, 'Luna este obligatorie')),
 	keyword: v.pipe(v.string(), v.minLength(1, 'Cuvântul cheie este obligatoriu')),
@@ -253,6 +262,7 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 		id: generateSeoLinkId(),
 		tenantId: event.locals.tenant!.id,
 		clientId: data.clientId,
+		websiteId: data.websiteId || null,
 		pressTrust: data.pressTrust || null,
 		month: data.month,
 		keyword: data.keyword,
@@ -328,6 +338,7 @@ export const updateSeoLink = command(updateSeoLinkSchema,
 			.update(table.seoLink)
 			.set({
 				clientId: updateData.clientId ?? existing.clientId,
+				websiteId: updateData.websiteId !== undefined ? updateData.websiteId : existing.websiteId,
 				pressTrust: updateData.pressTrust !== undefined ? updateData.pressTrust : existing.pressTrust,
 				month: updateData.month ?? existing.month,
 				keyword: updateData.keyword ?? existing.keyword,
@@ -660,7 +671,8 @@ function stripHtml(html: string): string {
 export const extractSeoLinkData = command(
 	v.object({
 		articleUrl: v.pipe(v.string(), v.minLength(1)),
-		clientUrl: v.pipe(v.string(), v.minLength(1))
+		clientUrl: v.optional(v.string()),
+		websiteId: v.optional(v.string())
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -668,7 +680,27 @@ export const extractSeoLinkData = command(
 			throw new Error('Unauthorized');
 		}
 
-		const clientDomain = extractDomainFromUrl(data.clientUrl);
+		// Determină clientUrl din websiteId dacă e furnizat
+		let resolvedClientUrl = data.clientUrl || '';
+		if (data.websiteId) {
+			const [website] = await db
+				.select()
+				.from(table.clientWebsite)
+				.where(
+					and(
+						eq(table.clientWebsite.id, data.websiteId),
+						eq(table.clientWebsite.tenantId, event.locals.tenant.id)
+					)
+				)
+				.limit(1);
+			if (website) resolvedClientUrl = website.url;
+		}
+
+		if (!resolvedClientUrl) {
+			throw new Error('Furnizați un URL de client sau un websiteId valid');
+		}
+
+		const clientDomain = extractDomainFromUrl(resolvedClientUrl);
 		if (!clientDomain) {
 			throw new Error('URL client invalid');
 		}
@@ -709,7 +741,7 @@ export const extractSeoLinkData = command(
 			anchorText: anchorText || keyword,
 			pressTrust,
 			linkType,
-			targetUrl: extractedTargetUrl || (data.clientUrl.startsWith('http') ? data.clientUrl : `https://${data.clientUrl}`),
+			targetUrl: extractedTargetUrl || (resolvedClientUrl.startsWith('http') ? resolvedClientUrl : `https://${resolvedClientUrl}`),
 			articlePublishedAt: articlePublishedAt || undefined
 		};
 	}

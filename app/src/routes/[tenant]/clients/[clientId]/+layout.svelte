@@ -40,7 +40,8 @@
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/clients/${clientId}` },
 		{ id: 'projects', label: `Projects (${projects.length})`, href: `/${tenantSlug}/clients/${clientId}/projects` },
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
-		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` }
+		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
+		{ id: 'seo', label: 'SEO', href: `/${tenantSlug}/clients/${clientId}/seo` }
 	]);
 
 	const activeTab = $derived(() => {
@@ -48,6 +49,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
+		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/seo`)) return 'seo';
 		return 'overview';
 	});
 </script>
@@ -88,7 +90,7 @@
 	</div>
 
 		<Tabs value={activeTab()} class="w-full">
-			<TabsList class="grid w-full grid-cols-4">
+			<TabsList class="grid w-full grid-cols-5">
 				{#each tabs as tab}
 					<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 						{tab.label}

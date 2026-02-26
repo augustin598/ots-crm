@@ -972,6 +972,7 @@ export const seoLink = sqliteTable('seo_link', {
 	price: integer('price'), // in cents
 	currency: text('currency').notNull().default('RON'),
 	anchorText: text('anchor_text'), // Textul ancorat al linkului
+	websiteId: text('website_id').references(() => clientWebsite.id),
 	projectId: text('project_id').references(() => project.id),
 	notes: text('notes'),
 	// Link check status (last verification result)
@@ -980,6 +981,25 @@ export const seoLink = sqliteTable('seo_link', {
 	lastCheckHttpCode: integer('last_check_http_code'),
 	lastCheckError: text('last_check_error'),
 	lastCheckDofollow: text('last_check_dofollow'), // 'dofollow' | 'nofollow' - verified from page, null = neverificat
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const clientWebsite = sqliteTable('client_website', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	name: text('name'), // ex: "Site principal", "Shop", "Blog"
+	url: text('url').notNull(), // ex: "https://brand-a.ro"
+	isDefault: boolean('is_default').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1147,7 +1167,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	matchRules: many(transactionMatchRule),
 	clientUsers: many(clientUser),
 	magicLinkTokens: many(magicLinkToken),
-	seoLinks: many(seoLink)
+	seoLinks: many(seoLink),
+	websites: many(clientWebsite)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -1179,6 +1200,10 @@ export const seoLinkRelations = relations(seoLink, ({ one, many }) => ({
 		fields: [seoLink.clientId],
 		references: [client.id]
 	}),
+	website: one(clientWebsite, {
+		fields: [seoLink.websiteId],
+		references: [clientWebsite.id]
+	}),
 	project: one(project, {
 		fields: [seoLink.projectId],
 		references: [project.id]
@@ -1191,6 +1216,18 @@ export const seoLinkCheckRelations = relations(seoLinkCheck, ({ one }) => ({
 		fields: [seoLinkCheck.seoLinkId],
 		references: [seoLink.id]
 	})
+}));
+
+export const clientWebsiteRelations = relations(clientWebsite, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [clientWebsite.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [clientWebsite.clientId],
+		references: [client.id]
+	}),
+	seoLinks: many(seoLink)
 }));
 
 export const milestoneRelations = relations(milestone, ({ one, many }) => ({
