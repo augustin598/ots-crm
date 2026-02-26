@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
+	import { getClientWebsites } from '$lib/remotes/client-websites.remote';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -40,16 +41,23 @@
 	let filterMonth = $state('');
 	let filterStatus = $state('');
 	let filterCheckStatus = $state('');
+	let filterWebsiteId = $state('');
 
 	const filterParams = $derived({
 		month: filterMonth || undefined,
 		status: filterStatus || undefined,
-		checkStatus: filterCheckStatus || undefined
+		checkStatus: filterCheckStatus || undefined,
+		websiteId: filterWebsiteId || undefined
 	});
 
 	const seoLinksQuery = $derived(getSeoLinks(filterParams));
 	const seoLinks = $derived(seoLinksQuery.current || []);
 	const loading = $derived(seoLinksQuery.loading);
+
+	const clientId = $derived((page.data as any)?.client?.id as string | undefined);
+	const websitesQuery = $derived(clientId ? getClientWebsites(clientId) : null);
+	const websites = $derived(websitesQuery?.current || []);
+	const websiteMap = $derived(new Map(websites.map((w) => [w.id, w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')])));
 
 	function getStatusLabel(status: string) {
 		const labels: Record<string, string> = {
@@ -260,6 +268,28 @@
 				</SelectContent>
 			</Select>
 		</div>
+		{#if websites.length > 1}
+		<div class="min-w-[160px]">
+			<Label class="text-xs text-muted-foreground">Website</Label>
+			<Select
+				value={filterWebsiteId || 'all'}
+				type="single"
+				onValueChange={(v: string | undefined) => {
+					filterWebsiteId = v === 'all' ? '' : v || '';
+				}}
+			>
+				<SelectTrigger>
+					{filterWebsiteId ? (websiteMap.get(filterWebsiteId) || 'Website') : 'Toate'}
+				</SelectTrigger>
+				<SelectContent>
+					<SelectItem value="all">Toate</SelectItem>
+					{#each websites as w}
+						<SelectItem value={w.id}>{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}</SelectItem>
+					{/each}
+				</SelectContent>
+			</Select>
+		</div>
+		{/if}
 	</div>
 
 	{#if loading}
