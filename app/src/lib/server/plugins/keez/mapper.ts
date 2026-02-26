@@ -491,8 +491,9 @@ export function mapInvoiceToKeez(
 
 	// Map CRM paymentMethod to Keez paymentTypeId
 	// Keez payment types: 1=BFCash, 2=BFCard, 3=Bank, 4=ChitCash, 5=Ramburs, 6=ProcesatorPlati, 7=PlatformaDistributie, 8=VoucherVacantaCard, 9=VoucherVacantaTichet
+	const settingsDefaultPaymentTypeId = settings?.keezDefaultPaymentTypeId ?? 3;
 	const mapPaymentTypeId = (paymentMethod: string | null | undefined): number => {
-		if (!paymentMethod) return 3; // Default: Bank Transfer
+		if (!paymentMethod) return settingsDefaultPaymentTypeId;
 		const pm = paymentMethod.toLowerCase().trim();
 		// Exact Keez code matches
 		if (pm === 'bfcash') return 1;

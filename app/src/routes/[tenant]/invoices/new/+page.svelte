@@ -36,7 +36,10 @@
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { CURRENCIES, type Currency, formatAmount } from '$lib/utils/currency';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
-	import { Calendar, X, Plus, Trash2, FileText, Send, Save } from '@lucide/svelte';
+	import { Calendar as CalendarIcon, X, Plus, Trash2, FileText, Send, Save, Hash, CreditCard, ArrowLeftRight, Percent, Clock, FolderOpen, RefreshCw, BadgePercent, Banknote, User, Building2, MapPin, Mail, Phone, Landmark } from '@lucide/svelte';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import * as Popover from '$lib/components/ui/popover';
+	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import { toast } from 'svelte-sonner';
 	import { untrack } from 'svelte';
 
@@ -158,7 +161,25 @@
 	);
 	let issueDate = $state(new Date().toISOString().split('T')[0]);
 	let dueDate = $state('');
-	let paymentTerms = $state('Net 15');
+	let paymentTermsDays = $state(5);
+	const paymentTerms = $derived(`Net ${paymentTermsDays}`);
+	// Map keezDefaultPaymentTypeId (integer) to Keez code string
+	const KEEZ_PAYMENT_ID_TO_CODE: Record<number, string> = {
+		1: 'BFCash', 2: 'BFCard', 3: 'Bank', 4: 'ChitCash',
+		5: 'Ramburs', 6: 'ProcesatorPlati', 7: 'PlatformaDistributie',
+		8: 'VoucherVacantaCard', 9: 'VoucherVacantaTichet'
+	};
+	const KEEZ_PAYMENT_LABELS: Record<string, string> = {
+		BFCash: 'Bon fiscal platit cu numerar',
+		BFCard: 'Bon fiscal platit cu cardul',
+		Bank: 'Transfer bancar',
+		ChitCash: 'Plată numerar cu chitanță',
+		Ramburs: 'Ramburs',
+		ProcesatorPlati: 'Procesator plăți (PayU, Netopia, euplatesc)',
+		PlatformaDistributie: 'Platforme distribuție și plată (Emag)',
+		VoucherVacantaCard: 'Voucher de Vacanță - Card',
+		VoucherVacantaTichet: 'Voucher de Vacanță - Tichet'
+	};
 	let paymentMethod = $state('Bank Transfer');
 	let exchangeRate = $state('');
 	let vatOnCollection = $state(false);
@@ -176,8 +197,13 @@
 	let recurringInterval = $state(1);
 	let recurringStartDate = $state(new Date().toISOString().split('T')[0]);
 	let recurringEndDate = $state('');
+	let recurringStartDateValue = $state<DateValue | undefined>((() => { const d = new Date(); return new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate()); })());
+	let recurringEndDateValue = $state<DateValue | undefined>(undefined);
+	let recurringStartDateOpen = $state(false);
+	let recurringEndDateOpen = $state(false);
 	let recurringIssueDateOffset = $state(0);
 	let recurringDueDateOffset = $state(30);
+	let recurringDurationMonths = $state<number | undefined>(undefined);
 	let addItemDialogOpen = $state(false);
 	let dialogSourceType = $state<string>('manual');
 	let dialogServiceId = $state('');
@@ -213,6 +239,10 @@
 			if (invoiceSettings.defaultCurrency) {
 				currency = invoiceSettings.defaultCurrency as Currency;
 				invoiceCurrency = invoiceSettings.defaultCurrency as Currency;
+			}
+			// Set default payment method from Keez settings
+			if (isKeezActive && invoiceSettings.keezDefaultPaymentTypeId) {
+				paymentMethod = KEEZ_PAYMENT_ID_TO_CODE[invoiceSettings.keezDefaultPaymentTypeId] || 'Bank';
 			}
 		}
 
@@ -305,6 +335,31 @@
 		if (isRecurringInvoice) {
 			issueDate = calculatedIssueDate;
 			dueDate = calculatedDueDate;
+		}
+	});
+
+	// Sync recurringStartDateValue -> recurringStartDate string
+	$effect(() => {
+		if (recurringStartDateValue) {
+			recurringStartDate = `${recurringStartDateValue.year}-${String(recurringStartDateValue.month).padStart(2, '0')}-${String(recurringStartDateValue.day).padStart(2, '0')}`;
+		}
+	});
+
+	// Sync recurringEndDateValue -> recurringEndDate string
+	$effect(() => {
+		if (recurringEndDateValue) {
+			recurringEndDate = `${recurringEndDateValue.year}-${String(recurringEndDateValue.month).padStart(2, '0')}-${String(recurringEndDateValue.day).padStart(2, '0')}`;
+		} else {
+			recurringEndDate = '';
+		}
+	});
+
+	// Auto-calculate End Date from Start Date + duration months
+	$effect(() => {
+		if (recurringDurationMonths && recurringDurationMonths > 0 && recurringStartDateValue) {
+			const d = new Date(recurringStartDate + 'T00:00:00');
+			d.setMonth(d.getMonth() + recurringDurationMonths);
+			recurringEndDateValue = new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
 		}
 	});
 
@@ -766,365 +821,451 @@
 		<!-- Client and Invoice Details - Two Columns -->
 		<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
 			<!-- Client Information Card -->
-			<Card class="border border-gray-200">
-				<CardContent class="p-6">
-					<div class="space-y-4">
-						<p class="mb-4 text-sm font-semibold text-gray-900">Client Information</p>
-						<div class="flex gap-2">
-							<div class="flex-1">
-								<Combobox
-									bind:value={clientId}
-									options={clientOptions}
-									placeholder="Select a client"
-									searchPlaceholder="Search clients..."
-								/>
-							</div>
-							<Button
-								type="button"
-								variant="default"
-								onclick={() => goto(`/${tenantSlug}/clients/new`)}
-							>
-								<Plus class="mr-2 h-4 w-4" />
-								Add New Client
-							</Button>
+			<Card class="border shadow-sm">
+				<CardContent class="space-y-5 p-6">
+					<div class="flex items-center justify-between border-b pb-4">
+						<div class="flex items-center gap-2">
+							<User class="h-4 w-4 text-muted-foreground" />
+							<h2 class="text-sm font-semibold">Client Information</h2>
 						</div>
 						{#if currentClient}
-							<div class="mt-4 space-y-4 border-t border-gray-200 pt-4">
-								<!-- Basic Information -->
-								<div class="grid grid-cols-2 gap-4">
-									<div class="space-y-2">
-										<Label>Name</Label>
-										<Input bind:value={clientName} />
-									</div>
-
-									<div class="space-y-2">
-										<Label>Email</Label>
-										<Input bind:value={clientEmail} type="email" />
-									</div>
-									<div class="space-y-2">
-										<Label>Phone</Label>
-										<Input bind:value={clientPhone} />
-									</div>
-								</div>
-
-								<!-- Legal Information -->
-								<div class="grid grid-cols-2 gap-4 pt-2">
-									<div class="space-y-2">
-										<Label>Vat ID</Label>
-										<Input bind:value={clientCui} />
-									</div>
-									<div class="space-y-2">
-										<Label>Registration Number</Label>
-										<Input bind:value={clientRegistrationNumber} />
-									</div>
-								</div>
-
-								<!-- Banking Information -->
-								<div class="grid grid-cols-2 gap-4 pt-2">
-									<div class="space-y-2">
-										<Label>IBAN</Label>
-										<Input bind:value={clientIban} />
-									</div>
-									<div class="space-y-2">
-										<Label>Bank Name</Label>
-										<Input bind:value={clientBankName} />
-									</div>
-								</div>
-
-								<!-- Address Information -->
-								<div class="grid grid-cols-2 gap-4 pt-2">
-									<div class="space-y-2">
-										<Label>Address</Label>
-										<Input bind:value={clientAddress} />
-									</div>
-									<div class="space-y-2">
-										<Label>City</Label>
-										<Input bind:value={clientCity} />
-									</div>
-									<div class="space-y-2">
-										<Label>County</Label>
-										<Input bind:value={clientCounty} />
-									</div>
-									<div class="space-y-2">
-										<Label>Postal Code</Label>
-										<Input bind:value={clientPostalCode} />
-									</div>
-									<div class="space-y-2">
-										<Label>Country</Label>
-										<Input bind:value={clientCountry} />
-									</div>
-								</div>
-							</div>
+							<span class="text-xs text-muted-foreground">{currentClient.name}</span>
 						{/if}
 					</div>
+					<!-- Client Selector -->
+					<div class="flex gap-2">
+						<div class="flex-1">
+							<Combobox
+								bind:value={clientId}
+								options={clientOptions}
+								placeholder="Select a client"
+								searchPlaceholder="Search clients..."
+							/>
+						</div>
+						<Button
+							type="button"
+							variant="default"
+							onclick={() => goto(`/${tenantSlug}/clients/new`)}
+						>
+							<Plus class="mr-2 h-4 w-4" />
+							Add New Client
+						</Button>
+					</div>
+
+					{#if currentClient}
+						<!-- Contact -->
+						<div class="rounded-xl border border-teal-100 bg-teal-50/60 p-4 dark:border-teal-900/40 dark:bg-teal-950/20">
+							<div class="mb-3 flex items-center gap-2">
+								<div class="rounded-md bg-teal-100 p-1.5 dark:bg-teal-900/50">
+									<User class="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+								</div>
+								<span class="text-xs font-semibold uppercase tracking-widest text-teal-600 dark:text-teal-400">Contact</span>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Name</Label>
+									<Input bind:value={clientName} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Mail class="h-3 w-3" /> Email
+									</Label>
+									<Input bind:value={clientEmail} type="email" />
+								</div>
+								<div class="col-span-2 space-y-1.5">
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Phone class="h-3 w-3" /> Phone
+									</Label>
+									<Input bind:value={clientPhone} />
+								</div>
+							</div>
+						</div>
+
+						<!-- Legal -->
+						<div class="rounded-xl border border-amber-100 bg-amber-50/60 p-4 dark:border-amber-900/40 dark:bg-amber-950/20">
+							<div class="mb-3 flex items-center gap-2">
+								<div class="rounded-md bg-amber-100 p-1.5 dark:bg-amber-900/50">
+									<Building2 class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+								</div>
+								<span class="text-xs font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Legal</span>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">VAT ID</Label>
+									<Input bind:value={clientCui} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Registration Number</Label>
+									<Input bind:value={clientRegistrationNumber} />
+								</div>
+							</div>
+						</div>
+
+						<!-- Banking -->
+						<div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+							<div class="mb-3 flex items-center gap-2">
+								<div class="rounded-md bg-emerald-100 p-1.5 dark:bg-emerald-900/50">
+									<Landmark class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+								</div>
+								<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Banking</span>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">IBAN</Label>
+									<Input bind:value={clientIban} class="font-mono" />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Bank Name</Label>
+									<Input bind:value={clientBankName} />
+								</div>
+							</div>
+						</div>
+
+						<!-- Address -->
+						<div class="rounded-xl border border-sky-100 bg-sky-50/60 p-4 dark:border-sky-900/40 dark:bg-sky-950/20">
+							<div class="mb-3 flex items-center gap-2">
+								<div class="rounded-md bg-sky-100 p-1.5 dark:bg-sky-900/50">
+									<MapPin class="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+								</div>
+								<span class="text-xs font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Address</span>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="col-span-2 space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Street Address</Label>
+									<Input bind:value={clientAddress} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">City</Label>
+									<Input bind:value={clientCity} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">County</Label>
+									<Input bind:value={clientCounty} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Postal Code</Label>
+									<Input bind:value={clientPostalCode} />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Country</Label>
+									<Input bind:value={clientCountry} />
+								</div>
+							</div>
+						</div>
+					{/if}
 				</CardContent>
 			</Card>
 
 			<!-- Invoice Details Card -->
-			<Card class="border border-gray-200">
-				<CardContent class="p-6">
-					<div class="space-y-4">
-						<p class="mb-4 text-sm font-semibold text-gray-900">Invoice Details</p>
-						<div class="grid grid-cols-2 gap-4">
-							<div class="space-y-2">
-								<Label>Series</Label>
-								<Input bind:value={invoiceSeries} placeholder="Enter invoice series" />
+			<Card class="border shadow-sm">
+				<CardContent class="space-y-5 p-6">
+					<div class="flex items-center justify-between border-b pb-4">
+						<div class="flex items-center gap-2">
+							<FileText class="h-4 w-4 text-muted-foreground" />
+							<h2 class="text-sm font-semibold">Invoice Details</h2>
+						</div>
+						<span class="font-mono text-xs text-muted-foreground">
+							{invoiceSeries || '—'} #{invoiceNumber || '—'}
+						</span>
+					</div>
+					<!-- Series & Number -->
+					<div class="rounded-xl border border-violet-100 bg-violet-50/60 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+						<div class="mb-3 flex items-center gap-2">
+							<div class="rounded-md bg-violet-100 p-1.5 dark:bg-violet-900/50">
+								<Hash class="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
 							</div>
-							<div class="space-y-2">
-								<Label>Number</Label>
+							<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">Invoice Number</span>
+						</div>
+						<div class="grid grid-cols-2 gap-3">
+							<div class="space-y-1.5">
+								<Label class="text-xs text-muted-foreground">Series</Label>
+								<Input bind:value={invoiceSeries} placeholder="OTS" class="font-mono font-semibold" />
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs text-muted-foreground">
+									Number {#if isKeezActive}<span class="ml-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:bg-violet-900/50 dark:text-violet-400">auto</span>{/if}
+								</Label>
 								<Input
 									bind:value={invoiceNumber}
-									placeholder="521"
+									placeholder="533"
 									readonly={isKeezActive}
 									disabled={isKeezActive}
-									class={isKeezActive ? 'opacity-70 cursor-not-allowed' : ''}
+									class="font-mono font-semibold {isKeezActive ? 'cursor-not-allowed opacity-60' : ''}"
 								/>
 							</div>
-							<div class="space-y-2">
-								<Label>Date</Label>
-								<div class="relative">
-									<Calendar
-										class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform text-gray-400"
-									/>
-									<Input
-										bind:value={issueDate}
-										type="date"
-										class="pl-10"
-										required
-										disabled={isRecurringInvoice}
-										readonly={isRecurringInvoice}
-									/>
-									{#if isRecurringInvoice}
-										<p class="mt-1 text-xs text-muted-foreground">
-											Calculated: {calculatedIssueDate}
-										</p>
-									{/if}
-								</div>
-							</div>
-							<div class="space-y-2">
-								<Label>Payment Terms</Label>
-								<Select type="single" bind:value={paymentTerms}>
-									<SelectTrigger>
-										{paymentTerms || 'Select payment terms'}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="Net 15">Net 15</SelectItem>
-										<SelectItem value="Net 30">Net 30</SelectItem>
-										<SelectItem value="Net 45">Net 45</SelectItem>
-										<SelectItem value="Net 60">Net 60</SelectItem>
-										<SelectItem value="Net 90">Net 90</SelectItem>
-										<SelectItem value="Due on Receipt">Due on Receipt</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="space-y-2">
-								<Label>Due Date</Label>
-								<div class="relative">
-									<Calendar
-										class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform text-gray-400"
-									/>
-									<Input
-										bind:value={dueDate}
-										type="date"
-										class="pl-10"
-										required
-										disabled={isRecurringInvoice}
-										readonly={isRecurringInvoice}
-									/>
-									{#if isRecurringInvoice}
-										<p class="mt-1 text-xs text-muted-foreground">
-											Calculated: {calculatedDueDate}
-										</p>
-									{/if}
-								</div>
-							</div>
-							<div class="space-y-2">
-								<Label>Project</Label>
-								<Combobox
-									bind:value={projectId}
-									options={[
-										{ value: '', label: 'None' },
-										...filteredProjects.map((p) => ({ value: p.id, label: p.name }))
-									]}
-									placeholder="Select a project (optional)"
-									searchPlaceholder="Search projects..."
-								/>
-							</div>
-							<div class="space-y-2">
-								<Label>Payment</Label>
-								<Select type="single" bind:value={paymentMethod}>
-									<SelectTrigger>
-										{paymentMethod || 'Select payment method'}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-										<SelectItem value="BFCard">Bon Fiscal Card</SelectItem>
-										<SelectItem value="BFCash">Bon Fiscal Cash</SelectItem>
-										<SelectItem value="ChitCash">Chitanță Cash</SelectItem>
-										<SelectItem value="Ramburs">Ramburs</SelectItem>
-										<SelectItem value="ProcesatorPlati">Procesator Plăți</SelectItem>
-										<SelectItem value="PlatformaDistributie">Platformă Distribuție</SelectItem>
-										<SelectItem value="VoucherVacantaCard">Voucher Vacanță Card</SelectItem>
-										<SelectItem value="VoucherVacantaTichet">Voucher Vacanță Tichet</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="space-y-2">
-								<Label>Calculation Currency</Label>
-								<Select type="single" bind:value={currency}>
-									<SelectTrigger>
-										{currency}
-									</SelectTrigger>
-									<SelectContent>
-										{#each CURRENCIES as curr}
-											<SelectItem value={curr}>{curr}</SelectItem>
-										{/each}
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="space-y-2">
-								<Label>Invoice Currency</Label>
-								<Select type="single" bind:value={invoiceCurrency}>
-									<SelectTrigger>
-										{invoiceCurrency}
-									</SelectTrigger>
-									<SelectContent>
-										{#each CURRENCIES as curr}
-											<SelectItem value={curr}>{curr}</SelectItem>
-										{/each}
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="space-y-2">
-								<Label>Exchange Rate</Label>
-								<Input
-									bind:value={exchangeRate}
-									placeholder={currency === invoiceCurrency ? '1,0000' : 'Enter exchange rate'}
-								/>
-							</div>
-							<div class="space-y-2">
-								<Label>Tax Application</Label>
-								<Select type="single" bind:value={taxApplicationType}>
-									<SelectTrigger>
-										{taxApplicationType === 'apply'
-											? 'Apply Tax (Normala)'
-											: taxApplicationType === 'none'
-												? 'Do Not Apply Tax'
-												: 'Reverse Tax (Taxare inversa)'}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="apply">Apply Tax (Normala)</SelectItem>
-										<SelectItem value="none">Do Not Apply Tax</SelectItem>
-										<SelectItem value="reverse">Reverse Tax (Taxare inversa)</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div class="col-span-2 mt-2 flex items-center gap-4">
-								<div class="flex items-center gap-2">
-									<Checkbox id="vat-on-collection" bind:checked={vatOnCollection} />
-									<label for="vat-on-collection" class="cursor-pointer text-sm text-gray-700">
-										VAT on Collection
-									</label>
-								</div>
-								<div class="flex items-center gap-2">
-									<Checkbox id="credit-note" bind:checked={isCreditNote} />
-									<label for="credit-note" class="cursor-pointer text-sm text-gray-700">
-										Credit Note
-									</label>
-								</div>
-								<div class="flex items-center gap-2">
-									<Checkbox id="recurring-invoice" bind:checked={isRecurringInvoice} />
-									<label for="recurring-invoice" class="cursor-pointer text-sm text-gray-700">
-										Create as Recurring Invoice
-									</label>
-								</div>
-							</div>
-							{#if isRecurringInvoice}
-								<div class="col-span-2 mt-4 space-y-4 border-t border-gray-200 pt-4">
-									<p class="text-sm font-semibold text-gray-900">Recurring Settings</p>
-
-									<div class="grid grid-cols-2 gap-4">
-										<div class="space-y-2">
-											<Label>Recurring Type</Label>
-											<Select type="single" bind:value={recurringType}>
-												<SelectTrigger>
-													{recurringType.charAt(0).toUpperCase() + recurringType.slice(1)}
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="daily">Daily</SelectItem>
-													<SelectItem value="weekly">Weekly</SelectItem>
-													<SelectItem value="monthly">Monthly</SelectItem>
-													<SelectItem value="yearly">Yearly</SelectItem>
-												</SelectContent>
-											</Select>
-										</div>
-
-										<div class="space-y-2">
-											<Label>Interval</Label>
-											<Input
-												type="number"
-												bind:value={recurringInterval}
-												min="1"
-												placeholder="1"
-											/>
-											<p class="text-xs text-muted-foreground">
-												Every {recurringInterval} {recurringInterval === 1
-													? recurringType === 'daily'
-														? 'day'
-														: recurringType === 'weekly'
-															? 'week'
-															: recurringType === 'monthly'
-																? 'month'
-																: 'year'
-													: recurringType === 'daily'
-														? 'days'
-														: recurringType === 'weekly'
-															? 'weeks'
-															: recurringType === 'monthly'
-																? 'months'
-																: 'years'}
-											</p>
-										</div>
-
-										<div class="space-y-2">
-											<Label>Start Date</Label>
-											<Input
-												type="date"
-												bind:value={recurringStartDate}
-												required
-											/>
-										</div>
-
-										<div class="space-y-2">
-											<Label>End Date (Optional)</Label>
-											<Input
-												type="date"
-												bind:value={recurringEndDate}
-											/>
-										</div>
-
-										<div class="space-y-2">
-											<Label>Issue Date Offset (days)</Label>
-											<Input
-												type="number"
-												bind:value={recurringIssueDateOffset}
-												placeholder="0"
-											/>
-										</div>
-
-										<div class="space-y-2">
-											<Label>Due Date Offset (days)</Label>
-											<Input
-												type="number"
-												bind:value={recurringDueDateOffset}
-												placeholder="30"
-											/>
-										</div>
-									</div>
-								</div>
-							{/if}
 						</div>
 					</div>
+
+					<!-- Dates & Terms -->
+					<div class="grid grid-cols-2 gap-4">
+						<div class="space-y-1.5">
+							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+								<CalendarIcon class="h-3.5 w-3.5 text-indigo-400" /> Date
+							</Label>
+							<Input
+								bind:value={issueDate}
+								type="date"
+								required
+								disabled={isRecurringInvoice}
+								readonly={isRecurringInvoice}
+							/>
+							{#if isRecurringInvoice}
+								<p class="text-xs text-muted-foreground">Calculated: {calculatedIssueDate}</p>
+							{/if}
+						</div>
+						<div class="space-y-1.5">
+							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+								<Clock class="h-3.5 w-3.5 text-indigo-400" /> Payment Terms (days)
+							</Label>
+							<Input
+								type="number"
+								min="0"
+								bind:value={paymentTermsDays}
+								placeholder="5"
+							/>
+						</div>
+						<div class="space-y-1.5">
+							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+								<CalendarIcon class="h-3.5 w-3.5 text-rose-400" /> Due Date
+							</Label>
+							<Input
+								bind:value={dueDate}
+								type="date"
+								required
+								disabled={isRecurringInvoice}
+								readonly={isRecurringInvoice}
+							/>
+							{#if isRecurringInvoice}
+								<p class="text-xs text-muted-foreground">Calculated: {calculatedDueDate}</p>
+							{/if}
+						</div>
+						<div class="space-y-1.5">
+							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+								<FolderOpen class="h-3.5 w-3.5 text-amber-400" /> Project
+							</Label>
+							<Combobox
+								bind:value={projectId}
+								options={[
+									{ value: '', label: 'None' },
+									...filteredProjects.map((p) => ({ value: p.id, label: p.name }))
+								]}
+								placeholder="Select a project (optional)"
+								searchPlaceholder="Search projects..."
+							/>
+						</div>
+					</div>
+
+					<!-- Payment & Currency -->
+					<div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+						<div class="mb-3 flex items-center gap-2">
+							<div class="rounded-md bg-emerald-100 p-1.5 dark:bg-emerald-900/50">
+								<Banknote class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+							</div>
+							<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Payment & Currency</span>
+						</div>
+						<div class="grid grid-cols-2 gap-3">
+							<div class="space-y-1.5">
+								<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+									<CreditCard class="h-3 w-3" /> Payment
+								</Label>
+								<Select type="single" bind:value={paymentMethod}>
+									<SelectTrigger>
+										{isKeezActive
+											? (KEEZ_PAYMENT_LABELS[paymentMethod] || paymentMethod || 'Select method')
+											: (paymentMethod || 'Select method')}
+									</SelectTrigger>
+									<SelectContent>
+										{#if isKeezActive}
+											<SelectItem value="BFCash">Bon fiscal platit cu numerar</SelectItem>
+											<SelectItem value="BFCard">Bon fiscal platit cu cardul</SelectItem>
+											<SelectItem value="Bank">Transfer bancar</SelectItem>
+											<SelectItem value="ChitCash">Plată numerar cu chitanță</SelectItem>
+											<SelectItem value="Ramburs">Ramburs</SelectItem>
+											<SelectItem value="ProcesatorPlati">Procesator plăți (PayU, Netopia, euplatesc)</SelectItem>
+											<SelectItem value="PlatformaDistributie">Platforme distribuție și plată (Emag)</SelectItem>
+											<SelectItem value="VoucherVacantaCard">Voucher de Vacanță - Card</SelectItem>
+											<SelectItem value="VoucherVacantaTichet">Voucher de Vacanță - Tichet</SelectItem>
+										{:else}
+											<SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+											<SelectItem value="Cash">Cash</SelectItem>
+											<SelectItem value="Card">Card</SelectItem>
+											<SelectItem value="Ramburs">Ramburs</SelectItem>
+										{/if}
+									</SelectContent>
+								</Select>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs text-muted-foreground">Calculation Currency</Label>
+								<Select type="single" bind:value={currency}>
+									<SelectTrigger>{currency}</SelectTrigger>
+									<SelectContent>
+										{#each CURRENCIES as curr}
+											<SelectItem value={curr}>{curr}</SelectItem>
+										{/each}
+									</SelectContent>
+								</Select>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs text-muted-foreground">Invoice Currency</Label>
+								<Select type="single" bind:value={invoiceCurrency}>
+									<SelectTrigger>{invoiceCurrency}</SelectTrigger>
+									<SelectContent>
+										{#each CURRENCIES as curr}
+											<SelectItem value={curr}>{curr}</SelectItem>
+										{/each}
+									</SelectContent>
+								</Select>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+									<ArrowLeftRight class="h-3 w-3" /> Exchange Rate
+								</Label>
+								<Input
+									bind:value={exchangeRate}
+									placeholder={currency === invoiceCurrency ? '1,0000' : 'Rate'}
+									class="font-mono"
+								/>
+							</div>
+						</div>
+					</div>
+
+					<!-- Tax Application -->
+					<div class="space-y-1.5">
+						<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+							<Percent class="h-3.5 w-3.5 text-orange-400" /> Tax Application
+						</Label>
+						<Select type="single" bind:value={taxApplicationType}>
+							<SelectTrigger>
+								{taxApplicationType === 'apply'
+									? 'Apply Tax (Normala)'
+									: taxApplicationType === 'none'
+										? 'Do Not Apply Tax'
+										: 'Reverse Tax (Taxare inversa)'}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="apply">Apply Tax (Normala)</SelectItem>
+								<SelectItem value="none">Do Not Apply Tax</SelectItem>
+								<SelectItem value="reverse">Reverse Tax (Taxare inversa)</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					<!-- Options -->
+					<div class="flex flex-wrap gap-2 border-t border-dashed pt-4">
+						<label class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all
+							{vatOnCollection ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border bg-background text-muted-foreground hover:border-blue-200 hover:text-blue-600'}">
+							<Checkbox id="vat-on-collection" bind:checked={vatOnCollection} class="sr-only" />
+							<span class="h-1.5 w-1.5 rounded-full {vatOnCollection ? 'bg-blue-500' : 'bg-muted-foreground/40'}"></span>
+							VAT on Collection
+						</label>
+						<label class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all
+							{isCreditNote ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'border-border bg-background text-muted-foreground hover:border-amber-200 hover:text-amber-600'}">
+							<Checkbox id="credit-note" bind:checked={isCreditNote} class="sr-only" />
+							<span class="h-1.5 w-1.5 rounded-full {isCreditNote ? 'bg-amber-500' : 'bg-muted-foreground/40'}"></span>
+							Credit Note
+						</label>
+						<label class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all
+							{isRecurringInvoice ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'border-border bg-background text-muted-foreground hover:border-violet-200 hover:text-violet-600'}">
+							<Checkbox id="recurring-invoice" bind:checked={isRecurringInvoice} class="sr-only" />
+							<span class="h-1.5 w-1.5 rounded-full {isRecurringInvoice ? 'bg-violet-500' : 'bg-muted-foreground/40'}"></span>
+							Recurring Invoice
+						</label>
+					</div>
+
+					<!-- Recurring Settings -->
+					{#if isRecurringInvoice}
+						<div class="rounded-xl border border-violet-100 bg-violet-50/60 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+							<div class="mb-3 flex items-center gap-2">
+								<div class="rounded-md bg-violet-100 p-1.5 dark:bg-violet-900/50">
+									<RefreshCw class="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+								</div>
+								<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">Recurring Settings</span>
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Recurring Type</Label>
+									<Select type="single" bind:value={recurringType}>
+										<SelectTrigger>
+											{recurringType.charAt(0).toUpperCase() + recurringType.slice(1)}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="daily">Daily</SelectItem>
+											<SelectItem value="weekly">Weekly</SelectItem>
+											<SelectItem value="monthly">Monthly</SelectItem>
+											<SelectItem value="yearly">Yearly</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Durată (luni)</Label>
+									<Input
+										type="number"
+										min="1"
+										bind:value={recurringDurationMonths}
+										placeholder="ex: 6"
+									/>
+									{#if recurringDurationMonths && recurringDurationMonths > 0 && recurringStartDate}
+										<p class="text-xs text-muted-foreground">
+											Până la {new Date(recurringStartDate + 'T00:00:00').toLocaleDateString('ro-RO', { month: 'short', year: 'numeric', day: '2-digit' })} + {recurringDurationMonths} luni
+										</p>
+									{/if}
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Interval</Label>
+									<Input type="number" bind:value={recurringInterval} min="1" placeholder="1" />
+									<p class="text-xs text-muted-foreground">
+										Every {recurringInterval} {recurringInterval === 1
+											? recurringType === 'daily' ? 'day' : recurringType === 'weekly' ? 'week' : recurringType === 'monthly' ? 'month' : 'year'
+											: recurringType === 'daily' ? 'days' : recurringType === 'weekly' ? 'weeks' : recurringType === 'monthly' ? 'months' : 'years'}
+									</p>
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Start Date</Label>
+									<Popover.Root bind:open={recurringStartDateOpen}>
+										<Popover.Trigger>
+											{#snippet child({ props })}
+												<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm">
+													<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+													{recurringStartDateValue
+														? new Date(recurringStartDate + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+														: 'Alege data'}
+												</Button>
+											{/snippet}
+										</Popover.Trigger>
+										<Popover.Content class="w-auto p-0" align="start">
+											<Calendar type="single" bind:value={recurringStartDateValue} onValueChange={() => (recurringStartDateOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+										</Popover.Content>
+									</Popover.Root>
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">End Date (Optional)</Label>
+									<Popover.Root bind:open={recurringEndDateOpen}>
+										<Popover.Trigger>
+											{#snippet child({ props })}
+												<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm">
+													<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+													{recurringEndDateValue
+														? new Date(recurringEndDate + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+														: 'Fără dată de sfârșit'}
+												</Button>
+											{/snippet}
+										</Popover.Trigger>
+										<Popover.Content class="w-auto p-0" align="start">
+											<Calendar type="single" bind:value={recurringEndDateValue} onValueChange={() => (recurringEndDateOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+										</Popover.Content>
+									</Popover.Root>
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Issue Date Offset (days)</Label>
+									<Input type="number" bind:value={recurringIssueDateOffset} placeholder="0" />
+								</div>
+								<div class="space-y-1.5">
+									<Label class="text-xs text-muted-foreground">Due Date Offset (days)</Label>
+									<Input type="number" bind:value={recurringDueDateOffset} placeholder="30" />
+								</div>
+							</div>
+						</div>
+					{/if}
 				</CardContent>
 			</Card>
 		</div>

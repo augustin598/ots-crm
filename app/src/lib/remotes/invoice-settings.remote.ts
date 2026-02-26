@@ -36,6 +36,7 @@ export const getInvoiceSettings = query(async () => {
 			keezStartNumber: null,
 			keezLastSyncedNumber: null,
 			keezAutoSync: false,
+			keezDefaultPaymentTypeId: 3,
 			defaultCurrency: 'RON',
 			defaultTaxRate: 19,
 			invoiceEmailsEnabled: true
@@ -54,6 +55,7 @@ export const getInvoiceSettings = query(async () => {
 		keezStartNumber: settings.keezStartNumber,
 		keezLastSyncedNumber: settings.keezLastSyncedNumber,
 		keezAutoSync: settings.keezAutoSync,
+		keezDefaultPaymentTypeId: settings.keezDefaultPaymentTypeId ?? 3,
 		defaultCurrency: settings.defaultCurrency || 'RON',
 		defaultTaxRate: settings.defaultTaxRate ?? 19,
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true
@@ -71,6 +73,7 @@ export const updateInvoiceSettings = command(
 		keezSeries: v.optional(v.string()),
 		keezStartNumber: v.optional(v.string()),
 		keezAutoSync: v.optional(v.boolean()),
+		keezDefaultPaymentTypeId: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(9))),
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 		defaultTaxRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))), // VAT percentage (0-100)
 		invoiceEmailsEnabled: v.optional(v.boolean())
@@ -112,6 +115,8 @@ export const updateInvoiceSettings = command(
 					keezSeries: data.keezSeries !== undefined ? data.keezSeries : undefined,
 					keezStartNumber: data.keezStartNumber !== undefined ? data.keezStartNumber : undefined,
 					keezAutoSync: data.keezAutoSync !== undefined ? data.keezAutoSync : undefined,
+					keezDefaultPaymentTypeId:
+						data.keezDefaultPaymentTypeId !== undefined ? data.keezDefaultPaymentTypeId : undefined,
 					defaultCurrency: data.defaultCurrency !== undefined ? data.defaultCurrency : undefined,
 					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
 					invoiceEmailsEnabled:
@@ -136,6 +141,7 @@ export const updateInvoiceSettings = command(
 				keezStartNumber: data.keezStartNumber || null,
 				keezLastSyncedNumber: null,
 				keezAutoSync: data.keezAutoSync ?? false,
+				keezDefaultPaymentTypeId: data.keezDefaultPaymentTypeId ?? 3,
 				defaultCurrency: data.defaultCurrency || 'RON',
 				defaultTaxRate: data.defaultTaxRate ?? 19,
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true

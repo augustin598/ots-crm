@@ -33,6 +33,7 @@
 	let keezSeries = $state(settings?.keezSeries || '');
 	let keezStartNumber = $state(settings?.keezStartNumber || '');
 	let keezAutoSync = $state(settings?.keezAutoSync || false);
+	let keezDefaultPaymentTypeId = $state(settings?.keezDefaultPaymentTypeId ?? 3);
 	let defaultCurrency = $state<Currency>((settings?.defaultCurrency || 'RON') as Currency);
 	let defaultTaxRate = $state(settings?.defaultTaxRate ?? 19);
 	let invoiceEmailsEnabled = $state(settings?.invoiceEmailsEnabled ?? true);
@@ -52,6 +53,7 @@
 			keezSeries = settings.keezSeries || '';
 			keezStartNumber = settings.keezStartNumber || '';
 			keezAutoSync = settings.keezAutoSync || false;
+			keezDefaultPaymentTypeId = settings.keezDefaultPaymentTypeId ?? 3;
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
 			defaultTaxRate = settings.defaultTaxRate ?? 19;
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
@@ -74,6 +76,7 @@
 				keezSeries: keezSeries || undefined,
 				keezStartNumber: keezStartNumber || undefined,
 				keezAutoSync,
+				keezDefaultPaymentTypeId,
 				defaultCurrency: defaultCurrency || undefined,
 				defaultTaxRate: defaultTaxRate !== undefined ? defaultTaxRate : undefined,
 				invoiceEmailsEnabled
@@ -303,6 +306,40 @@
 								</p>
 							</div>
 							<Switch id="keezAutoSync" bind:checked={keezAutoSync} />
+						</div>
+
+						<div class="space-y-2">
+							<Label for="keezDefaultPaymentTypeId">Default Payment Type</Label>
+							<Select type="single" bind:value={keezDefaultPaymentTypeId}>
+								<SelectTrigger id="keezDefaultPaymentTypeId">
+									{[
+										{ id: 1, label: 'Bon fiscal platit cu numerar (BFCash)' },
+										{ id: 2, label: 'Bon fiscal platit cu cardul (BFCard)' },
+										{ id: 3, label: 'Transfer bancar (Bank)' },
+										{ id: 4, label: 'Plată numerar cu chitanță (ChitCash)' },
+										{ id: 5, label: 'Ramburs' },
+										{ id: 6, label: 'Procesator plăți - PayU, Netopia (ProcesatorPlati)' },
+										{ id: 7, label: 'Platforme distribuție - Emag (PlatformaDistributie)' },
+										{ id: 8, label: 'Voucher de Vacanță - Card' },
+										{ id: 9, label: 'Voucher de Vacanță - Tichet' }
+									].find((p) => p.id === keezDefaultPaymentTypeId)?.label || 'Transfer bancar (Bank)'}
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value={1}>Bon fiscal platit cu numerar (BFCash)</SelectItem>
+									<SelectItem value={2}>Bon fiscal platit cu cardul (BFCard)</SelectItem>
+									<SelectItem value={3}>Transfer bancar (Bank)</SelectItem>
+									<SelectItem value={4}>Plată numerar cu chitanță (ChitCash)</SelectItem>
+									<SelectItem value={5}>Ramburs</SelectItem>
+									<SelectItem value={6}>Procesator plăți - PayU, Netopia (ProcesatorPlati)</SelectItem>
+									<SelectItem value={7}>Platforme distribuție - Emag (PlatformaDistributie)</SelectItem>
+									<SelectItem value={8}>Voucher de Vacanță - Card</SelectItem>
+									<SelectItem value={9}>Voucher de Vacanță - Tichet</SelectItem>
+								</SelectContent>
+							</Select>
+							<p class="text-xs text-muted-foreground">
+								Tipul de plată implicit trimis către Keez când factura nu are o metodă de plată specifică
+								setată. Se aplică numai când factura nu are "Bank Transfer", "Cash" etc. setat explicit.
+							</p>
 						</div>
 					</CardContent>
 				</Card>
