@@ -19,7 +19,7 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getServices } from '$lib/remotes/services.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { syncInvoicesFromKeez, getKeezStatus, createStornoInKeez } from '$lib/remotes/keez.remote';
+	import { syncInvoicesFromKeez, getKeezStatus, createStornoInKeez, validateInvoiceInKeez } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
 	import { useQueryState } from 'nuqs-svelte';
@@ -472,6 +472,20 @@ import { goto } from '$app/navigation';
 		}
 	}
 
+	async function handleValidateInKeez(invoiceId: string) {
+		if (!confirm('Validează factura în Keez? Factura va deveni factură fiscală și nu mai poate fi ștearsă.')) {
+			return;
+		}
+
+		try {
+			await validateInvoiceInKeez({ invoiceId });
+			toast.success('Factura a fost validată în Keez');
+			await invoicesQuery.refresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Validarea facturii în Keez a eșuat');
+		}
+	}
+
 	async function handleCreateStorno(invoiceId: string) {
 		if (!confirm('Create a storno (credit note) for this invoice in Keez?')) {
 			return;
@@ -711,6 +725,9 @@ import { goto } from '$app/navigation';
 													<DropdownMenuItem onclick={() => handleMarkAsPaid(invoice.id)}>Mark as Paid</DropdownMenuItem>
 												{/if}
 												{#if isKeezActive && invoice.keezExternalId}
+													<DropdownMenuItem onclick={() => handleValidateInKeez(invoice.id)}>
+														Validează în Keez
+													</DropdownMenuItem>
 													<DropdownMenuItem onclick={() => handleCreateStorno(invoice.id)}>
 														Storno în Keez
 													</DropdownMenuItem>

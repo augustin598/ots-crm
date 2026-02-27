@@ -6,7 +6,7 @@
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
-	import { getDocuments } from '$lib/remotes/documents.remote';
+	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { Badge } from '$lib/components/ui/badge';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -35,8 +35,8 @@
 	const projects = $derived(projectsQuery.current || []);
 	const invoicesQuery = getInvoices({ clientId });
 	const invoices = $derived(invoicesQuery.current || []);
-	const documentsQuery = getDocuments({ clientId });
-	const contracts = $derived((documentsQuery.current || []).filter((d) => d.type === 'contract'));
+	const contractsQuery = getContracts({ clientId });
+	const contracts = $derived(contractsQuery.current || []);
 
 	const breadcrumbItems = $derived([
 		{ label: data.tenant?.name || 'Organization', href: `/${tenantSlug}` },

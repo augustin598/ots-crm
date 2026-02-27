@@ -4,6 +4,7 @@
 	import { getProject } from '$lib/remotes/projects.remote';
 	import { getTransactions } from '$lib/remotes/banking.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { validateInvoiceInKeez } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -205,6 +206,19 @@
 			await sendInvoice(invoiceId).updates(invoiceQuery, getInvoice(invoiceId), getInvoices({}));
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to send invoice');
+		}
+	}
+
+	async function handleValidateInKeez() {
+		if (!invoice || !invoiceId) return;
+		if (!confirm('Validează factura în Keez? Factura va deveni factură fiscală și nu mai poate fi ștearsă.')) {
+			return;
+		}
+		try {
+			await validateInvoiceInKeez({ invoiceId });
+			alert('Factura a fost validată în Keez');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Validarea facturii în Keez a eșuat');
 		}
 	}
 
@@ -732,6 +746,12 @@
 								<CheckCircle2 class="mr-2 h-4 w-4" />
 								Mark as Paid
 							</Button>
+							{#if invoice.keezExternalId}
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleValidateInKeez}>
+									<CheckCircle2 class="mr-2 h-4 w-4" />
+									Validează în Keez
+								</Button>
+							{/if}
 						</CardContent>
 					</Card>
 				{/if}

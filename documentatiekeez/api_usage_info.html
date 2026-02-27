@@ -1,0 +1,860 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="ro" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="ro" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Informații generale utilizare API &mdash; Keez PublicAPI Documentation  documentație</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script src="_static/translations.js"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/keez.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Căutare" href="search.html" />
+    <link rel="next" title="Autorizarea" href="auth.html" />
+    <link rel="prev" title="Consideratii generale" href="general.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #6f43d6" >
+          
+
+          
+            <a href="index.html">
+          
+
+          
+            
+            <img src="_static/logo.png" class="logo" alt="Logo"/>
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="content.html">Introducere</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="general.html">Consideratii generale</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Informații generale utilizare API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#parametri-path-request">Parametri path/request</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#coduri-de-eroare-posibile">Coduri de eroare posibile</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#model-de-eroare">Model de eroare</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#keez-externalid-reference">Identificatorul Keez</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#reguli-generale">Reguli generale</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#wrapper-python-peste-api">Wrapper Python peste API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#mod-de-utilizare-wrapper">Mod de utilizare wrapper</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="auth.html">Autorizarea</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#descriere-autorizare">Descriere - Autorizare</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#medii">Medii</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#proprietati">Proprietăți</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#preluarea-unui-token">Preluarea unui token</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#exemple-autorizare">Exemple Autorizare</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="item.html">Articole</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="item_categories.html">Categorii de articole</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_lists.html">Afișare articole</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#descriere-afisare-lista-articole">Descriere - Afișare lista articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#model-de-utilizare-api-lista-articole">Model de utilizare API - Listă articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#validari">Validări</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#mod-de-folosire-wrapper-afisare-articole">Mod de folosire - Wrapper - Afișare articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#mod-de-folosire-fara-wrapper-afisare-articole">Mod de folosire - Fără Wrapper - Afișare articole</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_list.html">Afișare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#descriere-afisare-articol">Descriere - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#model-de-utilizare-api-afisare-articol">Model de utilizare API - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#validari-afisare-articol">Validări - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#mod-de-folosire-wrapper-afisare-articol">Mod de folosire - Wrapper - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#mod-de-folosire-fara-wrapper-afisare-articol">Mod de folosire - Fără Wrapper - Afișare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_create.html">Creare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#descriere-creare-articol">Descriere - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#model-de-utilizare-api-creare-articol">Model de utilizare API - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#model-de-request-body-creare-articol">Model de request body - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#validari-creare-articol">Validări - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#mod-de-folosire-wrapper-creare-articol">Mod de folosire - Wrapper - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#mod-de-folosire-fara-wrapper-creare-articol">Mod de folosire - Fără Wrapper - Creare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_replace.html">Modificare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#descriere-modificare-articol">Descriere - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#model-de-utilizare-api-modificare-articol">Model de utilizare API - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#model-de-request-body-modificare-articol">Model de request body - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#validari-modificare-articol">Validări - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#mod-de-folosire-wrapper-modificare-articol">Mod de folosire - Wrapper - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#mod-de-folosire-fara-wrapper-modificare-articol">Mod de folosire - Fără Wrapper - Modificare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_patch.html">Modificare proprietăți articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#descriere-modificare-proprietati-articol">Descriere - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#model-de-utilizare-api-modificare-proprietati-articol">Model de utilizare API - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#model-de-request-body-modificare-proprietati-articol">Model de request body - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#validari-modificare-proprietati-articol">Validări - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#mod-de-folosire-wrapper-modificare-proprietati-articol">Mod de folosire - Wrapper - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_patch.html#mod-de-folosire-fara-wrapper-modificare-proprietati-articol">Mod de folosire - Fără Wrapper - Modificare proprietăți articol</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="invoice.html">Facturi</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="invoice_lists.html">Afișare facturi</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#descriere-afisare-facturi">Descriere - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#model-de-utilizare-api-afisare-facturi">Model de utilizare API - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#validari-afisare-facturi">Validări - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#mod-de-folosire-wrapper-afisare-facturi">Mod de folosire - Wrapper - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#mod-de-folosire-fara-wrapper-afisare-facturi">Mod de folosire - Fără Wrapper - Afișare facturi</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_list.html">Afișare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#descriere-afisare-factura">Descriere - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#model-de-utilizare-api-afisare-factura">Model de utilizare API - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#validari-afisare-factura">Validări - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#mod-de-folosire-wrapper-afisare-factura">Mod de folosire - Wrapper - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#mod-de-folosire-fara-wrapper-afisare-factura">Mod de folosire - Fără Wrapper - Afișare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_create.html">Creare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#descriere-creare-factura">Descriere - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#model-de-utilizare-api-creare-factura">Model de utilizare API - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#model-de-request-body-creare-factura">Model de request body - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#validari-creare-factura">Validări - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#mod-de-folosire-wrapper-creare-factura">Mod de folosire - Wrapper - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#mod-de-folosire-fara-wrapper-creare-factura">Mod de folosire - Fără Wrapper - Creare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_update.html">Modificare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#descriere-modificare-factura">Descriere - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#model-de-utilizare-api-modificare-factura">Model de utilizare API - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#model-de-request-body-modificare-factura">Model de request body - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#validari-modificare-factura">Validări - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#mod-de-folosire-wrapper-modificare-factura">Mod de folosire - Wrapper - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#mod-de-folosire-fara-wrapper-modificare-factura">Mod de folosire - Fără Wrapper - Modificare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_delete.html">Ștergere factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#descriere-stergere-factura">Descriere - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#model-de-utilizare-api-stergere-factura">Model de utilizare API - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#model-de-request-body-stergere-factura">Model de request body - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#validari-stergere-factura">Validări - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#mod-de-folosire-wrapper-stergere-factura">Mod de folosire - Wrapper - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#mod-de-folosire-fara-wrapper-stergere-factura">Mod de folosire - Fără Wrapper - Ștergere factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_validate.html">Validare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#descriere-validare-factura">Descriere - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#model-de-utilizare-api-validare-factura">Model de utilizare API - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#model-de-request-body-validare-factura">Model de request body - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#validari-validare-factura">Validări - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#mod-de-folosire-wrapper-validare-factura">Mod de folosire - Wrapper - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#mod-de-folosire-fara-wrapper-validare-factura">Mod de folosire - Fără Wrapper - Validare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_submit_efactura.html">Trimitere în sistemul eFactura</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#descriere-trimitere-in-sistemul-efactura">Descriere - Trimitere în sistemul eFactura</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#model-de-utilizare-api">Model de utilizare API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#model-de-request-body">Model de request body</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#mod-de-folosire-wrapper-trimitere-efactura">Mod de folosire - Wrapper - Trimitere eFactura</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#mod-de-folosire-fara-wrapper-trimitere-efactura">Mod de folosire - Fără Wrapper - Trimitere eFactura</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_cancel.html">Anulare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#descriere-anulare-factura">Descriere - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#model-de-utilizare-api-anulare-factura">Model de utilizare API - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#model-de-request-body-anulare-factura">Model de request body - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#validari-anulare-factura">Validări - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#mod-de-folosire-wrapper-anulare-factura">Mod de folosire - Wrapper - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#mod-de-folosire-fara-wrapper-anulare-factura">Mod de folosire - Fără Wrapper - Anulare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_deliver_by_email.html">Trimitere factură pe email</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#descriere-trimitere-factura-pe-email">Descriere - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#model-de-utilizare-api-trimitere-factura-pe-email">Model de utilizare API - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#model-de-request-body-trimitere-factura-pe-email">Model de request body - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#validari-trimitere-factura-pe-email">Validări - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#mod-de-folosire-wrapper-trimitere-factura-pe-email">Mod de folosire - Wrapper - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#mod-de-folosire-fara-wrapper-trimitere-factura-pe-email">Mod de folosire - Fără Wrapper - Trimitere factură pe email</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_download_pdf.html">Descărcare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#descriere-descarcare-factura">Descriere - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#model-de-utilizare-api-descarcare-factura">Model de utilizare API - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#validari-descarcare-factura">Validări - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#mod-de-folosire-wrapper-descarcare-factura">Mod de folosire - Wrapper - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#mod-de-folosire-fara-wrapper-descarcare-factura">Mod de folosire - Fără Wrapper - Descărcare factură</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="data_models.html">Modele de date</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="data_models_auth.html">Token Autorizare</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_item.html">Articolul</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_list.html">Listă de Facturi</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_header.html">Informații generale factură (Header)</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_details.html">Detalii factură (Details)</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_partner.html">Partener</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_models_legal_partner.html">Partener personă juridică</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="data_models_nonlegal_partner.html">Partener personă fizică</a><ul class="simple">
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_storno.html">Entitate Storno</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_error.html">Eroare</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_measure_unit.html">Nomenclator Measure Unit</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_measure_unit.html#measure-units">Measure Units</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_payment_type.html">Nomenclator PaymentType</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_payment_type.html#paymenttypes">PaymentTypes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html">Exemple de creare a facturii</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON.html">Exemplul RON - RON</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_EUR_EUR.html">Exemplul EUR - EUR</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_EUR_RON.html">Exemplul EUR - RON</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_details_percent.html">Exemplul RON - RON cu discount procentual pe detaliu</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_details_value.html">Exemplul RON - RON cu discount valoric pe detaliu</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_percent.html">Exemplul RON - RON cu discount procentual pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_value_gross.html">Exemplul RON - RON cu discount valoric brut pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_value_net.html">Exemplul RON - RON cu discount valoric net pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_storno.html">Exemplul Storno</a><ul class="simple">
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Keez PublicAPI Documentation</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content style-external-links">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="content.html">Introducere</a> &raquo;</li>
+        
+      <li>Informații generale utilizare API</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="informatii-generale-utilizare-api">
+<h1>Informații generale utilizare API<a class="headerlink" href="#informatii-generale-utilizare-api" title="Link permanent la acest titlu">¶</a></h1>
+<ul>
+<li><p>URL-ul pentru API este: <a class="reference external" href="https://{MEDIU}.keez.ro/api/v1.0/public-api">https://{MEDIU}.keez.ro/api/v1.0/public-api</a></p></li>
+<li><p>De observat proprietatea <strong>{MEDIU}</strong> din URL, aceasta se va înlocui cu MEDIU pentru care se face apelul:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Pentru <strong>Staging</strong>: <a class="reference external" href="https://staging.keez.ro/api/v1.0/public-api">https://staging.keez.ro/api/v1.0/public-api</a></p></li>
+<li><p>Pentru <strong>Producție</strong>: <a class="reference external" href="https://app.keez.ro/api/v1.0/public-api">https://app.keez.ro/api/v1.0/public-api</a></p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Atenționare</p>
+<p>Regulile despre mediile disponibile și anume <strong>staging</strong> și <strong>app</strong> au fost descrise la <a class="reference external" href="auth.html#medii">Vezi Autorizare - Secțiunea Medii</a></p>
+</div>
+<ul>
+<li><p>Utilizarea API-ului se face cu ajutorul următoarelor operații, numite și verbe:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><strong>GET</strong> - este folosit pentru a aduce informații despre un anumit model de date</p></li>
+<li><p><strong>POST</strong> - este folosit pentru a adăuga informații în API</p></li>
+<li><p><strong>PUT</strong> - este folosit pentru a modifica informații într-un anumit model de date</p></li>
+<li><p><strong>PATCH</strong> - este folosit pentru a modifica doar anumite informații dintr-un model de date</p></li>
+<li><p><strong>DELETE</strong> - este folosit pentru a șterge din API</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<div class="section" id="parametri-path-request">
+<h2>Parametri path/request<a class="headerlink" href="#parametri-path-request" title="Link permanent la acest titlu">¶</a></h2>
+<ul>
+<li><p>Anumite operații pot avea sau nu parametrii. Aceștia pot fi de mai multe tipuri și se disting prin poziția în cadrul URL-ului sau a felului cum arată.</p>
+<blockquote>
+<div><ul>
+<li><dl class="simple">
+<dt><strong>PathVariable</strong></dt><dd><ul class="simple">
+<li><p>sunt parametrii care fac parte din endpoint și sunt de tip «valoare»</p></li>
+<li><p>Exemplu: <a class="reference external" href="https://staging.keez.ro/api/v1.0/public-api">https://staging.keez.ro/api/v1.0/public-api</a>/{clientEid}/items</p></li>
+<li><p>Se poate observa poziția parametrului {clientEid} în interiorul endpoint-ului</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>RequestParam</strong></dt><dd><ul class="simple">
+<li><p>sunt parametrii care apar și ei in URL dar nu fac parte din endpoint și sunt de tip «cheie-valoare»</p></li>
+<li><p>Exemplu: <a class="reference external" href="https://staging.keez.ro/api/v1.0/public-api/items?clientEid=Test123">https://staging.keez.ro/api/v1.0/public-api/items?clientEid=Test123</a></p></li>
+<li><p>Se poate observa poziția parametrului {clientEid} după caracterul «?»</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl>
+<dt><strong>RequestBody</strong></dt><dd><ul class="simple">
+<li><p>sunt parametrii care nu apar în URL deloc, ci sunt serviți ca request body al apelului</p></li>
+<li><p>Exemplu: <a class="reference external" href="https://staging.keez.ro/api/v1.0/public-api/items/">https://staging.keez.ro/api/v1.0/public-api/items/</a></p></li>
+<li><p>Se observă că nu există nici un parametrul în url, dar apelul arată de forma</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;clientEid&#39;</span><span class="p">:</span> <span class="n">Test123</span>
+<span class="p">}</span>
+<span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="n">URL</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span> <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Atenționare</p>
+<p>Parametrii de tip <strong>RequestBody</strong> pot fi serviți doar la operațiile de <strong>POST</strong>/<strong>PUT</strong>/<strong>PATCH</strong>/<strong>DELETE</strong>. Verbul <strong>GET</strong> nu suportă parametrii <strong>RequestBody</strong></p>
+</div>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+</div>
+<div class="section" id="coduri-de-eroare-posibile">
+<h2>Coduri de eroare posibile<a class="headerlink" href="#coduri-de-eroare-posibile" title="Link permanent la acest titlu">¶</a></h2>
+<table class="colwidths-given docutils align-default">
+<colgroup>
+<col style="width: 0%" />
+<col style="width: 2%" />
+<col style="width: 4%" />
+<col style="width: 94%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Cod</p></th>
+<th class="head"><p>Denumire</p></th>
+<th class="head"><p>Descriere</p></th>
+<th class="head"><p>Optiuni</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>200</p></td>
+<td><p>OK</p></td>
+<td><p>Totul a mers perfect</p></td>
+<td><p>Folosiți datele returnate dacă acestea există</p></td>
+</tr>
+<tr class="row-odd"><td><p>400</p></td>
+<td><p>Bad Request</p></td>
+<td><p>Format de date/apel incorect</p></td>
+<td><p>Modelul de date din parametrii sau din corpul apelului sunt greșit formatâte</p></td>
+</tr>
+<tr class="row-even"><td><p>403</p></td>
+<td><p>Forbidden</p></td>
+<td><p>Nu ai permisiune pentru a accesa acea funcționalitate</p></td>
+<td><div class="line-block">
+<div class="line">Ai uitat să apelezi preluarea de token / Nu ai folosit token-ul în apelul către API /</div>
+<div class="line">Trebuie să contactezi <a class="reference external" href="https://keez.ro/">Keez.ro</a></div>
+</div>
+</td>
+</tr>
+<tr class="row-odd"><td><p>401</p></td>
+<td><p>Unauthorized</p></td>
+<td><p>Nu ai permisiune pentru a accesa acea funcționalitate</p></td>
+<td><p>Ai uitat să apelezi preluarea de token / Nu ai folosit token-ul în apelul către API</p></td>
+</tr>
+<tr class="row-even"><td><p>404</p></td>
+<td><p>Not Found</p></td>
+<td><p>Pagina apelată către API nu există</p></td>
+<td><p>Verifică URL-ul din apel</p></td>
+</tr>
+<tr class="row-odd"><td><p>500</p></td>
+<td><p>Internal Server Error</p></td>
+<td><p>Probleme la server</p></td>
+<td><p>Contactează <a class="reference external" href="https://keez.ro/">Keez.ro</a></p></td>
+</tr>
+<tr class="row-even"><td><p>502</p></td>
+<td><p>Bad Gateway</p></td>
+<td><p>Aplicația nu funcționează, probleme rețea</p></td>
+<td><p>Așteptați câteva minute și apoi reîncercați</p></td>
+</tr>
+<tr class="row-odd"><td><p>504</p></td>
+<td><p>Gateway Timeout</p></td>
+<td><p>Timpul de asteptare a fost depasit</p></td>
+<td><p>Așteptați câteva minute și apoi reîncercați</p></td>
+</tr>
+<tr class="row-even"><td><p>503</p></td>
+<td><p>Service Unavailable</p></td>
+<td><p>Aplicația nu funcționează</p></td>
+<td><p>Așteptați câteva minute și apoi reîncercați</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="model-de-eroare">
+<h2>Model de eroare<a class="headerlink" href="#model-de-eroare" title="Link permanent la acest titlu">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+  <span class="s1">&#39;Code&#39;</span><span class="p">:</span> <span class="s1">&#39;401&#39;</span><span class="p">,</span>
+  <span class="s1">&#39;Message&#39;</span><span class="p">:</span> <span class="s1">&#39;Nu aveti drepturi suficiente pentru accesarea acestei functionalitati.&#39;</span><span class="p">,</span>
+  <span class="s1">&#39;Id&#39;</span><span class="p">:</span> <span class="s1">&#39;f1c6b834d26141fbad0282f165a015ae&#39;</span><span class="p">,</span>
+  <span class="s1">&#39;statusCode&#39;</span><span class="p">:</span> <span class="s1">&#39;UNAUTHORIZED&#39;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Notă</p>
+<p>Pentru mai multe informații despre modelul de eroare <a class="reference external" href="data_models_error.html">Vezi Model de Eroare</a></p>
+</div>
+</div>
+<div class="section" id="keez-externalid-reference">
+<span id="identificatorul-keez"></span><h2>Identificatorul Keez<a class="headerlink" href="#keez-externalid-reference" title="Link permanent la acest titlu">¶</a></h2>
+<p>Orice model de date conține o proprietate prin care se poate identifica în mod unic acea resursă (factură, articol, categorie, partener).
+În majoritatea cazurilor aceasta este denumită <strong>externalId</strong>, iar în manual aceasta se regaseste sub denumirea de <strong>Identificator Keez</strong></p>
+</div>
+<div class="section" id="reguli-generale">
+<h2>Reguli generale<a class="headerlink" href="#reguli-generale" title="Link permanent la acest titlu">¶</a></h2>
+<ul class="simple">
+<li><p>Orice operație de tip <strong>GET</strong> va returna un rezultat de tip <strong>model de date</strong> sau un identificator <strong>externalId</strong>. <a class="reference external" href="data_models.html">Vezi Modele de Date disponibile</a></p></li>
+<li><p>Orice operație de <strong>DELETE</strong> nu va returna nimic la finalul operației</p></li>
+<li><p>Orice operație de <strong>PATCH</strong> nu va returna nimic la finalul operației</p></li>
+<li><p>Orice operație de <strong>PUT</strong> nu va returna nimic la finalul operației</p></li>
+<li><p>Orice operație de <strong>PATCH</strong> nu va returna nimic la finalul operației</p></li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Atenționare</p>
+<div class="line-block">
+<div class="line">Indiferent dacă se creează un articol sau o factură, <a class="reference internal" href="#keez-externalid-reference"><span class="std std-ref">identificatorul Keez</span></a> al acestuia <strong>externalId</strong> trebuie furnizat pentru a avea acces ulterior la el.</div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Notă</p>
+<p>Exemplul 1: Dacă se creează un articol cu scopul de a fi folosit pe o factură, <a class="reference internal" href="#keez-externalid-reference"><span class="std std-ref">identificatorul Keez</span></a> <strong>externalId</strong> trebuie furnizat în corpul apelului,
+| deoarece operația de PUT/POST pentru crearea articolului nu returnează <a class="reference internal" href="#keez-externalid-reference"><span class="std std-ref">identificatorul Keez</span></a> <strong>externalId</strong></p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Notă</p>
+<div class="line-block">
+<div class="line">Exemplul 2: Dacă se creează o factură cu scopul de a fi trimisă pe email, <a class="reference internal" href="#keez-externalid-reference"><span class="std std-ref">identificatorul Keez</span></a> <strong>externalId</strong> trebuie furnizat în corpul apelului,</div>
+<div class="line">deoarece operația de PUT/POST pentru crearea facturii nu returnează <a class="reference internal" href="#keez-externalid-reference"><span class="std std-ref">identificatorul Keez</span></a> <strong>externalId</strong></div>
+</div>
+</div>
+</div>
+</div>
+<div class="section" id="wrapper-python-peste-api">
+<span id="wrapper-reference"></span><h2>Wrapper Python peste API<a class="headerlink" href="#wrapper-python-peste-api" title="Link permanent la acest titlu">¶</a></h2>
+<ul class="simple">
+<li><p>Keez.ro oferă o clasă <a class="reference external" href="https://en.wikipedia.org/wiki/Wrapper_function">wrapper</a> peste acest API, scris în Python</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">from</span> <span class="nn">urllib.parse</span> <span class="kn">import</span> <span class="n">urlencode</span>
+
+<span class="kn">import</span> <span class="nn">python_jwt</span> <span class="k">as</span> <span class="nn">jwt</span>
+<span class="kn">import</span> <span class="nn">requests</span>
+
+
+<span class="k">class</span> <span class="nc">KeezPublicApi</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">application_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">token_url</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">api_url</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">gmtime</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">application_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;application_id not provided!&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">secret</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;secret not provided!&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">token_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;token_url not provided!&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">api_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;api_url not provided!&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">=</span> <span class="n">api_url</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_url</span> <span class="o">=</span> <span class="n">token_url</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">application_id</span> <span class="o">=</span> <span class="n">application_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">secret</span> <span class="o">=</span> <span class="n">secret</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">token</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_type</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">access_token</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">refresh_auth_token</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_expired</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">generate_token</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">token_expired</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">&lt;</span> <span class="n">time</span><span class="o">.</span><span class="n">gmtime</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">generate_token</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token_url</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;client_id&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;app</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">application_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;client_secret&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">secret</span><span class="p">,</span>
+            <span class="s1">&#39;grant_type&#39;</span><span class="p">:</span> <span class="s1">&#39;client_credentials&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;scope&#39;</span><span class="p">:</span> <span class="s1">&#39;public-api&#39;</span><span class="p">,</span>
+        <span class="p">},</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/x-www-form-urlencoded&#39;</span>
+        <span class="p">})</span>
+        <span class="n">req</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+        <span class="n">json</span> <span class="o">=</span> <span class="n">req</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">token</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">json</span><span class="p">[</span><span class="s2">&quot;token_type&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">json</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_type</span> <span class="o">=</span> <span class="n">json</span><span class="p">[</span><span class="s1">&#39;token_type&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">access_token</span> <span class="o">=</span> <span class="n">json</span><span class="p">[</span><span class="s1">&#39;access_token&#39;</span><span class="p">]</span>
+        <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">claims</span><span class="p">)</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">process_jwt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">access_token</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">expires</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">gmtime</span><span class="p">(</span><span class="n">claims</span><span class="p">[</span><span class="s1">&#39;exp&#39;</span><span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">api_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">verb</span><span class="p">,</span> <span class="n">url</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refresh_auth_token</span><span class="p">()</span>
+
+        <span class="n">_req</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">verb</span> <span class="o">==</span> <span class="s1">&#39;GET&#39;</span><span class="p">:</span>
+            <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+                                                                    <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">verb</span> <span class="o">==</span> <span class="s1">&#39;POST&#39;</span><span class="p">:</span>
+            <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+                                                                     <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">verb</span> <span class="o">==</span> <span class="s1">&#39;PUT&#39;</span><span class="p">:</span>
+            <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+                                                                    <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">verb</span> <span class="o">==</span> <span class="s1">&#39;PATCH&#39;</span><span class="p">:</span>
+            <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+                                                                      <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">verb</span> <span class="o">==</span> <span class="s1">&#39;DELETE&#39;</span><span class="p">:</span>
+            <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+                                                                       <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">_req</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Internal error: invalid verb </span><span class="si">{</span><span class="n">verb</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="n">_req</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">_req</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+
+    <span class="sd">&quot;&quot;&quot; Public call methods (ITEMS)&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">items</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">count</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items&#39;</span>
+
+        <span class="n">params</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="nb">filter</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;filter&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39; AND &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s1">:</span><span class="si">{</span><span class="nb">filter</span><span class="p">[</span><span class="n">x</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">filter</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;order&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39; AND &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">order</span><span class="p">[</span><span class="n">x</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">order</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">count</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;count&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">count</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">offset</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;offset&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">offset</span><span class="p">)})</span>
+
+        <span class="n">qstr</span> <span class="o">=</span> <span class="n">urlencode</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="n">url</span> <span class="o">+</span> <span class="s1">&#39;?&#39;</span> <span class="o">+</span> <span class="n">qstr</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">item_external_id</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items/</span><span class="si">{</span><span class="n">item_external_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">create_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">replace_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">item_external_id</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;PUT&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items/</span><span class="si">{</span><span class="n">item_external_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">update_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">item_external_id</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;PATCH&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items/</span><span class="si">{</span><span class="n">item_external_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="sd">&quot;&quot;&quot; Public call methods (INVOICES)&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">invoices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">count</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices&#39;</span>
+
+        <span class="n">params</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="nb">filter</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;filter&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39; AND &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s1">:</span><span class="si">{</span><span class="nb">filter</span><span class="p">[</span><span class="n">x</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">filter</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;order&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39; AND &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">order</span><span class="p">[</span><span class="n">x</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">order</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">count</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;count&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">count</span><span class="p">)})</span>
+        <span class="k">if</span> <span class="n">offset</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;offset&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">offset</span><span class="p">)})</span>
+
+        <span class="n">qstr</span> <span class="o">=</span> <span class="n">urlencode</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="n">url</span> <span class="o">+</span> <span class="s1">&#39;?&#39;</span> <span class="o">+</span> <span class="n">qstr</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_external_id</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/</span><span class="si">{</span><span class="n">invoice_external_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">create_invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">replace_invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_external_id</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;PUT&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/</span><span class="si">{</span><span class="n">invoice_external_id</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">delete_invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_eid</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;DELETE&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;externalId&#39;</span><span class="p">:</span> <span class="n">invoice_eid</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">validate_invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_eid</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/valid&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;externalId&#39;</span><span class="p">:</span> <span class="n">invoice_eid</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">submit_e_factura</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_eid</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/efactura/submitted&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;externalId&#39;</span><span class="p">:</span> <span class="n">invoice_eid</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">cancel_invoice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_eid</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/canceled&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;externalId&#39;</span><span class="p">:</span> <span class="n">invoice_eid</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">deliver_invoice_by_email</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">invoice_eid</span><span class="p">,</span> <span class="n">to</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">bcc</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;POST&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/invoices/delivery&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+            <span class="s1">&#39;invoiceExternalId&#39;</span><span class="p">:</span> <span class="n">invoice_eid</span><span class="p">,</span>
+            <span class="s1">&#39;info&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s1">&#39;deliveryMethod&#39;</span><span class="p">:</span> <span class="s1">&#39;Email&#39;</span><span class="p">,</span>
+                    <span class="s1">&#39;representationType&#39;</span><span class="p">:</span> <span class="s1">&#39;Attachment&#39;</span><span class="p">,</span>
+                    <span class="s1">&#39;recipients&#39;</span><span class="p">:</span> <span class="p">{</span>
+                        <span class="s1">&#39;to&#39;</span><span class="p">:</span> <span class="n">to</span><span class="p">,</span>
+                        <span class="s1">&#39;cc&#39;</span><span class="p">:</span> <span class="n">cc</span><span class="p">,</span>
+                        <span class="s1">&#39;bcc&#39;</span><span class="p">:</span> <span class="n">bcc</span>
+                    <span class="p">}</span>
+                <span class="p">}</span>
+            <span class="p">]</span>
+        <span class="p">})</span>
+
+    <span class="k">def</span> <span class="nf">invoice_pdf</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">client_eid</span><span class="p">,</span> <span class="n">invoice_external_id</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">refresh_auth_token</span><span class="p">()</span>
+
+        <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">baseAPIUrl</span> <span class="o">+</span> <span class="sa">f</span><span class="s1">&#39;/</span><span class="si">{</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/invoices/</span><span class="si">{</span><span class="n">invoice_external_id</span><span class="si">}</span><span class="s1">/pdf&#39;</span><span class="p">,</span>
+                            <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">})</span>
+        <span class="k">if</span> <span class="n">_req</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Internal error: invalid download!&#39;</span><span class="p">)</span>
+
+        <span class="n">disp</span> <span class="o">=</span> <span class="n">_req</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="s1">&#39;content-disposition&#39;</span><span class="p">]</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="s1">&#39;filename&#39;</span> <span class="ow">in</span> <span class="n">disp</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">disp</span><span class="p">[</span><span class="n">disp</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;=&#39;</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="s1">&#39;&quot;&#39;</span> <span class="ow">in</span> <span class="n">name</span><span class="p">:</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">name</span><span class="p">,</span> <span class="n">_req</span><span class="o">.</span><span class="n">content</span>
+
+    <span class="k">def</span> <span class="nf">measure_unit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/items/measure-unit&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">invoice_payment_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">api_call</span><span class="p">(</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;/invoices/payment-type&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="mod-de-utilizare-wrapper">
+<h2>Mod de utilizare wrapper<a class="headerlink" href="#mod-de-utilizare-wrapper" title="Link permanent la acest titlu">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">token_url</span> <span class="o">=</span> <span class="s1">&#39;https://staging.keez.ro/idp/connect/token&#39;</span>
+<span class="n">api_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;https://staging.keez.ro/api/v1.0/public-api&#39;</span>
+
+<span class="n">client_eid</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_CLIENT_EID}</span><span class="s1">&#39;</span>
+<span class="n">application_id</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_APPLICATION_ID}</span><span class="s1">&#39;</span>
+<span class="n">secret</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_SECRET}</span><span class="s1">&#39;</span>
+
+<span class="c1"># Se face &#39;legatura&#39; la wrapper pe baza proprietăților necesare (application_id, secret, token_url, api_url)</span>
+<span class="n">wrapper_service</span> <span class="o">=</span> <span class="n">KeezPublicApi</span><span class="p">(</span><span class="n">application_id</span><span class="o">=</span><span class="n">application_id</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="n">secret</span><span class="p">,</span> <span class="n">token_url</span><span class="o">=</span><span class="n">token_url</span><span class="p">,</span> <span class="n">api_url</span><span class="o">=</span><span class="n">api_url</span><span class="p">)</span>
+
+<span class="c1"># Se apelează metodele din interiorul wrapper-ului pe baza client_eid si a altor parametri, in functie de metodă</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">wrapper_service</span><span class="o">.</span><span class="n">items</span><span class="p">(</span><span class="n">client_eid</span><span class="o">=</span><span class="n">client_eid</span><span class="p">)</span>
+
+<span class="c1"># Se printează rezultatul</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="auth.html" class="btn btn-neutral float-right" title="Autorizarea" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="general.html" class="btn btn-neutral float-left" title="Consideratii generale" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2025, keez.ro
+
+    </p>
+  </div> 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

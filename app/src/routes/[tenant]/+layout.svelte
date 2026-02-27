@@ -11,7 +11,6 @@
 	import FolderKanbanIcon from '@lucide/svelte/icons/folder-kanban';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import BriefcaseIcon from '@lucide/svelte/icons/briefcase';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
@@ -164,26 +163,6 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							<a href="/{tenantSlug}/my-plans" {...props}>
 								<CalendarIcon />
 								<span>My Plans</span>
-							</a>
-						{/snippet}
-					</SidebarMenuButton>
-				</SidebarMenuItem>
-				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/documents`)}>
-						{#snippet child({ props })}
-							<a href="/{tenantSlug}/documents" {...props}>
-								<FileTextIcon />
-								<span>Documents</span>
-							</a>
-						{/snippet}
-					</SidebarMenuButton>
-				</SidebarMenuItem>
-				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/document-templates`)}>
-						{#snippet child({ props })}
-							<a href="/{tenantSlug}/document-templates" {...props}>
-								<FileSignatureIcon />
-								<span>Document Templates</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

@@ -1,59 +1,55 @@
 <script lang="ts">
-	import { getDocuments, getDownloadUrl, generateDocumentPDF } from '$lib/remotes/documents.remote';
+	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { FileText, Download, Plus, FileDown } from '@lucide/svelte';
+	import { FileText, Plus, ExternalLink } from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
 
-	const documentsQuery = getDocuments({ clientId });
-	const documents = $derived(documentsQuery.current || []);
-	const loading = $derived(documentsQuery.loading);
+	const contractsQuery = getContracts({ clientId });
+	const contracts = $derived(contractsQuery.current || []);
+	const loading = $derived(contractsQuery.loading);
 
-	const contracts = $derived(documents.filter((d) => d.type === 'contract'));
-
-	async function handleDownload(id: string) {
-		try {
-			const { url } = await getDownloadUrl(id);
-			if (url) {
-				window.open(url, '_blank');
-			}
-		} catch (e) {
-			alert('Failed to download document');
+	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+		switch (status) {
+			case 'signed': return 'default';
+			case 'sent': return 'secondary';
+			case 'draft': return 'outline';
+			case 'cancelled': return 'destructive';
+			default: return 'outline';
 		}
 	}
 
-	async function handleGeneratePDF(id: string) {
-		try {
-			const result = await generateDocumentPDF(id);
-			if (result.url) {
-				window.open(result.url, '_blank');
-			}
-		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to generate PDF');
+	function getStatusLabel(status: string): string {
+		switch (status) {
+			case 'draft': return 'Ciornă';
+			case 'sent': return 'Trimis';
+			case 'signed': return 'Semnat';
+			case 'cancelled': return 'Anulat';
+			default: return status;
 		}
 	}
 </script>
 
 <div class="space-y-6">
 	<div class="flex items-center justify-between">
-		<h2 class="text-2xl font-semibold">Contracts</h2>
-		<Button onclick={() => goto(`/${tenantSlug}/documents/new?type=contract&clientId=${clientId}`)}>
+		<h2 class="text-2xl font-semibold">Contracte</h2>
+		<Button onclick={() => goto(`/${tenantSlug}/contracts/new`)}>
 			<Plus class="mr-2 h-4 w-4" />
-			Create Contract
+			Contract Nou
 		</Button>
 	</div>
 
 	{#if loading}
-		<p>Loading...</p>
+		<p class="text-muted-foreground">Se încarcă...</p>
 	{:else if contracts.length === 0}
 		<Card>
 			<CardContent class="pt-6">
-				<p class="text-center text-muted-foreground">No contracts for this client yet</p>
+				<p class="text-center text-muted-foreground">Niciun contract pentru acest client</p>
 			</CardContent>
 		</Card>
 	{:else}
@@ -67,25 +63,32 @@
 									<FileText class="h-5 w-5 text-primary" />
 								</div>
 								<div>
-									<p class="text-lg font-semibold">{contract.name}</p>
+									<p class="text-lg font-semibold">{contract.contractNumber}</p>
+									{#if contract.contractTitle}
+										<p class="text-sm text-muted-foreground">{contract.contractTitle}</p>
+									{/if}
 									<div class="flex items-center gap-3 mt-1">
-										<Badge variant="secondary">Contract</Badge>
-										<p class="text-sm text-muted-foreground">
-											Created {contract.createdAt ? new Date(contract.createdAt).toLocaleDateString() : '—'}
-										</p>
+										<Badge variant={getStatusVariant(contract.status)}>
+											{getStatusLabel(contract.status)}
+										</Badge>
+										{#if contract.contractDate}
+											<span class="text-sm text-muted-foreground">
+												{new Date(contract.contractDate).toLocaleDateString('ro-RO')}
+											</span>
+										{/if}
 									</div>
 								</div>
 							</div>
 							<div class="flex items-center gap-2">
-								{#if contract.documentTemplateId && !contract.pdfGenerated}
-									<Button variant="outline" onclick={() => handleGeneratePDF(contract.id)}>
-										<FileDown class="h-4 w-4 mr-2" />
-										Generate PDF
-									</Button>
-								{/if}
-								<Button variant="outline" onclick={() => handleDownload(contract.id)}>
-									<Download class="h-4 w-4 mr-2" />
-									Download
+								<Button
+									variant="outline"
+									onclick={() => window.open(`/${tenantSlug}/contracts/${contract.id}/pdf`, '_blank')}
+								>
+									<ExternalLink class="h-4 w-4 mr-2" />
+									PDF
+								</Button>
+								<Button onclick={() => goto(`/${tenantSlug}/contracts/${contract.id}`)}>
+									Detalii
 								</Button>
 							</div>
 						</div>
@@ -95,4 +98,3 @@
 		</div>
 	{/if}
 </div>
-

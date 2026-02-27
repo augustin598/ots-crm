@@ -396,11 +396,12 @@ export class KeezClient {
 	}
 
 	/**
-	 * Validate invoice
+	 * Validate invoice - changes status from Proforma (Draft) to Fiscal Invoice
 	 */
 	async validateInvoice(externalId: string): Promise<void> {
-		await this.request(`/${this.clientEid}/invoices/${externalId}/validate`, {
-			method: 'POST'
+		await this.request(`/${this.clientEid}/invoices/valid`, {
+			method: 'POST',
+			body: JSON.stringify({ externalId })
 		});
 	}
 

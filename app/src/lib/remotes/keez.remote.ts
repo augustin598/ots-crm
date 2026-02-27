@@ -1293,41 +1293,6 @@ export const getInvoicePDFFromKeez = query(
 	}
 );
 
-export const validateInvoiceInKeez = command(
-	v.object({
-		keezInvoiceId: v.pipe(v.string(), v.minLength(1))
-	}),
-	async (data) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		// Get integration
-		const [integration] = await db
-			.select()
-			.from(table.keezIntegration)
-			.where(
-				and(
-					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
-					eq(table.keezIntegration.isActive, true)
-				)
-			)
-			.limit(1);
-
-		if (!integration) {
-			throw new Error('Keez integration not connected');
-		}
-
-		// Create Keez client with DB token cache
-		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
-
-		await keezClient.validateInvoice(data.keezInvoiceId);
-
-		return { success: true };
-	}
-);
-
 export const sendInvoiceToEFactura = command(
 	v.object({
 		keezInvoiceId: v.pipe(v.string(), v.minLength(1))
@@ -1450,5 +1415,60 @@ export const createStornoInKeez = command(
 		const response = await keezClient.createStorno(invoice.keezExternalId);
 
 		return { success: true, stornoExternalId: response.externalId };
+	}
+);
+
+export const validateInvoiceInKeez = command(
+	v.object({
+		invoiceId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		// Get invoice and verify it has Keez external ID
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!invoice) {
+			throw new Error('Invoice not found');
+		}
+
+		if (!invoice.keezExternalId) {
+			throw new Error('Invoice is not synced with Keez');
+		}
+
+		// Get integration
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Keez integration not connected');
+		}
+
+		// Create Keez client with DB token cache
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+
+		await keezClient.validateInvoice(invoice.keezExternalId);
+
+		return { success: true };
 	}
 );

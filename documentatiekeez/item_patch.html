@@ -1,0 +1,582 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="ro" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="ro" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Modificare proprietăți articol &mdash; Keez PublicAPI Documentation  documentație</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script src="_static/translations.js"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/keez.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Căutare" href="search.html" />
+    <link rel="next" title="Facturi" href="invoice.html" />
+    <link rel="prev" title="Modificare articol" href="item_replace.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #6f43d6" >
+          
+
+          
+            <a href="index.html">
+          
+
+          
+            
+            <img src="_static/logo.png" class="logo" alt="Logo"/>
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="content.html">Introducere</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="general.html">Consideratii generale</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_usage_info.html">Informații generale utilizare API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#parametri-path-request">Parametri path/request</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#coduri-de-eroare-posibile">Coduri de eroare posibile</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#model-de-eroare">Model de eroare</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#keez-externalid-reference">Identificatorul Keez</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#reguli-generale">Reguli generale</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#wrapper-python-peste-api">Wrapper Python peste API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_usage_info.html#mod-de-utilizare-wrapper">Mod de utilizare wrapper</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="auth.html">Autorizarea</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#descriere-autorizare">Descriere - Autorizare</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#medii">Medii</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#proprietati">Proprietăți</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#preluarea-unui-token">Preluarea unui token</a></li>
+<li class="toctree-l3"><a class="reference internal" href="auth.html#exemple-autorizare">Exemple Autorizare</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="reference internal" href="item.html">Articole</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="item_categories.html">Categorii de articole</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_lists.html">Afișare articole</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#descriere-afisare-lista-articole">Descriere - Afișare lista articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#model-de-utilizare-api-lista-articole">Model de utilizare API - Listă articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#validari">Validări</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#mod-de-folosire-wrapper-afisare-articole">Mod de folosire - Wrapper - Afișare articole</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_lists.html#mod-de-folosire-fara-wrapper-afisare-articole">Mod de folosire - Fără Wrapper - Afișare articole</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_list.html">Afișare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#descriere-afisare-articol">Descriere - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#model-de-utilizare-api-afisare-articol">Model de utilizare API - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#validari-afisare-articol">Validări - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#mod-de-folosire-wrapper-afisare-articol">Mod de folosire - Wrapper - Afișare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_list.html#mod-de-folosire-fara-wrapper-afisare-articol">Mod de folosire - Fără Wrapper - Afișare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_create.html">Creare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#descriere-creare-articol">Descriere - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#model-de-utilizare-api-creare-articol">Model de utilizare API - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#model-de-request-body-creare-articol">Model de request body - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#validari-creare-articol">Validări - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#mod-de-folosire-wrapper-creare-articol">Mod de folosire - Wrapper - Creare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_create.html#mod-de-folosire-fara-wrapper-creare-articol">Mod de folosire - Fără Wrapper - Creare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="item_replace.html">Modificare articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#descriere-modificare-articol">Descriere - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#model-de-utilizare-api-modificare-articol">Model de utilizare API - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#model-de-request-body-modificare-articol">Model de request body - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#validari-modificare-articol">Validări - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#mod-de-folosire-wrapper-modificare-articol">Mod de folosire - Wrapper - Modificare articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="item_replace.html#mod-de-folosire-fara-wrapper-modificare-articol">Mod de folosire - Fără Wrapper - Modificare articol</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Modificare proprietăți articol</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#descriere-modificare-proprietati-articol">Descriere - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#model-de-utilizare-api-modificare-proprietati-articol">Model de utilizare API - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#model-de-request-body-modificare-proprietati-articol">Model de request body - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#validari-modificare-proprietati-articol">Validări - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#mod-de-folosire-wrapper-modificare-proprietati-articol">Mod de folosire - Wrapper - Modificare proprietăți articol</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#mod-de-folosire-fara-wrapper-modificare-proprietati-articol">Mod de folosire - Fără Wrapper - Modificare proprietăți articol</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="invoice.html">Facturi</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="invoice_lists.html">Afișare facturi</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#descriere-afisare-facturi">Descriere - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#model-de-utilizare-api-afisare-facturi">Model de utilizare API - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#validari-afisare-facturi">Validări - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#mod-de-folosire-wrapper-afisare-facturi">Mod de folosire - Wrapper - Afișare facturi</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_lists.html#mod-de-folosire-fara-wrapper-afisare-facturi">Mod de folosire - Fără Wrapper - Afișare facturi</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_list.html">Afișare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#descriere-afisare-factura">Descriere - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#model-de-utilizare-api-afisare-factura">Model de utilizare API - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#validari-afisare-factura">Validări - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#mod-de-folosire-wrapper-afisare-factura">Mod de folosire - Wrapper - Afișare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_list.html#mod-de-folosire-fara-wrapper-afisare-factura">Mod de folosire - Fără Wrapper - Afișare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_create.html">Creare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#descriere-creare-factura">Descriere - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#model-de-utilizare-api-creare-factura">Model de utilizare API - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#model-de-request-body-creare-factura">Model de request body - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#validari-creare-factura">Validări - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#mod-de-folosire-wrapper-creare-factura">Mod de folosire - Wrapper - Creare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_create.html#mod-de-folosire-fara-wrapper-creare-factura">Mod de folosire - Fără Wrapper - Creare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_update.html">Modificare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#descriere-modificare-factura">Descriere - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#model-de-utilizare-api-modificare-factura">Model de utilizare API - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#model-de-request-body-modificare-factura">Model de request body - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#validari-modificare-factura">Validări - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#mod-de-folosire-wrapper-modificare-factura">Mod de folosire - Wrapper - Modificare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_update.html#mod-de-folosire-fara-wrapper-modificare-factura">Mod de folosire - Fără Wrapper - Modificare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_delete.html">Ștergere factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#descriere-stergere-factura">Descriere - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#model-de-utilizare-api-stergere-factura">Model de utilizare API - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#model-de-request-body-stergere-factura">Model de request body - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#validari-stergere-factura">Validări - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#mod-de-folosire-wrapper-stergere-factura">Mod de folosire - Wrapper - Ștergere factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_delete.html#mod-de-folosire-fara-wrapper-stergere-factura">Mod de folosire - Fără Wrapper - Ștergere factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_validate.html">Validare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#descriere-validare-factura">Descriere - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#model-de-utilizare-api-validare-factura">Model de utilizare API - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#model-de-request-body-validare-factura">Model de request body - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#validari-validare-factura">Validări - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#mod-de-folosire-wrapper-validare-factura">Mod de folosire - Wrapper - Validare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_validate.html#mod-de-folosire-fara-wrapper-validare-factura">Mod de folosire - Fără Wrapper - Validare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_submit_efactura.html">Trimitere în sistemul eFactura</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#descriere-trimitere-in-sistemul-efactura">Descriere - Trimitere în sistemul eFactura</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#model-de-utilizare-api">Model de utilizare API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#model-de-request-body">Model de request body</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#mod-de-folosire-wrapper-trimitere-efactura">Mod de folosire - Wrapper - Trimitere eFactura</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_submit_efactura.html#mod-de-folosire-fara-wrapper-trimitere-efactura">Mod de folosire - Fără Wrapper - Trimitere eFactura</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_cancel.html">Anulare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#descriere-anulare-factura">Descriere - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#model-de-utilizare-api-anulare-factura">Model de utilizare API - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#model-de-request-body-anulare-factura">Model de request body - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#validari-anulare-factura">Validări - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#mod-de-folosire-wrapper-anulare-factura">Mod de folosire - Wrapper - Anulare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_cancel.html#mod-de-folosire-fara-wrapper-anulare-factura">Mod de folosire - Fără Wrapper - Anulare factură</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_deliver_by_email.html">Trimitere factură pe email</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#descriere-trimitere-factura-pe-email">Descriere - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#model-de-utilizare-api-trimitere-factura-pe-email">Model de utilizare API - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#model-de-request-body-trimitere-factura-pe-email">Model de request body - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#validari-trimitere-factura-pe-email">Validări - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#mod-de-folosire-wrapper-trimitere-factura-pe-email">Mod de folosire - Wrapper - Trimitere factură pe email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_deliver_by_email.html#mod-de-folosire-fara-wrapper-trimitere-factura-pe-email">Mod de folosire - Fără Wrapper - Trimitere factură pe email</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="invoice_download_pdf.html">Descărcare factură</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#descriere-descarcare-factura">Descriere - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#model-de-utilizare-api-descarcare-factura">Model de utilizare API - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#validari-descarcare-factura">Validări - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#mod-de-folosire-wrapper-descarcare-factura">Mod de folosire - Wrapper - Descărcare factură</a></li>
+<li class="toctree-l4"><a class="reference internal" href="invoice_download_pdf.html#mod-de-folosire-fara-wrapper-descarcare-factura">Mod de folosire - Fără Wrapper - Descărcare factură</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="data_models.html">Modele de date</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="data_models_auth.html">Token Autorizare</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_item.html">Articolul</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_list.html">Listă de Facturi</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_header.html">Informații generale factură (Header)</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_invoice_details.html">Detalii factură (Details)</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_partner.html">Partener</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_models_legal_partner.html">Partener personă juridică</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="data_models_nonlegal_partner.html">Partener personă fizică</a><ul class="simple">
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_storno.html">Entitate Storno</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_models_error.html">Eroare</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_measure_unit.html">Nomenclator Measure Unit</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_measure_unit.html#measure-units">Measure Units</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_payment_type.html">Nomenclator PaymentType</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_payment_type.html#paymenttypes">PaymentTypes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html">Exemple de creare a facturii</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON.html">Exemplul RON - RON</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_EUR_EUR.html">Exemplul EUR - EUR</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_EUR_RON.html">Exemplul EUR - RON</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_details_percent.html">Exemplul RON - RON cu discount procentual pe detaliu</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_details_value.html">Exemplul RON - RON cu discount valoric pe detaliu</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_percent.html">Exemplul RON - RON cu discount procentual pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_value_gross.html">Exemplul RON - RON cu discount valoric brut pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_RON_RON_w_discount_header_value_net.html">Exemplul RON - RON cu discount valoric net pe factură</a><ul class="simple">
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="example_storno.html">Exemplul Storno</a><ul class="simple">
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Keez PublicAPI Documentation</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content style-external-links">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="content.html">Introducere</a> &raquo;</li>
+        
+          <li><a href="item.html">Articole</a> &raquo;</li>
+        
+      <li>Modificare proprietăți articol</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="modificare-proprietati-articol">
+<h1>Modificare proprietăți articol<a class="headerlink" href="#modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<div class="section" id="descriere-modificare-proprietati-articol">
+<h2>Descriere - Modificare proprietăți articol<a class="headerlink" href="#descriere-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<ul class="simple">
+<li><p>Această secțiune este dedicată modificării informațiilor unui articol</p></li>
+<li><p>Articolul modificat poate fi folosit pe o factură nouă sau pe una deja existentă, însă PDF-ul facturii nu se va reîmprospăta
+cu noile informații din articol dacă acesta a fost deja generat</p></li>
+<li><p>Această operațiune va returna doar un mesaj de succes</p></li>
+</ul>
+<dl class="simple">
+<dt>Operații care se pot realiza după ce un articol a fost modificat:</dt><dd><ol class="arabic simple">
+<li><p><a class="reference external" href="invoice_update.html">Vezi Modificare articol</a></p></li>
+<li><p><a class="reference external" href="invoice_create.html">Vezi Creare factură</a></p></li>
+</ol>
+</dd>
+</dl>
+</div>
+<div class="section" id="model-de-utilizare-api-modificare-proprietati-articol">
+<h2>Model de utilizare API - Modificare proprietăți articol<a class="headerlink" href="#model-de-utilizare-api-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<ul class="simple">
+<li><p>Așa cum este explicat în zona de <a class="reference external" href="api_usage_info.html">Informații generale utilizare API</a> orice apel către API se face prin URL-ul de bază + endpoint-ul respectivei operații</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Notă</p>
+<ul class="simple">
+<li><p>Verb: PATCH</p></li>
+<li><p>Endpoint: /{clientEid}/items/{itemExternalId}</p></li>
+<li><p>Request parameter: {clientEid} si {itemExternalId}</p></li>
+<li><p>Request body: {data_body}</p></li>
+<li><p>Returns: Success Response</p></li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Atenționare</p>
+<ul class="simple">
+<li><p>A se observa parametrul {clientEid} și tipul acestuia (path variable)</p></li>
+<li><p>A se observa parametrul {itemExternalId} și tipul acestuia (path variable)</p></li>
+<li><p>A se observa parametrul {data_body} și tipul acestuia (request body)</p></li>
+</ul>
+</div>
+</div>
+</div>
+<div class="section" id="model-de-request-body-modificare-proprietati-articol">
+<h2>Model de request body - Modificare proprietăți articol<a class="headerlink" href="#model-de-request-body-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<ul class="simple">
+<li><p>Request body-ul se creează în prealabil, înaintea apelului către API</p></li>
+<li><p>Acesta va conține doar noile informațiile care se vor modificate</p></li>
+<li><p>Modelul acestui request body se regăsește în tabelul din <a class="reference external" href="data_models_item.html">Vezi Model Articol</a></p></li>
+<li><p>Informațiile obligatorii deja completate pentru articol nu pot fi șterse (completate cu null)</p></li>
+<li><p>Formatul de date primit de fiecare parametrul în parte este specificat în coloana «Format» din modelul de mai sus</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data_body</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Servicii zilnice&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;measureUnitId&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Se poate observa cum JSON-ului de mai sus conține doar 2 proprietățile care vor fi modificate</p></li>
+<li><p>Dacă o proprietate nu este completata în JSON-ul de mai sus, acea informație din articol nu va fi modificată</p></li>
+</ul>
+</div>
+<div class="section" id="validari-modificare-proprietati-articol">
+<h2>Validări - Modificare proprietăți articol<a class="headerlink" href="#validari-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<p>La momentul executării acestui apel se vor verifica și valida următoarele:</p>
+<ul class="simple">
+<li><p>Dacă există articolul</p></li>
+<li><p>Toate proprietățile obligatorii trebuie să fie completate</p></li>
+<li><p>Numele produselor existente sau nou create trebuie să fie unice (validarea se face pe totalitatea produselor deja existente)</p></li>
+<li><p>Caracterele speciale (șțâăî) vor fi transformate în caractere normale fără accente</p></li>
+</ul>
+<p>Verificările și validările vor arunca (throw) mesaje de eroare sub formă de excepție (<a class="reference external" href="data_models_error.html">Vezi Model Excepție</a>) atașate de un cod HTTP error 500.
+<a class="reference external" href="api_usage_info.html#coduri-de-eroare-posibile">Vezi Coduri eroare posibile</a></p>
+</div>
+<div class="section" id="mod-de-folosire-wrapper-modificare-proprietati-articol">
+<h2>Mod de folosire - Wrapper - Modificare proprietăți articol<a class="headerlink" href="#mod-de-folosire-wrapper-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<ul>
+<li><dl>
+<dt>Dacă se folosește wrapper-ul scris în Python se utilizează astfel:</dt><dd><ol class="arabic simple">
+<li><p>Se preia token-ul <a class="reference external" href="auth.html#exemple-autorizare">Vezi Autorizarea</a></p></li>
+<li><p>Se apelează metoda specifică acestui request <strong>PATCH</strong></p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">token_url</span> <span class="o">=</span> <span class="s1">&#39;https://staging.keez.ro/idp/connect/token&#39;</span>
+<span class="n">api_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;https://</span><span class="si">{</span><span class="n">ENVIRONMENT</span><span class="si">}</span><span class="s1">.keez.ro/api/v1.0/public-api&#39;</span>
+
+<span class="n">client_eid</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_CLIENT_EID}</span><span class="s1">&#39;</span>
+<span class="n">application_id</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_APPLICATION_ID}</span><span class="s1">&#39;</span>
+<span class="n">secret</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{RECEIVED_SECRET}</span><span class="s1">&#39;</span>
+
+<span class="n">api</span> <span class="o">=</span> <span class="n">KeezPublicApi</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="n">application_id</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="n">secret</span><span class="p">,</span> <span class="n">token_url</span><span class="o">=</span><span class="n">token_url</span><span class="p">,</span> <span class="n">api_url</span><span class="o">=</span><span class="n">api_url</span><span class="p">)</span>
+
+<span class="n">item_external_id</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{ID_EXTERN_ARTICOL}</span><span class="s1">&#39;</span>
+<span class="n">data_body</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Servicii zilnice&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;measureUnitId&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">api</span><span class="o">.</span><span class="n">update_item</span><span class="p">(</span><span class="n">client_eid</span><span class="p">,</span> <span class="n">item_external_id</span><span class="p">,</span> <span class="n">data_body</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</li>
+</ul>
+</div>
+<div class="section" id="mod-de-folosire-fara-wrapper-modificare-proprietati-articol">
+<h2>Mod de folosire - Fără Wrapper - Modificare proprietăți articol<a class="headerlink" href="#mod-de-folosire-fara-wrapper-modificare-proprietati-articol" title="Link permanent la acest titlu">¶</a></h2>
+<blockquote>
+<div><div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">ItemService</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">TokenService</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">auth_token</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">generate_token</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">auth_token</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;token_type&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">auth_token</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;access_token&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">client_eid</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">client_eid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">api_endpoint</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">api_endpoint</span>
+
+    <span class="k">def</span> <span class="nf">updateItem</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">item_external_id</span> <span class="o">=</span> <span class="s1">&#39;TEST&#39;</span>
+
+        <span class="n">item_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">api_endpoint</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">client_eid</span><span class="si">}</span><span class="s1">/items/</span><span class="si">{</span><span class="n">item_external_id</span><span class="si">}</span><span class="s1">&#39;</span>
+
+        <span class="n">item_data</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Servicii zilnice&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;measureUnitId&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="p">}</span>
+
+    <span class="n">_req</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="n">item_url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Content-Type&#39;</span><span class="p">:</span> <span class="s1">&#39;application/json&#39;</span><span class="p">,</span> <span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">},</span> <span class="n">json</span><span class="o">=</span><span class="n">item_data</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_req</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">service</span> <span class="o">=</span> <span class="n">ItemService</span><span class="p">()</span>
+    <span class="n">item</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">updateItem</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Notă</p>
+<p>Clasa TokenService() se găsește la secțiunea Autorizarea: <a class="reference external" href="auth.html#exemple-autorizare">Vezi Autorizarea</a></p>
+</div>
+</div></blockquote>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="invoice.html" class="btn btn-neutral float-right" title="Facturi" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="item_replace.html" class="btn btn-neutral float-left" title="Modificare articol" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2025, keez.ro
+
+    </p>
+  </div> 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>
