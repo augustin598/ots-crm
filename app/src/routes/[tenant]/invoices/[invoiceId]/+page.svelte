@@ -217,9 +217,21 @@
 		}
 	}
 
-	function handleDownloadPDF() {
-		// TODO: Implement PDF download
-		alert('PDF download will be implemented soon');
+	async function handleDownloadPDF() {
+		if (!invoiceId) return;
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/${invoiceId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+		}
 	}
 
 	function formatAddress() {

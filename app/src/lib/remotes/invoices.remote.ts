@@ -899,24 +899,3 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	return { success: true };
 });
 
-export const downloadInvoicePDF = query(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
-	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
-	}
-
-	// Verify invoice belongs to tenant
-	const [invoice] = await db
-		.select()
-		.from(table.invoice)
-		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, event.locals.tenant.id)))
-		.limit(1);
-
-	if (!invoice) {
-		throw new Error('Invoice not found');
-	}
-
-	// TODO: Implement PDF generation
-	// For now, return invoice data that can be used to generate PDF on client side
-	return { invoiceId, invoiceNumber: invoice.invoiceNumber };
-});
