@@ -1,97 +1,128 @@
 <script lang="ts">
 	import { createContractTemplate } from '$lib/remotes/contract-templates.remote';
+	import { getDefaultContractClauses } from '$lib/contract-templates';
+	import type { ContractClause } from '$lib/contract-templates';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { toast } from 'svelte-sonner';
+	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Separator } from '$lib/components/ui/separator';
+	import ContractClausesEditor from '$lib/components/app/contract-clauses-editor.svelte';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import SaveIcon from '@lucide/svelte/icons/save';
 
 	const tenantSlug = $derived(page.params.tenant);
+	const defaultClauses = getDefaultContractClauses();
 
 	let name = $state('');
 	let description = $state('');
-	let content = $state('');
+	let clauses = $state<ContractClause[]>(
+		defaultClauses.map((c) => ({ ...c, paragraphs: [...c.paragraphs] }))
+	);
 	let isActive = $state(true);
-	let loading = $state(false);
-	let error = $state<string | null>(null);
+	let creating = $state(false);
 
 	async function handleSubmit() {
-		if (!name || !content) {
-			error = 'Name and content are required';
+		if (!name.trim()) {
+			toast.error('Numele este obligatoriu');
 			return;
 		}
 
-		loading = true;
-		error = null;
-
+		creating = true;
 		try {
 			const result = await createContractTemplate({
-				name,
-				description: description || undefined,
-				content,
-				isActive: isActive
+				name: name.trim(),
+				description: description.trim() || undefined,
+				clausesJson: JSON.stringify(clauses),
+				isActive
 			});
 
-			if (result.success) {
-				goto(`/${tenantSlug}/contract-templates`);
+			if (result.success && result.templateId) {
+				toast.success('Template creat cu succes');
+				goto(`/${tenantSlug}/contract-templates/${result.templateId}`);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to create template';
+			toast.error(e instanceof Error ? e.message : 'Eroare la crearea template-ului');
 		} finally {
-			loading = false;
+			creating = false;
 		}
 	}
 </script>
 
+<svelte:head>
+	<title>Template Nou - CRM</title>
+</svelte:head>
+
 <div class="space-y-6">
-	<h1 class="text-3xl font-bold">New Contract Template</h1>
+	<div class="mb-6">
+		<Button
+			variant="ghost"
+			size="sm"
+			class="mb-4"
+			onclick={() => goto(`/${tenantSlug}/contract-templates`)}
+		>
+			<ArrowLeftIcon class="mr-2 h-4 w-4" />
+			Inapoi la Template-uri
+		</Button>
+		<h1 class="text-3xl font-bold tracking-tight">Template Nou</h1>
+		<p class="text-muted-foreground mt-1">
+			Creaza un template de contract cu clauze legale editabile
+		</p>
+	</div>
 
+	<!-- Template info -->
 	<Card>
-		<CardHeader>
-			<CardTitle>Template Information</CardTitle>
-			<CardDescription>Create a new contract template with variables like {'{{tenant.name}}'}, {'{{client.name}}'}, etc.</CardDescription>
-		</CardHeader>
-		<CardContent>
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					handleSubmit();
-				}}
-				class="space-y-4"
-			>
-				<div class="space-y-2">
-					<Label for="name">Template Name *</Label>
-					<Input id="name" bind:value={name} type="text" required />
+		<CardContent class="pt-6 space-y-4">
+			<div class="grid gap-4 md:grid-cols-2">
+				<div class="space-y-1.5">
+					<Label>Nume template *</Label>
+					<Input bind:value={name} placeholder="ex: Prestari Servicii Informatice" />
 				</div>
-				<div class="space-y-2">
-					<Label for="description">Description</Label>
-					<Input id="description" bind:value={description} type="text" />
-				</div>
-				<div class="space-y-2">
-					<Label for="content">Template Content *</Label>
-					<Textarea id="content" bind:value={content} rows="20" required />
-					<p class="text-xs text-gray-500">
-						Use variables like {'{{tenant.name}}'}, {'{{client.name}}'}, {'{{client.cui}}'}, {'{{project.name}}'}, {'{{date}}'}
-					</p>
-				</div>
-
-				{#if error}
-					<div class="rounded-md bg-red-50 p-3">
-						<p class="text-sm text-red-800">{error}</p>
+				<div class="space-y-1.5">
+					<Label>Status</Label>
+					<div class="flex items-center gap-3 h-9">
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input type="checkbox" bind:checked={isActive} class="rounded" />
+							<span class="text-sm">{isActive ? 'Activ' : 'Inactiv'}</span>
+						</label>
 					</div>
-				{/if}
-
-				<div class="flex items-center justify-end gap-4">
-					<Button type="button" variant="outline" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
-						Cancel
-					</Button>
-					<Button type="submit" disabled={loading}>
-						{loading ? 'Creating...' : 'Create Template'}
-					</Button>
 				</div>
-			</form>
+			</div>
+			<div class="space-y-1.5">
+				<Label>Descriere</Label>
+				<Textarea
+					bind:value={description}
+					placeholder="Descriere optionala a template-ului..."
+					rows={2}
+				/>
+			</div>
 		</CardContent>
 	</Card>
+
+	<Separator />
+
+	<!-- Clauses editor -->
+	<Card>
+		<CardContent class="pt-6">
+			<ContractClausesEditor
+				bind:clauses
+				{defaultClauses}
+			/>
+		</CardContent>
+	</Card>
+
+	<!-- Submit -->
+	<div class="flex justify-end gap-3 pb-8">
+		<Button variant="outline" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
+			Anuleaza
+		</Button>
+		<Button onclick={handleSubmit} disabled={creating} size="lg">
+			<SaveIcon class="mr-2 h-4 w-4" />
+			{creating ? 'Se creeaza...' : 'Creaza Template'}
+		</Button>
+	</div>
 </div>

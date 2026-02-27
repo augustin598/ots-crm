@@ -174,6 +174,9 @@ export const testEmailSettings = command(async () => {
 		throw new Error('Email settings are not configured or enabled');
 	}
 
+	// Clear cached transporter to ensure fresh settings are used for test
+	clearTenantTransporterCache(event.locals.tenant.id);
+
 	// Get transporter using tenant-specific settings
 	const transporter = await getTenantTransporter(event.locals.tenant.id);
 	if (!transporter) {

@@ -13,6 +13,12 @@
 	import { X } from '@lucide/svelte';
 	import { getFaviconUrl } from '$lib/utils';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+
+	const tenantSlug = $derived(page.params.tenant);
 
 	let { data }: { data: PageData } = $props();
 
@@ -31,12 +37,15 @@
 	let vatNumber = $state(data.tenant?.vatNumber || '');
 	let legalRepresentative = $state(data.tenant?.legalRepresentative || '');
 	let iban = $state(data.tenant?.iban || '');
+	let ibanEuro = $state(data.tenant?.ibanEuro || '');
 	let bankName = $state(data.tenant?.bankName || '');
 	let address = $state(data.tenant?.address || '');
 	let city = $state(data.tenant?.city || '');
 	let county = $state(data.tenant?.county || '');
 	let postalCode = $state(data.tenant?.postalCode || '');
 	let country = $state(data.tenant?.country || 'România');
+	let phone = $state(data.tenant?.phone || '');
+	let email = $state(data.tenant?.email || '');
 
 	// Invitation state
 	let invitationEmail = $state('');
@@ -96,12 +105,15 @@
 				vatNumber: vatNumber || undefined,
 				legalRepresentative: legalRepresentative || undefined,
 				iban: iban || undefined,
+				ibanEuro: ibanEuro || undefined,
 				bankName: bankName || undefined,
 				address: address || undefined,
 				city: city || undefined,
 				county: county || undefined,
 				postalCode: postalCode || undefined,
-				country: country || undefined
+				country: country || undefined,
+				phone: phone || undefined,
+				email: email || undefined
 			}).updates(getInvitations());
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update settings';
@@ -258,12 +270,26 @@
 							<Input id="legalRepresentative" bind:value={legalRepresentative} type="text" />
 						</div>
 						<div class="space-y-2">
-							<Label for="iban">IBAN</Label>
-							<Input id="iban" bind:value={iban} type="text" />
+							<Label for="iban">IBAN (LEI)</Label>
+							<Input id="iban" bind:value={iban} type="text" placeholder="RO86BTRL..." />
+						</div>
+						<div class="space-y-2">
+							<Label for="ibanEuro">IBAN (EURO)</Label>
+							<Input id="ibanEuro" bind:value={ibanEuro} type="text" placeholder="RO36BTRL..." />
 						</div>
 						<div class="space-y-2">
 							<Label for="bankName">Bank Name</Label>
 							<Input id="bankName" bind:value={bankName} type="text" />
+						</div>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div class="space-y-2">
+							<Label for="phone">Phone</Label>
+							<Input id="phone" bind:value={phone} type="tel" placeholder="07xxxxxxxx" />
+						</div>
+						<div class="space-y-2">
+							<Label for="email">Email</Label>
+							<Input id="email" bind:value={email} type="email" placeholder="office@company.ro" />
 						</div>
 					</div>
 					<div class="space-y-2">
@@ -301,6 +327,21 @@
 				</Button>
 			</form>
 		</CardContent>
+	</Card>
+
+	<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
+		<CardHeader>
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3">
+					<FileSignatureIcon class="h-5 w-5 text-muted-foreground" />
+					<div>
+						<CardTitle>Template-uri Contracte</CardTitle>
+						<CardDescription>Gestioneaza template-urile de contract cu clauze legale predefinite</CardDescription>
+					</div>
+				</div>
+				<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+			</div>
+		</CardHeader>
 	</Card>
 
 	{#if data.tenantUser?.role === 'owner' || data.tenantUser?.role === 'admin'}

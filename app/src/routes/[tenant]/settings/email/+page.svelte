@@ -173,6 +173,10 @@
 								max="65535"
 								required={isEnabled}
 								disabled={!isEnabled}
+								onchange={() => {
+									if (smtpPort === 465) smtpSecure = true;
+									else if (smtpPort === 587 || smtpPort === 25) smtpSecure = false;
+								}}
 							/>
 							<p class="text-xs text-muted-foreground">
 								SMTP port (587 for TLS, 465 for SSL, 25 for unencrypted)

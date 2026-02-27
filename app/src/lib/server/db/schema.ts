@@ -48,12 +48,15 @@ export const tenant = sqliteTable('tenant', {
 	vatNumber: text('vat_number'),
 	legalRepresentative: text('legal_representative'),
 	iban: text('iban'),
+	ibanEuro: text('iban_euro'),
 	bankName: text('bank_name'),
 	address: text('address'),
 	city: text('city'),
 	county: text('county'),
 	postalCode: text('postal_code'),
 	country: text('country').default('România'),
+	phone: text('phone'),
+	email: text('email'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -256,6 +259,7 @@ export const contractTemplate = sqliteTable('contract_template', {
 	description: text('description'),
 	content: text('content').notNull(),
 	variables: jsonb('variables').$type<string[]>(),
+	clausesJson: text('clauses_json'), // JSON array of {number, title, paragraphs[]} for PDF contract generation
 	isActive: boolean('is_active').notNull().default(true),
 	createdByUserId: text('created_by_user_id')
 		.notNull()
@@ -1024,6 +1028,86 @@ export const seoLinkCheck = sqliteTable('seo_link_check', {
 	errorMessage: text('error_message')
 });
 
+// ==================== CONTRACT TABLES ====================
+
+export const contract = sqliteTable('contract', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	templateId: text('template_id').references(() => contractTemplate.id),
+
+	// Contract identification
+	contractNumber: text('contract_number').notNull(),
+	contractDate: timestamp('contract_date', { withTimezone: true, mode: 'date' }).notNull(),
+	contractTitle: text('contract_title').notNull().default('PRESTARI SERVICII INFORMATICE'),
+	status: text('status').notNull().default('draft'), // 'draft', 'sent', 'signed', 'active', 'expired', 'cancelled'
+
+	// Section 2: Object/scope
+	serviceDescription: text('service_description'),
+	offerLink: text('offer_link'),
+
+	// Section 3: Payment
+	currency: text('currency').notNull().default('EUR'),
+	paymentTermsDays: integer('payment_terms_days').notNull().default(5),
+	penaltyRate: integer('penalty_rate').notNull().default(50), // basis points per day (50 = 0.5%)
+	billingFrequency: text('billing_frequency').notNull().default('monthly'), // 'monthly', 'one-time', 'quarterly', 'yearly'
+
+	// Section 4: Duration
+	contractDurationMonths: integer('contract_duration_months').notNull().default(6),
+
+	// Discount
+	discountPercent: integer('discount_percent'),
+
+	// Contact / notification
+	prestatorEmail: text('prestator_email'),
+	beneficiarEmail: text('beneficiar_email'),
+
+	// Additional services rate
+	hourlyRate: integer('hourly_rate').notNull().default(6000), // in cents (6000 = 60 EUR)
+	hourlyRateCurrency: text('hourly_rate_currency').notNull().default('EUR'),
+
+	// Signatures
+	prestatorSignatureName: text('prestator_signature_name'),
+	beneficiarSignatureName: text('beneficiar_signature_name'),
+	prestatorSignatureImage: text('prestator_signature_image'),
+	beneficiarSignatureImage: text('beneficiar_signature_image'),
+	prestatorSignedAt: timestamp('prestator_signed_at', { withTimezone: true, mode: 'date' }),
+	beneficiarSignedAt: timestamp('beneficiar_signed_at', { withTimezone: true, mode: 'date' }),
+
+	// Legal clauses (copied from template, editable per contract)
+	clausesJson: text('clauses_json'),
+
+	notes: text('notes'),
+
+	createdByUserId: text('created_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const contractLineItem = sqliteTable('contract_line_item', {
+	id: text('id').primaryKey(),
+	contractId: text('contract_id')
+		.notNull()
+		.references(() => contract.id, { onDelete: 'cascade' }),
+	description: text('description').notNull(),
+	price: integer('price').notNull(), // in cents
+	unitOfMeasure: text('unit_of_measure').notNull().default('Luna'),
+	sortOrder: integer('sort_order').notNull().default(0),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const clientUser = sqliteTable('client_user', {
 	id: text('id').primaryKey(),
 	userId: text('user_id')
@@ -1063,6 +1147,25 @@ export const adminMagicLinkToken = sqliteTable('admin_magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
 	email: text('email').notNull(),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	used: boolean('used').notNull().default(false),
+	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const contractSignToken = sqliteTable('contract_sign_token', {
+	id: text('id').primaryKey(),
+	token: text('token').notNull().unique(), // Hashed token
+	contractId: text('contract_id')
+		.notNull()
+		.references(() => contract.id),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	signingUrl: text('signing_url'),
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
 	used: boolean('used').notNull().default(false),
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
@@ -1140,7 +1243,9 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	userBankAccounts: many(userBankAccount),
 	clientUsers: many(clientUser),
 	magicLinkTokens: many(magicLinkToken),
-	seoLinks: many(seoLink)
+	seoLinks: many(seoLink),
+	contracts: many(contract),
+	contractTemplates: many(contractTemplate)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -1170,7 +1275,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	clientUsers: many(clientUser),
 	magicLinkTokens: many(magicLinkToken),
 	seoLinks: many(seoLink),
-	websites: many(clientWebsite)
+	websites: many(clientWebsite),
+	contracts: many(contract)
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -1695,6 +1801,42 @@ export const clientUserRelations = relations(clientUser, ({ one }) => ({
 	})
 }));
 
+// Contract relations
+export const contractTemplateRelations = relations(contractTemplate, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [contractTemplate.tenantId],
+		references: [tenant.id]
+	}),
+	contracts: many(contract)
+}));
+
+export const contractRelations = relations(contract, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [contract.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [contract.clientId],
+		references: [client.id]
+	}),
+	template: one(contractTemplate, {
+		fields: [contract.templateId],
+		references: [contractTemplate.id]
+	}),
+	createdBy: one(user, {
+		fields: [contract.createdByUserId],
+		references: [user.id]
+	}),
+	lineItems: many(contractLineItem)
+}));
+
+export const contractLineItemRelations = relations(contractLineItem, ({ one }) => ({
+	contract: one(contract, {
+		fields: [contractLineItem.contractId],
+		references: [contract.id]
+	})
+}));
+
 export const magicLinkTokenRelations = relations(magicLinkToken, ({ one }) => ({
 	client: one(client, {
 		fields: [magicLinkToken.clientId],
@@ -1789,3 +1931,9 @@ export type SeoLink = typeof seoLink.$inferSelect;
 export type NewSeoLink = typeof seoLink.$inferInsert;
 export type SeoLinkCheck = typeof seoLinkCheck.$inferSelect;
 export type NewSeoLinkCheck = typeof seoLinkCheck.$inferInsert;
+export type ContractTemplate = typeof contractTemplate.$inferSelect;
+export type NewContractTemplate = typeof contractTemplate.$inferInsert;
+export type Contract = typeof contract.$inferSelect;
+export type NewContract = typeof contract.$inferInsert;
+export type ContractLineItem = typeof contractLineItem.$inferSelect;
+export type NewContractLineItem = typeof contractLineItem.$inferInsert;

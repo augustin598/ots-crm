@@ -86,14 +86,17 @@ export async function getTenantTransporter(
 			const decryptedPassword = decrypt(tenantId, emailSettings.smtpPassword);
 
 			// Create transporter with tenant-specific settings
+			const port = emailSettings.smtpPort || 587;
+			const secure = emailSettings.smtpSecure || port === 465;
 			const transporter = nodemailer.createTransport({
 				host: emailSettings.smtpHost,
-				port: emailSettings.smtpPort || 587,
-				secure: emailSettings.smtpSecure || false,
+				port,
+				secure,
 				auth: {
 					user: emailSettings.smtpUser,
 					pass: decryptedPassword
-				}
+				},
+				tls: { rejectUnauthorized: false }
 			});
 
 			// Cache the transporter
@@ -1185,5 +1188,106 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 	} catch (error) {
 		console.error('Failed to send daily work reminder email:', error);
 		throw new Error('Failed to send daily work reminder email');
+	}
+}
+
+/**
+ * Send contract signing invitation email to client
+ */
+export async function sendContractSigningEmail(
+	email: string,
+	rawToken: string,
+	tenantSlug: string,
+	contractNumber: string,
+	clientName: string
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.slug, tenantSlug))
+		.limit(1);
+
+	if (!tenant) {
+		throw new Error('Tenant not found');
+	}
+
+	const transporter = await getTenantTransporter(tenant.id);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
+
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenant.id))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
+	const tenantName = tenant.name || 'CRM';
+	const signingUrl = `${baseUrl}/sign/${tenantSlug}/${encodeURIComponent(rawToken)}`;
+
+	const mailOptions = {
+		from: `"${tenantName}" <${fromEmail}>`,
+		to: email,
+		subject: `Semnare contract ${contractNumber} - ${tenantName}`,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Semnare contract ${contractNumber}</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: #1e293b; margin-top: 0;">${tenantName}</h1>
+					<p>Stimate/Stimată ${clientName},</p>
+					<p>Ați primit o invitație pentru a semna contractul <strong>${contractNumber}</strong> emis de <strong>${tenantName}</strong>.</p>
+					<p>Faceți clic pe butonul de mai jos pentru a vizualiza și semna contractul. Link-ul este valabil 7 zile.</p>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${signingUrl}" style="background-color: #1e293b; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Vizualizează și Semnează Contractul</a>
+					</div>
+					<p style="font-size: 14px; color: #666;">Sau copiați și lipiți acest link în browser:</p>
+					<p style="font-size: 12px; color: #999; word-break: break-all;">${signingUrl}</p>
+					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
+						<p style="margin: 0; font-size: 14px; color: #856404;">
+							<strong>Notă de securitate:</strong> Acest link este valabil 7 zile și poate fi folosit o singură dată. Dacă nu ați solicitat semnarea acestui contract, vă rugăm să ignorați acest email.
+						</p>
+					</div>
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru orice întrebări, vă rugăm să contactați ${tenantName}.</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+			${tenantName}
+
+			Stimate/Stimată ${clientName},
+
+			Ați primit o invitație pentru a semna contractul ${contractNumber} emis de ${tenantName}.
+
+			Accesați link-ul de mai jos pentru a vizualiza și semna contractul (valabil 7 zile):
+
+			${signingUrl}
+
+			Notă de securitate: Acest link este valabil 7 zile și poate fi folosit o singură dată.
+
+			Pentru orice întrebări, contactați ${tenantName}.
+		`
+	};
+
+	try {
+		await transporter.sendMail(mailOptions);
+		console.log(`Contract signing email sent to ${email} for contract ${contractNumber}`);
+	} catch (error) {
+		console.error('Failed to send contract signing email:', error);
+		throw new Error('Failed to send contract signing email');
 	}
 }

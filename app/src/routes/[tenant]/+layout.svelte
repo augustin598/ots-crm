@@ -209,6 +209,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/contracts`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/contracts" {...props}>
+								<FileSignatureIcon />
+								<span>Contracte</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/banking`)}>
 						{#snippet child({ props })}
 							<a href="/{tenantSlug}/banking" {...props}>

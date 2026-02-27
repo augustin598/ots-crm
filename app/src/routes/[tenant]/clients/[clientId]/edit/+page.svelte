@@ -253,7 +253,7 @@
 
 			await updateClient({
 				clientId,
-				name,
+				name: name || businessName,
 				businessName: businessName || undefined,
 				email: email || undefined,
 				phone: phone || undefined,
@@ -314,11 +314,12 @@
 					<div class="space-y-4">
 						<h3 class="text-lg font-semibold">Basic Information</h3>
 						<div class="space-y-2">
-							<Label for="name">Display name (alias) *</Label>
-							<Input id="name" bind:value={name} type="text" required placeholder="Ex: Meduza Agency" />
-							{#if businessName && businessName !== name}
-								<p class="text-xs text-muted-foreground">Denumire oficială: {businessName}</p>
-							{/if}
+							<Label for="businessName">Organization Name *</Label>
+							<Input id="businessName" bind:value={businessName} type="text" required placeholder="Ex: Meduza Agency S.R.L." />
+						</div>
+						<div class="space-y-2">
+							<Label for="name">Display name (alias)</Label>
+							<Input id="name" bind:value={name} type="text" placeholder="Ex: Meduza Agency" />
 						</div>
 						<div class="grid grid-cols-2 gap-4">
 							<div class="space-y-2">

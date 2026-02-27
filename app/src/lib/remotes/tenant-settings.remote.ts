@@ -15,12 +15,15 @@ const tenantSettingsSchema = v.object({
 	vatNumber: v.optional(v.string()),
 	legalRepresentative: v.optional(v.string()),
 	iban: v.optional(v.string()),
+	ibanEuro: v.optional(v.string()),
 	bankName: v.optional(v.string()),
 	address: v.optional(v.string()),
 	city: v.optional(v.string()),
 	county: v.optional(v.string()),
 	postalCode: v.optional(v.string()),
-	country: v.optional(v.string())
+	country: v.optional(v.string()),
+	phone: v.optional(v.string()),
+	email: v.optional(v.string())
 });
 
 export const updateTenantSettings = command(tenantSettingsSchema, async (data) => {
