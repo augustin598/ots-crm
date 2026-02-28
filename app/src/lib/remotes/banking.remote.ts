@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, gte, lte, or, isNull, isNotNull, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, or, not, isNull, isNotNull, sql, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { BankManager } from '$lib/server/plugins/banking/shared/manager';
 import type { BankName } from '$lib/server/plugins/banking/shared/types';
@@ -12,6 +12,7 @@ import { RevolutClient } from '$lib/server/plugins/banking/revolut/client';
 import { getRevolutConfigForClient } from '$lib/server/plugins/banking/revolut/config';
 import { dev } from '$app/environment';
 import * as storage from '$lib/server/storage';
+import { syncKeezInvoicesForTenant } from '$lib/server/plugins/keez/sync';
 
 function generateBankAccountId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -1370,46 +1371,67 @@ export const getUnmatchedTransactions = query(async () => {
 	return transactions;
 });
 
+export const syncKeezIfStale = command(v.void_(), async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [keezIntegration] = await db
+		.select()
+		.from(table.keezIntegration)
+		.where(
+			and(
+				eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+				eq(table.keezIntegration.isActive, true)
+			)
+		)
+		.limit(1);
+
+	if (!keezIntegration) return { synced: false, reason: 'no_integration' };
+
+	const SYNC_STALE_MS = 5 * 60 * 1000;
+	const lastSync = keezIntegration.lastSyncAt ? new Date(keezIntegration.lastSyncAt).getTime() : 0;
+	if (Date.now() - lastSync <= SYNC_STALE_MS) {
+		return { synced: false, reason: 'fresh' };
+	}
+
+	const result = await syncKeezInvoicesForTenant(event.locals.tenant.id);
+	return { synced: true, ...result };
+});
+
 export const getClientCredit = query(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
 
-	// Get all invoices for client
-	const invoices = await db
+	// Get all invoices for client (excluding drafts and cancelled)
+	const allInvoices = await db
 		.select()
 		.from(table.invoice)
 		.where(
 			and(
 				eq(table.invoice.tenantId, event.locals.tenant.id),
 				eq(table.invoice.clientId, clientId),
-				or(eq(table.invoice.status, 'sent'), eq(table.invoice.status, 'overdue'))
+				not(eq(table.invoice.status, 'draft')),
+				not(eq(table.invoice.status, 'cancelled'))
 			)
 		);
 
-	const totalInvoiced = invoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+	const unpaid = allInvoices.filter((inv) => inv.status === 'sent' || inv.status === 'overdue');
+	const paid = allInvoices.filter((inv) => inv.status === 'paid');
 
-	// Get paid invoices
-	const paidInvoices = await db
-		.select()
-		.from(table.invoice)
-		.where(
-			and(
-				eq(table.invoice.tenantId, event.locals.tenant.id),
-				eq(table.invoice.clientId, clientId),
-				eq(table.invoice.status, 'paid')
-			)
-		);
-
-	const totalPaid = paidInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+	const totalInvoiced = allInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+	const totalPaid = paid.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+	const remainingCredit = unpaid.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
 
 	return {
 		totalInvoiced,
 		totalPaid,
-		remainingCredit: totalInvoiced - totalPaid,
-		unpaidInvoices: invoices.length,
-		paidInvoices: paidInvoices.length
+		remainingCredit,
+		unpaidInvoices: unpaid.length,
+		paidInvoices: paid.length
 	};
 });
 

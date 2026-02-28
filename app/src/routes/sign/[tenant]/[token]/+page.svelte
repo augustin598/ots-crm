@@ -17,6 +17,21 @@
 	const alreadySigned = $derived(!!data.contract.beneficiarSignedAt);
 	const justSigned = $derived(form && 'success' in form && form.success);
 	const canSubmit = $derived(signatureName.trim().length > 0 && signatureDataUrl.length > 0);
+
+	let redirectCountdown = $state(5);
+
+	$effect(() => {
+		if (justSigned || alreadySigned) {
+			const interval = setInterval(() => {
+				redirectCountdown--;
+				if (redirectCountdown <= 0) {
+					clearInterval(interval);
+					window.location.href = `/client/${page.params.tenant}/`;
+				}
+			}, 1000);
+			return () => clearInterval(interval);
+		}
+	});
 </script>
 
 <svelte:head>
@@ -75,6 +90,7 @@
 					Semnătura <strong>{justSigned && 'signatureName' in form ? form.signatureName : data.contract.beneficiarSignatureName}</strong> a fost înregistrată.
 				</p>
 				<p class="text-sm text-green-600 mt-2">Veți primi o confirmare prin email de la {data.tenant.name}.</p>
+				<p class="text-xs text-gray-500 mt-3">Redirectare automată în {redirectCountdown} secunde...</p>
 			</div>
 		{:else}
 			<div class="bg-white rounded-lg border p-6">

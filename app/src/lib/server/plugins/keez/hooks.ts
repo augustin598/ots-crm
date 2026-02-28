@@ -1,4 +1,4 @@
-import type { HookHandler, InvoiceCreatedEvent, InvoiceUpdatedEvent } from '../types';
+import type { HookHandler, InvoiceCreatedEvent, InvoiceUpdatedEvent, InvoiceDeletedEvent } from '../types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -332,6 +332,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	let updateData: any = {
 		keezInvoiceId: response.externalId,
 		keezExternalId: response.externalId,
+		keezStatus: keezInvoiceData?.status || keezInvoiceHeader?.status || 'Draft',
 		updatedAt: new Date()
 	};
 
@@ -679,5 +680,64 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 				})
 				.where(eq(table.keezInvoiceSync.id, existingSync.id));
 		}
+	}
+};
+
+/**
+ * Handle invoice deleted event - delete from Keez if it's a draft/proforma
+ */
+export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) => {
+	const { invoice, tenantId } = event;
+	console.log(`[Keez] onInvoiceDeleted hook fired for invoice ${invoice.id} (keezExternalId: ${invoice.keezExternalId}, keezStatus: ${invoice.keezStatus})`);
+
+	// Check if invoice has Keez sync data
+	if (!invoice.keezExternalId) {
+		console.log(`[Keez] Invoice ${invoice.id} not synced with Keez, skipping deletion`);
+		return;
+	}
+
+	// Check if Keez integration is active for tenant
+	const [integration] = await db
+		.select()
+		.from(table.keezIntegration)
+		.where(
+			and(
+				eq(table.keezIntegration.tenantId, tenantId),
+				eq(table.keezIntegration.isActive, true)
+			)
+		)
+		.limit(1);
+
+	if (!integration) {
+		console.log(`[Keez] Keez integration not active for tenant ${tenantId}, skipping deletion`);
+		return;
+	}
+
+	try {
+		const keezClient = await createKeezClientForTenant(tenantId, integration);
+
+		// Only draft/proforma invoices can be deleted in Keez
+		// Validated fiscal invoices cannot be deleted (must be storno'd)
+		if (invoice.keezStatus === 'Valid' || invoice.keezStatus === 'Cancelled') {
+			console.log(`[Keez] Invoice ${invoice.id} is ${invoice.keezStatus} in Keez — cannot delete validated/cancelled invoices, skipping`);
+			return;
+		}
+
+		await keezClient.deleteInvoice(invoice.keezExternalId);
+		console.log(`[Keez] Successfully deleted invoice ${invoice.id} from Keez`);
+
+		// Clean up sync records
+		const [syncRecord] = await db
+			.select()
+			.from(table.keezInvoiceSync)
+			.where(eq(table.keezInvoiceSync.invoiceId, invoice.id))
+			.limit(1);
+
+		if (syncRecord) {
+			await db.delete(table.keezInvoiceSync).where(eq(table.keezInvoiceSync.id, syncRecord.id));
+		}
+	} catch (error) {
+		// Don't fail the CRM deletion if Keez deletion fails
+		console.error(`[Keez] Failed to delete invoice ${invoice.id} from Keez:`, error);
 	}
 };

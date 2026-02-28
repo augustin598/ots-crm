@@ -4,7 +4,7 @@
 	import { getProject } from '$lib/remotes/projects.remote';
 	import { getTransactions } from '$lib/remotes/banking.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { validateInvoiceInKeez } from '$lib/remotes/keez.remote';
+	import { validateInvoiceInKeez, sendInvoiceToEFactura, cancelInvoiceInKeez, getInvoicePDFFromKeez, sendInvoiceEmailFromKeez, syncInvoiceToKeez } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -23,7 +23,12 @@
 		Calendar,
 		Edit,
 		CheckCircle2,
-		CreditCard
+		CreditCard,
+		FileText,
+		Upload,
+		Ban,
+		RefreshCw,
+		Eye
 	} from '@lucide/svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -222,6 +227,77 @@
 		}
 	}
 
+	async function handleSendToEFactura() {
+		if (!invoice || !invoiceId) return;
+		if (!confirm('Trimite factura în sistemul eFactura? Factura trebuie să fie validată.')) {
+			return;
+		}
+		try {
+			await sendInvoiceToEFactura({ invoiceId });
+			alert('Factura a fost trimisă în eFactura');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Trimiterea în eFactura a eșuat');
+		}
+	}
+
+	async function handleCancelInKeez() {
+		if (!invoice || !invoiceId) return;
+		if (!confirm('Anulează factura în Keez? Această acțiune va schimba statusul facturii în Cancelled.')) {
+			return;
+		}
+		try {
+			await cancelInvoiceInKeez({ invoiceId });
+			alert('Factura a fost anulată în Keez');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Anularea facturii în Keez a eșuat');
+		}
+	}
+
+	async function handleDownloadKeezPDF() {
+		if (!invoice || !invoiceId) return;
+		try {
+			const result = await getInvoicePDFFromKeez({ invoiceId });
+			const byteCharacters = atob(result.pdf);
+			const byteNumbers = new Array(byteCharacters.length);
+			for (let i = 0; i < byteCharacters.length; i++) {
+				byteNumbers[i] = byteCharacters.charCodeAt(i);
+			}
+			const byteArray = new Uint8Array(byteNumbers);
+			const blob = new Blob([byteArray], { type: 'application/pdf' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `keez-${invoice.invoiceNumber || invoiceId}.pdf`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Descărcarea PDF-ului din Keez a eșuat');
+		}
+	}
+
+	async function handleSendEmailFromKeez() {
+		if (!invoice || !invoiceId) return;
+		const email = prompt('Introduceți adresa de email pentru trimiterea facturii:');
+		if (!email) return;
+		try {
+			await sendInvoiceEmailFromKeez({ invoiceId, to: email });
+			alert('Factura a fost trimisă pe email din Keez');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Trimiterea pe email a eșuat');
+		}
+	}
+
+	async function handleSyncToKeez() {
+		if (!invoice || !invoiceId) return;
+		if (!confirm('Sincronizează factura în Keez?')) return;
+		try {
+			await syncInvoiceToKeez({ invoiceId });
+			alert('Factura a fost sincronizată în Keez');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Sincronizarea în Keez a eșuat');
+		}
+	}
+
 	async function handleMarkAsPaid() {
 		if (!invoice || !invoiceId) return;
 		try {
@@ -245,6 +321,19 @@
 			URL.revokeObjectURL(url);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+		}
+	}
+
+	async function handlePreviewPDF() {
+		if (!invoiceId) return;
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/${invoiceId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
 		}
 	}
 
@@ -303,6 +392,15 @@
 					<div class="flex items-center gap-3 mb-2">
 						<h1 class="text-3xl font-bold tracking-tight">{displayInvoiceNumber}</h1>
 						<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
+						{#if invoice.keezExternalId}
+							{#if invoice.keezStatus === 'Valid'}
+								<Badge variant="outline" class="border-green-500 text-green-600 dark:text-green-400">Keez ✓</Badge>
+							{:else if invoice.keezStatus === 'Cancelled'}
+								<Badge variant="outline" class="border-red-500 text-red-600 dark:text-red-400">Keez Anulată</Badge>
+							{:else}
+								<Badge variant="outline" class="border-yellow-500 text-yellow-600 dark:text-yellow-400">Keez Proformă</Badge>
+							{/if}
+						{/if}
 						{#if invoice.isCreditNote}
 							<Badge variant="outline">Credit Note</Badge>
 						{/if}
@@ -310,6 +408,9 @@
 					<p class="text-lg text-muted-foreground">{client?.name || 'Unknown Client'}</p>
 				</div>
 				<div class="flex gap-2">
+					<Button variant="outline" size="icon" onclick={handlePreviewPDF} title="Preview PDF">
+						<Eye class="h-4 w-4" />
+					</Button>
 					<Button variant="outline" onclick={handleDownloadPDF}>
 						<Download class="mr-2 h-4 w-4" />
 						Download PDF
@@ -349,7 +450,7 @@
 							{/if}
 						</div>
 						<div class="text-right">
-							<h3 class="text-3xl font-bold mb-2">INVOICE</h3>
+							<h3 class="text-3xl font-bold mb-2">{invoice.isCreditNote ? 'CREDIT NOTE' : (invoice.keezStatus === 'Draft' || (!invoice.keezStatus && invoice.status === 'draft')) ? 'PROFORMA' : 'INVOICE'}</h3>
 							<p class="text-muted-foreground">{displayInvoiceNumber}</p>
 						</div>
 					</div>
@@ -746,10 +847,32 @@
 								<CheckCircle2 class="mr-2 h-4 w-4" />
 								Mark as Paid
 							</Button>
+							{#if !invoice.keezExternalId}
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleSyncToKeez}>
+									<Upload class="mr-2 h-4 w-4" />
+									Sincronizează în Keez
+								</Button>
+							{/if}
 							{#if invoice.keezExternalId}
 								<Button variant="outline" class="w-full bg-transparent" onclick={handleValidateInKeez}>
 									<CheckCircle2 class="mr-2 h-4 w-4" />
 									Validează în Keez
+								</Button>
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleSendToEFactura}>
+									<FileText class="mr-2 h-4 w-4" />
+									Trimite eFactura
+								</Button>
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleSendEmailFromKeez}>
+									<Mail class="mr-2 h-4 w-4" />
+									Trimite pe Email (Keez)
+								</Button>
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleDownloadKeezPDF}>
+									<Download class="mr-2 h-4 w-4" />
+									Descarcă PDF Keez
+								</Button>
+								<Button variant="outline" class="w-full bg-transparent" onclick={handleCancelInKeez}>
+									<Ban class="mr-2 h-4 w-4" />
+									Anulează în Keez
 								</Button>
 							{/if}
 						</CardContent>

@@ -1,0 +1,1 @@
+ALTER TABLE `invoice_settings` ADD `invoice_logo` text;

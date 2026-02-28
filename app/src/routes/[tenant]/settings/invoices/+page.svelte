@@ -7,7 +7,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import { Receipt } from '@lucide/svelte';
+	import { Receipt, Upload, X } from '@lucide/svelte';
 	import { CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
@@ -37,6 +37,8 @@
 	let defaultCurrency = $state<Currency>((settings?.defaultCurrency || 'RON') as Currency);
 	let defaultTaxRate = $state(settings?.defaultTaxRate ?? 19);
 	let invoiceEmailsEnabled = $state(settings?.invoiceEmailsEnabled ?? true);
+	let invoiceLogo = $state<string | null>(settings?.invoiceLogo || null);
+	let logoPreview = $state<string | null>(null);
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
 	let saveSuccess = $state(false);
@@ -57,8 +59,39 @@
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
 			defaultTaxRate = settings.defaultTaxRate ?? 19;
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
+			invoiceLogo = settings.invoiceLogo || null;
+			logoPreview = settings.invoiceLogo || null;
 		}
 	});
+
+	function handleLogoSelect(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		if (!file.type.startsWith('image/')) {
+			saveError = 'File must be an image (PNG or JPEG)';
+			return;
+		}
+
+		if (file.size > 2 * 1024 * 1024) {
+			saveError = 'Logo must be smaller than 2MB';
+			return;
+		}
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			const base64 = reader.result as string;
+			invoiceLogo = base64;
+			logoPreview = base64;
+		};
+		reader.readAsDataURL(file);
+	}
+
+	function removeLogo() {
+		invoiceLogo = null;
+		logoPreview = null;
+	}
 
 	async function handleSubmit() {
 		saving = true;
@@ -79,7 +112,8 @@
 				keezDefaultPaymentTypeId,
 				defaultCurrency: defaultCurrency || undefined,
 				defaultTaxRate: defaultTaxRate !== undefined ? defaultTaxRate : undefined,
-				invoiceEmailsEnabled
+				invoiceEmailsEnabled,
+				invoiceLogo
 			}).updates(settingsQuery);
 			saveSuccess = true;
 			setTimeout(() => {
@@ -132,6 +166,38 @@
 			}}
 			class="space-y-6"
 		>
+			<Card>
+				<CardHeader>
+					<CardTitle>Invoice Logo</CardTitle>
+					<CardDescription>Upload a logo to appear on your generated invoice PDFs</CardDescription>
+				</CardHeader>
+				<CardContent class="space-y-4">
+					{#if logoPreview}
+						<div class="flex items-start gap-4">
+							<div class="border rounded-lg p-2 bg-white">
+								<img src={logoPreview} alt="Invoice logo" class="h-16 max-w-[200px] object-contain" />
+							</div>
+							<Button type="button" variant="outline" size="sm" onclick={removeLogo}>
+								<X class="h-4 w-4 mr-1" />
+								Remove
+							</Button>
+						</div>
+					{:else}
+						<label
+							class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+						>
+							<Upload class="h-8 w-8 text-muted-foreground mb-2" />
+							<span class="text-sm text-muted-foreground">Click to upload logo</span>
+							<span class="text-xs text-muted-foreground mt-1">PNG or JPEG, max 2MB</span>
+							<input type="file" class="hidden" accept="image/png,image/jpeg" onchange={handleLogoSelect} />
+						</label>
+					{/if}
+					<p class="text-xs text-muted-foreground">
+						This logo will appear in the top-left corner of your invoice PDFs. If no logo is uploaded, a default logo will be used.
+					</p>
+				</CardContent>
+			</Card>
+
 			{#if isSmartBillActive}
 				<Card>
 					<CardHeader>

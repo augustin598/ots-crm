@@ -17,6 +17,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
@@ -266,7 +267,16 @@
 									variant="outline"
 									size="icon"
 									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
-									onclick={() => window.open(`/${tenantSlug}/contracts/${contract.id}/pdf`, '_blank')}
+									onclick={(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); window.open(`/${tenantSlug}/contracts/${contract.id}/pdf`, '_blank'); }}
+									title="Vizualizeaza PDF"
+								>
+									<EyeIcon class="h-3.5 w-3.5" />
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									onclick={async (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); const res = await fetch(`/${tenantSlug}/contracts/${contract.id}/pdf`); if (!res.ok) return; const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`; a.click(); URL.revokeObjectURL(url); }}
 									title="Descarca PDF"
 								>
 									<DownloadIcon class="h-3.5 w-3.5" />

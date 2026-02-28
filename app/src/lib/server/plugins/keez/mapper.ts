@@ -558,23 +558,48 @@ export function mapKeezInvoiceToCRM(
 	clientId: string | null,
 	userId: string
 ): Partial<Invoice> & { lineItems: Array<Omit<InvoiceLineItem, 'id' | 'createdAt'>> } {
-	// Calculate amounts from Keez details
+	// Calculate amounts from Keez
+	// For EUR invoices, Keez may return amounts in EUR (not RON) from the list endpoint
+	// Only if detail-level has netAmountCurrency can we get RON amounts
+	const invoiceCurrencyCode = keezInvoice.currencyCode || keezInvoice.currency || keezHeader.currencyCode || keezHeader.currency;
+	const hasRealExchangeRate = keezInvoice.exchangeRate && keezInvoice.exchangeRate > 1;
+	const isNonRonInvoice = invoiceCurrencyCode && invoiceCurrencyCode !== 'RON';
+	const detailHasRonBreakdown = !!keezInvoice.invoiceDetails?.[0]?.netAmountCurrency;
+
 	let amount = 0;
 	let taxAmount = 0;
 	let totalAmount = 0;
 
-	for (const detail of keezInvoice.invoiceDetails) {
-		const detailAmount = detail.netAmount || detail.unitPrice * detail.quantity;
-		amount += detailAmount;
-
-		if (detail.vatAmount) {
-			taxAmount += detail.vatAmount;
-		} else if (detail.vatPercent) {
-			taxAmount += detailAmount * (detail.vatPercent / 100);
+	if (isNonRonInvoice && detailHasRonBreakdown) {
+		// EUR invoice with detail-level RON breakdown — use netAmount (RON)
+		for (const detail of keezInvoice.invoiceDetails) {
+			const detailAmount = detail.netAmount || detail.unitPrice * detail.quantity;
+			amount += detailAmount;
+			if (detail.vatAmount) {
+				taxAmount += detail.vatAmount;
+			} else if (detail.vatPercent) {
+				taxAmount += detailAmount * (detail.vatPercent / 100);
+			}
 		}
-	}
+	} else if (keezHeader.grossAmount && keezHeader.grossAmount > 0) {
+		// Header-level amounts (may be EUR for non-RON invoices without breakdown)
+		amount = keezHeader.netAmount ?? 0;
+		taxAmount = keezHeader.vatAmount ?? 0;
+		totalAmount = keezHeader.grossAmount;
+	} else {
+		// Fallback to detail-level amounts
+		for (const detail of keezInvoice.invoiceDetails) {
+			const detailAmount = detail.netAmount || detail.unitPrice * detail.quantity;
+			amount += detailAmount;
 
-	totalAmount = amount + taxAmount;
+			if (detail.vatAmount) {
+				taxAmount += detail.vatAmount;
+			} else if (detail.vatPercent) {
+				taxAmount += detailAmount * (detail.vatPercent / 100);
+			}
+		}
+		totalAmount = amount + taxAmount;
+	}
 
 	// Convert to cents
 	amount = Math.round(amount * 100);
@@ -666,37 +691,43 @@ export function mapKeezInvoiceToCRM(
 		);
 	}
 
-	// Determine status based on remainingAmount
-	// If remainingAmount is 0 or undefined (and totalAmount matches), invoice is paid
-	// remainingAmount is in the same currency as the invoice
+	// Determine status based on Keez status + remainingAmount
+	const keezStatus = keezHeader.status || keezInvoice.status;
 	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = 'sent';
 
-	if (keezHeader.remainingAmount !== undefined) {
-		// Convert remainingAmount to cents for comparison (Keez returns in main currency units)
-		const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
-
-		if (remainingAmountCents === 0) {
-			// Invoice is fully paid
-			invoiceStatus = 'paid';
-		} else if (remainingAmountCents > 0) {
-			// Invoice has remaining amount - check if overdue
-			if (dueDate && dueDate < new Date()) {
-				invoiceStatus = 'overdue';
-			} else {
-				invoiceStatus = 'sent';
+	if (keezStatus === 'Cancelled') {
+		invoiceStatus = 'cancelled';
+	} else if (keezStatus === 'Draft') {
+		// Proforma — keep as draft, do NOT mark as paid
+		invoiceStatus = 'draft';
+	} else if (keezStatus === 'Valid') {
+		// Validated fiscal invoice — check remainingAmount for payment status
+		if (keezHeader.remainingAmount !== undefined) {
+			const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
+			if (remainingAmountCents === 0) {
+				invoiceStatus = 'paid';
+			} else if (remainingAmountCents > 0) {
+				if (dueDate && dueDate < new Date()) {
+					invoiceStatus = 'overdue';
+				} else {
+					invoiceStatus = 'sent';
+				}
 			}
+		} else {
+			invoiceStatus = 'sent';
 		}
 	} else {
-		// If remainingAmount is not provided, use Keez status
-		// Keez status: "Valid" = sent, "Cancelled" = cancelled
-		if (keezHeader.status === 'Cancelled') {
-			invoiceStatus = 'cancelled';
-		} else if (keezHeader.status === 'Valid') {
-			// Check if overdue
-			if (dueDate && dueDate < new Date()) {
-				invoiceStatus = 'overdue';
-			} else {
-				invoiceStatus = 'sent';
+		// Unknown status — fallback
+		if (keezHeader.remainingAmount !== undefined) {
+			const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
+			if (remainingAmountCents === 0 && keezStatus) {
+				invoiceStatus = 'paid';
+			} else if (remainingAmountCents > 0) {
+				if (dueDate && dueDate < new Date()) {
+					invoiceStatus = 'overdue';
+				} else {
+					invoiceStatus = 'sent';
+				}
 			}
 		}
 	}
@@ -712,8 +743,29 @@ export function mapKeezInvoiceToCRM(
 		totalAmount,
 		issueDate,
 		dueDate,
-		currency: keezInvoice.currency || keezHeader.currency || 'RON',
+		currency: (() => {
+			if (isNonRonInvoice) {
+				// If we have RON amounts (real exchange rate or detail breakdown), store as RON
+				if (hasRealExchangeRate || detailHasRonBreakdown) return 'RON';
+				// Otherwise amounts are in foreign currency
+				return invoiceCurrencyCode;
+			}
+			return 'RON';
+		})(),
+		invoiceCurrency: (() => {
+			if (isNonRonInvoice && (hasRealExchangeRate || detailHasRonBreakdown)) {
+				return invoiceCurrencyCode;
+			}
+			return undefined;
+		})(),
+		exchangeRate: (() => {
+			if (isNonRonInvoice && (hasRealExchangeRate || detailHasRonBreakdown) && keezInvoice.exchangeRate) {
+				return String(keezInvoice.exchangeRate);
+			}
+			return undefined;
+		})(),
 		notes: keezInvoice.notes || undefined,
+		keezStatus: keezStatus || null,
 		keezInvoiceId: keezHeader.externalId || null,
 		keezExternalId: keezHeader.externalId || null,
 		createdByUserId: userId,
@@ -787,23 +839,23 @@ export function mapKeezDetailsToLineItems(
 		// Use itemName as primary source (Keez API uses this), fallback to itemDescription
 		const description = detail.itemName || detail.itemDescription || 'Item';
 
-		// Calculate amount: prefer netAmountCurrency if available (invoice currency),
-		// otherwise use netAmount (RON), or calculate from unitPrice * quantity
+		// Calculate amount: prefer RON amounts (netAmount) over foreign currency (netAmountCurrency)
+		// netAmount = always RON, netAmountCurrency = foreign currency (e.g. EUR)
 		let amount: number;
-		if (detail.netAmountCurrency !== undefined && detail.netAmountCurrency !== null) {
-			amount = detail.netAmountCurrency;
-		} else if (detail.netAmount !== undefined && detail.netAmount !== null) {
+		if (detail.netAmount !== undefined && detail.netAmount !== null) {
 			amount = detail.netAmount;
+		} else if (detail.netAmountCurrency !== undefined && detail.netAmountCurrency !== null) {
+			amount = detail.netAmountCurrency;
 		} else {
 			// Fallback: calculate from unitPrice * quantity
 			amount = (detail.unitPrice || 0) * (detail.quantity || 1);
 		}
 
-		// Use unitPriceCurrency if available (invoice currency), otherwise use unitPrice
+		// Use unitPrice (RON) first, fallback to unitPriceCurrency (foreign currency)
 		const unitPrice =
-			detail.unitPriceCurrency !== undefined && detail.unitPriceCurrency !== null
-				? detail.unitPriceCurrency
-				: detail.unitPrice || 0;
+			detail.unitPrice !== undefined && detail.unitPrice !== null
+				? detail.unitPrice
+				: detail.unitPriceCurrency || 0;
 
 		// Extract tax rate from vatPercent (convert from percentage to cents: 19 -> 1900)
 		const taxRate = detail.vatPercent ? Math.round(detail.vatPercent * 100) : null;

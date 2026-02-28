@@ -1,0 +1,1 @@
+ALTER TABLE `tenant` ADD `contract_prefix` text DEFAULT 'CTR';

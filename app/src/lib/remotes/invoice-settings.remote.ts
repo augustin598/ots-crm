@@ -39,7 +39,8 @@ export const getInvoiceSettings = query(async () => {
 			keezDefaultPaymentTypeId: 3,
 			defaultCurrency: 'RON',
 			defaultTaxRate: 19,
-			invoiceEmailsEnabled: true
+			invoiceEmailsEnabled: true,
+			invoiceLogo: null
 		};
 	}
 
@@ -58,7 +59,8 @@ export const getInvoiceSettings = query(async () => {
 		keezDefaultPaymentTypeId: settings.keezDefaultPaymentTypeId ?? 3,
 		defaultCurrency: settings.defaultCurrency || 'RON',
 		defaultTaxRate: settings.defaultTaxRate ?? 19,
-		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true
+		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true,
+		invoiceLogo: settings.invoiceLogo || null
 	};
 });
 
@@ -76,7 +78,8 @@ export const updateInvoiceSettings = command(
 		keezDefaultPaymentTypeId: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(9))),
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 		defaultTaxRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))), // VAT percentage (0-100)
-		invoiceEmailsEnabled: v.optional(v.boolean())
+		invoiceEmailsEnabled: v.optional(v.boolean()),
+		invoiceLogo: v.optional(v.nullable(v.string())) // base64-encoded logo image, null to remove
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -121,6 +124,7 @@ export const updateInvoiceSettings = command(
 					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
 					invoiceEmailsEnabled:
 						data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
+					invoiceLogo: data.invoiceLogo !== undefined ? data.invoiceLogo : undefined,
 					updatedAt: new Date()
 				})
 				.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id));
@@ -144,7 +148,8 @@ export const updateInvoiceSettings = command(
 				keezDefaultPaymentTypeId: data.keezDefaultPaymentTypeId ?? 3,
 				defaultCurrency: data.defaultCurrency || 'RON',
 				defaultTaxRate: data.defaultTaxRate ?? 19,
-				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true
+				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true,
+				invoiceLogo: data.invoiceLogo || null
 			});
 		}
 

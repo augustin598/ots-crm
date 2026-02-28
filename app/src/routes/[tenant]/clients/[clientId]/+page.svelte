@@ -3,7 +3,8 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { getDocuments } from '$lib/remotes/documents.remote';
-	import { getClientCredit } from '$lib/remotes/banking.remote';
+	import { getClientCredit, syncKeezIfStale } from '$lib/remotes/banking.remote';
+	import { onMount } from 'svelte';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
@@ -44,30 +45,6 @@
 
 	const activeProjects = $derived(projects.filter((p) => p.status === 'active').length);
 	const totalContracts = $derived(contracts.length);
-	const paidInvoices = $derived(invoices.filter((i) => i.status === 'paid'));
-	const pendingInvoices = $derived(invoices.filter((i) => i.status === 'sent' || i.status === 'overdue'));
-
-	// Calculate totals grouped by currency
-	const paidByCurrency = $derived.by(() => {
-		const map = new Map<Currency, number>();
-		for (const invoice of paidInvoices) {
-			const currency = (invoice.currency || 'RON') as Currency;
-			const current = map.get(currency) || 0;
-			map.set(currency, current + (invoice.totalAmount || 0));
-		}
-		return map;
-	});
-
-	const pendingByCurrency = $derived.by(() => {
-		const map = new Map<Currency, number>();
-		for (const invoice of pendingInvoices) {
-			const currency = (invoice.currency || 'RON') as Currency;
-			const current = map.get(currency) || 0;
-			map.set(currency, current + (invoice.totalAmount || 0));
-		}
-		return map;
-	});
-
 	const recentInvoices = $derived(
 		[...invoices]
 			.sort((a, b) => {
@@ -83,6 +60,15 @@
 
 	const invoiceSettingsQuery = getInvoiceSettings();
 	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
+	// Sync Keez invoices on mount (if stale), then refresh credit data
+	onMount(async () => {
+		try {
+			await syncKeezIfStale().updates(creditQuery, invoicesQuery);
+		} catch {
+			// Sync failed silently, use cached data
+		}
+	});
 </script>
 
 <svelte:head>
@@ -100,29 +86,62 @@
 		
 
 		<!-- KPIs -->
-		<div class="grid gap-4 md:grid-cols-4 mb-6">
+		<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5 mb-6">
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500/10">
+						<DollarSign class="h-6 w-6 text-blue-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Total Facturat</p>
+						{#if credit}
+							<p class="text-2xl font-bold">{formatAmount(credit.totalInvoiced, 'RON')}</p>
+							<p class="text-xs text-muted-foreground mt-1">
+								{credit.paidInvoices + credit.unpaidInvoices} factur{credit.paidInvoices + credit.unpaidInvoices !== 1 ? 'i' : 'ă'}
+							</p>
+						{:else}
+							<p class="text-2xl font-bold">—</p>
+						{/if}
+					</div>
+				</div>
+			</Card>
+
 			<Card class="p-4">
 				<div class="flex items-center gap-3">
 					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500/10">
-						<DollarSign class="h-6 w-6 text-green-600" />
+						<TrendingUp class="h-6 w-6 text-green-600" />
 					</div>
 					<div>
-						<p class="text-sm text-muted-foreground">Total Revenue</p>
-						<div class="space-y-1">
-							{#if paidByCurrency.size === 0}
-								<p class="text-2xl font-bold">—</p>
-							{:else if paidByCurrency.size === 1}
-								{#each Array.from(paidByCurrency.entries()) as [currency, amount]}
-									<p class="text-2xl font-bold">{formatAmount(amount, currency)}</p>
-								{/each}
-							{:else}
-								<div class="space-y-1">
-									{#each Array.from(paidByCurrency.entries()) as [currency, amount]}
-										<p class="text-xl font-bold">{formatAmount(amount, currency)}</p>
-									{/each}
-								</div>
-							{/if}
-						</div>
+						<p class="text-sm text-muted-foreground">Total Încasat</p>
+						{#if credit}
+							<p class="text-2xl font-bold text-green-600">{formatAmount(credit.totalPaid, 'RON')}</p>
+							<p class="text-xs text-muted-foreground mt-1">
+								{credit.paidInvoices} factur{credit.paidInvoices !== 1 ? 'i' : 'ă'} plătit{credit.paidInvoices !== 1 ? 'e' : 'ă'}
+							</p>
+						{:else}
+							<p class="text-2xl font-bold">—</p>
+						{/if}
+					</div>
+				</div>
+			</Card>
+
+			<Card class="p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-red-500/10">
+						<CreditCard class="h-6 w-6 text-red-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Remaining Credit</p>
+						{#if credit}
+							<p class="text-2xl font-bold {credit.remainingCredit > 0 ? 'text-red-600' : 'text-green-600'}">
+								{formatAmount(credit.remainingCredit, 'RON')}
+							</p>
+							<p class="text-xs text-muted-foreground mt-1">
+								{credit.unpaidInvoices} factur{credit.unpaidInvoices !== 1 ? 'i' : 'ă'} neachitat{credit.unpaidInvoices !== 1 ? 'e' : 'ă'}
+							</p>
+						{:else}
+							<p class="text-2xl font-bold">—</p>
+						{/if}
 					</div>
 				</div>
 			</Card>
@@ -147,27 +166,6 @@
 					<div>
 						<p class="text-sm text-muted-foreground">Contracts</p>
 						<p class="text-2xl font-bold">{totalContracts}</p>
-					</div>
-				</div>
-			</Card>
-
-			<Card class="p-4">
-				<div class="flex items-center gap-3">
-					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-red-500/10">
-						<CreditCard class="h-6 w-6 text-red-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Remaining Credit</p>
-						{#if credit}
-							<p class="text-2xl font-bold {credit.remainingCredit > 0 ? 'text-red-600' : 'text-green-600'}">
-								{formatAmount(credit.remainingCredit, 'RON')}
-							</p>
-							<p class="text-xs text-muted-foreground mt-1">
-								{credit.unpaidInvoices} unpaid invoice{credit.unpaidInvoices !== 1 ? 's' : ''}
-							</p>
-						{:else}
-							<p class="text-2xl font-bold">—</p>
-						{/if}
 					</div>
 				</div>
 			</Card>

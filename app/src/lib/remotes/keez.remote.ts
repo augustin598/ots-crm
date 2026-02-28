@@ -325,7 +325,8 @@ export const createKeezItem = command(
 	}
 );
 
-export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
+export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string(), v.minLength(1)) }), async (data) => {
+	const invoiceId = data.invoiceId;
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
@@ -532,12 +533,26 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 		}
 	}
 
-	// Extract and update currency from Keez
-	if (keezInvoiceData?.currency || keezInvoiceHeader?.currency) {
-		const keezCurrency = keezInvoiceData?.currency || keezInvoiceHeader?.currency;
-		if (keezCurrency && keezCurrency !== invoice.currency) {
-			updateData.currency = keezCurrency;
+	// Currency logic for push-pull-back
+	const keezOriginalCurrency = keezInvoiceData?.currencyCode || keezInvoiceData?.currency || keezInvoiceHeader?.currencyCode || keezInvoiceHeader?.currency;
+	const pushHasRealExchangeRate = keezInvoiceData?.exchangeRate && keezInvoiceData.exchangeRate > 1;
+	const pushIsNonRon = keezOriginalCurrency && keezOriginalCurrency !== 'RON';
+	const pushDetailHasRonBreakdown = !!keezInvoiceData?.invoiceDetails?.[0]?.netAmountCurrency;
+
+	if (pushIsNonRon) {
+		if (pushHasRealExchangeRate || pushDetailHasRonBreakdown) {
+			updateData.currency = 'RON';
+			updateData.invoiceCurrency = keezOriginalCurrency;
+			if (keezInvoiceData?.exchangeRate) {
+				updateData.exchangeRate = String(keezInvoiceData.exchangeRate);
+			}
+		} else {
+			updateData.currency = keezOriginalCurrency;
+			updateData.invoiceCurrency = null;
+			updateData.exchangeRate = null;
 		}
+	} else if (invoice.currency !== 'RON') {
+		updateData.currency = 'RON';
 	}
 
 	// Helper function to parse Keez date format (YYYYMMDD as number or string)
@@ -600,37 +615,36 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 		console.warn(`[Keez] Invalid due date from Keez:`, dueDateSource);
 	}
 
-	// Update status based on remainingAmount
-	if (keezInvoiceHeader?.remainingAmount !== undefined) {
-		const remainingAmountCents = Math.round(keezInvoiceHeader.remainingAmount * 100);
-		
-		if (remainingAmountCents === 0) {
-			// Invoice is fully paid
-			updateData.status = 'paid';
-			// Set paidDate if not already set
-			if (!invoice.paidDate) {
-				updateData.paidDate = new Date();
+	// Update status based on Keez status + remainingAmount
+	const keezStatus = keezInvoiceHeader?.status || keezInvoiceData?.status;
+	if (keezStatus) {
+		updateData.keezStatus = keezStatus;
+	}
+
+	if (keezStatus === 'Cancelled') {
+		updateData.status = 'cancelled';
+	} else if (keezStatus === 'Draft') {
+		// Proforma — keep as draft, do NOT mark as paid even if remainingAmount is 0
+		updateData.status = 'draft';
+	} else if (keezStatus === 'Valid') {
+		// Validated fiscal invoice — check remainingAmount for payment status
+		if (keezInvoiceHeader?.remainingAmount !== undefined) {
+			const remainingAmountCents = Math.round(keezInvoiceHeader.remainingAmount * 100);
+			if (remainingAmountCents === 0) {
+				updateData.status = 'paid';
+				if (!invoice.paidDate) {
+					updateData.paidDate = new Date();
+				}
+			} else if (remainingAmountCents > 0) {
+				const dueDate = parsedDueDate || invoice.dueDate;
+				if (dueDate && dueDate < new Date()) {
+					updateData.status = 'overdue';
+				} else {
+					updateData.status = 'sent';
+				}
 			}
-		} else if (remainingAmountCents > 0) {
-			// Invoice has remaining amount - check if overdue
-			const dueDate = parsedDueDate || invoice.dueDate;
-			if (dueDate && dueDate < new Date()) {
-				updateData.status = 'overdue';
-			} else {
-				updateData.status = 'sent';
-			}
-		}
-	} else if (keezInvoiceHeader?.status) {
-		// Fallback to Keez status if remainingAmount is not available
-		if (keezInvoiceHeader.status === 'Cancelled') {
-			updateData.status = 'cancelled';
-		} else if (keezInvoiceHeader.status === 'Valid') {
-			const dueDate = parsedDueDate || invoice.dueDate;
-			if (dueDate && dueDate < new Date()) {
-				updateData.status = 'overdue';
-			} else {
-				updateData.status = 'sent';
-			}
+		} else {
+			updateData.status = 'sent';
 		}
 	}
 
@@ -643,10 +657,10 @@ export const syncInvoiceToKeez = command(v.pipe(v.string(), v.minLength(1)), asy
 		let keezTaxRate: number | null = null;
 
 		for (const detail of keezInvoiceData.invoiceDetails) {
-			// Use currency amounts if available, otherwise use RON amounts
-			const netAmount = detail.netAmountCurrency ?? detail.netAmount ?? 0;
-			const vatAmount = detail.vatAmountCurrency ?? detail.vatAmount ?? 0;
-			const grossAmount = detail.grossAmountCurrency ?? detail.grossAmount ?? 0;
+			// Always use RON amounts (netAmount is always RON per Keez API)
+			const netAmount = detail.netAmount ?? 0;
+			const vatAmount = detail.vatAmount ?? 0;
+			const grossAmount = detail.grossAmount ?? 0;
 
 			keezNetAmount += netAmount;
 			keezVatAmount += vatAmount;
@@ -835,13 +849,36 @@ export const syncInvoicesFromKeez = command(
 					const dueDateSource = invoiceHeader.dueDate || keezInvoice.dueDate;
 					const parsedDueDate = parseKeezDate(dueDateSource);
 
-					// Determine status based on remainingAmount
+					// Determine status based on Keez status + remainingAmount
+					const keezStatus = invoiceHeader.status || keezInvoice.status;
 					let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = existing.status as any;
-					
-					if (invoiceHeader.remainingAmount !== undefined) {
+
+					if (keezStatus === 'Cancelled') {
+						invoiceStatus = 'cancelled';
+					} else if (keezStatus === 'Draft') {
+						// Proforma — keep as draft, do NOT mark as paid
+						invoiceStatus = 'draft';
+					} else if (keezStatus === 'Valid') {
+						// Validated fiscal invoice — check remainingAmount for payment status
+						if (invoiceHeader.remainingAmount !== undefined) {
+							const remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
+							if (remainingAmountCents === 0) {
+								invoiceStatus = 'paid';
+							} else if (remainingAmountCents > 0) {
+								const dueDate = parsedDueDate || existing.dueDate;
+								if (dueDate && dueDate < new Date()) {
+									invoiceStatus = 'overdue';
+								} else {
+									invoiceStatus = 'sent';
+								}
+							}
+						} else {
+							invoiceStatus = 'sent';
+						}
+					} else if (invoiceHeader.remainingAmount !== undefined) {
+						// Fallback for unknown status — use remainingAmount but only if > 0
 						const remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
-						
-						if (remainingAmountCents === 0) {
+						if (remainingAmountCents === 0 && keezStatus) {
 							invoiceStatus = 'paid';
 						} else if (remainingAmountCents > 0) {
 							const dueDate = parsedDueDate || existing.dueDate;
@@ -853,24 +890,42 @@ export const syncInvoicesFromKeez = command(
 						}
 					}
 
-					// Calculate totals from Keez invoice details
-					let keezNetAmount = 0;
-					let keezVatAmount = 0;
-					let keezGrossAmount = 0;
+					// Calculate totals — use HEADER-level RON amounts (always RON per Keez API)
+					let keezNetAmount = invoiceHeader.netAmount ?? 0;
+					let keezVatAmount = invoiceHeader.vatAmount ?? 0;
+					let keezGrossAmount = invoiceHeader.grossAmount ?? 0;
 					let keezTaxRate: number | null = null;
 
+					// Fallback to invoice-level RON amounts if header has none
+					if (keezGrossAmount === 0) {
+						keezNetAmount = keezInvoice.netAmount ?? 0;
+						keezVatAmount = keezInvoice.vatAmount ?? 0;
+						keezGrossAmount = keezInvoice.grossAmount ?? 0;
+					}
+
+					// Determine currency: detect if amounts are in foreign currency (EUR)
+					// Keez list endpoint returns amounts in the invoice's currency, NOT always RON
+					const invoiceCurrencyCode = keezInvoice?.currencyCode || keezInvoice?.currency || invoiceHeader.currencyCode || invoiceHeader.currency;
+					const hasRealExchangeRate = keezInvoice.exchangeRate && keezInvoice.exchangeRate > 1;
+					const isNonRonInvoice = invoiceCurrencyCode && invoiceCurrencyCode !== 'RON';
+
+					// If EUR invoice has netAmountCurrency (detail endpoint provides RON vs EUR split),
+					// use netAmount (RON) — this happens for invoices created via CRM push
+					if (isNonRonInvoice && keezInvoice.invoiceDetails?.[0]?.netAmountCurrency) {
+						// Detail endpoint provides RON in netAmount, EUR in netAmountCurrency
+						keezNetAmount = 0;
+						keezVatAmount = 0;
+						keezGrossAmount = 0;
+						for (const detail of keezInvoice.invoiceDetails) {
+							keezNetAmount += detail.netAmount ?? 0;
+							keezVatAmount += detail.vatAmount ?? 0;
+							keezGrossAmount += detail.grossAmount ?? 0;
+						}
+					}
+
+					// Extract tax rate from details
 					if (keezInvoice.invoiceDetails && Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
 						for (const detail of keezInvoice.invoiceDetails) {
-							// Use currency amounts if available, otherwise use RON amounts
-							const netAmount = detail.netAmountCurrency ?? detail.netAmount ?? 0;
-							const vatAmount = detail.vatAmountCurrency ?? detail.vatAmount ?? 0;
-							const grossAmount = detail.grossAmountCurrency ?? detail.grossAmount ?? 0;
-
-							keezNetAmount += netAmount;
-							keezVatAmount += vatAmount;
-							keezGrossAmount += grossAmount;
-
-							// Get VAT rate from first detail (assuming all details have same VAT rate)
 							if (keezTaxRate === null && detail.vatPercent !== undefined && detail.vatPercent !== null) {
 								keezTaxRate = detail.vatPercent;
 							}
@@ -894,6 +949,10 @@ export const syncInvoicesFromKeez = command(
 					if (invoiceStatus === 'paid' && !existing.paidDate) {
 						updateData.paidDate = new Date();
 					}
+					// Save Keez status (Draft/Valid/Cancelled) for badge display
+					if (keezStatus && keezStatus !== existing.keezStatus) {
+						updateData.keezStatus = keezStatus;
+					}
 
 					// Update invoice number if changed
 					if (invoiceHeader.series && invoiceHeader.number) {
@@ -903,9 +962,29 @@ export const syncInvoicesFromKeez = command(
 						}
 					}
 
-					// Update currency if changed
-					if (invoiceHeader.currency && invoiceHeader.currency !== existing.currency) {
-						updateData.currency = invoiceHeader.currency;
+					// Currency logic:
+					// - If EUR invoice has real exchange rate OR detail-level RON amounts → store as RON
+					// - If EUR invoice has exchangeRate=1 and no RON breakdown → amounts ARE in EUR
+					if (isNonRonInvoice) {
+						const detailHasRonBreakdown = !!keezInvoice.invoiceDetails?.[0]?.netAmountCurrency;
+						if (hasRealExchangeRate || detailHasRonBreakdown) {
+							// We have RON amounts — store as RON with original currency metadata
+							updateData.currency = 'RON';
+							updateData.invoiceCurrency = invoiceCurrencyCode;
+							if (keezInvoice.exchangeRate) {
+								updateData.exchangeRate = String(keezInvoice.exchangeRate);
+							}
+						} else {
+							// Amounts are in EUR (no RON conversion available from Keez)
+							updateData.currency = invoiceCurrencyCode;
+							updateData.invoiceCurrency = null;
+							updateData.exchangeRate = null;
+						}
+					} else {
+						// RON invoice
+						if (existing.currency !== 'RON') {
+							updateData.currency = 'RON';
+						}
 					}
 
 					// Update totals from Keez invoice details
@@ -1066,12 +1145,15 @@ export const syncInvoicesFromKeez = command(
 					taxAmount: invoiceInsertData.taxAmount || 0,
 					totalAmount: invoiceInsertData.totalAmount || 0,
 					currency: invoiceInsertData.currency || 'RON',
+					invoiceCurrency: invoiceInsertData.invoiceCurrency || null,
+					exchangeRate: invoiceInsertData.exchangeRate || null,
 					// Only use fallback if issueDate is explicitly null/undefined, not if it's a valid date
 					issueDate: invoiceInsertData.issueDate ?? new Date(),
 					dueDate: invoiceInsertData.dueDate ?? null,
 					notes: invoiceInsertData.notes || null,
 					keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
 					keezExternalId: invoiceInsertData.keezExternalId || null,
+					keezStatus: invoiceInsertData.keezStatus || null,
 					createdByUserId: invoiceInsertData.createdByUserId || event.locals.user.id
 				});
 
@@ -1256,7 +1338,7 @@ export const importClientsFromKeez = command(
 
 export const getInvoicePDFFromKeez = query(
 	v.object({
-		keezInvoiceId: v.pipe(v.string(), v.minLength(1))
+		invoiceId: v.pipe(v.string(), v.minLength(1))
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -1264,7 +1346,20 @@ export const getInvoicePDFFromKeez = query(
 			throw new Error('Unauthorized');
 		}
 
-		// Get integration
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!invoice) throw new Error('Invoice not found');
+		if (!invoice.keezExternalId) throw new Error('Invoice is not synced with Keez');
+
 		const [integration] = await db
 			.select()
 			.from(table.keezIntegration)
@@ -1276,26 +1371,22 @@ export const getInvoicePDFFromKeez = query(
 			)
 			.limit(1);
 
-		if (!integration) {
-			throw new Error('Keez integration not connected');
-		}
+		if (!integration) throw new Error('Keez integration not connected');
 
-		// Create Keez client with DB token cache
 		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
-
-		// Get PDF
-		const pdfBuffer = await keezClient.downloadInvoicePDF(data.keezInvoiceId);
-
-		// Convert to base64 for transmission
+		const pdfBuffer = await keezClient.downloadInvoicePDF(invoice.keezExternalId);
 		const base64 = Buffer.from(pdfBuffer).toString('base64');
 
 		return { pdf: base64 };
 	}
 );
 
-export const sendInvoiceToEFactura = command(
+export const sendInvoiceEmailFromKeez = command(
 	v.object({
-		keezInvoiceId: v.pipe(v.string(), v.minLength(1))
+		invoiceId: v.pipe(v.string(), v.minLength(1)),
+		to: v.pipe(v.string(), v.minLength(1)),
+		cc: v.optional(v.string()),
+		bcc: v.optional(v.string())
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -1303,7 +1394,20 @@ export const sendInvoiceToEFactura = command(
 			throw new Error('Unauthorized');
 		}
 
-		// Get integration
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!invoice) throw new Error('Invoice not found');
+		if (!invoice.keezExternalId) throw new Error('Invoice is not synced with Keez');
+
 		const [integration] = await db
 			.select()
 			.from(table.keezIntegration)
@@ -1315,14 +1419,58 @@ export const sendInvoiceToEFactura = command(
 			)
 			.limit(1);
 
-		if (!integration) {
-			throw new Error('Keez integration not connected');
+		if (!integration) throw new Error('Keez integration not connected');
+
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+		await keezClient.sendInvoiceEmail(invoice.keezExternalId, {
+			to: data.to,
+			cc: data.cc,
+			bcc: data.bcc
+		});
+
+		return { success: true };
+	}
+);
+
+export const sendInvoiceToEFactura = command(
+	v.object({
+		invoiceId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
 		}
 
-		// Create Keez client with DB token cache
-		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
 
-		await keezClient.sendToEFactura(data.keezInvoiceId);
+		if (!invoice) throw new Error('Invoice not found');
+		if (!invoice.keezExternalId) throw new Error('Invoice is not synced with Keez');
+
+		const [integration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+					eq(table.keezIntegration.isActive, true)
+				)
+			)
+			.limit(1);
+
+		if (!integration) throw new Error('Keez integration not connected');
+
+		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+		await keezClient.sendToEFactura(invoice.keezExternalId);
 
 		return { success: true };
 	}
@@ -1330,7 +1478,7 @@ export const sendInvoiceToEFactura = command(
 
 export const cancelInvoiceInKeez = command(
 	v.object({
-		keezInvoiceId: v.pipe(v.string(), v.minLength(1))
+		invoiceId: v.pipe(v.string(), v.minLength(1))
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -1338,7 +1486,20 @@ export const cancelInvoiceInKeez = command(
 			throw new Error('Unauthorized');
 		}
 
-		// Get integration
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.id, data.invoiceId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!invoice) throw new Error('Invoice not found');
+		if (!invoice.keezExternalId) throw new Error('Invoice is not synced with Keez');
+
 		const [integration] = await db
 			.select()
 			.from(table.keezIntegration)
@@ -1350,14 +1511,20 @@ export const cancelInvoiceInKeez = command(
 			)
 			.limit(1);
 
-		if (!integration) {
-			throw new Error('Keez integration not connected');
-		}
+		if (!integration) throw new Error('Keez integration not connected');
 
-		// Create Keez client with DB token cache
 		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+		await keezClient.cancelInvoice(invoice.keezExternalId);
 
-		await keezClient.cancelInvoice(data.keezInvoiceId);
+		// Update local invoice status
+		await db
+			.update(table.invoice)
+			.set({
+				keezStatus: 'Cancelled',
+				status: 'cancelled',
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, data.invoiceId));
 
 		return { success: true };
 	}
@@ -1468,6 +1635,16 @@ export const validateInvoiceInKeez = command(
 		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
 
 		await keezClient.validateInvoice(invoice.keezExternalId);
+
+		// Update local invoice: proforma → validated fiscal invoice
+		await db
+			.update(table.invoice)
+			.set({
+				keezStatus: 'Valid',
+				status: 'sent',
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, data.invoiceId));
 
 		return { success: true };
 	}

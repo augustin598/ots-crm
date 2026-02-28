@@ -4,6 +4,7 @@ import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezPartnerToClient, mapKeezDetailsToLineItems } from './mapper';
+import type { KeezPartner } from './client';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -54,6 +55,108 @@ function parseKeezDate(dateValue: string | number | undefined): Date | null {
 	}
 }
 
+/**
+ * Find an existing CRM client matching a Keez partner, or create a new one.
+ * Matching priority: CUI → VAT number → Name → Create new
+ */
+async function findOrCreateClientForKeezPartner(
+	partner: KeezPartner,
+	tenantId: string
+): Promise<string | null> {
+	const cui = partner.identificationNumber?.trim() || '';
+	const partnerName = partner.partnerName?.trim() || '';
+
+	if (!cui && !partnerName) {
+		return null;
+	}
+
+	// 1. Match by CUI (most reliable)
+	if (cui) {
+		const [byCui] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cui)))
+			.limit(1);
+
+		if (byCui) {
+			// Backfill missing fields
+			const updates: Record<string, any> = {};
+			if (!byCui.businessName && partnerName) updates.businessName = partnerName;
+			if (!byCui.address && partner.addressDetails) updates.address = partner.addressDetails;
+			if (!byCui.email && partner.email) updates.email = partner.email;
+			if (!byCui.phone && partner.phone) updates.phone = partner.phone;
+			if (!byCui.registrationNumber && partner.registrationNumber)
+				updates.registrationNumber = partner.registrationNumber;
+			if (Object.keys(updates).length > 0) {
+				updates.updatedAt = new Date();
+				await db.update(table.client).set(updates).where(eq(table.client.id, byCui.id));
+			}
+			return byCui.id;
+		}
+
+		// 2. Match by VAT number (RO + CUI)
+		if (partner.taxAttribute) {
+			const fullVat = (partner.taxAttribute + cui).trim();
+			const [byVat] = await db
+				.select()
+				.from(table.client)
+				.where(and(eq(table.client.tenantId, tenantId), eq(table.client.vatNumber, fullVat)))
+				.limit(1);
+
+			if (byVat) {
+				const updates: Record<string, any> = {};
+				if (!byVat.cui) updates.cui = cui;
+				if (!byVat.businessName && partnerName) updates.businessName = partnerName;
+				if (Object.keys(updates).length > 0) {
+					updates.updatedAt = new Date();
+					await db.update(table.client).set(updates).where(eq(table.client.id, byVat.id));
+				}
+				return byVat.id;
+			}
+		}
+	}
+
+	// 3. Fallback to name matching
+	if (partnerName) {
+		const [byName] = await db
+			.select()
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					or(eq(table.client.name, partnerName), eq(table.client.businessName, partnerName))
+				)
+			)
+			.limit(1);
+
+		if (byName) {
+			// Backfill CUI and other missing fields
+			const updates: Record<string, any> = {};
+			if (!byName.cui && cui) updates.cui = cui;
+			if (!byName.vatNumber && partner.taxAttribute && cui)
+				updates.vatNumber = (partner.taxAttribute + cui).trim();
+			if (!byName.registrationNumber && partner.registrationNumber)
+				updates.registrationNumber = partner.registrationNumber;
+			if (!byName.address && partner.addressDetails) updates.address = partner.addressDetails;
+			if (!byName.city && partner.cityName) updates.city = partner.cityName;
+			if (!byName.county && partner.countyName) updates.county = partner.countyName;
+			if (!byName.email && partner.email) updates.email = partner.email;
+			if (!byName.phone && partner.phone) updates.phone = partner.phone;
+			if (Object.keys(updates).length > 0) {
+				updates.updatedAt = new Date();
+				await db.update(table.client).set(updates).where(eq(table.client.id, byName.id));
+			}
+			return byName.id;
+		}
+	}
+
+	// 4. No match — create new client
+	const newClientId = generateId();
+	const clientData = mapKeezPartnerToClient(partner, tenantId);
+	await db.insert(table.client).values({ id: newClientId, ...clientData });
+	return newClientId;
+}
+
 export interface SyncKeezInvoicesResult {
 	imported: number;
 	updated: number;
@@ -86,12 +189,26 @@ export async function syncKeezInvoicesForTenant(
 
 	const keezClient = await createKeezClientForTenant(tenantId, integration);
 
+	// Get tenant owner userId for new invoice imports (createdByUserId is NOT NULL)
+	const [tenantOwner] = await db
+		.select({ userId: table.tenantUser.userId })
+		.from(table.tenantUser)
+		.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.tenantUser.role, 'owner')))
+		.limit(1);
+	const systemUserId = tenantOwner?.userId || '';
+
 	// Get invoices from Keez
 	const response = await keezClient.getInvoices({
 		offset: options?.offset,
-		count: options?.count || 100,
+		count: options?.count || 500,
 		filter: options?.filter
 	});
+
+	console.log(
+		`[Keez-Sync] Fetched ${response.data?.length || 0} invoices` +
+			` (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'})` +
+			` [${response.first}-${response.last}]`
+	);
 
 	for (const invoiceHeader of response.data || []) {
 		try {
@@ -124,13 +241,33 @@ export async function syncKeezInvoicesForTenant(
 				const parsedIssueDate = parseKeezDate(issueDateSource);
 				const parsedDueDate = parseKeezDate(invoiceHeader.dueDate || keezInvoice.dueDate);
 
-				// Determine status based on remainingAmount
+				// Determine status based on Keez status + remainingAmount
+				const keezStatus = invoiceHeader.status || keezInvoice.status;
 				let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' =
 					existing.status as any;
 
-				if (invoiceHeader.remainingAmount !== undefined) {
+				if (keezStatus === 'Cancelled') {
+					invoiceStatus = 'cancelled';
+				} else if (keezStatus === 'Draft') {
+					// Proforma — keep as draft, do NOT mark as paid
+					invoiceStatus = 'draft';
+				} else if (keezStatus === 'Valid') {
+					// Validated fiscal invoice — check remainingAmount
+					if (invoiceHeader.remainingAmount !== undefined) {
+						const remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
+						if (remainingCents === 0) {
+							invoiceStatus = 'paid';
+						} else if (remainingCents > 0) {
+							const dueDate = parsedDueDate || existing.dueDate;
+							invoiceStatus = dueDate && dueDate < new Date() ? 'overdue' : 'sent';
+						}
+					} else {
+						invoiceStatus = 'sent';
+					}
+				} else if (invoiceHeader.remainingAmount !== undefined) {
+					// Fallback for unknown status
 					const remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
-					if (remainingCents === 0) {
+					if (remainingCents === 0 && keezStatus) {
 						invoiceStatus = 'paid';
 					} else if (remainingCents > 0) {
 						const dueDate = parsedDueDate || existing.dueDate;
@@ -138,24 +275,50 @@ export async function syncKeezInvoicesForTenant(
 					}
 				}
 
-				// Calculate totals from Keez invoice details
+				// Calculate totals from Keez — try detail lines first, then invoice-level, then header
 				let keezNetAmount = 0;
 				let keezVatAmount = 0;
 				let keezGrossAmount = 0;
 				let keezTaxRate: number | null = null;
 
+				// Use HEADER-level amounts (always RON, even for EUR invoices)
+				// Detail-level amounts return EUR for multi-currency invoices (unreliable)
+				keezNetAmount = invoiceHeader.netAmount ?? 0;
+				keezVatAmount = invoiceHeader.vatAmount ?? 0;
+				keezGrossAmount = invoiceHeader.grossAmount ?? 0;
+
+				// Determine currency context
+				const invoiceCurrencyCode = keezInvoice?.currencyCode || keezInvoice?.currency || invoiceHeader.currencyCode || invoiceHeader.currency;
+				const hasRealExchangeRate = keezInvoice.exchangeRate && keezInvoice.exchangeRate > 1;
+				const isNonRonInvoice = invoiceCurrencyCode && invoiceCurrencyCode !== 'RON';
+				const detailHasRonBreakdown = !!keezInvoice.invoiceDetails?.[0]?.netAmountCurrency;
+
+				// If EUR invoice has detail-level RON breakdown, use RON amounts from details
+				if (isNonRonInvoice && detailHasRonBreakdown) {
+					keezNetAmount = 0;
+					keezVatAmount = 0;
+					keezGrossAmount = 0;
+					for (const detail of keezInvoice.invoiceDetails) {
+						keezNetAmount += detail.netAmount ?? 0;
+						keezVatAmount += detail.vatAmount ?? 0;
+						keezGrossAmount += detail.grossAmount ?? 0;
+					}
+				}
+
+				// Extract tax rate from details
 				if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
 					for (const detail of keezInvoice.invoiceDetails) {
-						const netAmount = detail.netAmountCurrency ?? detail.netAmount ?? 0;
-						const vatAmount = detail.vatAmountCurrency ?? detail.vatAmount ?? 0;
-						const grossAmount = detail.grossAmountCurrency ?? detail.grossAmount ?? 0;
-						keezNetAmount += netAmount;
-						keezVatAmount += vatAmount;
-						keezGrossAmount += grossAmount;
 						if (keezTaxRate === null && detail.vatPercent != null) {
 							keezTaxRate = detail.vatPercent;
 						}
 					}
+				}
+
+				// Fallback: invoice-level totals if header has no amounts
+				if (keezGrossAmount === 0) {
+					keezNetAmount = keezInvoice.netAmount ?? keezInvoice.netAmountCurrency ?? 0;
+					keezVatAmount = keezInvoice.vatAmount ?? keezInvoice.vatAmountCurrency ?? 0;
+					keezGrossAmount = keezInvoice.grossAmount ?? keezInvoice.grossAmountCurrency ?? 0;
 				}
 
 				const updateData: any = { updatedAt: new Date() };
@@ -164,20 +327,47 @@ export async function syncKeezInvoicesForTenant(
 				if (parsedDueDate) updateData.dueDate = parsedDueDate;
 				if (invoiceStatus !== existing.status) updateData.status = invoiceStatus;
 				if (invoiceStatus === 'paid' && !existing.paidDate) updateData.paidDate = new Date();
+				if (keezStatus && keezStatus !== existing.keezStatus) updateData.keezStatus = keezStatus;
 
 				if (invoiceHeader.series && invoiceHeader.number) {
 					const newNumber = `${invoiceHeader.series} ${invoiceHeader.number}`;
 					if (newNumber !== existing.invoiceNumber) updateData.invoiceNumber = newNumber;
 				}
 
-				if (invoiceHeader.currency && invoiceHeader.currency !== existing.currency) {
-					updateData.currency = invoiceHeader.currency;
+				// Currency logic:
+				// - If EUR invoice has real exchange rate OR detail-level RON amounts → store as RON
+				// - If EUR invoice has exchangeRate=1 and no RON breakdown → amounts ARE in EUR
+				if (isNonRonInvoice) {
+					if (hasRealExchangeRate || detailHasRonBreakdown) {
+						updateData.currency = 'RON';
+						updateData.invoiceCurrency = invoiceCurrencyCode;
+						if (keezInvoice.exchangeRate) {
+							updateData.exchangeRate = String(keezInvoice.exchangeRate);
+						}
+					} else {
+						// Amounts are in EUR (no RON conversion available from Keez)
+						updateData.currency = invoiceCurrencyCode;
+						updateData.invoiceCurrency = null;
+						updateData.exchangeRate = null;
+					}
+				} else {
+					if (existing.currency !== 'RON') {
+						updateData.currency = 'RON';
+					}
 				}
 
 				if (keezNetAmount > 0 || keezVatAmount > 0 || keezGrossAmount > 0) {
+					const newTotalCents = Math.round(keezGrossAmount * 100);
+					if (newTotalCents !== existing.totalAmount) {
+						console.log(
+							`[Keez-Sync] Amount update ${existing.invoiceNumber}: ` +
+								`${existing.totalAmount} -> ${newTotalCents} ` +
+								`(Keez gross: ${keezGrossAmount})`
+						);
+					}
 					updateData.amount = Math.round(keezNetAmount * 100);
 					updateData.taxAmount = Math.round(keezVatAmount * 100);
-					updateData.totalAmount = Math.round(keezGrossAmount * 100);
+					updateData.totalAmount = newTotalCents;
 				}
 
 				if (keezTaxRate !== null) {
@@ -185,6 +375,22 @@ export async function syncKeezInvoicesForTenant(
 				}
 
 				if (keezInvoice.notes) updateData.notes = keezInvoice.notes;
+
+				// Re-match client using CUI-first logic to fix wrong associations
+				if (keezInvoice.partner) {
+					const correctClientId = await findOrCreateClientForKeezPartner(
+						keezInvoice.partner,
+						tenantId
+					);
+					if (correctClientId && correctClientId !== existing.clientId) {
+						updateData.clientId = correctClientId;
+						console.log(
+							`[Keez-Sync] Re-matched invoice ${existing.invoiceNumber}: ` +
+								`client ${existing.clientId} -> ${correctClientId} ` +
+								`(CUI: ${keezInvoice.partner.identificationNumber || 'N/A'})`
+						);
+					}
+				}
 
 				await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, existing.id));
 
@@ -246,29 +452,10 @@ export async function syncKeezInvoicesForTenant(
 				continue;
 			}
 
-			// New invoice - find or create client
+			// New invoice - find or create client (CUI-first matching)
 			let clientId: string | null = null;
-			if (keezInvoice.partner?.partnerName) {
-				const partnerName = keezInvoice.partner.partnerName;
-				const [existingClient] = await db
-					.select()
-					.from(table.client)
-					.where(
-						and(
-							eq(table.client.tenantId, tenantId),
-							or(eq(table.client.name, partnerName), eq(table.client.businessName, partnerName))
-						)
-					)
-					.limit(1);
-
-				if (existingClient) {
-					clientId = existingClient.id;
-				} else if (keezInvoice.partner) {
-					const newClientId = generateId();
-					const clientData = mapKeezPartnerToClient(keezInvoice.partner, tenantId);
-					await db.insert(table.client).values({ id: newClientId, ...clientData });
-					clientId = newClientId;
-				}
+			if (keezInvoice.partner) {
+				clientId = await findOrCreateClientForKeezPartner(keezInvoice.partner, tenantId);
 			}
 
 			if (!clientId) {
@@ -299,12 +486,15 @@ export async function syncKeezInvoicesForTenant(
 				taxAmount: invoiceInsertData.taxAmount || 0,
 				totalAmount: invoiceInsertData.totalAmount || 0,
 				currency: invoiceInsertData.currency || 'RON',
+				invoiceCurrency: invoiceInsertData.invoiceCurrency || null,
+				exchangeRate: invoiceInsertData.exchangeRate || null,
 				issueDate: invoiceInsertData.issueDate ?? new Date(),
 				dueDate: invoiceInsertData.dueDate ?? null,
 				notes: invoiceInsertData.notes || null,
 				keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
 				keezExternalId: invoiceInsertData.keezExternalId || null,
-				createdByUserId: null
+				keezStatus: invoiceInsertData.keezStatus || null,
+				createdByUserId: systemUserId
 			});
 
 			if (lineItems && lineItems.length > 0) {

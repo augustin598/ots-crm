@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
 
 const DEFAULT_BASE_URL = 'https://app.keez.ro/api/v1.0/public-api';
-const DEFAULT_TOKEN_URL = 'https://app.keez.ro/oauth/token';
+const DEFAULT_TOKEN_URL = 'https://app.keez.ro/idp/connect/token';
 
 export interface KeezClientConfig {
 	clientEid: string;
@@ -55,6 +55,7 @@ export interface KeezInvoice {
 	netAmountCurrency?: number;
 	vatAmountCurrency?: number;
 	grossAmountCurrency?: number;
+	status?: string; // 'Draft' (proforma), 'Valid' (fiscal), 'Cancelled'
 }
 
 export interface KeezInvoiceDetail {
@@ -132,8 +133,12 @@ export interface KeezInvoiceHeader {
 		name: string;
 		vatCode?: string;
 	};
+	netAmount?: number; // Valoare netă RON (mereu RON, chiar dacă factura e EUR)
+	vatAmount?: number; // TVA RON
+	grossAmount?: number; // Total brut RON (net + TVA)
 	totalAmount?: number;
 	currency?: string;
+	currencyCode?: string;
 	status?: string;
 	remainingAmount?: number; // Suma rămasă de plată (0 = factură plătită complet)
 }
@@ -387,11 +392,12 @@ export class KeezClient {
 	}
 
 	/**
-	 * Delete invoice
+	 * Delete invoice (only draft/proforma invoices can be deleted)
 	 */
 	async deleteInvoice(externalId: string): Promise<void> {
-		await this.request(`/${this.clientEid}/invoices/${externalId}`, {
-			method: 'DELETE'
+		await this.request(`/${this.clientEid}/invoices?externalId=${encodeURIComponent(externalId)}`, {
+			method: 'DELETE',
+			body: JSON.stringify({ externalId })
 		});
 	}
 
@@ -406,44 +412,60 @@ export class KeezClient {
 	}
 
 	/**
-	 * Send invoice to eFactura
+	 * Send invoice to eFactura (Romanian e-invoice system)
+	 * Invoice must be validated first
 	 */
 	async sendToEFactura(externalId: string): Promise<void> {
-		await this.request(`/${this.clientEid}/invoices/${externalId}/efactura`, {
-			method: 'POST'
+		await this.request(`/${this.clientEid}/invoices/efactura/submitted`, {
+			method: 'POST',
+			body: JSON.stringify({ externalId })
 		});
 	}
 
 	/**
-	 * Cancel invoice
+	 * Cancel invoice (only validated invoices can be cancelled)
 	 */
 	async cancelInvoice(externalId: string): Promise<void> {
-		await this.request(`/${this.clientEid}/invoices/${externalId}/cancel`, {
-			method: 'POST'
+		await this.request(`/${this.clientEid}/invoices/canceled`, {
+			method: 'POST',
+			body: JSON.stringify({ externalId })
 		});
 	}
 
 	/**
-	 * Send invoice via email
+	 * Send invoice via email (Keez sends the PDF as attachment)
+	 * Endpoint: POST /invoices/delivery (no clientEid in path)
 	 */
 	async sendInvoiceEmail(
 		externalId: string,
 		emailData: {
-			to?: string;
+			to: string;
 			cc?: string;
 			bcc?: string;
-			subject?: string;
-			message?: string;
 		}
 	): Promise<void> {
-		await this.request(`/${this.clientEid}/invoices/${externalId}/email`, {
+		await this.request(`/invoices/delivery`, {
 			method: 'POST',
-			body: JSON.stringify(emailData)
+			body: JSON.stringify({
+				invoiceExternalId: externalId,
+				info: [
+					{
+						deliveryMethod: 'Email',
+						representationType: 'Attachment',
+						recipients: {
+							to: emailData.to,
+							...(emailData.cc && { cc: emailData.cc }),
+							...(emailData.bcc && { bcc: emailData.bcc })
+						}
+					}
+				]
+			})
 		});
 	}
 
 	/**
 	 * Download invoice PDF
+	 * Endpoint: GET /{clientEid}/invoices/{externalId}/pdf
 	 */
 	async downloadInvoicePDF(externalId: string): Promise<ArrayBuffer> {
 		return this.request<ArrayBuffer>(`/${this.clientEid}/invoices/${externalId}/pdf`, {

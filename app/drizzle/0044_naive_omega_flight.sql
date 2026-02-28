@@ -1,0 +1,1 @@
+ALTER TABLE `invoice` ADD `keez_status` text;

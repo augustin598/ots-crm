@@ -50,10 +50,14 @@ export const GET: RequestHandler = async (event) => {
 		lineItems,
 		tenant: event.locals.tenant,
 		client: event.locals.client,
-		displayInvoiceNumber
+		displayInvoiceNumber,
+		invoiceLogo: invoiceSettings?.invoiceLogo || null
 	});
 
-	const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+	const isProforma = invoice.keezStatus === 'Draft' || (!invoice.keezStatus && invoice.status === 'draft');
+	const isCreditNote = invoice.isCreditNote;
+	const filenamePrefix = isCreditNote ? 'NotaDeCredit' : isProforma ? 'Proforma' : 'Factura';
+	const safeFilename = `${filenamePrefix}-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 
 	const uint8 = new Uint8Array(pdfBuffer);
 

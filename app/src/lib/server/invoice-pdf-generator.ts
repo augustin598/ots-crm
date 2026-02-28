@@ -54,6 +54,7 @@ interface InvoiceData {
 	paymentMethod?: string | null;
 	vatOnCollection?: boolean | null;
 	isCreditNote?: boolean | null;
+	keezStatus?: string | null;
 	taxApplicationType?: string | null;
 	discountType?: string | null;
 	discountValue?: number | null;
@@ -79,6 +80,7 @@ export interface InvoicePDFInput {
 	tenant: TenantData;
 	client: ClientData;
 	displayInvoiceNumber: string;
+	invoiceLogo?: string | null;
 }
 
 const PW = 595.28;
@@ -128,11 +130,16 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const invCurr = invoice.invoiceCurrency || calcCurr;
 			const isMulti = calcCurr !== invCurr;
 
+			// Determine if proforma based on keezStatus or invoice status
+			const isProforma = invoice.keezStatus === 'Draft' || (!invoice.keezStatus && invoice.status === 'draft' && invoice.keezStatus !== 'Valid');
+			const isCreditNote = invoice.isCreditNote;
+			const pdfTitle = isCreditNote ? 'NOTA DE CREDIT' : isProforma ? 'FACTURA PROFORMA' : 'FACTURA';
+
 			const doc = new PDFDocument({
 				size: 'A4',
 				margins: { top: MT, bottom: 0, left: ML, right: MR },
 				autoFirstPage: true,
-				info: { Title: `Factura ${displayInvoiceNumber}`, Author: tenant.name }
+				info: { Title: `${pdfTitle} ${displayInvoiceNumber}`, Author: tenant.name }
 			});
 
 			const buffers: Buffer[] = [];
@@ -158,12 +165,18 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			// ===== HEADER =====
 			// Logo left
 			try {
-				doc.image(LOGO_PATH, ML, y + 2, { height: 32 });
+				if (input.invoiceLogo) {
+					const base64Data = input.invoiceLogo.replace(/^data:image\/\w+;base64,/, '');
+					const logoBuffer = Buffer.from(base64Data, 'base64');
+					doc.image(logoBuffer, ML, y + 2, { height: 32 });
+				} else {
+					doc.image(LOGO_PATH, ML, y + 2, { height: 32 });
+				}
 			} catch { /* skip */ }
 
 			// Invoice title - right
-			doc.fontSize(24).font('Helvetica-Bold').fillColor(ACCENT);
-			doc.text('FACTURA', ML, y, { width: CW, align: 'right', lineBreak: false });
+			doc.fontSize(isProforma ? 18 : 24).font('Helvetica-Bold').fillColor(ACCENT);
+			doc.text(pdfTitle, ML, y, { width: CW, align: 'right', lineBreak: false });
 			doc.fontSize(10).font('Helvetica').fillColor(MUTED);
 			doc.text(displayInvoiceNumber, ML, y + 28, { width: CW, align: 'right', lineBreak: false });
 

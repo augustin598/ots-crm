@@ -57,6 +57,7 @@ export const tenant = sqliteTable('tenant', {
 	country: text('country').default('România'),
 	phone: text('phone'),
 	email: text('email'),
+	contractPrefix: text('contract_prefix').default('CTR'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -423,6 +424,7 @@ export const invoice = sqliteTable('invoice', {
 	smartbillNumber: text('smartbill_number'),
 	keezInvoiceId: text('keez_invoice_id'),
 	keezExternalId: text('keez_external_id'),
+	keezStatus: text('keez_status'), // 'Draft' (proforma), 'Valid' (fiscal), 'Cancelled'
 	spvId: text('spv_id'), // ANAF SPV invoice ID
 	createdByUserId: text('created_by_user_id')
 		.notNull()
@@ -548,6 +550,7 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
 	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
+	invoiceLogo: text('invoice_logo'), // base64-encoded logo image for invoice PDFs
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

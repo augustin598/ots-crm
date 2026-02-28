@@ -46,6 +46,7 @@
 	let country = $state(data.tenant?.country || 'România');
 	let phone = $state(data.tenant?.phone || '');
 	let email = $state(data.tenant?.email || '');
+	let contractPrefix = $state(data.tenant?.contractPrefix || 'CTR');
 
 	// Invitation state
 	let invitationEmail = $state('');
@@ -113,7 +114,8 @@
 				postalCode: postalCode || undefined,
 				country: country || undefined,
 				phone: phone || undefined,
-				email: email || undefined
+				email: email || undefined,
+				contractPrefix: contractPrefix || undefined
 			}).updates(getInvitations());
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update settings';
@@ -329,20 +331,41 @@
 		</CardContent>
 	</Card>
 
-	<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
-		<CardHeader>
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-3">
-					<FileSignatureIcon class="h-5 w-5 text-muted-foreground" />
-					<div>
-						<CardTitle>Template-uri Contracte</CardTitle>
-						<CardDescription>Gestioneaza template-urile de contract cu clauze legale predefinite</CardDescription>
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/contract-templates`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<FileSignatureIcon class="h-5 w-5 text-muted-foreground" />
+						<div>
+							<CardTitle>Template-uri Contracte</CardTitle>
+							<CardDescription>Gestioneaza template-urile de contract cu clauze legale predefinite</CardDescription>
+						</div>
 					</div>
+					<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
 				</div>
-				<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
-			</div>
-		</CardHeader>
-	</Card>
+			</CardHeader>
+		</Card>
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Prefix Numar Contract</CardTitle>
+				<CardDescription>Prefixul folosit la generarea numerelor de contract (ex: CTR-0001)</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<div class="flex items-center gap-3">
+					<Input
+						bind:value={contractPrefix}
+						type="text"
+						placeholder="CTR"
+						maxlength={10}
+						class="max-w-[120px]"
+					/>
+					<span class="text-sm text-muted-foreground">-0001</span>
+				</div>
+			</CardContent>
+		</Card>
+	</div>
 
 	{#if data.tenantUser?.role === 'owner' || data.tenantUser?.role === 'admin'}
 		<Card>

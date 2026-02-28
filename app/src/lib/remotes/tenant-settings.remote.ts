@@ -23,7 +23,8 @@ const tenantSettingsSchema = v.object({
 	postalCode: v.optional(v.string()),
 	country: v.optional(v.string()),
 	phone: v.optional(v.string()),
-	email: v.optional(v.string())
+	email: v.optional(v.string()),
+	contractPrefix: v.optional(v.string())
 });
 
 export const updateTenantSettings = command(tenantSettingsSchema, async (data) => {

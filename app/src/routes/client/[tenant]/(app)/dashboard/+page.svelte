@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
-	import { getDocuments } from '$lib/remotes/documents.remote';
+	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { CheckSquare, FileText, Receipt } from '@lucide/svelte';
@@ -17,9 +17,8 @@
 	const invoices = $derived(invoicesQuery.current || []);
 	const invoicesLoading = $derived(invoicesQuery.loading);
 
-	const documentsQuery = getDocuments({});
-	const documents = $derived(documentsQuery.current || []);
-	const contracts = $derived(documents.filter((d) => d.type === 'contract'));
+	const contractsQuery = getContracts({});
+	const contracts = $derived(contractsQuery.current || []);
 
 	const pendingTasks = $derived(tasks.filter((t) => t.status === 'pending-approval').length);
 	const activeTasks = $derived(tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length);
@@ -34,7 +33,7 @@
 	</div>
 
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-		<Card>
+		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-sm font-medium">Pending Tasks</CardTitle>
 				<CheckSquare class="h-4 w-4 text-muted-foreground" />
@@ -45,7 +44,7 @@
 			</CardContent>
 		</Card>
 
-		<Card>
+		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-sm font-medium">Active Tasks</CardTitle>
 				<CheckSquare class="h-4 w-4 text-muted-foreground" />
@@ -56,7 +55,7 @@
 			</CardContent>
 		</Card>
 
-		<Card>
+		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/contracts`)}>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-sm font-medium">Contracts</CardTitle>
 				<FileText class="h-4 w-4 text-muted-foreground" />
@@ -67,7 +66,7 @@
 			</CardContent>
 		</Card>
 
-		<Card>
+		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/invoices`)}>
 			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<CardTitle class="text-sm font-medium">Pending Invoices</CardTitle>
 				<Receipt class="h-4 w-4 text-muted-foreground" />

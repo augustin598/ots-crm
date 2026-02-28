@@ -19,7 +19,7 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getServices } from '$lib/remotes/services.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { syncInvoicesFromKeez, getKeezStatus, createStornoInKeez, validateInvoiceInKeez } from '$lib/remotes/keez.remote';
+	import { syncInvoicesFromKeez, getKeezStatus, createStornoInKeez, validateInvoiceInKeez, sendInvoiceToEFactura, cancelInvoiceInKeez, syncInvoiceToKeez } from '$lib/remotes/keez.remote';
 	import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 	import { page } from '$app/state';
 	import { useQueryState } from 'nuqs-svelte';
@@ -53,6 +53,7 @@
 	import InvoiceFilters from '$lib/components/invoice-filters.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import EyeIcon from '@lucide/svelte/icons/eye';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
@@ -263,6 +264,34 @@ import { goto } from '$app/navigation';
 		}
 	}
 
+	async function handleDownloadPDF(invoiceId: string) {
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/${invoiceId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `Invoice-${invoiceId}.pdf`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+		}
+	}
+
+	async function handlePreviewPDF(invoiceId: string) {
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/${invoiceId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
+		}
+	}
+
 	async function handleSendInvoice(invoiceId: string) {
 		try {
 			// Get the invoice to find the client
@@ -454,19 +483,25 @@ import { goto } from '$app/navigation';
 		syncingInvoices = true;
 		syncError = null;
 		syncResult = null;
+		console.log('[Keez-Debug] Starting sync invoices from Keez...');
 
 		try {
 			const result = await syncInvoicesFromKeez({}).updates(invoicesQuery, keezStatusQuery);
+			console.log('[Keez-Debug] syncInvoicesFromKeez result:', JSON.stringify(result, null, 2));
 
 			if (result.success) {
 				syncResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
+				console.log('[Keez-Debug] Sync success:', syncResult);
 				await invoicesQuery.refresh();
 				setTimeout(() => {
 					syncResult = null;
 				}, 5000);
+			} else {
+				console.error('[Keez-Debug] Sync returned success=false:', result);
 			}
 		} catch (e) {
 			syncError = e instanceof Error ? e.message : 'Failed to sync invoices from Keez';
+			console.error('[Keez-Debug] syncInvoicesFromKeez ERROR:', e);
 		} finally {
 			syncingInvoices = false;
 		}
@@ -477,11 +512,14 @@ import { goto } from '$app/navigation';
 			return;
 		}
 
+		console.log('[Keez-Debug] Validating invoice in Keez:', invoiceId);
 		try {
-			await validateInvoiceInKeez({ invoiceId });
+			const result = await validateInvoiceInKeez({ invoiceId });
+			console.log('[Keez-Debug] validateInvoiceInKeez result:', result);
 			toast.success('Factura a fost validată în Keez');
 			await invoicesQuery.refresh();
 		} catch (e) {
+			console.error('[Keez-Debug] validateInvoiceInKeez ERROR:', e);
 			toast.error(e instanceof Error ? e.message : 'Validarea facturii în Keez a eșuat');
 		}
 	}
@@ -491,12 +529,58 @@ import { goto } from '$app/navigation';
 			return;
 		}
 
+		console.log('[Keez-Debug] Creating storno for invoice:', invoiceId);
 		try {
 			const result = await createStornoInKeez({ invoiceId });
+			console.log('[Keez-Debug] createStornoInKeez result:', result);
 			toast.success(`Storno created in Keez (ID: ${result.stornoExternalId})`);
 			await invoicesQuery.refresh();
 		} catch (e) {
+			console.error('[Keez-Debug] createStornoInKeez ERROR:', e);
 			toast.error(e instanceof Error ? e.message : 'Failed to create storno in Keez');
+		}
+	}
+
+	async function handleSendToEFactura(invoiceId: string) {
+		if (!confirm('Trimite factura în sistemul eFactura? Factura trebuie să fie validată.')) {
+			return;
+		}
+		console.log('[Keez-Debug] Sending invoice to eFactura:', invoiceId);
+		try {
+			const result = await sendInvoiceToEFactura({ invoiceId });
+			console.log('[Keez-Debug] sendInvoiceToEFactura result:', result);
+			toast.success('Factura a fost trimisă în eFactura');
+			await invoicesQuery.refresh();
+		} catch (e) {
+			console.error('[Keez-Debug] sendInvoiceToEFactura ERROR:', e);
+			toast.error(e instanceof Error ? e.message : 'Trimiterea în eFactura a eșuat');
+		}
+	}
+
+	async function handleCancelInKeez(invoiceId: string) {
+		if (!confirm('Anulează factura în Keez? Această acțiune va schimba statusul facturii în Cancelled.')) {
+			return;
+		}
+		console.log('[Keez-Debug] Cancelling invoice in Keez:', invoiceId);
+		try {
+			const result = await cancelInvoiceInKeez({ invoiceId });
+			console.log('[Keez-Debug] cancelInvoiceInKeez result:', result);
+			toast.success('Factura a fost anulată în Keez');
+			await invoicesQuery.refresh();
+		} catch (e) {
+			console.error('[Keez-Debug] cancelInvoiceInKeez ERROR:', e);
+			toast.error(e instanceof Error ? e.message : 'Anularea facturii în Keez a eșuat');
+		}
+	}
+
+	async function handleSyncToKeez(invoiceId: string) {
+		if (!confirm('Sincronizează factura în Keez?')) return;
+		try {
+			await syncInvoiceToKeez({ invoiceId });
+			toast.success('Factura a fost sincronizată în Keez');
+			await invoicesQuery.refresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Sincronizarea în Keez a eșuat');
 		}
 	}
 </script>
@@ -604,9 +688,19 @@ import { goto } from '$app/navigation';
 												{getStatusIcon(invoice.status)} {invoice.status}
 											</Badge>
 											{#if isKeezActive && invoice.keezExternalId}
-												<Badge variant="outline" class="text-xs px-2 py-0.5 border-green-500 text-green-600 dark:text-green-400">
-													Keez ✓
-												</Badge>
+												{#if invoice.keezStatus === 'Valid'}
+													<Badge variant="outline" class="text-xs px-2 py-0.5 border-green-500 text-green-600 dark:text-green-400">
+														Keez ✓
+													</Badge>
+												{:else if invoice.keezStatus === 'Cancelled'}
+													<Badge variant="outline" class="text-xs px-2 py-0.5 border-red-500 text-red-600 dark:text-red-400">
+														Keez Anulată
+													</Badge>
+												{:else}
+													<Badge variant="outline" class="text-xs px-2 py-0.5 border-yellow-500 text-yellow-600 dark:text-yellow-400">
+														Keez Proformă
+													</Badge>
+												{/if}
 											{/if}
 										</div>
 
@@ -676,10 +770,21 @@ import { goto } from '$app/navigation';
 
 									<!-- Action buttons with modern styling -->
 									<div class="flex items-center gap-1.5 flex-shrink-0">
-										<Button 
-											variant="outline" 
+										<Button
+											variant="outline"
 											size="icon"
 											class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); handlePreviewPDF(invoice.id); }}
+											title="Preview PDF"
+										>
+											<EyeIcon class="h-3.5 w-3.5" />
+										</Button>
+										<Button
+											variant="outline"
+											size="icon"
+											class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); handleDownloadPDF(invoice.id); }}
+											title="Download PDF"
 										>
 											<DownloadIcon class="h-3.5 w-3.5" />
 										</Button>
@@ -724,9 +829,20 @@ import { goto } from '$app/navigation';
 												{#if invoice.status !== 'paid'}
 													<DropdownMenuItem onclick={() => handleMarkAsPaid(invoice.id)}>Mark as Paid</DropdownMenuItem>
 												{/if}
+												{#if isKeezActive && !invoice.keezExternalId}
+													<DropdownMenuItem onclick={() => handleSyncToKeez(invoice.id)}>
+														Sincronizează în Keez
+													</DropdownMenuItem>
+												{/if}
 												{#if isKeezActive && invoice.keezExternalId}
 													<DropdownMenuItem onclick={() => handleValidateInKeez(invoice.id)}>
 														Validează în Keez
+													</DropdownMenuItem>
+													<DropdownMenuItem onclick={() => handleSendToEFactura(invoice.id)}>
+														Trimite eFactura
+													</DropdownMenuItem>
+													<DropdownMenuItem onclick={() => handleCancelInKeez(invoice.id)}>
+														Anulează în Keez
 													</DropdownMenuItem>
 													<DropdownMenuItem onclick={() => handleCreateStorno(invoice.id)}>
 														Storno în Keez

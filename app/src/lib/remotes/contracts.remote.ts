@@ -85,11 +85,46 @@ export const getContracts = query(
 			) as any;
 		}
 
-		return await db
+		const contracts = await db
 			.select()
 			.from(table.contract)
 			.where(conditions)
 			.orderBy(desc(table.contract.contractDate));
+
+		// For client users, attach signing URLs for draft/sent contracts
+		if (event.locals.isClientUser) {
+			const contractIds = contracts
+				.filter(c => c.status === 'draft' || c.status === 'sent')
+				.map(c => c.id);
+
+			if (contractIds.length > 0) {
+				const tokens = await db
+					.select()
+					.from(table.contractSignToken)
+					.where(
+						and(
+							inArray(table.contractSignToken.contractId, contractIds),
+							eq(table.contractSignToken.tenantId, event.locals.tenant.id),
+							eq(table.contractSignToken.used, false)
+						)
+					);
+
+				const now = new Date();
+				const tokenMap = new Map<string, string>();
+				for (const token of tokens) {
+					if (token.signingUrl && token.expiresAt > now) {
+						tokenMap.set(token.contractId, token.signingUrl);
+					}
+				}
+
+				return contracts.map(c => ({
+					...c,
+					signingUrl: tokenMap.get(c.id) ?? null
+				}));
+			}
+		}
+
+		return contracts;
 	}
 );
 
@@ -132,6 +167,7 @@ export const createContract = command(
 		}
 
 		// Auto-generate contract number: query max contract_number for tenant, increment
+		const prefix = event.locals.tenant.contractPrefix || 'CTR';
 		const [maxResult] = await db
 			.select({
 				maxNumber: sql<string>`max(${table.contract.contractNumber})`
@@ -147,7 +183,7 @@ export const createContract = command(
 				nextNumber = parseInt(match[1], 10) + 1;
 			}
 		}
-		const contractNumber = `CTR-${String(nextNumber).padStart(4, '0')}`;
+		const contractNumber = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
 
 		const contractId = generateContractId();
 
@@ -432,6 +468,7 @@ export const duplicateContract = command(
 			.orderBy(asc(table.contractLineItem.sortOrder));
 
 		// Generate new contract number
+		const prefix = event.locals.tenant.contractPrefix || 'CTR';
 		const [maxResult] = await db
 			.select({
 				maxNumber: sql<string>`max(${table.contract.contractNumber})`
@@ -446,7 +483,7 @@ export const duplicateContract = command(
 				nextNumber = parseInt(match[1], 10) + 1;
 			}
 		}
-		const contractNumber = `CTR-${String(nextNumber).padStart(4, '0')}`;
+		const contractNumber = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
 
 		const newContractId = generateContractId();
 

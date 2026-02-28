@@ -11,7 +11,7 @@
 	} from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Download, Search } from '@lucide/svelte';
+	import { Download, Search, Eye, PenLine } from '@lucide/svelte';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -33,6 +33,18 @@
 			URL.revokeObjectURL(url);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+		}
+	}
+
+	async function handlePreviewPDF(contractId: string) {
+		try {
+			const response = await fetch(`/client/${tenantSlug}/contracts/${contractId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
 		}
 	}
 
@@ -247,16 +259,39 @@
 									</span>
 								</TableCell>
 								<TableCell>
-									<Button
-										variant="ghost"
-										size="icon"
-										class="h-8 w-8"
-										onclick={() =>
-											handleDownloadPDF(contract.id, contract.contractNumber)}
-										title="Descarca PDF"
-									>
-										<Download class="h-4 w-4" />
-									</Button>
+									<div class="flex items-center gap-1">
+										{#if contract.signingUrl && (contract.status === 'draft' || contract.status === 'sent')}
+											<Button
+												variant="default"
+												size="sm"
+												class="h-8"
+												onclick={() => window.open(contract.signingUrl, '_blank')}
+												title="Semneaza contractul"
+											>
+												<PenLine class="mr-1.5 h-3.5 w-3.5" />
+												Semneaza
+											</Button>
+										{/if}
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-8 w-8"
+											onclick={() => handlePreviewPDF(contract.id)}
+											title="Vizualizeaza PDF"
+										>
+											<Eye class="h-4 w-4" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-8 w-8"
+											onclick={() =>
+												handleDownloadPDF(contract.id, contract.contractNumber)}
+											title="Descarca PDF"
+										>
+											<Download class="h-4 w-4" />
+										</Button>
+									</div>
 								</TableCell>
 							</TableRow>
 						{/each}

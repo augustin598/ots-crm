@@ -12,7 +12,7 @@
 	} from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Download, Search } from '@lucide/svelte';
+	import { Download, Search, Eye } from '@lucide/svelte';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
@@ -30,6 +30,18 @@
 			URL.revokeObjectURL(url);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+		}
+	}
+
+	async function handlePreviewPDF(invoiceId: string) {
+		try {
+			const response = await fetch(`/client/${tenantSlug}/invoices/${invoiceId}/pdf`);
+			if (!response.ok) throw new Error('Failed to generate PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
 		}
 	}
 
@@ -353,16 +365,27 @@
 									</span>
 								</TableCell>
 								<TableCell>
-									<Button
-										variant="ghost"
-										size="icon"
-										class="h-8 w-8"
-										onclick={() =>
-											handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
-										title="Download PDF"
-									>
-										<Download class="h-4 w-4" />
-									</Button>
+									<div class="flex items-center gap-1">
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-8 w-8"
+											onclick={() => handlePreviewPDF(invoice.id)}
+											title="Preview PDF"
+										>
+											<Eye class="h-4 w-4" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-8 w-8"
+											onclick={() =>
+												handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
+											title="Download PDF"
+										>
+											<Download class="h-4 w-4" />
+										</Button>
+									</div>
 								</TableCell>
 							</TableRow>
 						{/each}
