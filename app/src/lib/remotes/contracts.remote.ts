@@ -10,6 +10,48 @@ import * as storage from '$lib/server/storage';
 import { env as publicEnv } from '$env/dynamic/public';
 import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
 
+const CONTRACT_STATUSES = ['draft', 'sent', 'signed', 'active', 'expired', 'cancelled'] as const;
+type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+
+const VALID_STATUS_TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {
+	draft: ['sent', 'cancelled'],
+	sent: ['signed', 'draft', 'cancelled'],
+	signed: ['active', 'cancelled'],
+	active: ['expired', 'cancelled'],
+	expired: [],
+	cancelled: []
+};
+
+function validateStatusTransition(currentStatus: string, newStatus: string): void {
+	if (!CONTRACT_STATUSES.includes(newStatus as ContractStatus)) {
+		throw new Error(`Status invalid: "${newStatus}". Statusuri valide: ${CONTRACT_STATUSES.join(', ')}`);
+	}
+	const allowed = VALID_STATUS_TRANSITIONS[currentStatus as ContractStatus];
+	if (allowed && !allowed.includes(newStatus as ContractStatus)) {
+		throw new Error(
+			`Tranziție de status nepermisă: "${currentStatus}" → "${newStatus}". Tranzitii permise din "${currentStatus}": ${allowed.length > 0 ? allowed.join(', ') : 'niciuna'}`
+		);
+	}
+}
+
+async function generateContractNumber(txOrDb: { select: typeof db.select }, tenantId: string, prefix: string): Promise<string> {
+	const [maxResult] = await txOrDb
+		.select({
+			maxNumber: sql<string>`max(${table.contract.contractNumber})`
+		})
+		.from(table.contract)
+		.where(eq(table.contract.tenantId, tenantId));
+
+	let nextNumber = 1;
+	if (maxResult?.maxNumber) {
+		const match = maxResult.maxNumber.match(/(\d+)$/);
+		if (match) {
+			nextNumber = parseInt(match[1], 10) + 1;
+		}
+	}
+	return `${prefix}-${String(nextNumber).padStart(4, '0')}`;
+}
+
 function generateContractId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
@@ -143,7 +185,7 @@ export const createContract = command(
 		templateId: v.optional(v.string()),
 		contractDate: v.optional(v.string()),
 		contractTitle: v.optional(v.string()),
-		status: v.optional(v.string()),
+		status: v.optional(v.picklist(CONTRACT_STATUSES)),
 		serviceDescription: v.optional(v.string()),
 		offerLink: v.optional(v.string()),
 		currency: v.optional(v.string()),
@@ -168,25 +210,25 @@ export const createContract = command(
 			throw new Error('Unauthorized');
 		}
 
-		// Auto-generate contract number: query max contract_number for tenant, increment
-		const prefix = event.locals.tenant.contractPrefix || 'CTR';
-		const [maxResult] = await db
-			.select({
-				maxNumber: sql<string>`max(${table.contract.contractNumber})`
-			})
-			.from(table.contract)
-			.where(eq(table.contract.tenantId, event.locals.tenant.id));
+		// Validate clientId belongs to current tenant
+		const [clientCheck] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.id, data.clientId),
+					eq(table.client.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
 
-		let nextNumber = 1;
-		if (maxResult?.maxNumber) {
-			// Try to extract numeric part from the contract number
-			const match = maxResult.maxNumber.match(/(\d+)$/);
-			if (match) {
-				nextNumber = parseInt(match[1], 10) + 1;
-			}
+		if (!clientCheck) {
+			throw new Error('Client invalid sau nu aparține acestui tenant');
 		}
-		const contractNumber = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
 
+		const tenantId = event.locals.tenant.id;
+		const userId = event.locals.user.id;
+		const prefix = event.locals.tenant.contractPrefix || 'CTR';
 		const contractId = generateContractId();
 
 		// If templateId provided, copy clausesJson from template
@@ -198,7 +240,7 @@ export const createContract = command(
 				.where(
 					and(
 						eq(table.contractTemplate.id, data.templateId),
-						eq(table.contractTemplate.tenantId, event.locals.tenant.id)
+						eq(table.contractTemplate.tenantId, tenantId)
 					)
 				)
 				.limit(1);
@@ -208,37 +250,37 @@ export const createContract = command(
 			}
 		}
 
-		const newContract = {
-			id: contractId,
-			tenantId: event.locals.tenant.id,
-			clientId: data.clientId,
-			templateId: data.templateId || null,
-			contractNumber,
-			contractDate: data.contractDate ? new Date(data.contractDate) : new Date(),
-			contractTitle: data.contractTitle || 'PRESTARI SERVICII INFORMATICE',
-			status: data.status || 'draft',
-			serviceDescription: data.serviceDescription || null,
-			offerLink: data.offerLink || null,
-			currency: data.currency || 'EUR',
-			paymentTermsDays: data.paymentTermsDays ?? 5,
-			penaltyRate: data.penaltyRate ?? 50,
-			billingFrequency: data.billingFrequency || 'monthly',
-			contractDurationMonths: data.contractDurationMonths ?? 6,
-			discountPercent: data.discountPercent ?? null,
-			prestatorEmail: data.prestatorEmail || null,
-			beneficiarEmail: data.beneficiarEmail || null,
-			hourlyRate: data.hourlyRate ?? 6000,
-			hourlyRateCurrency: data.hourlyRateCurrency || 'EUR',
-			prestatorSignatureName: data.prestatorSignatureName || null,
-			beneficiarSignatureName: data.beneficiarSignatureName || null,
-			clausesJson,
-			notes: data.notes || null,
-			createdByUserId: event.locals.user.id
-		};
-
-		// Use transaction to create contract and line items
+		// Use transaction for atomic contract number generation + insert
 		await db.transaction(async (tx) => {
-			await tx.insert(table.contract).values(newContract);
+			const contractNumber = await generateContractNumber(tx, tenantId, prefix);
+
+			await tx.insert(table.contract).values({
+				id: contractId,
+				tenantId,
+				clientId: data.clientId,
+				templateId: data.templateId || null,
+				contractNumber,
+				contractDate: data.contractDate ? new Date(data.contractDate) : new Date(),
+				contractTitle: data.contractTitle || 'PRESTARI SERVICII INFORMATICE',
+				status: data.status || 'draft',
+				serviceDescription: data.serviceDescription || null,
+				offerLink: data.offerLink || null,
+				currency: data.currency || 'EUR',
+				paymentTermsDays: data.paymentTermsDays ?? 5,
+				penaltyRate: data.penaltyRate ?? 50,
+				billingFrequency: data.billingFrequency || 'monthly',
+				contractDurationMonths: data.contractDurationMonths ?? 6,
+				discountPercent: data.discountPercent ?? null,
+				prestatorEmail: data.prestatorEmail || null,
+				beneficiarEmail: data.beneficiarEmail || null,
+				hourlyRate: data.hourlyRate ?? 6000,
+				hourlyRateCurrency: data.hourlyRateCurrency || 'EUR',
+				prestatorSignatureName: data.prestatorSignatureName || null,
+				beneficiarSignatureName: data.beneficiarSignatureName || null,
+				clausesJson,
+				notes: data.notes || null,
+				createdByUserId: userId
+			});
 
 			// Insert line items if provided
 			if (data.lineItems && data.lineItems.length > 0) {
@@ -283,7 +325,7 @@ export const updateContract = command(
 		templateId: v.optional(v.string()),
 		contractDate: v.optional(v.string()),
 		contractTitle: v.optional(v.string()),
-		status: v.optional(v.string()),
+		status: v.optional(v.picklist(CONTRACT_STATUSES)),
 		serviceDescription: v.optional(v.string()),
 		offerLink: v.optional(v.string()),
 		currency: v.optional(v.string()),
@@ -324,6 +366,11 @@ export const updateContract = command(
 
 		if (!existing) {
 			throw new Error('Contract not found');
+		}
+
+		// Validate status transition if status is being changed
+		if (updateData.status && updateData.status !== existing.status) {
+			validateStatusTransition(existing.status, updateData.status);
 		}
 
 		await db.transaction(async (tx) => {
@@ -437,17 +484,19 @@ export const deleteContract = command(
 		}
 
 		try {
-			// Delete sign tokens first (no cascade on FK)
-			await db
-				.delete(table.contractSignToken)
-				.where(eq(table.contractSignToken.contractId, contractId));
+			await db.transaction(async (tx) => {
+				// Delete sign tokens first (no cascade on FK)
+				await tx
+					.delete(table.contractSignToken)
+					.where(eq(table.contractSignToken.contractId, contractId));
 
-			// Delete line items explicitly (in case cascade doesn't work)
-			await db
-				.delete(table.contractLineItem)
-				.where(eq(table.contractLineItem.contractId, contractId));
+				// Delete line items explicitly (in case cascade doesn't work)
+				await tx
+					.delete(table.contractLineItem)
+					.where(eq(table.contractLineItem.contractId, contractId));
 
-			await db.delete(table.contract).where(eq(table.contract.id, contractId));
+				await tx.delete(table.contract).where(eq(table.contract.id, contractId));
+			});
 		} catch (err) {
 			console.error('Failed to delete contract from DB:', err);
 			throw new Error('Eroare la stergerea contractului din baza de date');
@@ -488,56 +537,42 @@ export const duplicateContract = command(
 			.where(eq(table.contractLineItem.contractId, contractId))
 			.orderBy(asc(table.contractLineItem.sortOrder));
 
-		// Generate new contract number
+		const tenantId = event.locals.tenant.id;
+		const userId = event.locals.user.id;
 		const prefix = event.locals.tenant.contractPrefix || 'CTR';
-		const [maxResult] = await db
-			.select({
-				maxNumber: sql<string>`max(${table.contract.contractNumber})`
-			})
-			.from(table.contract)
-			.where(eq(table.contract.tenantId, event.locals.tenant.id));
-
-		let nextNumber = 1;
-		if (maxResult?.maxNumber) {
-			const match = maxResult.maxNumber.match(/(\d+)$/);
-			if (match) {
-				nextNumber = parseInt(match[1], 10) + 1;
-			}
-		}
-		const contractNumber = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
-
 		const newContractId = generateContractId();
 
-		const newContract = {
-			id: newContractId,
-			tenantId: event.locals.tenant.id,
-			clientId: existing.clientId,
-			templateId: existing.templateId,
-			contractNumber,
-			contractDate: new Date(),
-			contractTitle: existing.contractTitle,
-			status: 'draft',
-			serviceDescription: existing.serviceDescription,
-			offerLink: existing.offerLink,
-			currency: existing.currency,
-			paymentTermsDays: existing.paymentTermsDays,
-			penaltyRate: existing.penaltyRate,
-			billingFrequency: existing.billingFrequency,
-			contractDurationMonths: existing.contractDurationMonths,
-			discountPercent: existing.discountPercent,
-			prestatorEmail: existing.prestatorEmail,
-			beneficiarEmail: existing.beneficiarEmail,
-			hourlyRate: existing.hourlyRate,
-			hourlyRateCurrency: existing.hourlyRateCurrency,
-			prestatorSignatureName: existing.prestatorSignatureName,
-			beneficiarSignatureName: existing.beneficiarSignatureName,
-			clausesJson: existing.clausesJson,
-			notes: existing.notes,
-			createdByUserId: event.locals.user.id
-		};
-
+		// Use transaction for atomic contract number generation + insert
 		await db.transaction(async (tx) => {
-			await tx.insert(table.contract).values(newContract);
+			const contractNumber = await generateContractNumber(tx, tenantId, prefix);
+
+			await tx.insert(table.contract).values({
+				id: newContractId,
+				tenantId,
+				clientId: existing.clientId,
+				templateId: existing.templateId,
+				contractNumber,
+				contractDate: new Date(),
+				contractTitle: existing.contractTitle,
+				status: 'draft',
+				serviceDescription: existing.serviceDescription,
+				offerLink: existing.offerLink,
+				currency: existing.currency,
+				paymentTermsDays: existing.paymentTermsDays,
+				penaltyRate: existing.penaltyRate,
+				billingFrequency: existing.billingFrequency,
+				contractDurationMonths: existing.contractDurationMonths,
+				discountPercent: existing.discountPercent,
+				prestatorEmail: existing.prestatorEmail,
+				beneficiarEmail: existing.beneficiarEmail,
+				hourlyRate: existing.hourlyRate,
+				hourlyRateCurrency: existing.hourlyRateCurrency,
+				prestatorSignatureName: existing.prestatorSignatureName,
+				beneficiarSignatureName: existing.beneficiarSignatureName,
+				clausesJson: existing.clausesJson,
+				notes: existing.notes,
+				createdByUserId: userId
+			});
 
 			if (existingLineItems.length > 0) {
 				const lineItemsToInsert = existingLineItems.map((item) => ({
@@ -595,11 +630,27 @@ export const sendContractForSigning = command(
 
 		if (!contract) throw new Error('Contract not found');
 
+		// Only allow sending from draft or sent status
+		if (contract.status !== 'draft' && contract.status !== 'sent') {
+			throw new Error(`Nu se poate trimite pentru semnare un contract cu statusul "${contract.status}". Doar contractele în starea "draft" sau "sent" pot fi trimise.`);
+		}
+
 		const [client] = await db
 			.select()
 			.from(table.client)
 			.where(eq(table.client.id, contract.clientId))
 			.limit(1);
+
+		// Revoke all existing unused tokens for this contract
+		await db
+			.update(table.contractSignToken)
+			.set({ used: true, usedAt: new Date() })
+			.where(
+				and(
+					eq(table.contractSignToken.contractId, contractId),
+					eq(table.contractSignToken.used, false)
+				)
+			);
 
 		// Generate signing token
 		const rawBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -673,6 +724,15 @@ export const signContractAsPrestator = command(
 			.limit(1);
 
 		if (!contract) throw new Error('Contract not found');
+
+		// Only allow prestator signing on draft or sent contracts
+		if (contract.status !== 'draft' && contract.status !== 'sent') {
+			throw new Error(`Nu se poate semna un contract cu statusul "${contract.status}". Doar contractele în starea "draft" sau "sent" pot fi semnate.`);
+		}
+
+		if (signatureImage && signatureImage.length > 700000) {
+			throw new Error('Imaginea semnăturii este prea mare (max 700KB)');
+		}
 
 		const imageToSave =
 			signatureImage?.startsWith('data:image/png;base64,') ? signatureImage : null;

@@ -116,23 +116,24 @@ export const actions: Actions = {
 
 		const { signToken, contract } = result;
 
-		// Mark token as used
-		await db
-			.update(table.contractSignToken)
-			.set({ used: true, usedAt: new Date() })
-			.where(eq(table.contractSignToken.id, signToken.id));
+		// Atomic: mark token as used + save signature in one transaction
+		await db.transaction(async (tx) => {
+			await tx
+				.update(table.contractSignToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(eq(table.contractSignToken.id, signToken.id));
 
-		// Save signature and mark contract as signed
-		await db
-			.update(table.contract)
-			.set({
-				beneficiarSignatureName: signatureName,
-				beneficiarSignatureImage: signatureImage,
-				beneficiarSignedAt: new Date(),
-				status: 'signed',
-				updatedAt: new Date()
-			})
-			.where(eq(table.contract.id, contract.id));
+			await tx
+				.update(table.contract)
+				.set({
+					beneficiarSignatureName: signatureName,
+					beneficiarSignatureImage: signatureImage,
+					beneficiarSignedAt: new Date(),
+					status: 'signed',
+					updatedAt: new Date()
+				})
+				.where(eq(table.contract.id, contract.id));
+		});
 
 		return { success: true, signatureName };
 	}
