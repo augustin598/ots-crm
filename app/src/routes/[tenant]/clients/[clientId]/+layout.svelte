@@ -70,8 +70,8 @@
 			magicLinkUrl = result.url;
 			magicLinkEmail = result.email;
 			magicLinkDialogOpen = true;
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la generare');
+		} catch (e: any) {
+			toast.error(e?.message || (typeof e === 'string' ? e : 'Eroare la generare'));
 		} finally {
 			magicLinkLoading = false;
 		}

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { getContracts, deleteContract, duplicateContract } from '$lib/remotes/contracts.remote';
-	import { getClients } from '$lib/remotes/clients.remote';
+	import { getContracts, deleteContract, duplicateContract, extractClientFromContract } from '$lib/remotes/contracts.remote';
+	import { getClients, getClient, updateClient } from '$lib/remotes/clients.remote';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { Card } from '$lib/components/ui/card';
@@ -14,7 +14,17 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
+	import {
+		Dialog,
+		DialogContent,
+		DialogHeader,
+		DialogTitle,
+		DialogFooter,
+		DialogDescription
+	} from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import EyeIcon from '@lucide/svelte/icons/eye';
@@ -22,6 +32,22 @@
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import { Upload, X, Loader2, FileText, CheckCircle2, AlertCircle, Info } from '@lucide/svelte';
+	import { cn } from '$lib/utils';
+
+	const fieldLabels: Record<string, string> = {
+		cui: 'CUI',
+		registrationNumber: 'Nr. Înregistrare',
+		email: 'Email',
+		phone: 'Telefon',
+		address: 'Adresă',
+		city: 'Oraș',
+		county: 'Județ',
+		postalCode: 'Cod Poștal',
+		iban: 'IBAN',
+		bankName: 'Bancă',
+		legalRepresentative: 'Reprezentant Legal'
+	};
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -113,7 +139,9 @@
 			await deleteContract(contractId).updates(contractsQuery);
 			toast.success('Contractul a fost sters.');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la stergerea contractului');
+			console.error('Delete contract error:', e);
+			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la stergerea contractului';
+			toast.error(message);
 		}
 	}
 
@@ -126,6 +154,160 @@
 			}
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la duplicarea contractului');
+		}
+	}
+
+	// Extraction report state
+	let showExtractionReport = $state(false);
+	let extractionReport = $state<{ extracted: Record<string, string>; updated: Record<string, string>; skipped: Record<string, string> } | null>(null);
+	let updatingSkipped = $state(false);
+	let extractionClientId = $state('');
+
+	async function handleUpdateSkippedFields() {
+		if (!extractionReport || Object.keys(extractionReport.skipped).length === 0 || !extractionClientId) return;
+		updatingSkipped = true;
+		try {
+			// Use already-loaded clients array (getClient query may not have data on this page)
+			const client = clients.find(c => c.id === extractionClientId);
+			if (!client) throw new Error('Client not found');
+			console.log('[Upload] Updating skipped fields for client:', client.name, extractionReport.skipped);
+			await updateClient({ clientId: extractionClientId, name: client.name, ...extractionReport.skipped })
+				.updates(getClient(extractionClientId), getClients());
+			extractionReport = {
+				extracted: extractionReport.extracted,
+				updated: { ...extractionReport.updated, ...extractionReport.skipped },
+				skipped: {}
+			};
+			toast.success('Datele clientului au fost actualizate');
+		} catch (e) {
+			console.error('[Upload] Update skipped fields error:', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare');
+		} finally {
+			updatingSkipped = false;
+		}
+	}
+
+	// Upload modal state
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+	let showUploadModal = $state(false);
+	let uploadFile = $state<File | null>(null);
+	let uploadClientId = $state('');
+	let uploadTitle = $state('');
+	let uploadDate = $state('');
+	let uploadNumber = $state('');
+	let uploading = $state(false);
+	let uploadError = $state<string | null>(null);
+	let isDragging = $state(false);
+	let fileInputRef: HTMLInputElement | null = $state(null);
+
+	function handleDragOver(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		isDragging = true;
+	}
+
+	function handleDragLeave(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		isDragging = false;
+	}
+
+	function handleDrop(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		isDragging = false;
+		const files = e.dataTransfer?.files;
+		if (files && files.length > 0) {
+			const f = files[0];
+			if (f.type === 'application/pdf') {
+				uploadFile = f;
+				if (!uploadTitle) uploadTitle = f.name.replace(/\.pdf$/i, '');
+			} else {
+				uploadError = 'Doar fișiere PDF sunt acceptate';
+			}
+		}
+	}
+
+	function handleFileSelect(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const files = target.files;
+		if (files && files.length > 0) {
+			uploadFile = files[0];
+			if (!uploadTitle) uploadTitle = files[0].name.replace(/\.pdf$/i, '');
+		}
+	}
+
+	function handleRemoveFile() {
+		uploadFile = null;
+		if (fileInputRef) fileInputRef.value = '';
+	}
+
+	function resetUploadModal() {
+		uploadFile = null;
+		uploadClientId = '';
+		uploadTitle = '';
+		uploadDate = '';
+		uploadNumber = '';
+		uploadError = null;
+		if (fileInputRef) fileInputRef.value = '';
+	}
+
+	async function handleUploadContract() {
+		if (!uploadFile) {
+			uploadError = 'Selectează un fișier PDF';
+			return;
+		}
+		if (!uploadClientId) {
+			uploadError = 'Selectează un client';
+			return;
+		}
+		uploading = true;
+		uploadError = null;
+		try {
+			const formData = new FormData();
+			formData.append('file', uploadFile);
+			formData.append('clientId', uploadClientId);
+			if (uploadTitle) formData.append('contractTitle', uploadTitle);
+			if (uploadDate) formData.append('contractDate', uploadDate);
+			if (uploadNumber) formData.append('contractNumber', uploadNumber);
+
+			const res = await fetch(`/${tenantSlug}/contracts/upload`, { method: 'POST', body: formData });
+			if (!res.ok) {
+				const errData = await res.json().catch(() => null);
+				throw new Error(errData?.message || 'Eroare la încărcarea contractului');
+			}
+			const result = await res.json();
+			console.log('[Upload] Server response:', JSON.stringify(result));
+			const selectedClientId = uploadClientId;
+			extractionClientId = selectedClientId;
+			console.log('[Upload] selectedClientId:', selectedClientId);
+			await invalidateAll();
+			showUploadModal = false;
+			resetUploadModal();
+			toast.success('Contractul a fost încărcat cu succes');
+			try {
+				console.log('[Upload] Calling extractClientFromContract with contractId:', result.contractId);
+				const extraction = await extractClientFromContract({ contractId: result.contractId })
+					.updates(getClient(selectedClientId));
+				console.log('[Upload] Extraction result:', JSON.stringify(extraction));
+				if (extraction.extracted && Object.keys(extraction.extracted).length > 0) {
+					extractionReport = {
+						extracted: extraction.extracted,
+						updated: extraction.updated || {},
+						skipped: extraction.skipped || {}
+					};
+					showExtractionReport = true;
+					console.log('[Upload] showExtractionReport set to true');
+				} else {
+					console.log('[Upload] No extracted data, extraction.extracted:', extraction.extracted);
+				}
+			} catch (extractErr) {
+				console.error('[Upload] extractClientFromContract error:', extractErr);
+			}
+		} catch (e) {
+			uploadError = e instanceof Error ? e.message : 'Eroare la încărcarea contractului';
+		} finally {
+			uploading = false;
 		}
 	}
 </script>
@@ -141,10 +323,16 @@
 			<h1 class="text-3xl font-bold tracking-tight">Contracte</h1>
 			<p class="text-muted-foreground mt-1">Gestioneaza contractele cu clientii</p>
 		</div>
-		<Button onclick={() => goto(`/${tenantSlug}/contracts/new`)}>
-			<PlusIcon class="mr-2 h-4 w-4" />
-			Contract Nou
-		</Button>
+		<div class="flex items-center gap-2">
+			<Button variant="outline" onclick={() => { resetUploadModal(); showUploadModal = true; }}>
+				<Upload class="mr-2 h-4 w-4" />
+				Încarcă Contract
+			</Button>
+			<Button onclick={() => goto(`/${tenantSlug}/contracts/new`)}>
+				<PlusIcon class="mr-2 h-4 w-4" />
+				Contract Nou
+			</Button>
+		</div>
 	</div>
 
 	<!-- Search bar -->
@@ -276,7 +464,7 @@
 									variant="outline"
 									size="icon"
 									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
-									onclick={async (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); const res = await fetch(`/${tenantSlug}/contracts/${contract.id}/pdf`); if (!res.ok) return; const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`; a.click(); URL.revokeObjectURL(url); }}
+									onclick={async (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); const res = await fetch(`/${tenantSlug}/contracts/${contract.id}/pdf?download=true`); if (!res.ok) return; const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`; a.click(); URL.revokeObjectURL(url); }}
 									title="Descarca PDF"
 								>
 									<DownloadIcon class="h-3.5 w-3.5" />
@@ -315,3 +503,197 @@
 		</div>
 	{/if}
 </div>
+
+<Dialog bind:open={showUploadModal}>
+	<DialogContent class="sm:max-w-xl border-2 shadow-2xl overflow-hidden">
+		<DialogHeader>
+			<div class="flex items-center gap-3">
+				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+					<Upload class="h-5 w-5 text-primary" />
+				</div>
+				<div>
+					<DialogTitle>Încarcă Contract</DialogTitle>
+					<DialogDescription>Încarcă un contract PDF existent</DialogDescription>
+				</div>
+			</div>
+		</DialogHeader>
+		<div class="space-y-4">
+			<div class="space-y-2">
+				<Label class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fișier PDF *</Label>
+				{#if uploadFile}
+					<div class="group relative">
+						<div class="relative flex w-full items-center gap-4 rounded-lg border-2 border-primary/20 bg-primary/5 p-4 transition-colors">
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+								<FileText class="h-5 w-5 text-primary" />
+							</div>
+							<div class="min-w-0 flex-1">
+								<p class="truncate text-sm font-semibold">{uploadFile.name}</p>
+								<p class="text-xs text-muted-foreground">
+									{(uploadFile.size / 1024 / 1024).toFixed(2)} MB
+								</p>
+							</div>
+							<Button
+								type="button" variant="ghost" size="sm"
+								class="opacity-0 transition-opacity group-hover:opacity-100"
+								onclick={handleRemoveFile} disabled={uploading}
+							>
+								<X class="h-4 w-4" />
+							</Button>
+						</div>
+					</div>
+				{:else}
+					<div
+						class={cn(
+							'relative flex h-[120px] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors',
+							isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 bg-muted/50',
+							!uploading && 'cursor-pointer hover:border-primary/50'
+						)}
+						ondragover={handleDragOver}
+						ondragleave={handleDragLeave}
+						ondrop={handleDrop}
+						onclick={() => !uploading && fileInputRef?.click()}
+						role="button"
+						tabindex="0"
+					>
+						<input
+							bind:this={fileInputRef}
+							type="file" accept="application/pdf" class="hidden"
+							disabled={uploading} onchange={handleFileSelect}
+						/>
+						<Upload class="h-8 w-8 text-muted-foreground" />
+						<div class="text-center">
+							<p class="text-sm font-medium">
+								<span class="text-primary underline">Click pentru upload</span> sau drag & drop
+							</p>
+							<p class="mt-1 text-xs text-muted-foreground">Doar fișiere PDF</p>
+						</div>
+					</div>
+				{/if}
+			</div>
+
+			<div class="space-y-2">
+				<Label class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Client *</Label>
+				<Combobox
+					bind:value={uploadClientId}
+					options={clientOptions}
+					placeholder="Selectează client"
+					searchPlaceholder="Caută client..."
+				/>
+			</div>
+
+			<div class="space-y-2">
+				<Label for="uploadTitle" class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Titlu contract</Label>
+				<Input id="uploadTitle" bind:value={uploadTitle} placeholder="ex: Contract servicii IT" />
+			</div>
+
+			<div class="grid grid-cols-2 gap-4">
+				<div class="space-y-2">
+					<Label for="uploadNumber" class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Număr contract</Label>
+					<Input id="uploadNumber" bind:value={uploadNumber} placeholder="Auto-generat" />
+				</div>
+				<div class="space-y-2">
+					<Label for="uploadDate" class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Data contract</Label>
+					<Input id="uploadDate" type="date" bind:value={uploadDate} />
+				</div>
+			</div>
+
+			{#if uploadError}
+				<div class="rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+					<p class="text-sm text-red-800 dark:text-red-200">{uploadError}</p>
+				</div>
+			{/if}
+		</div>
+		<DialogFooter class="gap-2 pt-2">
+			<Button variant="outline" onclick={() => (showUploadModal = false)}>Anulează</Button>
+			<Button onclick={handleUploadContract} disabled={uploading || !uploadFile || !uploadClientId}>
+				{#if uploading}
+					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+					Se încarcă...
+				{:else}
+					<Upload class="mr-2 h-4 w-4" />
+					Încarcă
+				{/if}
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={showExtractionReport}>
+	<DialogContent class="sm:max-w-lg">
+		<DialogHeader>
+			<div class="flex items-center gap-3">
+				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+					<Info class="h-5 w-5 text-primary" />
+				</div>
+				<div>
+					<DialogTitle>Raport extragere date client</DialogTitle>
+					<DialogDescription>Date extrase automat din contractul PDF</DialogDescription>
+				</div>
+			</div>
+		</DialogHeader>
+		{#if extractionReport}
+			<div class="space-y-4 max-h-[60vh] overflow-y-auto">
+				{#if Object.keys(extractionReport.updated).length > 0}
+					<div class="space-y-2">
+						<div class="flex items-center gap-2 text-sm font-semibold text-green-700 dark:text-green-400">
+							<CheckCircle2 class="h-4 w-4" />
+							Câmpuri actualizate
+						</div>
+						<div class="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 divide-y divide-green-200 dark:divide-green-800">
+							{#each Object.entries(extractionReport.updated) as [key, value]}
+								<div class="px-3 py-2 flex justify-between gap-4">
+									<span class="text-sm font-medium text-green-800 dark:text-green-300 shrink-0">{fieldLabels[key] || key}</span>
+									<span class="text-sm text-green-700 dark:text-green-400 text-right truncate">{value}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if Object.keys(extractionReport.skipped).length > 0}
+					<div class="space-y-2">
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+								<AlertCircle class="h-4 w-4" />
+								Extrase dar neschimbate
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={handleUpdateSkippedFields}
+								disabled={updatingSkipped}
+							>
+								{#if updatingSkipped}
+									<Loader2 class="mr-2 h-3 w-3 animate-spin" />
+									Se actualizează...
+								{:else}
+									<CheckCircle2 class="mr-2 h-3 w-3" />
+									Actualizează toate
+								{/if}
+							</Button>
+						</div>
+						<div class="rounded-lg border divide-y">
+							{#each Object.keys(extractionReport.skipped) as key}
+								<div class="px-3 py-1.5 flex items-center justify-between gap-4">
+									<span class="text-sm font-medium text-muted-foreground shrink-0">{fieldLabels[key] || key}</span>
+									<Input
+										class="max-w-[280px] h-7 text-sm text-right border-dashed"
+										value={extractionReport.skipped[key]}
+										oninput={(e) => { if (extractionReport) extractionReport.skipped[key] = e.currentTarget.value; }}
+									/>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if Object.keys(extractionReport.extracted).length === 0}
+					<p class="text-sm text-muted-foreground text-center py-4">Nu s-au putut extrage date din acest PDF.</p>
+				{/if}
+			</div>
+		{/if}
+		<DialogFooter>
+			<Button onclick={() => (showExtractionReport = false)}>Închide</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>

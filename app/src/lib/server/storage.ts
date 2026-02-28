@@ -118,6 +118,24 @@ export async function uploadBuffer(
 }
 
 /**
+ * Get file contents as a Buffer from MinIO
+ */
+export async function getFileBuffer(filePath: string): Promise<Buffer> {
+	try {
+		const client = getMinioClient();
+		const stream = await client.getObject(BUCKET_NAME, filePath);
+		const chunks: Buffer[] = [];
+		for await (const chunk of stream) {
+			chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		}
+		return Buffer.concat(chunks);
+	} catch (error) {
+		console.error('Error getting file buffer:', error);
+		throw error;
+	}
+}
+
+/**
  * Delete a file from MinIO
  */
 export async function deleteFile(filePath: string): Promise<void> {

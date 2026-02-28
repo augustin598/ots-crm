@@ -1086,6 +1086,11 @@ export const contract = sqliteTable('contract', {
 
 	notes: text('notes'),
 
+	// Uploaded contract file (for contracts uploaded as PDF instead of generated)
+	uploadedFilePath: text('uploaded_file_path'),
+	uploadedFileSize: integer('uploaded_file_size'),
+	uploadedFileMimeType: text('uploaded_file_mime_type'),
+
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),

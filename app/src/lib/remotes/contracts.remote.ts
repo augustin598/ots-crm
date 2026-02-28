@@ -6,7 +6,9 @@ import { eq, and, inArray, like, sql, asc, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { sendContractSigningEmail } from '$lib/server/email';
+import * as storage from '$lib/server/storage';
 import { env as publicEnv } from '$env/dynamic/public';
+import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
 
 function generateContractId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -425,12 +427,31 @@ export const deleteContract = command(
 			throw new Error('Contract not found');
 		}
 
-		// Delete sign tokens first (no cascade on FK)
-		await db
-			.delete(table.contractSignToken)
-			.where(eq(table.contractSignToken.contractId, contractId));
+		// Delete uploaded file from storage if exists
+		if (existing.uploadedFilePath) {
+			try {
+				await storage.deleteFile(existing.uploadedFilePath);
+			} catch (err) {
+				console.error('Failed to delete uploaded contract file (non-fatal):', err);
+			}
+		}
 
-		await db.delete(table.contract).where(eq(table.contract.id, contractId));
+		try {
+			// Delete sign tokens first (no cascade on FK)
+			await db
+				.delete(table.contractSignToken)
+				.where(eq(table.contractSignToken.contractId, contractId));
+
+			// Delete line items explicitly (in case cascade doesn't work)
+			await db
+				.delete(table.contractLineItem)
+				.where(eq(table.contractLineItem.contractId, contractId));
+
+			await db.delete(table.contract).where(eq(table.contract.id, contractId));
+		} catch (err) {
+			console.error('Failed to delete contract from DB:', err);
+			throw new Error('Eroare la stergerea contractului din baza de date');
+		}
 
 		return { success: true };
 	}
@@ -702,5 +723,137 @@ export const getActiveSigningToken = query(
 			email: token.email,
 			signingUrl: token.signingUrl ?? null
 		};
+	}
+);
+
+export const extractClientFromContract = command(
+	v.object({ contractId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ contractId }) => {
+		const debug: Record<string, unknown> = { contractId, steps: [] as string[] };
+		const step = (msg: string, data?: Record<string, unknown>) => {
+			(debug.steps as string[]).push(msg);
+			if (data) Object.assign(debug, data);
+		};
+		const emptyResult = (reason: string) => {
+			step(`EARLY_EXIT: ${reason}`);
+			console.log('\n========== extractClientFromContract DEBUG ==========');
+			console.log(JSON.stringify(debug, null, 2));
+			console.log('=====================================================\n');
+			return { clientUpdated: false, extracted: {} as Record<string, string>, updated: {} as Record<string, string>, skipped: {} as Record<string, string> };
+		};
+
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			return emptyResult('Unauthorized - no user or tenant');
+		}
+		step('auth_ok', { userEmail: event.locals.user.email, tenantName: event.locals.tenant.name });
+
+		const [contract] = await db
+			.select()
+			.from(table.contract)
+			.where(and(eq(table.contract.id, contractId), eq(table.contract.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!contract || !contract.uploadedFilePath || !contract.clientId) {
+			return emptyResult(`Contract lookup failed: found=${!!contract}, hasFile=${!!contract?.uploadedFilePath}, hasClient=${!!contract?.clientId}`);
+		}
+		step('contract_found', { uploadedFilePath: contract.uploadedFilePath, clientId: contract.clientId });
+
+		const fileBuffer = await storage.getFileBuffer(contract.uploadedFilePath);
+		step('file_loaded', { bufferSize: fileBuffer.length });
+
+		const pdfText = await extractTextFromPDF(fileBuffer);
+		if (!pdfText || pdfText.trim().length === 0) {
+			return emptyResult('PDF text extraction returned empty');
+		}
+		step('pdf_text_extracted', { textLength: pdfText.length, first200chars: pdfText.substring(0, 200) });
+
+		const tenantEmails = [event.locals.tenant.email, event.locals.user.email].filter(Boolean);
+		const tenantData: TenantInfo = {
+			cui: event.locals.tenant.cui, registrationNumber: event.locals.tenant.registrationNumber,
+			email: event.locals.tenant.email, phone: event.locals.tenant.phone,
+			address: event.locals.tenant.address, city: event.locals.tenant.city,
+			county: event.locals.tenant.county, postalCode: event.locals.tenant.postalCode,
+			iban: event.locals.tenant.iban, ibanEuro: event.locals.tenant.ibanEuro,
+			bankName: event.locals.tenant.bankName, legalRepresentative: event.locals.tenant.legalRepresentative
+		};
+
+		const extractedInfo = extractClientInfoFromText(pdfText, tenantData);
+		if (Object.keys(extractedInfo).length === 0) {
+			return emptyResult('extractClientInfoFromText returned empty');
+		}
+		step('extraction_done', { extractedInfo, tenantEmails });
+
+		const [currentClient] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.id, contract.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!currentClient) {
+			return emptyResult('Client not found in DB');
+		}
+		step('client_found', { clientName: currentClient.name });
+
+		const fieldsToUpdate: Record<string, string> = {};
+		const fieldMapping: Array<[keyof ClientExtractedInfo, keyof typeof currentClient]> = [
+			['cui', 'cui'], ['registrationNumber', 'registrationNumber'], ['email', 'email'],
+			['phone', 'phone'], ['address', 'address'], ['city', 'city'], ['county', 'county'],
+			['postalCode', 'postalCode'], ['iban', 'iban'], ['bankName', 'bankName'],
+			['legalRepresentative', 'legalRepresentative']
+		];
+
+		function matchesByWords(current: string, tenantVal: string): boolean {
+			const getWords = (s: string) => s.toLowerCase().replace(/[^\p{L}\d]/gu, ' ').split(/\s+/).filter(w => w.length >= 3);
+			const tenantWords = getWords(tenantVal);
+			if (tenantWords.length === 0) return false;
+			const currentWords = getWords(current);
+			return tenantWords.every(tw => currentWords.some(cw => cw === tw || cw.includes(tw) || tw.includes(cw)));
+		}
+
+		const fieldAnalysis: Record<string, unknown>[] = [];
+		for (const [extractedKey, dbKey] of fieldMapping) {
+			const extractedValue = extractedInfo[extractedKey];
+			const currentValue = currentClient[dbKey];
+			const isEmpty = !currentValue || (typeof currentValue === 'string' && currentValue.trim() === '');
+			const tenantVal = tenantData[dbKey as keyof TenantInfo];
+
+			let isTenantData = false;
+			if (!isEmpty && typeof currentValue === 'string') {
+				if (dbKey === 'email') {
+					isTenantData = tenantEmails.some(te => typeof te === 'string' && te.toLowerCase() === currentValue.toLowerCase());
+				} else if (dbKey === 'legalRepresentative') {
+					isTenantData = typeof tenantVal === 'string' && matchesByWords(currentValue, tenantVal);
+				} else if (typeof tenantVal === 'string') {
+					const norm = (s: string) => s.replace(/[\s.\-\/(),;:]/g, '').toLowerCase();
+					isTenantData = norm(currentValue).includes(norm(tenantVal)) || norm(tenantVal).includes(norm(currentValue));
+				}
+			}
+
+			const willUpdate = !!(extractedValue && (isEmpty || isTenantData));
+			fieldAnalysis.push({ field: dbKey, extracted: extractedValue || null, current: currentValue || null, tenant: tenantVal || null, isEmpty, isTenantData, willUpdate });
+			if (willUpdate) fieldsToUpdate[dbKey] = extractedValue!;
+		}
+		debug.fieldAnalysis = fieldAnalysis;
+
+		const extracted = Object.fromEntries(Object.entries(extractedInfo).filter(([, v]) => v)) as Record<string, string>;
+
+		if (Object.keys(fieldsToUpdate).length === 0) {
+			step('RESULT: no fields to update');
+			console.log('\n========== extractClientFromContract DEBUG ==========');
+			console.log(JSON.stringify(debug, null, 2));
+			console.log('=====================================================\n');
+			return { clientUpdated: false, extracted, updated: {} as Record<string, string>, skipped: extracted };
+		}
+
+		await db.update(table.client).set({ ...fieldsToUpdate, updatedAt: new Date() }).where(eq(table.client.id, contract.clientId));
+
+		const skipped = Object.fromEntries(Object.entries(extracted).filter(([k]) => !(k in fieldsToUpdate))) as Record<string, string>;
+
+		step('RESULT: client updated', { updated: fieldsToUpdate, skipped });
+		console.log('\n========== extractClientFromContract DEBUG ==========');
+		console.log(JSON.stringify(debug, null, 2));
+		console.log('=====================================================\n');
+		return { clientUpdated: true, extracted, updated: fieldsToUpdate, skipped };
 	}
 );

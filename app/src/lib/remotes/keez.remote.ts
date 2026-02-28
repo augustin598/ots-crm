@@ -10,7 +10,8 @@ import {
 	mapInvoiceToKeez,
 	mapKeezInvoiceToCRM,
 	mapKeezPartnerToClient,
-	mapKeezDetailsToLineItems
+	mapKeezDetailsToLineItems,
+	findOrCreateClientForKeezPartner
 } from '$lib/server/plugins/keez/mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
@@ -937,6 +938,22 @@ export const syncInvoicesFromKeez = command(
 						updatedAt: new Date()
 					};
 
+					// Re-match client using CUI-first logic to fix wrong associations
+					if (keezInvoice.partner) {
+						const correctClientId = await findOrCreateClientForKeezPartner(
+							keezInvoice.partner,
+							event.locals.tenant.id
+						);
+						if (correctClientId && correctClientId !== existing.clientId) {
+							updateData.clientId = correctClientId;
+							console.log(
+								`[Keez] Re-matched invoice ${existing.invoiceNumber}: ` +
+								`client ${existing.clientId} -> ${correctClientId} ` +
+								`(CUI: ${keezInvoice.partner.identificationNumber || 'N/A'})`
+							);
+						}
+					}
+
 					if (parsedIssueDate) {
 						updateData.issueDate = parsedIssueDate;
 					}
@@ -1074,36 +1091,13 @@ export const syncInvoicesFromKeez = command(
 					continue;
 				}
 
-				// Find or create client
+				// Find or create client (CUI-first matching)
 				let clientId: string | null = null;
-				if (keezInvoice.partner?.partnerName) {
-					const partnerName = keezInvoice.partner.partnerName;
-					const [existingClient] = await db
-						.select()
-						.from(table.client)
-						.where(
-							and(
-								eq(table.client.tenantId, event.locals.tenant.id),
-								or(
-									eq(table.client.name, partnerName),
-									eq(table.client.businessName, partnerName)
-								)
-							)
-						)
-						.limit(1);
-
-					if (existingClient) {
-						clientId = existingClient.id;
-					} else if (keezInvoice.partner) {
-						// Create new client
-						const newClientId = generateClientId();
-						const clientData = mapKeezPartnerToClient(keezInvoice.partner, event.locals.tenant.id);
-						await db.insert(table.client).values({
-							id: newClientId,
-							...clientData
-						});
-						clientId = newClientId;
-					}
+				if (keezInvoice.partner) {
+					clientId = await findOrCreateClientForKeezPartner(
+						keezInvoice.partner,
+						event.locals.tenant.id
+					);
 				}
 
 				if (!clientId) {

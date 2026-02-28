@@ -240,7 +240,9 @@
 			toast.success('Contract sters cu succes');
 			goto(`/${tenantSlug}/contracts`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la stergerea contractului');
+			console.error('Delete contract error:', e);
+			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la stergerea contractului';
+			toast.error(message);
 		}
 	}
 </script>

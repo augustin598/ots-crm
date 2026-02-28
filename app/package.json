@@ -95,6 +95,7 @@
 		"svelte-adapter-bun": "^1.0.1",
 		"svelte-microanimations": "^0.0.3",
 		"svelte-sonner": "^1.0.7",
+		"unpdf": "^1.4.0",
 		"valibot": "^1.1.0",
 		"xlsx": "^0.18.5"
 	},

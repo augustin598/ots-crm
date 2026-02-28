@@ -1,10 +1,9 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
-import { mapKeezInvoiceToCRM, mapKeezPartnerToClient, mapKeezDetailsToLineItems } from './mapper';
-import type { KeezPartner } from './client';
+import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -53,108 +52,6 @@ function parseKeezDate(dateValue: string | number | undefined): Date | null {
 	} catch {
 		return null;
 	}
-}
-
-/**
- * Find an existing CRM client matching a Keez partner, or create a new one.
- * Matching priority: CUI → VAT number → Name → Create new
- */
-async function findOrCreateClientForKeezPartner(
-	partner: KeezPartner,
-	tenantId: string
-): Promise<string | null> {
-	const cui = partner.identificationNumber?.trim() || '';
-	const partnerName = partner.partnerName?.trim() || '';
-
-	if (!cui && !partnerName) {
-		return null;
-	}
-
-	// 1. Match by CUI (most reliable)
-	if (cui) {
-		const [byCui] = await db
-			.select()
-			.from(table.client)
-			.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cui)))
-			.limit(1);
-
-		if (byCui) {
-			// Backfill missing fields
-			const updates: Record<string, any> = {};
-			if (!byCui.businessName && partnerName) updates.businessName = partnerName;
-			if (!byCui.address && partner.addressDetails) updates.address = partner.addressDetails;
-			if (!byCui.email && partner.email) updates.email = partner.email;
-			if (!byCui.phone && partner.phone) updates.phone = partner.phone;
-			if (!byCui.registrationNumber && partner.registrationNumber)
-				updates.registrationNumber = partner.registrationNumber;
-			if (Object.keys(updates).length > 0) {
-				updates.updatedAt = new Date();
-				await db.update(table.client).set(updates).where(eq(table.client.id, byCui.id));
-			}
-			return byCui.id;
-		}
-
-		// 2. Match by VAT number (RO + CUI)
-		if (partner.taxAttribute) {
-			const fullVat = (partner.taxAttribute + cui).trim();
-			const [byVat] = await db
-				.select()
-				.from(table.client)
-				.where(and(eq(table.client.tenantId, tenantId), eq(table.client.vatNumber, fullVat)))
-				.limit(1);
-
-			if (byVat) {
-				const updates: Record<string, any> = {};
-				if (!byVat.cui) updates.cui = cui;
-				if (!byVat.businessName && partnerName) updates.businessName = partnerName;
-				if (Object.keys(updates).length > 0) {
-					updates.updatedAt = new Date();
-					await db.update(table.client).set(updates).where(eq(table.client.id, byVat.id));
-				}
-				return byVat.id;
-			}
-		}
-	}
-
-	// 3. Fallback to name matching
-	if (partnerName) {
-		const [byName] = await db
-			.select()
-			.from(table.client)
-			.where(
-				and(
-					eq(table.client.tenantId, tenantId),
-					or(eq(table.client.name, partnerName), eq(table.client.businessName, partnerName))
-				)
-			)
-			.limit(1);
-
-		if (byName) {
-			// Backfill CUI and other missing fields
-			const updates: Record<string, any> = {};
-			if (!byName.cui && cui) updates.cui = cui;
-			if (!byName.vatNumber && partner.taxAttribute && cui)
-				updates.vatNumber = (partner.taxAttribute + cui).trim();
-			if (!byName.registrationNumber && partner.registrationNumber)
-				updates.registrationNumber = partner.registrationNumber;
-			if (!byName.address && partner.addressDetails) updates.address = partner.addressDetails;
-			if (!byName.city && partner.cityName) updates.city = partner.cityName;
-			if (!byName.county && partner.countyName) updates.county = partner.countyName;
-			if (!byName.email && partner.email) updates.email = partner.email;
-			if (!byName.phone && partner.phone) updates.phone = partner.phone;
-			if (Object.keys(updates).length > 0) {
-				updates.updatedAt = new Date();
-				await db.update(table.client).set(updates).where(eq(table.client.id, byName.id));
-			}
-			return byName.id;
-		}
-	}
-
-	// 4. No match — create new client
-	const newClientId = generateId();
-	const clientData = mapKeezPartnerToClient(partner, tenantId);
-	await db.insert(table.client).values({ id: newClientId, ...clientData });
-	return newClientId;
 }
 
 export interface SyncKeezInvoicesResult {

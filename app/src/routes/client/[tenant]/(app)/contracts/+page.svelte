@@ -11,7 +11,8 @@
 	} from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Download, Search, Eye, PenLine } from '@lucide/svelte';
+	import { Download, Search, Eye, PenLine, Upload, FileText } from '@lucide/svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -235,7 +236,7 @@
 								{/if}
 							</button>
 						</TableHead>
-						<TableHead class="w-[50px]"></TableHead>
+						<TableHead class="w-[100px] text-right">Acțiuni</TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
@@ -248,7 +249,22 @@
 					{:else}
 						{#each paginatedContracts as contract}
 							<TableRow>
-								<TableCell class="font-medium">{contract.contractNumber}</TableCell>
+								<TableCell class="font-medium">
+									<div class="flex items-center gap-2">
+										{contract.contractNumber}
+										{#if contract.uploadedFilePath}
+											<Badge variant="outline" class="text-xs gap-1 px-1.5 py-0">
+												<Upload class="h-3 w-3" />
+												Încărcat
+											</Badge>
+										{:else}
+											<Badge variant="outline" class="text-xs gap-1 px-1.5 py-0">
+												<FileText class="h-3 w-3" />
+												Generat
+											</Badge>
+										{/if}
+									</div>
+								</TableCell>
 								<TableCell>{contract.contractTitle}</TableCell>
 								<TableCell>{formatDate(contract.contractDate)}</TableCell>
 								<TableCell>
@@ -275,7 +291,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-8 w-8"
+											class="h-8 w-8 cursor-pointer"
 											onclick={() => handlePreviewPDF(contract.id)}
 											title="Vizualizeaza PDF"
 										>
@@ -284,7 +300,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-8 w-8"
+											class="h-8 w-8 cursor-pointer"
 											onclick={() =>
 												handleDownloadPDF(contract.id, contract.contractNumber)}
 											title="Descarca PDF"

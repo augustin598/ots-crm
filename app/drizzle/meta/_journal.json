@@ -330,6 +330,13 @@
       "when": 1772217439139,
       "tag": "0046_gigantic_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1772262919782,
+      "tag": "0047_lean_microchip",
+      "breakpoints": true
     }
   ]
 }

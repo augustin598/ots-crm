@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
+import * as storage from '$lib/server/storage';
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.isClientUser || !event.locals.client || !event.locals.tenant) {
@@ -31,6 +32,25 @@ export const GET: RequestHandler = async (event) => {
 		throw error(404, 'Contract not found');
 	}
 
+	// If this is an uploaded contract, serve the uploaded file directly
+	if (contract.uploadedFilePath) {
+		const fileBuffer = await storage.getFileBuffer(contract.uploadedFilePath);
+		const safeFilename = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+		const download = event.url.searchParams.get('download') === 'true';
+		const disposition = download
+			? `attachment; filename="${safeFilename}"`
+			: `inline; filename="${safeFilename}"`;
+
+		return new Response(new Uint8Array(fileBuffer), {
+			status: 200,
+			headers: {
+				'Content-Type': contract.uploadedFileMimeType || 'application/pdf',
+				'Content-Disposition': disposition,
+				'Content-Length': fileBuffer.length.toString()
+			}
+		});
+	}
+
 	const lineItems = await db
 		.select()
 		.from(table.contractLineItem)
@@ -49,11 +69,16 @@ export const GET: RequestHandler = async (event) => {
 
 	const uint8 = new Uint8Array(pdfBuffer);
 
+	const download = event.url.searchParams.get('download') === 'true';
+	const disposition = download
+		? `attachment; filename="${safeFilename}"`
+		: `inline; filename="${safeFilename}"`;
+
 	return new Response(uint8, {
 		status: 200,
 		headers: {
 			'Content-Type': 'application/pdf',
-			'Content-Disposition': `attachment; filename="${safeFilename}"`,
+			'Content-Disposition': disposition,
 			'Content-Length': pdfBuffer.length.toString()
 		}
 	});
