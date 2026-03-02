@@ -141,6 +141,50 @@ export const deleteSupplierInvoice = command(
 	}
 );
 
+export const deleteSupplierInvoices = command(
+	v.object({
+		invoiceIds: v.array(v.pipe(v.string(), v.minLength(1)))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		let deleted = 0;
+
+		for (const invoiceId of data.invoiceIds) {
+			const [existing] = await db
+				.select()
+				.from(table.supplierInvoice)
+				.where(
+					and(
+						eq(table.supplierInvoice.id, invoiceId),
+						eq(table.supplierInvoice.tenantId, tenantId)
+					)
+				)
+				.limit(1);
+
+			if (!existing) continue;
+
+			if (existing.pdfPath) {
+				const absolutePath = join(process.cwd(), existing.pdfPath);
+				try {
+					await unlink(absolutePath);
+				} catch {
+					console.warn(`[Supplier Invoice] Could not delete PDF: ${absolutePath}`);
+				}
+			}
+
+			await db.delete(table.supplierInvoice).where(eq(table.supplierInvoice.id, invoiceId));
+			deleted++;
+		}
+
+		return { deleted };
+	}
+);
+
 /**
  * Preview invoices found in Gmail without importing them
  */

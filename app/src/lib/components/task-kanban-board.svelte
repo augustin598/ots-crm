@@ -10,8 +10,10 @@
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import type { Task } from '$lib/server/db/schema';
 	import { updateTaskPosition, getTasks } from '$lib/remotes/tasks.remote';
-	import { formatStatus } from './task-kanban-utils';
+	import { formatStatus, getPriorityColor, getPriorityDotColor, formatPriority, formatDate } from './task-kanban-utils';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { toast } from 'svelte-sonner';
+	import { tick } from 'svelte';
 
 	type Props = {
 		tasks: Task[];
@@ -77,6 +79,10 @@
 
 		return groups;
 	});
+
+	// Keyboard accessibility state
+	let pickedUpTask = $state<Task | null>(null);
+	let liveRegionMessage = $state('');
 
 	// Drag state
 	let draggedTask = $state<Task | null>(null);
@@ -193,36 +199,116 @@
 		} catch (error) {
 			// Rollback on error
 			optimisticTasks = tasks;
-			alert(error instanceof Error ? error.message : 'Failed to update task position');
+			toast.error(error instanceof Error ? error.message : 'Failed to update task position');
+		}
+	}
+
+	async function moveTask(task: Task, oldStatus: string, oldIndex: number, newStatus: string, newPosition: number) {
+		const taskIndex = optimisticTasks.findIndex((t) => t.id === task.id);
+		if (taskIndex === -1) return;
+
+		const updatedTask: Task = { ...task, status: newStatus, position: newPosition };
+		const newTasks = [...optimisticTasks];
+		newTasks[taskIndex] = updatedTask;
+
+		if (oldStatus !== newStatus) {
+			newTasks.forEach((t, i) => {
+				if (t.status === oldStatus && i !== taskIndex && (t.position ?? 0) > oldIndex) {
+					newTasks[i] = { ...t, position: (t.position ?? 0) - 1 };
+				}
+			});
+		}
+		newTasks.forEach((t, i) => {
+			if (t.status === newStatus && i !== taskIndex && (t.position ?? 0) >= newPosition) {
+				newTasks[i] = { ...t, position: (t.position ?? 0) + 1 };
+			}
+		});
+
+		optimisticTasks = newTasks;
+
+		try {
+			await updateTaskPosition({
+				taskId: task.id,
+				newStatus,
+				newPosition,
+				oldStatus,
+				oldPosition: oldIndex
+			}).updates(getTasks(filterParams || {}));
+			onTasksUpdate?.();
+		} catch (error) {
+			optimisticTasks = tasks;
+			toast.error(error instanceof Error ? error.message : 'Failed to update task position');
+		}
+
+		// Re-focus the card after DOM update
+		await tick();
+		const el = document.querySelector(`[data-task-id="${task.id}"]`) as HTMLElement;
+		el?.focus();
+	}
+
+	async function handleCardKeyDown(e: KeyboardEvent, task: Task, currentStatus: string, currentIndex: number) {
+		const statusIndex = STATUSES.indexOf(currentStatus as typeof STATUSES[number]);
+
+		if (e.key === ' ' || e.key === 'Enter') {
+			e.preventDefault();
+			e.stopPropagation();
+			if (pickedUpTask?.id === task.id) {
+				pickedUpTask = null;
+				liveRegionMessage = `${task.title} dropped`;
+			} else {
+				pickedUpTask = task;
+				liveRegionMessage = `${task.title} picked up. Use arrow keys to move, Enter to drop, Escape to cancel.`;
+			}
+			return;
+		}
+
+		if (e.key === 'Escape' && pickedUpTask) {
+			e.preventDefault();
+			liveRegionMessage = `${pickedUpTask.title} move cancelled`;
+			pickedUpTask = null;
+			return;
+		}
+
+		if (!pickedUpTask || pickedUpTask.id !== task.id) return;
+
+		const columnTasks = groupedTasks[currentStatus] || [];
+
+		if (e.key === 'ArrowLeft' && statusIndex > 0) {
+			e.preventDefault();
+			const newStatus = STATUSES[statusIndex - 1];
+			const newColumnTasks = groupedTasks[newStatus] || [];
+			await moveTask(task, currentStatus, currentIndex, newStatus, newColumnTasks.length);
+			liveRegionMessage = `${task.title} moved to ${formatStatus(newStatus)}`;
+		} else if (e.key === 'ArrowRight' && statusIndex < STATUSES.length - 1) {
+			e.preventDefault();
+			const newStatus = STATUSES[statusIndex + 1];
+			const newColumnTasks = groupedTasks[newStatus] || [];
+			await moveTask(task, currentStatus, currentIndex, newStatus, newColumnTasks.length);
+			liveRegionMessage = `${task.title} moved to ${formatStatus(newStatus)}`;
+		} else if (e.key === 'ArrowUp' && currentIndex > 0) {
+			e.preventDefault();
+			await moveTask(task, currentStatus, currentIndex, currentStatus, currentIndex - 1);
+			liveRegionMessage = `${task.title} moved up to position ${currentIndex}`;
+		} else if (e.key === 'ArrowDown' && currentIndex < columnTasks.length - 1) {
+			e.preventDefault();
+			await moveTask(task, currentStatus, currentIndex, currentStatus, currentIndex + 1);
+			liveRegionMessage = `${task.title} moved down to position ${currentIndex + 2}`;
 		}
 	}
 
 	function formatDueDate(date: Date | string | null): string {
 		if (!date) return 'No due date';
-		const d = date instanceof Date ? date : new Date(date);
-		return d.toLocaleDateString('ro-RO', { month: 'short', day: 'numeric' });
-	}
-
-	function getPriorityColor(priority: string | null): string {
-		switch (priority) {
-			case 'urgent':
-				return 'bg-red-100 text-red-700';
-			case 'high':
-				return 'bg-orange-100 text-orange-700';
-			case 'medium':
-				return 'bg-blue-100 text-blue-700';
-			case 'low':
-				return 'bg-gray-100 text-gray-700';
-			default:
-				return 'bg-gray-100 text-gray-700';
-		}
+		return formatDate(date, 'short');
 	}
 </script>
 
+<div class="sr-only" role="status" aria-live="assertive" aria-atomic="true">
+	{liveRegionMessage}
+</div>
 <div class="grid gap-6 lg:grid-cols-5 overflow-x-auto pb-4">
 	{#each STATUSES as status}
 		{@const statusTasks = groupedTasks[status] || []}
-		<div class="flex flex-col min-w-[280px]">
+		<div class="flex flex-col min-w-[280px]" role="region" aria-label="{formatStatus(status)} column, {statusTasks.length} tasks">
 			<div class="flex items-center justify-between mb-4">
 				<h3 class="font-semibold capitalize">
 					{formatStatus(status)} ({statusTasks.length})
@@ -241,11 +327,17 @@
 					<Card
 						class="p-4 cursor-move hover:shadow-md transition-all {isDragged
 							? 'opacity-50'
-							: ''} {isDragOver ? 'ring-2 ring-primary' : ''}"
+							: ''} {isDragOver ? 'ring-2 ring-primary' : ''} {pickedUpTask?.id === task.id ? 'ring-2 ring-primary bg-primary/5' : ''}"
 						draggable={true}
+						tabindex={0}
+						role="button"
+						aria-roledescription="Draggable task"
+						aria-label="{task.title}, {formatStatus(status)}, position {index + 1} of {statusTasks.length}"
+						data-task-id={task.id}
 						ondragstart={(e) => handleDragStart(e, task, status, index)}
 						ondragend={handleDragEnd}
 						onclick={() => onTaskClick(task)}
+						onkeydown={(e) => handleCardKeyDown(e, task, status, index)}
 					>
 						<div class="flex items-start justify-between mb-3">
 							<div class="flex-1">
@@ -292,7 +384,7 @@
 
 						<div class="space-y-2">
 							<div class="flex items-center gap-2">
-								<span class={`text-xs font-medium px-2 py-1 rounded ${getPriorityColor(task.priority || 'medium')}`}>
+								<span class={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${getPriorityColor(task.priority || 'medium')}`}>
 									{task.priority || 'medium'}
 								</span>
 							</div>

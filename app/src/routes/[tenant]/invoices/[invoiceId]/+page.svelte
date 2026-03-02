@@ -78,6 +78,7 @@
 	// Get currencies from invoice
 	const calculationCurrency = $derived((invoice?.currency || 'RON') as Currency);
 	const invoiceCurrency = $derived((invoice?.invoiceCurrency || invoice?.currency || 'RON') as Currency);
+	const taxType = $derived(invoice?.taxApplicationType || 'apply');
 
 	// Calculate totals grouped by currency (similar to new invoice page)
 	const totalsByCurrency = $derived.by(() => {
@@ -123,7 +124,7 @@
 
 			// Calculate tax based on tax application type
 			const itemTax =
-				invoice.taxApplicationType === 'apply' ? (itemNetValue * itemTaxRate) / 100 : 0;
+				taxType === 'apply' ? (itemNetValue * itemTaxRate) / 100 : 0;
 
 			totals[itemCurrency].subtotal += itemSubtotal;
 			totals[itemCurrency].taxTotal += itemTax;
@@ -183,7 +184,7 @@
 
 					const itemNetValue = itemSubtotal - itemDiscount;
 					const itemTax =
-						invoice.taxApplicationType === 'apply' ? (itemNetValue * itemTaxRate) / 100 : 0;
+						taxType === 'apply' ? (itemNetValue * itemTaxRate) / 100 : 0;
 					const itemFinalValue = itemNetValue + itemTax;
 
 					return {
@@ -534,7 +535,7 @@
 									<div class="flex justify-between">
 										<span class="text-muted-foreground">Tax Application:</span>
 										<span class="font-medium">
-											{invoice.taxApplicationType === 'apply'
+											{taxType === 'apply'
 												? 'Apply Tax (Normala)'
 												: invoice.taxApplicationType === 'none'
 													? 'Do Not Apply Tax'
@@ -593,7 +594,7 @@
 										</td>
 										<td class="text-right py-4">{formatAmount(Math.round(item.amount * 100), item.currency)}</td>
 										<td class="text-right py-4">
-											{invoice.taxApplicationType === 'apply' ? `${(item.taxRate * 100).toFixed(0)}%` : '-'}
+											{taxType === 'apply' ? `${(item.taxRate * 100).toFixed(0)}%` : '-'}
 										</td>
 										<td class="text-right py-4 font-medium">{formatAmount(Math.round(item.finalValue * 100), item.currency)}</td>
 									</tr>
@@ -620,7 +621,7 @@
 									<span class="font-medium">-{formatAmount(Math.round(invoiceDiscountAmount * 100), calculationCurrency)}</span>
 								</div>
 							{/if}
-							{#if invoice.taxApplicationType === 'apply' && taxTotal > 0}
+							{#if taxType === 'apply' && taxTotal > 0}
 								<div class="flex justify-between">
 									<span class="text-muted-foreground">Tax Total:</span>
 									<span class="font-medium">{formatAmount(Math.round(taxTotal * 100), calculationCurrency)}</span>

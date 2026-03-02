@@ -1,12 +1,17 @@
 /**
  * Utility functions for task filtering and date calculations
+ * Types, formatStatus, formatPriority, getPriorityColor are re-exported from task-kanban-utils (single source of truth)
  */
 
-export type TaskStatus = 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval';
-export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
-
-export const TASK_STATUSES: TaskStatus[] = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'];
-export const TASK_PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+export {
+	type TaskStatus,
+	type TaskPriority,
+	TASK_STATUSES,
+	TASK_PRIORITIES,
+	formatStatus,
+	formatPriority,
+	getPriorityColor
+} from '$lib/components/task-kanban-utils';
 
 /**
  * Calculate date ranges for filter options
@@ -57,23 +62,6 @@ export function getDateRange(filter: string): { start: Date; end: Date } | null 
 }
 
 /**
- * Format status for display
- */
-export function formatStatus(status: string): string {
-	return status
-		.split('-')
-		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-		.join(' ');
-}
-
-/**
- * Format priority for display
- */
-export function formatPriority(priority: string): string {
-	return priority.charAt(0).toUpperCase() + priority.slice(1);
-}
-
-/**
  * Format date range for display
  */
 export function formatDateRange(filter: string): string {
@@ -94,24 +82,6 @@ export function formatDateRange(filter: string): string {
 				return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
 			}
 			return filter;
-	}
-}
-
-/**
- * Get priority color classes
- */
-export function getPriorityColor(priority: string | null): string {
-	switch (priority) {
-		case 'urgent':
-			return 'bg-red-100 text-red-700';
-		case 'high':
-			return 'bg-orange-100 text-orange-700';
-		case 'medium':
-			return 'bg-blue-100 text-blue-700';
-		case 'low':
-			return 'bg-gray-100 text-gray-700';
-		default:
-			return 'bg-gray-100 text-gray-700';
 	}
 }
 

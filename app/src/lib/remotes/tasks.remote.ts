@@ -5,11 +5,15 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail } from '$lib/server/email';
+import { recordTaskActivity } from '$lib/server/task-activity';
 
 function generateTaskId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
 }
+
+const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'] as const;
+const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 
 const taskSchema = v.object({
 	title: v.pipe(v.string(), v.minLength(1, 'Title is required')),
@@ -17,8 +21,8 @@ const taskSchema = v.object({
 	projectId: v.optional(v.string()),
 	clientId: v.optional(v.string()),
 	milestoneId: v.optional(v.string()),
-	status: v.optional(v.string()),
-	priority: v.optional(v.string()),
+	status: v.optional(v.picklist(VALID_STATUSES)),
+	priority: v.optional(v.picklist(VALID_PRIORITIES)),
 	dueDate: v.optional(v.string()),
 	assignedToUserId: v.optional(v.string())
 });
@@ -361,6 +365,14 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	}
 
+	// Record activity
+	await recordTaskActivity({
+		taskId,
+		userId: event.locals.user.id,
+		tenantId: targetTenantId,
+		action: 'created'
+	});
+
 	return { success: true, taskId };
 });
 
@@ -432,6 +444,29 @@ export const updateTask = command(
 				updatedAt: new Date()
 			})
 			.where(eq(table.task.id, taskId));
+
+		// Record activity for changed fields
+		const fieldsToTrack = ['title', 'description', 'status', 'priority', 'assignedToUserId', 'dueDate', 'clientId', 'projectId', 'milestoneId'] as const;
+		const formatFieldValue = (val: unknown): string | null => {
+			if (val == null) return null;
+			if (val instanceof Date) return val.toISOString().split('T')[0];
+			return String(val);
+		};
+		for (const field of fieldsToTrack) {
+			const oldVal = existing[field];
+			const newVal = updateData[field as keyof typeof updateData];
+			if (newVal !== undefined && formatFieldValue(oldVal) !== formatFieldValue(newVal)) {
+				await recordTaskActivity({
+					taskId,
+					userId: event.locals.user.id,
+					tenantId: existing.tenantId,
+					action: field === 'status' ? 'status_changed' : field === 'assignedToUserId' ? 'assigned' : 'updated',
+					field,
+					oldValue: formatFieldValue(oldVal),
+					newValue: formatFieldValue(newVal)
+				});
+			}
+		}
 
 		// Handle assignment change
 		if (assigneeChanged) {
@@ -554,9 +589,9 @@ export const updateTask = command(
 export const updateTaskPosition = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
-		newStatus: v.string(),
+		newStatus: v.picklist(VALID_STATUSES),
 		newPosition: v.number(),
-		oldStatus: v.optional(v.string()),
+		oldStatus: v.optional(v.picklist(VALID_STATUSES)),
 		oldPosition: v.optional(v.number())
 	}),
 	async (data) => {
@@ -623,6 +658,19 @@ export const updateTaskPosition = command(
 				})
 				.where(eq(table.task.id, taskId));
 		});
+
+		// Record activity if status changed
+		if (oldStatus && oldStatus !== newStatus) {
+			await recordTaskActivity({
+				taskId,
+				userId: event.locals.user.id,
+				tenantId: event.locals.tenant.id,
+				action: 'status_changed',
+				field: 'status',
+				oldValue: oldStatus,
+				newValue: newStatus
+			});
+		}
 
 		return { success: true };
 	}
@@ -845,7 +893,7 @@ export const isWatchingTask = query(v.pipe(v.string(), v.minLength(1)), async (t
 export const approveTask = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
-		newStatus: v.optional(v.string())
+		newStatus: v.optional(v.picklist(['todo', 'in-progress', 'review', 'done']))
 	}),
 	async ({ taskId, newStatus }) => {
 		const event = getRequestEvent();
@@ -882,6 +930,16 @@ export const approveTask = command(
 				updatedAt: new Date()
 			})
 			.where(eq(table.task.id, taskId));
+
+		await recordTaskActivity({
+			taskId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'approved',
+			field: 'status',
+			oldValue: 'pending-approval',
+			newValue: status
+		});
 
 		return { success: true, taskId };
 	}
@@ -922,6 +980,16 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 			updatedAt: new Date()
 		})
 		.where(eq(table.task.id, taskId));
+
+	await recordTaskActivity({
+		taskId,
+		userId: event.locals.user.id,
+		tenantId: event.locals.tenant.id,
+		action: 'rejected',
+		field: 'status',
+		oldValue: 'pending-approval',
+		newValue: 'cancelled'
+	});
 
 	return { success: true, taskId };
 });

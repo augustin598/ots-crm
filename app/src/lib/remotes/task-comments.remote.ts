@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { recordTaskActivity } from '$lib/server/task-activity';
 
 function generateTaskCommentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -68,6 +69,13 @@ export const createTaskComment = command(
 			taskId: data.taskId,
 			userId: event.locals.user.id,
 			content: data.content
+		});
+
+		await recordTaskActivity({
+			taskId: data.taskId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'commented'
 		});
 
 		return { success: true, commentId };

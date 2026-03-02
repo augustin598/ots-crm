@@ -13,6 +13,7 @@
 		TableRow
 	} from '$lib/components/ui/table';
 	import { Plus, Download, Trash2 } from '@lucide/svelte';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId);
@@ -26,7 +27,7 @@
 			const result = await getDownloadUrl(documentId);
 			window.open(result.url, '_blank');
 		} catch (e) {
-			alert('Failed to download document');
+			toast.error('Failed to download document');
 		}
 	}
 
@@ -38,7 +39,7 @@
 		try {
 			await deleteDocument(documentId).updates(documentsQuery);
 		} catch (e) {
-			alert('Failed to delete document');
+			toast.error('Failed to delete document');
 		}
 	}
 </script>

@@ -358,7 +358,7 @@ export const taskComment = sqliteTable('task_comment', {
 	id: text('id').primaryKey(),
 	taskId: text('task_id')
 		.notNull()
-		.references(() => task.id),
+		.references(() => task.id, { onDelete: 'cascade' }),
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id),
@@ -385,6 +385,26 @@ export const taskWatcher = sqliteTable('task_watcher', {
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
+});
+
+export const taskActivity = sqliteTable('task_activity', {
+	id: text('id').primaryKey(),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id, { onDelete: 'cascade' }),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	action: text('action').notNull(),
+	field: text('field'),
+	oldValue: text('old_value'),
+	newValue: text('new_value'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
 });
 
 export const invoice = sqliteTable('invoice', {
@@ -1136,6 +1156,36 @@ export const clientUser = sqliteTable('client_user', {
 		.default(sql`current_date`)
 });
 
+export const clientUserPreferences = sqliteTable('client_user_preferences', {
+	id: text('id').primaryKey(),
+	clientUserId: text('client_user_id')
+		.notNull()
+		.references(() => clientUser.id, { onDelete: 'cascade' })
+		.unique(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	// Email notification preferences
+	notifyTaskStatusChange: boolean('notify_task_status_change').notNull().default(true),
+	notifyNewComment: boolean('notify_new_comment').notNull().default(true),
+	notifyApproachingDeadline: boolean('notify_approaching_deadline').notNull().default(true),
+	notifyTaskAssigned: boolean('notify_task_assigned').notNull().default(true),
+	notifyTaskApprovedRejected: boolean('notify_task_approved_rejected').notNull().default(true),
+	// Visual preferences
+	defaultTaskView: text('default_task_view').default('card'), // 'list' | 'card'
+	defaultTaskSort: text('default_task_sort').default('date'), // 'date' | 'priority' | 'status'
+	itemsPerPage: integer('items_per_page').default(25), // 10 | 25 | 50
+	// Task creation defaults
+	defaultPriority: text('default_priority').default('medium'), // 'low' | 'medium' | 'high' | 'urgent'
+	// Timestamps
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const magicLinkToken = sqliteTable('magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -1310,7 +1360,9 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	contracts: many(contract),
 	contractTemplates: many(contractTemplate),
 	gmailIntegration: one(gmailIntegration),
-	supplierInvoices: many(supplierInvoice)
+	supplierInvoices: many(supplierInvoice),
+	emailLogs: many(emailLog),
+	debugLogs: many(debugLog)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -1442,7 +1494,8 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 		relationName: 'createdTasks'
 	}),
 	comments: many(taskComment),
-	watchers: many(taskWatcher)
+	watchers: many(taskWatcher),
+	activities: many(taskActivity)
 }));
 
 export const taskCommentRelations = relations(taskComment, ({ one }) => ({
@@ -1467,6 +1520,21 @@ export const taskWatcherRelations = relations(taskWatcher, ({ one }) => ({
 	}),
 	tenant: one(tenant, {
 		fields: [taskWatcher.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const taskActivityRelations = relations(taskActivity, ({ one }) => ({
+	task: one(task, {
+		fields: [taskActivity.taskId],
+		references: [task.id]
+	}),
+	user: one(user, {
+		fields: [taskActivity.userId],
+		references: [user.id]
+	}),
+	tenant: one(tenant, {
+		fields: [taskActivity.tenantId],
 		references: [tenant.id]
 	})
 }));
@@ -1887,6 +1955,18 @@ export const clientUserRelations = relations(clientUser, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [clientUser.tenantId],
 		references: [tenant.id]
+	}),
+	preferences: one(clientUserPreferences)
+}));
+
+export const clientUserPreferencesRelations = relations(clientUserPreferences, ({ one }) => ({
+	clientUser: one(clientUser, {
+		fields: [clientUserPreferences.clientUserId],
+		references: [clientUser.id]
+	}),
+	tenant: one(tenant, {
+		fields: [clientUserPreferences.tenantId],
+		references: [tenant.id]
 	})
 }));
 
@@ -1948,6 +2028,58 @@ export const bnrExchangeRate = sqliteTable('bnr_exchange_rate', {
 }, (table) => [
 	uniqueIndex('bnr_rate_currency_date_idx').on(table.currency, table.rateDate)
 ]);
+
+// Email Log - tracks every email send attempt
+export const emailLog = sqliteTable('email_log', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id').references(() => tenant.id),
+	toEmail: text('to_email').notNull(),
+	subject: text('subject').notNull(),
+	emailType: text('email_type').notNull(), // invitation, invoice, magic-link, admin-magic-link, password-reset, task-assignment, task-update, task-reminder, daily-reminder, contract-signing, invoice-paid
+	status: text('status').notNull().default('pending'), // pending, active, completed, failed, delayed
+	attempts: integer('attempts').notNull().default(0),
+	maxAttempts: integer('max_attempts').notNull().default(3),
+	errorMessage: text('error_message'),
+	smtpMessageId: text('smtp_message_id'),
+	smtpResponse: text('smtp_response'),
+	processedAt: timestamp('processed_at'),
+	completedAt: timestamp('completed_at'),
+	metadata: text('metadata'), // JSON string
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
+});
+
+// Debug Log - tracks application events, errors, warnings
+export const debugLog = sqliteTable('debug_log', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id').references(() => tenant.id),
+	level: text('level').notNull().default('info'), // info, warning, error
+	source: text('source').notNull().default('server'), // server, client, scheduler, plugin, email, gmail, keez, smartbill, bnr
+	message: text('message').notNull(),
+	url: text('url'),
+	stackTrace: text('stack_trace'),
+	metadata: text('metadata'), // JSON string
+	userId: text('user_id').references(() => user.id),
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`)
+});
+
+export const emailLogRelations = relations(emailLog, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [emailLog.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const debugLogRelations = relations(debugLog, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [debugLog.tenantId],
+		references: [tenant.id]
+	}),
+	user: one(user, {
+		fields: [debugLog.userId],
+		references: [user.id]
+	})
+}));
 
 // Types
 export type Session = typeof session.$inferSelect;
@@ -2043,3 +2175,11 @@ export type NewGmailIntegration = typeof gmailIntegration.$inferInsert;
 export type SupplierInvoice = typeof supplierInvoice.$inferSelect;
 export type NewSupplierInvoice = typeof supplierInvoice.$inferInsert;
 export type BnrExchangeRate = typeof bnrExchangeRate.$inferSelect;
+export type TaskActivity = typeof taskActivity.$inferSelect;
+export type NewTaskActivity = typeof taskActivity.$inferInsert;
+export type ClientUserPreferences = typeof clientUserPreferences.$inferSelect;
+export type NewClientUserPreferences = typeof clientUserPreferences.$inferInsert;
+export type EmailLog = typeof emailLog.$inferSelect;
+export type NewEmailLog = typeof emailLog.$inferInsert;
+export type DebugLog = typeof debugLog.$inferSelect;
+export type NewDebugLog = typeof debugLog.$inferInsert;

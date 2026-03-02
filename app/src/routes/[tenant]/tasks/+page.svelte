@@ -17,7 +17,10 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import TableIcon from '@lucide/svelte/icons/table';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import type { Task } from '$lib/server/db/schema';
+	import { toast } from 'svelte-sonner';
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
@@ -84,6 +87,20 @@
 	);
 	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
 
+	// Pagination state (table view only)
+	let currentPage = $state(1);
+	let pageSize = $state(25);
+	const totalPages = $derived(Math.ceil(tasks.length / pageSize));
+	const paginatedTasks = $derived(
+		tasks.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+	);
+
+	// Reset to page 1 when filters change
+	$effect(() => {
+		filterParams;
+		currentPage = 1;
+	});
+
 	// Dialog states
 	let isCreateDialogOpen = $state(false);
 	let selectedTask = $state<Task | null>(null);
@@ -110,8 +127,9 @@
 				isTaskDetailOpen = false;
 				selectedTask = null;
 			}
+			toast.success('Task deleted');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to delete task');
+			toast.error(e instanceof Error ? e.message : 'Failed to delete task');
 		}
 	}
 
@@ -211,6 +229,7 @@
 		if (!open) selectedTask = null;
 	}}
 	{tenantSlug}
+	currentUserId={(page.data as any)?.tenantUser?.userId}
 />
 
 <!-- Content -->
@@ -233,7 +252,7 @@
 	/>
 {:else}
 		<TaskTableView
-			{tasks}
+			tasks={paginatedTasks}
 			{projectMap}
 			{userMap}
 			{tenantSlug}
@@ -244,4 +263,33 @@
 			onEditTask={handleEditTask}
 			onDeleteTask={handleDeleteTask}
 		/>
+		{#if tasks.length > 0}
+			<div class="flex items-center justify-between mt-4">
+				<div class="flex items-center gap-4">
+					<p class="text-sm text-muted-foreground">
+						{Math.min((currentPage - 1) * pageSize + 1, tasks.length)}-{Math.min(currentPage * pageSize, tasks.length)} of {tasks.length} tasks
+					</p>
+					<select
+						class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+						bind:value={pageSize}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value={10}>10 / page</option>
+						<option value={25}>25 / page</option>
+						<option value={50}>50 / page</option>
+					</select>
+				</div>
+				{#if totalPages > 1}
+					<div class="flex items-center gap-2">
+						<Button variant="outline" size="sm" disabled={currentPage <= 1} onclick={() => (currentPage = currentPage - 1)}>
+							<ChevronLeftIcon class="h-4 w-4" />
+						</Button>
+						<span class="text-sm text-muted-foreground">Page {currentPage} / {totalPages}</span>
+						<Button variant="outline" size="sm" disabled={currentPage >= totalPages} onclick={() => (currentPage = currentPage + 1)}>
+							<ChevronRightIcon class="h-4 w-4" />
+						</Button>
+					</div>
+				{/if}
+			</div>
+		{/if}
 {/if}

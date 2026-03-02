@@ -9,12 +9,15 @@
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import Link2Icon from '@lucide/svelte/icons/link-2';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { Button } from '$lib/components/ui/button';
 	import { getFaviconUrl } from '$lib/utils';
+	import { Toaster } from '$lib/components/ui/sonner';
+	import { browser } from '$app/environment';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -109,6 +112,16 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/settings`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/settings" {...props}>
+								<SettingsIcon />
+								<span>Setări</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
 			</SidebarMenu>
 		</SidebarContent>
 		<SidebarFooter>
@@ -137,3 +150,6 @@
 		</main>
 	</SidebarInset>
 </SidebarProvider>
+{#if browser}
+	<Toaster />
+{/if}

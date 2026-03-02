@@ -1,8 +1,10 @@
 <script lang="ts">
-	import { getTaskComments, createTaskComment } from '$lib/remotes/task-comments.remote';
+	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
-	import { approveTask, rejectTask } from '$lib/remotes/tasks.remote';
+	import { approveTask, rejectTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
+	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
+	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { goto } from '$app/navigation';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -10,8 +12,9 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Separator } from '$lib/components/ui/separator';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
-	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
-	import { Calendar, User, MessageSquare, Edit, Check, X } from '@lucide/svelte';
+	import { formatStatus, getStatusBadgeVariant, formatDate, getPriorityColor, getPriorityDotColor, formatPriority, getActivityValueColor } from '$lib/components/task-kanban-utils';
+	import { Calendar, User, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw } from '@lucide/svelte';
+	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
 
 	interface Props {
@@ -19,17 +22,26 @@
 		open: boolean;
 		onOpenChange: (open: boolean) => void;
 		tenantSlug?: string;
+		currentUserId?: string;
 	}
 
-	let { task, open, onOpenChange, tenantSlug = '' }: Props = $props();
+	let { task, open, onOpenChange, tenantSlug = '', currentUserId }: Props = $props();
+
+	const filterParams = getTaskFilters();
 
 	let isEditOpen = $state(false);
 	let newComment = $state('');
 	let commentLoading = $state(false);
 	let approvalLoading = $state(false);
+	let editingCommentId = $state<string | null>(null);
+	let editingContent = $state('');
+	let editLoading = $state(false);
 
 	const commentsQuery = $derived(task ? getTaskComments(task.id) : null);
 	const comments = $derived(commentsQuery?.current || []);
+
+	const activitiesQuery = $derived(task ? getTaskActivities(task.id) : null);
+	const activities = $derived(activitiesQuery?.current || []);
 
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
@@ -46,15 +58,41 @@
 	const projects = $derived(projectsQuery.current || []);
 	const projectMap = $derived(new Map(projects.map((p) => [p.id, p.name])));
 
-	function getPriorityBadgeVariant(priority: string) {
-		switch (priority) {
-			case 'urgent':
-				return 'destructive';
-			case 'high':
-				return 'default';
-			default:
-				return 'secondary';
+
+	function getActivityVerb(activity: { action: string; field?: string | null }): string {
+		switch (activity.action) {
+			case 'created': return 'created this task';
+			case 'commented': return 'added a comment';
+			case 'approved': return 'approved the task';
+			case 'rejected': return 'rejected the task';
+			case 'status_changed': return 'changed status';
+			case 'assigned': return 'changed assignee';
+			case 'updated': return activity.field ? `updated ${activity.field}` : 'updated the task';
+			default: return activity.action;
 		}
+	}
+
+	function getActivityIconColor(action: string): string {
+		switch (action) {
+			case 'created': return 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
+			case 'commented': return 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400';
+			case 'approved': return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400';
+			case 'rejected': return 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400';
+			case 'status_changed': return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400';
+			case 'assigned': return 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400';
+			default: return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+		}
+	}
+
+	function timeAgo(date: Date | string): string {
+		const now = new Date();
+		const d = new Date(date);
+		const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
+		if (diff < 60) return 'just now';
+		if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+		if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+		if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+		return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 
 	function getInitials(name: string): string {
@@ -76,10 +114,39 @@
 				content: newComment.trim()
 			}).updates(getTaskComments(task.id));
 			newComment = '';
+			toast.success('Comment added');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to add comment');
+			toast.error(e instanceof Error ? e.message : 'Failed to add comment');
 		} finally {
 			commentLoading = false;
+		}
+	}
+
+	async function handleEditComment(commentId: string) {
+		if (!editingContent.trim() || !task) return;
+		editLoading = true;
+		try {
+			await updateTaskComment({
+				commentId,
+				content: editingContent.trim()
+			}).updates(getTaskComments(task.id));
+			editingCommentId = null;
+			editingContent = '';
+			toast.success('Comment updated');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to update comment');
+		} finally {
+			editLoading = false;
+		}
+	}
+
+	async function handleDeleteComment(commentId: string) {
+		if (!task || !confirm('Delete this comment?')) return;
+		try {
+			await deleteTaskComment(commentId).updates(getTaskComments(task.id));
+			toast.success('Comment deleted');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to delete comment');
 		}
 	}
 
@@ -87,12 +154,11 @@
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id });
+			await approveTask({ taskId: task.id }).updates(getTasks(filterParams || {}), getTask(task.id));
+			toast.success('Task approved');
 			onOpenChange(false);
-			// Refresh the page or task list
-			window.location.reload();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to approve task');
+			toast.error(e instanceof Error ? e.message : 'Failed to approve task');
 		} finally {
 			approvalLoading = false;
 		}
@@ -103,12 +169,11 @@
 		if (!confirm('Are you sure you want to reject this task?')) return;
 		approvalLoading = true;
 		try {
-			await rejectTask(task.id);
+			await rejectTask(task.id).updates(getTasks(filterParams || {}), getTask(task.id));
+			toast.success('Task rejected');
 			onOpenChange(false);
-			// Refresh the page or task list
-			window.location.reload();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to reject task');
+			toast.error(e instanceof Error ? e.message : 'Failed to reject task');
 		} finally {
 			approvalLoading = false;
 		}
@@ -136,8 +201,8 @@
 							</a>
 						{/if}
 					<div class="flex items-center gap-2 mt-3">
-						<Badge variant={getPriorityBadgeVariant(task.priority || 'medium')}>
-							{task.priority || 'medium'}
+						<Badge class={getPriorityColor(task.priority || 'medium')}>
+							{formatPriority(task.priority || 'medium')}
 						</Badge>
 						<Badge variant={getStatusBadgeVariant(task.status)}>{formatStatus(task.status || 'todo')}</Badge>
 					</div>
@@ -200,7 +265,7 @@
 							</div>
 							<div>
 								<p class="text-sm text-muted-foreground">Due Date</p>
-								<p class="font-medium">{new Date(task.dueDate).toLocaleDateString()}</p>
+								<p class="font-medium">{formatDate(task.dueDate)}</p>
 							</div>
 						</div>
 					{/if}
@@ -220,19 +285,47 @@
 						{:else}
 							{#each comments as comment}
 								{@const authorName = userMap.get(comment.userId) || comment.userId}
+								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
 								<div class="border rounded-lg p-4">
 									<div class="flex items-center gap-3 mb-2">
 										<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-semibold">
 											{getInitials(authorName)}
 										</div>
-										<div>
+										<div class="flex-1">
 											<p class="font-medium text-sm">{authorName}</p>
 											<p class="text-xs text-muted-foreground">
 												{new Date(comment.createdAt).toLocaleString()}
+												{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
+													<span class="italic">(edited)</span>
+												{/if}
 											</p>
 										</div>
+										{#if isOwnComment && editingCommentId !== comment.id}
+											<div class="flex items-center gap-1">
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
+													<Pencil class="h-3 w-3" />
+												</Button>
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handleDeleteComment(comment.id)}>
+													<Trash2 class="h-3 w-3" />
+												</Button>
+											</div>
+										{/if}
 									</div>
-									<p class="text-sm leading-relaxed">{comment.content}</p>
+									{#if editingCommentId === comment.id}
+										<div class="space-y-2">
+											<Textarea bind:value={editingContent} rows={3} />
+											<div class="flex gap-2">
+												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading || !editingContent.trim()}>
+													{editLoading ? 'Saving...' : 'Save'}
+												</Button>
+												<Button size="sm" variant="outline" onclick={() => { editingCommentId = null; editingContent = ''; }}>
+													Cancel
+												</Button>
+											</div>
+										</div>
+									{:else}
+										<p class="text-sm leading-relaxed">{comment.content}</p>
+									{/if}
 								</div>
 							{/each}
 						{/if}
@@ -249,11 +342,79 @@
 						</Button>
 					</div>
 				</div>
+
+				<Separator />
+
+				<div>
+					<div class="flex items-center gap-2 mb-4">
+						<History class="h-4 w-4 text-muted-foreground" />
+						<h4 class="font-semibold">Activity ({activities.length})</h4>
+					</div>
+
+					{#if activities.length === 0}
+						<p class="text-sm text-muted-foreground">No activity recorded yet.</p>
+					{:else}
+						<div class="relative max-h-[350px] overflow-y-auto">
+							<div class="absolute left-[15px] top-0 bottom-0 w-px bg-border"></div>
+							<div class="space-y-4">
+								{#each activities as activity}
+									{@const actorName = activity.userName || userMap.get(activity.userId) || activity.userId}
+									<div class="flex items-start gap-3 relative">
+										<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full {getActivityIconColor(activity.action)} z-10">
+											{#if activity.action === 'created'}
+												<Plus class="h-3.5 w-3.5" />
+											{:else if activity.action === 'commented'}
+												<MessageSquare class="h-3.5 w-3.5" />
+											{:else if activity.action === 'approved'}
+												<Check class="h-3.5 w-3.5" />
+											{:else if activity.action === 'rejected'}
+												<X class="h-3.5 w-3.5" />
+											{:else if activity.action === 'status_changed'}
+												<ArrowRight class="h-3.5 w-3.5" />
+											{:else if activity.action === 'assigned'}
+												<UserCheck class="h-3.5 w-3.5" />
+											{:else}
+												<RefreshCw class="h-3.5 w-3.5" />
+											{/if}
+										</div>
+										<div class="flex-1 min-w-0 pt-0.5">
+											<p class="text-sm">
+												<span class="font-medium">{actorName}</span>
+												<span class="text-muted-foreground"> {getActivityVerb(activity)}</span>
+											</p>
+											{#if activity.oldValue || activity.newValue}
+												<div class="flex items-center gap-1.5 mt-1 flex-wrap">
+													{#if activity.oldValue}
+														<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{activity.oldValue}</Badge>
+													{/if}
+													{#if activity.oldValue && activity.newValue}
+														<ArrowRight class="h-3 w-3 text-muted-foreground shrink-0" />
+													{/if}
+													{#if activity.newValue}
+														<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{activity.newValue}</Badge>
+													{/if}
+												</div>
+											{/if}
+											<p class="text-xs text-muted-foreground mt-1">{timeAgo(activity.createdAt)}</p>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
 			</div>
 		</DialogContent>
 	</Dialog>
 
 	{#if task}
-		<EditTaskDialog task={task} open={isEditOpen} onOpenChange={(open) => (isEditOpen = open)} />
+		<EditTaskDialog
+			task={task}
+			open={isEditOpen}
+			onOpenChange={(open) => (isEditOpen = open)}
+			onSuccess={() => {
+				// Task data refreshed via .updates() in EditTaskDialog
+			}}
+		/>
 	{/if}
 {/if}

@@ -318,6 +318,7 @@ export const createInvoice = command(
 		const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
 		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
 		const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
+		const taxApplicationType = data.taxApplicationType || 'apply';
 
 		// Use user-provided invoice series and number if provided, otherwise auto-generate
 		let invoiceNumber: string;
@@ -389,7 +390,7 @@ export const createInvoice = command(
 				subtotal += itemSubtotal;
 
 				// Only calculate tax if taxApplicationType is 'apply'
-				if (data.taxApplicationType === 'apply') {
+				if (taxApplicationType === 'apply') {
 					// Use item's tax rate if provided, otherwise use default from settings
 					const itemTaxRate = item.taxRate ? Math.round(item.taxRate * 100) : defaultTaxRateCents;
 					const itemTax = Math.round((itemSubtotal * itemTaxRate) / 10000);
@@ -412,7 +413,7 @@ export const createInvoice = command(
 			taxAmount = totalTax;
 			totalAmount = amount + taxAmount;
 			// Only set tax rate if taxApplicationType is 'apply'
-			if (data.taxApplicationType === 'apply') {
+			if (taxApplicationType === 'apply') {
 				taxRate = data.lineItems[0]?.taxRate
 					? Math.round(data.lineItems[0].taxRate * 100)
 					: defaultTaxRateCents;
@@ -475,7 +476,7 @@ export const createInvoice = command(
 			exchangeRate: data.exchangeRate || null,
 			vatOnCollection: data.vatOnCollection || false,
 			isCreditNote: data.isCreditNote || false,
-			taxApplicationType: data.taxApplicationType || null,
+			taxApplicationType,
 			discountType: data.discountType || null,
 			discountValue: discountValueCents,
 			createdByUserId: event.locals.user.id

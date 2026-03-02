@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
-	import { getClientWebsites } from '$lib/remotes/client-websites.remote';
+	import { getClientWebsites, getClientWebsitesSeoStats } from '$lib/remotes/client-websites.remote';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -43,6 +43,11 @@
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import Link2Icon from '@lucide/svelte/icons/link-2';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
+	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+	import StarIcon from '@lucide/svelte/icons/star';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -96,6 +101,9 @@
 	const websites = $derived(websitesQuery?.current || []);
 	const websiteMap = $derived(new Map(websites.map((w) => [w.id, w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')])));
 	const defaultWebsite = $derived(websites.find((w) => w.isDefault) ?? websites[0] ?? null);
+
+	const websiteStatsQuery = $derived(clientId ? getClientWebsitesSeoStats(clientId) : null);
+	const websiteStats = $derived(websiteStatsQuery?.current || []);
 
 	function getStatusLabel(status: string) {
 		const labels: Record<string, string> = {
@@ -258,6 +266,91 @@
 				<p class="text-sm text-muted-foreground">Dofollow</p>
 				<p class="text-2xl font-bold">{stats.dofollow}</p>
 			</Card>
+		</div>
+	{/if}
+
+	<!-- Website-uri administrate -->
+	{#if websiteStats.length > 0}
+		<div>
+			<div class="mb-3">
+				<h2 class="text-lg font-semibold">Website-uri administrate</h2>
+				<p class="text-sm text-muted-foreground">Performanța SEO per site</p>
+			</div>
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each websiteStats as { website, totalLinks, publishedLinks, dofollowLinks, okLinks }}
+					<Card class="relative {website.isDefault ? 'ring-2 ring-primary/30' : ''}">
+						<CardContent class="p-4">
+							<div class="flex items-start justify-between gap-2 mb-3">
+								<div class="min-w-0">
+									<div class="flex items-center gap-2 flex-wrap">
+										<span class="text-sm font-semibold truncate">
+											{website.name || website.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+										</span>
+										{#if website.isDefault}
+											<Badge variant="secondary" class="text-xs shrink-0">Principal</Badge>
+										{/if}
+									</div>
+									<a
+										href={website.url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5 truncate"
+									>
+										{website.url.replace(/^https?:\/\//, '')}
+										<ExternalLinkIcon class="h-2.5 w-2.5 shrink-0" />
+									</a>
+								</div>
+								{#if website.isDefault}
+									<span class="rounded p-1 text-amber-500 shrink-0" title="Website principal">
+										<StarIcon class="h-3.5 w-3.5 fill-current" />
+									</span>
+								{/if}
+							</div>
+
+							<div class="grid grid-cols-2 gap-3 mb-3">
+								<div class="rounded-lg bg-muted/50 px-3 py-2">
+									<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+										<Link2Icon class="h-3 w-3" />
+										Total linkuri
+									</div>
+									<div class="text-lg font-bold">{totalLinks}</div>
+								</div>
+								<div class="rounded-lg bg-muted/50 px-3 py-2">
+									<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+										<CheckCircle2Icon class="h-3 w-3" />
+										Publicate
+									</div>
+									<div class="text-lg font-bold text-green-600">{publishedLinks}</div>
+								</div>
+								<div class="rounded-lg bg-muted/50 px-3 py-2">
+									<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+										<TrendingUpIcon class="h-3 w-3" />
+										Dofollow
+									</div>
+									<div class="text-lg font-bold text-blue-600">{dofollowLinks}</div>
+								</div>
+								<div class="rounded-lg bg-muted/50 px-3 py-2">
+									<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+										<AlertCircleIcon class="h-3 w-3" />
+										Accesibile
+									</div>
+									<div class="text-lg font-bold">{okLinks}</div>
+								</div>
+							</div>
+
+							<Button
+								variant="outline"
+								size="sm"
+								class="w-full text-xs"
+								onclick={() => { filterWebsiteId = website.id; }}
+							>
+								<ExternalLinkIcon class="mr-1.5 h-3 w-3" />
+								Vizualizează linkurile SEO
+							</Button>
+						</CardContent>
+					</Card>
+				{/each}
+			</div>
 		</div>
 	{/if}
 
@@ -466,31 +559,6 @@
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
-									<Link2Icon class="h-3.5 w-3.5 shrink-0" />
-									Dofollow
-									<TooltipProvider>
-										<Tooltip>
-											<TooltipTrigger>
-												<HelpCircleIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 cursor-help" />
-											</TooltipTrigger>
-											<TooltipContent
-												class="max-w-[260px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
-												arrowClasses="!bg-popover"
-											>
-												<p class="font-semibold text-sm mb-1.5 text-foreground">Dofollow vs Nofollow</p>
-												<p class="text-[13px] text-foreground/90 leading-relaxed">
-													<strong class="text-foreground">Dofollow</strong> — link transmite autoritate către site-ul țintă; Google urmărește link-ul pentru SEO.
-												</p>
-												<p class="text-[13px] text-foreground/90 leading-relaxed mt-1">
-													<strong class="text-foreground">Nofollow</strong> — link nu transmite link equity; Google nu îl urmărește pentru ranking.
-												</p>
-											</TooltipContent>
-										</Tooltip>
-									</TooltipProvider>
-								</span>
-							</TableHead>
-							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
-								<span class="inline-flex items-center gap-1.5">
 									<KeyIcon class="h-3.5 w-3.5 shrink-0" />
 									Cuvânt cheie
 									<TooltipProvider>
@@ -649,15 +717,6 @@
 										<span class="text-[13px] font-medium text-foreground/90">{getPressTrustDisplay(link)}</span>
 									</div>
 								</TableCell>
-								<TableCell class="px-3 py-3.5 align-middle">
-									{#if link.lastCheckDofollow}
-										<Badge variant={link.lastCheckDofollow === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
-											{link.lastCheckDofollow}
-										</Badge>
-									{:else}
-										<span class="text-[12px] text-muted-foreground">Neverificat</span>
-									{/if}
-								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
 									<span class="text-[13px] text-foreground/85 line-clamp-2">{link.keyword}</span>
 								</TableCell>
@@ -685,15 +744,13 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
-									<div class="flex flex-col gap-0.5">
-										{#if link.lastCheckDofollow}
-											<Badge variant={link.lastCheckDofollow === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
-												{link.lastCheckDofollow}
-											</Badge>
-										{:else}
-											<span class="text-[12px] text-muted-foreground">Neverificat</span>
-										{/if}
-									</div>
+									{#if link.lastCheckDofollow}
+										<Badge variant={link.lastCheckDofollow === 'dofollow' ? 'default' : 'secondary'} class="text-[11px] h-5 rounded-full px-2 w-fit font-normal">
+											{link.lastCheckDofollow}
+										</Badge>
+									{:else}
+										<span class="text-[12px] text-muted-foreground">Neverificat</span>
+									{/if}
 								</TableCell>
 								<TableCell class="px-3 py-3.5 align-middle">
 									<div class="flex items-center gap-1.5">
@@ -726,7 +783,7 @@
 					</TableBody>
 					<TableFooter>
 						<TableRow class="border-t-2 border-border/60 bg-muted/30 hover:bg-muted/30 font-medium">
-							<TableCell colspan={9} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
+							<TableCell colspan={8} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
 								Total preț
 							</TableCell>
 							<TableCell class="px-3 py-3.5 pr-5 text-[13px] font-semibold">

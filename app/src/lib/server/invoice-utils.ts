@@ -550,7 +550,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		exchangeRate: invoiceFields.exchangeRate || null,
 		vatOnCollection: invoiceFields.vatOnCollection || false,
 		isCreditNote: invoiceFields.isCreditNote || false,
-		taxApplicationType: invoiceFields.taxApplicationType || null,
+		taxApplicationType: invoiceFields.taxApplicationType || 'apply',
 		discountType: invoiceFields.discountType || null,
 		discountValue: invoiceFields.discountValue
 			? invoiceFields.discountType === 'percent'

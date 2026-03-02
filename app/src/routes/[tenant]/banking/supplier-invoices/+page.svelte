@@ -2,6 +2,7 @@
 	import {
 		getSupplierInvoices,
 		deleteSupplierInvoice,
+		deleteSupplierInvoices,
 		getLastSyncResults,
 		createExpenseFromSupplierInvoice,
 		linkSupplierInvoiceToExpense
@@ -10,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import {
@@ -21,7 +23,8 @@
 		Info,
 		X,
 		Receipt,
-		Eye
+		Eye,
+		Download
 	} from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -136,6 +139,80 @@
 				return type || 'Necunoscut';
 		}
 	};
+
+	// Selection state
+	let selectedIds = $state(new Set<string>());
+	const allPageSelected = $derived(
+		paginatedInvoices.length > 0 && paginatedInvoices.every((inv) => selectedIds.has(inv.id))
+	);
+	const somePageSelected = $derived(
+		paginatedInvoices.some((inv) => selectedIds.has(inv.id)) && !allPageSelected
+	);
+
+	function toggleSelectAll() {
+		if (allPageSelected) {
+			const next = new Set(selectedIds);
+			for (const inv of paginatedInvoices) next.delete(inv.id);
+			selectedIds = next;
+		} else {
+			const next = new Set(selectedIds);
+			for (const inv of paginatedInvoices) next.add(inv.id);
+			selectedIds = next;
+		}
+	}
+
+	function toggleSelect(id: string) {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedIds = next;
+	}
+
+	let bulkDeleting = $state(false);
+	let bulkDownloading = $state(false);
+
+	async function handleBulkDelete() {
+		const count = selectedIds.size;
+		if (!confirm(`Ești sigur că vrei să ștergi ${count} facturi?`)) return;
+		bulkDeleting = true;
+		try {
+			await deleteSupplierInvoices({ invoiceIds: [...selectedIds] }).updates(invoicesQuery);
+			toast.success(`${count} facturi șterse`);
+			selectedIds = new Set();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		} finally {
+			bulkDeleting = false;
+		}
+	}
+
+	async function handleBulkDownload() {
+		bulkDownloading = true;
+		try {
+			const res = await fetch(`/${tenantSlug}/banking/supplier-invoices/download-zip`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ invoiceIds: [...selectedIds] })
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				throw new Error(text || 'Eroare la descărcare');
+			}
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'facturi.zip';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+		} finally {
+			bulkDownloading = false;
+		}
+	}
 
 	let deleting = $state<string | null>(null);
 	let creatingExpense = $state<string | null>(null);
@@ -255,6 +332,26 @@
 		</CardContent>
 	</Card>
 
+	<!-- Bulk action bar -->
+	{#if selectedIds.size > 0}
+		<div class="mb-6 rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between">
+			<span class="text-sm font-medium">{selectedIds.size} selectate</span>
+			<div class="flex items-center gap-2">
+				<Button variant="outline" size="sm" onclick={handleBulkDownload} disabled={bulkDownloading}>
+					<Download class="h-4 w-4 mr-2" />
+					{bulkDownloading ? 'Se descarcă...' : 'Descarcă selecția'}
+				</Button>
+				<Button variant="outline" size="sm" onclick={() => (selectedIds = new Set())}>
+					Anulează selecția
+				</Button>
+				<Button variant="destructive" size="sm" onclick={handleBulkDelete} disabled={bulkDeleting}>
+					<Trash2 class="h-4 w-4 mr-2" />
+					{bulkDeleting ? 'Se șterge...' : 'Șterge selecția'}
+				</Button>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Table -->
 	{#if loading}
 		<p class="text-center text-muted-foreground py-8">Se încarcă...</p>
@@ -283,6 +380,13 @@
 					<table class="w-full">
 						<thead>
 							<tr class="border-b bg-muted/50">
+								<th class="w-10 p-3">
+									<Checkbox
+										checked={allPageSelected}
+										indeterminate={somePageSelected}
+										onCheckedChange={toggleSelectAll}
+									/>
+								</th>
 								<th class="text-left p-3 font-medium">Furnizor</th>
 								<th class="text-left p-3 font-medium">Nr. Factură</th>
 								<th class="text-right p-3 font-medium">Sumă</th>
@@ -295,6 +399,12 @@
 						<tbody>
 							{#each paginatedInvoices as invoice}
 								<tr class="border-b hover:bg-muted/25">
+									<td class="w-10 p-3">
+										<Checkbox
+											checked={selectedIds.has(invoice.id)}
+											onCheckedChange={() => toggleSelect(invoice.id)}
+										/>
+									</td>
 									<td class="p-3">
 										<div class="font-medium">
 											{invoice.supplierName || invoice.emailFrom || '-'}

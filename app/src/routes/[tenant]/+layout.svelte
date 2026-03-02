@@ -16,6 +16,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 import LinkIcon from '@lucide/svelte/icons/link';
+	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import FileDownIcon from '@lucide/svelte/icons/file-down';
@@ -225,6 +226,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							<a href="/{tenantSlug}/seo-links" {...props}>
 								<LinkIcon />
 								<span>Linkuri SEO</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/admin/logs`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/admin/logs" {...props}>
+								<ScrollTextIcon />
+								<span>Logs si Debug</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

@@ -10,9 +10,14 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import * as Popover from '$lib/components/ui/popover';
+	import { Calendar } from '$lib/components/ui/calendar';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import type { Task } from '$lib/server/db/schema';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getPriorityDotColor, getStatusDotColor } from '$lib/components/task-kanban-utils';
+	import { CalendarDate, type DateValue } from '@internationalized/date';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 
 	interface Props {
 		task: Task | null;
@@ -31,6 +36,11 @@
 
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
+
+	const clientOptions = $derived([
+		{ value: '', label: 'None' },
+		...clients.map((c) => ({ value: c.id, label: c.name }))
+	]);
 
 	const projectOptions = $derived([
 		{ value: '', label: 'None' },
@@ -52,13 +62,42 @@
 	let description = $state('');
 	let clientId = $state('');
 	let projectId = $state('');
+	let previousProjectId = $state('');
 	let milestoneId = $state('');
 	let status = $state('todo');
 	let priority = $state('medium');
 	let assignedToUserId = $state('');
 	let dueDate = $state('');
+	let dueDateOpen = $state(false);
+	let dueDateValue = $state<DateValue | undefined>(undefined);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
+
+	// Sync dueDate string → CalendarDate
+	$effect(() => {
+		if (dueDate) {
+			const [y, m, d] = dueDate.split('-').map(Number);
+			if (y && m && d) dueDateValue = new CalendarDate(y, m, d);
+		} else {
+			dueDateValue = undefined;
+		}
+	});
+
+	function handleDateSelect(value: DateValue | undefined) {
+		if (value) {
+			dueDate = `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
+		} else {
+			dueDate = '';
+		}
+		dueDateOpen = false;
+	}
+
+	function formatDisplayDate(dateStr: string): string {
+		if (!dateStr) return '';
+		const [y, m, d] = dateStr.split('-').map(Number);
+		if (!y || !m || !d) return dateStr;
+		return new Date(y, m - 1, d).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+	}
 
 	// Load milestones for selected project
 	const milestonesQuery = $derived(
@@ -73,6 +112,7 @@
 			description = task.description || '';
 			clientId = task.clientId || '';
 			projectId = task.projectId || '';
+			previousProjectId = task.projectId || '';
 			milestoneId = task.milestoneId || '';
 			status = task.status || 'todo';
 			priority = task.priority || 'medium';
@@ -82,10 +122,11 @@
 	});
 
 	$effect(() => {
-		// Reset milestone when project changes
-		if (projectId !== task?.projectId) {
+		// Reset milestone when project changes (but not on initial load)
+		if (projectId !== previousProjectId && previousProjectId !== '') {
 			milestoneId = '';
 		}
+		previousProjectId = projectId;
 	});
 
 	async function handleSubmit() {
@@ -141,6 +182,15 @@
 					<Textarea id="edit-description" bind:value={description} placeholder="Add details about the task..." />
 				</div>
 				<div class="grid gap-2">
+					<Label for="edit-client">Client</Label>
+					<Combobox
+						bind:value={clientId}
+						options={clientOptions}
+						placeholder="Select a client (optional)"
+						searchPlaceholder="Search clients..."
+					/>
+				</div>
+				<div class="grid gap-2">
 					<Label for="edit-project">Project</Label>
 					<Combobox
 						bind:value={projectId}
@@ -174,23 +224,32 @@
 						<Label for="edit-status">Status</Label>
 						<Select type="single" bind:value={status}>
 							<SelectTrigger id="edit-status">
-								{#if status === 'todo'}
-									To Do
-								{:else if status === 'in-progress'}
-									In Progress
-								{:else if status === 'review'}
-									Review
-								{:else if status === 'done'}
-									Done
-								{:else}
-									Select status
-								{/if}
+								<div class="flex items-center gap-2">
+									<span class="h-2 w-2 rounded-full {getStatusDotColor(status)}"></span>
+									{#if status === 'pending-approval'}
+										Pending Approval
+									{:else if status === 'todo'}
+										To Do
+									{:else if status === 'in-progress'}
+										In Progress
+									{:else if status === 'review'}
+										Review
+									{:else if status === 'done'}
+										Done
+									{:else if status === 'cancelled'}
+										Cancelled
+									{:else}
+										Select status
+									{/if}
+								</div>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="todo">To Do</SelectItem>
-								<SelectItem value="in-progress">In Progress</SelectItem>
-								<SelectItem value="review">Review</SelectItem>
-								<SelectItem value="done">Done</SelectItem>
+								<SelectItem value="pending-approval"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-amber-500"></span> Pending Approval</div></SelectItem>
+								<SelectItem value="todo"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-slate-400"></span> To Do</div></SelectItem>
+								<SelectItem value="in-progress"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-blue-500"></span> In Progress</div></SelectItem>
+								<SelectItem value="review"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-purple-500"></span> Review</div></SelectItem>
+								<SelectItem value="done"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-green-500"></span> Done</div></SelectItem>
+								<SelectItem value="cancelled"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-red-500"></span> Cancelled</div></SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -198,23 +257,26 @@
 						<Label for="edit-priority">Priority</Label>
 						<Select type="single" bind:value={priority}>
 							<SelectTrigger id="edit-priority">
-								{#if priority === 'low'}
-									Low
-								{:else if priority === 'medium'}
-									Medium
-								{:else if priority === 'high'}
-									High
-								{:else if priority === 'urgent'}
-									Urgent
-								{:else}
-									Select priority
-								{/if}
+								<div class="flex items-center gap-2">
+									<span class="h-2 w-2 rounded-full {getPriorityDotColor(priority)}"></span>
+									{#if priority === 'low'}
+										Low
+									{:else if priority === 'medium'}
+										Medium
+									{:else if priority === 'high'}
+										High
+									{:else if priority === 'urgent'}
+										Urgent
+									{:else}
+										Select priority
+									{/if}
+								</div>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="low">Low</SelectItem>
-								<SelectItem value="medium">Medium</SelectItem>
-								<SelectItem value="high">High</SelectItem>
-								<SelectItem value="urgent">Urgent</SelectItem>
+								<SelectItem value="low"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-gray-400"></span> Low</div></SelectItem>
+								<SelectItem value="medium"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-green-500"></span> Medium</div></SelectItem>
+								<SelectItem value="high"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-orange-500"></span> High</div></SelectItem>
+								<SelectItem value="urgent"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-red-500"></span> Urgent</div></SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -243,8 +305,27 @@
 						</Select>
 					</div>
 					<div class="grid gap-2">
-						<Label for="edit-dueDate">Due Date</Label>
-						<Input id="edit-dueDate" type="date" bind:value={dueDate} />
+						<Label>Due Date</Label>
+						<Popover.Root bind:open={dueDateOpen}>
+							<Popover.Trigger>
+								{#snippet child({ props })}
+									<Button {...props} variant="outline" class="w-full h-9 justify-start text-start font-normal text-sm">
+										<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+										{dueDate ? formatDisplayDate(dueDate) : 'Select date'}
+									</Button>
+								{/snippet}
+							</Popover.Trigger>
+							<Popover.Content class="w-auto p-0" align="start">
+								<div class="flex flex-col">
+									<Calendar type="single" value={dueDateValue} onValueChange={handleDateSelect} locale="ro-RO" />
+									{#if dueDate}
+										<Button variant="ghost" class="rounded-t-none border-t text-muted-foreground text-sm" onclick={() => { dueDate = ''; dueDateValue = undefined; dueDateOpen = false; }}>
+											Clear date
+										</Button>
+									{/if}
+								</div>
+							</Popover.Content>
+						</Popover.Root>
 					</div>
 				</div>
 			</div>

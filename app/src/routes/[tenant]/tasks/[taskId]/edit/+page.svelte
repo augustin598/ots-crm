@@ -173,7 +173,9 @@
 							<Label for="status">Status</Label>
 							<Select type="single" bind:value={status}>
 								<SelectTrigger>
-									{#if status === 'todo'}
+									{#if status === 'pending-approval'}
+										Pending Approval
+									{:else if status === 'todo'}
 										To Do
 									{:else if status === 'in-progress'}
 										In Progress
@@ -188,6 +190,7 @@
 									{/if}
 								</SelectTrigger>
 								<SelectContent>
+									<SelectItem value="pending-approval">Pending Approval</SelectItem>
 									<SelectItem value="todo">To Do</SelectItem>
 									<SelectItem value="in-progress">In Progress</SelectItem>
 									<SelectItem value="review">Review</SelectItem>

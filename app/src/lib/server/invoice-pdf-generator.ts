@@ -101,7 +101,10 @@ const BORDER = '#CBD5E1';
 const SOFT_BG = '#F1F5F9';
 const WHITE = '#FFFFFF';
 
-const LOGO_PATH = resolve(import.meta.dirname ?? '.', 'assets/logo.png');
+const ASSETS_DIR = resolve(import.meta.dirname ?? '.', 'assets');
+const LOGO_PATH = resolve(ASSETS_DIR, 'logo.png');
+const FONT_REGULAR = resolve(ASSETS_DIR, 'DejaVuSans.ttf');
+const FONT_BOLD = resolve(ASSETS_DIR, 'DejaVuSans-Bold.ttf');
 
 function fDate(date: Date | string | null | undefined): string {
 	if (!date) return '-';
@@ -129,6 +132,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const calcCurr = invoice.currency || 'RON';
 			const invCurr = invoice.invoiceCurrency || calcCurr;
 			const isMulti = calcCurr !== invCurr;
+			const taxType = invoice.taxApplicationType || 'apply';
 
 			// Determine if proforma based on keezStatus or invoice status
 			const isProforma = invoice.keezStatus === 'Draft' || (!invoice.keezStatus && invoice.status === 'draft' && invoice.keezStatus !== 'Valid');
@@ -142,6 +146,10 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				info: { Title: `${pdfTitle} ${displayInvoiceNumber}`, Author: tenant.name }
 			});
 
+			// Register DejaVu Sans fonts for Romanian diacritics
+			doc.registerFont('DejaVu', FONT_REGULAR);
+			doc.registerFont('DejaVu-Bold', FONT_BOLD);
+
 			const buffers: Buffer[] = [];
 			doc.on('data', (c: Buffer) => buffers.push(c));
 			doc.on('end', () => resolve(Buffer.concat(buffers)));
@@ -152,7 +160,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			function footer() {
 				const fy = PH - 40;
 				doc.moveTo(ML, fy).lineTo(PW - MR, fy).strokeColor(BORDER).lineWidth(0.5).stroke();
-				doc.fontSize(6.5).font('Helvetica').fillColor(LIGHT);
+				doc.fontSize(6.5).font('DejaVu').fillColor(LIGHT);
 				doc.text('One Top Solution SRL', ML, fy + 6, { lineBreak: false });
 				doc.text(`Pagina ${pg}`, ML, fy + 6, { width: CW, align: 'right', lineBreak: false });
 			}
@@ -175,9 +183,9 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			} catch { /* skip */ }
 
 			// Invoice title - right
-			doc.fontSize(isProforma ? 18 : 24).font('Helvetica-Bold').fillColor(ACCENT);
+			doc.fontSize(isProforma ? 18 : 24).font('DejaVu-Bold').fillColor(ACCENT);
 			doc.text(pdfTitle, ML, y, { width: CW, align: 'right', lineBreak: false });
-			doc.fontSize(10).font('Helvetica').fillColor(MUTED);
+			doc.fontSize(10).font('DejaVu').fillColor(MUTED);
 			doc.text(displayInvoiceNumber, ML, y + 28, { width: CW, align: 'right', lineBreak: false });
 
 			y += 50;
@@ -193,15 +201,15 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const sectionStart = y;
 
 			// --- Left: Furnizor ---
-			doc.fontSize(7).font('Helvetica-Bold').fillColor(ACCENT);
+			doc.fontSize(7).font('DejaVu-Bold').fillColor(ACCENT);
 			doc.text('FURNIZOR', col1X, y, { lineBreak: false });
 			y += 12;
 
-			doc.fontSize(9.5).font('Helvetica-Bold').fillColor(DARK);
+			doc.fontSize(9.5).font('DejaVu-Bold').fillColor(DARK);
 			doc.text(tenant.name, col1X, y, { width: colW, lineBreak: false });
 			y += 14;
 
-			doc.fontSize(7.5).font('Helvetica').fillColor(TEXT);
+			doc.fontSize(7.5).font('DejaVu').fillColor(TEXT);
 			const ta = addr(tenant);
 			if (ta) { doc.text(ta, col1X, y, { width: colW, lineBreak: false }); y += 10; }
 			if (tenant.cui) { doc.text(`CIF: ${tenant.cui}`, col1X, y, { lineBreak: false }); y += 10; }
@@ -211,7 +219,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 
 			// --- Right: Invoice details ---
 			let yr = sectionStart;
-			doc.fontSize(7).font('Helvetica-Bold').fillColor(ACCENT);
+			doc.fontSize(7).font('DejaVu-Bold').fillColor(ACCENT);
 			doc.text('DETALII FACTURA', col2X, yr, { lineBreak: false });
 			yr += 14;
 
@@ -228,9 +236,9 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			if (invoice.vatOnCollection) meta.push(['TVA la incasare', 'Da']);
 
 			for (const [label, val] of meta) {
-				doc.fontSize(7.5).font('Helvetica').fillColor(MUTED);
+				doc.fontSize(7.5).font('DejaVu').fillColor(MUTED);
 				doc.text(label, col2X, yr, { width: 80, lineBreak: false });
-				doc.fontSize(7.5).font('Helvetica-Bold').fillColor(DARK);
+				doc.fontSize(7.5).font('DejaVu-Bold').fillColor(DARK);
 				doc.text(val, col2X + 82, yr, { width: colW - 82, align: 'right', lineBreak: false });
 				yr += 13;
 			}
@@ -242,13 +250,13 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const clientBoxH = 55;
 			doc.roundedRect(ML, y, CW, clientBoxH, 3).fillColor(SOFT_BG).fill();
 
-			doc.fontSize(7).font('Helvetica-Bold').fillColor(ACCENT);
+			doc.fontSize(7).font('DejaVu-Bold').fillColor(ACCENT);
 			doc.text('CLIENT', ML + 12, y + 8, { lineBreak: false });
 
-			doc.fontSize(9.5).font('Helvetica-Bold').fillColor(DARK);
+			doc.fontSize(9.5).font('DejaVu-Bold').fillColor(DARK);
 			doc.text(client.businessName || client.name, ML + 12, y + 19, { width: CW - 24, lineBreak: false });
 
-			doc.fontSize(7.5).font('Helvetica').fillColor(TEXT);
+			doc.fontSize(7.5).font('DejaVu').fillColor(TEXT);
 			const clientParts: string[] = [];
 			const ca = addr(client);
 			if (ca) clientParts.push(ca);
@@ -281,7 +289,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				doc.moveTo(ML, sy + HH - 1).lineTo(PW - MR, sy + HH - 1).strokeColor(DARK).lineWidth(1.2).stroke();
 
 				let x = ML;
-				doc.fontSize(7).font('Helvetica-Bold').fillColor(DARK);
+				doc.fontSize(7).font('DejaVu-Bold').fillColor(DARK);
 				for (const c of cols) {
 					doc.text(c.l, x + 3, sy + 6, { width: c.w - 6, align: c.a, lineBreak: false });
 					x += c.w;
@@ -310,7 +318,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				if (item.discountType === 'percent' && item.discount) disc = (sub * item.discount) / 100;
 				else if (item.discountType === 'fixed' && item.discount) disc = item.discount / 100;
 				const net = sub - disc;
-				const tax = invoice.taxApplicationType === 'apply' ? (net * tr) / 100 : 0;
+				const tax = taxType === 'apply' ? (net * tr) / 100 : 0;
 				const total = net + tax;
 
 				doc.fontSize(7.5);
@@ -327,21 +335,21 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				const cy = y + 4;
 
 				// #
-				doc.fontSize(7).font('Helvetica').fillColor(LIGHT);
+				doc.fontSize(7).font('DejaVu').fillColor(LIGHT);
 				doc.text(String(i + 1), x + 3, cy, { width: cols[0].w - 6, align: 'center', lineBreak: false });
 				x += cols[0].w;
 
 				// Articol (description may wrap, so use height constraint)
-				doc.fontSize(7.5).font('Helvetica-Bold').fillColor(DARK);
+				doc.fontSize(7.5).font('DejaVu-Bold').fillColor(DARK);
 				doc.text(item.description, x + 4, cy, { width: cols[1].w - 8, height: dH + 2, ellipsis: true });
 				if (item.note) {
 					const off = doc.heightOfString(item.description, { width: cols[1].w - 8 });
-					doc.fontSize(6.5).font('Helvetica').fillColor(LIGHT);
+					doc.fontSize(6.5).font('DejaVu').fillColor(LIGHT);
 					doc.text(item.note, x + 4, cy + off + 1, { width: cols[1].w - 8, height: nH + 2, ellipsis: true });
 				}
 				x += cols[1].w;
 
-				doc.fontSize(7.5).font('Helvetica').fillColor(TEXT);
+				doc.fontSize(7.5).font('DejaVu').fillColor(TEXT);
 
 				// UM
 				doc.text(item.unitOfMeasure || 'Buc', x + 2, cy, { width: cols[2].w - 4, align: 'center', lineBreak: false });
@@ -360,7 +368,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				x += cols[5].w;
 
 				// %TVA
-				if (invoice.taxApplicationType === 'apply' && tr > 0) {
+				if (taxType === 'apply' && tr > 0) {
 					doc.text(`${Math.round(tr)}%`, x + 2, cy, { width: cols[6].w - 4, align: 'right', lineBreak: false });
 				} else {
 					doc.fillColor(LIGHT).text('-', x + 2, cy, { width: cols[6].w - 4, align: 'right', lineBreak: false });
@@ -373,7 +381,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				x += cols[7].w;
 
 				// Total
-				doc.font('Helvetica-Bold').fillColor(DARK);
+				doc.font('DejaVu-Bold').fillColor(DARK);
 				doc.text(fNum(total), x + 2, cy, { width: cols[8].w - 4, align: 'right', lineBreak: false });
 
 				y += rh;
@@ -396,7 +404,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 				else if (item.discountType === 'fixed' && item.discount) disc = item.discount / 100;
 				const net = sub - disc;
 				subtotal += net;
-				taxTotal += invoice.taxApplicationType === 'apply' ? (net * tr) / 100 : 0;
+				taxTotal += taxType === 'apply' ? (net * tr) / 100 : 0;
 			}
 
 			let invDisc = 0;
@@ -420,9 +428,9 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const tValW = 110;
 
 			function tRow(label: string, value: string, bold = false) {
-				doc.fontSize(8).font(bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(bold ? DARK : MUTED);
+				doc.fontSize(8).font(bold ? 'DejaVu-Bold' : 'DejaVu').fillColor(bold ? DARK : MUTED);
 				doc.text(label, tLabelX, y, { width: 145, align: 'right', lineBreak: false });
-				doc.fontSize(8.5).font(bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(DARK);
+				doc.fontSize(8.5).font(bold ? 'DejaVu-Bold' : 'DejaVu').fillColor(DARK);
 				doc.text(value, tValX, y, { width: tValW, align: 'right', lineBreak: false });
 				y += bold ? 16 : 13;
 			}
@@ -432,7 +440,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 
 			if (invDisc > 0) tRow('Discount:', `-${fNum(invDisc)} ${calcCurr}`);
 
-			if (invoice.taxApplicationType === 'apply' && taxTotal > 0) {
+			if (taxType === 'apply' && taxTotal > 0) {
 				tRow('Total TVA:', `${fNum(taxTotal)} ${calcCurr}`);
 				if (isMulti) tRow('', `${fNum(taxTotal * xRate)} ${invCurr}`, true);
 			}
@@ -442,13 +450,13 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			const gtBoxW = 265;
 			const gtBoxX = PW - MR - gtBoxW;
 			doc.roundedRect(gtBoxX, y - 2, gtBoxW, 22, 3).fillColor(ACCENT).fill();
-			doc.fontSize(9).font('Helvetica-Bold').fillColor(WHITE);
+			doc.fontSize(9).font('DejaVu-Bold').fillColor(WHITE);
 			doc.text('TOTAL:', gtBoxX + 5, y + 4, { width: gtBoxW / 2 - 10, lineBreak: false });
 			doc.text(`${fNum(grand)} ${calcCurr}`, gtBoxX + gtBoxW / 2, y + 4, { width: gtBoxW / 2 - 5, align: 'right', lineBreak: false });
 			y += 24;
 
 			if (isMulti) {
-				doc.fontSize(8.5).font('Helvetica-Bold').fillColor(DARK);
+				doc.fontSize(8.5).font('DejaVu-Bold').fillColor(DARK);
 				doc.text(`${fNum(grand * xRate)} ${invCurr}`, tValX, y, { width: tValW, align: 'right', lineBreak: false });
 				y += 16;
 			}
@@ -457,7 +465,7 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			if (invoice.notes) {
 				y = pageBreak(y, 40);
 				y += 8;
-				doc.fontSize(7.5).font('Helvetica').fillColor(MUTED);
+				doc.fontSize(7.5).font('DejaVu').fillColor(MUTED);
 				const notesH = doc.heightOfString(invoice.notes, { width: CW });
 				doc.text(invoice.notes, ML, y, { width: CW, height: notesH + 2 });
 				y += notesH + 10;

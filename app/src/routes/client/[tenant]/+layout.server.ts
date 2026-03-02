@@ -59,6 +59,14 @@ export const load: LayoutServerLoad = async (event) => {
 		tenant,
 		client: event.locals.client,
 		clientUser: event.locals.clientUser,
+		user: event.locals.user
+			? {
+					id: event.locals.user.id,
+					email: event.locals.user.email,
+					firstName: event.locals.user.firstName,
+					lastName: event.locals.user.lastName
+				}
+			: null,
 		defaultWebsiteUrl
 	};
 };

@@ -22,6 +22,28 @@ export async function extractInvoiceDataFromPdf(buffer: Buffer): Promise<PdfExtr
 	return parseInvoiceText(text);
 }
 
+/**
+ * Parse a bare number string (no currency symbol) to cents.
+ * Handles "241.30", "1,234.56", "241,30" (comma as decimal).
+ */
+function parseBareAmount(str: string): number | null {
+	let s = str.trim();
+	if (!s) return null;
+	const hasCommaAsDecimal = s.includes(',') && !s.includes('.');
+	if (hasCommaAsDecimal) {
+		s = s.replace(',', '.');
+	} else {
+		s = s.replace(/,/g, '');
+	}
+	const amount = Math.round(parseFloat(s) * 100);
+	return !isNaN(amount) && amount > 0 ? amount : null;
+}
+
+function normalizeCurrency(c: string): string {
+	const upper = c.toUpperCase();
+	return upper === 'LEI' ? 'RON' : upper;
+}
+
 function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	const result: PdfExtractedInvoiceData = {};
 
@@ -50,26 +72,65 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	}
 
 	// --- Amount ---
-	// Use the existing parseAmount from parsers (handles $, €, USD, EUR, RON, GBP)
-	// Look for amount near keywords like "total", "amount due", "suma"
-	const amountPatterns = [
-		/(?:total|amount\s*due|suma\s*total[aă]?|de\s*plat[aă]|gesamtbetrag)\s*[:\-–]?\s*(.{3,30})/i,
-		/(?:balance\s*due|amount\s*payable)\s*[:\-–]?\s*(.{3,30})/i
-	];
+	// Strategy: try multiple approaches from most specific to least specific
 
-	for (const pattern of amountPatterns) {
-		const match = text.match(pattern);
-		if (match) {
-			const amountResult = parseAmount(match[1]);
-			if (amountResult) {
-				result.amount = amountResult.amount;
-				result.currency = amountResult.currency;
-				break;
+	// 1. "Total in RON 241.30" or "Total in EUR 50.00" (exact currency + number)
+	const totalInCurrencyMatch = text.match(/(?:total)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s+([\d.,]+)/i);
+	if (totalInCurrencyMatch) {
+		const parsed = parseBareAmount(totalInCurrencyMatch[2]);
+		if (parsed) {
+			result.amount = parsed;
+			result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+		}
+	}
+
+	// 2. Standard patterns: "Total: $12.34", "Amount due: 50.00 EUR", etc.
+	if (!result.amount) {
+		const amountPatterns = [
+			/(?:total|amount\s*due|suma\s*total[aă]?|de\s*plat[aă]|gesamtbetrag)\s*[:\-–]?\s*(.{3,30})/i,
+			/(?:balance\s*due|amount\s*payable)\s*[:\-–]?\s*(.{3,30})/i
+		];
+		for (const pattern of amountPatterns) {
+			const match = text.match(pattern);
+			if (match) {
+				const amountResult = parseAmount(match[1]);
+				if (amountResult) {
+					result.amount = amountResult.amount;
+					result.currency = amountResult.currency;
+					break;
+				}
 			}
 		}
 	}
 
-	// Fallback: try parseAmount on the full text (picks first amount found)
+	// 3. "Amount in RON/EUR" header followed by number (column-style layout)
+	if (!result.amount) {
+		const headerMatch = text.match(/(?:amount|suma|sumă)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s*\n?\s*([\d.,]+)/i);
+		if (headerMatch) {
+			const parsed = parseBareAmount(headerMatch[2]);
+			if (parsed) {
+				result.amount = parsed;
+				result.currency = normalizeCurrency(headerMatch[1]);
+			}
+		}
+	}
+
+	// 4. "Total" followed by bare number (no currency symbol — detect currency from context)
+	if (!result.amount) {
+		const totalBareMatch = text.match(/\btotal\b\s*[:\-–]?\s*([\d.,]+)/i);
+		if (totalBareMatch) {
+			const parsed = parseBareAmount(totalBareMatch[1]);
+			if (parsed) {
+				result.amount = parsed;
+				const currencyHint = text.match(/(?:amount|suma|sumă|total|consumption)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)/i);
+				if (currencyHint) {
+					result.currency = normalizeCurrency(currencyHint[1]);
+				}
+			}
+		}
+	}
+
+	// 5. Fallback: try parseAmount on the full text (picks first amount with currency found)
 	if (!result.amount) {
 		const amountResult = parseAmount(text);
 		if (amountResult) {
