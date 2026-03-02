@@ -79,6 +79,7 @@
 		"bullmq": "^5.66.4",
 		"embla-carousel-auto-scroll": "^8.6.0",
 		"embla-carousel-autoplay": "^8.6.0",
+		"googleapis": "^171.4.0",
 		"jsonwebtoken": "^9.0.3",
 		"jszip": "^3.10.1",
 		"lucia": "^3.2.2",

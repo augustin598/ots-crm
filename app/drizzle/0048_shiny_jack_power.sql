@@ -1,0 +1,36 @@
+CREATE TABLE `gmail_integration` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`email` text NOT NULL,
+	`access_token` text NOT NULL,
+	`refresh_token` text NOT NULL,
+	`token_expires_at` timestamp NOT NULL,
+	`is_active` number DEFAULT true NOT NULL,
+	`last_sync_at` timestamp,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `supplier_invoice` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`supplier_id` text,
+	`invoice_number` text,
+	`amount` integer,
+	`currency` text DEFAULT 'USD' NOT NULL,
+	`issue_date` timestamp,
+	`due_date` timestamp,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`pdf_path` text,
+	`gmail_message_id` text,
+	`email_subject` text,
+	`email_from` text,
+	`supplier_type` text,
+	`raw_email_data` text,
+	`imported_at` timestamp,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`supplier_id`) REFERENCES `supplier`(`id`) ON UPDATE no action ON DELETE no action
+);

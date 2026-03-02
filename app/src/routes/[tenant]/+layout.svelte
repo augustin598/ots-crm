@@ -17,6 +17,8 @@
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 import LinkIcon from '@lucide/svelte/icons/link';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import FileDownIcon from '@lucide/svelte/icons/file-down';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
@@ -198,11 +200,21 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/banking`)}>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/banking`) && !currentPath.startsWith(`/${tenantSlug}/banking/supplier-invoices`)}>
 						{#snippet child({ props })}
 							<a href="/{tenantSlug}/banking" {...props}>
 								<CreditCardIcon />
 								<span>Banking</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/banking/supplier-invoices`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/banking/supplier-invoices" {...props}>
+								<FileDownIcon />
+								<span>Facturi Furnizori</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>
@@ -218,11 +230,21 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings`)}>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings`) && !currentPath.startsWith(`/${tenantSlug}/settings/gmail`)}>
 						{#snippet child({ props })}
 							<a href="/{tenantSlug}/settings" {...props}>
 								<SettingsIcon />
 								<span>Settings</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings/gmail`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/settings/gmail" {...props}>
+								<MailIcon />
+								<span>Gmail</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

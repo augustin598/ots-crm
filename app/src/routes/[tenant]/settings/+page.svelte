@@ -14,7 +14,9 @@
 	import { getFaviconUrl } from '$lib/utils';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
+	import MailIcon from '@lucide/svelte/icons/mail';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 
@@ -47,6 +49,10 @@
 	let phone = $state(data.tenant?.phone || '');
 	let email = $state(data.tenant?.email || '');
 	let contractPrefix = $state(data.tenant?.contractPrefix || 'CTR');
+
+	// Gmail status
+	const gmailStatusQuery = getGmailConnectionStatus();
+	const gmailStatus = $derived(gmailStatusQuery.current);
 
 	// Invitation state
 	let invitationEmail = $state('');
@@ -364,6 +370,34 @@
 					<span class="text-sm text-muted-foreground">-0001</span>
 				</div>
 			</CardContent>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/gmail`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<MailIcon class="h-5 w-5 text-muted-foreground" />
+						<div>
+							<CardTitle>Gmail Integration</CardTitle>
+							<CardDescription>
+								{#if gmailStatus?.isConnected}
+									Conectat ca {gmailStatus.email}
+								{:else}
+									Conecteaza contul Gmail pentru import facturi furnizori
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if gmailStatus?.isConnected}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
 		</Card>
 	</div>
 

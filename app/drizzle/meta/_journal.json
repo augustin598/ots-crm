@@ -337,6 +337,20 @@
       "when": 1772262919782,
       "tag": "0047_lean_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1772295616630,
+      "tag": "0048_shiny_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1772300037779,
+      "tag": "0049_careful_quasimodo",
+      "breakpoints": true
     }
   ]
 }

@@ -903,6 +903,7 @@ export const expense = sqliteTable('expense', {
 	receiptPath: text('receipt_path'), // File path for receipt upload
 	invoicePath: text('invoice_path'), // File path for invoice upload
 	isPaid: boolean('is_paid').notNull().default(false), // Whether the expense has been paid (linked to a bank transaction)
+	supplierInvoiceId: text('supplier_invoice_id').references(() => supplierInvoice.id),
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -1182,6 +1183,57 @@ export const contractSignToken = sqliteTable('contract_sign_token', {
 		.default(sql`current_date`)
 });
 
+export const gmailIntegration = sqliteTable('gmail_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	accessToken: text('access_token').notNull(),
+	refreshToken: text('refresh_token').notNull(),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	syncEnabled: boolean('sync_enabled').notNull().default(true),
+	syncInterval: text('sync_interval').notNull().default('daily'), // 'daily' | 'twice_daily' | 'weekly'
+	syncParserIds: text('sync_parser_ids'), // JSON array string or null (= all)
+	syncDateRangeDays: integer('sync_date_range_days').notNull().default(7),
+	lastSyncResults: text('last_sync_results'), // JSON string with {imported, errors, timestamp}
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const supplierInvoice = sqliteTable('supplier_invoice', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	supplierId: text('supplier_id').references(() => supplier.id),
+	invoiceNumber: text('invoice_number'),
+	amount: integer('amount'), // in cents
+	currency: text('currency').notNull().default('USD'),
+	issueDate: timestamp('issue_date', { withTimezone: true, mode: 'date' }),
+	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
+	status: text('status').notNull().default('pending'), // 'paid', 'unpaid', 'pending'
+	pdfPath: text('pdf_path'),
+	gmailMessageId: text('gmail_message_id'), // for deduplication
+	emailSubject: text('email_subject'),
+	emailFrom: text('email_from'),
+	supplierType: text('supplier_type'), // 'cpanel', 'whmcs', 'hetzner', 'google', 'unknown'
+	rawEmailData: text('raw_email_data'), // JSON with email metadata for debugging
+	importedAt: timestamp('imported_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const passwordResetToken = sqliteTable('password_reset_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -1253,7 +1305,9 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	magicLinkTokens: many(magicLinkToken),
 	seoLinks: many(seoLink),
 	contracts: many(contract),
-	contractTemplates: many(contractTemplate)
+	contractTemplates: many(contractTemplate),
+	gmailIntegration: one(gmailIntegration),
+	supplierInvoices: many(supplierInvoice)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -1707,7 +1761,27 @@ export const supplierRelations = relations(supplier, ({ one, many }) => ({
 		references: [tenant.id]
 	}),
 	expenses: many(expense),
-	matchRules: many(transactionMatchRule)
+	matchRules: many(transactionMatchRule),
+	supplierInvoices: many(supplierInvoice)
+}));
+
+export const gmailIntegrationRelations = relations(gmailIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [gmailIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const supplierInvoiceRelations = relations(supplierInvoice, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [supplierInvoice.tenantId],
+		references: [tenant.id]
+	}),
+	supplier: one(supplier, {
+		fields: [supplierInvoice.supplierId],
+		references: [supplier.id]
+	}),
+	expenses: many(expense)
 }));
 
 export const userBankAccountRelations = relations(userBankAccount, ({ one }) => ({
@@ -1745,6 +1819,10 @@ export const expenseRelations = relations(expense, ({ one }) => ({
 	createdBy: one(user, {
 		fields: [expense.createdByUserId],
 		references: [user.id]
+	}),
+	supplierInvoice: one(supplierInvoice, {
+		fields: [expense.supplierInvoiceId],
+		references: [supplierInvoice.id]
 	})
 }));
 
@@ -1945,3 +2023,7 @@ export type Contract = typeof contract.$inferSelect;
 export type NewContract = typeof contract.$inferInsert;
 export type ContractLineItem = typeof contractLineItem.$inferSelect;
 export type NewContractLineItem = typeof contractLineItem.$inferInsert;
+export type GmailIntegration = typeof gmailIntegration.$inferSelect;
+export type NewGmailIntegration = typeof gmailIntegration.$inferInsert;
+export type SupplierInvoice = typeof supplierInvoice.$inferSelect;
+export type NewSupplierInvoice = typeof supplierInvoice.$inferInsert;

@@ -6,6 +6,7 @@ import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
 import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
 import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
+import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -59,7 +60,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	daily_work_reminders: processDailyWorkReminders,
 	spv_invoice_sync: processSpvInvoiceSync,
 	revolut_transaction_sync: processRevolutTransactionSync,
-	keez_invoice_sync: processKeezInvoiceSync
+	keez_invoice_sync: processKeezInvoiceSync,
+	gmail_invoice_sync: processGmailInvoiceSync
 };
 
 /**
@@ -224,6 +226,42 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled Keez invoice sync: daily at 4:00 AM');
+
+	// Schedule Gmail invoice sync job to run daily at 5:00 AM
+	schedulerQueue.add(
+		'gmail-invoice-sync',
+		{
+			type: 'gmail_invoice_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 5 * * *', // Every day at 5:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'gmail-invoice-sync'
+		}
+	);
+
+	console.log('Scheduled Gmail invoice sync: daily at 5:00 AM');
+
+	// Schedule Gmail invoice sync evening run for twice_daily tenants
+	schedulerQueue.add(
+		'gmail-invoice-sync-evening',
+		{
+			type: 'gmail_invoice_sync',
+			params: { timeSlot: 'evening' }
+		},
+		{
+			repeat: {
+				pattern: '0 17 * * *', // Every day at 5:00 PM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'gmail-invoice-sync-evening'
+		}
+	);
+
+	console.log('Scheduled Gmail invoice sync (evening): daily at 5:00 PM');
 
 	return { queue: schedulerQueue, worker };
 };
