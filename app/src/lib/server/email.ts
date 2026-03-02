@@ -885,6 +885,158 @@ export async function sendTaskUpdateEmail(
 }
 
 /**
+ * Send task notification email to client
+ */
+export async function sendTaskClientNotificationEmail(
+	taskId: string,
+	clientEmail: string,
+	clientName: string,
+	notificationType: 'created' | 'status-change' | 'comment' | 'modified',
+	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
+	if (!task) {
+		throw new Error('Task not found');
+	}
+
+	const transporter = await getTenantTransporter(task.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
+
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, task.tenantId))
+		.limit(1);
+
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, task.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
+	const tenantName = tenant?.name || 'CRM';
+	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+
+	// Subject and description based on notification type
+	let subject: string;
+	let changeDescription: string;
+	let headerColor = '#2563eb';
+
+	switch (notificationType) {
+		case 'created':
+			subject = `Task nou: ${task.title}`;
+			changeDescription = 'Un task nou a fost creat pentru dumneavoastră.';
+			break;
+		case 'status-change': {
+			const statusLabels: Record<string, string> = {
+				'todo': 'De făcut',
+				'in-progress': 'În lucru',
+				'review': 'În review',
+				'done': 'Finalizat',
+				'cancelled': 'Anulat',
+				'pending-approval': 'Așteaptă aprobare'
+			};
+			const statusLabel = statusLabels[extra?.newStatus || task.status] || extra?.newStatus || task.status;
+			subject = `Task actualizat: ${task.title} — ${statusLabel}`;
+			changeDescription = `Statusul taskului a fost schimbat în: <strong>${statusLabel}</strong>.`;
+			if (extra?.newStatus === 'done') headerColor = '#16a34a';
+			if (extra?.newStatus === 'cancelled') headerColor = '#dc2626';
+			break;
+		}
+		case 'comment':
+			subject = `Comentariu nou pe task: ${task.title}`;
+			changeDescription = extra?.commentPreview
+				? `Un comentariu nou a fost adăugat: "${extra.commentPreview.substring(0, 200)}${extra.commentPreview.length > 200 ? '...' : ''}"`
+				: 'Un comentariu nou a fost adăugat pe task.';
+			break;
+		case 'modified':
+			subject = `Task modificat: ${task.title}`;
+			changeDescription = extra?.changedFields
+				? `Următoarele câmpuri au fost modificate: ${extra.changedFields}.`
+				: 'Taskul a fost modificat.';
+			break;
+	}
+
+	const mailOptions = {
+		from: `"${tenantName}" <${fromEmail}>`,
+		to: clientEmail,
+		subject,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>${subject}</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: ${headerColor}; margin-top: 0;">${subject}</h1>
+					<p>Bună ${clientName || 'ziua'},</p>
+					<p>${changeDescription}</p>
+					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
+						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
+						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
+						<p><strong>Prioritate:</strong> ${task.priority || 'Medium'}</p>
+						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
+						${task.dueDate ? `<p><strong>Termen:</strong> ${new Date(task.dueDate).toLocaleDateString('ro-RO')}</p>` : ''}
+					</div>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Task</a>
+					</div>
+					<p style="color: #999; font-size: 12px; margin-top: 20px;">Acest email a fost trimis automat de ${tenantName}.</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+${subject}
+
+Bună ${clientName || 'ziua'},
+
+${changeDescription.replace(/<[^>]+>/g, '')}
+
+${task.title}
+${task.description ? `\n${task.description}\n` : ''}
+Prioritate: ${task.priority || 'Medium'}
+Status: ${task.status || 'Todo'}
+${task.dueDate ? `Termen: ${new Date(task.dueDate).toLocaleDateString('ro-RO')}\n` : ''}
+
+Vezi task: ${taskUrl}
+		`
+	};
+
+	const logId = await logEmailAttempt({
+		tenantId: task.tenantId,
+		toEmail: clientEmail,
+		subject: mailOptions.subject,
+		emailType: 'task-client-notification',
+		metadata: { taskId, taskTitle: task.title, notificationType, ...extra }
+	});
+
+	try {
+		await logEmailProcessing(logId);
+		const info = await transporter.sendMail(mailOptions);
+		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
+		console.log(`Task client notification email sent to ${clientEmail} for task ${task.title} (${notificationType})`);
+	} catch (error) {
+		await logEmailFailure(logId, (error as Error).message);
+		console.error('Failed to send task client notification email:', error);
+		throw new Error('Failed to send task client notification email');
+	}
+}
+
+/**
  * Send invoice paid confirmation email
  */
 export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: string): Promise<void> {
@@ -1013,6 +1165,149 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		await logEmailFailure(logId, (error as Error).message);
 		console.error('Failed to send invoice paid email:', error);
 		throw new Error('Failed to send invoice paid email');
+	}
+}
+
+/**
+ * Send overdue invoice reminder email to client
+ */
+export async function sendOverdueReminderEmail(
+	invoiceId: string,
+	clientEmail: string,
+	daysOverdue: number,
+	reminderNumber: number
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	// Get invoice details
+	const [invoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(eq(table.invoice.id, invoiceId))
+		.limit(1);
+
+	if (!invoice) {
+		throw new Error('Invoice not found');
+	}
+
+	// Get tenant-specific transporter
+	const transporter = await getTenantTransporter(invoice.tenantId);
+	if (!transporter) {
+		throw new Error('Email transporter not available');
+	}
+
+	// Get client details
+	const [client] = await db
+		.select()
+		.from(table.client)
+		.where(eq(table.client.id, invoice.clientId))
+		.limit(1);
+
+	// Get tenant details
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, invoice.tenantId))
+		.limit(1);
+
+	// Get tenant email settings to determine from email
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	const fromEmail =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		'noreply@example.com';
+	const tenantName = tenant?.name || 'CRM';
+	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
+
+	// Format amounts
+	const formatAmount = (cents: number | null | undefined, currency: string) => {
+		if (cents === null || cents === undefined) return 'N/A';
+		const amount = (cents / 100).toFixed(2);
+		return `${amount} ${currency}`;
+	};
+
+	const dueDateStr = invoice.dueDate
+		? new Date(invoice.dueDate).toLocaleDateString()
+		: 'N/A';
+
+	const mailOptions = {
+		from: `"${tenantName}" <${fromEmail}>`,
+		to: clientEmail,
+		subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
+		html: `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Reminder: Factura ${invoice.invoiceNumber}</title>
+			</head>
+			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					<h1 style="color: #d97706; margin-top: 0;">Reminder plata factura</h1>
+					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
+					<p>Va reamintim ca factura de mai jos este restanta de <strong>${daysOverdue} zile</strong>.</p>
+					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #d97706;">
+						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
+						<p><strong>Suma de plata:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
+						<p><strong>Data scadenta:</strong> ${dueDateStr}</p>
+						<p style="color: #d97706;"><strong>Zile restanta:</strong> ${daysOverdue}</p>
+						${reminderNumber > 1 ? `<p style="font-size: 12px; color: #999;">Reminder #${reminderNumber}</p>` : ''}
+					</div>
+					<p>Va rugam sa efectuati plata cat mai curand posibil.</p>
+					<div style="text-align: center; margin: 30px 0;">
+						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura</a>
+					</div>
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">Daca ati efectuat deja plata, va rugam sa ignorati acest email. Pentru intrebari, nu ezitati sa ne contactati.</p>
+				</div>
+			</body>
+			</html>
+		`,
+		text: `
+			Reminder plata factura
+
+			Stimate/Stimata ${client?.name || 'Client'},
+
+			Va reamintim ca factura de mai jos este restanta de ${daysOverdue} zile.
+
+			Numar factura: ${invoice.invoiceNumber}
+			Suma de plata: ${formatAmount(invoice.totalAmount, invoice.currency)}
+			Data scadenta: ${dueDateStr}
+			Zile restanta: ${daysOverdue}
+			${reminderNumber > 1 ? `Reminder #${reminderNumber}` : ''}
+
+			Va rugam sa efectuati plata cat mai curand posibil.
+
+			Vezi factura: ${invoiceUrl}
+
+			Daca ati efectuat deja plata, va rugam sa ignorati acest email.
+		`
+	};
+
+	const logId = await logEmailAttempt({
+		tenantId: invoice.tenantId,
+		toEmail: clientEmail,
+		subject: mailOptions.subject,
+		emailType: 'invoice-overdue-reminder',
+		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber }
+	});
+
+	try {
+		await logEmailProcessing(logId);
+		const info = await transporter.sendMail(mailOptions);
+		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
+		console.log(`Overdue reminder email sent to ${clientEmail} for invoice ${invoice.invoiceNumber} (${daysOverdue} days overdue, reminder #${reminderNumber})`);
+	} catch (error) {
+		await logEmailFailure(logId, (error as Error).message);
+		console.error('Failed to send overdue reminder email:', error);
+		throw new Error('Failed to send overdue reminder email');
 	}
 }
 

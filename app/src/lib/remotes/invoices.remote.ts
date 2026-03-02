@@ -840,7 +840,9 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
 		.limit(1);
 
-	const invoiceEmailsEnabled = invoiceSettings?.invoiceEmailsEnabled ?? true;
+	const masterEnabled = invoiceSettings?.invoiceEmailsEnabled ?? true;
+	const sendInvoiceEnabled = invoiceSettings?.sendInvoiceEmailEnabled ?? true;
+	const invoiceEmailsEnabled = masterEnabled && sendInvoiceEnabled;
 
 	// Get client email
 	const [client] = await db

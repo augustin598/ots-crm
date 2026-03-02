@@ -40,6 +40,13 @@ export const getInvoiceSettings = query(async () => {
 			defaultCurrency: 'RON',
 			defaultTaxRate: 19,
 			invoiceEmailsEnabled: true,
+			sendInvoiceEmailEnabled: true,
+			paidConfirmationEmailEnabled: true,
+			overdueReminderEnabled: false,
+			overdueReminderDaysAfterDue: 3,
+			overdueReminderRepeatDays: 7,
+			overdueReminderMaxCount: 3,
+			autoSendRecurringInvoices: false,
 			invoiceLogo: null
 		};
 	}
@@ -60,6 +67,13 @@ export const getInvoiceSettings = query(async () => {
 		defaultCurrency: settings.defaultCurrency || 'RON',
 		defaultTaxRate: settings.defaultTaxRate ?? 19,
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true,
+		sendInvoiceEmailEnabled: settings.sendInvoiceEmailEnabled ?? true,
+		paidConfirmationEmailEnabled: settings.paidConfirmationEmailEnabled ?? true,
+		overdueReminderEnabled: settings.overdueReminderEnabled ?? false,
+		overdueReminderDaysAfterDue: settings.overdueReminderDaysAfterDue ?? 3,
+		overdueReminderRepeatDays: settings.overdueReminderRepeatDays ?? 7,
+		overdueReminderMaxCount: settings.overdueReminderMaxCount ?? 3,
+		autoSendRecurringInvoices: settings.autoSendRecurringInvoices ?? false,
 		invoiceLogo: settings.invoiceLogo || null
 	};
 });
@@ -79,6 +93,13 @@ export const updateInvoiceSettings = command(
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 		defaultTaxRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))), // VAT percentage (0-100)
 		invoiceEmailsEnabled: v.optional(v.boolean()),
+		sendInvoiceEmailEnabled: v.optional(v.boolean()),
+		paidConfirmationEmailEnabled: v.optional(v.boolean()),
+		overdueReminderEnabled: v.optional(v.boolean()),
+		overdueReminderDaysAfterDue: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(30))),
+		overdueReminderRepeatDays: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(30))),
+		overdueReminderMaxCount: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(10))),
+		autoSendRecurringInvoices: v.optional(v.boolean()),
 		invoiceLogo: v.optional(v.nullable(v.string())) // base64-encoded logo image, null to remove
 	}),
 	async (data) => {
@@ -124,6 +145,20 @@ export const updateInvoiceSettings = command(
 					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
 					invoiceEmailsEnabled:
 						data.invoiceEmailsEnabled !== undefined ? data.invoiceEmailsEnabled : undefined,
+					sendInvoiceEmailEnabled:
+						data.sendInvoiceEmailEnabled !== undefined ? data.sendInvoiceEmailEnabled : undefined,
+					paidConfirmationEmailEnabled:
+						data.paidConfirmationEmailEnabled !== undefined ? data.paidConfirmationEmailEnabled : undefined,
+					overdueReminderEnabled:
+						data.overdueReminderEnabled !== undefined ? data.overdueReminderEnabled : undefined,
+					overdueReminderDaysAfterDue:
+						data.overdueReminderDaysAfterDue !== undefined ? data.overdueReminderDaysAfterDue : undefined,
+					overdueReminderRepeatDays:
+						data.overdueReminderRepeatDays !== undefined ? data.overdueReminderRepeatDays : undefined,
+					overdueReminderMaxCount:
+						data.overdueReminderMaxCount !== undefined ? data.overdueReminderMaxCount : undefined,
+					autoSendRecurringInvoices:
+						data.autoSendRecurringInvoices !== undefined ? data.autoSendRecurringInvoices : undefined,
 					invoiceLogo: data.invoiceLogo !== undefined ? data.invoiceLogo : undefined,
 					updatedAt: new Date()
 				})
@@ -149,6 +184,13 @@ export const updateInvoiceSettings = command(
 				defaultCurrency: data.defaultCurrency || 'RON',
 				defaultTaxRate: data.defaultTaxRate ?? 19,
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true,
+				sendInvoiceEmailEnabled: data.sendInvoiceEmailEnabled ?? true,
+				paidConfirmationEmailEnabled: data.paidConfirmationEmailEnabled ?? true,
+				overdueReminderEnabled: data.overdueReminderEnabled ?? false,
+				overdueReminderDaysAfterDue: data.overdueReminderDaysAfterDue ?? 3,
+				overdueReminderRepeatDays: data.overdueReminderRepeatDays ?? 7,
+				overdueReminderMaxCount: data.overdueReminderMaxCount ?? 3,
+				autoSendRecurringInvoices: data.autoSendRecurringInvoices ?? false,
 				invoiceLogo: data.invoiceLogo || null
 			});
 		}

@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
+import { sendInvoiceEmail } from '../../email';
 
 /**
  * Process recurring invoices - finds active recurring invoices that are due
@@ -35,8 +36,23 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 		// Generate invoice for each recurring invoice
 		for (const recurringInvoice of activeRecurringInvoices) {
 			try {
-				await generateInvoiceFromRecurringTemplate(recurringInvoice.id);
+				const result = await generateInvoiceFromRecurringTemplate(recurringInvoice.id);
 				invoicesGenerated++;
+
+				// Auto-send email if enabled for this tenant
+				if (result?.invoiceId) {
+					try {
+						await autoSendRecurringInvoiceIfEnabled(
+							recurringInvoice.tenantId,
+							result.invoiceId
+						);
+					} catch (autoSendError) {
+						console.error(
+							`Failed to auto-send recurring invoice ${result.invoiceId}:`,
+							autoSendError
+						);
+					}
+				}
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 				console.error(
@@ -65,4 +81,52 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			error: 'Failed to process recurring invoices'
 		};
 	}
+}
+
+/**
+ * Auto-send a recurring invoice email if the tenant has auto-send enabled
+ */
+async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: string) {
+	const [settings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
+	const masterEnabled = settings?.invoiceEmailsEnabled ?? true;
+	const autoSendEnabled = settings?.autoSendRecurringInvoices ?? false;
+
+	if (!masterEnabled || !autoSendEnabled) return;
+
+	const [invoice] = await db
+		.select()
+		.from(table.invoice)
+		.where(eq(table.invoice.id, invoiceId))
+		.limit(1);
+
+	if (!invoice) return;
+
+	const [client] = await db
+		.select()
+		.from(table.client)
+		.where(eq(table.client.id, invoice.clientId))
+		.limit(1);
+
+	if (!client?.email) {
+		console.warn(`Cannot auto-send invoice ${invoiceId}: client email not found`);
+		return;
+	}
+
+	await sendInvoiceEmail(invoiceId, client.email);
+
+	await db
+		.update(table.invoice)
+		.set({
+			lastEmailSentAt: new Date(),
+			lastEmailStatus: 'sent',
+			updatedAt: new Date()
+		})
+		.where(eq(table.invoice.id, invoiceId));
+
+	console.log(`Auto-sent recurring invoice ${invoice.invoiceNumber} to ${client.email}`);
 }

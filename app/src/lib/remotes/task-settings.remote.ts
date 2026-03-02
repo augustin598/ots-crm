@@ -25,18 +25,36 @@ export const getTaskSettings = query(async () => {
 	// Return default settings if none exist
 	if (!settings) {
 		return {
-			taskRemindersEnabled: true
+			taskRemindersEnabled: true,
+			clientEmailsEnabled: false,
+			clientEmailOnTaskCreated: true,
+			clientEmailOnStatusChange: true,
+			clientEmailOnComment: true,
+			clientEmailOnTaskModified: true,
+			internalEmailOnComment: true
 		};
 	}
 
 	return {
-		taskRemindersEnabled: settings.taskRemindersEnabled ?? true
+		taskRemindersEnabled: settings.taskRemindersEnabled ?? true,
+		clientEmailsEnabled: settings.clientEmailsEnabled ?? false,
+		clientEmailOnTaskCreated: settings.clientEmailOnTaskCreated ?? true,
+		clientEmailOnStatusChange: settings.clientEmailOnStatusChange ?? true,
+		clientEmailOnComment: settings.clientEmailOnComment ?? true,
+		clientEmailOnTaskModified: settings.clientEmailOnTaskModified ?? true,
+		internalEmailOnComment: settings.internalEmailOnComment ?? true
 	};
 });
 
 export const updateTaskSettings = command(
 	v.object({
-		taskRemindersEnabled: v.optional(v.boolean())
+		taskRemindersEnabled: v.optional(v.boolean()),
+		clientEmailsEnabled: v.optional(v.boolean()),
+		clientEmailOnTaskCreated: v.optional(v.boolean()),
+		clientEmailOnStatusChange: v.optional(v.boolean()),
+		clientEmailOnComment: v.optional(v.boolean()),
+		clientEmailOnTaskModified: v.optional(v.boolean()),
+		internalEmailOnComment: v.optional(v.boolean())
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -57,21 +75,31 @@ export const updateTaskSettings = command(
 			.limit(1);
 
 		if (existing) {
-			// Update existing settings
 			await db
 				.update(table.taskSettings)
 				.set({
-					taskRemindersEnabled: data.taskRemindersEnabled !== undefined ? data.taskRemindersEnabled : undefined,
+					taskRemindersEnabled: data.taskRemindersEnabled,
+					clientEmailsEnabled: data.clientEmailsEnabled,
+					clientEmailOnTaskCreated: data.clientEmailOnTaskCreated,
+					clientEmailOnStatusChange: data.clientEmailOnStatusChange,
+					clientEmailOnComment: data.clientEmailOnComment,
+					clientEmailOnTaskModified: data.clientEmailOnTaskModified,
+					internalEmailOnComment: data.internalEmailOnComment,
 					updatedAt: new Date()
 				})
 				.where(eq(table.taskSettings.tenantId, event.locals.tenant.id));
 		} else {
-			// Create new settings
 			const settingsId = generateTaskSettingsId();
 			await db.insert(table.taskSettings).values({
 				id: settingsId,
 				tenantId: event.locals.tenant.id,
-				taskRemindersEnabled: data.taskRemindersEnabled ?? true
+				taskRemindersEnabled: data.taskRemindersEnabled ?? true,
+				clientEmailsEnabled: data.clientEmailsEnabled ?? false,
+				clientEmailOnTaskCreated: data.clientEmailOnTaskCreated ?? true,
+				clientEmailOnStatusChange: data.clientEmailOnStatusChange ?? true,
+				clientEmailOnComment: data.clientEmailOnComment ?? true,
+				clientEmailOnTaskModified: data.clientEmailOnTaskModified ?? true,
+				internalEmailOnComment: data.internalEmailOnComment ?? true
 			});
 		}
 

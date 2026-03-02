@@ -4,8 +4,66 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { sendTaskAssignmentEmail, sendTaskUpdateEmail } from '$lib/server/email';
+import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail } from '$lib/server/email';
 import { recordTaskActivity } from '$lib/server/task-activity';
+
+type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
+
+async function sendClientNotificationIfEnabled(
+	taskId: string,
+	tenantId: string,
+	notificationType: ClientNotificationType,
+	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
+): Promise<void> {
+	try {
+		// Load task settings
+		const [settings] = await db
+			.select()
+			.from(table.taskSettings)
+			.where(eq(table.taskSettings.tenantId, tenantId))
+			.limit(1);
+
+		// Check master toggle (default OFF)
+		if (!settings?.clientEmailsEnabled) return;
+
+		// Check sub-toggle
+		const toggleMap: Record<ClientNotificationType, boolean> = {
+			'created': settings.clientEmailOnTaskCreated ?? true,
+			'status-change': settings.clientEmailOnStatusChange ?? true,
+			'comment': settings.clientEmailOnComment ?? true,
+			'modified': settings.clientEmailOnTaskModified ?? true
+		};
+		if (!toggleMap[notificationType]) return;
+
+		// Get task with client
+		const [task] = await db
+			.select()
+			.from(table.task)
+			.where(eq(table.task.id, taskId))
+			.limit(1);
+
+		if (!task?.clientId) return;
+
+		// Get client email
+		const [client] = await db
+			.select()
+			.from(table.client)
+			.where(eq(table.client.id, task.clientId))
+			.limit(1);
+
+		if (!client?.email) return;
+
+		await sendTaskClientNotificationEmail(
+			taskId,
+			client.email,
+			client.name || client.email,
+			notificationType,
+			extra
+		);
+	} catch (error) {
+		console.error(`Failed to send client notification (${notificationType}):`, error);
+	}
+}
 
 function generateTaskId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -373,6 +431,9 @@ export const createTask = command(taskSchema, async (data) => {
 		action: 'created'
 	});
 
+	// Send client notification
+	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created');
+
 	return { success: true, taskId };
 });
 
@@ -582,6 +643,33 @@ export const updateTask = command(
 			}
 		}
 
+		// Send client notification
+		const statusChanged = updateData.status !== undefined && updateData.status !== existing.status;
+		if (statusChanged) {
+			await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'status-change', {
+				newStatus: updateData.status
+			});
+		} else {
+			// Collect changed fields for notification
+			const changedFieldLabels: string[] = [];
+			const fieldLabels: Record<string, string> = {
+				title: 'Titlu', description: 'Descriere', priority: 'Prioritate',
+				dueDate: 'Termen', assignedToUserId: 'Persoana asignată',
+				projectId: 'Proiect', milestoneId: 'Milestone', clientId: 'Client'
+			};
+			for (const field of Object.keys(fieldLabels)) {
+				const newVal = updateData[field as keyof typeof updateData];
+				if (newVal !== undefined && String(existing[field as keyof typeof existing] ?? '') !== String(newVal)) {
+					changedFieldLabels.push(fieldLabels[field]);
+				}
+			}
+			if (changedFieldLabels.length > 0) {
+				await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'modified', {
+					changedFields: changedFieldLabels.join(', ')
+				});
+			}
+		}
+
 		return { success: true };
 	}
 );
@@ -669,6 +757,11 @@ export const updateTaskPosition = command(
 				field: 'status',
 				oldValue: oldStatus,
 				newValue: newStatus
+			});
+
+			// Send client notification for status change
+			await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
+				newStatus
 			});
 		}
 
@@ -941,6 +1034,11 @@ export const approveTask = command(
 			newValue: status
 		});
 
+		// Send client notification
+		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
+			newStatus: status
+		});
+
 		return { success: true, taskId };
 	}
 );
@@ -989,6 +1087,11 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 		field: 'status',
 		oldValue: 'pending-approval',
 		newValue: 'cancelled'
+	});
+
+	// Send client notification
+	await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
+		newStatus: 'cancelled'
 	});
 
 	return { success: true, taskId };

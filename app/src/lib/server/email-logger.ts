@@ -12,9 +12,11 @@ type EmailType =
 	| 'task-assignment'
 	| 'task-update'
 	| 'task-reminder'
+	| 'task-client-notification'
 	| 'daily-reminder'
 	| 'contract-signing'
-	| 'invoice-paid';
+	| 'invoice-paid'
+	| 'invoice-overdue-reminder';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

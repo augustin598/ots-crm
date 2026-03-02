@@ -8,6 +8,7 @@ import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync'
 import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
 import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
+import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -63,7 +64,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	revolut_transaction_sync: processRevolutTransactionSync,
 	keez_invoice_sync: processKeezInvoiceSync,
 	gmail_invoice_sync: processGmailInvoiceSync,
-	bnr_rate_sync: processBnrRateSync
+	bnr_rate_sync: processBnrRateSync,
+	invoice_overdue_reminders: processInvoiceOverdueReminders
 };
 
 /**
@@ -282,6 +284,24 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled BNR rate sync: daily at 10:00 AM');
+
+	// Schedule invoice overdue reminders weekdays at 9:00 AM
+	schedulerQueue.add(
+		'invoice-overdue-reminders',
+		{
+			type: 'invoice_overdue_reminders',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 9 * * 1-5', // Weekdays at 9:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'invoice-overdue-reminders'
+		}
+	);
+
+	console.log('Scheduled invoice overdue reminders: weekdays at 9:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };

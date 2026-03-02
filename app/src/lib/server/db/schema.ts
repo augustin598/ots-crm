@@ -428,6 +428,8 @@ export const invoice = sqliteTable('invoice', {
 	paidDate: timestamp('paid_date', { withTimezone: true, mode: 'date' }),
 	lastEmailSentAt: timestamp('last_email_sent_at', { withTimezone: true, mode: 'date' }),
 	lastEmailStatus: text('last_email_status'), // 'sent', 'failed', 'pending'
+	overdueReminderCount: integer('overdue_reminder_count').notNull().default(0),
+	lastOverdueReminderAt: timestamp('last_overdue_reminder_at', { withTimezone: true, mode: 'date' }),
 	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	notes: text('notes'),
 	invoiceSeries: text('invoice_series'), // User-entered invoice series
@@ -570,6 +572,13 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
 	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
+	sendInvoiceEmailEnabled: boolean('send_invoice_email_enabled').notNull().default(true),
+	paidConfirmationEmailEnabled: boolean('paid_confirmation_email_enabled').notNull().default(true),
+	overdueReminderEnabled: boolean('overdue_reminder_enabled').notNull().default(false),
+	overdueReminderDaysAfterDue: integer('overdue_reminder_days_after_due').notNull().default(3),
+	overdueReminderRepeatDays: integer('overdue_reminder_repeat_days').notNull().default(7),
+	overdueReminderMaxCount: integer('overdue_reminder_max_count').notNull().default(3),
+	autoSendRecurringInvoices: boolean('auto_send_recurring_invoices').notNull().default(false),
 	invoiceLogo: text('invoice_logo'), // base64-encoded logo image for invoice PDFs
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -586,6 +595,14 @@ export const taskSettings = sqliteTable('task_settings', {
 		.references(() => tenant.id)
 		.unique(),
 	taskRemindersEnabled: boolean('task_reminders_enabled').notNull().default(true),
+	// Client email notification toggles
+	clientEmailsEnabled: boolean('client_emails_enabled').notNull().default(false),
+	clientEmailOnTaskCreated: boolean('client_email_on_task_created').notNull().default(true),
+	clientEmailOnStatusChange: boolean('client_email_on_status_change').notNull().default(true),
+	clientEmailOnComment: boolean('client_email_on_comment').notNull().default(true),
+	clientEmailOnTaskModified: boolean('client_email_on_task_modified').notNull().default(true),
+	// Internal notification toggles
+	internalEmailOnComment: boolean('internal_email_on_comment').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

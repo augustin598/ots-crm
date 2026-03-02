@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { recordTaskActivity } from '$lib/server/task-activity';
+import { sendTaskUpdateEmail, sendTaskClientNotificationEmail } from '$lib/server/email';
 
 function generateTaskCommentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -77,6 +78,71 @@ export const createTaskComment = command(
 			tenantId: event.locals.tenant.id,
 			action: 'commented'
 		});
+
+		// Load task settings for notification toggles
+		const [settings] = await db
+			.select()
+			.from(table.taskSettings)
+			.where(eq(table.taskSettings.tenantId, event.locals.tenant.id))
+			.limit(1);
+
+		// Send internal notification to watchers (if enabled)
+		if (settings?.internalEmailOnComment !== false) {
+			const watchers = await db
+				.select()
+				.from(table.taskWatcher)
+				.where(
+					and(
+						eq(table.taskWatcher.taskId, data.taskId),
+						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
+					)
+				);
+
+			for (const watcher of watchers) {
+				if (watcher.userId === event.locals.user.id) continue;
+
+				const [watcherUser] = await db
+					.select()
+					.from(table.user)
+					.where(eq(table.user.id, watcher.userId))
+					.limit(1);
+
+				if (watcherUser?.email) {
+					try {
+						const watcherName =
+							`${watcherUser.firstName} ${watcherUser.lastName}`.trim() || watcherUser.email;
+						await sendTaskUpdateEmail(data.taskId, watcherUser.email, watcherName, 'comment');
+					} catch (error) {
+						console.error('Failed to send comment notification to watcher:', error);
+					}
+				}
+			}
+		}
+
+		// Send client notification (if enabled)
+		if (settings?.clientEmailsEnabled && settings?.clientEmailOnComment !== false) {
+			if (task.clientId) {
+				const [client] = await db
+					.select()
+					.from(table.client)
+					.where(eq(table.client.id, task.clientId))
+					.limit(1);
+
+				if (client?.email) {
+					try {
+						await sendTaskClientNotificationEmail(
+							data.taskId,
+							client.email,
+							client.name || client.email,
+							'comment',
+							{ commentPreview: data.content }
+						);
+					} catch (error) {
+						console.error('Failed to send comment notification to client:', error);
+					}
+				}
+			}
+		}
 
 		return { success: true, commentId };
 	}

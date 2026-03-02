@@ -23,11 +23,12 @@ export function registerEmailNotificationHooks(): void {
 				.where(eq(table.invoiceSettings.tenantId, tenantId))
 				.limit(1);
 
-			const invoiceEmailsEnabled = invoiceSettings?.invoiceEmailsEnabled ?? true;
+			const masterEnabled = invoiceSettings?.invoiceEmailsEnabled ?? true;
+			const paidEmailEnabled = invoiceSettings?.paidConfirmationEmailEnabled ?? true;
 
-			if (!invoiceEmailsEnabled) {
+			if (!masterEnabled || !paidEmailEnabled) {
 				console.log(
-					`Invoice emails are disabled for tenant ${tenantId}. Skipping invoice paid email for invoice ${invoice.invoiceNumber}.`
+					`Invoice paid emails are disabled for tenant ${tenantId}. Skipping email for invoice ${invoice.invoiceNumber}.`
 				);
 				return;
 			}

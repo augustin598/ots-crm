@@ -37,6 +37,13 @@
 	let defaultCurrency = $state<Currency>((settings?.defaultCurrency || 'RON') as Currency);
 	let defaultTaxRate = $state(settings?.defaultTaxRate ?? 19);
 	let invoiceEmailsEnabled = $state(settings?.invoiceEmailsEnabled ?? true);
+	let sendInvoiceEmailEnabled = $state(settings?.sendInvoiceEmailEnabled ?? true);
+	let paidConfirmationEmailEnabled = $state(settings?.paidConfirmationEmailEnabled ?? true);
+	let overdueReminderEnabled = $state(settings?.overdueReminderEnabled ?? false);
+	let overdueReminderDaysAfterDue = $state(settings?.overdueReminderDaysAfterDue ?? 3);
+	let overdueReminderRepeatDays = $state(settings?.overdueReminderRepeatDays ?? 7);
+	let overdueReminderMaxCount = $state(settings?.overdueReminderMaxCount ?? 3);
+	let autoSendRecurringInvoices = $state(settings?.autoSendRecurringInvoices ?? false);
 	let invoiceLogo = $state<string | null>(settings?.invoiceLogo || null);
 	let logoPreview = $state<string | null>(null);
 	let saving = $state(false);
@@ -59,6 +66,13 @@
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
 			defaultTaxRate = settings.defaultTaxRate ?? 19;
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
+			sendInvoiceEmailEnabled = settings.sendInvoiceEmailEnabled ?? true;
+			paidConfirmationEmailEnabled = settings.paidConfirmationEmailEnabled ?? true;
+			overdueReminderEnabled = settings.overdueReminderEnabled ?? false;
+			overdueReminderDaysAfterDue = settings.overdueReminderDaysAfterDue ?? 3;
+			overdueReminderRepeatDays = settings.overdueReminderRepeatDays ?? 7;
+			overdueReminderMaxCount = settings.overdueReminderMaxCount ?? 3;
+			autoSendRecurringInvoices = settings.autoSendRecurringInvoices ?? false;
 			invoiceLogo = settings.invoiceLogo || null;
 			logoPreview = settings.invoiceLogo || null;
 		}
@@ -113,6 +127,13 @@
 				defaultCurrency: defaultCurrency || undefined,
 				defaultTaxRate: defaultTaxRate !== undefined ? defaultTaxRate : undefined,
 				invoiceEmailsEnabled,
+				sendInvoiceEmailEnabled,
+				paidConfirmationEmailEnabled,
+				overdueReminderEnabled,
+				overdueReminderDaysAfterDue,
+				overdueReminderRepeatDays,
+				overdueReminderMaxCount,
+				autoSendRecurringInvoices,
 				invoiceLogo
 			}).updates(settingsQuery);
 			saveSuccess = true;
@@ -451,22 +472,124 @@
 							automatically applied when creating invoices unless overridden.
 						</p>
 					</div>
+				</CardContent>
+			</Card>
 
-					<Separator />
+			<Card>
+				<CardHeader>
+					<CardTitle>Notificari Email Facturi</CardTitle>
+					<CardDescription>Configureaza emailurile trimise automat pentru facturi</CardDescription>
+				</CardHeader>
+				<CardContent class="space-y-6">
+					<div class="flex items-center justify-between">
+						<div class="space-y-0.5">
+							<Label for="invoiceEmailsEnabled">Emailuri Facturi (Master)</Label>
+							<p class="text-xs text-muted-foreground">
+								Activeaza/dezactiveaza toate emailurile legate de facturi
+							</p>
+						</div>
+						<Switch id="invoiceEmailsEnabled" bind:checked={invoiceEmailsEnabled} />
+					</div>
 
-					<div class="space-y-6">
-						<h3 class="text-lg font-semibold">Email Notifications</h3>
+					{#if invoiceEmailsEnabled}
+						<Separator />
 
 						<div class="flex items-center justify-between">
 							<div class="space-y-0.5">
-								<Label for="invoiceEmailsEnabled">Invoice Emails</Label>
+								<Label for="sendInvoiceEmailEnabled">Trimitere Factura</Label>
 								<p class="text-xs text-muted-foreground">
-									Send invoice emails to clients when invoices are sent or marked as paid
+									Trimite email clientului cand apesi "Trimite Factura"
 								</p>
 							</div>
-							<Switch id="invoiceEmailsEnabled" bind:checked={invoiceEmailsEnabled} />
+							<Switch id="sendInvoiceEmailEnabled" bind:checked={sendInvoiceEmailEnabled} />
 						</div>
-					</div>
+
+						<div class="flex items-center justify-between">
+							<div class="space-y-0.5">
+								<Label for="paidConfirmationEmailEnabled">Confirmare Plata</Label>
+								<p class="text-xs text-muted-foreground">
+									Trimite email clientului cand factura este marcata ca platita
+								</p>
+							</div>
+							<Switch id="paidConfirmationEmailEnabled" bind:checked={paidConfirmationEmailEnabled} />
+						</div>
+
+						<div class="flex items-center justify-between">
+							<div class="space-y-0.5">
+								<Label for="autoSendRecurringInvoices">Auto-trimitere Facturi Recurente</Label>
+								<p class="text-xs text-muted-foreground">
+									Facturile generate automat de recurenta sunt trimise pe email clientului
+								</p>
+							</div>
+							<Switch id="autoSendRecurringInvoices" bind:checked={autoSendRecurringInvoices} />
+						</div>
+
+						<Separator />
+
+						<div class="space-y-4">
+							<div class="flex items-center justify-between">
+								<div class="space-y-0.5">
+									<Label for="overdueReminderEnabled">Reminder Factura Restanta</Label>
+									<p class="text-xs text-muted-foreground">
+										Trimite remindere automate pentru facturile restante (Luni-Vineri la 9:00)
+									</p>
+								</div>
+								<Switch id="overdueReminderEnabled" bind:checked={overdueReminderEnabled} />
+							</div>
+
+							{#if overdueReminderEnabled}
+								<div class="ml-4 space-y-4 border-l-2 border-muted pl-4">
+									<div class="space-y-2">
+										<Label for="overdueReminderDaysAfterDue">
+											Zile dupa scadenta pentru primul reminder
+										</Label>
+										<Input
+											id="overdueReminderDaysAfterDue"
+											type="number"
+											min="1"
+											max="30"
+											bind:value={overdueReminderDaysAfterDue}
+										/>
+										<p class="text-xs text-muted-foreground">
+											Numarul de zile dupa data scadenta cand se trimite primul reminder (1-30)
+										</p>
+									</div>
+
+									<div class="space-y-2">
+										<Label for="overdueReminderRepeatDays">
+											Interval repetare (zile)
+										</Label>
+										<Input
+											id="overdueReminderRepeatDays"
+											type="number"
+											min="0"
+											max="30"
+											bind:value={overdueReminderRepeatDays}
+										/>
+										<p class="text-xs text-muted-foreground">
+											La cate zile se repeta reminderul (0 = fara repetare)
+										</p>
+									</div>
+
+									<div class="space-y-2">
+										<Label for="overdueReminderMaxCount">
+											Numar maxim de remindere
+										</Label>
+										<Input
+											id="overdueReminderMaxCount"
+											type="number"
+											min="1"
+											max="10"
+											bind:value={overdueReminderMaxCount}
+										/>
+										<p class="text-xs text-muted-foreground">
+											Numarul maxim de remindere trimise per factura (1-10)
+										</p>
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/if}
 				</CardContent>
 			</Card>
 
