@@ -55,7 +55,8 @@ export function findParser(from: string, subject: string): SupplierParser | null
 export function buildSearchQuery(
 	parserIds?: string[],
 	dateFrom?: Date,
-	dateTo?: Date
+	dateTo?: Date,
+	customEmails?: string[]
 ): string {
 	const parsers = parserIds
 		? parserRegistry.filter((p) => parserIds.includes(p.id))
@@ -67,14 +68,25 @@ export function buildSearchQuery(
 		.map((p) => `(${p.getSearchQuery()})`)
 		.join(' OR ');
 
+	// Build custom email/domain queries
+	const customQuery =
+		customEmails && customEmails.length > 0
+			? customEmails.map((e) => `from:${e}`).join(' OR ')
+			: '';
+
 	// If generic is included, we search broader
 	const includesGeneric = parsers.some((p) => p.id === 'generic');
 
-	let query = supplierQueries;
-	if (includesGeneric && !supplierQueries) {
+	// Combine all source queries
+	const sourceQueries = [supplierQueries, customQuery].filter(Boolean);
+	let query = sourceQueries.join(' OR ');
+
+	if (includesGeneric && !query) {
 		query = genericParser.getSearchQuery();
 	} else if (includesGeneric) {
-		query = `(${supplierQueries}) OR (${genericParser.getSearchQuery()})`;
+		query = `(${query}) OR (${genericParser.getSearchQuery()})`;
+	} else if (sourceQueries.length > 1) {
+		query = `(${supplierQueries}) OR (${customQuery})`;
 	}
 
 	// Add date filters
@@ -140,5 +152,57 @@ export function parseAmount(text: string): { amount: number; currency: string } 
 			}
 		}
 	}
+	return null;
+}
+
+/**
+ * Extract email address from "Name <email>" format and match against a pattern.
+ * Patterns: "@domain.com" (domain), "user@domain.com" (exact), "domain.com" (partial domain)
+ */
+function matchesEmailPattern(from: string, pattern: string): boolean {
+	const fromLower = from.toLowerCase();
+	const emailMatch = fromLower.match(/<(.+?)>/);
+	const emailAddress = emailMatch ? emailMatch[1] : fromLower.trim();
+	const patternLower = pattern.toLowerCase().trim();
+	if (!patternLower) return false;
+
+	if (patternLower.startsWith('@')) {
+		return emailAddress.endsWith(patternLower);
+	} else if (patternLower.includes('@')) {
+		return emailAddress === patternLower;
+	} else {
+		const domain = emailAddress.split('@')[1] || '';
+		return domain.includes(patternLower);
+	}
+}
+
+/**
+ * Check if an email sender matches any exclusion pattern.
+ */
+export function shouldExcludeEmail(from: string, excludePatterns: string[]): boolean {
+	if (!excludePatterns || excludePatterns.length === 0) return false;
+	return excludePatterns.some((pattern) => matchesEmailPattern(from, pattern));
+}
+
+/**
+ * Check if an email sender matches any of the custom monitored emails/domains.
+ */
+export function isFromCustomSource(from: string, customEmails: string[]): boolean {
+	if (!customEmails || customEmails.length === 0) return false;
+	return customEmails.some((pattern) => matchesEmailPattern(from, pattern));
+}
+
+/**
+ * Find parser for an email. If the email is from a custom-monitored source
+ * and no specific parser matches, fall back to generic parser.
+ */
+export function findParserWithFallback(
+	from: string,
+	subject: string,
+	isCustomMonitored: boolean
+): SupplierParser | null {
+	const parser = parserRegistry.find((p) => p.matchEmail(from, subject));
+	if (parser) return parser;
+	if (isCustomMonitored) return genericParser;
 	return null;
 }

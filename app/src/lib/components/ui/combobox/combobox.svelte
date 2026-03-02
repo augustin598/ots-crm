@@ -1,13 +1,15 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Check, ChevronsUpDown } from 'lucide-svelte';
 	import { cn } from '$lib/utils';
 
-	type Option = {
+	export type Option = {
 		value: string | number;
 		label: string;
+		meta?: Record<string, unknown>;
 	};
 
 	let {
@@ -17,7 +19,9 @@
 		searchPlaceholder = 'Search...',
 		onValueChange,
 		disabled = false,
-		class: className
+		class: className,
+		optionSnippet,
+		selectedSnippet
 	}: {
 		options?: Option[];
 		value?: number | string | undefined;
@@ -26,6 +30,8 @@
 		onValueChange?: (value: number | string | undefined) => void;
 		disabled?: boolean;
 		class?: string;
+		optionSnippet?: Snippet<[{ option: Option; selected: boolean }]>;
+		selectedSnippet?: Snippet<[{ option: Option }]>;
 	} = $props();
 
 	let open = $state(false);
@@ -69,8 +75,12 @@
 				class={cn('w-full justify-between', className)}
 				{disabled}
 			>
-				<span class="truncate">
-					{selectedOption ? selectedOption.label : placeholder}
+				<span class="flex items-center truncate">
+					{#if selectedOption && selectedSnippet}
+						{@render selectedSnippet({ option: selectedOption })}
+					{:else}
+						{selectedOption ? selectedOption.label : placeholder}
+					{/if}
 				</span>
 				<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
 			</Button>
@@ -108,11 +118,15 @@
 						>
 							<Check
 								class={cn(
-									'mr-2 h-4 w-4',
+									'mr-2 h-4 w-4 shrink-0',
 									(String(value) === String(option.value)) ? 'opacity-100' : 'opacity-0'
 								)}
 							/>
-							{option.label}
+							{#if optionSnippet}
+								{@render optionSnippet({ option, selected: String(value) === String(option.value) })}
+							{:else}
+								{option.label}
+							{/if}
 						</button>
 					{/each}
 				{/if}
@@ -120,4 +134,3 @@
 		</div>
 	</PopoverContent>
 </Popover>
-

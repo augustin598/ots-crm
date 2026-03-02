@@ -239,16 +239,6 @@ import LinkIcon from '@lucide/svelte/icons/link';
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
-				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings/gmail`)}>
-						{#snippet child({ props })}
-							<a href="/{tenantSlug}/settings/gmail" {...props}>
-								<MailIcon />
-								<span>Gmail</span>
-							</a>
-						{/snippet}
-					</SidebarMenuButton>
-				</SidebarMenuItem>
 			</SidebarMenu>
 		</SidebarContent>
 		<SidebarFooter>

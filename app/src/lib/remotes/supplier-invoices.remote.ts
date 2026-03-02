@@ -85,6 +85,24 @@ export const getGmailConnectionStatus = query(async () => {
 	return getGmailStatus(event.locals.tenant.id);
 });
 
+export const getSupplierListForGmail = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const suppliers = await db
+		.select({
+			id: table.supplier.id,
+			name: table.supplier.name,
+			email: table.supplier.email
+		})
+		.from(table.supplier)
+		.where(eq(table.supplier.tenantId, event.locals.tenant.id));
+
+	return suppliers.filter((s) => s.email);
+});
+
 // ---- Commands ----
 
 export const deleteSupplierInvoice = command(
@@ -335,7 +353,19 @@ export const updateGmailSyncConfig = command(
 		syncEnabled: v.boolean(),
 		syncInterval: v.picklist(['daily', 'twice_daily', 'weekly']),
 		syncParserIds: v.optional(v.nullable(v.array(v.string()))),
-		syncDateRangeDays: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(90)))
+		syncDateRangeDays: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(90))),
+		customMonitoredEmails: v.optional(
+			v.nullable(
+				v.array(
+					v.object({
+						label: v.string(),
+						value: v.pipe(v.string(), v.minLength(1))
+					})
+				)
+			)
+		),
+		monitoredSupplierIds: v.optional(v.nullable(v.array(v.string()))),
+		excludeEmails: v.optional(v.nullable(v.array(v.pipe(v.string(), v.minLength(1)))))
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -362,6 +392,9 @@ export const updateGmailSyncConfig = command(
 				syncInterval: data.syncInterval,
 				syncParserIds: data.syncParserIds ? JSON.stringify(data.syncParserIds) : null,
 				syncDateRangeDays: data.syncDateRangeDays ?? 7,
+				customMonitoredEmails: data.customMonitoredEmails ? JSON.stringify(data.customMonitoredEmails) : null,
+				monitoredSupplierIds: data.monitoredSupplierIds ? JSON.stringify(data.monitoredSupplierIds) : null,
+				excludeEmails: data.excludeEmails ? JSON.stringify(data.excludeEmails) : null,
 				updatedAt: new Date()
 			})
 			.where(eq(table.gmailIntegration.id, integration.id));

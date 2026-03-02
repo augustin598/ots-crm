@@ -2,7 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { searchEmails, getEmail, getAttachment } from '../../gmail/client';
-import { findParser, buildSearchQuery } from '../../gmail/parsers';
+import { findParserWithFallback, buildSearchQuery, shouldExcludeEmail, isFromCustomSource } from '../../gmail/parsers';
 import { updateLastSyncAt } from '../../gmail/auth';
 import { extractInvoiceDataFromPdf } from '../../gmail/pdf-parser';
 import { writeFile, mkdir } from 'fs/promises';
@@ -60,7 +60,34 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 
 				// Use tenant-specific parser selection
 				const parserIds = integration.syncParserIds ? JSON.parse(integration.syncParserIds) : undefined;
-				const query = buildSearchQuery(parserIds, dateFrom);
+
+				// Load custom monitored emails
+				const customEmails: string[] = [];
+				if (integration.customMonitoredEmails) {
+					const parsed: Array<{ label: string; value: string }> = JSON.parse(integration.customMonitoredEmails);
+					customEmails.push(...parsed.map((e) => e.value));
+				}
+				if (integration.monitoredSupplierIds) {
+					const supplierIds: string[] = JSON.parse(integration.monitoredSupplierIds);
+					if (supplierIds.length > 0) {
+						const suppliers = await db
+							.select({ id: table.supplier.id, email: table.supplier.email })
+							.from(table.supplier)
+							.where(eq(table.supplier.tenantId, integration.tenantId));
+						for (const s of suppliers) {
+							if (s.email && supplierIds.includes(s.id)) {
+								customEmails.push(s.email);
+							}
+						}
+					}
+				}
+
+				// Load exclusion patterns
+				const excludePatterns: string[] = integration.excludeEmails
+					? JSON.parse(integration.excludeEmails)
+					: [];
+
+				const query = buildSearchQuery(parserIds, dateFrom, undefined, customEmails.length > 0 ? customEmails : undefined);
 
 				const messages = await searchEmails(integration.tenantId, query, 100);
 
@@ -82,7 +109,12 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 						if (existing) continue;
 
 						const email = await getEmail(integration.tenantId, msg.id);
-						const parser = findParser(email.from, email.subject);
+
+						// Apply exclusion filter
+						if (shouldExcludeEmail(email.from, excludePatterns)) continue;
+
+						const customMonitored = isFromCustomSource(email.from, customEmails);
+						const parser = findParserWithFallback(email.from, email.subject, customMonitored);
 						if (!parser) continue;
 
 						const parsed = parser.parseInvoice(email);

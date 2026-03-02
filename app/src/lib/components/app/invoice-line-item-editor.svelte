@@ -78,8 +78,8 @@
 					...item,
 					description: keezItem.name,
 					keezItem,
-					rate: keezItem.lastPrice || 0, // Auto-set price from Keez item
-					taxRate: defaultTaxRate // Use default VAT rate from settings
+					rate: keezItem.lastPrice || 0,
+					taxRate: keezItem.vatRate && keezItem.vatRate > 0 ? keezItem.vatRate : defaultTaxRate
 				};
 			}
 			return item;
@@ -120,6 +120,7 @@
 				const newItem: KeezItem = {
 					externalId: result.externalId,
 					lastPrice: 0,
+					vatRate: parseFloat(newItemVatRate) || defaultTaxRate,
 					name: newItemName.trim(),
 					code: newItemCode.trim() || '',
 					currencyCode: 'RON',
@@ -151,7 +152,7 @@
 	const keezItemOptions = $derived(
 		keezItems.map((item) => ({
 			value: item.externalId || '',
-			label: `${item.name}${item.code ? ` (${item.code})` : ''}`
+			label: `${item.name}${item.code ? ` (${item.code})` : ''} — ${item.lastPrice ? `${item.lastPrice} ${item.currencyCode || 'RON'}` : 'fără preț'}`
 		}))
 	);
 

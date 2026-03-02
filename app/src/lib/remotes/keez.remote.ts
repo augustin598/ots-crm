@@ -262,11 +262,19 @@ export const getKeezItems = query(
 			filter: filters.filter
 		});
 
+		// Normalize and filter items: exclude inactive, missing name, or missing externalId
+		const items = (response || [])
+			.filter((item) => item.isActive && item.name && item.externalId)
+			.map((item) => ({
+				...item,
+				lastPrice: item.lastPrice ?? 0,
+				vatRate: item.vatRate ?? 0
+			}));
 
 		return {
-			data: response || [],
-			total: response.length || 0,
-			recordsCount: response.length || 0
+			data: items,
+			total: items.length,
+			recordsCount: items.length
 		};
 	}
 );
@@ -460,7 +468,7 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 	}
 
 	// Map and create invoice
-	const keezInvoice = mapInvoiceToKeez(
+	const keezInvoice = await mapInvoiceToKeez(
 		{ ...invoice, lineItems },
 		client,
 		tenant,

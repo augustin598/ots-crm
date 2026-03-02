@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getGmailConnectionStatus, updateGmailSyncConfig } from '$lib/remotes/supplier-invoices.remote';
+	import { getGmailConnectionStatus, updateGmailSyncConfig, getSupplierListForGmail } from '$lib/remotes/supplier-invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -9,7 +9,8 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Switch } from '$lib/components/ui/switch';
-	import { CheckCircle2, XCircle, Mail, Link as LinkIcon, Unlink, Settings, Save } from '@lucide/svelte';
+	import { Combobox } from '$lib/components/ui/combobox';
+	import { CheckCircle2, XCircle, Mail, Link as LinkIcon, Unlink, Settings, Save, Plus, X, UserPlus, ShieldBan } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 
@@ -29,6 +30,31 @@
 	let syncDateRangeDays = $state(7);
 	let selectedSyncParsers = $state<string[] | null>(null); // null = all
 
+	// Custom monitored emails (freeform)
+	let customMonitoredEmails = $state<Array<{ label: string; value: string }>>([]);
+	let newCustomEmail = $state('');
+
+	// Monitored CRM suppliers
+	let monitoredSupplierIds = $state<string[]>([]);
+	let selectedSupplierId = $state<string | undefined>(undefined);
+
+	// Exclusion patterns
+	let excludeEmails = $state<string[]>([]);
+	let newExcludeEmail = $state('');
+
+	// Load suppliers for combobox
+	const suppliersQuery = getSupplierListForGmail();
+	const supplierList = $derived(suppliersQuery.current ?? []);
+
+	const supplierOptions = $derived(
+		supplierList
+			.filter((s: { id: string }) => !monitoredSupplierIds.includes(s.id))
+			.map((s: { id: string; name: string; email: string | null }) => ({
+				value: s.id,
+				label: `${s.name} (${s.email})`
+			}))
+	);
+
 	// Initialize sync config from status
 	$effect(() => {
 		if (status?.connected) {
@@ -36,6 +62,9 @@
 			syncInterval = status.syncInterval ?? 'daily';
 			syncDateRangeDays = status.syncDateRangeDays ?? 7;
 			selectedSyncParsers = status.syncParserIds ?? null;
+			customMonitoredEmails = status.customMonitoredEmails ?? [];
+			monitoredSupplierIds = status.monitoredSupplierIds ?? [];
+			excludeEmails = status.excludeEmails ?? [];
 		}
 	});
 
@@ -73,6 +102,61 @@
 
 	function isParserSelected(id: string): boolean {
 		return selectedSyncParsers === null || selectedSyncParsers.includes(id);
+	}
+
+	// Custom email helpers
+	function addCustomEmail() {
+		const val = newCustomEmail.trim();
+		if (!val) return;
+		if (!val.includes('@') && !val.includes('.')) {
+			toast.error('Introdu o adresă de email sau un domeniu (ex: @acme.ro, billing@furnizor.com)');
+			return;
+		}
+		if (customMonitoredEmails.some((e) => e.value === val)) {
+			toast.error('Această adresă există deja');
+			return;
+		}
+		const label = val.startsWith('@') ? `Domeniu: ${val}` : val;
+		customMonitoredEmails = [...customMonitoredEmails, { label, value: val }];
+		newCustomEmail = '';
+	}
+
+	function removeCustomEmail(value: string) {
+		customMonitoredEmails = customMonitoredEmails.filter((e) => e.value !== value);
+	}
+
+	// Monitored supplier helpers
+	function addMonitoredSupplier() {
+		if (!selectedSupplierId) return;
+		if (!monitoredSupplierIds.includes(selectedSupplierId)) {
+			monitoredSupplierIds = [...monitoredSupplierIds, selectedSupplierId];
+		}
+		selectedSupplierId = undefined;
+	}
+
+	function removeMonitoredSupplier(id: string) {
+		monitoredSupplierIds = monitoredSupplierIds.filter((sid) => sid !== id);
+	}
+
+	function getSupplierDisplay(id: string): string {
+		const s = supplierList.find((s: { id: string }) => s.id === id);
+		return s ? `${s.name} (${s.email})` : id;
+	}
+
+	// Exclusion helpers
+	function addExcludeEmail() {
+		const val = newExcludeEmail.trim();
+		if (!val) return;
+		if (excludeEmails.includes(val)) {
+			toast.error('Acest pattern există deja');
+			return;
+		}
+		excludeEmails = [...excludeEmails, val];
+		newExcludeEmail = '';
+	}
+
+	function removeExcludeEmail(val: string) {
+		excludeEmails = excludeEmails.filter((e) => e !== val);
 	}
 
 	// Check URL params for success/error from OAuth callback
@@ -113,7 +197,10 @@
 				syncEnabled,
 				syncInterval: syncInterval as 'daily' | 'twice_daily' | 'weekly',
 				syncParserIds: selectedSyncParsers,
-				syncDateRangeDays
+				syncDateRangeDays,
+				customMonitoredEmails: customMonitoredEmails.length > 0 ? customMonitoredEmails : null,
+				monitoredSupplierIds: monitoredSupplierIds.length > 0 ? monitoredSupplierIds : null,
+				excludeEmails: excludeEmails.length > 0 ? excludeEmails : null
 			}).updates(statusQuery);
 			toast.success('Configurare salvată');
 		} catch (e) {
@@ -312,6 +399,112 @@
 								</label>
 							{/each}
 						</div>
+					</div>
+
+					<Separator />
+
+					<!-- Custom supplier monitoring -->
+					<div>
+						<Label class="font-medium mb-1 flex items-center gap-2">
+							<UserPlus class="h-4 w-4" />
+							Furnizori Suplimentari
+						</Label>
+						<p class="text-sm text-muted-foreground mb-3">
+							Adaugă furnizori din CRM sau adrese de email/domenii personalizate pentru monitorizare.
+						</p>
+
+						<!-- CRM Suppliers combobox -->
+						{#if supplierOptions.length > 0 || monitoredSupplierIds.length > 0}
+							<div class="flex gap-2 mb-3">
+								<div class="flex-1">
+									<Combobox
+										options={supplierOptions}
+										bind:value={selectedSupplierId}
+										placeholder="Selectează furnizor din CRM..."
+										searchPlaceholder="Caută furnizor..."
+									/>
+								</div>
+								<Button variant="outline" size="icon" onclick={addMonitoredSupplier} disabled={!selectedSupplierId}>
+									<Plus class="h-4 w-4" />
+								</Button>
+							</div>
+						{/if}
+
+						<!-- Custom email/domain input -->
+						<div class="flex gap-2 mb-3">
+							<Input
+								bind:value={newCustomEmail}
+								placeholder="@domeniu.ro sau email@furnizor.com"
+								class="flex-1"
+								onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomEmail(); } }}
+							/>
+							<Button variant="outline" size="icon" onclick={addCustomEmail}>
+								<Plus class="h-4 w-4" />
+							</Button>
+						</div>
+
+						<!-- Display selected suppliers and custom emails as chips -->
+						{#if monitoredSupplierIds.length > 0 || customMonitoredEmails.length > 0}
+							<div class="flex flex-wrap gap-2">
+								{#each monitoredSupplierIds as sid}
+									<Badge variant="secondary" class="flex items-center gap-1 px-3 py-1">
+										{getSupplierDisplay(sid)}
+										<button type="button" onclick={() => removeMonitoredSupplier(sid)}
+											class="ml-1 hover:text-destructive">
+											<X class="h-3 w-3" />
+										</button>
+									</Badge>
+								{/each}
+								{#each customMonitoredEmails as email}
+									<Badge variant="outline" class="flex items-center gap-1 px-3 py-1">
+										{email.value}
+										<button type="button" onclick={() => removeCustomEmail(email.value)}
+											class="ml-1 hover:text-destructive">
+											<X class="h-3 w-3" />
+										</button>
+									</Badge>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<Separator />
+
+					<!-- Email exclusions -->
+					<div>
+						<Label class="font-medium mb-1 flex items-center gap-2">
+							<ShieldBan class="h-4 w-4" />
+							Excluderi
+						</Label>
+						<p class="text-sm text-muted-foreground mb-3">
+							Emailurile de la aceste adrese sau domenii vor fi ignorate la import.
+						</p>
+
+						<div class="flex gap-2 mb-3">
+							<Input
+								bind:value={newExcludeEmail}
+								placeholder="@spam.ro sau noreply@example.com"
+								class="flex-1"
+								onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExcludeEmail(); } }}
+							/>
+							<Button variant="outline" size="icon" onclick={addExcludeEmail}>
+								<Plus class="h-4 w-4" />
+							</Button>
+						</div>
+
+						{#if excludeEmails.length > 0}
+							<div class="flex flex-wrap gap-2">
+								{#each excludeEmails as pattern}
+									<Badge variant="destructive" class="flex items-center gap-1 px-3 py-1">
+										{pattern}
+										<button type="button" onclick={() => removeExcludeEmail(pattern)}
+											class="ml-1 hover:text-white/80">
+											<X class="h-3 w-3" />
+										</button>
+									</Badge>
+								{/each}
+							</div>
+						{/if}
 					</div>
 				{/if}
 

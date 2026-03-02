@@ -1,4 +1,4 @@
-import { customType, sqliteTable, integer as serial, integer, text } from 'drizzle-orm/sqlite-core';
+import { customType, sqliteTable, integer as serial, integer, text, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
 const timestamp = customType<{ data: Date }>({
@@ -1199,6 +1199,9 @@ export const gmailIntegration = sqliteTable('gmail_integration', {
 	syncParserIds: text('sync_parser_ids'), // JSON array string or null (= all)
 	syncDateRangeDays: integer('sync_date_range_days').notNull().default(7),
 	lastSyncResults: text('last_sync_results'), // JSON string with {imported, errors, timestamp}
+	customMonitoredEmails: text('custom_monitored_emails'), // JSON: [{label: string, value: string}]
+	monitoredSupplierIds: text('monitored_supplier_ids'), // JSON: string[] (supplier IDs)
+	excludeEmails: text('exclude_emails'), // JSON: string[] (email/domain patterns)
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1934,6 +1937,18 @@ export const magicLinkTokenRelations = relations(magicLinkToken, ({ one }) => ({
 	})
 }));
 
+// BNR Exchange Rates (synced daily from https://www.bnr.ro/nbrfxrates.xml)
+export const bnrExchangeRate = sqliteTable('bnr_exchange_rate', {
+	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+	currency: text('currency').notNull(),
+	rate: real('rate').notNull(),
+	multiplier: integer('multiplier').default(1),
+	rateDate: text('rate_date').notNull(),
+	fetchedAt: integer('fetched_at', { mode: 'timestamp' }).$defaultFn(() => new Date())
+}, (table) => [
+	uniqueIndex('bnr_rate_currency_date_idx').on(table.currency, table.rateDate)
+]);
+
 // Types
 export type Session = typeof session.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -2027,3 +2042,4 @@ export type GmailIntegration = typeof gmailIntegration.$inferSelect;
 export type NewGmailIntegration = typeof gmailIntegration.$inferInsert;
 export type SupplierInvoice = typeof supplierInvoice.$inferSelect;
 export type NewSupplierInvoice = typeof supplierInvoice.$inferInsert;
+export type BnrExchangeRate = typeof bnrExchangeRate.$inferSelect;

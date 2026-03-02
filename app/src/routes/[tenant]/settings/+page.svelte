@@ -17,6 +17,8 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
+	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 
@@ -53,6 +55,31 @@
 	// Gmail status
 	const gmailStatusQuery = getGmailConnectionStatus();
 	const gmailStatus = $derived(gmailStatusQuery.current);
+
+	// BNR exchange rates
+	const bnrRatesQuery = getBnrRates();
+	const bnrRates = $derived(bnrRatesQuery.current || []);
+	const mainCurrencies = ['EUR', 'USD', 'GBP', 'CHF'];
+	const mainRates = $derived(
+		mainCurrencies
+			.map((c) => bnrRates.find((r: any) => r.currency === c))
+			.filter(Boolean) as Array<{ currency: string; rate: number; multiplier: number; date: string }>
+	);
+	const bnrDate = $derived(mainRates.length > 0 ? mainRates[0].date : null);
+	let refreshingBnr = $state(false);
+	let bnrError = $state<string | null>(null);
+
+	async function handleRefreshBnr() {
+		refreshingBnr = true;
+		bnrError = null;
+		try {
+			await refreshBnrRates().updates(bnrRatesQuery);
+		} catch (e) {
+			bnrError = e instanceof Error ? e.message : 'Eroare la actualizarea cursului';
+		} finally {
+			refreshingBnr = false;
+		}
+	}
 
 	// Invitation state
 	let invitationEmail = $state('');
@@ -369,6 +396,43 @@
 					/>
 					<span class="text-sm text-muted-foreground">-0001</span>
 				</div>
+			</CardContent>
+		</Card>
+
+		<Card class="md:col-span-2">
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div>
+						<CardTitle>Curs Valutar BNR</CardTitle>
+						<CardDescription>
+							Cursul oficial BNR — actualizat zilnic de la bnr.ro
+						</CardDescription>
+					</div>
+					<Button variant="outline" size="sm" onclick={handleRefreshBnr} disabled={refreshingBnr}>
+						<RefreshCwIcon class="h-3.5 w-3.5 mr-1.5 {refreshingBnr ? 'animate-spin' : ''}" />
+						{refreshingBnr ? 'Se actualizeaza...' : 'Actualizeaza'}
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent>
+				{#if mainRates.length > 0}
+					<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+						{#each mainRates as rate}
+							<div class="rounded-lg border p-3 text-center">
+								<p class="text-xs text-muted-foreground">{rate.currency}/RON</p>
+								<p class="text-lg font-mono font-semibold">{rate.rate.toFixed(4)}</p>
+							</div>
+						{/each}
+					</div>
+					{#if bnrDate}
+						<p class="text-xs text-muted-foreground mt-2">Data curs: {bnrDate}</p>
+					{/if}
+				{:else}
+					<p class="text-sm text-muted-foreground">Nu sunt cursuri disponibile. Apasa Actualizeaza.</p>
+				{/if}
+				{#if bnrError}
+					<p class="text-sm text-red-600 mt-2">{bnrError}</p>
+				{/if}
 			</CardContent>
 		</Card>
 

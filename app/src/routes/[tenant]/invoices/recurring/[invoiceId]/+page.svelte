@@ -4,6 +4,7 @@
 	import { getServices } from '$lib/remotes/services.remote';
 	import { updateRecurringInvoice, getRecurringInvoice } from '$lib/remotes/recurring-invoices.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
+	import { getBnrRate } from '$lib/remotes/bnr.remote';
 	import { getPlugins } from '$lib/remotes/plugins.remote';
 	import { getKeezItems } from '$lib/remotes/keez.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
@@ -19,6 +20,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
+	import ClientComboboxLogo from '$lib/components/client-combobox-logo.svelte';
 	import {
 		Dialog,
 		DialogContent,
@@ -129,6 +131,14 @@
 	let paymentTerms = $state('Net 15');
 	let paymentMethod = $state('Bank Transfer');
 	let exchangeRate = $state('');
+	// BNR rate query — reactive, updates when target currency changes
+	const bnrTargetCurrency = $derived(
+		currency !== invoiceCurrency
+			? (currency !== 'RON' ? currency : invoiceCurrency !== 'RON' ? invoiceCurrency : null)
+			: null
+	);
+	let bnrRateQuery = $derived(bnrTargetCurrency ? getBnrRate(bnrTargetCurrency) : null);
+	let bnrRate = $derived(bnrRateQuery?.current ?? null);
 	let vatOnCollection = $state(false);
 	let isCreditNote = $state(false);
 	let taxApplicationType = $state<'apply' | 'none' | 'reverse'>('apply');
@@ -335,12 +345,23 @@
 		}
 	});
 
-	// Update exchange rate when currencies match
+	// Update exchange rate when currencies change
 	$effect(() => {
 		if (currency === invoiceCurrency && currency) {
 			if (!exchangeRate || exchangeRate === '') {
 				exchangeRate = '1,0000';
 			}
+		} else if (currency !== invoiceCurrency) {
+			if (exchangeRate === '1,0000') {
+				exchangeRate = '';
+			}
+		}
+	});
+
+	// Auto-fill exchange rate from BNR when available
+	$effect(() => {
+		if (bnrRate && !exchangeRate) {
+			exchangeRate = bnrRate.toFixed(4).replace('.', ',');
 		}
 	});
 
@@ -369,7 +390,11 @@
 	const clientOptions = $derived(
 		clients.map((c) => ({
 			value: c.id,
-			label: c.cui ? `${c.cui} - ${c.name}` : c.name
+			label: c.cui ? `${c.cui} - ${c.name}` : c.name,
+			meta: {
+				name: c.name,
+				websiteUrl: (c.defaultWebsiteUrl ?? c.website ?? null) as string | null
+			}
 		}))
 	);
 	const filteredServices = $derived(
@@ -410,10 +435,18 @@
 			}
 
 			const itemSubtotal = item.quantity * item.rate;
-			// Only calculate tax if taxApplicationType is 'apply'
+			// Apply item-level discount before calculating tax
+			const itemDiscount =
+				item.discountType === 'percent'
+					? (itemSubtotal * (item.discount || 0)) / 100
+					: item.discountType === 'fixed'
+						? item.discount || 0
+						: 0;
+			const itemNetValue = itemSubtotal - itemDiscount;
+			// Only calculate tax if taxApplicationType is 'apply' — tax on net value (after discount)
 			const itemTax =
 				taxApplicationType === 'apply'
-					? (itemSubtotal * (item.taxRate || defaultTaxRate)) / 100
+					? (itemNetValue * (item.taxRate || defaultTaxRate)) / 100
 					: 0;
 
 			totals[itemCurrency].subtotal += itemSubtotal;
@@ -596,11 +629,11 @@
 		return value.toFixed(2).replace('.', ',');
 	}
 
-	// Keez item options for combobox
+	// Keez item options for combobox — show price so user sees which items have values
 	const keezItemOptions = $derived(
 		keezItems.map((item) => ({
 			value: item.externalId || '',
-			label: `${item.name}${item.code ? ` (${item.code})` : ''}`
+			label: `${item.name}${item.code ? ` (${item.code})` : ''} — ${item.lastPrice ? `${item.lastPrice} ${item.currencyCode || 'RON'}` : 'fără preț'}`
 		}))
 	);
 
@@ -631,17 +664,18 @@
 		} else if (dialogSourceType === 'plugin-keez' && dialogPluginItemId['keez']) {
 			const keezItem = keezItems.find((ki) => ki.externalId === dialogPluginItemId['keez']);
 			if (keezItem) {
+				const MEASURE_UNIT_MAP: Record<number, string> = { 1: 'Buc', 2: 'Luna om', 3: 'An', 4: 'Zi', 5: 'Ora', 6: 'Kg', 7: 'Km', 8: 'KWh', 9: 'KW', 10: 'M', 11: 'L', 12: 'Min', 13: 'Luna', 14: 'Mp', 15: 'Oz', 16: 'Per', 17: 'Trim', 18: 'T', 19: 'Sapt', 20: 'Mc', 22: 'Cutie', 23: 'Pag', 24: 'Rola', 25: 'Coala', 26: 'Tambur', 27: 'Set' };
 				const newItem: LineItem = {
 					id: crypto.randomUUID(),
 					description: keezItem.name,
 					quantity: 1,
 					rate: keezItem.lastPrice || 0,
-					taxRate: defaultTaxRate,
+					taxRate: keezItem.vatRate && keezItem.vatRate > 0 ? keezItem.vatRate : defaultTaxRate,
 					discountType: '',
 					discount: 0,
 					note: dialogItemNote,
-					currency: (keezItem.currencyCode as Currency) || currency,
-					unitOfMeasure: 'Pcs',
+					currency: (CURRENCIES.includes(keezItem.currencyCode as Currency) ? keezItem.currencyCode as Currency : currency),
+					unitOfMeasure: MEASURE_UNIT_MAP[keezItem.measureUnitId] || 'Buc',
 					keezItem: keezItem
 				};
 				lineItems = [...lineItems, newItem];
@@ -738,7 +772,26 @@
 										options={clientOptions}
 										placeholder="Select a client"
 										searchPlaceholder="Search clients..."
-									/>
+									>
+										{#snippet optionSnippet({ option })}
+											<span class="flex items-center gap-2">
+												<ClientComboboxLogo
+													website={option.meta?.websiteUrl as string | null}
+													name={(option.meta?.name as string) ?? option.label}
+												/>
+												<span class="truncate">{option.label}</span>
+											</span>
+										{/snippet}
+										{#snippet selectedSnippet({ option })}
+											<span class="flex items-center gap-2">
+												<ClientComboboxLogo
+													website={option.meta?.websiteUrl as string | null}
+													name={(option.meta?.name as string) ?? option.label}
+												/>
+												<span class="truncate">{option.label}</span>
+											</span>
+										{/snippet}
+									</Combobox>
 								</div>
 								<Button
 									type="button"
@@ -940,8 +993,12 @@
 									<Label>Exchange Rate</Label>
 									<Input
 										bind:value={exchangeRate}
-										placeholder={currency === invoiceCurrency ? '1,0000' : 'Enter exchange rate'}
+										placeholder={currency === invoiceCurrency ? '1,0000' : 'Curs BNR'}
+										class="font-mono"
 									/>
+									{#if currency !== invoiceCurrency && exchangeRate}
+										<p class="text-xs text-muted-foreground">Curs BNR auto-completat</p>
+									{/if}
 								</div>
 								<div class="space-y-2">
 									<Label>Tax Application</Label>
@@ -1332,14 +1389,14 @@
 													class="h-auto w-full border-0 bg-transparent p-0 text-right"
 												/>
 											</td>
-											<td class="px-4 py-3 text-right font-medium text-gray-900">
-												{formatNumber(itemSubtotal)}
+											<td class="px-4 py-3 text-right text-nowrap font-medium text-gray-900">
+												{formatNumber(itemSubtotal)}{#if item.currency && item.currency !== currency}&nbsp;<span class="text-xs text-gray-500">{item.currency}</span>{/if}
 											</td>
 											<td class="px-4 py-3 text-right text-nowrap text-gray-900">
 												{taxApplicationType === 'apply' ? `${itemTaxRate} %` : '-'}
 											</td>
-											<td class="px-4 py-3 text-right font-medium text-gray-900">
-												{formatNumber(itemFinalValue)}
+											<td class="px-4 py-3 text-right text-nowrap font-medium text-gray-900">
+												{formatNumber(itemFinalValue)}{#if item.currency && item.currency !== currency}&nbsp;<span class="text-xs text-gray-500">{item.currency}</span>{/if}
 											</td>
 											<td class="px-4 py-3 text-center">
 												<Button
@@ -1425,22 +1482,26 @@
 							</div>
 						</div>
 
+						{#each Object.entries(totalsByCurrency) as [curr, currTotals]}
 						<div class="space-y-3">
+							{#if Object.keys(totalsByCurrency).length > 1}
+								<p class="text-xs font-semibold uppercase text-gray-500">{curr}</p>
+							{/if}
 							<div class="flex justify-between">
 								<span class="text-gray-700">Subtotal</span>
-								<span class="font-medium text-gray-900">{formatNumber(subtotal)} {currency}</span>
+								<span class="font-medium text-gray-900">{formatNumber(currTotals.subtotal)} {curr}</span>
 							</div>
 							{#if taxApplicationType === 'apply'}
 								<div class="flex justify-between">
 									<span class="text-gray-700">Tax Total ({defaultTaxRate}%)</span>
-									<span class="font-medium text-gray-900">{formatNumber(taxTotal)} {currency}</span>
+									<span class="font-medium text-gray-900">{formatNumber(currTotals.taxTotal)} {curr}</span>
 								</div>
 							{/if}
-							{#if invoiceDiscountType !== 'none' && invoiceDiscountAmount > 0}
+							{#if curr === currency && invoiceDiscountType !== 'none' && invoiceDiscountAmount > 0}
 								<div class="flex justify-between">
 									<span class="text-gray-700">Discount</span>
 									<span class="font-medium text-gray-900"
-										>-{formatNumber(invoiceDiscountAmount)} {currency}</span
+										>-{formatNumber(invoiceDiscountAmount)} {curr}</span
 									>
 								</div>
 							{/if}
@@ -1448,10 +1509,23 @@
 							<div class="flex justify-between">
 								<span class="text-lg font-semibold text-gray-900">Grand Total</span>
 								<span class="text-lg font-bold text-gray-900"
-									>{formatNumber(grandTotal)} {currency}</span
+									>{formatNumber(currTotals.grandTotal)} {curr}</span
 								>
 							</div>
 						</div>
+					{:else}
+						<div class="space-y-3">
+							<div class="flex justify-between">
+								<span class="text-gray-700">Subtotal</span>
+								<span class="font-medium text-gray-900">0,00 {currency}</span>
+							</div>
+							<Separator />
+							<div class="flex justify-between">
+								<span class="text-lg font-semibold text-gray-900">Grand Total</span>
+								<span class="text-lg font-bold text-gray-900">0,00 {currency}</span>
+							</div>
+						</div>
+					{/each}
 					</div>
 				</CardContent>
 			</Card>

@@ -9,6 +9,7 @@ import * as table from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { getLatestBnrRate } from '$lib/server/bnr/client';
 import type {
 	KeezInvoice,
 	KeezInvoiceDetail,
@@ -21,14 +22,14 @@ import type {
  * Convert CRM invoice to Keez invoice format
  * Conforms to Keez API documentation: https://app.keez.ro/help/api/data_models_invoice_details.html
  */
-export function mapInvoiceToKeez(
+export async function mapInvoiceToKeez(
 	invoice: Invoice & { lineItems: InvoiceLineItem[] },
 	client: Client,
 	tenant: Tenant,
 	externalId?: string,
 	settings?: InvoiceSettings | null,
 	itemExternalIds?: Map<string, string> // Map of lineItem.id -> Keez itemExternalId
-): KeezInvoice {
+): Promise<KeezInvoice> {
 	// Helper function to map Romanian county name to ISO code
 	const mapRomanianCounty = (
 		countyName: string | null | undefined,
@@ -197,19 +198,36 @@ export function mapInvoiceToKeez(
 		bankName: client.bankName || undefined
 	};
 
-	// Get currency and exchange rate - use invoiceCurrency if available
+	// Get invoice currency for Keez currencyCode header
 	const currency =
 		invoice.invoiceCurrency || invoice.currency || settings?.defaultCurrency || 'RON';
 	const isRON = currency === 'RON';
 
 	// Parse exchange rate from string format "1,0000" or use default
-	let exchangeRate = isRON ? 1 : 4.82; // Default exchange rate for non-RON currencies
+	let exchangeRate = 1;
 	if (invoice.exchangeRate) {
-		// Parse exchange rate string (e.g., "1,0000" -> 1.0 or "4,9500" -> 4.95)
 		const parsedRate = parseFloat(invoice.exchangeRate.replace(',', '.'));
 		if (!isNaN(parsedRate) && parsedRate > 0) {
 			exchangeRate = parsedRate;
 		}
+	}
+
+	// Detect non-RON currencies in line items for referenceCurrencyCode
+	const nonRONCurrencies = new Set(
+		invoice.lineItems.map((item) => item.currency || currency).filter((c) => c !== 'RON')
+	);
+	const hasNonRONItems = nonRONCurrencies.size > 0;
+	// referenceCurrencyCode = the calculation/reference currency (e.g., EUR when invoice is RON)
+	// Keez requires this to know which currency the Currency-suffixed amounts represent
+	const referenceCurrencyCode = hasNonRONItems ? [...nonRONCurrencies][0] : undefined;
+	// exchangeRate is needed whenever any non-RON currency is involved
+	const needsExchangeRate = hasNonRONItems || !isRON;
+	// Ensure we have a meaningful exchange rate when needed
+	if (needsExchangeRate && exchangeRate <= 1) {
+		// Try BNR rate from DB before using hardcoded fallback
+		const targetCurrency = referenceCurrencyCode || (isRON ? 'EUR' : currency);
+		const bnrRate = await getLatestBnrRate(targetCurrency);
+		exchangeRate = bnrRate || 4.82;
 	}
 
 	// Map invoice details from line items - conform to Keez API format
@@ -256,20 +274,35 @@ export function mapInvoiceToKeez(
 						amountCents = itemSubtotalCents - itemDiscountCents;
 					}
 
-					// Calculate amounts in RON (base currency)
-					const unitPriceRON = unitPriceCents / 100;
-					const originalNetAmountRON = itemSubtotalCents / 100;
-					const discountNetValueRON = itemDiscountCents / 100;
-					const netAmountRON = amountCents / 100;
-					const originalVatAmountRON =
-						Math.round(((originalNetAmountRON * itemVatPercent) / 100) * 100) / 100;
-					const discountVatValueRON =
-						Math.round(((discountNetValueRON * itemVatPercent) / 100) * 100) / 100;
-					const vatAmountRON = Math.round(((netAmountRON * itemVatPercent) / 100) * 100) / 100;
-					const originalGrossAmountRON = originalNetAmountRON + originalVatAmountRON;
-					const grossAmountRON = netAmountRON + vatAmountRON;
+					// item.rate is in CENTS in the ITEM's currency (EUR cents if item is EUR, RON bani if RON)
+					// Keez requires: non-suffixed amounts = ALWAYS RON, Currency-suffixed = reference currency
+					const itemPriceDecimal = unitPriceCents / 100; // Price in item's own currency
+					const itemSubtotalDecimal = itemSubtotalCents / 100;
+					const itemDiscountDecimal = itemDiscountCents / 100;
+					const itemNetDecimal = amountCents / 100;
 
-					// Calculate amounts in invoice currency (if not RON)
+					// Calculate VAT in item's currency first
+					const itemOriginalVat =
+						Math.round(((itemSubtotalDecimal * itemVatPercent) / 100) * 100) / 100;
+					const itemDiscountVat =
+						Math.round(((itemDiscountDecimal * itemVatPercent) / 100) * 100) / 100;
+					const itemNetVat =
+						Math.round(((itemNetDecimal * itemVatPercent) / 100) * 100) / 100;
+					const itemOriginalGross = itemSubtotalDecimal + itemOriginalVat;
+					const itemNetGross = itemNetDecimal + itemNetVat;
+
+					// Convert to RON (non-suffixed) and reference currency (Currency-suffixed)
+					let unitPriceRON: number;
+					let originalNetAmountRON: number;
+					let discountNetValueRON: number;
+					let netAmountRON: number;
+					let originalVatAmountRON: number;
+					let discountVatValueRON: number;
+					let vatAmountRON: number;
+					let originalGrossAmountRON: number;
+					let grossAmountRON: number;
+
+					let unitPriceCurrency: number | undefined;
 					let originalNetAmountCurrency: number | undefined;
 					let originalVatAmountCurrency: number | undefined;
 					let originalGrossAmountCurrency: number | undefined;
@@ -278,39 +311,62 @@ export function mapInvoiceToKeez(
 					let netAmountCurrency: number | undefined;
 					let vatAmountCurrency: number | undefined;
 					let grossAmountCurrency: number | undefined;
-					let unitPriceCurrency: number | undefined;
 
-					if (!itemIsRON) {
-						// Use exchange rate for item currency conversion
-						const itemExchangeRate = itemCurrency !== currency ? exchangeRate : 1;
-						unitPriceCurrency = Math.round(unitPriceRON * itemExchangeRate * 10000) / 10000;
-						originalNetAmountCurrency =
-							Math.round(originalNetAmountRON * itemExchangeRate * 100) / 100;
+					if (itemIsRON) {
+						// Item is in RON — amounts are already in RON, no conversion needed
+						unitPriceRON = itemPriceDecimal;
+						originalNetAmountRON = itemSubtotalDecimal;
+						discountNetValueRON = itemDiscountDecimal;
+						netAmountRON = itemNetDecimal;
+						originalVatAmountRON = itemOriginalVat;
+						discountVatValueRON = itemDiscountVat;
+						vatAmountRON = itemNetVat;
+						originalGrossAmountRON = itemOriginalGross;
+						grossAmountRON = itemNetGross;
+						// Currency-suffixed = same as RON for RON items
+						originalNetAmountCurrency = itemSubtotalDecimal;
+						originalVatAmountCurrency = itemOriginalVat;
+						originalGrossAmountCurrency = itemOriginalGross;
 						discountNetValueCurrency =
-							discountNetValueRON > 0
-								? Math.round(discountNetValueRON * itemExchangeRate * 100) / 100
-								: undefined;
-						netAmountCurrency = Math.round(netAmountRON * itemExchangeRate * 100) / 100;
-						originalVatAmountCurrency =
-							Math.round(originalVatAmountRON * itemExchangeRate * 100) / 100;
+							itemDiscountDecimal > 0 ? itemDiscountDecimal : undefined;
 						discountVatValueCurrency =
-							discountVatValueRON > 0
-								? Math.round(discountVatValueRON * itemExchangeRate * 100) / 100
-								: undefined;
-						vatAmountCurrency = Math.round(vatAmountRON * itemExchangeRate * 100) / 100;
-						originalGrossAmountCurrency =
-							Math.round(originalGrossAmountRON * itemExchangeRate * 100) / 100;
-						grossAmountCurrency = Math.round(grossAmountRON * itemExchangeRate * 100) / 100;
+							itemDiscountVat > 0 ? itemDiscountVat : undefined;
+						netAmountCurrency = itemNetDecimal;
+						vatAmountCurrency = itemNetVat;
+						grossAmountCurrency = itemNetGross;
 					} else {
-						// For RON invoices, currency amounts are the same as RON amounts (Keez requires them)
-						originalNetAmountCurrency = originalNetAmountRON;
-						originalVatAmountCurrency = originalVatAmountRON;
-						originalGrossAmountCurrency = originalGrossAmountRON;
-						discountNetValueCurrency = discountNetValueRON > 0 ? discountNetValueRON : undefined;
-						discountVatValueCurrency = discountVatValueRON > 0 ? discountVatValueRON : undefined;
-						netAmountCurrency = netAmountRON;
-						vatAmountCurrency = vatAmountRON;
-						grossAmountCurrency = grossAmountRON;
+						// Item is in non-RON currency (e.g., EUR)
+						// Non-suffixed = RON (convert: EUR × exchangeRate)
+						unitPriceRON =
+							Math.round(itemPriceDecimal * exchangeRate * 10000) / 10000;
+						originalNetAmountRON =
+							Math.round(itemSubtotalDecimal * exchangeRate * 100) / 100;
+						discountNetValueRON =
+							Math.round(itemDiscountDecimal * exchangeRate * 100) / 100;
+						netAmountRON =
+							Math.round(itemNetDecimal * exchangeRate * 100) / 100;
+						originalVatAmountRON =
+							Math.round(itemOriginalVat * exchangeRate * 100) / 100;
+						discountVatValueRON =
+							Math.round(itemDiscountVat * exchangeRate * 100) / 100;
+						vatAmountRON =
+							Math.round(itemNetVat * exchangeRate * 100) / 100;
+						originalGrossAmountRON =
+							Math.round(itemOriginalGross * exchangeRate * 100) / 100;
+						grossAmountRON =
+							Math.round(itemNetGross * exchangeRate * 100) / 100;
+						// Currency-suffixed = original item currency (EUR as-is)
+						unitPriceCurrency = itemPriceDecimal;
+						originalNetAmountCurrency = itemSubtotalDecimal;
+						originalVatAmountCurrency = itemOriginalVat;
+						originalGrossAmountCurrency = itemOriginalGross;
+						discountNetValueCurrency =
+							itemDiscountDecimal > 0 ? itemDiscountDecimal : undefined;
+						discountVatValueCurrency =
+							itemDiscountVat > 0 ? itemDiscountVat : undefined;
+						netAmountCurrency = itemNetDecimal;
+						vatAmountCurrency = itemNetVat;
+						grossAmountCurrency = itemNetGross;
 					}
 
 					// Map unit of measure - Keez uses measureUnitId as integer (1 = Buc)
@@ -529,7 +585,8 @@ export function mapInvoiceToKeez(
 		deliveryDate: formatDateYYYYMMDD(invoice.issueDate),
 		currencyCode: currency,
 		currency: currency,
-		exchangeRate: !isRON ? Math.round(exchangeRate * 10000) / 10000 : undefined,
+		referenceCurrencyCode: referenceCurrencyCode,
+		exchangeRate: needsExchangeRate ? Math.round(exchangeRate * 10000) / 10000 : undefined,
 		vatOnCollection: invoice.vatOnCollection || false,
 		paymentTypeId: mapPaymentTypeId(invoice.paymentMethod),
 		discountType: invoiceDiscountType,

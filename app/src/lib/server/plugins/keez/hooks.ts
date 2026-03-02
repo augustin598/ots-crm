@@ -247,7 +247,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 
 	// Map invoice to Keez format with updated mapper
 	// Pass the series and number we got from Keez to ensure correct numbering
-	const keezInvoice = mapInvoiceToKeez(
+	const keezInvoice = await mapInvoiceToKeez(
 		{ ...invoice, lineItems },
 		client,
 		tenant,
@@ -633,7 +633,7 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 		const keezClient = await createKeezClientForTenant(tenantId, integration);
 
 		// Map updated invoice to Keez format, preserving existing Keez external ID
-		const keezInvoice = mapInvoiceToKeez(
+		const keezInvoice = await mapInvoiceToKeez(
 			{ ...invoice, lineItems },
 			client,
 			tenant,

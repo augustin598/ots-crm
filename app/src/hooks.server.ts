@@ -4,6 +4,7 @@ import * as auth from '$lib/server/auth';
 import * as tenantUtils from '$lib/server/tenant';
 import { initializePlugins } from '$lib/server/plugins';
 import { startScheduler } from '$lib/server/scheduler';
+import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
 import { runMigrations } from '$lib/server/db/migrate';
 import { dev } from '$app/environment';
@@ -132,6 +133,8 @@ export const init = async () => {
 	await ensurePluginsInitialized();
 	registerEmailNotificationHooks();
 	await ensureSchedulerInitialized();
+	// Sync BNR rates if not already synced today (works even without Redis scheduler)
+	await ensureBnrRatesSynced();
 };
 
 export const handle: Handle = handleAuth;

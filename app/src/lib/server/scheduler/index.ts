@@ -7,6 +7,7 @@ import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
 import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
 import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
 import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
+import { processBnrRateSync } from './tasks/bnr-rate-sync';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -61,7 +62,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	spv_invoice_sync: processSpvInvoiceSync,
 	revolut_transaction_sync: processRevolutTransactionSync,
 	keez_invoice_sync: processKeezInvoiceSync,
-	gmail_invoice_sync: processGmailInvoiceSync
+	gmail_invoice_sync: processGmailInvoiceSync,
+	bnr_rate_sync: processBnrRateSync
 };
 
 /**
@@ -262,6 +264,24 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled Gmail invoice sync (evening): daily at 5:00 PM');
+
+	// Schedule BNR exchange rate sync daily at 10:00 AM (BNR publishes around 10:00)
+	schedulerQueue.add(
+		'bnr-rate-sync',
+		{
+			type: 'bnr_rate_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 10 * * *', // Every day at 10:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'bnr-rate-sync'
+		}
+	);
+
+	console.log('Scheduled BNR rate sync: daily at 10:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };

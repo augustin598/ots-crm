@@ -34,6 +34,7 @@ export interface KeezInvoice {
 	deliveryDate?: number; // YYYYMMDD format as integer
 	currency?: string; // 'RON', 'EUR', etc. (legacy field)
 	currencyCode?: string; // 'RON', 'EUR', etc. (preferred field)
+	referenceCurrencyCode?: string; // Reference/calculation currency (e.g., 'EUR' when currencyCode='RON')
 	exchangeRate?: number;
 	vatOnCollection?: boolean; // TVA la încasare
 	paymentTypeId?: number; // Payment type ID (1 = default, 3 = bank transfer, 6 = payment processor)

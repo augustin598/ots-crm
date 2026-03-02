@@ -134,7 +134,7 @@ export async function getGmailStatus(tenantId: string) {
 		.limit(1);
 
 	if (!integration) {
-		return { connected: false, email: null, lastSyncAt: null, isActive: false, syncEnabled: false, syncInterval: 'daily', syncParserIds: null, syncDateRangeDays: 7, lastSyncResults: null };
+		return { connected: false, email: null, lastSyncAt: null, isActive: false, syncEnabled: false, syncInterval: 'daily', syncParserIds: null, syncDateRangeDays: 7, lastSyncResults: null, customMonitoredEmails: null, monitoredSupplierIds: null, excludeEmails: null };
 	}
 
 	return {
@@ -146,7 +146,10 @@ export async function getGmailStatus(tenantId: string) {
 		syncInterval: integration.syncInterval,
 		syncParserIds: integration.syncParserIds ? JSON.parse(integration.syncParserIds) : null,
 		syncDateRangeDays: integration.syncDateRangeDays,
-		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null
+		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null,
+		customMonitoredEmails: integration.customMonitoredEmails ? JSON.parse(integration.customMonitoredEmails) : null,
+		monitoredSupplierIds: integration.monitoredSupplierIds ? JSON.parse(integration.monitoredSupplierIds) : null,
+		excludeEmails: integration.excludeEmails ? JSON.parse(integration.excludeEmails) : null
 	};
 }
 
