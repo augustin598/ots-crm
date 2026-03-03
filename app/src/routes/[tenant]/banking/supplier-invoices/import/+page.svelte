@@ -6,13 +6,15 @@
 	} from '$lib/remotes/supplier-invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import * as Popover from '$lib/components/ui/popover';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
-	import { ArrowLeft, Search, Download, CheckCircle2, AlertCircle, Mail } from '@lucide/svelte';
+	import { type DateValue } from '@internationalized/date';
+	import { ArrowLeft, Search, Download, CheckCircle2, AlertCircle, Mail, Calendar as CalendarIcon } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
@@ -28,6 +30,10 @@
 	// Config step
 	let dateFrom = $state('');
 	let dateTo = $state('');
+	let dateFromValue = $state<DateValue | undefined>(undefined);
+	let dateToValue = $state<DateValue | undefined>(undefined);
+	let dateFromOpen = $state(false);
+	let dateToOpen = $state(false);
 	let selectedParsers = $state<string[]>(['cpanel', 'whmcs', 'hetzner', 'google', 'ovh', 'digitalocean', 'aws', 'generic']);
 
 	// Preview step
@@ -39,6 +45,21 @@
 	// Result step
 	let importResult = $state<{ imported: number; skippedDuplicates: number; errors: string[] } | null>(null);
 	let importing = $state(false);
+
+	$effect(() => {
+		if (dateFromValue) {
+			dateFrom = `${dateFromValue.year}-${String(dateFromValue.month).padStart(2, '0')}-${String(dateFromValue.day).padStart(2, '0')}`;
+		} else {
+			dateFrom = '';
+		}
+	});
+	$effect(() => {
+		if (dateToValue) {
+			dateTo = `${dateToValue.year}-${String(dateToValue.month).padStart(2, '0')}-${String(dateToValue.day).padStart(2, '0')}`;
+		} else {
+			dateTo = '';
+		}
+	});
 
 	const parserOptions = [
 		{ id: 'cpanel', label: 'cPanel/WHM' },
@@ -206,13 +227,41 @@
 					<Separator />
 
 					<div class="grid grid-cols-2 gap-4">
-						<div>
-							<Label for="dateFrom">De la data</Label>
-							<Input id="dateFrom" type="date" bind:value={dateFrom} />
+						<div class="space-y-1.5">
+							<Label>De la data</Label>
+							<Popover.Root bind:open={dateFromOpen}>
+								<Popover.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm">
+											<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+											{dateFromValue
+												? new Date(dateFrom + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+												: 'Alege data'}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<Calendar type="single" bind:value={dateFromValue} onValueChange={() => (dateFromOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+								</Popover.Content>
+							</Popover.Root>
 						</div>
-						<div>
-							<Label for="dateTo">Până la data</Label>
-							<Input id="dateTo" type="date" bind:value={dateTo} />
+						<div class="space-y-1.5">
+							<Label>Până la data</Label>
+							<Popover.Root bind:open={dateToOpen}>
+								<Popover.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm">
+											<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+											{dateToValue
+												? new Date(dateTo + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+												: 'Alege data'}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<Calendar type="single" bind:value={dateToValue} onValueChange={() => (dateToOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+								</Popover.Content>
+							</Popover.Root>
 						</div>
 					</div>
 
