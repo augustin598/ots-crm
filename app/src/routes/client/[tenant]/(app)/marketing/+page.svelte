@@ -4,6 +4,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
+	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import GoogleAdsIcon from '$lib/components/marketing/icon-google-ads.svelte';
+	import FacebookIcon from '$lib/components/marketing/icon-facebook.svelte';
+	import TiktokIcon from '$lib/components/marketing/icon-tiktok.svelte';
 	import MaterialCard from '$lib/components/marketing/material-card.svelte';
 	import MaterialFilters from '$lib/components/marketing/material-filters.svelte';
 	import MaterialUploadDialog from '$lib/components/marketing/material-upload-dialog.svelte';
@@ -125,11 +130,21 @@
 	<!-- Category tabs -->
 	<Tabs value={activeCategory} class="w-full">
 		<TabsList class="grid w-full grid-cols-5">
-			{#each categories as cat}
-				<TabsTrigger value={cat.id} onclick={() => { activeCategory = cat.id; filterType = ''; searchTerm = ''; }}>
-					{cat.label}
-				</TabsTrigger>
-			{/each}
+			<TabsTrigger value="google-ads" onclick={() => { activeCategory = 'google-ads'; filterType = ''; searchTerm = ''; }}>
+				<GoogleAdsIcon class="h-4 w-4 mr-1.5 shrink-0" /> Google Ads
+			</TabsTrigger>
+			<TabsTrigger value="facebook-ads" onclick={() => { activeCategory = 'facebook-ads'; filterType = ''; searchTerm = ''; }}>
+				<FacebookIcon class="h-4 w-4 mr-1.5 shrink-0" /> Facebook Ads
+			</TabsTrigger>
+			<TabsTrigger value="tiktok-ads" onclick={() => { activeCategory = 'tiktok-ads'; filterType = ''; searchTerm = ''; }}>
+				<TiktokIcon class="h-4 w-4 mr-1.5 shrink-0" /> TikTok Ads
+			</TabsTrigger>
+			<TabsTrigger value="press-article" onclick={() => { activeCategory = 'press-article'; filterType = ''; searchTerm = ''; }}>
+				<NewspaperIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole Presă
+			</TabsTrigger>
+			<TabsTrigger value="seo-article" onclick={() => { activeCategory = 'seo-article'; filterType = ''; searchTerm = ''; }}>
+				<SearchIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole SEO
+			</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value={activeCategory} class="mt-4 space-y-4">

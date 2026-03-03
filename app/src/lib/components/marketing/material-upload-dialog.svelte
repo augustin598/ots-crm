@@ -123,9 +123,31 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
+	function isValidHttpUrl(value: string): boolean {
+		try {
+			const url = new URL(value);
+			return url.protocol === 'http:' || url.protocol === 'https:';
+		} catch {
+			return false;
+		}
+	}
+
+	function validateTagsInput(value: string): boolean {
+		const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
+		return parts.length <= 10 && parts.every((t) => t.length <= 50);
+	}
+
 	async function handleUpload() {
 		if (!title.trim()) {
 			toast.error('Titlul este obligatoriu');
+			return;
+		}
+		if (title.trim().length > 200) {
+			toast.error('Titlul nu poate depăși 200 de caractere');
+			return;
+		}
+		if (tags.trim() && !validateTagsInput(tags)) {
+			toast.error('Maximum 10 taguri, fiecare maxim 50 caractere');
 			return;
 		}
 
@@ -183,6 +205,11 @@
 			} else if (materialType === 'url') {
 				if (!externalUrl.trim()) {
 					toast.error('URL-ul este obligatoriu');
+					uploading = false;
+					return;
+				}
+				if (!isValidHttpUrl(externalUrl.trim())) {
+					toast.error('URL invalid. Trebuie să înceapă cu https:// sau http://');
 					uploading = false;
 					return;
 				}
@@ -296,7 +323,8 @@
 			{#if materialType === 'text'}
 				<div class="space-y-1.5">
 					<Label for="text-content">Conținut Text</Label>
-					<Textarea id="text-content" bind:value={textContent} rows={4} placeholder="Textul materialului publicitar..." />
+					<Textarea id="text-content" bind:value={textContent} rows={4} maxlength={5000} placeholder="Textul materialului publicitar..." />
+					<p class="text-xs text-muted-foreground text-right">{textContent.length}/5000</p>
 				</div>
 			{/if}
 
@@ -311,13 +339,13 @@
 			<!-- Title -->
 			<div class="space-y-1.5">
 				<Label for="material-title">Titlu</Label>
-				<Input id="material-title" bind:value={title} placeholder="Numele materialului" />
+				<Input id="material-title" bind:value={title} maxlength={200} placeholder="Numele materialului" />
 			</div>
 
 			<!-- Description -->
 			<div class="space-y-1.5">
 				<Label for="material-desc">Descriere (opțional)</Label>
-				<Textarea id="material-desc" bind:value={description} rows={2} placeholder="Descriere scurtă..." />
+				<Textarea id="material-desc" bind:value={description} rows={2} maxlength={1000} placeholder="Descriere scurtă..." />
 			</div>
 
 			<!-- SEO Link selector (only for seo-article category) -->

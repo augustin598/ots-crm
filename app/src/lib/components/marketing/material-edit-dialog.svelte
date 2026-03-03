@@ -61,10 +61,36 @@
 		}
 	});
 
+	function isValidHttpUrl(value: string): boolean {
+		try {
+			const url = new URL(value);
+			return url.protocol === 'http:' || url.protocol === 'https:';
+		} catch {
+			return false;
+		}
+	}
+
+	function validateTagsInput(value: string): boolean {
+		const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
+		return parts.length <= 10 && parts.every((t) => t.length <= 50);
+	}
+
 	async function handleSave() {
 		if (!material) return;
 		if (!title.trim()) {
 			toast.error('Titlul este obligatoriu');
+			return;
+		}
+		if (title.trim().length > 200) {
+			toast.error('Titlul nu poate depăși 200 de caractere');
+			return;
+		}
+		if (externalUrl.trim() && !isValidHttpUrl(externalUrl.trim())) {
+			toast.error('URL extern invalid. Trebuie să înceapă cu https:// sau http://');
+			return;
+		}
+		if (tags.trim() && !validateTagsInput(tags)) {
+			toast.error('Maximum 10 taguri, fiecare maxim 50 caractere');
 			return;
 		}
 
@@ -101,18 +127,18 @@
 			<div class="space-y-4 pt-2">
 				<div class="space-y-1.5">
 					<Label for="edit-title">Titlu</Label>
-					<Input id="edit-title" bind:value={title} />
+					<Input id="edit-title" bind:value={title} maxlength={200} />
 				</div>
 
 				<div class="space-y-1.5">
 					<Label for="edit-desc">Descriere</Label>
-					<Textarea id="edit-desc" bind:value={description} rows={2} />
+					<Textarea id="edit-desc" bind:value={description} rows={2} maxlength={1000} />
 				</div>
 
 				{#if material.textContent !== null || material.type === 'text'}
 					<div class="space-y-1.5">
 						<Label for="edit-text">Conținut Text</Label>
-						<Textarea id="edit-text" bind:value={textContent} rows={4} />
+						<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={5000} />
 					</div>
 				{/if}
 

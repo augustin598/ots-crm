@@ -58,6 +58,7 @@ export const tenant = sqliteTable('tenant', {
 	phone: text('phone'),
 	email: text('email'),
 	contractPrefix: text('contract_prefix').default('CTR'),
+	themeColor: text('theme_color'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

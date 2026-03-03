@@ -19,8 +19,15 @@
 	import { getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { browser } from '$app/environment';
+	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
 
 	let { data, children }: { data: PageData; children: any } = $props();
+
+	const themeHue = $derived(
+		data.tenant?.themeColor && isValidHex(data.tenant.themeColor)
+			? hexToOklchHue(data.tenant.themeColor)
+			: 245
+	);
 
 	async function handleLogout() {
 		try {
@@ -37,6 +44,10 @@
 		document.documentElement.classList.toggle('dark');
 	}
 </script>
+
+<svelte:head>
+	{@html `<style>:root{--theme-hue:${themeHue}}</style>`}
+</svelte:head>
 
 <SidebarProvider>
 	<Sidebar>

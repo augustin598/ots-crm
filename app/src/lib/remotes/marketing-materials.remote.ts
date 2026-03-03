@@ -11,6 +11,20 @@ function generateMaterialId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+function validateTags(value: string): boolean {
+	const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
+	return parts.length <= 10 && parts.every((t) => t.length <= 50);
+}
+
+function isValidHttpUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' || url.protocol === 'https:';
+	} catch {
+		return false;
+	}
+}
+
 export const getMarketingMaterials = query(
 	v.object({
 		clientId: v.optional(v.string()),
@@ -99,13 +113,13 @@ const createSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1)),
 	category: v.picklist(['google-ads', 'facebook-ads', 'tiktok-ads', 'press-article', 'seo-article']),
 	type: v.picklist(['image', 'video', 'document', 'text', 'url']),
-	title: v.pipe(v.string(), v.minLength(1)),
-	description: v.optional(v.nullable(v.string())),
-	textContent: v.optional(v.nullable(v.string())),
-	externalUrl: v.optional(v.nullable(v.string())),
+	title: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+	description: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(1000)))),
+	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(5000)))),
+	externalUrl: v.optional(v.nullable(v.pipe(v.string(), v.check(isValidHttpUrl, 'URL invalid. Trebuie să înceapă cu https:// sau http://')))),
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
-	tags: v.optional(v.nullable(v.string()))
+	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
 });
 
 export const createMarketingMaterial = command(createSchema, async (data) => {
@@ -133,6 +147,18 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 		}
 	}
 
+	// Validate seoLinkId FK
+	if (data.seoLinkId) {
+		const [seoCheck] = await db
+			.select({ id: table.seoLink.id })
+			.from(table.seoLink)
+			.where(and(eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)))
+			.limit(1);
+		if (!seoCheck) {
+			throw new Error('SEO Link invalid');
+		}
+	}
+
 	const materialId = generateMaterialId();
 
 	await db.insert(table.marketingMaterial).values({
@@ -157,13 +183,13 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 
 const updateSchema = v.object({
 	id: v.pipe(v.string(), v.minLength(1)),
-	title: v.optional(v.string()),
-	description: v.optional(v.nullable(v.string())),
-	textContent: v.optional(v.nullable(v.string())),
-	externalUrl: v.optional(v.nullable(v.string())),
+	title: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
+	description: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(1000)))),
+	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(5000)))),
+	externalUrl: v.optional(v.nullable(v.pipe(v.string(), v.check(isValidHttpUrl, 'URL invalid. Trebuie să înceapă cu https:// sau http://')))),
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
-	tags: v.optional(v.nullable(v.string()))
+	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
 });
 
 export const updateMarketingMaterial = command(updateSchema, async (data) => {

@@ -11,6 +11,7 @@
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import { getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
+	import { toast } from 'svelte-sonner';
 
 	interface Material {
 		id: string;
@@ -91,6 +92,7 @@
 			window.open(result.url, '_blank');
 		} catch (e) {
 			console.error('Download error:', e);
+			toast.error('Eroare la descărcarea fișierului');
 		} finally {
 			downloading = false;
 		}

@@ -24,7 +24,11 @@ const tenantSettingsSchema = v.object({
 	country: v.optional(v.string()),
 	phone: v.optional(v.string()),
 	email: v.optional(v.string()),
-	contractPrefix: v.optional(v.string())
+	contractPrefix: v.optional(v.string()),
+	themeColor: v.optional(v.pipe(
+		v.string(),
+		v.regex(/^#[0-9A-Fa-f]{6}$/, 'Format culoare invalid')
+	))
 });
 
 export const updateTenantSettings = command(tenantSettingsSchema, async (data) => {

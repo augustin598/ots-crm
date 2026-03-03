@@ -95,7 +95,7 @@ const MT = 40;
 const MB = 55;
 const CW = PW - ML - MR;
 
-const ACCENT = '#3BA4DC';
+const DEFAULT_ACCENT = '#3BA4DC';
 const DARK = '#1E293B';
 const TEXT = '#334155';
 const MUTED = '#64748B';
@@ -147,6 +147,7 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 	return new Promise<Buffer>((resolve, reject) => {
 		try {
 			const { contract, lineItems, tenant, client } = input;
+			const ACCENT = tenant.themeColor || DEFAULT_ACCENT;
 
 			const doc = new PDFDocument({
 				size: 'A4',

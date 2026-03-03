@@ -21,6 +21,10 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
+	import { THEME_PRESETS, DEFAULT_THEME_COLOR, hexToOklchHue, isValidHex } from '$lib/theme-utils';
+	import PaletteIcon from '@lucide/svelte/icons/palette';
+	import CheckIcon from '@lucide/svelte/icons/check';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -51,6 +55,14 @@
 	let phone = $state(data.tenant?.phone || '');
 	let email = $state(data.tenant?.email || '');
 	let contractPrefix = $state(data.tenant?.contractPrefix || 'CTR');
+	let themeColor = $state(data.tenant?.themeColor || DEFAULT_THEME_COLOR);
+
+	// Live preview: update CSS variable immediately on color change
+	$effect(() => {
+		if (browser && themeColor && isValidHex(themeColor)) {
+			document.documentElement.style.setProperty('--theme-hue', String(hexToOklchHue(themeColor)));
+		}
+	});
 
 	// Gmail status
 	const gmailStatusQuery = getGmailConnectionStatus();
@@ -148,7 +160,8 @@
 				country: country || undefined,
 				phone: phone || undefined,
 				email: email || undefined,
-				contractPrefix: contractPrefix || undefined
+				contractPrefix: contractPrefix || undefined,
+				themeColor: themeColor || undefined
 			}).updates(getInvitations());
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update settings';
@@ -361,6 +374,51 @@
 					{loading ? 'Saving...' : 'Save Settings'}
 				</Button>
 			</form>
+		</CardContent>
+	</Card>
+
+	<Card>
+		<CardHeader>
+			<div class="flex items-center gap-3">
+				<PaletteIcon class="h-5 w-5 text-muted-foreground" />
+				<div>
+					<CardTitle>Culoare Tema</CardTitle>
+					<CardDescription>Personalizati culoarea principala a aplicatiei</CardDescription>
+				</div>
+			</div>
+		</CardHeader>
+		<CardContent class="space-y-4">
+			<div class="flex flex-wrap gap-3">
+				{#each THEME_PRESETS as preset}
+					<button
+						type="button"
+						onclick={() => { themeColor = preset.hex; }}
+						class="relative w-10 h-10 rounded-full border-2 transition-all hover:scale-110 {themeColor === preset.hex ? 'border-foreground ring-2 ring-offset-2 ring-foreground scale-110' : 'border-transparent'}"
+						style="background-color: {preset.hex}"
+						title={preset.name}
+					>
+						{#if themeColor === preset.hex}
+							<CheckIcon class="absolute inset-0 m-auto h-5 w-5 text-white drop-shadow-md" />
+						{/if}
+					</button>
+				{/each}
+			</div>
+			<div class="flex items-center gap-3">
+				<input
+					type="color"
+					value={themeColor}
+					oninput={(e) => { themeColor = (e.currentTarget as HTMLInputElement).value.toUpperCase(); }}
+					class="w-10 h-10 rounded cursor-pointer border p-0.5"
+				/>
+				<Input
+					bind:value={themeColor}
+					type="text"
+					placeholder="#009AFF"
+					maxlength={7}
+					class="max-w-[120px] font-mono uppercase"
+				/>
+				<span class="text-xs text-muted-foreground">Culoare custom</span>
+			</div>
 		</CardContent>
 	</Card>
 
