@@ -2,7 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { error, json } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, like, sql } from 'drizzle-orm';
+import { eq, and, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
 

@@ -283,7 +283,7 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 
 	await db.insert(table.seoLink).values(values);
 
-	return { success: true, created: values.length };
+	return { success: true, created: values.length, seoLinkIds: values.map((v) => v.id) };
 });
 
 export const getSeoLink = query(
@@ -422,7 +422,21 @@ export const deleteSeoLinksBulk = command(
 );
 
 const EXTRACT_USER_AGENT =
-	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const EXTRACT_HEADERS: Record<string, string> = {
+	'User-Agent': EXTRACT_USER_AGENT,
+	'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+	'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
+	'Accept-Encoding': 'gzip, deflate, br',
+	'Sec-Fetch-Dest': 'document',
+	'Sec-Fetch-Mode': 'navigate',
+	'Sec-Fetch-Site': 'none',
+	'Sec-Fetch-User': '?1',
+	'Upgrade-Insecure-Requests': '1',
+	'Cache-Control': 'max-age=0',
+	'Connection': 'keep-alive'
+};
 
 function extractDomainFromUrl(url: string): string {
 	try {
@@ -737,7 +751,7 @@ export const extractSeoLinkData = command(
 				method: 'GET',
 				redirect: 'follow',
 				signal: controller.signal,
-				headers: { 'User-Agent': EXTRACT_USER_AGENT }
+				headers: EXTRACT_HEADERS
 			});
 			clearTimeout(timeoutId);
 			if (!res.ok) {
@@ -830,7 +844,7 @@ export const extractTargetUrlForSeoLink = command(
 				method: 'GET',
 				redirect: 'follow',
 				signal: controller.signal,
-				headers: { 'User-Agent': EXTRACT_USER_AGENT }
+				headers: EXTRACT_HEADERS
 			});
 			clearTimeout(timeoutId);
 			if (!res.ok) {
@@ -928,9 +942,25 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 				continue;
 			}
 
-			const clientDomain = clientRow.website
-				? extractDomainFromUrl(clientRow.website)
-				: inferClientDomainFromName(clientRow.name);
+			// Determină domeniul clientului: targetUrl > websiteId > client.website > infer din nume
+			let clientDomain = '';
+			if (link.targetUrl) {
+				clientDomain = extractDomainFromUrl(link.targetUrl);
+			}
+			if (!clientDomain && link.websiteId) {
+				const [website] = await db
+					.select()
+					.from(table.clientWebsite)
+					.where(eq(table.clientWebsite.id, link.websiteId))
+					.limit(1);
+				if (website) clientDomain = extractDomainFromUrl(website.url);
+			}
+			if (!clientDomain && clientRow.website) {
+				clientDomain = extractDomainFromUrl(clientRow.website);
+			}
+			if (!clientDomain) {
+				clientDomain = inferClientDomainFromName(clientRow.name);
+			}
 
 			if (!clientDomain) {
 				errors.push({
@@ -948,7 +978,7 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 					method: 'GET',
 					redirect: 'follow',
 					signal: controller.signal,
-					headers: { 'User-Agent': EXTRACT_USER_AGENT }
+					headers: EXTRACT_HEADERS
 				});
 				clearTimeout(timeoutId);
 				if (!res.ok) {
@@ -968,25 +998,30 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 			const { url: extractedTargetUrl, keyword: extractedKeyword } = pickBestTargetUrl(extractedLinks);
 			const articlePublishedAt = extractArticlePublishedDate(html);
 
-			if (!extractedTargetUrl) {
+			if (!extractedTargetUrl && !extractedKeyword) {
 				errors.push({ id: link.id, error: `Nu s-a găsit link către ${clientDomain} în articol` });
 				continue;
 			}
 
+			const updates: Record<string, unknown> = { updatedAt: new Date() };
+			if (extractedTargetUrl) updates.targetUrl = extractedTargetUrl;
+			if (extractedKeyword) {
+				updates.keyword = extractedKeyword;
+				updates.anchorText = extractedKeyword;
+			}
+			if (articlePublishedAt) updates.articlePublishedAt = articlePublishedAt;
+			// Extrage pressTrust dacă lipsește
+			if (!link.pressTrust) {
+				const pressTrust = extractPressTrustFromUrl(link.articleUrl);
+				if (pressTrust) updates.pressTrust = pressTrust;
+			}
+
 			await db
 				.update(table.seoLink)
-				.set({
-					targetUrl: extractedTargetUrl,
-					...(extractedKeyword && {
-						keyword: extractedKeyword,
-						anchorText: extractedKeyword
-					}),
-					...(articlePublishedAt && { articlePublishedAt }),
-					updatedAt: new Date()
-				})
+				.set(updates)
 				.where(eq(table.seoLink.id, link.id));
 
-			results.push({ id: link.id, targetUrl: extractedTargetUrl });
+			results.push({ id: link.id, targetUrl: extractedTargetUrl || link.targetUrl || '' });
 		} catch (e) {
 			errors.push({
 				id: link.id,
@@ -999,7 +1034,19 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 });
 
 const LINK_CHECK_USER_AGENT =
-	'Mozilla/5.0 (compatible; SEOBacklinkChecker/1.0; +https://example.com)';
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const LINK_CHECK_HEADERS: Record<string, string> = {
+	'User-Agent': LINK_CHECK_USER_AGENT,
+	'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+	'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
+	'Accept-Encoding': 'gzip, deflate, br',
+	'Sec-Fetch-Dest': 'document',
+	'Sec-Fetch-Mode': 'navigate',
+	'Sec-Fetch-Site': 'none',
+	'Upgrade-Insecure-Requests': '1',
+	'Connection': 'keep-alive'
+};
 
 /** Extrage atributul dofollow/nofollow dintr-un HTML deja încărcat. */
 function extractDofollowFromHtml(
@@ -1048,7 +1095,7 @@ async function verifyDofollowFromPage(
 			method: 'GET',
 			redirect: 'follow',
 			signal: controller.signal,
-			headers: { 'User-Agent': LINK_CHECK_USER_AGENT }
+			headers: LINK_CHECK_HEADERS
 		});
 		clearTimeout(timeoutId);
 		if (!res.ok) return null;
@@ -1074,7 +1121,7 @@ async function performLinkCheck(articleUrl: string): Promise<{
 			method: 'HEAD',
 			redirect: 'follow',
 			signal: controller.signal,
-			headers: { 'User-Agent': LINK_CHECK_USER_AGENT }
+			headers: LINK_CHECK_HEADERS
 		});
 		clearTimeout(timeoutId);
 		const responseTimeMs = Date.now() - start;
@@ -1139,10 +1186,13 @@ export const checkSeoLink = command(
 
 		let lastCheckDofollow: 'dofollow' | 'nofollow' | null = null;
 		let newArticlePublishedAt: string | null = null;
+		let extractedKeyword: string | null = null;
+		let extractedTargetUrl: string | null = null;
+		const needsKeyword = !link.keyword || link.keyword === '—' || link.keyword === '-';
 
-		// Dacă linkul e accesibil și avem nevoie de HTML (dofollow sau dată publicare lipsă),
-		// facem un singur GET request în loc de două separate.
-		if (result.status === 'ok' && (link.targetUrl || !link.articlePublishedAt)) {
+		// Dacă linkul e accesibil și avem nevoie de HTML (dofollow, dată publicare lipsă, sau keyword lipsă),
+		// facem un singur GET request în loc de mai multe separate.
+		if (result.status === 'ok' && (link.targetUrl || !link.articlePublishedAt || needsKeyword)) {
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 			try {
 				const controller = new AbortController();
@@ -1151,7 +1201,7 @@ export const checkSeoLink = command(
 					method: 'GET',
 					redirect: 'follow',
 					signal: controller.signal,
-					headers: { 'User-Agent': EXTRACT_USER_AGENT }
+					headers: EXTRACT_HEADERS
 				});
 				clearTimeout(timeoutId);
 				if (htmlRes.ok) {
@@ -1161,6 +1211,38 @@ export const checkSeoLink = command(
 					}
 					if (!link.articlePublishedAt) {
 						newArticlePublishedAt = extractArticlePublishedDate(html);
+					}
+					// Extrage keyword/anchorText dacă lipsesc
+					if (needsKeyword) {
+						// Determină domeniul clientului
+						const [clientRow] = await db
+							.select()
+							.from(table.client)
+							.where(eq(table.client.id, link.clientId))
+							.limit(1);
+						let clientDomain = '';
+						if (link.targetUrl) {
+							clientDomain = extractDomainFromUrl(link.targetUrl);
+						} else if (link.websiteId) {
+							const [website] = await db
+								.select()
+								.from(table.clientWebsite)
+								.where(eq(table.clientWebsite.id, link.websiteId))
+								.limit(1);
+							if (website) clientDomain = extractDomainFromUrl(website.url);
+						}
+						if (!clientDomain && clientRow?.website) {
+							clientDomain = extractDomainFromUrl(clientRow.website);
+						}
+						if (!clientDomain && clientRow?.name) {
+							clientDomain = inferClientDomainFromName(clientRow.name);
+						}
+						if (clientDomain) {
+							const extractedLinks = extractLinksToRootFromHtml(html, clientDomain);
+							const best = pickBestTargetUrl(extractedLinks);
+							if (best.keyword) extractedKeyword = best.keyword;
+							if (best.url && !link.targetUrl) extractedTargetUrl = best.url;
+						}
 					}
 				}
 			} catch {
@@ -1180,6 +1262,9 @@ export const checkSeoLink = command(
 				...(lastCheckDofollow && { linkAttribute: lastCheckDofollow }),
 				// Actualizează data publicării dacă lipsea și am reușit să o extragem
 				...(newArticlePublishedAt && { articlePublishedAt: newArticlePublishedAt }),
+				// Actualizează keyword/anchorText dacă lipseau și am reușit să le extragem
+				...(extractedKeyword && { keyword: extractedKeyword, anchorText: extractedKeyword }),
+				...(extractedTargetUrl && { targetUrl: extractedTargetUrl }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
@@ -1616,7 +1701,7 @@ export const importSeoLinksFromFile = command(
 			try {
 				const resp = await fetch(articleUrl, {
 					signal: AbortSignal.timeout(12000),
-					headers: { 'User-Agent': EXTRACT_USER_AGENT }
+					headers: EXTRACT_HEADERS
 				});
 				if (resp.ok) {
 					const html = await resp.text();

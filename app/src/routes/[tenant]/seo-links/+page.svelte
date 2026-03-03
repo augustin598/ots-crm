@@ -310,6 +310,10 @@
 	let editingPriceValue = $state('');
 	let editingPriceCurrency = $state<Currency>('RON');
 
+	// Inline keyword editing
+	let editingKeywordId = $state<string | null>(null);
+	let editingKeywordValue = $state('');
+
 	// Extract state
 	let extractLoading = $state(false);
 	let extractError = $state<string | null>(null);
@@ -660,7 +664,7 @@
 		try {
 			if (formBulkMode) {
 				const urls = parseBulkArticleUrls(formArticleUrlsBulk);
-				await createSeoLinksBulk({
+				const bulkResult = await createSeoLinksBulk({
 					clientId: formClientId,
 					websiteId: formWebsiteId || undefined,
 					pressTrust: formPressTrust || undefined,
@@ -677,9 +681,19 @@
 					projectId: formProjectId || undefined,
 					notes: formNotes || undefined
 				}).updates(seoLinksQuery);
-				toast.success(`${urls.length} linkuri adăugate`);
+				toast.success(`${urls.length} linkuri adăugate. Se extrag cuvintele cheie...`);
 				resetForm();
 				isDialogOpen = false;
+				// Auto-extrage keyword/anchorText/targetUrl din fiecare articol
+				if (bulkResult?.seoLinkIds?.length) {
+					extractTargetUrlBatch({ seoLinkIds: bulkResult.seoLinkIds })
+						.updates(seoLinksQuery)
+						.then((r) => {
+							if (r.extracted > 0) toast.success(`Cuvinte cheie extrase pentru ${r.extracted} din ${urls.length} linkuri`);
+							if (r.failed > 0) toast.error(`${r.failed} linkuri fără cuvânt cheie detectat`);
+						})
+						.catch(() => toast.error('Extragerea automată a eșuat'));
+				}
 				return;
 			}
 			if (isEditing && editingId) {
@@ -928,6 +942,24 @@
 				currency: curr
 			}).updates(seoLinksQuery);
 			toast.success(num != null ? 'Preț actualizat' : 'Preț eliminat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+		}
+	}
+
+	async function handleSaveKeyword(link: (typeof seoLinks)[0], value: string) {
+		editingKeywordId = null;
+		editingKeywordValue = '';
+		const trimmed = value.trim();
+		if (!trimmed) return;
+		if (trimmed === link.keyword) return;
+		try {
+			await updateSeoLink({
+				seoLinkId: link.id,
+				keyword: trimmed,
+				anchorText: trimmed
+			}).updates(seoLinksQuery);
+			toast.success('Cuvânt cheie actualizat');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
 		}
@@ -2609,7 +2641,38 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
-									<span class="text-[13px] text-foreground/85 line-clamp-2">{link.keyword}</span>
+									{#if editingKeywordId === link.id}
+										<div onclick={(e) => e.stopPropagation()}>
+											<Input
+												type="text"
+												class="h-8 w-full text-[13px] px-2"
+												bind:value={editingKeywordValue}
+												placeholder="cuvânt cheie"
+												autofocus
+												onblur={(e) => handleSaveKeyword(link, e.currentTarget.value)}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') {
+														e.currentTarget.blur();
+													} else if (e.key === 'Escape') {
+														editingKeywordId = null;
+														editingKeywordValue = '';
+														e.currentTarget.blur();
+													}
+												}}
+											/>
+										</div>
+									{:else}
+										<button
+											type="button"
+											class="text-left w-full min-w-[4rem] py-1 px-1.5 -mx-1.5 rounded hover:bg-muted/50 text-foreground/85 hover:text-foreground transition-colors text-[13px] line-clamp-2"
+											onclick={() => {
+												editingKeywordId = link.id;
+												editingKeywordValue = link.keyword;
+											}}
+										>
+											{link.keyword || '—'}
+										</button>
+									{/if}
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle">
 									{#if link.targetUrl}

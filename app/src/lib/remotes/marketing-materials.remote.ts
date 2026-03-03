@@ -41,9 +41,13 @@ export const getMarketingMaterials = query(
 
 		let conditions = eq(table.marketingMaterial.tenantId, event.locals.tenant.id);
 
-		// Client portal: force filter by client
+		// Client portal: force filter by client + only active materials
 		if (event.locals.isClientUser && event.locals.client) {
-			conditions = and(conditions, eq(table.marketingMaterial.clientId, event.locals.client.id)) as typeof conditions;
+			conditions = and(
+				conditions,
+				eq(table.marketingMaterial.clientId, event.locals.client.id),
+				eq(table.marketingMaterial.status, 'active')
+			) as typeof conditions;
 		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.marketingMaterial.clientId, filters.clientId)) as typeof conditions;
 		}

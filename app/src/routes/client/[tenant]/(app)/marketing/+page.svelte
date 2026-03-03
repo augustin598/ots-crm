@@ -35,14 +35,6 @@
 	let deleteTarget = $state<any>(null);
 	let deleting = $state(false);
 
-	const categories = [
-		{ id: 'google-ads', label: 'Google Ads' },
-		{ id: 'facebook-ads', label: 'Facebook Ads' },
-		{ id: 'tiktok-ads', label: 'TikTok Ads' },
-		{ id: 'press-article', label: 'Articole Presă' },
-		{ id: 'seo-article', label: 'Articole SEO' }
-	];
-
 	const materialsQuery = $derived(
 		getMarketingMaterials({
 			category: activeCategory,
@@ -54,7 +46,7 @@
 	const materials = $derived(materialsQuery.current || []);
 
 	// SEO links for the seo-article combobox
-	const seoLinksQuery = $derived(getSeoLinks({}));
+	const seoLinksQuery = $derived(getSeoLinks({ clientId: clientId || undefined }));
 	const seoLinks = $derived(
 		(seoLinksQuery.current || []).map((l: any) => ({
 			id: l.id,
@@ -63,9 +55,15 @@
 		}))
 	);
 
-	// Thumbnail URLs cache
+	// Thumbnail URLs cache — clear on category switch
 	let thumbnailUrls = $state<Record<string, string>>({});
 	const loadingThumbnailIds = new Set<string>();
+
+	$effect(() => {
+		void activeCategory;
+		thumbnailUrls = {};
+		loadingThumbnailIds.clear();
+	});
 
 	$effect(() => {
 		const imageMaterials = materials.filter(

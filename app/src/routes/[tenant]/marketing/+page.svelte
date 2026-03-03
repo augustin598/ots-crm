@@ -35,14 +35,6 @@
 	let deleteTarget = $state<any>(null);
 	let deleting = $state(false);
 
-	const categories = [
-		{ id: 'google-ads', label: 'Google Ads' },
-		{ id: 'facebook-ads', label: 'Facebook Ads' },
-		{ id: 'tiktok-ads', label: 'TikTok Ads' },
-		{ id: 'press-article', label: 'Articole Presă' },
-		{ id: 'seo-article', label: 'Articole SEO' }
-	];
-
 	// Load all clients for the filter
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
@@ -68,9 +60,17 @@
 		}))
 	);
 
-	// Thumbnail URLs cache
+	// Thumbnail URLs cache — clear on context switch
 	let thumbnailUrls = $state<Record<string, string>>({});
 	const loadingThumbnailIds = new Set<string>();
+
+	$effect(() => {
+		// Reset cache when client or category changes (presigned URLs expire anyway)
+		void selectedClientId;
+		void activeCategory;
+		thumbnailUrls = {};
+		loadingThumbnailIds.clear();
+	});
 
 	$effect(() => {
 		const imageMaterials = materials.filter(
