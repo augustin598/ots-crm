@@ -11,8 +11,7 @@ CREATE TABLE `task_activity` (
 	FOREIGN KEY (`task_id`) REFERENCES `task`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
+);--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_task_comment` (
 	`id` text PRIMARY KEY NOT NULL,

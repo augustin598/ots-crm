@@ -15,6 +15,5 @@ CREATE TABLE `client_user_preferences` (
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
 	FOREIGN KEY (`client_user_id`) REFERENCES `client_user`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
+);--> statement-breakpoint
 CREATE UNIQUE INDEX `client_user_preferences_client_user_id_unique` ON `client_user_preferences` (`client_user_id`);

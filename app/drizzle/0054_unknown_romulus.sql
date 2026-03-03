@@ -11,8 +11,7 @@ CREATE TABLE `debug_log` (
 	`created_at` timestamp DEFAULT current_timestamp NOT NULL,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
+);--> statement-breakpoint
 CREATE TABLE `email_log` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text,

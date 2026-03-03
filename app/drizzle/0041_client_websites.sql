@@ -7,9 +7,9 @@ CREATE TABLE `client_website` (
 	`is_default` integer NOT NULL DEFAULT 0,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
-);
+);--> statement-breakpoint
 
--- Populare automată din câmpul client.website existent
+
 INSERT INTO `client_website` (`id`, `tenant_id`, `client_id`, `name`, `url`, `is_default`, `created_at`, `updated_at`)
 SELECT
 	lower(hex(randomblob(15))),
@@ -21,6 +21,6 @@ SELECT
 	datetime('now'),
 	datetime('now')
 FROM `client`
-WHERE `website` IS NOT NULL AND trim(`website`) != '';
+WHERE `website` IS NOT NULL AND trim(`website`) != '';--> statement-breakpoint
 
 ALTER TABLE `seo_link` ADD `website_id` text REFERENCES `client_website`(`id`);

@@ -10,8 +10,7 @@ CREATE TABLE `gmail_integration` (
 	`created_at` timestamp DEFAULT current_date NOT NULL,
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
+);--> statement-breakpoint
 CREATE TABLE `supplier_invoice` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,

@@ -1,3 +1,50 @@
-ALTER TABLE `contract` ADD `uploaded_file_path` text;--> statement-breakpoint
-ALTER TABLE `contract` ADD `uploaded_file_size` integer;--> statement-breakpoint
-ALTER TABLE `contract` ADD `uploaded_file_mime_type` text;
+CREATE TABLE IF NOT EXISTS `contract` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`client_id` text NOT NULL,
+	`template_id` text,
+	`contract_number` text NOT NULL,
+	`contract_date` timestamp NOT NULL,
+	`contract_title` text DEFAULT 'PRESTARI SERVICII INFORMATICE' NOT NULL,
+	`status` text DEFAULT 'draft' NOT NULL,
+	`service_description` text,
+	`offer_link` text,
+	`currency` text DEFAULT 'EUR' NOT NULL,
+	`payment_terms_days` integer DEFAULT 5 NOT NULL,
+	`penalty_rate` integer DEFAULT 50 NOT NULL,
+	`billing_frequency` text DEFAULT 'monthly' NOT NULL,
+	`contract_duration_months` integer DEFAULT 6 NOT NULL,
+	`discount_percent` integer,
+	`prestator_email` text,
+	`beneficiar_email` text,
+	`hourly_rate` integer DEFAULT 6000 NOT NULL,
+	`hourly_rate_currency` text DEFAULT 'EUR' NOT NULL,
+	`prestator_signature_name` text,
+	`beneficiar_signature_name` text,
+	`prestator_signature_image` text,
+	`beneficiar_signature_image` text,
+	`prestator_signed_at` timestamp,
+	`beneficiar_signed_at` timestamp,
+	`clauses_json` text,
+	`notes` text,
+	`uploaded_file_path` text,
+	`uploaded_file_size` integer,
+	`uploaded_file_mime_type` text,
+	`created_by_user_id` text NOT NULL,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`template_id`) REFERENCES `contract_template`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `contract_line_item` (
+	`id` text PRIMARY KEY NOT NULL,
+	`contract_id` text NOT NULL,
+	`description` text NOT NULL,
+	`price` integer NOT NULL,
+	`unit_of_measure` text DEFAULT 'Luna' NOT NULL,
+	`sort_order` integer DEFAULT 0 NOT NULL,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`contract_id`) REFERENCES `contract`(`id`) ON UPDATE no action ON DELETE cascade
+);
