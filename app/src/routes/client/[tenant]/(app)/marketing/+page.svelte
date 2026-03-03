@@ -12,6 +12,7 @@
 	import MaterialCard from '$lib/components/marketing/material-card.svelte';
 	import MaterialFilters from '$lib/components/marketing/material-filters.svelte';
 	import MaterialUploadDialog from '$lib/components/marketing/material-upload-dialog.svelte';
+	import MaterialInlineUpload from '$lib/components/marketing/material-inline-upload.svelte';
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
@@ -26,6 +27,7 @@
 	let activeCategory = $state('google-ads');
 	let filterType = $state('');
 	let searchTerm = $state('');
+	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
@@ -45,8 +47,9 @@
 		getMarketingMaterials({
 			category: activeCategory,
 			type: filterType || undefined,
-			search: searchTerm.trim() || undefined
-		})
+			search: searchTerm.trim() || undefined,
+			_refresh: refreshKey
+		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
 
@@ -105,14 +108,15 @@
 	}
 
 	function handleUploaded() {
-		materialsQuery.revalidate();
+		refreshKey++;
 	}
 
 	function handleUpdated() {
-		materialsQuery.revalidate();
+		refreshKey++;
 	}
 
 	const uploadUrl = $derived(`/client/${tenantSlug}/marketing/upload`);
+	const isFileFilterType = $derived(['image', 'video', 'document'].includes(filterType));
 </script>
 
 <div class="space-y-6">
@@ -121,10 +125,12 @@
 			<MegaphoneIcon class="h-6 w-6 text-primary" />
 			<h2 class="text-xl font-semibold">Materiale Marketing</h2>
 		</div>
-		<Button onclick={() => (uploadDialogOpen = true)}>
-			<PlusIcon class="h-4 w-4 mr-2" />
-			Adaugă Material
-		</Button>
+		{#if !isFileFilterType}
+			<Button onclick={() => (uploadDialogOpen = true)}>
+				<PlusIcon class="h-4 w-4 mr-2" />
+				Adaugă Material
+			</Button>
+		{/if}
 	</div>
 
 	<!-- Category tabs -->
@@ -151,6 +157,17 @@
 			<!-- Filters -->
 			<MaterialFilters bind:filterType bind:searchTerm />
 
+			<!-- Inline upload zone for file type filters -->
+			{#if isFileFilterType && clientId}
+				<MaterialInlineUpload
+					filterType={filterType as 'image' | 'video' | 'document'}
+					category={activeCategory}
+					{clientId}
+					{uploadUrl}
+					onUploaded={handleUploaded}
+				/>
+			{/if}
+
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<span>{materials.length} materiale</span>
@@ -168,10 +185,12 @@
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
 					<p class="text-sm">Niciun material în această categorie.</p>
-					<Button variant="outline" class="mt-3" onclick={() => (uploadDialogOpen = true)}>
-						<PlusIcon class="h-4 w-4 mr-2" />
-						Adaugă primul material
-					</Button>
+					{#if !isFileFilterType}
+						<Button variant="outline" class="mt-3" onclick={() => (uploadDialogOpen = true)}>
+							<PlusIcon class="h-4 w-4 mr-2" />
+							Adaugă primul material
+						</Button>
+					{/if}
 				</div>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

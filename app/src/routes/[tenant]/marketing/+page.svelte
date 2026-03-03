@@ -13,6 +13,7 @@
 	import MaterialCard from '$lib/components/marketing/material-card.svelte';
 	import MaterialFilters from '$lib/components/marketing/material-filters.svelte';
 	import MaterialUploadDialog from '$lib/components/marketing/material-upload-dialog.svelte';
+	import MaterialInlineUpload from '$lib/components/marketing/material-inline-upload.svelte';
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
@@ -26,6 +27,7 @@
 	let activeCategory = $state('google-ads');
 	let filterType = $state('');
 	let searchTerm = $state('');
+	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
@@ -50,8 +52,9 @@
 			clientId: selectedClientId || undefined,
 			category: activeCategory,
 			type: filterType || undefined,
-			search: searchTerm.trim() || undefined
-		})
+			search: searchTerm.trim() || undefined,
+			_refresh: refreshKey
+		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
 
@@ -110,14 +113,15 @@
 	}
 
 	function handleUploaded() {
-		materialsQuery.revalidate();
+		refreshKey++;
 	}
 
 	function handleUpdated() {
-		materialsQuery.revalidate();
+		refreshKey++;
 	}
 
 	const uploadUrl = $derived(`/${tenantSlug}/marketing-materials/upload`);
+	const isFileFilterType = $derived(['image', 'video', 'document'].includes(filterType));
 
 	// Get client name by id
 	function getClientName(clientId: string): string {
@@ -149,10 +153,12 @@
 				</Select.Content>
 			</Select.Root>
 
-			<Button onclick={() => { if (!selectedClientId) { toast.error('Selectează un client mai întâi'); return; } uploadDialogOpen = true; }}>
-				<PlusIcon class="h-4 w-4 mr-2" />
-				Adaugă Material
-			</Button>
+			{#if !isFileFilterType}
+				<Button onclick={() => { if (!selectedClientId) { toast.error('Selectează un client mai întâi'); return; } uploadDialogOpen = true; }}>
+					<PlusIcon class="h-4 w-4 mr-2" />
+					Adaugă Material
+				</Button>
+			{/if}
 		</div>
 	</div>
 
@@ -180,6 +186,17 @@
 			<!-- Filters -->
 			<MaterialFilters bind:filterType bind:searchTerm />
 
+			<!-- Inline upload zone for file type filters -->
+			{#if isFileFilterType && selectedClientId}
+				<MaterialInlineUpload
+					filterType={filterType as 'image' | 'video' | 'document'}
+					category={activeCategory}
+					clientId={selectedClientId}
+					{uploadUrl}
+					onUploaded={handleUploaded}
+				/>
+			{/if}
+
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<span>{materials.length} materiale</span>
@@ -200,10 +217,12 @@
 						<p class="text-sm">Selectează un client pentru a vedea materialele.</p>
 					{:else}
 						<p class="text-sm">Niciun material în această categorie.</p>
-						<Button variant="outline" class="mt-3" onclick={() => (uploadDialogOpen = true)}>
-							<PlusIcon class="h-4 w-4 mr-2" />
-							Adaugă primul material
-						</Button>
+						{#if !isFileFilterType}
+							<Button variant="outline" class="mt-3" onclick={() => (uploadDialogOpen = true)}>
+								<PlusIcon class="h-4 w-4 mr-2" />
+								Adaugă primul material
+							</Button>
+						{/if}
 					{/if}
 				</div>
 			{:else}

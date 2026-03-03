@@ -2,7 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { error, json } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, like, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
 
@@ -86,6 +86,54 @@ async function validateMagicBytes(file: File): Promise<boolean> {
 	return false;
 }
 
+function escapeLike(s: string): string {
+	return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+function escapeRegex(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function resolveUniqueTitle(
+	tenantId: string,
+	clientId: string,
+	category: string,
+	baseTitle: string
+): Promise<string> {
+	const escapedTitle = escapeLike(baseTitle);
+	const existing = await db
+		.select({ title: table.marketingMaterial.title })
+		.from(table.marketingMaterial)
+		.where(
+			and(
+				eq(table.marketingMaterial.tenantId, tenantId),
+				eq(table.marketingMaterial.clientId, clientId),
+				eq(table.marketingMaterial.category, category),
+				or(
+					eq(table.marketingMaterial.title, baseTitle),
+					sql`${table.marketingMaterial.title} LIKE ${escapedTitle + ' (%)'} ESCAPE '\\'`
+				)
+			)
+		);
+
+	if (existing.length === 0) return baseTitle;
+
+	const existingTitles = new Set(existing.map((e) => e.title));
+	if (!existingTitles.has(baseTitle)) return baseTitle;
+
+	let maxSuffix = 0;
+	const suffixPattern = new RegExp(`^${escapeRegex(baseTitle)} \\((\\d+)\\)$`);
+	for (const e of existing) {
+		const match = e.title?.match(suffixPattern);
+		if (match) {
+			const num = parseInt(match[1], 10);
+			if (num > maxSuffix) maxSuffix = num;
+		}
+	}
+
+	return `${baseTitle} (${maxSuffix + 1})`;
+}
+
 export async function handleMarketingUpload(event: RequestEvent): Promise<Response> {
 	const tenantId = event.locals.tenant?.id;
 	const userId = event.locals.user?.id;
@@ -100,10 +148,11 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 	const file = formData.get('file') as File | null;
 	const clientId = formData.get('clientId') as string;
 	const category = formData.get('category') as string;
-	const title = formData.get('title') as string;
+	let title = formData.get('title') as string;
 	const description = (formData.get('description') as string) || null;
 	const seoLinkId = (formData.get('seoLinkId') as string) || null;
 	const tags = (formData.get('tags') as string) || null;
+	const autoRename = formData.get('autoRename') === 'true';
 
 	if (!clientId || !category || !title) {
 		throw error(400, 'clientId, category și title sunt obligatorii');
@@ -168,6 +217,10 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		clientId,
 		category
 	});
+
+	if (autoRename) {
+		title = await resolveUniqueTitle(tenantId, clientId, category, title);
+	}
 
 	const materialId = generateMaterialId();
 	const materialType = detectType(file.type);
