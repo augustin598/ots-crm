@@ -1,0 +1,23 @@
+CREATE TABLE `marketing_material` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
+	`client_id` text NOT NULL REFERENCES `client`(`id`),
+	`category` text NOT NULL DEFAULT 'google-ads',
+	`type` text NOT NULL DEFAULT 'image',
+	`title` text NOT NULL,
+	`description` text,
+	`file_path` text,
+	`file_size` integer,
+	`mime_type` text,
+	`file_name` text,
+	`text_content` text,
+	`dimensions` text,
+	`external_url` text,
+	`seo_link_id` text REFERENCES `seo_link`(`id`),
+	`status` text NOT NULL DEFAULT 'active',
+	`uploaded_by_user_id` text REFERENCES `user`(`id`),
+	`uploaded_by_client_user_id` text REFERENCES `client_user`(`id`),
+	`tags` text,
+	`created_at` timestamp NOT NULL DEFAULT current_timestamp,
+	`updated_at` timestamp NOT NULL DEFAULT current_timestamp
+);

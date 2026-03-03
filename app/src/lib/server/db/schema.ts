@@ -2098,6 +2098,62 @@ export const debugLogRelations = relations(debugLog, ({ one }) => ({
 	})
 }));
 
+// ==================== MARKETING MATERIALS ====================
+
+export const marketingMaterial = sqliteTable('marketing_material', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	category: text('category').notNull().default('google-ads'),
+	// 'google-ads' | 'facebook-ads' | 'tiktok-ads' | 'press-article' | 'seo-article'
+	type: text('type').notNull().default('image'),
+	// 'image' | 'video' | 'document' | 'text' | 'url'
+	title: text('title').notNull(),
+	description: text('description'),
+	filePath: text('file_path'),
+	fileSize: integer('file_size'),
+	mimeType: text('mime_type'),
+	fileName: text('file_name'),
+	textContent: text('text_content'),
+	dimensions: text('dimensions'),
+	externalUrl: text('external_url'),
+	seoLinkId: text('seo_link_id').references(() => seoLink.id, { onDelete: 'set null' }),
+	status: text('status').notNull().default('active'),
+	// 'draft' | 'active' | 'archived'
+	uploadedByUserId: text('uploaded_by_user_id').references(() => user.id),
+	uploadedByClientUserId: text('uploaded_by_client_user_id').references(() => clientUser.id),
+	tags: text('tags'), // JSON string array
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
+});
+
+export const marketingMaterialRelations = relations(marketingMaterial, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [marketingMaterial.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [marketingMaterial.clientId],
+		references: [client.id]
+	}),
+	seoLink: one(seoLink, {
+		fields: [marketingMaterial.seoLinkId],
+		references: [seoLink.id]
+	}),
+	uploadedByUser: one(user, {
+		fields: [marketingMaterial.uploadedByUserId],
+		references: [user.id]
+	}),
+	uploadedByClientUser: one(clientUser, {
+		fields: [marketingMaterial.uploadedByClientUserId],
+		references: [clientUser.id]
+	})
+}));
+
 // Types
 export type Session = typeof session.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -2200,3 +2256,5 @@ export type EmailLog = typeof emailLog.$inferSelect;
 export type NewEmailLog = typeof emailLog.$inferInsert;
 export type DebugLog = typeof debugLog.$inferSelect;
 export type NewDebugLog = typeof debugLog.$inferInsert;
+export type MarketingMaterial = typeof marketingMaterial.$inferSelect;
+export type NewMarketingMaterial = typeof marketingMaterial.$inferInsert;

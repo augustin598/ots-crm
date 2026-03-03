@@ -49,7 +49,7 @@
 		{ id: 'projects', label: `Projects (${projects.length})`, href: `/${tenantSlug}/clients/${clientId}/projects` },
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
-		{ id: 'seo', label: 'SEO', href: `/${tenantSlug}/clients/${clientId}/seo` }
+		{ id: 'marketing', label: 'Marketing', href: `/${tenantSlug}/clients/${clientId}/marketing` }
 	]);
 
 	let magicLinkDialogOpen = $state(false);
@@ -101,7 +101,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
-		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/seo`)) return 'seo';
+		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/marketing`)) return 'marketing';
 		return 'overview';
 	});
 </script>
