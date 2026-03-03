@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { getClients, getClientFirstInvoiceDates, createClient, updateClient, deleteClient } from '$lib/remotes/clients.remote';
+	import { getClients, getClientFirstInvoiceDates, getClientsStats, createClient, updateClient, deleteClient } from '$lib/remotes/clients.remote';
 	import { getAllClientWebsites } from '$lib/remotes/client-websites.remote';
 	import ClientLogo from '$lib/components/client-logo.svelte';
 	import { getFaviconUrl } from '$lib/utils';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { goto } from '$app/navigation';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Progress } from '$lib/components/ui/progress';
 	import {
 		Dialog,
 		DialogContent,
@@ -37,8 +39,10 @@
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import XIcon from '@lucide/svelte/icons/x';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import MapPinIcon from '@lucide/svelte/icons/map-pin';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import HashIcon from '@lucide/svelte/icons/hash';
 
 	const clientsQuery = getClients();
 	const firstInvoiceDatesQuery = getClientFirstInvoiceDates();
@@ -56,6 +60,18 @@
 			return map;
 		})()
 	);
+	const clientsStatsQuery = getClientsStats();
+	const clientStats = $derived(
+		(() => {
+			const rows = clientsStatsQuery.current || [];
+			const map = new Map<string, (typeof rows)[0]>();
+			for (const r of rows) {
+				if (r.clientId) map.set(r.clientId, r);
+			}
+			return map;
+		})()
+	);
+
 	const allWebsitesQuery = getAllClientWebsites();
 	const websitesByClient = $derived(
 		(() => {
@@ -390,9 +406,20 @@
 	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 		{#each filteredClients as client}
 			{@const firstInvoiceDate = firstInvoiceDates.get(client.id)}
-			<Card class="group flex flex-col rounded-xl border bg-card shadow-sm transition-all hover:shadow-md hover:border-primary/30 p-0 overflow-hidden">
-				<!-- Header: avatar + name + menu -->
-				<div class="flex items-start gap-4 p-5 pb-4">
+			{@const stats = clientStats.get(client.id)}
+			{@const currencies = stats ? Object.keys(stats.totalInvoicedByCurrency) : []}
+			{@const isSingleCurrency = currencies.length === 1}
+			{@const singleCurr = currencies[0] || 'RON'}
+			{@const paymentPercent = stats && isSingleCurrency && (stats.totalInvoicedByCurrency[singleCurr] || 0) > 0 ? Math.round(((stats.totalPaidByCurrency[singleCurr] || 0) / stats.totalInvoicedByCurrency[singleCurr]) * 100) : 0}
+
+			<Card
+				class="group flex flex-col rounded-xl border bg-card shadow-sm transition-all hover:shadow-md hover:border-primary/30 p-0 overflow-hidden cursor-pointer"
+				onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}
+				role="link"
+			>
+				<!-- Section 1: Header -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="flex items-start gap-4 p-5 pb-3" onclick={(e) => e.stopPropagation()}>
 					<ClientLogo website={client.defaultWebsiteUrl ?? client.website} name={client.name} size="sm" />
 					<div class="min-w-0 flex-1">
 						{#if editingClientId === client.id}
@@ -410,7 +437,7 @@
 							/>
 						{:else}
 							<h3
-								class="font-semibold text-base text-foreground cursor-text hover:bg-muted/50 rounded px-1 -mx-1 py-0.5 transition-colors line-clamp-2"
+								class="font-semibold text-base text-foreground cursor-text hover:bg-muted/50 rounded px-1 -mx-1 py-0.5 transition-colors line-clamp-1"
 								onclick={() => startEditName(client)}
 								role="button"
 								tabindex="0"
@@ -419,13 +446,13 @@
 								{client.name}
 							</h3>
 						{/if}
-						<div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+						<div class="flex items-center gap-1.5 mt-1 flex-wrap">
 							{#if client.status}
 								<Badge variant={getStatusVariant(client.status)} class="text-[11px] font-medium px-2 py-0.5 shrink-0">
 									{client.status}
 								</Badge>
 							{/if}
-							{#each (websitesByClient.get(client.id) ?? []) as w (w.id)}
+							{#each (websitesByClient.get(client.id) ?? []).slice(0, 2) as w (w.id)}
 								<a
 									href={w.url.startsWith('http') ? w.url : 'https://' + w.url}
 									target="_blank"
@@ -439,6 +466,22 @@
 								</a>
 							{/each}
 						</div>
+						{#if client.cui || client.city}
+							<div class="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+								{#if client.cui}
+									<span class="flex items-center gap-1">
+										<HashIcon class="h-3 w-3 shrink-0" />
+										<span class="truncate">{client.cui}</span>
+									</span>
+								{/if}
+								{#if client.city}
+									<span class="flex items-center gap-1">
+										<MapPinIcon class="h-3 w-3 shrink-0" />
+										<span class="truncate">{client.city}{#if client.county}, {client.county}{/if}</span>
+									</span>
+								{/if}
+							</div>
+						{/if}
 					</div>
 					<DropdownMenu>
 						<DropdownMenuTrigger>
@@ -448,38 +491,82 @@
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/clients/${client.id}/edit`)}>
-								Edit
+								Editează
 							</DropdownMenuItem>
 							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}>
-								View Details
+								Detalii
 							</DropdownMenuItem>
 							<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteClient(client.id)}>
-								Delete
+								Șterge
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				</div>
 
-				<!-- Details: icon + text rows, consistent layout -->
-				<div class="flex flex-col gap-2 px-5 pb-5 pt-0">
-					<div class="flex items-center gap-3 text-sm min-h-[20px]">
-						<Building2Icon class="h-4 w-4 shrink-0 text-muted-foreground/70" />
-						<span class="truncate text-muted-foreground">{client.name}</span>
+				<!-- Section 2: Financial Summary -->
+				{#if stats && stats.invoiceCount > 0}
+					{@const hasUnpaid = Object.values(stats.unpaidAmountByCurrency).some((v) => v > 0)}
+					<div class="bg-muted/30 px-5 py-3 border-t border-border/50">
+						<div class="flex items-baseline justify-between mb-2">
+							<div>
+								<span class="text-[11px] text-muted-foreground uppercase tracking-wide">Facturat</span>
+								{#each Object.entries(stats.totalInvoicedByCurrency) as [curr, amount]}
+									<p class="text-sm font-semibold">{formatAmount(amount, curr as Currency)}</p>
+								{/each}
+							</div>
+							{#if hasUnpaid}
+								<div class="text-right">
+									<span class="text-[11px] text-muted-foreground uppercase tracking-wide">Neîncasat</span>
+									{#each Object.entries(stats.unpaidAmountByCurrency).filter(([_, v]) => v > 0) as [curr, amount]}
+										<p class="text-sm font-semibold text-amber-600">{formatAmount(amount, curr as Currency)}</p>
+									{/each}
+								</div>
+							{:else}
+								<div class="text-right">
+									<span class="text-[11px] font-medium text-green-600">Totul încasat</span>
+								</div>
+							{/if}
+						</div>
+						{#if isSingleCurrency}
+							<div class="flex items-center gap-2">
+								<Progress value={paymentPercent} max={100} class="h-1.5 flex-1 !bg-amber-100 dark:!bg-amber-900/30 [&>div]:!bg-green-500" />
+								<span class="text-[10px] text-muted-foreground font-medium w-8 text-right">{paymentPercent}%</span>
+							</div>
+						{/if}
+						<div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+							<span class="flex items-center gap-1">
+								<ReceiptIcon class="h-3 w-3" />
+								{stats.invoiceCount} factur{stats.invoiceCount !== 1 ? 'i' : 'ă'}
+							</span>
+							{#if stats.overdueCount > 0}
+								<Badge variant="destructive" class="text-[10px] px-1.5 py-0 h-4">
+									{stats.overdueCount} restant{stats.overdueCount !== 1 ? 'e' : 'ă'}
+								</Badge>
+							{/if}
+						</div>
 					</div>
-					<div class="flex items-center gap-3 text-sm min-h-[20px]">
-						<MailIcon class="h-4 w-4 shrink-0 text-muted-foreground/70" />
-						<span class="truncate text-muted-foreground">{client.email || '—'}</span>
+				{:else}
+					<div class="bg-muted/20 px-5 py-3 border-t border-border/50">
+						<p class="text-xs text-muted-foreground italic">Nicio factură emisă</p>
 					</div>
-					<div class="flex items-center gap-3 text-sm min-h-[20px]">
-						<PhoneIcon class="h-4 w-4 shrink-0 text-muted-foreground/70" />
-						<span class="truncate text-muted-foreground">{client.phone || '—'}</span>
+				{/if}
+
+				<!-- Section 3: Contact Footer -->
+				<div class="grid grid-cols-2 gap-x-3 gap-y-1.5 px-5 py-3">
+					<div class="flex items-center gap-2 min-w-0">
+						<MailIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+						<span class="truncate text-xs text-muted-foreground">{client.email || '—'}</span>
 					</div>
-					<div class="flex items-center gap-3 text-sm min-h-[20px] pt-1">
-						<CalendarIcon class="h-4 w-4 shrink-0 text-muted-foreground/70" />
-						<span class="text-muted-foreground">
+					<div class="flex items-center gap-2 min-w-0">
+						<PhoneIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+						<span class="truncate text-xs text-muted-foreground">{client.phone || '—'}</span>
+					</div>
+					<div class="col-span-2 flex items-center gap-2 min-w-0 pt-0.5">
+						<CalendarIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+						<span class="text-xs text-muted-foreground">
 							{firstInvoiceDate
-								? `First invoice ${firstInvoiceDate.toLocaleDateString()}`
-								: `Joined ${new Date(client.createdAt).toLocaleDateString()}`}
+								? `Prima factură ${firstInvoiceDate.toLocaleDateString('ro-RO')}`
+								: `Din ${new Date(client.createdAt).toLocaleDateString('ro-RO')}`}
 						</span>
 					</div>
 				</div>

@@ -1422,14 +1422,27 @@ export const getClientCredit = query(v.pipe(v.string(), v.minLength(1)), async (
 	const unpaid = allInvoices.filter((inv) => inv.status === 'sent' || inv.status === 'overdue');
 	const paid = allInvoices.filter((inv) => inv.status === 'paid');
 
-	const totalInvoiced = allInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
-	const totalPaid = paid.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
-	const remainingCredit = unpaid.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+	const totalInvoicedByCurrency: Record<string, number> = {};
+	const totalPaidByCurrency: Record<string, number> = {};
+	const remainingCreditByCurrency: Record<string, number> = {};
+
+	for (const inv of allInvoices) {
+		const curr = inv.currency || 'RON';
+		totalInvoicedByCurrency[curr] = (totalInvoicedByCurrency[curr] || 0) + (inv.totalAmount || 0);
+	}
+	for (const inv of paid) {
+		const curr = inv.currency || 'RON';
+		totalPaidByCurrency[curr] = (totalPaidByCurrency[curr] || 0) + (inv.totalAmount || 0);
+	}
+	for (const inv of unpaid) {
+		const curr = inv.currency || 'RON';
+		remainingCreditByCurrency[curr] = (remainingCreditByCurrency[curr] || 0) + (inv.totalAmount || 0);
+	}
 
 	return {
-		totalInvoiced,
-		totalPaid,
-		remainingCredit,
+		totalInvoicedByCurrency,
+		totalPaidByCurrency,
+		remainingCreditByCurrency,
 		unpaidInvoices: unpaid.length,
 		paidInvoices: paid.length
 	};

@@ -107,6 +107,78 @@ export const getClientFirstInvoiceDates = query(async () => {
 	}
 });
 
+/** Returns per-client invoice aggregates (totals, counts, overdue) in a single batch query. */
+export const getClientsStats = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	try {
+		const rows = await db
+			.select({
+				clientId: table.invoice.clientId,
+				currency: table.invoice.currency,
+				totalInvoiced: sql<number>`COALESCE(SUM(${table.invoice.totalAmount}), 0)`.as('total_invoiced'),
+				totalPaid: sql<number>`COALESCE(SUM(CASE WHEN ${table.invoice.status} = 'paid' THEN ${table.invoice.totalAmount} ELSE 0 END), 0)`.as('total_paid'),
+				unpaidAmount: sql<number>`COALESCE(SUM(CASE WHEN ${table.invoice.status} IN ('sent', 'overdue') THEN ${table.invoice.totalAmount} ELSE 0 END), 0)`.as('unpaid_amount'),
+				invoiceCount: sql<number>`COUNT(*)`.as('invoice_count'),
+				paidCount: sql<number>`SUM(CASE WHEN ${table.invoice.status} = 'paid' THEN 1 ELSE 0 END)`.as('paid_count'),
+				unpaidCount: sql<number>`SUM(CASE WHEN ${table.invoice.status} IN ('sent', 'overdue') THEN 1 ELSE 0 END)`.as('unpaid_count'),
+				overdueCount: sql<number>`SUM(CASE WHEN ${table.invoice.status} = 'overdue' THEN 1 ELSE 0 END)`.as('overdue_count')
+			})
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.tenantId, event.locals.tenant.id),
+					sql`${table.invoice.status} NOT IN ('draft', 'cancelled')`
+				)
+			)
+			.groupBy(table.invoice.clientId, table.invoice.currency);
+
+		// Aggregate per-currency rows into a single object per client
+		const aggregated = new Map<string, {
+			clientId: string;
+			totalInvoicedByCurrency: Record<string, number>;
+			totalPaidByCurrency: Record<string, number>;
+			unpaidAmountByCurrency: Record<string, number>;
+			invoiceCount: number;
+			paidCount: number;
+			unpaidCount: number;
+			overdueCount: number;
+		}>();
+
+		for (const row of rows) {
+			if (!row.clientId) continue;
+			const curr = row.currency || 'RON';
+			if (!aggregated.has(row.clientId)) {
+				aggregated.set(row.clientId, {
+					clientId: row.clientId,
+					totalInvoicedByCurrency: {},
+					totalPaidByCurrency: {},
+					unpaidAmountByCurrency: {},
+					invoiceCount: 0,
+					paidCount: 0,
+					unpaidCount: 0,
+					overdueCount: 0
+				});
+			}
+			const agg = aggregated.get(row.clientId)!;
+			agg.totalInvoicedByCurrency[curr] = (agg.totalInvoicedByCurrency[curr] || 0) + row.totalInvoiced;
+			agg.totalPaidByCurrency[curr] = (agg.totalPaidByCurrency[curr] || 0) + row.totalPaid;
+			agg.unpaidAmountByCurrency[curr] = (agg.unpaidAmountByCurrency[curr] || 0) + row.unpaidAmount;
+			agg.invoiceCount += row.invoiceCount;
+			agg.paidCount += row.paidCount;
+			agg.unpaidCount += row.unpaidCount;
+			agg.overdueCount += row.overdueCount;
+		}
+
+		return Array.from(aggregated.values());
+	} catch {
+		return [];
+	}
+});
+
 export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {

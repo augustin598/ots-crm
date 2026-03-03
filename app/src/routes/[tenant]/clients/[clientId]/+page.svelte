@@ -95,7 +95,11 @@
 					<div>
 						<p class="text-sm text-muted-foreground">Total Facturat</p>
 						{#if credit}
-							<p class="text-2xl font-bold">{formatAmount(credit.totalInvoiced, 'RON')}</p>
+							{#each Object.entries(credit.totalInvoicedByCurrency) as [curr, amount]}
+								<p class="text-2xl font-bold">{formatAmount(amount, curr as Currency)}</p>
+							{:else}
+								<p class="text-2xl font-bold">{formatAmount(0, 'RON')}</p>
+							{/each}
 							<p class="text-xs text-muted-foreground mt-1">
 								{credit.paidInvoices + credit.unpaidInvoices} factur{credit.paidInvoices + credit.unpaidInvoices !== 1 ? 'i' : 'ă'}
 							</p>
@@ -114,7 +118,11 @@
 					<div>
 						<p class="text-sm text-muted-foreground">Total Încasat</p>
 						{#if credit}
-							<p class="text-2xl font-bold text-green-600">{formatAmount(credit.totalPaid, 'RON')}</p>
+							{#each Object.entries(credit.totalPaidByCurrency) as [curr, amount]}
+								<p class="text-2xl font-bold text-green-600">{formatAmount(amount, curr as Currency)}</p>
+							{:else}
+								<p class="text-2xl font-bold text-green-600">{formatAmount(0, 'RON')}</p>
+							{/each}
 							<p class="text-xs text-muted-foreground mt-1">
 								{credit.paidInvoices} factur{credit.paidInvoices !== 1 ? 'i' : 'ă'} plătit{credit.paidInvoices !== 1 ? 'e' : 'ă'}
 							</p>
@@ -133,9 +141,13 @@
 					<div>
 						<p class="text-sm text-muted-foreground">Remaining Credit</p>
 						{#if credit}
-							<p class="text-2xl font-bold {credit.remainingCredit > 0 ? 'text-red-600' : 'text-green-600'}">
-								{formatAmount(credit.remainingCredit, 'RON')}
-							</p>
+							{#each Object.entries(credit.remainingCreditByCurrency) as [curr, amount]}
+								<p class="text-2xl font-bold {amount > 0 ? 'text-red-600' : 'text-green-600'}">
+									{formatAmount(amount, curr as Currency)}
+								</p>
+							{:else}
+								<p class="text-2xl font-bold text-green-600">{formatAmount(0, 'RON')}</p>
+							{/each}
 							<p class="text-xs text-muted-foreground mt-1">
 								{credit.unpaidInvoices} factur{credit.unpaidInvoices !== 1 ? 'i' : 'ă'} neachitat{credit.unpaidInvoices !== 1 ? 'e' : 'ă'}
 							</p>
