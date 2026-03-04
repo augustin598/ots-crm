@@ -262,6 +262,7 @@
 	let formNotes = $state('');
 	let formLoading = $state(false);
 	let formError = $state<string | null>(null);
+	let extractedLinks = $state<{ url: string; keyword: string }[]>([]);
 
 	// Form website query (depends on formClientId $state)
 	const formWebsitesQuery = $derived(formClientId ? getClientWebsites(formClientId) : null);
@@ -516,6 +517,9 @@
 			const c = clientById.get(filterClientIds[0]);
 			if (c?.website) {
 				rowTargetUrl = c.website;
+			} else if (filterWebsites.length > 0) {
+				// Fallback: use first clientWebsite URL if client.website is empty
+				rowTargetUrl = filterWebsites[0].url;
 			}
 		}
 	});
@@ -634,8 +638,17 @@
 		const monthToUse = filterMonth || new Date().toISOString().slice(0, 7);
 
 		try {
+			// Auto-select websiteId from filterWebsites matching targetUrl domain
+			let inlineWebsiteId: string | undefined;
+			if (rowTargetUrl && filterWebsites.length > 0) {
+				const targetHost = (() => { try { return new URL(rowTargetUrl.startsWith('http') ? rowTargetUrl : `https://${rowTargetUrl}`).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+				const match = filterWebsites.find((w) => { try { return new URL(w.url).hostname.replace(/^www\./, '') === targetHost; } catch { return false; } });
+				if (match) inlineWebsiteId = match.id;
+			}
+
 			await createSeoLink({
 				clientId: filterClientIds[0],
+				websiteId: inlineWebsiteId,
 				pressTrust: rowPressTrust || undefined,
 				month: monthToUse,
 				keyword: rowKeyword,
@@ -682,6 +695,7 @@
 		formNotes = '';
 		formError = null;
 		extractError = null;
+		extractedLinks = [];
 		showAdvanced = false;
 	}
 
@@ -714,6 +728,7 @@
 		formAnchorText = link.anchorText || '';
 		formProjectId = link.projectId || '';
 		formNotes = link.notes || '';
+		extractedLinks = parseExtractedLinks(link);
 		formError = null;
 		extractError = null;
 		showAdvanced = true;
@@ -806,7 +821,8 @@
 					currency: formCurrency,
 					anchorText: formAnchorText || undefined,
 					projectId: formProjectId || undefined,
-					notes: formNotes || undefined
+					notes: formNotes || undefined,
+					extractedLinks: extractedLinks.length > 1 ? JSON.stringify(extractedLinks) : undefined
 				}).updates(seoLinksQuery);
 			} else {
 				const result = await createSeoLink({
@@ -825,7 +841,8 @@
 					currency: formCurrency,
 					anchorText: formAnchorText || undefined,
 					projectId: formProjectId || undefined,
-					notes: formNotes || undefined
+					notes: formNotes || undefined,
+					extractedLinks: extractedLinks.length > 1 ? JSON.stringify(extractedLinks) : undefined
 				}).updates(seoLinksQuery);
 				if (result?.seoLinkId) {
 					try {
@@ -853,7 +870,7 @@
 		try {
 			await deleteSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Nu s-a putut șterge linkul');
+			toast.error(e instanceof Error ? e.message : 'Nu s-a putut șterge linkul');
 		}
 	}
 
@@ -1004,7 +1021,7 @@
 		try {
 			await checkSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Verificare eșuată');
+			toast.error(e instanceof Error ? e.message : 'Verificare eșuată');
 		} finally {
 			checkingId = null;
 		}
@@ -1015,7 +1032,7 @@
 		try {
 			await extractTargetUrlForSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Extragere URL țintă eșuată');
+			toast.error(e instanceof Error ? e.message : 'Extragere URL țintă eșuată');
 		} finally {
 			extractingTargetUrlId = null;
 		}
@@ -1064,6 +1081,7 @@
 		}
 		extractLoading = true;
 		extractError = null;
+		extractedLinks = [];
 		try {
 			const result = await extractSeoLinkData({
 				articleUrl: formArticleUrl,
@@ -1075,12 +1093,19 @@
 			formLinkType = result.linkType || formLinkType;
 			if (result.targetUrl) formTargetUrl = result.targetUrl;
 			if (result.articlePublishedAt) formArticlePublishedAt = result.articlePublishedAt;
+			if (result.allLinks) extractedLinks = result.allLinks;
 			showAdvanced = true;
 		} catch (e) {
 			extractError = e instanceof Error ? e.message : 'Extragere eșuată';
 		} finally {
 			extractLoading = false;
 		}
+	}
+
+	function selectExtractedLink(link: { url: string; keyword: string }) {
+		formTargetUrl = link.url;
+		formKeyword = link.keyword;
+		formAnchorText = link.keyword;
 	}
 
 	const stats = $derived({
@@ -1335,6 +1360,15 @@
 			bulkDeleteLoading = false;
 			bulkDeleteConfirm = false;
 		}
+	}
+
+	function parseExtractedLinks(link: { extractedLinks?: string | null }): { url: string; keyword: string }[] {
+		if (!link.extractedLinks) return [];
+		try {
+			const parsed = JSON.parse(link.extractedLinks);
+			if (!Array.isArray(parsed)) return [];
+			return parsed.filter((el: any) => el && typeof el.url === 'string' && typeof el.keyword === 'string');
+		} catch { return []; }
 	}
 
 	function getPressTrustDisplay(link: { pressTrust: string | null; articleUrl: string }): string {
@@ -1620,6 +1654,23 @@
 						{#if extractError}
 							<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
 								<p class="text-sm text-red-800 dark:text-red-300">{extractError}</p>
+							</div>
+						{/if}
+						{#if extractedLinks.length > 0}
+							<div class="rounded-md border bg-muted/30 p-3">
+								<p class="text-sm font-medium mb-2">{extractedLinks.length} link-uri gasite in articol:</p>
+								<div class="space-y-1.5">
+									{#each extractedLinks as link}
+										<button
+											type="button"
+											class="flex items-start gap-2 w-full text-left rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-accent {formTargetUrl === link.url ? 'bg-accent ring-1 ring-primary' : ''}"
+											onclick={() => selectExtractedLink(link)}
+										>
+											<span class="font-medium text-primary shrink-0">{link.keyword}</span>
+											<span class="text-muted-foreground truncate text-xs mt-0.5">{link.url}</span>
+										</button>
+									{/each}
+								</div>
 							</div>
 						{/if}
 					{/if}
@@ -2865,6 +2916,7 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
+									{@const elLinks = parseExtractedLinks(link)}
 									{#if editingKeywordId === link.id}
 										<div onclick={(e) => e.stopPropagation()}>
 											<Input
@@ -2885,6 +2937,22 @@
 												}}
 											/>
 										</div>
+									{:else if elLinks.length > 1}
+										<div class="flex flex-col gap-1">
+											{#each elLinks as el, i}
+												<button
+													type="button"
+													class="text-left w-full min-w-[4rem] py-0.5 px-1.5 -mx-1.5 rounded hover:bg-muted/50 text-foreground/85 hover:text-foreground transition-colors text-[13px] leading-tight"
+													onclick={() => {
+														if (editingRowId === link.id) return;
+														editingKeywordId = link.id;
+														editingKeywordValue = el.keyword;
+													}}
+												>
+													<span class="text-muted-foreground/60 text-[11px] mr-1">{i + 1}.</span>{el.keyword}
+												</button>
+											{/each}
+										</div>
 									{:else}
 										<button
 											type="button"
@@ -2900,7 +2968,17 @@
 									{/if}
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle">
-									{#if link.targetUrl}
+									{@const elLinksTarget = parseExtractedLinks(link)}
+									{#if elLinksTarget.length > 1}
+										<div class="flex flex-col gap-1">
+											{#each elLinksTarget as el, i}
+												<div class="flex items-center gap-1">
+													<span class="text-muted-foreground/60 text-[11px] shrink-0">{i + 1}.</span>
+													<SeoLinkUrlCell url={el.url} maxChars={30} />
+												</div>
+											{/each}
+										</div>
+									{:else if link.targetUrl}
 										<SeoLinkUrlCell url={link.targetUrl} maxChars={35} />
 									{:else}
 										<span class="text-muted-foreground/90 text-[13px]">—</span>

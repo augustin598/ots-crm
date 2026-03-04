@@ -1048,6 +1048,7 @@ export const seoLink = sqliteTable('seo_link', {
 	lastCheckHttpCode: integer('last_check_http_code'),
 	lastCheckError: text('last_check_error'),
 	lastCheckDofollow: text('last_check_dofollow'), // 'dofollow' | 'nofollow' - verified from page, null = neverificat
+	extractedLinks: text('extracted_links'), // JSON: [{keyword, url}] - all links to client found in article
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

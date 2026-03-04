@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc, or, isNull, isNotNull, inArray, like } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
+import { fetchWithCloudflareFallback } from '$lib/server/scraper/cloudflare-bypass';
 
 function generateSeoLinkId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -32,7 +33,8 @@ const seoLinkSchema = v.object({
 	currency: v.optional(v.string()),
 	anchorText: v.optional(v.string()),
 	projectId: v.optional(v.string()),
-	notes: v.optional(v.string())
+	notes: v.optional(v.string()),
+	extractedLinks: v.optional(v.string())
 });
 
 /** Schema for partial updates - all fields optional except seoLinkId */
@@ -53,7 +55,8 @@ const updateSeoLinkSchema = v.object({
 	currency: v.optional(v.string()),
 	anchorText: v.optional(v.string()),
 	projectId: v.optional(v.string()),
-	notes: v.optional(v.string())
+	notes: v.optional(v.string()),
+	extractedLinks: v.optional(v.nullable(v.string()))
 });
 
 export const getSeoLinks = query(
@@ -202,11 +205,25 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 
 	const seoLinkId = generateSeoLinkId();
 
+	// Auto-assign websiteId dacă avem targetUrl dar nu websiteId
+	let resolvedWebsiteId = data.websiteId || null;
+	if (!resolvedWebsiteId && data.targetUrl) {
+		const websites = await db
+			.select()
+			.from(table.clientWebsite)
+			.where(eq(table.clientWebsite.clientId, data.clientId));
+		const targetDomain = extractDomainFromUrl(data.targetUrl);
+		if (targetDomain) {
+			const match = websites.find((w) => extractDomainFromUrl(w.url) === targetDomain);
+			if (match) resolvedWebsiteId = match.id;
+		}
+	}
+
 	await db.insert(table.seoLink).values({
 		id: seoLinkId,
 		tenantId: event.locals.tenant.id,
 		clientId: data.clientId,
-		websiteId: data.websiteId || null,
+		websiteId: resolvedWebsiteId,
 		pressTrust: data.pressTrust || null,
 		month: data.month,
 		keyword: data.keyword,
@@ -220,7 +237,8 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		currency,
 		anchorText: data.anchorText || null,
 		projectId: data.projectId || null,
-		notes: data.notes || null
+		notes: data.notes || null,
+		extractedLinks: data.extractedLinks || null
 	});
 
 	return { success: true, seoLinkId };
@@ -240,6 +258,7 @@ const createSeoLinksBulkSchema = v.object({
 		v.minLength(1, 'Introduceți cel puțin un URL articol')
 	),
 	targetUrl: v.optional(v.string()),
+	articlePublishedAt: v.optional(v.string()),
 	price: v.optional(v.number()),
 	currency: v.optional(v.string()),
 	anchorText: v.optional(v.string()),
@@ -261,11 +280,25 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 
 	const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
 
+	// Auto-assign websiteId dacă avem targetUrl dar nu websiteId
+	let resolvedWebsiteId = data.websiteId || null;
+	if (!resolvedWebsiteId && data.targetUrl) {
+		const websites = await db
+			.select()
+			.from(table.clientWebsite)
+			.where(eq(table.clientWebsite.clientId, data.clientId));
+		const targetDomain = extractDomainFromUrl(data.targetUrl);
+		if (targetDomain) {
+			const match = websites.find((w) => extractDomainFromUrl(w.url) === targetDomain);
+			if (match) resolvedWebsiteId = match.id;
+		}
+	}
+
 	const values = data.articleUrls.map((articleUrl) => ({
 		id: generateSeoLinkId(),
 		tenantId: event.locals.tenant!.id,
 		clientId: data.clientId,
-		websiteId: data.websiteId || null,
+		websiteId: resolvedWebsiteId,
 		pressTrust: data.pressTrust || null,
 		month: data.month,
 		keyword: data.keyword,
@@ -273,6 +306,7 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 		linkAttribute: data.linkAttribute || 'dofollow',
 		status: data.status || 'pending',
 		articleUrl,
+		articlePublishedAt: data.articlePublishedAt || null,
 		targetUrl: data.targetUrl || null,
 		price: data.price != null ? Math.round(data.price * 100) : null,
 		currency,
@@ -363,6 +397,7 @@ export const updateSeoLink = command(updateSeoLinkSchema,
 					updateData.anchorText !== undefined ? updateData.anchorText : existing.anchorText,
 				projectId: updateData.projectId !== undefined ? updateData.projectId : existing.projectId,
 				notes: updateData.notes !== undefined ? updateData.notes : existing.notes,
+				extractedLinks: updateData.extractedLinks !== undefined ? updateData.extractedLinks || null : existing.extractedLinks,
 				updatedAt: new Date()
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
@@ -437,6 +472,15 @@ const EXTRACT_HEADERS: Record<string, string> = {
 	'Cache-Control': 'max-age=0',
 	'Connection': 'keep-alive'
 };
+
+/** Fetch article HTML with automatic Cloudflare bypass fallback. */
+async function fetchArticleHtml(url: string, opts?: { headers?: Record<string, string>; timeoutMs?: number }): Promise<string> {
+	const { html } = await fetchWithCloudflareFallback(url, {
+		headers: opts?.headers ?? EXTRACT_HEADERS,
+		timeoutMs: opts?.timeoutMs ?? 15000
+	});
+	return html;
+}
 
 function extractDomainFromUrl(url: string): string {
 	try {
@@ -743,23 +787,10 @@ export const extractSeoLinkData = command(
 			throw new Error('URL client invalid');
 		}
 
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 15000);
 		let html: string;
 		try {
-			const res = await fetch(data.articleUrl, {
-				method: 'GET',
-				redirect: 'follow',
-				signal: controller.signal,
-				headers: EXTRACT_HEADERS
-			});
-			clearTimeout(timeoutId);
-			if (!res.ok) {
-				throw new Error(`Pagina nu a putut fi accesată (${res.status})`);
-			}
-			html = await res.text();
+			html = await fetchArticleHtml(data.articleUrl);
 		} catch (e) {
-			clearTimeout(timeoutId);
 			throw new Error(
 				e instanceof Error ? e.message : 'Nu s-a putut încărca articolul. Verificați URL-ul.'
 			);
@@ -774,13 +805,25 @@ export const extractSeoLinkData = command(
 		const linkType = 'article';
 		const articlePublishedAt = extractArticlePublishedDate(html);
 
+		// Deduplicate links by URL
+		const seen = new Set<string>();
+		const allLinks = links
+			.filter((l) => {
+				const key = l.url.toLowerCase().replace(/\/$/, '');
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return l.anchorText && l.anchorText.length > 1;
+			})
+			.map((l) => ({ url: l.url, keyword: l.anchorText }));
+
 		return {
 			keyword: keyword || '',
 			anchorText: anchorText || keyword,
 			pressTrust,
 			linkType,
 			targetUrl: extractedTargetUrl || (resolvedClientUrl.startsWith('http') ? resolvedClientUrl : `https://${resolvedClientUrl}`),
-			articlePublishedAt: articlePublishedAt || undefined
+			articlePublishedAt: articlePublishedAt || undefined,
+			allLinks: allLinks.length > 1 ? allLinks : undefined
 		};
 	}
 );
@@ -836,23 +879,10 @@ export const extractTargetUrlForSeoLink = command(
 			throw new Error('Adăugați website-ul clientului (ex: glemis.ro) în profilul clientului');
 		}
 
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 15000);
 		let html: string;
 		try {
-			const res = await fetch(link.articleUrl, {
-				method: 'GET',
-				redirect: 'follow',
-				signal: controller.signal,
-				headers: EXTRACT_HEADERS
-			});
-			clearTimeout(timeoutId);
-			if (!res.ok) {
-				throw new Error(`Pagina nu a putut fi accesată (${res.status})`);
-			}
-			html = await res.text();
+			html = await fetchArticleHtml(link.articleUrl);
 		} catch (e) {
-			clearTimeout(timeoutId);
 			throw new Error(
 				e instanceof Error ? e.message : 'Nu s-a putut încărca articolul. Verificați URL-ul.'
 			);
@@ -911,9 +941,16 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 		if (filters.clientId) {
 			conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 		}
-		// Filtru după data publicării (articlePublishedAt)
+		// Filtru după data publicării — articlePublishedAt dacă există, altfel câmpul month
 		if (filters.month) {
-			conditions = and(conditions, like(table.seoLink.articlePublishedAt, filters.month + '%')) as typeof conditions;
+			const monthPrefix = filters.month + '%';
+			conditions = and(
+				conditions,
+				or(
+					and(isNotNull(table.seoLink.articlePublishedAt), like(table.seoLink.articlePublishedAt, monthPrefix)),
+					and(isNull(table.seoLink.articlePublishedAt), eq(table.seoLink.month, filters.month))
+				)!
+			) as typeof conditions;
 		}
 	}
 
@@ -970,23 +1007,10 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 				continue;
 			}
 
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), 15000);
 			let html: string;
 			try {
-				const res = await fetch(link.articleUrl, {
-					method: 'GET',
-					redirect: 'follow',
-					signal: controller.signal,
-					headers: EXTRACT_HEADERS
-				});
-				clearTimeout(timeoutId);
-				if (!res.ok) {
-					throw new Error(`Pagina nu a putut fi accesată (${res.status})`);
-				}
-				html = await res.text();
+				html = await fetchArticleHtml(link.articleUrl);
 			} catch (e) {
-				clearTimeout(timeoutId);
 				errors.push({
 					id: link.id,
 					error: e instanceof Error ? e.message : 'Nu s-a putut încărca articolul'
@@ -1054,7 +1078,18 @@ function extractDofollowFromHtml(
 	targetUrl: string,
 	articleUrl: string
 ): 'dofollow' | 'nofollow' | null {
-	const targetUrlNorm = targetUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+	// Parse target URL for proper domain+path matching
+	let targetHost: string;
+	let targetPath: string;
+	try {
+		const tUrl = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`);
+		targetHost = tUrl.hostname.replace(/^www\./, '').toLowerCase();
+		targetPath = tUrl.pathname.replace(/\/+$/, '').toLowerCase();
+	} catch {
+		targetHost = targetUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]?.toLowerCase() || '';
+		targetPath = '';
+	}
+
 	const linkRegex = /<a\s+([^>]*)>/gi;
 	let m: RegExpExecArray | null;
 	while ((m = linkRegex.exec(html)) !== null) {
@@ -1073,8 +1108,20 @@ function extractDofollowFromHtml(
 				href = new URL(href, articleUrl).href;
 			} catch { continue; }
 		}
-		const hrefNorm = href.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-		if (!hrefNorm.includes(targetUrlNorm) && !targetUrlNorm.includes(hrefNorm)) continue;
+
+		// Proper domain matching instead of loose includes()
+		let hrefHost: string;
+		let hrefPath: string;
+		try {
+			const hUrl = new URL(href);
+			hrefHost = hUrl.hostname.replace(/^www\./, '').toLowerCase();
+			hrefPath = hUrl.pathname.replace(/\/+$/, '').toLowerCase();
+		} catch { continue; }
+
+		const domainMatch = hrefHost === targetHost || hrefHost.endsWith('.' + targetHost);
+		if (!domainMatch) continue;
+		if (targetPath && targetPath !== '/' && !hrefPath.startsWith(targetPath)) continue;
+
 		const relM = attrs.match(/rel\s*=\s*["']([^"']*)["']/i);
 		const rel = (relM ? relM[1] : '').toLowerCase();
 		return rel.includes('nofollow') ? 'nofollow' : 'dofollow';
@@ -1087,22 +1134,13 @@ async function verifyDofollowFromPage(
 	articleUrl: string,
 	targetUrl: string
 ): Promise<'dofollow' | 'nofollow' | null> {
-	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 	try {
-		const controller = new AbortController();
-		timeoutId = setTimeout(() => controller.abort(), 15000);
-		const res = await fetch(articleUrl, {
-			method: 'GET',
-			redirect: 'follow',
-			signal: controller.signal,
-			headers: LINK_CHECK_HEADERS
-		});
-		clearTimeout(timeoutId);
-		if (!res.ok) return null;
-		const html = await res.text();
-		return extractDofollowFromHtml(html, targetUrl, articleUrl);
-	} catch {
-		if (timeoutId) clearTimeout(timeoutId);
+		const html = await fetchArticleHtml(articleUrl, { headers: LINK_CHECK_HEADERS });
+		const result = extractDofollowFromHtml(html, targetUrl, articleUrl);
+		console.log(`[SEO-CHECK] verifyDofollow ${articleUrl} → ${targetUrl}: ${result}`);
+		return result;
+	} catch (e) {
+		console.warn(`[SEO-CHECK] verifyDofollow failed for ${articleUrl}:`, e instanceof Error ? e.message : e);
 		return null;
 	}
 }
@@ -1112,14 +1150,16 @@ async function performLinkCheck(articleUrl: string): Promise<{
 	httpCode: number | null;
 	responseTimeMs: number | null;
 	errorMessage: string | null;
+	cloudflareSuspected: boolean;
 }> {
 	const start = Date.now();
 	try {
+		// Step 1: HEAD with redirect: 'manual' so we detect 3xx codes
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 10000);
 		const res = await fetch(articleUrl, {
 			method: 'HEAD',
-			redirect: 'follow',
+			redirect: 'manual',
 			signal: controller.signal,
 			headers: LINK_CHECK_HEADERS
 		});
@@ -1127,30 +1167,74 @@ async function performLinkCheck(articleUrl: string): Promise<{
 		const responseTimeMs = Date.now() - start;
 		const httpCode = res.status;
 
+		console.log(`[SEO-CHECK] HEAD ${articleUrl} → ${httpCode} (${responseTimeMs}ms)`);
+
 		if (httpCode >= 200 && httpCode < 300) {
-			return { status: 'ok', httpCode, responseTimeMs, errorMessage: null };
+			return { status: 'ok', httpCode, responseTimeMs, errorMessage: null, cloudflareSuspected: false };
 		}
-		if (httpCode === 301 || httpCode === 302) {
-			return { status: 'redirect', httpCode, responseTimeMs, errorMessage: null };
+		if (httpCode >= 300 && httpCode < 400) {
+			return { status: 'redirect', httpCode, responseTimeMs, errorMessage: null, cloudflareSuspected: false };
+		}
+		// Detect Cloudflare JS Challenge at HEAD level
+		const cfMitigatedHead = res.headers.get('cf-mitigated');
+		if (cfMitigatedHead === 'challenge') {
+			console.log(`[SEO-CHECK] Cloudflare JS Challenge detected at HEAD for ${articleUrl} — treating as OK`);
+			return { status: 'ok', httpCode, responseTimeMs, errorMessage: 'Cloudflare JS Challenge', cloudflareSuspected: true };
 		}
 		if (httpCode === 404 || httpCode === 410) {
-			return { status: 'unreachable', httpCode, responseTimeMs, errorMessage: null };
+			return { status: 'unreachable', httpCode, responseTimeMs, errorMessage: null, cloudflareSuspected: false };
+		}
+
+		// Step 2: HEAD returned non-2xx/non-3xx/non-404 — many sites block HEAD, retry with GET
+		console.log(`[SEO-CHECK] HEAD blocked (${httpCode}), retrying with GET: ${articleUrl}`);
+		const getController = new AbortController();
+		const getTimeoutId = setTimeout(() => getController.abort(), 8000);
+		const getRes = await fetch(articleUrl, {
+			method: 'GET',
+			redirect: 'follow',
+			signal: getController.signal,
+			headers: LINK_CHECK_HEADERS
+		});
+		clearTimeout(getTimeoutId);
+		const getResponseTimeMs = Date.now() - start;
+		const getHttpCode = getRes.status;
+
+		// Detect Cloudflare JS Challenge — site is accessible in browser, just blocks bots
+		const cfMitigated = getRes.headers.get('cf-mitigated');
+		if (cfMitigated === 'challenge') {
+			getRes.body?.cancel();
+			console.log(`[SEO-CHECK] Cloudflare JS Challenge detected for ${articleUrl} — treating as OK`);
+			return { status: 'ok', httpCode: getHttpCode, responseTimeMs: getResponseTimeMs, errorMessage: 'Cloudflare JS Challenge', cloudflareSuspected: true };
+		}
+
+		// Cancel body reading to avoid downloading the entire page
+		getRes.body?.cancel();
+		console.log(`[SEO-CHECK] GET fallback ${articleUrl} → ${getHttpCode} (${getResponseTimeMs}ms)`);
+
+		if (getHttpCode >= 200 && getHttpCode < 300) {
+			return { status: 'ok', httpCode: getHttpCode, responseTimeMs: getResponseTimeMs, errorMessage: null, cloudflareSuspected: false };
+		}
+		if (getHttpCode === 404 || getHttpCode === 410) {
+			return { status: 'unreachable', httpCode: getHttpCode, responseTimeMs: getResponseTimeMs, errorMessage: null, cloudflareSuspected: false };
 		}
 		return {
 			status: 'error',
-			httpCode,
-			responseTimeMs,
-			errorMessage: `HTTP ${httpCode}`
+			httpCode: getHttpCode,
+			responseTimeMs: getResponseTimeMs,
+			errorMessage: `HTTP ${getHttpCode}`,
+			cloudflareSuspected: false
 		};
 	} catch (e) {
 		const responseTimeMs = Date.now() - start;
 		const err = e instanceof Error ? e : new Error(String(e));
 		const isTimeout = err.name === 'AbortError';
+		console.warn(`[SEO-CHECK] ${isTimeout ? 'TIMEOUT' : 'ERROR'} ${articleUrl}: ${err.message}`);
 		return {
 			status: isTimeout ? 'timeout' : 'error',
 			httpCode: null,
 			responseTimeMs,
-			errorMessage: err.message
+			errorMessage: err.message,
+			cloudflareSuspected: false
 		};
 	}
 }
@@ -1181,6 +1265,7 @@ export const checkSeoLink = command(
 			throw new Error('Link SEO nu a fost găsit');
 		}
 
+		console.log(`[SEO-CHECK] Checking link ${link.id}: ${link.articleUrl}`);
 		const result = await performLinkCheck(link.articleUrl);
 		const now = new Date();
 
@@ -1188,65 +1273,95 @@ export const checkSeoLink = command(
 		let newArticlePublishedAt: string | null = null;
 		let extractedKeyword: string | null = null;
 		let extractedTargetUrl: string | null = null;
+		let allExtractedLinks: { url: string; keyword: string }[] | null = null;
 		const needsKeyword = !link.keyword || link.keyword === '—' || link.keyword === '-';
 
-		// Dacă linkul e accesibil și avem nevoie de HTML (dofollow, dată publicare lipsă, sau keyword lipsă),
-		// facem un singur GET request în loc de mai multe separate.
-		if (result.status === 'ok' && (link.targetUrl || !link.articlePublishedAt || needsKeyword)) {
-			let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		// Dacă linkul e accesibil și avem nevoie de HTML (dofollow, dată publicare lipsă, keyword lipsă, sau targetUrl lipsă),
+		// facem un singur GET request cu Cloudflare bypass în loc de mai multe separate.
+		const needsTargetUrl = !link.targetUrl;
+		if (result.status === 'ok' && (link.targetUrl || needsTargetUrl || !link.articlePublishedAt || needsKeyword)) {
 			try {
-				const controller = new AbortController();
-				timeoutId = setTimeout(() => controller.abort(), 15000);
-				const htmlRes = await fetch(link.articleUrl, {
-					method: 'GET',
-					redirect: 'follow',
-					signal: controller.signal,
-					headers: EXTRACT_HEADERS
-				});
-				clearTimeout(timeoutId);
-				if (htmlRes.ok) {
-					const html = await htmlRes.text();
+				const html = await fetchArticleHtml(link.articleUrl);
+				if (link.targetUrl) {
+					lastCheckDofollow = extractDofollowFromHtml(html, link.targetUrl, link.articleUrl);
+					console.log(`[SEO-CHECK] Dofollow for ${link.articleUrl} → ${link.targetUrl}: ${lastCheckDofollow}`);
+				}
+				if (!link.articlePublishedAt) {
+					newArticlePublishedAt = extractArticlePublishedDate(html);
+				}
+				// Extrage toate linkurile + keyword/anchorText/targetUrl dacă lipsesc
+				{
+					// Determină domeniul clientului
+					const [clientRow] = await db
+						.select()
+						.from(table.client)
+						.where(eq(table.client.id, link.clientId))
+						.limit(1);
+					let clientDomain = '';
 					if (link.targetUrl) {
-						lastCheckDofollow = extractDofollowFromHtml(html, link.targetUrl, link.articleUrl);
-					}
-					if (!link.articlePublishedAt) {
-						newArticlePublishedAt = extractArticlePublishedDate(html);
-					}
-					// Extrage keyword/anchorText dacă lipsesc
-					if (needsKeyword) {
-						// Determină domeniul clientului
-						const [clientRow] = await db
+						clientDomain = extractDomainFromUrl(link.targetUrl);
+					} else if (link.websiteId) {
+						const [website] = await db
 							.select()
-							.from(table.client)
-							.where(eq(table.client.id, link.clientId))
+							.from(table.clientWebsite)
+							.where(eq(table.clientWebsite.id, link.websiteId))
 							.limit(1);
-						let clientDomain = '';
-						if (link.targetUrl) {
-							clientDomain = extractDomainFromUrl(link.targetUrl);
-						} else if (link.websiteId) {
-							const [website] = await db
-								.select()
-								.from(table.clientWebsite)
-								.where(eq(table.clientWebsite.id, link.websiteId))
-								.limit(1);
-							if (website) clientDomain = extractDomainFromUrl(website.url);
+						if (website) clientDomain = extractDomainFromUrl(website.url);
+					}
+					if (!clientDomain && clientRow?.website) {
+						clientDomain = extractDomainFromUrl(clientRow.website);
+					}
+					if (!clientDomain && clientRow?.name) {
+						clientDomain = inferClientDomainFromName(clientRow.name);
+					}
+					if (clientDomain) {
+						const extractedLinks = extractLinksToRootFromHtml(html, clientDomain);
+						const best = pickBestTargetUrl(extractedLinks);
+						if (best.keyword && needsKeyword) extractedKeyword = best.keyword;
+						if (best.url && !link.targetUrl) extractedTargetUrl = best.url;
+						if (extractedKeyword || extractedTargetUrl) {
+							console.log(`[SEO-CHECK] Extracted keyword: ${extractedKeyword}, targetUrl: ${extractedTargetUrl}`);
 						}
-						if (!clientDomain && clientRow?.website) {
-							clientDomain = extractDomainFromUrl(clientRow.website);
+						// Verifică dofollow pe noul targetUrl extras
+						if (extractedTargetUrl && !lastCheckDofollow) {
+							lastCheckDofollow = extractDofollowFromHtml(html, extractedTargetUrl, link.articleUrl);
+							console.log(`[SEO-CHECK] Dofollow for ${link.articleUrl} → ${extractedTargetUrl}: ${lastCheckDofollow}`);
 						}
-						if (!clientDomain && clientRow?.name) {
-							clientDomain = inferClientDomainFromName(clientRow.name);
-						}
-						if (clientDomain) {
-							const extractedLinks = extractLinksToRootFromHtml(html, clientDomain);
-							const best = pickBestTargetUrl(extractedLinks);
-							if (best.keyword) extractedKeyword = best.keyword;
-							if (best.url && !link.targetUrl) extractedTargetUrl = best.url;
+						// Salvează toate linkurile extrase (deduplicate)
+						const seen = new Set<string>();
+						const deduped = extractedLinks
+							.filter((l) => {
+								const key = l.url.toLowerCase().replace(/\/$/, '');
+								if (seen.has(key)) return false;
+								seen.add(key);
+								return l.anchorText && l.anchorText.length > 1;
+							})
+							.map((l) => ({ url: l.url, keyword: l.anchorText }));
+						if (deduped.length > 0) {
+							allExtractedLinks = deduped;
 						}
 					}
 				}
-			} catch {
-				if (timeoutId) clearTimeout(timeoutId);
+			} catch (e) {
+				console.warn(`[SEO-CHECK] HTML extraction failed for ${link.articleUrl}:`, e instanceof Error ? e.message : e);
+			}
+		}
+
+		// Auto-assign websiteId dacă lipsește dar avem targetUrl
+		let extractedWebsiteId: string | null = null;
+		const finalTargetUrl = extractedTargetUrl || link.targetUrl;
+		if (!link.websiteId && finalTargetUrl) {
+			const websites = await db
+				.select()
+				.from(table.clientWebsite)
+				.where(eq(table.clientWebsite.clientId, link.clientId));
+			const domain = extractDomainFromUrl(finalTargetUrl);
+			if (domain) {
+				const match = websites.find((w) => extractDomainFromUrl(w.url) === domain);
+				if (match) {
+					extractedWebsiteId = match.id;
+					console.log(`[SEO-CHECK] Auto-assigned websiteId ${match.id} for ${link.articleUrl}`);
+				}
 			}
 		}
 
@@ -1265,6 +1380,8 @@ export const checkSeoLink = command(
 				// Actualizează keyword/anchorText dacă lipseau și am reușit să le extragem
 				...(extractedKeyword && { keyword: extractedKeyword, anchorText: extractedKeyword }),
 				...(extractedTargetUrl && { targetUrl: extractedTargetUrl }),
+				...(extractedWebsiteId && { websiteId: extractedWebsiteId }),
+				...(allExtractedLinks && { extractedLinks: JSON.stringify(allExtractedLinks) }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
@@ -1303,9 +1420,16 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 	if (filters.clientId) {
 		conditions = and(conditions, eq(table.seoLink.clientId, filters.clientId)) as typeof conditions;
 	}
-	// Filtru după data publicării (articlePublishedAt)
+	// Filtru după lună — folosește articlePublishedAt dacă există, altfel câmpul month
 	if (filters.month) {
-		conditions = and(conditions, like(table.seoLink.articlePublishedAt, filters.month + '%')) as typeof conditions;
+		const monthPrefix = filters.month + '%';
+		conditions = and(
+			conditions,
+			or(
+				and(isNotNull(table.seoLink.articlePublishedAt), like(table.seoLink.articlePublishedAt, monthPrefix)),
+				and(isNull(table.seoLink.articlePublishedAt), eq(table.seoLink.month, filters.month))
+			)!
+		) as typeof conditions;
 	}
 	if (filters.seoLinkIds?.length) {
 		conditions = and(conditions, inArray(table.seoLink.id, filters.seoLinkIds)) as typeof conditions;
@@ -1316,18 +1440,74 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 		.from(table.seoLink)
 		.where(conditions);
 
+	console.log(`[SEO-CHECK] Batch check starting: ${links.length} links`);
 	const results: { id: string; status: string; httpCode: number | null }[] = [];
 	for (let i = 0; i < links.length; i++) {
 		if (i > 0) {
 			await new Promise((r) => setTimeout(r, 1500));
 		}
 		const link = links[i];
+		console.log(`[SEO-CHECK] Batch ${i + 1}/${links.length}: ${link.articleUrl}`);
 		const result = await performLinkCheck(link.articleUrl);
 		const now = new Date();
 
 		let lastCheckDofollow: 'dofollow' | 'nofollow' | null = null;
-		if (result.status === 'ok' && link.targetUrl) {
-			lastCheckDofollow = await verifyDofollowFromPage(link.articleUrl, link.targetUrl);
+		let batchExtractedLinks: { url: string; keyword: string }[] | null = null;
+		let batchExtractedKeyword: string | null = null;
+		let batchExtractedTargetUrl: string | null = null;
+		let batchArticlePublishedAt: string | null = null;
+
+		if (result.status === 'ok') {
+			try {
+				const html = await fetchArticleHtml(link.articleUrl);
+				if (link.targetUrl) {
+					lastCheckDofollow = extractDofollowFromHtml(html, link.targetUrl, link.articleUrl);
+				}
+				if (!link.articlePublishedAt) {
+					batchArticlePublishedAt = extractArticlePublishedDate(html);
+				}
+				// Extract all links to client domain
+				const needsKeyword = !link.keyword || link.keyword === '—' || link.keyword === '-';
+				const needsTargetUrl = !link.targetUrl;
+				const [clientRow] = await db.select().from(table.client).where(eq(table.client.id, link.clientId)).limit(1);
+				let clientDomain = '';
+				if (link.targetUrl) clientDomain = extractDomainFromUrl(link.targetUrl);
+				else if (link.websiteId) {
+					const [w] = await db.select().from(table.clientWebsite).where(eq(table.clientWebsite.id, link.websiteId)).limit(1);
+					if (w) clientDomain = extractDomainFromUrl(w.url);
+				}
+				if (!clientDomain && clientRow?.website) clientDomain = extractDomainFromUrl(clientRow.website);
+				if (!clientDomain && clientRow?.name) clientDomain = inferClientDomainFromName(clientRow.name);
+				if (clientDomain) {
+					const allLinks = extractLinksToRootFromHtml(html, clientDomain);
+					const best = pickBestTargetUrl(allLinks);
+					if (best.keyword && needsKeyword) batchExtractedKeyword = best.keyword;
+					if (best.url && needsTargetUrl) batchExtractedTargetUrl = best.url;
+					if (batchExtractedTargetUrl && !lastCheckDofollow) {
+						lastCheckDofollow = extractDofollowFromHtml(html, batchExtractedTargetUrl, link.articleUrl);
+					}
+					// Deduplicate and save all links
+					const seen = new Set<string>();
+					const deduped = allLinks
+						.filter((l) => { const key = l.url.toLowerCase().replace(/\/$/, ''); if (seen.has(key)) return false; seen.add(key); return l.anchorText && l.anchorText.length > 1; })
+						.map((l) => ({ url: l.url, keyword: l.anchorText }));
+					if (deduped.length > 0) batchExtractedLinks = deduped;
+				}
+			} catch (e) {
+				console.warn(`[SEO-CHECK] Batch HTML extraction failed for ${link.articleUrl}:`, e instanceof Error ? e.message : e);
+			}
+		}
+
+		// Auto-assign websiteId
+		let batchWebsiteId: string | null = null;
+		const finalTarget = batchExtractedTargetUrl || link.targetUrl;
+		if (!link.websiteId && finalTarget) {
+			const websites = await db.select().from(table.clientWebsite).where(eq(table.clientWebsite.clientId, link.clientId));
+			const domain = extractDomainFromUrl(finalTarget);
+			if (domain) {
+				const match = websites.find((w) => extractDomainFromUrl(w.url) === domain);
+				if (match) batchWebsiteId = match.id;
+			}
 		}
 
 		await db
@@ -1338,8 +1518,12 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 				lastCheckHttpCode: result.httpCode,
 				lastCheckError: result.errorMessage,
 				lastCheckDofollow: lastCheckDofollow,
-				// Sincronizează linkAttribute (tip dofollow/nofollow) cu rezultatul verificării
 				...(lastCheckDofollow && { linkAttribute: lastCheckDofollow }),
+				...(batchArticlePublishedAt && { articlePublishedAt: batchArticlePublishedAt }),
+				...(batchExtractedKeyword && { keyword: batchExtractedKeyword, anchorText: batchExtractedKeyword }),
+				...(batchExtractedTargetUrl && { targetUrl: batchExtractedTargetUrl }),
+				...(batchWebsiteId && { websiteId: batchWebsiteId }),
+				...(batchExtractedLinks && { extractedLinks: JSON.stringify(batchExtractedLinks) }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, link.id));
@@ -1358,6 +1542,8 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 		results.push({ id: link.id, status: result.status, httpCode: result.httpCode });
 	}
 
+	const okCount = results.filter((r) => r.status === 'ok' || r.status === 'redirect').length;
+	console.log(`[SEO-CHECK] Batch complete: ${results.length} checked, ${okCount} OK, ${results.length - okCount} problems`);
 	return { success: true, checked: results.length, results };
 });
 
@@ -1699,30 +1885,24 @@ export const importSeoLinksFromFile = command(
 
 			// Auto-detectare websiteId (și clientId dacă lipsește) din articol
 			try {
-				const resp = await fetch(articleUrl, {
-					signal: AbortSignal.timeout(12000),
-					headers: EXTRACT_HEADERS
-				});
-				if (resp.ok) {
-					const html = await resp.text();
-					const linkRegex = /<a\s[^>]*href=["'](https?:[^"'\s#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-					let m: RegExpExecArray | null;
-					while ((m = linkRegex.exec(html)) !== null) {
-						const href = m[1];
-						const anchorText = m[2].replace(/<[^>]+>/g, '').trim();
-						if (!anchorText) continue;
-						const domain = extractDomainFromUrl(href);
-						const found = domainToWebsite.get(domain);
-						if (found) {
-							// Potrivire cu clientul cunoscut (sau orice client dacă clientId lipsește)
-							const clientMatches = !clientId || found.clientId === clientId;
-							if (clientMatches) {
-								if (!clientId) { clientId = found.clientId; wasAutoDetected = true; }
-								websiteId = found.websiteId;
-								if (!resolvedTargetUrl) resolvedTargetUrl = href;
-								resolvedAnchorText = anchorText;
-								break;
-							}
+				const html = await fetchArticleHtml(articleUrl, { timeoutMs: 12000 });
+				const linkRegex = /<a\s[^>]*href=["'](https?:[^"'\s#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+				let m: RegExpExecArray | null;
+				while ((m = linkRegex.exec(html)) !== null) {
+					const href = m[1];
+					const anchorText = m[2].replace(/<[^>]+>/g, '').trim();
+					if (!anchorText) continue;
+					const domain = extractDomainFromUrl(href);
+					const found = domainToWebsite.get(domain);
+					if (found) {
+						// Potrivire cu clientul cunoscut (sau orice client dacă clientId lipsește)
+						const clientMatches = !clientId || found.clientId === clientId;
+						if (clientMatches) {
+							if (!clientId) { clientId = found.clientId; wasAutoDetected = true; }
+							websiteId = found.websiteId;
+							if (!resolvedTargetUrl) resolvedTargetUrl = href;
+							resolvedAnchorText = anchorText;
+							break;
 						}
 					}
 				}

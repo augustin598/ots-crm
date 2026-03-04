@@ -7,6 +7,7 @@ import { startScheduler } from '$lib/server/scheduler';
 import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
 import { runMigrations } from '$lib/server/db/migrate';
+import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
 import { dev } from '$app/environment';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -138,6 +139,14 @@ export const init = async () => {
 };
 
 export const handle: Handle = handleAuth;
+
+// Graceful shutdown: close Puppeteer browser if running
+process.on('SIGTERM', async () => {
+	await shutdownBrowser();
+});
+process.on('SIGINT', async () => {
+	await shutdownBrowser();
+});
 
 export const handleError = ({ error, event, status }) => {
 	console.error(`[${status}]`, event.url.pathname, error);

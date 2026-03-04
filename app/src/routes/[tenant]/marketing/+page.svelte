@@ -3,11 +3,16 @@
 	import { browser } from '$app/environment';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
-	import * as Select from '$lib/components/ui/select';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import FilterIcon from '@lucide/svelte/icons/filter';
 	import GoogleAdsIcon from '$lib/components/marketing/icon-google-ads.svelte';
 	import FacebookIcon from '$lib/components/marketing/icon-facebook.svelte';
 	import TiktokIcon from '$lib/components/marketing/icon-tiktok.svelte';
@@ -26,7 +31,6 @@
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	let selectedClientId = $state('');
 	let activeCategory = $state('google-ads');
 	let filterType = $state('');
 	let searchTerm = $state('');
@@ -53,10 +57,71 @@
 	// Load all clients for the filter
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
+	const activeClients = $derived(clients.filter((c: any) => c.status === 'active'));
+
+	// Multi-select client filter — separate from Clients page, default none
+	const STORAGE_KEY = (tenant: string) => `crm-marketing-clients-${tenant}`;
+	let selectedClientIds = $state<string[]>([]);
+	let clientFilterPopoverOpen = $state(false);
+	let clientFilterSearch = $state('');
+	let initialized = $state(false);
+
+	const popoverClients = $derived(
+		clientFilterSearch.trim()
+			? activeClients.filter((c: any) => c.name.toLowerCase().includes(clientFilterSearch.trim().toLowerCase()))
+			: activeClients
+	);
+
+	// Init from own localStorage key, default empty
+	$effect(() => {
+		if (activeClients.length > 0 && !initialized) {
+			initialized = true;
+			if (browser && tenantSlug) {
+				try {
+					const stored = localStorage.getItem(STORAGE_KEY(tenantSlug));
+					if (stored) {
+						const ids = JSON.parse(stored);
+						if (Array.isArray(ids) && ids.length > 0) {
+							selectedClientIds = ids;
+							return;
+						}
+					}
+				} catch { /* ignore */ }
+			}
+			selectedClientIds = [];
+		}
+	});
+
+	// Save to own key
+	$effect(() => {
+		if (!browser || !tenantSlug || !initialized) return;
+		if (selectedClientIds.length > 0) {
+			localStorage.setItem(STORAGE_KEY(tenantSlug), JSON.stringify(selectedClientIds));
+		} else {
+			localStorage.removeItem(STORAGE_KEY(tenantSlug));
+		}
+	});
+
+	function toggleClient(clientId: string) {
+		if (selectedClientIds.includes(clientId)) {
+			selectedClientIds = selectedClientIds.filter((id) => id !== clientId);
+		} else {
+			selectedClientIds = [...selectedClientIds, clientId];
+		}
+	}
+
+	function selectAllClients() {
+		selectedClientIds = activeClients.map((c: any) => c.id);
+	}
+
+	function clearClientFilter() {
+		selectedClientIds = [];
+	}
 
 	const materialsQuery = $derived(
 		getMarketingMaterials({
-			clientId: selectedClientId || undefined,
+			clientId: selectedClientIds.length === 1 ? selectedClientIds[0] : undefined,
+			clientIds: selectedClientIds.length > 1 && selectedClientIds.length < activeClients.length ? selectedClientIds : undefined,
 			category: activeCategory,
 			type: filterType || undefined,
 			search: searchTerm.trim() || undefined,
@@ -65,8 +130,11 @@
 	);
 	const materials = $derived(materialsQuery.current || []);
 
+	// For upload dialogs — pick first selected client or empty
+	const uploadClientId = $derived(selectedClientIds.length === 1 ? selectedClientIds[0] : '');
+
 	// SEO links for the seo-article combobox
-	const seoLinksQuery = $derived(getSeoLinks({ clientId: selectedClientId || undefined }));
+	const seoLinksQuery = $derived(getSeoLinks({ clientId: uploadClientId || undefined }));
 	const seoLinks = $derived(
 		(seoLinksQuery.current || []).map((l: any) => ({
 			id: l.id,
@@ -80,8 +148,7 @@
 	const loadingThumbnailIds = new Set<string>();
 
 	$effect(() => {
-		// Reset cache when client or category changes (presigned URLs expire anyway)
-		void selectedClientId;
+		void selectedClientIds;
 		void activeCategory;
 		thumbnailUrls = {};
 		loadingThumbnailIds.clear();
@@ -155,22 +222,66 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-3">
-			<!-- Client filter -->
-			<Select.Root type="single" bind:value={selectedClientId}>
-				<Select.Trigger class="w-[220px]">
-					{selectedClientId ? getClientName(selectedClientId) : 'Toți clienții'}
-				</Select.Trigger>
-				<Select.Content>
-					<Select.Item value="">Toți clienții</Select.Item>
-					{#each clients as client (client.id)}
-						<Select.Item value={client.id}>{client.name}</Select.Item>
-					{/each}
-				</Select.Content>
-			</Select.Root>
+			<!-- Client filter (multi-select popover) -->
+			{#if activeClients.length > 0}
+				<Popover bind:open={clientFilterPopoverOpen}>
+					<PopoverTrigger>
+						<Button variant="outline" class="h-9 gap-2 text-sm font-normal">
+							<FilterIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+							{#if selectedClientIds.length === 0 || selectedClientIds.length === activeClients.length}
+								Toți clienții
+							{:else if selectedClientIds.length === 1}
+								{getClientName(selectedClientIds[0])}
+							{:else}
+								{selectedClientIds.length} clienți selectați
+							{/if}
+							{#if selectedClientIds.length > 0 && selectedClientIds.length < activeClients.length}
+								<Badge variant="secondary" class="ml-auto">{selectedClientIds.length}</Badge>
+							{/if}
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent class="w-72 p-2" align="end">
+						<div class="flex items-center justify-between mb-2">
+							<p class="text-xs font-medium">Filtrează clienți</p>
+							{#if selectedClientIds.length > 0 && selectedClientIds.length < activeClients.length}
+								<button class="text-xs text-muted-foreground hover:text-foreground" onclick={selectAllClients}>
+									Resetează
+								</button>
+							{/if}
+						</div>
+						<div class="relative mb-2">
+							<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+							<Input bind:value={clientFilterSearch} placeholder="Caută client..." class="pl-8 h-8 text-sm" />
+						</div>
+						<Button variant="outline" size="sm" class="w-full mb-2" onclick={selectAllClients}>
+							Selectează toți
+						</Button>
+						<p class="text-xs text-muted-foreground mb-1">
+							{selectedClientIds.length === 0 || selectedClientIds.length === activeClients.length
+								? 'Toți clienții afișați'
+								: `${selectedClientIds.length} din ${activeClients.length} selectați`}
+						</p>
+						<div class="max-h-[200px] overflow-y-auto space-y-0.5">
+							{#each popoverClients as client (client.id)}
+								<div class="flex items-center space-x-2 rounded px-1 py-1 hover:bg-muted/50">
+									<Checkbox
+										checked={selectedClientIds.includes(client.id)}
+										onCheckedChange={() => toggleClient(client.id)}
+										id={`mkt-client-${client.id}`}
+									/>
+									<Label for={`mkt-client-${client.id}`} class="cursor-pointer flex-1 truncate text-sm font-normal">
+										{client.name}
+									</Label>
+								</div>
+							{/each}
+						</div>
+					</PopoverContent>
+				</Popover>
+			{/if}
 
 			{#if !isFileFilterType}
 				<Button onclick={() => {
-					if (!selectedClientId) { toast.error('Selectează un client mai întâi'); return; }
+					if (selectedClientIds.length !== 1) { toast.error('Selectează un singur client mai întâi'); return; }
 					if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 					else { uploadDialogOpen = true; }
 				}}>
@@ -206,11 +317,11 @@
 			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode />
 
 			<!-- Inline upload zone for file type filters -->
-			{#if isFileFilterType && selectedClientId}
+			{#if isFileFilterType && uploadClientId}
 				<MaterialInlineUpload
 					filterType={filterType as 'image' | 'video' | 'document'}
 					category={activeCategory}
-					clientId={selectedClientId}
+					clientId={uploadClientId}
 					{uploadUrl}
 					onUploaded={handleUploaded}
 				/>
@@ -232,25 +343,21 @@
 			{#if materials.length === 0}
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
-					{#if !selectedClientId}
-						<p class="text-sm">Selectează un client pentru a vedea materialele.</p>
-					{:else}
-						<p class="text-sm">Niciun material în această categorie.</p>
-						{#if !isFileFilterType}
-							<Button variant="outline" class="mt-3" onclick={() => {
-								if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
-								else { uploadDialogOpen = true; }
-							}}>
-								<PlusIcon class="h-4 w-4 mr-2" />
-								Adaugă primul material
-							</Button>
-						{/if}
+					<p class="text-sm">Niciun material în această categorie.</p>
+					{#if !isFileFilterType && uploadClientId}
+						<Button variant="outline" class="mt-3" onclick={() => {
+							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+							else { uploadDialogOpen = true; }
+						}}>
+							<PlusIcon class="h-4 w-4 mr-2" />
+							Adaugă primul material
+						</Button>
 					{/if}
 				</div>
 			{:else if viewMode === 'list'}
 				<MaterialListView
 					{materials}
-					clientNameFn={!selectedClientId ? getClientName : undefined}
+					clientNameFn={selectedClientIds.length !== 1 ? getClientName : undefined}
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
 				/>
@@ -258,7 +365,7 @@
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 					{#each materials as material (material.id)}
 						<div>
-							{#if !selectedClientId}
+							{#if selectedClientIds.length !== 1}
 								<p class="text-xs text-muted-foreground mb-1 truncate">{getClientName(material.clientId)}</p>
 							{/if}
 							<MaterialCard
@@ -275,12 +382,12 @@
 	</Tabs>
 </div>
 
-<!-- Upload Dialog (requires client selected) -->
-{#if selectedClientId}
+<!-- Upload Dialog (requires single client selected) -->
+{#if uploadClientId}
 	<MaterialUploadDialog
 		bind:open={uploadDialogOpen}
 		category={activeCategory}
-		clientId={selectedClientId}
+		clientId={uploadClientId}
 		{uploadUrl}
 		{seoLinks}
 		onUploaded={handleUploaded}
@@ -290,7 +397,7 @@
 	<!-- Google Ads Asset Dialog -->
 	<GoogleAdsAssetDialog
 		bind:open={googleAdsDialogOpen}
-		clientId={selectedClientId}
+		clientId={uploadClientId}
 		{uploadUrl}
 		onSaved={handleUploaded}
 	/>

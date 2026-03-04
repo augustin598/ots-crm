@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, or, sql } from 'drizzle-orm';
+import { eq, and, desc, or, sql, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
 
@@ -28,6 +28,7 @@ function isValidHttpUrl(value: string): boolean {
 export const getMarketingMaterials = query(
 	v.object({
 		clientId: v.optional(v.string()),
+		clientIds: v.optional(v.array(v.string())),
 		category: v.optional(v.string()),
 		type: v.optional(v.string()),
 		status: v.optional(v.string()),
@@ -51,6 +52,8 @@ export const getMarketingMaterials = query(
 			) as typeof conditions;
 		} else if (filters.clientId) {
 			conditions = and(conditions, eq(table.marketingMaterial.clientId, filters.clientId)) as typeof conditions;
+		} else if (filters.clientIds && filters.clientIds.length > 0) {
+			conditions = and(conditions, inArray(table.marketingMaterial.clientId, filters.clientIds)) as typeof conditions;
 		}
 
 		if (filters.category) {
