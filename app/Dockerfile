@@ -20,6 +20,23 @@ RUN bun run build
 FROM oven/bun:1.3.5-slim AS production
 WORKDIR /usr/src/app
 
+# Install Chromium for Puppeteer (SEO link checking / Cloudflare bypass)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_PATH=/usr/bin/chromium
+
 # Copy production dependencies and build output
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/build ./build

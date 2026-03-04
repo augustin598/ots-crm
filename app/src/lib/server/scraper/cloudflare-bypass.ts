@@ -232,8 +232,14 @@ export async function fetchWithCloudflareFallback(
 		if (isCloudflareChallenge(res)) {
 			res.body?.cancel();
 			console.log(`[SCRAPER] Cloudflare detected for ${url} — falling back to Puppeteer`);
-			const html = await fetchWithPuppeteer(url, timeoutMs);
-			return { html, usedPuppeteer: true };
+			try {
+				const html = await fetchWithPuppeteer(url, timeoutMs);
+				return { html, usedPuppeteer: true };
+			} catch (puppeteerErr) {
+				console.warn(`[SCRAPER] Puppeteer fallback failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+				// Return empty so caller can handle gracefully
+				return { html: '', usedPuppeteer: false };
+			}
 		}
 
 		if (!res.ok) {
@@ -247,8 +253,14 @@ export async function fetchWithCloudflareFallback(
 			console.log(
 				`[SCRAPER] Cloudflare HTML detected for ${url} — falling back to Puppeteer`
 			);
-			const puppeteerHtml = await fetchWithPuppeteer(url, timeoutMs);
-			return { html: puppeteerHtml, usedPuppeteer: true };
+			try {
+				const puppeteerHtml = await fetchWithPuppeteer(url, timeoutMs);
+				return { html: puppeteerHtml, usedPuppeteer: true };
+			} catch (puppeteerErr) {
+				console.warn(`[SCRAPER] Puppeteer fallback failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+				// Return the Cloudflare HTML — caller can decide
+				return { html, usedPuppeteer: false };
+			}
 		}
 
 		return { html, usedPuppeteer: false };
@@ -263,7 +275,7 @@ export async function fetchWithCloudflareFallback(
 				const html = await fetchWithPuppeteer(url, timeoutMs);
 				return { html, usedPuppeteer: true };
 			} catch (puppeteerErr) {
-				// If Puppeteer also fails, throw the original error
+				console.warn(`[SCRAPER] Puppeteer also failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
 				throw err;
 			}
 		}
