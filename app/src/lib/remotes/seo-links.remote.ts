@@ -1347,6 +1347,17 @@ export const checkSeoLink = command(
 			}
 		}
 
+		// Don't overwrite richer extractedLinks with fewer results (e.g. non-Puppeteer fetch finding fewer links)
+		let finalExtractedLinks = allExtractedLinks;
+		if (allExtractedLinks && link.extractedLinks) {
+			try {
+				const existing = JSON.parse(link.extractedLinks);
+				if (Array.isArray(existing) && existing.length > allExtractedLinks.length) {
+					finalExtractedLinks = null;
+				}
+			} catch { /* parse error — overwrite is fine */ }
+		}
+
 		// Auto-assign websiteId dacă lipsește dar avem targetUrl
 		let extractedWebsiteId: string | null = null;
 		const finalTargetUrl = extractedTargetUrl || link.targetUrl;
@@ -1381,7 +1392,7 @@ export const checkSeoLink = command(
 				...(extractedKeyword && { keyword: extractedKeyword, anchorText: extractedKeyword }),
 				...(extractedTargetUrl && { targetUrl: extractedTargetUrl }),
 				...(extractedWebsiteId && { websiteId: extractedWebsiteId }),
-				...(allExtractedLinks && { extractedLinks: JSON.stringify(allExtractedLinks) }),
+				...(finalExtractedLinks && { extractedLinks: JSON.stringify(finalExtractedLinks) }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
@@ -1444,7 +1455,8 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 	const results: { id: string; status: string; httpCode: number | null }[] = [];
 	for (let i = 0; i < links.length; i++) {
 		if (i > 0) {
-			await new Promise((r) => setTimeout(r, 1500));
+			// 3s between requests to avoid rate limiting (429)
+			await new Promise((r) => setTimeout(r, 3000));
 		}
 		const link = links[i];
 		console.log(`[SEO-CHECK] Batch ${i + 1}/${links.length}: ${link.articleUrl}`);
@@ -1498,6 +1510,17 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 			}
 		}
 
+		// Don't overwrite richer extractedLinks with fewer results
+		let finalBatchExtractedLinks = batchExtractedLinks;
+		if (batchExtractedLinks && link.extractedLinks) {
+			try {
+				const existing = JSON.parse(link.extractedLinks);
+				if (Array.isArray(existing) && existing.length > batchExtractedLinks.length) {
+					finalBatchExtractedLinks = null;
+				}
+			} catch { /* parse error — overwrite is fine */ }
+		}
+
 		// Auto-assign websiteId
 		let batchWebsiteId: string | null = null;
 		const finalTarget = batchExtractedTargetUrl || link.targetUrl;
@@ -1523,7 +1546,7 @@ export const checkSeoLinksBatch = command(checkSeoLinksBatchSchema, async (filte
 				...(batchExtractedKeyword && { keyword: batchExtractedKeyword, anchorText: batchExtractedKeyword }),
 				...(batchExtractedTargetUrl && { targetUrl: batchExtractedTargetUrl }),
 				...(batchWebsiteId && { websiteId: batchWebsiteId }),
-				...(batchExtractedLinks && { extractedLinks: JSON.stringify(batchExtractedLinks) }),
+				...(finalBatchExtractedLinks && { extractedLinks: JSON.stringify(finalBatchExtractedLinks) }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, link.id));

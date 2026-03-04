@@ -58,7 +58,15 @@ async function ensureBrowser(): Promise<Browser> {
 
 	// Launch new browser
 	state.launching = (async () => {
-		const chromePath = findChromePath();
+		let chromePath: string;
+		try {
+			chromePath = findChromePath();
+		} catch (e) {
+			console.error(`[SCRAPER] Chrome not found:`, e instanceof Error ? e.message : e);
+			console.error(`[SCRAPER] CHROME_PATH env: ${process.env.CHROME_PATH || '(not set)'}`);
+			console.error(`[SCRAPER] Platform: ${process.platform}`);
+			throw e;
+		}
 		console.log(`[SCRAPER] Launching browser (Chrome at ${chromePath})`);
 
 		const browser = await puppeteer.launch({
@@ -79,9 +87,13 @@ async function ensureBrowser(): Promise<Browser> {
 		state.browser = browser;
 		state.launching = null;
 		resetIdleTimer();
-		console.log('[SCRAPER] Browser launched');
+		console.log('[SCRAPER] Browser launched successfully');
 		return browser;
-	})();
+	})().catch((err) => {
+		state.launching = null;
+		console.error(`[SCRAPER] Browser launch FAILED:`, err instanceof Error ? err.message : err);
+		throw err;
+	});
 
 	return state.launching;
 }
