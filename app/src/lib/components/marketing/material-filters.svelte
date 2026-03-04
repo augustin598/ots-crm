@@ -7,13 +7,17 @@
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import LinkIcon from '@lucide/svelte/icons/link';
+	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import ListIcon from '@lucide/svelte/icons/list';
 
 	let {
 		filterType = $bindable(''),
-		searchTerm = $bindable('')
+		searchTerm = $bindable(''),
+		viewMode = $bindable<'grid' | 'list'>('grid')
 	}: {
 		filterType: string;
 		searchTerm: string;
+		viewMode: 'grid' | 'list';
 	} = $props();
 
 	const typeFilters = [
@@ -52,5 +56,27 @@
 			class="pl-9 h-8 text-sm"
 			bind:value={searchTerm}
 		/>
+	</div>
+
+	<!-- View toggle -->
+	<div class="flex items-center gap-0.5 border rounded-md p-0.5 ml-auto">
+		<Button
+			variant={viewMode === 'grid' ? 'default' : 'ghost'}
+			size="sm"
+			class="h-7 w-7 p-0"
+			onclick={() => (viewMode = 'grid')}
+			aria-label="Vizualizare grilă"
+		>
+			<LayoutGridIcon class="h-4 w-4" />
+		</Button>
+		<Button
+			variant={viewMode === 'list' ? 'default' : 'ghost'}
+			size="sm"
+			class="h-7 w-7 p-0"
+			onclick={() => (viewMode = 'list')}
+			aria-label="Vizualizare listă"
+		>
+			<ListIcon class="h-4 w-4" />
+		</Button>
 	</div>
 </div>

@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
+import { GOOGLE_ADS_SPECS, validateImageDimensions, type GoogleAdsCampaignType } from '$lib/shared/google-ads-specs';
 
 function generateMaterialId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -86,6 +87,64 @@ async function validateMagicBytes(file: File): Promise<boolean> {
 	return false;
 }
 
+/** Read image dimensions from raw bytes (PNG/JPEG/WebP/GIF). No external dependencies. */
+async function getImageDimensions(file: File): Promise<{ w: number; h: number } | null> {
+	try {
+		const buf = new Uint8Array(await file.arrayBuffer());
+
+		// PNG: width at bytes 16-19, height at bytes 20-23 (big-endian)
+		if (file.type === 'image/png' && buf.length > 24) {
+			const view = new DataView(buf.buffer);
+			return { w: view.getUint32(16), h: view.getUint32(20) };
+		}
+
+		// JPEG: scan for SOF0 (0xFFC0) or SOF2 (0xFFC2) marker
+		if (file.type === 'image/jpeg') {
+			let offset = 2; // skip SOI
+			const view = new DataView(buf.buffer);
+			while (offset < buf.length - 8) {
+				if (buf[offset] !== 0xff) break;
+				const marker = buf[offset + 1];
+				if (marker === 0xc0 || marker === 0xc2) {
+					const h = view.getUint16(offset + 5);
+					const w = view.getUint16(offset + 7);
+					return { w, h };
+				}
+				const segLen = view.getUint16(offset + 2);
+				offset += 2 + segLen;
+			}
+		}
+
+		// GIF: width at 6-7, height at 8-9 (little-endian)
+		if (file.type === 'image/gif' && buf.length > 10) {
+			const view = new DataView(buf.buffer);
+			return { w: view.getUint16(6, true), h: view.getUint16(8, true) };
+		}
+
+		// WebP: look for VP8 chunk
+		if (file.type === 'image/webp' && buf.length > 30) {
+			const view = new DataView(buf.buffer);
+			// VP8 (lossy) at offset 12
+			const chunk = String.fromCharCode(buf[12], buf[13], buf[14], buf[15]);
+			if (chunk === 'VP8 ' && buf.length > 30) {
+				const w = view.getUint16(26, true) & 0x3fff;
+				const h = view.getUint16(28, true) & 0x3fff;
+				return { w, h };
+			}
+			// VP8L (lossless) at offset 12
+			if (chunk === 'VP8L' && buf.length > 25) {
+				const bits = view.getUint32(21, true);
+				const w = (bits & 0x3fff) + 1;
+				const h = ((bits >> 14) & 0x3fff) + 1;
+				return { w, h };
+			}
+		}
+	} catch {
+		// Fall through
+	}
+	return null;
+}
+
 function escapeLike(s: string): string {
 	return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
@@ -153,6 +212,8 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 	const seoLinkId = (formData.get('seoLinkId') as string) || null;
 	const tags = (formData.get('tags') as string) || null;
 	const autoRename = formData.get('autoRename') === 'true';
+	const campaignType = (formData.get('campaignType') as string) || null;
+	const googleAdsSlotKey = (formData.get('googleAdsSlotKey') as string) || null;
 
 	if (!clientId || !category || !title) {
 		throw error(400, 'clientId, category și title sunt obligatorii');
@@ -199,6 +260,28 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		throw error(400, 'Fișierul nu corespunde tipului declarat');
 	}
 
+	// Validate image dimensions for Google Ads slots
+	if (googleAdsSlotKey && campaignType && ALLOWED_IMAGE_TYPES.includes(file.type)) {
+		const spec = GOOGLE_ADS_SPECS[campaignType as GoogleAdsCampaignType];
+		if (spec) {
+			const slot = spec.imageSlots.find((s) => s.key === googleAdsSlotKey);
+			if (slot) {
+				// Check file size against slot-specific limit
+				if (file.size > slot.maxFileSize) {
+					throw error(400, `Fișierul depășește dimensiunea maximă de ${slot.maxFileSize / (1024 * 1024)}MB pentru ${slot.label}`);
+				}
+
+				const dims = await getImageDimensions(file);
+				if (dims) {
+					const validation = validateImageDimensions(dims.w, dims.h, slot);
+					if (!validation.valid) {
+						throw error(400, validation.error!);
+					}
+				}
+			}
+		}
+	}
+
 	// Validate seoLinkId if provided
 	if (seoLinkId) {
 		const [seoLinkCheck] = await db
@@ -239,6 +322,7 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		fileName: file.name,
 		seoLinkId,
 		status: 'active',
+		campaignType,
 		uploadedByUserId: isClientUser ? null : userId,
 		uploadedByClientUserId: clientUserId || null,
 		tags

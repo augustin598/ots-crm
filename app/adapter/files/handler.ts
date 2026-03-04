@@ -279,12 +279,12 @@ const ssr = async (request: Request, bunServer: Bun.Server<unknown>) => {
 		const expectedOrigin = `${originalUrl.protocol}//${originalUrl.host}`;
 		const currentOrigin = headers.get('origin');
 
-		// Log CSRF debugging info for POST requests
-		if (request.method === 'POST') {
-			console.log(
+		// Log CSRF debugging info for POST requests (only in debug mode)
+		if (request.method === 'POST' && isDebugMode()) {
+			debugLog(
 				`[CSRF] POST request - Origin: ${currentOrigin || 'missing'}, Expected: ${expectedOrigin}, URL: ${requestUrl}`
 			);
-			console.log(`[CSRF] Referer: ${headers.get('referer') || 'missing'}`);
+			debugLog(`[CSRF] Referer: ${headers.get('referer') || 'missing'}`);
 		}
 
 		// Set origin if missing or doesn't match

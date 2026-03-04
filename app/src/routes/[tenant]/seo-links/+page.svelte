@@ -149,6 +149,12 @@
 		 filterLinkType, filterLinkAttribute, filterPressTrust.trim(), filterWebsiteId, filterSearch.trim()].filter(Boolean).length
 	);
 
+	const clientsQuery = getClients();
+	const clients = $derived(clientsQuery.current || []);
+	const clientMap = $derived(new Map(clients.map((c) => [c.id, c.name])));
+	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
+	const clientById = $derived(new Map(clients.map((c) => [c.id, c])));
+
 	function resetAllFilters() {
 		filterClientIds = [];
 		filterMonth = '';
@@ -211,12 +217,6 @@
 	const seoLinksQuery = $derived(getSeoLinks(filterParams));
 	const seoLinks = $derived(seoLinksQuery.current || []);
 	const loading = $derived(seoLinksQuery.loading);
-
-	const clientsQuery = getClients();
-	const clients = $derived(clientsQuery.current || []);
-	const clientMap = $derived(new Map(clients.map((c) => [c.id, c.name])));
-	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
-	const clientById = $derived(new Map(clients.map((c) => [c.id, c])));
 
 	// Website queries for filter and form
 	const filterWebsitesQuery = $derived(filterClientIds.length === 1 ? getClientWebsites(filterClientIds[0]) : null);
@@ -447,6 +447,21 @@
 	let rowLoading = $state(false);
 	let rowError = $state<string | null>(null);
 
+	// ── Inline row EDIT state ──────────────────────────────────────────────
+	let editingRowId = $state<string | null>(null);
+	let editRowPressTrust = $state('');
+	let editRowKeyword = $state('');
+	let editRowTargetUrl = $state('');
+	let editRowArticleUrl = $state('');
+	let editRowStatus = $state('pending');
+	let editRowArticlePublishedAt = $state<string | null>(null);
+	let editRowLinkType = $state('');
+	let editRowLinkAttribute = $state('dofollow');
+	let editRowPrice = $state('');
+	let editRowCurrency = $state<Currency>('RON');
+	let editRowLoading = $state(false);
+	let editRowError = $state<string | null>(null);
+
 	const projectsQuery = $derived(getProjects(formClientId || undefined));
 	const projects = $derived(projectsQuery.current || []);
 	const projectOptions = $derived([
@@ -521,6 +536,7 @@
 	}
 
 	function openInlineRow() {
+		if (editingRowId) cancelEditRow();
 		resetInlineRow();
 		isAddingInlineRow = true;
 	}
@@ -529,6 +545,82 @@
 		isAddingInlineRow = false;
 		resetInlineRow();
 	}
+
+	// ── Inline row EDIT functions ─────────────────────────────────────────
+	function startEditRow(link: (typeof seoLinks)[0]) {
+		// Cancel any active inline add or single-field editors
+		if (isAddingInlineRow) cancelInlineRow();
+		editingKeywordId = null;
+		editingKeywordValue = '';
+		editingPriceId = null;
+		editingPriceValue = '';
+		editingPriceCurrency = 'RON';
+
+		editingRowId = link.id;
+		editRowPressTrust = link.pressTrust || '';
+		editRowKeyword = link.keyword || '';
+		editRowTargetUrl = link.targetUrl || '';
+		editRowArticleUrl = link.articleUrl || '';
+		editRowStatus = link.status || 'pending';
+		editRowArticlePublishedAt = link.articlePublishedAt || null;
+		editRowLinkType = link.linkType || '';
+		editRowLinkAttribute = link.linkAttribute || 'dofollow';
+		editRowPrice = link.price != null ? (link.price / 100).toFixed(2) : '';
+		editRowCurrency = (link.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
+		editRowLoading = false;
+		editRowError = null;
+	}
+
+	function cancelEditRow() {
+		editingRowId = null;
+		editRowPressTrust = '';
+		editRowKeyword = '';
+		editRowTargetUrl = '';
+		editRowArticleUrl = '';
+		editRowStatus = 'pending';
+		editRowArticlePublishedAt = null;
+		editRowLinkType = '';
+		editRowLinkAttribute = 'dofollow';
+		editRowPrice = '';
+		editRowCurrency = 'RON';
+		editRowLoading = false;
+		editRowError = null;
+	}
+
+	async function saveEditRow() {
+		if (!editingRowId) return;
+		if (!editRowKeyword.trim() || !editRowArticleUrl.trim()) {
+			editRowError = 'Cuvântul cheie și linkul articol sunt obligatorii';
+			return;
+		}
+
+		editRowLoading = true;
+		editRowError = null;
+
+		try {
+			await updateSeoLink({
+				seoLinkId: editingRowId,
+				pressTrust: editRowPressTrust || undefined,
+				keyword: editRowKeyword.trim(),
+				targetUrl: editRowTargetUrl ? normalizeTargetUrl(editRowTargetUrl) : undefined,
+				articleUrl: editRowArticleUrl.trim(),
+				status: editRowStatus as 'pending' | 'submitted' | 'published' | 'rejected',
+				articlePublishedAt: editRowArticlePublishedAt || undefined,
+				linkType: parseLinkType(editRowLinkType),
+				linkAttribute: editRowLinkAttribute as 'dofollow' | 'nofollow',
+				price: editRowPrice ? parseFloat(editRowPrice) : undefined,
+				currency: editRowCurrency,
+				anchorText: editRowKeyword.trim()
+			}).updates(seoLinksQuery);
+			toast.success('Link actualizat');
+			cancelEditRow();
+		} catch (e) {
+			editRowError = e instanceof Error ? e.message : 'Eroare la salvare';
+		} finally {
+			editRowLoading = false;
+		}
+	}
+	// ──────────────────────────────────────────────────────────────────────
 
 	async function saveInlineRow() {
 		if (filterClientIds.length !== 1 || !rowKeyword || !rowArticleUrl) {
@@ -1258,6 +1350,12 @@
 	}
 </script>
 
+<svelte:window onkeydown={(e) => {
+	if (e.key === 'Escape' && editingRowId && !editRowLoading) {
+		cancelEditRow();
+	}
+}} />
+
 <svelte:head>
 	<title>Linkuri SEO - CRM</title>
 </svelte:head>
@@ -1369,7 +1467,7 @@
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-			<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading || filterClientIds.length !== 1}>
+			<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading || filterClientIds.length !== 1 || editingRowId !== null}>
 				<Rows3Icon class="mr-2 h-4 w-4" />
 				Adaugă rând
 			</Button>
@@ -2615,7 +2713,133 @@
 							{/if}
 						{/if}
 						{#each seoLinks as link, index}
-						<TableRow class="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors duration-150">
+						{#if editingRowId === link.id}
+						<!-- ── Inline edit row ── -->
+						<TableRow class="border-b border-border/30 bg-muted/30 hover:bg-muted/40">
+							<TableCell class="pl-5 pr-2 py-2 align-middle">
+								<Checkbox
+									checked={selectedIds.has(link.id)}
+									onCheckedChange={(v) => toggleSelect(link.id, v)}
+									aria-label="Selectează"
+								/>
+							</TableCell>
+							<TableCell class="text-muted-foreground tabular-nums text-[13px] px-3 py-2 align-middle">
+								{index + 1}
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<Input bind:value={editRowPressTrust} placeholder="Trust presă" class="h-8 text-[13px] w-full min-w-[6rem]" />
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<Input bind:value={editRowKeyword} placeholder="Cuvânt cheie" class="h-8 text-[13px] w-full min-w-[7rem]" />
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<Input bind:value={editRowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
+							</TableCell>
+							{#if filterClientIds.length === 1}
+							<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">
+								{#if link.websiteId && filterWebsiteMap.has(link.websiteId)}
+									{filterWebsiteMap.get(link.websiteId)}
+								{:else}
+									—
+								{/if}
+							</TableCell>
+							{/if}
+							<TableCell class="px-3 py-2 align-middle">
+								<Input bind:value={editRowArticleUrl} placeholder="Link articol" class="h-8 text-[13px] w-full min-w-[10rem]" />
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<div class="flex flex-col gap-1">
+									<Select type="single" bind:value={editRowStatus}>
+										<SelectTrigger class="h-8 text-[13px] min-w-[6rem]">
+											{getStatusLabel(editRowStatus)}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="pending">În așteptare</SelectItem>
+											<SelectItem value="submitted">Trimis</SelectItem>
+											<SelectItem value="published">Publicat</SelectItem>
+											<SelectItem value="rejected">Refuzat</SelectItem>
+										</SelectContent>
+									</Select>
+									<Input
+										type="date"
+										class="h-7 text-[12px] px-2"
+										value={editRowArticlePublishedAt ? editRowArticlePublishedAt.slice(0, 10) : ''}
+										onchange={(e) => { editRowArticlePublishedAt = e.currentTarget.value || null; }}
+									/>
+								</div>
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<div class="flex flex-col gap-1">
+									<Select type="single" bind:value={editRowLinkType}>
+										<SelectTrigger class="h-8 text-[12px] min-w-[5rem]">
+											{editRowLinkType ? getLinkTypeLabel(editRowLinkType) : 'Tip'}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="article">Articol</SelectItem>
+											<SelectItem value="guest-post">Guest post</SelectItem>
+											<SelectItem value="press-release">Comunicat</SelectItem>
+											<SelectItem value="directory">Director</SelectItem>
+											<SelectItem value="other">Altul</SelectItem>
+										</SelectContent>
+									</Select>
+									<Select type="single" bind:value={editRowLinkAttribute}>
+										<SelectTrigger class="h-7 text-[11px] min-w-[5rem]">
+											{editRowLinkAttribute}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="dofollow">Dofollow</SelectItem>
+											<SelectItem value="nofollow">Nofollow</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<Badge variant={getCheckStatusBadge(link).variant} class="text-[11px] h-5 rounded-full px-2 font-normal">
+									{getCheckStatusBadge(link).label}
+								</Badge>
+							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<div class="flex items-center gap-1.5">
+									<Input
+										type="number"
+										bind:value={editRowPrice}
+										placeholder="0"
+										step="0.01"
+										class="h-8 w-16 text-[13px] px-2"
+									/>
+									<Select type="single" bind:value={editRowCurrency}>
+										<SelectTrigger class="h-8 w-[4.5rem] text-[12px] px-2">
+											{CURRENCY_LABELS[editRowCurrency]}
+										</SelectTrigger>
+										<SelectContent>
+											{#each CURRENCIES as curr}
+												<SelectItem value={curr}>{CURRENCY_LABELS[curr]}</SelectItem>
+											{/each}
+										</SelectContent>
+									</Select>
+								</div>
+							</TableCell>
+							<TableCell class="py-2 pr-5 align-middle">
+								<div class="flex items-center gap-1">
+									<Button size="sm" class="h-8" onclick={saveEditRow} disabled={editRowLoading}>
+										{editRowLoading ? 'Se salvează...' : 'Salvează'}
+									</Button>
+									<Button size="sm" variant="ghost" class="h-8" onclick={cancelEditRow} disabled={editRowLoading}>
+										Anulează
+									</Button>
+								</div>
+							</TableCell>
+						</TableRow>
+						{#if editRowError}
+							<TableRow class="bg-destructive/10">
+								<TableCell colspan={12} class="px-5 py-2 text-sm text-destructive">
+									{editRowError}
+								</TableCell>
+							</TableRow>
+						{/if}
+						{:else}
+						<!-- ── Display row ── -->
+						<TableRow class="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors duration-150" ondblclick={() => startEditRow(link)}>
 								<TableCell class="pl-5 pr-2 py-3.5 align-middle">
 									<Checkbox
 										checked={selectedIds.has(link.id)}
@@ -2666,6 +2890,7 @@
 											type="button"
 											class="text-left w-full min-w-[4rem] py-1 px-1.5 -mx-1.5 rounded hover:bg-muted/50 text-foreground/85 hover:text-foreground transition-colors text-[13px] line-clamp-2"
 											onclick={() => {
+												if (editingRowId === link.id) return;
 												editingKeywordId = link.id;
 												editingKeywordValue = link.keyword;
 											}}
@@ -2778,6 +3003,7 @@
 											type="button"
 											class="text-left w-full min-w-[4rem] py-1 px-1.5 -mx-1.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
 											onclick={() => {
+												if (editingRowId === link.id) return;
 												editingPriceId = link.id;
 												editingPriceValue = link.price != null ? (link.price / 100).toFixed(2) : '';
 												editingPriceCurrency = (link.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
@@ -2813,9 +3039,13 @@
 												<Link2Icon class="mr-2 h-4 w-4" />
 												{checkingId === link.id ? 'Se verifică...' : 'Verifică link'}
 											</DropdownMenuItem>
+											<DropdownMenuItem onclick={() => startEditRow(link)}>
+												<EditIcon class="mr-2 h-4 w-4" />
+												Editează inline
+											</DropdownMenuItem>
 											<DropdownMenuItem onclick={() => openEditDialog(link)}>
 												<EditIcon class="mr-2 h-4 w-4" />
-												Editează
+												Editare completă...
 											</DropdownMenuItem>
 											<DropdownMenuItem
 												class="text-destructive"
@@ -2828,6 +3058,7 @@
 									</DropdownMenu>
 								</TableCell>
 							</TableRow>
+						{/if}
 						{/each}
 					</TableBody>
 					<TableFooter>

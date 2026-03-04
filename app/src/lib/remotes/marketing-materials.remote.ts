@@ -31,7 +31,8 @@ export const getMarketingMaterials = query(
 		category: v.optional(v.string()),
 		type: v.optional(v.string()),
 		status: v.optional(v.string()),
-		search: v.optional(v.string())
+		search: v.optional(v.string()),
+		campaignType: v.optional(v.string())
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -60,6 +61,9 @@ export const getMarketingMaterials = query(
 		}
 		if (filters.status) {
 			conditions = and(conditions, eq(table.marketingMaterial.status, filters.status)) as typeof conditions;
+		}
+		if (filters.campaignType) {
+			conditions = and(conditions, eq(table.marketingMaterial.campaignType, filters.campaignType)) as typeof conditions;
 		}
 		if (filters.search?.trim()) {
 			const escaped = filters.search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -94,6 +98,7 @@ export const getMarketingMaterials = query(
 				status: table.marketingMaterial.status,
 				uploadedByUserId: table.marketingMaterial.uploadedByUserId,
 				uploadedByClientUserId: table.marketingMaterial.uploadedByClientUserId,
+				campaignType: table.marketingMaterial.campaignType,
 				tags: table.marketingMaterial.tags,
 				createdAt: table.marketingMaterial.createdAt,
 				updatedAt: table.marketingMaterial.updatedAt,
@@ -119,10 +124,11 @@ const createSchema = v.object({
 	type: v.picklist(['image', 'video', 'document', 'text', 'url']),
 	title: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
 	description: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(1000)))),
-	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(5000)))),
+	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(50000)))),
 	externalUrl: v.optional(v.nullable(v.pipe(v.string(), v.check(isValidHttpUrl, 'URL invalid. Trebuie să înceapă cu https:// sau http://')))),
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
+	campaignType: v.optional(v.nullable(v.picklist(['display', 'pmax', 'search', 'demand-gen']))),
 	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
 });
 
@@ -177,6 +183,7 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 		externalUrl: data.externalUrl || null,
 		seoLinkId: data.seoLinkId || null,
 		status: data.status || 'active',
+		campaignType: data.campaignType || null,
 		tags: data.tags || null,
 		uploadedByUserId: isClientUser ? null : event.locals.user.id,
 		uploadedByClientUserId: isClientUser ? (event.locals as any).clientUser?.id || null : null
@@ -189,10 +196,11 @@ const updateSchema = v.object({
 	id: v.pipe(v.string(), v.minLength(1)),
 	title: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
 	description: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(1000)))),
-	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(5000)))),
+	textContent: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(50000)))),
 	externalUrl: v.optional(v.nullable(v.pipe(v.string(), v.check(isValidHttpUrl, 'URL invalid. Trebuie să înceapă cu https:// sau http://')))),
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
+	campaignType: v.optional(v.nullable(v.picklist(['display', 'pmax', 'search', 'demand-gen']))),
 	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
 });
 
@@ -238,6 +246,7 @@ export const updateMarketingMaterial = command(updateSchema, async (data) => {
 	if (data.externalUrl !== undefined) updateData.externalUrl = data.externalUrl;
 	if (data.seoLinkId !== undefined) updateData.seoLinkId = data.seoLinkId;
 	if (data.status !== undefined) updateData.status = data.status;
+	if (data.campaignType !== undefined) updateData.campaignType = data.campaignType;
 	if (data.tags !== undefined) updateData.tags = data.tags;
 
 	await db

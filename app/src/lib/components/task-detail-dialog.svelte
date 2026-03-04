@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
+	import { getTaskMaterials, getAvailableMaterialsForTask, linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { approveTask, rejectTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
@@ -10,10 +11,12 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Input } from '$lib/components/ui/input';
 	import { Separator } from '$lib/components/ui/separator';
+	import * as Popover from '$lib/components/ui/popover';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import { formatStatus, getStatusBadgeVariant, formatDate, getPriorityColor, getPriorityDotColor, formatPriority, getActivityValueColor } from '$lib/components/task-kanban-utils';
-	import { Calendar, User, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw } from '@lucide/svelte';
+	import { Calendar, User, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
 
@@ -42,6 +45,33 @@
 
 	const activitiesQuery = $derived(task ? getTaskActivities(task.id) : null);
 	const activities = $derived(activitiesQuery?.current || []);
+
+	const materialsQuery = $derived(task ? getTaskMaterials(task.id) : null);
+	const taskMaterials = $derived(materialsQuery?.current || []);
+
+	let materialPickerOpen = $state(false);
+	let materialSearchTerm = $state('');
+	let linkingMaterialId = $state<string | null>(null);
+
+	const availableMaterialsQuery = $derived(
+		task && materialPickerOpen ? getAvailableMaterialsForTask(task.id) : null
+	);
+	const availableMaterials = $derived(availableMaterialsQuery?.current || []);
+	const filteredAvailableMaterials = $derived(
+		materialSearchTerm.trim()
+			? availableMaterials.filter((m: any) =>
+					m.title.toLowerCase().includes(materialSearchTerm.toLowerCase())
+				)
+			: availableMaterials
+	);
+
+	const MATERIAL_TYPE_ICONS: Record<string, typeof Image> = {
+		image: Image,
+		video: Video,
+		document: FileText,
+		text: Type,
+		url: ExternalLink
+	};
 
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
@@ -178,6 +208,31 @@
 			approvalLoading = false;
 		}
 	}
+
+	async function handleLinkMaterial(materialId: string) {
+		if (!task) return;
+		linkingMaterialId = materialId;
+		try {
+			await linkMaterialToTask({ taskId: task.id, materialId })
+				.updates(getTaskMaterials(task.id), getAvailableMaterialsForTask(task.id));
+			toast.success('Material adăugat');
+		} catch (e: any) {
+			toast.error(e?.message || 'Eroare la adăugare material');
+		} finally {
+			linkingMaterialId = null;
+		}
+	}
+
+	async function handleUnlinkMaterial(materialId: string) {
+		if (!task || !confirm('Elimină legătura cu acest material?')) return;
+		try {
+			await unlinkMaterialFromTask({ taskId: task.id, materialId })
+				.updates(getTaskMaterials(task.id), getAvailableMaterialsForTask(task.id));
+			toast.success('Material eliminat');
+		} catch (e: any) {
+			toast.error(e?.message || 'Eroare la eliminare');
+		}
+	}
 </script>
 
 {#if task}
@@ -267,6 +322,96 @@
 								<p class="text-sm text-muted-foreground">Due Date</p>
 								<p class="font-medium">{formatDate(task.dueDate)}</p>
 							</div>
+						</div>
+					{/if}
+				</div>
+
+				<Separator />
+
+				<!-- Materials section -->
+				<div>
+					<div class="flex items-center justify-between mb-4">
+						<div class="flex items-center gap-2">
+							<Link class="h-4 w-4 text-muted-foreground" />
+							<h4 class="font-semibold">Materiale ({taskMaterials.length})</h4>
+						</div>
+						<Popover.Root bind:open={materialPickerOpen}>
+							<Popover.Trigger>
+								{#snippet child({ props })}
+									<Button {...props} variant="outline" size="sm">
+										<Plus class="h-3.5 w-3.5 mr-1" />
+										Adaugă
+									</Button>
+								{/snippet}
+							</Popover.Trigger>
+							<Popover.Content class="w-80 p-0" align="end">
+								<div class="p-3 border-b">
+									<Input
+										type="text"
+										placeholder="Caută materiale..."
+										bind:value={materialSearchTerm}
+										class="h-8 text-sm"
+									/>
+								</div>
+								<div class="max-h-[200px] overflow-y-auto">
+									{#if filteredAvailableMaterials.length === 0}
+										<p class="text-sm text-muted-foreground p-3">
+											{materialSearchTerm ? 'Niciun material găsit.' : 'Nu există materiale disponibile.'}
+										</p>
+									{:else}
+										{#each filteredAvailableMaterials as mat}
+											{@const Icon = MATERIAL_TYPE_ICONS[mat.type] || FileText}
+											<button
+												class="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-muted text-sm transition-colors disabled:opacity-50"
+												onclick={() => handleLinkMaterial(mat.id)}
+												disabled={linkingMaterialId === mat.id}
+											>
+												<Icon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												<span class="truncate flex-1">{mat.title}</span>
+												<Badge variant="outline" class="text-xs shrink-0">{mat.type}</Badge>
+											</button>
+										{/each}
+									{/if}
+								</div>
+							</Popover.Content>
+						</Popover.Root>
+					</div>
+
+					{#if taskMaterials.length === 0}
+						<p class="text-sm text-muted-foreground">Niciun material asociat.</p>
+					{:else}
+						<div class="grid gap-2 sm:grid-cols-2">
+							{#each taskMaterials as mat}
+								{@const Icon = MATERIAL_TYPE_ICONS[mat.materialType] || FileText}
+								<div class="flex items-center gap-3 p-3 border rounded-lg group">
+									<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+										<Icon class="h-4 w-4 text-muted-foreground" />
+									</div>
+									<div class="flex-1 min-w-0">
+										{#if mat.materialExternalUrl}
+											<a
+												href={mat.materialExternalUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-sm font-medium truncate block hover:text-primary"
+											>
+												{mat.materialTitle}
+											</a>
+										{:else}
+											<p class="text-sm font-medium truncate">{mat.materialTitle}</p>
+										{/if}
+										<p class="text-xs text-muted-foreground capitalize">{mat.materialCategory.replace(/-/g, ' ')} · {mat.materialType}</p>
+									</div>
+									<Button
+										variant="ghost"
+										size="icon"
+										class="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+										onclick={() => handleUnlinkMaterial(mat.materialId)}
+									>
+										<Unlink class="h-3.5 w-3.5" />
+									</Button>
+								</div>
+							{/each}
 						</div>
 					{/if}
 				</div>

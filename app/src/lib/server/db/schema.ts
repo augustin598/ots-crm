@@ -408,6 +408,25 @@ export const taskActivity = sqliteTable('task_activity', {
 		.default(sql`current_timestamp`)
 });
 
+export const taskMarketingMaterial = sqliteTable('task_marketing_material', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id, { onDelete: 'cascade' }),
+	marketingMaterialId: text('marketing_material_id')
+		.notNull()
+		.references(() => marketingMaterial.id, { onDelete: 'cascade' }),
+	addedByUserId: text('added_by_user_id')
+		.notNull()
+		.references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 export const invoice = sqliteTable('invoice', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -1513,7 +1532,8 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 	}),
 	comments: many(taskComment),
 	watchers: many(taskWatcher),
-	activities: many(taskActivity)
+	activities: many(taskActivity),
+	materials: many(taskMarketingMaterial)
 }));
 
 export const taskCommentRelations = relations(taskComment, ({ one }) => ({
@@ -2127,12 +2147,33 @@ export const marketingMaterial = sqliteTable('marketing_material', {
 	// 'draft' | 'active' | 'archived'
 	uploadedByUserId: text('uploaded_by_user_id').references(() => user.id),
 	uploadedByClientUserId: text('uploaded_by_client_user_id').references(() => clientUser.id),
+	campaignType: text('campaign_type'),
+	// 'display' | 'pmax' | 'search' | 'demand-gen' — only set when category = 'google-ads'
 	tags: text('tags'), // JSON string array
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
 });
 
-export const marketingMaterialRelations = relations(marketingMaterial, ({ one }) => ({
+export const taskMarketingMaterialRelations = relations(taskMarketingMaterial, ({ one }) => ({
+	task: one(task, {
+		fields: [taskMarketingMaterial.taskId],
+		references: [task.id]
+	}),
+	marketingMaterial: one(marketingMaterial, {
+		fields: [taskMarketingMaterial.marketingMaterialId],
+		references: [marketingMaterial.id]
+	}),
+	addedByUser: one(user, {
+		fields: [taskMarketingMaterial.addedByUserId],
+		references: [user.id]
+	}),
+	tenant: one(tenant, {
+		fields: [taskMarketingMaterial.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const marketingMaterialRelations = relations(marketingMaterial, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [marketingMaterial.tenantId],
 		references: [tenant.id]
@@ -2152,7 +2193,8 @@ export const marketingMaterialRelations = relations(marketingMaterial, ({ one })
 	uploadedByClientUser: one(clientUser, {
 		fields: [marketingMaterial.uploadedByClientUserId],
 		references: [clientUser.id]
-	})
+	}),
+	taskLinks: many(taskMarketingMaterial)
 }));
 
 // Types

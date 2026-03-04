@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -14,6 +15,8 @@
 	import MaterialUploadDialog from '$lib/components/marketing/material-upload-dialog.svelte';
 	import MaterialInlineUpload from '$lib/components/marketing/material-inline-upload.svelte';
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
+	import MaterialListView from '$lib/components/marketing/material-list-view.svelte';
+	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { toast } from 'svelte-sonner';
@@ -27,11 +30,23 @@
 	let searchTerm = $state('');
 	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
+	let googleAdsDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
 	let deleteConfirmOpen = $state(false);
 	let deleteTarget = $state<any>(null);
 	let deleting = $state(false);
+
+	// View mode with localStorage persistence
+	let viewMode = $state<'grid' | 'list'>(
+		browser ? (localStorage.getItem('marketing-view-mode') as 'grid' | 'list') || 'grid' : 'grid'
+	);
+
+	$effect(() => {
+		if (browser) {
+			localStorage.setItem('marketing-view-mode', viewMode);
+		}
+	});
 
 	const materialsQuery = $derived(
 		getMarketingMaterials({
@@ -65,10 +80,10 @@
 	});
 
 	$effect(() => {
-		const imageMaterials = materials.filter(
-			(m: any) => m.type === 'image' && m.filePath && !thumbnailUrls[m.id] && !loadingThumbnailIds.has(m.id)
+		const mediaMaterials = materials.filter(
+			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !thumbnailUrls[m.id] && !loadingThumbnailIds.has(m.id)
 		);
-		for (const m of imageMaterials) {
+		for (const m of mediaMaterials) {
 			loadingThumbnailIds.add(m.id);
 			getMaterialDownloadUrl(m.id)
 				.then((r) => {
@@ -123,7 +138,10 @@
 			<h2 class="text-xl font-semibold">Materiale Marketing</h2>
 		</div>
 		{#if !isFileFilterType}
-			<Button onclick={() => (uploadDialogOpen = true)}>
+			<Button onclick={() => {
+				if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+				else { uploadDialogOpen = true; }
+			}}>
 				<PlusIcon class="h-4 w-4 mr-2" />
 				Adaugă Material
 			</Button>
@@ -152,7 +170,7 @@
 
 		<TabsContent value={activeCategory} class="mt-4 space-y-4">
 			<!-- Filters -->
-			<MaterialFilters bind:filterType bind:searchTerm />
+			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode />
 
 			<!-- Inline upload zone for file type filters -->
 			{#if isFileFilterType}
@@ -183,12 +201,21 @@
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
 					<p class="text-sm">Niciun material în această categorie.</p>
 					{#if !isFileFilterType}
-						<Button variant="outline" class="mt-3" onclick={() => (uploadDialogOpen = true)}>
+						<Button variant="outline" class="mt-3" onclick={() => {
+							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+							else { uploadDialogOpen = true; }
+						}}>
 							<PlusIcon class="h-4 w-4 mr-2" />
 							Adaugă primul material
 						</Button>
 					{/if}
 				</div>
+			{:else if viewMode === 'list'}
+				<MaterialListView
+					{materials}
+					onEdit={handleEdit}
+					onDelete={handleDeleteClick}
+				/>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 					{#each materials as material (material.id)}
@@ -213,6 +240,14 @@
 	{uploadUrl}
 	{seoLinks}
 	onUploaded={handleUploaded}
+/>
+
+<!-- Google Ads Asset Dialog -->
+<GoogleAdsAssetDialog
+	bind:open={googleAdsDialogOpen}
+	{clientId}
+	{uploadUrl}
+	onSaved={handleUploaded}
 />
 
 <!-- Edit Dialog -->

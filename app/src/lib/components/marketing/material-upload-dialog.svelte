@@ -23,7 +23,8 @@
 		clientId,
 		uploadUrl,
 		seoLinks = [],
-		onUploaded
+		onUploaded,
+		initialType = undefined
 	}: {
 		open: boolean;
 		category: string;
@@ -31,14 +32,23 @@
 		uploadUrl: string;
 		seoLinks?: SeoLinkOption[];
 		onUploaded?: () => void;
+		initialType?: 'url' | 'text';
 	} = $props();
+
+	const isTypeLocked = $derived(initialType === 'url' || initialType === 'text');
 
 	let title = $state('');
 	let description = $state('');
 	let seoLinkId = $state('');
 	let tags = $state('');
 	let textContent = $state('');
-	let materialType = $state<'file' | 'text' | 'url'>('file');
+	let materialType = $state<'file' | 'text' | 'url'>(initialType || 'file');
+
+	$effect(() => {
+		if (open && initialType) {
+			materialType = initialType;
+		}
+	});
 	let externalUrl = $state('');
 	let selectedFile = $state<File | null>(null);
 	let uploading = $state(false);
@@ -50,7 +60,7 @@
 		seoLinkId = '';
 		tags = '';
 		textContent = '';
-		materialType = 'file';
+		materialType = initialType || 'file';
 		externalUrl = '';
 		selectedFile = null;
 		uploading = false;
@@ -243,37 +253,53 @@
 <Dialog.Root bind:open onOpenChange={(o) => { if (!o) resetForm(); }}>
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>Adaugă Material</Dialog.Title>
+			<Dialog.Title>
+				{#if initialType === 'url'}
+					Adaugă URL Extern
+				{:else if initialType === 'text'}
+					Adaugă Text Ad
+				{:else}
+					Adaugă Material
+				{/if}
+			</Dialog.Title>
 			<Dialog.Description>
-				Încarcă un fișier, adaugă text publicitar sau un URL extern.
+				{#if initialType === 'url'}
+					Adaugă un URL extern ca material de marketing.
+				{:else if initialType === 'text'}
+					Adaugă un text publicitar ca material de marketing.
+				{:else}
+					Încarcă un fișier, adaugă text publicitar sau un URL extern.
+				{/if}
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<div class="space-y-4 pt-2">
 			<!-- Material type selector -->
-			<div class="flex gap-2">
-				<Button
-					variant={materialType === 'file' ? 'default' : 'outline'}
-					size="sm"
-					onclick={() => (materialType = 'file')}
-				>
-					<FileIcon class="h-4 w-4 mr-1" /> Fișier
-				</Button>
-				<Button
-					variant={materialType === 'text' ? 'default' : 'outline'}
-					size="sm"
-					onclick={() => (materialType = 'text')}
-				>
-					Text Ad
-				</Button>
-				<Button
-					variant={materialType === 'url' ? 'default' : 'outline'}
-					size="sm"
-					onclick={() => (materialType = 'url')}
-				>
-					URL Extern
-				</Button>
-			</div>
+			{#if !isTypeLocked}
+				<div class="flex gap-2">
+					<Button
+						variant={materialType === 'file' ? 'default' : 'outline'}
+						size="sm"
+						onclick={() => (materialType = 'file')}
+					>
+						<FileIcon class="h-4 w-4 mr-1" /> Fișier
+					</Button>
+					<Button
+						variant={materialType === 'text' ? 'default' : 'outline'}
+						size="sm"
+						onclick={() => (materialType = 'text')}
+					>
+						Text Ad
+					</Button>
+					<Button
+						variant={materialType === 'url' ? 'default' : 'outline'}
+						size="sm"
+						onclick={() => (materialType = 'url')}
+					>
+						URL Extern
+					</Button>
+				</div>
+			{/if}
 
 			<!-- File upload area -->
 			{#if materialType === 'file'}
