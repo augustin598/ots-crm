@@ -332,7 +332,7 @@
 				Add Client
 			</Button>
 		</DialogTrigger>
-		<DialogContent class="sm:max-w-[500px]">
+		<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 			<DialogHeader>
 				<DialogTitle>Add New Client</DialogTitle>
 				<DialogDescription>Create a new client profile to start managing your relationship</DialogDescription>
@@ -587,7 +587,7 @@
 {/if}
 
 <Dialog bind:open={deleteConfirmOpen}>
-	<DialogContent class="sm:max-w-[400px]">
+	<DialogContent class="sm:max-w-[400px] max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Șterge client</DialogTitle>
 			<DialogDescription>

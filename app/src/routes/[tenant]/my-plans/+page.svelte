@@ -427,7 +427,7 @@
 />
 
 <Dialog bind:open={isAssignTasksDialogOpen}>
-	<DialogContent class="sm:max-w-[500px]">
+	<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Assign Existing Task</DialogTitle>
 			<DialogDescription>

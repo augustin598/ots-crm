@@ -729,7 +729,7 @@
 
 <!-- Prestator sign modal -->
 <Dialog bind:open={showSignModal}>
-	<DialogContent class="sm:max-w-lg">
+	<DialogContent class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Semnează ca Prestator</DialogTitle>
 		</DialogHeader>

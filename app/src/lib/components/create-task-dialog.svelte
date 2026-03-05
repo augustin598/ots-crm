@@ -170,7 +170,7 @@
 </script>
 
 <Dialog bind:open onOpenChange={onOpenChange}>
-	<DialogContent class="sm:max-w-[600px]">
+	<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Create New Task</DialogTitle>
 			<DialogDescription>Add a new task to a project</DialogDescription>

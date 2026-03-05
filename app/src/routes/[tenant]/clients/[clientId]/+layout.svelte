@@ -150,7 +150,7 @@
 	</div>
 
 		<Dialog.Root bind:open={magicLinkDialogOpen}>
-		<Dialog.Content class="sm:max-w-md">
+		<Dialog.Content class="sm:max-w-md max-h-[85vh] overflow-y-auto">
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
 					<SparklesIcon class="h-5 w-5 text-primary" />

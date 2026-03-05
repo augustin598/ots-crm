@@ -195,7 +195,7 @@
 				Add Service
 			</Button>
 		</DialogTrigger>
-		<DialogContent class="sm:max-w-[600px]">
+		<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 			<DialogHeader>
 				<DialogTitle>Add New Service</DialogTitle>
 				<DialogDescription>Create a new service offering for your clients</DialogDescription>

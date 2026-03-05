@@ -281,7 +281,7 @@
 		if (!open) previewDocumentId = null;
 	}}
 >
-	<DialogContent class="max-w-4xl max-h-[90vh]">
+	<DialogContent class="max-w-4xl max-h-[90vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Document Preview</DialogTitle>
 			<DialogDescription>Preview of the rendered document</DialogDescription>

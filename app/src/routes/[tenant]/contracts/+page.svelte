@@ -505,7 +505,7 @@
 </div>
 
 <Dialog bind:open={showUploadModal}>
-	<DialogContent class="sm:max-w-xl border-2 shadow-2xl overflow-hidden">
+	<DialogContent class="sm:max-w-xl border-2 shadow-2xl max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<div class="flex items-center gap-3">
 				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
@@ -619,7 +619,7 @@
 </Dialog>
 
 <Dialog bind:open={showExtractionReport}>
-	<DialogContent class="sm:max-w-lg">
+	<DialogContent class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<div class="flex items-center gap-3">
 				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">

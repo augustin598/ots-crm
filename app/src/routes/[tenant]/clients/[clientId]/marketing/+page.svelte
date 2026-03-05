@@ -315,7 +315,7 @@
 
 <!-- Delete Confirmation -->
 <Dialog.Root bind:open={deleteConfirmOpen}>
-	<Dialog.Content class="sm:max-w-md">
+	<Dialog.Content class="sm:max-w-md max-h-[85vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Confirmare ștergere</Dialog.Title>
 			<Dialog.Description>

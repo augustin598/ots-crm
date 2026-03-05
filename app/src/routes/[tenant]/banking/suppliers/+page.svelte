@@ -118,7 +118,7 @@
 					Add Supplier
 				</Button>
 			</DialogTrigger>
-			<DialogContent class="sm:max-w-[500px]">
+			<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle>Add New Supplier</DialogTitle>
 					<DialogDescription>Create a new supplier profile</DialogDescription>

@@ -372,7 +372,7 @@
 								New Milestone
 							</Button>
 						</DialogTrigger>
-						<DialogContent class="sm:max-w-[500px]">
+						<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 							<DialogHeader>
 								<DialogTitle>Create New Milestone</DialogTitle>
 								<DialogDescription>Add a milestone to track project progress</DialogDescription>
@@ -529,7 +529,7 @@
 
 		{#if editingMilestone}
 			<Dialog bind:open={isEditMilestoneDialogOpen}>
-				<DialogContent class="sm:max-w-[500px]">
+				<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Edit Milestone</DialogTitle>
 						<DialogDescription>Update milestone details</DialogDescription>
@@ -599,7 +599,7 @@
 							Edit Team Members
 						</Button>
 					</DialogTrigger>
-					<DialogContent class="sm:max-w-[500px]">
+					<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Edit Team Members</DialogTitle>
 							<DialogDescription>Select team members for this project</DialogDescription>

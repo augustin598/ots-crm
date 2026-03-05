@@ -167,7 +167,7 @@
 </script>
 
 <Dialog bind:open onOpenChange={onOpenChange}>
-	<DialogContent class="sm:max-w-[600px]">
+	<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 		{#if task}
 			<DialogHeader>
 				<DialogTitle>Edit Task</DialogTitle>

@@ -1339,7 +1339,7 @@
 									</Button>
 								{/snippet}
 							</DialogTrigger>
-							<DialogContent class="max-w-2xl">
+							<DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>Add Item to Invoice</DialogTitle>
 									<DialogDescription>

@@ -1151,7 +1151,7 @@
 
 <!-- ── Article Modal ── -->
 <Dialog bind:open={articleModalOpen}>
-	<DialogContent class="max-w-md">
+	<DialogContent class="max-w-md max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Articol</DialogTitle>
 			<DialogDescription>

@@ -247,7 +247,7 @@
 					New Project
 				</Button>
 			</DialogTrigger>
-			<DialogContent class="sm:max-w-[600px]">
+			<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle>Create New Project</DialogTitle>
 					<DialogDescription>Start a new project (client is optional for internal projects)</DialogDescription>
@@ -342,7 +342,7 @@
 
 {#if editingProject}
 	<Dialog bind:open={isEditDialogOpen}>
-		<DialogContent class="sm:max-w-[600px]">
+		<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 			<DialogHeader>
 				<DialogTitle>Edit Project</DialogTitle>
 				<DialogDescription>Update project details</DialogDescription>
