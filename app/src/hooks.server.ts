@@ -42,6 +42,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 		event.locals.clientUser = null;
 		event.locals.client = null;
 		event.locals.isClientUser = false;
+		event.locals.isClientUserPrimary = false;
 		return resolve(event);
 	}
 
@@ -59,6 +60,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 	// Check if this is a client route
 	const isClientRoute = event.url.pathname.startsWith('/client/');
 	event.locals.isClientUser = false;
+	event.locals.isClientUserPrimary = false;
 	event.locals.clientUser = null;
 	event.locals.client = null;
 
@@ -92,6 +94,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 
 				if (clientUserRecord) {
 					event.locals.isClientUser = true;
+					event.locals.isClientUserPrimary = clientUserRecord.clientUser.isPrimary;
 					event.locals.clientUser = clientUserRecord.clientUser;
 					event.locals.client = clientUserRecord.client;
 					event.locals.tenant = tenant;

@@ -1076,6 +1076,24 @@ export const clientWebsite = sqliteTable('client_website', {
 		.default(sql`current_date`)
 });
 
+export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	email: text('email').notNull(),
+	label: text('label'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const seoLinkCheck = sqliteTable('seo_link_check', {
 	id: text('id').primaryKey(),
 	seoLinkId: text('seo_link_id')
@@ -1186,6 +1204,7 @@ export const clientUser = sqliteTable('client_user', {
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
+	isPrimary: boolean('is_primary').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1431,7 +1450,19 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	magicLinkTokens: many(magicLinkToken),
 	seoLinks: many(seoLink),
 	websites: many(clientWebsite),
-	contracts: many(contract)
+	contracts: many(contract),
+	secondaryEmails: many(clientSecondaryEmail)
+}));
+
+export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [clientSecondaryEmail.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [clientSecondaryEmail.clientId],
+		references: [client.id]
+	})
 }));
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -2302,3 +2333,5 @@ export type DebugLog = typeof debugLog.$inferSelect;
 export type NewDebugLog = typeof debugLog.$inferInsert;
 export type MarketingMaterial = typeof marketingMaterial.$inferSelect;
 export type NewMarketingMaterial = typeof marketingMaterial.$inferInsert;
+export type ClientSecondaryEmail = typeof clientSecondaryEmail.$inferSelect;
+export type NewClientSecondaryEmail = typeof clientSecondaryEmail.$inferInsert;

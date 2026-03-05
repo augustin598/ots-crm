@@ -3,7 +3,7 @@ import { command } from '$app/server';
 import { getRequestEvent } from '$app/server';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase64url, encodeBase32LowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase } from '@oslojs/encoding';
@@ -55,12 +55,31 @@ export const clientSignup = command(
 				throw new Error('Client not found with this CUI. Please contact your administrator.');
 			}
 
-			// Update client email if different
-			if (client.email !== email) {
-				await db
-					.update(table.client)
-					.set({ email, updatedAt: new Date() })
-					.where(eq(table.client.id, client.id));
+			// Verify email matches either primary or secondary (don't overwrite primary email)
+			const emailLower = email.toLowerCase();
+			const isPrimaryMatch = client.email?.toLowerCase() === emailLower;
+			if (!isPrimaryMatch) {
+				const [secondary] = await db
+					.select()
+					.from(table.clientSecondaryEmail)
+					.where(
+						and(
+							eq(table.clientSecondaryEmail.clientId, client.id),
+							eq(table.clientSecondaryEmail.tenantId, tenant.id),
+							eq(sql`lower(${table.clientSecondaryEmail.email})`, emailLower)
+						)
+					)
+					.limit(1);
+				if (!secondary && client.email) {
+					throw new Error('Email does not match this client. Please use the email your administrator has configured.');
+				}
+				// If client has no email set yet, allow the signup email to be set as primary
+				if (!client.email) {
+					await db
+						.update(table.client)
+						.set({ email, updatedAt: new Date() })
+						.where(eq(table.client.id, client.id));
+				}
 			}
 
 			// Generate magic link token
@@ -119,12 +138,30 @@ export const requestMagicLink = command(
 				throw new Error('Tenant not found');
 			}
 
-			// Find client by email in this tenant
-			const [client] = await db
+			// Find client by primary email in this tenant (case-insensitive)
+			let [client] = await db
 				.select()
 				.from(table.client)
-				.where(and(eq(table.client.tenantId, tenant.id), eq(table.client.email, email)))
+				.where(and(eq(table.client.tenantId, tenant.id), eq(sql`lower(${table.client.email})`, email.toLowerCase())))
 				.limit(1);
+
+			// If not found by primary email, check secondary emails
+			if (!client) {
+				const [secondary] = await db
+					.select({ client: table.client })
+					.from(table.clientSecondaryEmail)
+					.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+					.where(
+						and(
+							eq(table.clientSecondaryEmail.tenantId, tenant.id),
+							eq(sql`lower(${table.clientSecondaryEmail.email})`, email.toLowerCase())
+						)
+					)
+					.limit(1);
+				if (secondary) {
+					client = secondary.client;
+				}
+			}
 
 			if (!client) {
 				// Don't reveal if client exists or not for security

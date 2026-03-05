@@ -55,10 +55,18 @@ export const load: LayoutServerLoad = async (event) => {
 		defaultWebsiteUrl = defW?.url ?? null;
 	}
 
+	// Fetch invoice logo for branding (login page, etc.)
+	const [invoiceSettingsRow] = await db
+		.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenant.id))
+		.limit(1);
+
 	return {
 		tenant,
 		client: event.locals.client,
 		clientUser: event.locals.clientUser,
+		isClientUserPrimary: event.locals.clientUser?.isPrimary ?? true,
 		user: event.locals.user
 			? {
 					id: event.locals.user.id,
@@ -67,6 +75,7 @@ export const load: LayoutServerLoad = async (event) => {
 					lastName: event.locals.user.lastName
 				}
 			: null,
-		defaultWebsiteUrl
+		defaultWebsiteUrl,
+		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null
 	};
 };

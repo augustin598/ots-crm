@@ -13,6 +13,11 @@
 		deleteClientWebsite,
 		setDefaultClientWebsite
 	} from '$lib/remotes/client-websites.remote';
+	import {
+		getClientSecondaryEmails,
+		createClientSecondaryEmail,
+		deleteClientSecondaryEmail
+	} from '$lib/remotes/client-secondary-emails.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -68,6 +73,49 @@
 
 	function handleRefreshLogo(websiteId: string) {
 		faviconKeys = { ...faviconKeys, [websiteId]: (faviconKeys[websiteId] ?? 0) + 1 };
+	}
+
+	// Secondary emails
+	const secondaryEmailsQuery = $derived(getClientSecondaryEmails(clientId));
+	const secondaryEmails = $derived(secondaryEmailsQuery?.current || []);
+	let newSecondaryEmail = $state('');
+	let newSecondaryLabel = $state('');
+	let showAddSecondaryEmail = $state(false);
+	let addingSecondaryEmail = $state(false);
+	let addSecondaryEmailError = $state<string | null>(null);
+
+	async function handleAddSecondaryEmail() {
+		if (!newSecondaryEmail.trim()) {
+			addSecondaryEmailError = 'Emailul este obligatoriu';
+			return;
+		}
+		addingSecondaryEmail = true;
+		addSecondaryEmailError = null;
+		try {
+			await createClientSecondaryEmail({
+				clientId,
+				email: newSecondaryEmail.trim(),
+				label: newSecondaryLabel.trim() || undefined
+			}).updates(secondaryEmailsQuery);
+			newSecondaryEmail = '';
+			newSecondaryLabel = '';
+			showAddSecondaryEmail = false;
+			toast.success('Email secundar adăugat');
+		} catch (e) {
+			addSecondaryEmailError = e instanceof Error ? e.message : 'Eroare la adăugare';
+		} finally {
+			addingSecondaryEmail = false;
+		}
+	}
+
+	async function handleDeleteSecondaryEmail(id: string) {
+		if (!confirm('Sigur vrei să ștergi acest email secundar?')) return;
+		try {
+			await deleteClientSecondaryEmail({ secondaryEmailId: id }).updates(secondaryEmailsQuery);
+			toast.success('Email secundar șters');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		}
 	}
 
 	let name = $state('');
@@ -330,6 +378,86 @@
 								<Label for="phone">Phone</Label>
 								<Input id="phone" bind:value={phone} type="tel" />
 							</div>
+						</div>
+
+						<!-- Emailuri Secundare -->
+						<div class="space-y-2">
+							<div class="flex items-center justify-between">
+								<Label>Emailuri Secundare (acces portal)</Label>
+								{#if !showAddSecondaryEmail}
+									<Button type="button" variant="outline" size="sm" onclick={() => { showAddSecondaryEmail = true; }}>
+										<PlusIcon class="h-3.5 w-3.5 mr-1" />
+										Adaugă
+									</Button>
+								{/if}
+							</div>
+
+							{#if secondaryEmails.length > 0}
+								<div class="space-y-2">
+									{#each secondaryEmails as se (se.id)}
+										<div class="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 group hover:bg-muted/30 transition-colors">
+											<div class="flex-1 min-w-0">
+												<p class="text-sm font-medium">{se.email}</p>
+												{#if se.label}
+													<p class="text-xs text-muted-foreground">{se.label}</p>
+												{/if}
+											</div>
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												class="h-7 w-7 p-0 text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+												onclick={() => handleDeleteSecondaryEmail(se.id)}
+											>
+												<TrashIcon class="h-3.5 w-3.5" />
+											</Button>
+										</div>
+									{/each}
+								</div>
+							{/if}
+
+							{#if showAddSecondaryEmail}
+								<div class="rounded-lg border border-dashed border-primary/40 bg-muted/20 p-3 space-y-2">
+									<p class="text-xs font-medium text-muted-foreground">Email secundar nou</p>
+									<div class="grid grid-cols-2 gap-2">
+										<div class="space-y-1">
+											<p class="text-xs text-muted-foreground">Email *</p>
+											<Input
+												bind:value={newSecondaryEmail}
+												type="email"
+												placeholder="contact@firma.ro"
+												class="h-8 text-sm"
+												onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSecondaryEmail(); } }}
+											/>
+										</div>
+										<div class="space-y-1">
+											<p class="text-xs text-muted-foreground">Etichetă (opțional)</p>
+											<Input
+												bind:value={newSecondaryLabel}
+												placeholder="ex: Contabilitate"
+												class="h-8 text-sm"
+											/>
+										</div>
+									</div>
+									{#if addSecondaryEmailError}
+										<p class="text-xs text-destructive">{addSecondaryEmailError}</p>
+									{/if}
+									<div class="flex justify-end gap-2">
+										<Button type="button" variant="ghost" size="sm" onclick={() => { showAddSecondaryEmail = false; addSecondaryEmailError = null; newSecondaryEmail = ''; newSecondaryLabel = ''; }} disabled={addingSecondaryEmail}>
+											<XIcon class="h-3.5 w-3.5 mr-1" />
+											Anulare
+										</Button>
+										<Button type="button" size="sm" onclick={handleAddSecondaryEmail} disabled={addingSecondaryEmail || !newSecondaryEmail.trim()}>
+											<PlusIcon class="h-3.5 w-3.5 mr-1" />
+											{addingSecondaryEmail ? 'Se adaugă...' : 'Adaugă'}
+										</Button>
+									</div>
+								</div>
+							{/if}
+
+							<p class="text-xs text-muted-foreground">
+								Emailurile secundare pot accesa portalul client dar nu pot vedea contractele sau facturile.
+							</p>
 						</div>
 
 						<!-- Website-uri -->

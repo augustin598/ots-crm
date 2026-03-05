@@ -108,6 +108,8 @@ export const getContracts = query(
 
 		// If user is a client user, filter by their client ID
 		if (event.locals.isClientUser && event.locals.client) {
+			// Secondary email users cannot see contracts
+			if (!event.locals.isClientUserPrimary) return [];
 			conditions = and(conditions, eq(table.contract.clientId, event.locals.client.id)) as any;
 		} else if (filters.clientId) {
 			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];

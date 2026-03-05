@@ -10,6 +10,7 @@ declare global {
 			clientUser?: import('$lib/server/db/schema').ClientUser | null;
 			client?: import('$lib/server/db/schema').Client | null;
 			isClientUser?: boolean;
+			isClientUserPrimary?: boolean;
 		}
 		interface PageData {
 			translations?: Record<import('$lib/i18n/index.svelte').Language, Record<string, any>>;

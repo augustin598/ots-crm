@@ -94,6 +94,7 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{#if data.isClientUserPrimary}
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/contracts`)}>
 						{#snippet child({ props })}
@@ -114,6 +115,7 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{/if}
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/marketing`)}>
 						{#snippet child({ props })}

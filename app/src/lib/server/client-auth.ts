@@ -2,7 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { db } from './db';
 import * as table from './db/schema';
 import * as auth from './auth';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase, encodeBase32LowerCase } from '@oslojs/encoding';
 import { hash } from '@node-rs/argon2';
@@ -87,18 +87,130 @@ export async function verifyMagicLinkToken(
 		throw new Error('Client not found');
 	}
 
+	// Determine if the login email is the primary email
+	const isPrimary = tokenRecord.email.toLowerCase() === client.email?.toLowerCase();
+
+	// If not primary, verify it exists as a secondary email for this client
+	if (!isPrimary) {
+		const [secondary] = await db
+			.select()
+			.from(table.clientSecondaryEmail)
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.clientId, client.id),
+					eq(table.clientSecondaryEmail.tenantId, tenant.id),
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, tokenRecord.email.toLowerCase())
+				)
+			)
+			.limit(1);
+		if (!secondary) {
+			throw new Error('Email address no longer authorized for this client.');
+		}
+	}
+
+	// Delegate to shared logic
+	const result = await findOrCreateClientUserSession(
+		tenant,
+		client,
+		tokenRecord.email,
+		isPrimary,
+		event
+	);
+
+	return { success: true, userId: result.userId };
+}
+
+/**
+ * Match an email against a tenant's clients (primary + secondary),
+ * then find/create user + clientUser and optionally create a session.
+ * Used by both magic link verification and Google OAuth login.
+ */
+export async function findOrCreateClientSession(
+	tenantSlug: string,
+	email: string,
+	event?: RequestEvent
+): Promise<
+	| { success: true; userId: string; clientId: string; isPrimary: boolean }
+	| { success: false; reason: 'no-match' | 'tenant-not-found' }
+> {
+	// Find tenant by slug
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.slug, tenantSlug))
+		.limit(1);
+
+	if (!tenant) {
+		return { success: false, reason: 'tenant-not-found' };
+	}
+
+	const normalizedEmail = email.toLowerCase();
+
+	// Try to match primary email
+	let [client] = await db
+		.select()
+		.from(table.client)
+		.where(
+			and(
+				eq(table.client.tenantId, tenant.id),
+				eq(sql`lower(${table.client.email})`, normalizedEmail)
+			)
+		)
+		.limit(1);
+
+	let isPrimary = !!client;
+
+	// Try secondary email if no primary match
+	if (!client) {
+		const [secondaryMatch] = await db
+			.select({ client: table.client })
+			.from(table.clientSecondaryEmail)
+			.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.tenantId, tenant.id),
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
+				)
+			)
+			.limit(1);
+
+		if (secondaryMatch) {
+			client = secondaryMatch.client;
+			isPrimary = false;
+		}
+	}
+
+	if (!client) {
+		return { success: false, reason: 'no-match' };
+	}
+
+	const result = await findOrCreateClientUserSession(tenant, client, email, isPrimary, event);
+	return { success: true, userId: result.userId, clientId: client.id, isPrimary };
+}
+
+/**
+ * Internal: find/create user + clientUser rows and optionally create session
+ */
+async function findOrCreateClientUserSession(
+	tenant: { id: string },
+	client: { id: string; name: string },
+	email: string,
+	isPrimary: boolean,
+	event?: RequestEvent
+): Promise<{ userId: string }> {
+	// Normalize email to lowercase to prevent duplicate user records
+	const normalizedEmail = email.toLowerCase();
+
 	// Find or create user
 	let user = await db
 		.select()
 		.from(table.user)
-		.where(eq(table.user.email, tokenRecord.email))
+		.where(eq(table.user.email, normalizedEmail))
 		.limit(1)
 		.then((users) => users[0] || null);
 
 	if (!user) {
-		// Create new user with a dummy password hash (they'll use magic links)
-		// Extract name from email or use client name
-		const emailParts = tokenRecord.email.split('@');
+		const emailParts = normalizedEmail.split('@');
 		const firstName = client.name.split(' ')[0] || emailParts[0];
 		const lastName = client.name.split(' ').slice(1).join(' ') || '';
 
@@ -112,7 +224,7 @@ export async function verifyMagicLinkToken(
 
 		await db.insert(table.user).values({
 			id: userId,
-			email: tokenRecord.email,
+			email: normalizedEmail,
 			firstName,
 			lastName,
 			passwordHash: dummyPasswordHash
@@ -143,14 +255,21 @@ export async function verifyMagicLinkToken(
 		)
 		.limit(1);
 
-	if (!existingClientUser) {
-		// Create clientUser relationship
+	if (existingClientUser) {
+		if (existingClientUser.isPrimary !== isPrimary) {
+			await db
+				.update(table.clientUser)
+				.set({ isPrimary, updatedAt: new Date() })
+				.where(eq(table.clientUser.id, existingClientUser.id));
+		}
+	} else {
 		const clientUserId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 		await db.insert(table.clientUser).values({
 			id: clientUserId,
 			userId: user.id,
 			clientId: client.id,
-			tenantId: tenant.id
+			tenantId: tenant.id,
+			isPrimary
 		});
 	}
 
@@ -161,5 +280,5 @@ export async function verifyMagicLinkToken(
 		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
 	}
 
-	return { success: true, userId: user.id };
+	return { userId: user.id };
 }
