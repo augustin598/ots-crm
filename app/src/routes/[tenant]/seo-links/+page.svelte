@@ -627,8 +627,12 @@
 	// ──────────────────────────────────────────────────────────────────────
 
 	async function saveInlineRow() {
-		if (filterClientIds.length !== 1 || !rowKeyword || !rowArticleUrl) {
-			rowError = 'Selectați un singur client în filtre, apoi completați cuvântul cheie și linkul articol';
+		const issues: string[] = [];
+		if (filterClientIds.length !== 1) issues.push('Selectați un singur client în filtre');
+		if (!rowKeyword) issues.push('completați cuvântul cheie');
+		if (!rowArticleUrl) issues.push('completați linkul articol');
+		if (issues.length > 0) {
+			rowError = issues.join(', ').replace(/^./, (c) => c.toUpperCase());
 			return;
 		}
 
