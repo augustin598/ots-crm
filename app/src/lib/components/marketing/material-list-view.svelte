@@ -67,6 +67,16 @@
 		return new Date(date).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' });
 	}
 
+	function parseAttachedImageCount(attachedImages: string | null): number {
+		if (!attachedImages) return 0;
+		try {
+			const parsed = JSON.parse(attachedImages);
+			return Array.isArray(parsed) ? parsed.length : 0;
+		} catch {
+			return 0;
+		}
+	}
+
 	function parseTags(tags: string | null): string[] {
 		if (!tags) return [];
 		try {
@@ -220,6 +230,7 @@
 				{@const IconComponent = typeIcons[material.type] || FileTextIcon}
 				{@const tags = parseTags(material.tags)}
 				{@const socialSets = material.type === 'url' ? parseSocialSets(material.textContent) : []}
+				{@const imgCount = parseAttachedImageCount(material.attachedImages)}
 				<Table.Row class="hover:bg-accent/50">
 					<!-- Material -->
 					<Table.Cell>
@@ -259,6 +270,12 @@
 										<ExternalLinkIcon class="h-3 w-3 shrink-0 opacity-60" />
 										<span class="truncate">{material.externalUrl}</span>
 									</a>
+								{/if}
+								{#if imgCount > 0}
+									<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground mt-0.5">
+										<ImageIcon class="h-3 w-3" />
+										{imgCount} img
+									</span>
 								{/if}
 							</div>
 						</div>

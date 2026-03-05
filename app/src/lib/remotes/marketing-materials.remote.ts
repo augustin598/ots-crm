@@ -103,6 +103,7 @@ export const getMarketingMaterials = query(
 				uploadedByClientUserId: table.marketingMaterial.uploadedByClientUserId,
 				campaignType: table.marketingMaterial.campaignType,
 				tags: table.marketingMaterial.tags,
+				attachedImages: table.marketingMaterial.attachedImages,
 				createdAt: table.marketingMaterial.createdAt,
 				updatedAt: table.marketingMaterial.updatedAt,
 				// SEO link fields
@@ -292,7 +293,8 @@ export const deleteMarketingMaterial = command(
 		const [material] = await db
 			.select({
 				id: table.marketingMaterial.id,
-				filePath: table.marketingMaterial.filePath
+				filePath: table.marketingMaterial.filePath,
+				attachedImages: table.marketingMaterial.attachedImages
 			})
 			.from(table.marketingMaterial)
 			.where(conditions!)
@@ -313,6 +315,22 @@ export const deleteMarketingMaterial = command(
 				await storage.deleteFile(material.filePath);
 			} catch (e) {
 				console.error('Error deleting marketing material file:', e);
+			}
+		}
+
+		// Delete attached images from MinIO if exist
+		if (material.attachedImages) {
+			try {
+				const images = JSON.parse(material.attachedImages) as { filePath: string }[];
+				for (const img of images) {
+					try {
+						await storage.deleteFile(img.filePath);
+					} catch (e) {
+						console.error('Error deleting attached image:', e);
+					}
+				}
+			} catch {
+				// Invalid JSON, skip
 			}
 		}
 
@@ -357,6 +375,58 @@ export const getMaterialDownloadUrl = query(
 
 		const url = await storage.getDownloadUrl(material.filePath, 300);
 		return { url, fileName: material.fileName, mimeType: material.mimeType };
+	}
+);
+
+export const getMaterialAttachedImageUrl = query(
+	v.object({
+		materialId: v.pipe(v.string(), v.minLength(1)),
+		imageIndex: v.pipe(v.number(), v.minValue(0), v.maxValue(2))
+	}),
+	async ({ materialId, imageIndex }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		let conditions = and(
+			eq(table.marketingMaterial.id, materialId),
+			eq(table.marketingMaterial.tenantId, tenantId)
+		);
+
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(
+				conditions,
+				eq(table.marketingMaterial.clientId, event.locals.client.id)
+			) as typeof conditions;
+		}
+
+		const [material] = await db
+			.select({ attachedImages: table.marketingMaterial.attachedImages })
+			.from(table.marketingMaterial)
+			.where(conditions!)
+			.limit(1);
+
+		if (!material?.attachedImages) {
+			throw new Error('Material negăsit sau fără imagini atașate');
+		}
+
+		let images: { filePath: string; fileName: string; mimeType: string }[];
+		try {
+			images = JSON.parse(material.attachedImages);
+			if (!Array.isArray(images)) throw new Error('Format invalid');
+		} catch {
+			throw new Error('Date imagini atașate corupte');
+		}
+
+		if (imageIndex >= images.length) {
+			throw new Error('Index imagine invalid');
+		}
+
+		const img = images[imageIndex];
+		const url = await storage.getDownloadUrl(img.filePath, 300);
+		return { url, fileName: img.fileName, mimeType: img.mimeType };
 	}
 );
 

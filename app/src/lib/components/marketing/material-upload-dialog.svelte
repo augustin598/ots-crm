@@ -251,7 +251,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (!o) resetForm(); }}>
-	<Dialog.Content class="sm:max-w-lg">
+	<Dialog.Content class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>
 				{#if initialType === 'url'}

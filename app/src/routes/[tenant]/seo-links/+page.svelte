@@ -1537,7 +1537,7 @@
 						Import Excel / CSV
 					</Button>
 				</DialogTrigger>
-				<DialogContent class="sm:max-w-md">
+				<DialogContent class="sm:max-w-md max-h-[85vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Import linkuri SEO</DialogTitle>
 						<DialogDescription>
@@ -3338,7 +3338,7 @@
 
 <!-- ── Dialog Scanează Backlinks ───────────────────────────────────────────── -->
 <Dialog bind:open={isScanDialogOpen}>
-	<DialogContent class="sm:max-w-2xl">
+	<DialogContent class="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle class="flex items-center gap-2">
 				<ScanSearchIcon class="h-5 w-5" />
@@ -3629,7 +3629,7 @@
 
 <!-- ── Article Modal ── -->
 <Dialog bind:open={articleModalOpen}>
-	<DialogContent class="max-w-md">
+	<DialogContent class="max-w-md max-h-[85vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Articol</DialogTitle>
 			<DialogDescription>

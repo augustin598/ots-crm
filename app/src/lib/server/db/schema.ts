@@ -2188,6 +2188,7 @@ export const marketingMaterial = sqliteTable('marketing_material', {
 	campaignType: text('campaign_type'),
 	// 'display' | 'pmax' | 'search' | 'demand-gen' — only set when category = 'google-ads'
 	tags: text('tags'), // JSON string array
+	attachedImages: text('attached_images'), // JSON: [{filePath, fileName, fileSize, mimeType, dimensions}]
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
 });

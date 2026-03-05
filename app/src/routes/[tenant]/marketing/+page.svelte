@@ -13,6 +13,7 @@
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import FilterIcon from '@lucide/svelte/icons/filter';
+	import Layers3Icon from '@lucide/svelte/icons/layers-3';
 	import GoogleAdsIcon from '$lib/components/marketing/icon-google-ads.svelte';
 	import FacebookIcon from '$lib/components/marketing/icon-facebook.svelte';
 	import TiktokIcon from '$lib/components/marketing/icon-tiktok.svelte';
@@ -24,21 +25,26 @@
 	import MaterialListView from '$lib/components/marketing/material-list-view.svelte';
 	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
 	import SocialUrlDialog from '$lib/components/marketing/social-url-dialog.svelte';
+	import ArticleUploadDialog from '$lib/components/marketing/article-upload-dialog.svelte';
+	import MaterialGroupedView from '$lib/components/marketing/material-grouped-view.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { toast } from 'svelte-sonner';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import type { DateRange } from 'bits-ui';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	let activeCategory = $state('google-ads');
+	let activeCategory = $state('all');
 	let filterType = $state('');
 	let searchTerm = $state('');
+	let dateRange = $state<DateRange>({ start: undefined, end: undefined });
 	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let googleAdsDialogOpen = $state(false);
 	let socialUrlDialogOpen = $state(false);
+	let articleDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
 	let deleteConfirmOpen = $state(false);
@@ -124,13 +130,26 @@
 		getMarketingMaterials({
 			clientId: selectedClientIds.length === 1 ? selectedClientIds[0] : undefined,
 			clientIds: selectedClientIds.length > 1 && selectedClientIds.length < activeClients.length ? selectedClientIds : undefined,
-			category: activeCategory,
+			category: activeCategory === 'all' ? undefined : activeCategory,
 			type: filterType || undefined,
 			search: searchTerm.trim() || undefined,
 			_refresh: refreshKey
 		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
+	const filteredMaterials = $derived.by(() => {
+		if (!dateRange.start) return materials;
+		return materials.filter((m: any) => {
+			const d = new Date(m.createdAt);
+			const startDate = new Date(dateRange.start!.year, dateRange.start!.month - 1, dateRange.start!.day);
+			if (d < startDate) return false;
+			if (dateRange.end) {
+				const endDate = new Date(dateRange.end.year, dateRange.end.month - 1, dateRange.end.day + 1);
+				if (d >= endDate) return false;
+			}
+			return true;
+		});
+	});
 
 	// For upload dialogs — pick first selected client or empty
 	const uploadClientId = $derived(selectedClientIds.length === 1 ? selectedClientIds[0] : '');
@@ -258,9 +277,14 @@
 							<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
 							<Input bind:value={clientFilterSearch} placeholder="Caută client..." class="pl-8 h-8 text-sm" />
 						</div>
-						<Button variant="outline" size="sm" class="w-full mb-2" onclick={selectAllClients}>
-							Selectează toți
-						</Button>
+						<div class="flex gap-1.5 mb-2">
+							<Button variant="outline" size="sm" class="flex-1" onclick={selectAllClients}>
+								Selectează toți
+							</Button>
+							<Button variant="outline" size="sm" class="flex-1" onclick={clearClientFilter}>
+								Deselectează toți
+							</Button>
+						</div>
 						<p class="text-xs text-muted-foreground mb-1">
 							{selectedClientIds.length === 0 || selectedClientIds.length === activeClients.length
 								? 'Toți clienții afișați'
@@ -284,11 +308,12 @@
 				</Popover>
 			{/if}
 
-			{#if !isFileFilterType}
+			{#if !isFileFilterType && activeCategory !== 'all'}
 				<Button onclick={() => {
 					if (selectedClientIds.length !== 1) { toast.error('Selectează un singur client mai întâi'); return; }
 					if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 					else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
+					else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
 					else { uploadDialogOpen = true; }
 				}}>
 					<PlusIcon class="h-4 w-4 mr-2" />
@@ -300,30 +325,33 @@
 
 	<!-- Category tabs -->
 	<Tabs value={activeCategory} class="w-full">
-		<TabsList class="grid w-full grid-cols-5">
-			<TabsTrigger value="google-ads" onclick={() => { activeCategory = 'google-ads'; filterType = ''; searchTerm = ''; }}>
+		<TabsList class="grid w-full grid-cols-3 sm:grid-cols-6">
+			<TabsTrigger value="all" onclick={() => { activeCategory = 'all'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+				<Layers3Icon class="h-4 w-4 mr-1.5 shrink-0" /> Toate
+			</TabsTrigger>
+			<TabsTrigger value="google-ads" onclick={() => { activeCategory = 'google-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<GoogleAdsIcon class="h-4 w-4 mr-1.5 shrink-0" /> Google Ads
 			</TabsTrigger>
-			<TabsTrigger value="facebook-ads" onclick={() => { activeCategory = 'facebook-ads'; filterType = ''; searchTerm = ''; }}>
+			<TabsTrigger value="facebook-ads" onclick={() => { activeCategory = 'facebook-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<FacebookIcon class="h-4 w-4 mr-1.5 shrink-0" /> Facebook Ads
 			</TabsTrigger>
-			<TabsTrigger value="tiktok-ads" onclick={() => { activeCategory = 'tiktok-ads'; filterType = ''; searchTerm = ''; }}>
+			<TabsTrigger value="tiktok-ads" onclick={() => { activeCategory = 'tiktok-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<TiktokIcon class="h-4 w-4 mr-1.5 shrink-0" /> TikTok Ads
 			</TabsTrigger>
-			<TabsTrigger value="press-article" onclick={() => { activeCategory = 'press-article'; filterType = ''; searchTerm = ''; }}>
+			<TabsTrigger value="press-article" onclick={() => { activeCategory = 'press-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<NewspaperIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole Presă
 			</TabsTrigger>
-			<TabsTrigger value="seo-article" onclick={() => { activeCategory = 'seo-article'; filterType = ''; searchTerm = ''; }}>
+			<TabsTrigger value="seo-article" onclick={() => { activeCategory = 'seo-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<SearchIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole SEO
 			</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value={activeCategory} class="mt-4 space-y-4">
 			<!-- Filters + view toggle -->
-			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode />
+			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode bind:dateRange />
 
 			<!-- Inline upload zone for file type filters -->
-			{#if isFileFilterType && uploadClientId}
+			{#if isFileFilterType && uploadClientId && activeCategory !== 'all'}
 				<MaterialInlineUpload
 					filterType={filterType as 'image' | 'video' | 'document'}
 					category={activeCategory}
@@ -335,9 +363,9 @@
 
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
-				<span>{materials.length} materiale</span>
-				{#if materials.length > 0}
-					{@const totalSize = materials.reduce((acc: number, m: any) => acc + (m.fileSize || 0), 0)}
+				<span>{filteredMaterials.length} materiale</span>
+				{#if filteredMaterials.length > 0}
+					{@const totalSize = filteredMaterials.reduce((acc: number, m: any) => acc + (m.fileSize || 0), 0)}
 					{#if totalSize > 0}
 						<span>·</span>
 						<span>{(totalSize / (1024 * 1024)).toFixed(1)} MB total</span>
@@ -346,14 +374,15 @@
 			</div>
 
 			<!-- Content -->
-			{#if materials.length === 0}
+			{#if filteredMaterials.length === 0}
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
 					<p class="text-sm">Niciun material în această categorie.</p>
-					{#if !isFileFilterType && uploadClientId}
+					{#if !isFileFilterType && uploadClientId && activeCategory !== 'all'}
 						<Button variant="outline" class="mt-3" onclick={() => {
 							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 							else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
+							else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
 							else { uploadDialogOpen = true; }
 						}}>
 							<PlusIcon class="h-4 w-4 mr-2" />
@@ -361,16 +390,25 @@
 						</Button>
 					{/if}
 				</div>
+			{:else if activeCategory === 'all'}
+				<MaterialGroupedView
+					materials={filteredMaterials}
+					{thumbnailUrls}
+					{viewMode}
+					clientNameFn={selectedClientIds.length !== 1 ? getClientName : undefined}
+					onEdit={handleEdit}
+					onDelete={handleDeleteClick}
+				/>
 			{:else if viewMode === 'list'}
 				<MaterialListView
-					{materials}
+					materials={filteredMaterials}
 					clientNameFn={selectedClientIds.length !== 1 ? getClientName : undefined}
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
 				/>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-					{#each materials as material (material.id)}
+					{#each filteredMaterials as material (material.id)}
 						<div>
 							{#if selectedClientIds.length !== 1}
 								<p class="text-xs text-muted-foreground mb-1 truncate">{getClientName(material.clientId)}</p>
@@ -415,6 +453,15 @@
 		clientId={uploadClientId}
 		category={activeCategory as 'tiktok-ads' | 'facebook-ads'}
 		onSaved={handleUploaded}
+	/>
+
+	<!-- Article Upload Dialog (Press / SEO) -->
+	<ArticleUploadDialog
+		bind:open={articleDialogOpen}
+		category={activeCategory}
+		clientId={uploadClientId}
+		{uploadUrl}
+		onUploaded={handleUploaded}
 	/>
 {/if}
 

@@ -1,24 +1,47 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import * as Popover from '$lib/components/ui/popover';
+	import { RangeCalendar } from '$lib/components/ui/range-calendar';
+	import { type DateValue } from '@internationalized/date';
+	import type { DateRange } from 'bits-ui';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import ImageIcon from '@lucide/svelte/icons/image';
 	import VideoIcon from '@lucide/svelte/icons/video';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import LinkIcon from '@lucide/svelte/icons/link';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import XIcon from '@lucide/svelte/icons/x';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import ListIcon from '@lucide/svelte/icons/list';
 
 	let {
 		filterType = $bindable(''),
 		searchTerm = $bindable(''),
-		viewMode = $bindable<'grid' | 'list'>('grid')
+		viewMode = $bindable<'grid' | 'list'>('grid'),
+		dateRange = $bindable<DateRange>({ start: undefined, end: undefined })
 	}: {
 		filterType: string;
 		searchTerm: string;
 		viewMode: 'grid' | 'list';
+		dateRange: DateRange;
 	} = $props();
+
+	let dateOpen = $state(false);
+
+	const dateRangeLabel = $derived.by(() => {
+		const { start, end } = dateRange;
+		if (!start) return 'Perioadă';
+		const fmt = (d: DateValue) =>
+			new Date(d.year, d.month - 1, d.day).toLocaleDateString('ro-RO', {
+				day: 'numeric',
+				month: 'short',
+				year: 'numeric'
+			});
+		if (!end) return fmt(start);
+		return `${fmt(start)} – ${fmt(end)}`;
+	});
 
 	const typeFilters = [
 		{ id: '', label: 'Toate', icon: null },
@@ -56,6 +79,59 @@
 			class="pl-9 h-8 text-sm"
 			bind:value={searchTerm}
 		/>
+	</div>
+
+	<!-- Date range filter -->
+	<div class="flex items-center gap-0.5">
+		<Popover.Root bind:open={dateOpen}>
+			<Popover.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="outline"
+						size="sm"
+						class="h-8 text-xs justify-start font-normal {dateRange.start ? '' : 'text-muted-foreground'}"
+					>
+						<CalendarIcon class="h-3.5 w-3.5 mr-1.5 shrink-0 opacity-50" />
+						{dateRangeLabel}
+					</Button>
+				{/snippet}
+			</Popover.Trigger>
+			<Popover.Content class="w-auto p-0" align="start">
+				<div class="flex flex-col">
+					<RangeCalendar
+						bind:value={dateRange}
+						locale="ro-RO"
+						weekStartsOn={1}
+						onValueChange={() => {
+							if (dateRange.start && dateRange.end) dateOpen = false;
+						}}
+					/>
+					<Button
+						variant="ghost"
+						class="rounded-t-none border-t text-muted-foreground text-sm"
+						onclick={() => {
+							dateRange = { start: undefined, end: undefined };
+							dateOpen = false;
+						}}
+					>
+						Șterge filtru dată
+					</Button>
+				</div>
+			</Popover.Content>
+		</Popover.Root>
+		{#if dateRange.start}
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-8 w-8 p-0"
+				onclick={() => {
+					dateRange = { start: undefined, end: undefined };
+				}}
+			>
+				<XIcon class="h-3.5 w-3.5" />
+			</Button>
+		{/if}
 	</div>
 
 	<!-- View toggle -->

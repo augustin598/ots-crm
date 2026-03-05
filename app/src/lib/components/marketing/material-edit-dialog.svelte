@@ -6,6 +6,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Select from '$lib/components/ui/select';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import ImageIcon from '@lucide/svelte/icons/image';
 	import { toast } from 'svelte-sonner';
 	import { updateMarketingMaterial } from '$lib/remotes/marketing-materials.remote';
 
@@ -20,6 +21,7 @@
 		status: string;
 		tags: string | null;
 		category: string;
+		attachedImages: string | null;
 	}
 
 	interface SeoLinkOption {
@@ -119,7 +121,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (!o) { title = ''; description = ''; textContent = ''; externalUrl = ''; seoLinkId = ''; status = 'active'; tags = ''; } }}>
-	<Dialog.Content class="sm:max-w-lg">
+	<Dialog.Content class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Editează Material</Dialog.Title>
 		</Dialog.Header>
@@ -173,6 +175,16 @@
 							</Select.Content>
 						</Select.Root>
 					</div>
+				{/if}
+
+				{#if material.attachedImages}
+					{@const imgCount = (() => { try { const p = JSON.parse(material.attachedImages); return Array.isArray(p) ? p.length : 0; } catch { return 0; } })()}
+					{#if imgCount > 0}
+						<div class="flex items-center gap-2 text-sm text-muted-foreground bg-muted rounded-lg px-3 py-2">
+							<ImageIcon class="h-4 w-4 shrink-0" />
+							<span>{imgCount} {imgCount === 1 ? 'imagine atașată' : 'imagini atașate'}</span>
+						</div>
+					{/if}
 				{/if}
 
 				<div class="space-y-1.5">

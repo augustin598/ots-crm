@@ -8,7 +8,7 @@
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MaterialActionsMenu from './material-actions-menu.svelte';
-	import { getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
+	import { getMaterialDownloadUrl, getMaterialAttachedImageUrl } from '$lib/remotes/marketing-materials.remote';
 	import { toast } from 'svelte-sonner';
 	import { CAMPAIGN_TYPE_LABELS, type GoogleAdsCampaignType } from '$lib/shared/google-ads-specs';
 
@@ -27,6 +27,7 @@
 		status: string;
 		campaignType: string | null;
 		tags: string | null;
+		attachedImages: string | null;
 		seoLinkKeyword?: string | null;
 		seoLinkArticleUrl?: string | null;
 		createdAt: Date;
@@ -116,6 +117,16 @@
 		return [];
 	}
 
+	const attachedImageCount = $derived.by(() => {
+		if (!material.attachedImages) return 0;
+		try {
+			const parsed = JSON.parse(material.attachedImages);
+			return Array.isArray(parsed) ? parsed.length : 0;
+		} catch {
+			return 0;
+		}
+	});
+
 	const canModify = $derived(
 		!readonly && (
 			!currentClientUserId ||
@@ -147,6 +158,29 @@
 	let videoUrl = $state<string | null>(null);
 	let videoLoading = $state(false);
 	let videoPlaying = $state(false);
+	let attachedImgUrl = $state<string | null>(null);
+	let attachedImgLoading = $state(false);
+
+	// Reset attached image URL when material changes
+	let prevMaterialId = $state(material.id);
+	$effect(() => {
+		if (material.id !== prevMaterialId) {
+			prevMaterialId = material.id;
+			attachedImgUrl = null;
+			attachedImgLoading = false;
+		}
+	});
+
+	// Load first attached image as thumbnail for document materials
+	$effect(() => {
+		if (attachedImageCount > 0 && !attachedImgUrl && !attachedImgLoading) {
+			attachedImgLoading = true;
+			getMaterialAttachedImageUrl({ materialId: material.id, imageIndex: 0 })
+				.then((r) => { attachedImgUrl = r.url; })
+				.catch(() => {})
+				.finally(() => { attachedImgLoading = false; });
+		}
+	});
 
 	async function handlePlayVideo() {
 		if (videoUrl) {
@@ -235,6 +269,8 @@
 					<p class="text-[9px] text-muted-foreground">+{socialSets.length - 3} seturi</p>
 				{/if}
 			</div>
+		{:else if material.type === 'document' && attachedImgUrl}
+			<img src={attachedImgUrl} alt={material.title} class="w-full h-full object-cover" />
 		{:else}
 			<div class="flex items-center justify-center h-10 w-10 rounded-xl {colors.bg}">
 				<TypeIconComponent class="h-5 w-5 {colors.text}" />
@@ -263,6 +299,16 @@
 		{#if material.dimensions && !videoPlaying}
 			<div class="absolute bottom-1.5 left-1.5">
 				<span class="text-[10px] text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded">{material.dimensions}</span>
+			</div>
+		{/if}
+
+		<!-- Attached images badge -->
+		{#if attachedImageCount > 0 && !videoPlaying}
+			<div class="absolute bottom-1.5 {material.dimensions ? 'left-24' : 'left-1.5'}">
+				<span class="text-[10px] text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-0.5">
+					<ImageIcon class="h-2.5 w-2.5" />
+					{attachedImageCount} img
+				</span>
 			</div>
 		{/if}
 

@@ -17,7 +17,8 @@ const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm'];
 const ALLOWED_DOC_TYPES = [
 	'application/pdf',
 	'application/msword',
-	'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+	'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	'text/plain'
 ];
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -82,6 +83,11 @@ async function validateMagicBytes(file: File): Promise<boolean> {
 		const isPK = header[0] === 0x50 && header[1] === 0x4b;
 		const isOLE = header[0] === 0xd0 && header[1] === 0xcf;
 		return isPK || isOLE;
+	}
+
+	// TXT: verify no null bytes (binary file masquerading as text)
+	if (file.type === 'text/plain') {
+		return !header.some((b) => b === 0x00);
 	}
 
 	return false;
@@ -333,6 +339,168 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		seoLinkId,
 		status: 'active',
 		campaignType,
+		uploadedByUserId: isClientUser ? null : userId,
+		uploadedByClientUserId: clientUserId || null,
+		tags
+	});
+
+	return json({ success: true, materialId });
+}
+
+export async function handleArticleUpload(event: RequestEvent): Promise<Response> {
+	const tenantId = event.locals.tenant?.id;
+	const userId = event.locals.user?.id;
+	const isClientUser = event.locals.isClientUser;
+	const clientUserId = isClientUser ? (event.locals as any).clientUser?.id : null;
+
+	if (!userId || !tenantId) {
+		throw error(401, 'Unauthorized');
+	}
+
+	const formData = await event.request.formData();
+	const file = formData.get('file') as File | null;
+	const images = formData.getAll('images') as File[];
+	const clientId = formData.get('clientId') as string;
+	const category = formData.get('category') as string;
+	let title = formData.get('title') as string;
+	const description = (formData.get('description') as string) || null;
+	const tags = (formData.get('tags') as string) || null;
+
+	if (!clientId || !category || !title) {
+		throw error(400, 'clientId, category și title sunt obligatorii');
+	}
+
+	if (category !== 'press-article' && category !== 'seo-article') {
+		throw error(400, 'Această rută acceptă doar press-article sau seo-article');
+	}
+
+	// Validate clientId belongs to tenant
+	if (isClientUser && event.locals.client) {
+		if (clientId !== event.locals.client.id) {
+			throw error(403, 'Nu puteți uploada pentru alt client');
+		}
+	} else {
+		const [clientCheck] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+
+		if (!clientCheck) {
+			throw error(400, 'Client invalid sau nu aparține acestui tenant');
+		}
+	}
+
+	// Validate document file (required)
+	if (!file || !(file instanceof File)) {
+		throw error(400, 'Fișierul document este obligatoriu');
+	}
+
+	if (file.size === 0) {
+		throw error(400, 'Fișierul nu poate fi gol');
+	}
+
+	if (!ALLOWED_DOC_TYPES.includes(file.type)) {
+		throw error(400, 'Tip de fișier document neacceptat. Acceptăm: PDF, DOC, DOCX, TXT');
+	}
+
+	if (file.size > MAX_DOC_SIZE) {
+		throw error(400, `Documentul depășește dimensiunea maximă de ${MAX_DOC_SIZE / (1024 * 1024)}MB`);
+	}
+
+	const validDocBytes = await validateMagicBytes(file);
+	if (!validDocBytes) {
+		throw error(400, 'Fișierul document nu corespunde tipului declarat');
+	}
+
+	// Validate images (optional, max 3)
+	if (images.length > 3) {
+		throw error(400, 'Maximum 3 imagini permise');
+	}
+
+	for (const img of images) {
+		if (!(img instanceof File)) {
+			throw error(400, 'Imagine invalidă');
+		}
+		if (img.size === 0) {
+			throw error(400, `Imaginea "${img.name}" nu poate fi goală`);
+		}
+		if (!ALLOWED_IMAGE_TYPES.includes(img.type)) {
+			throw error(400, `Imaginea "${img.name}" are un tip neacceptat. Acceptăm: JPG, PNG, GIF, WebP`);
+		}
+		if (img.size > MAX_IMAGE_SIZE) {
+			throw error(400, `Imaginea "${img.name}" depășește dimensiunea maximă de ${MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
+		}
+		const validImgBytes = await validateMagicBytes(img);
+		if (!validImgBytes) {
+			throw error(400, `Imaginea "${img.name}" nu corespunde tipului declarat`);
+		}
+	}
+
+	// Upload document to MinIO
+	const docUpload = await storage.uploadFile(tenantId, file, {
+		type: 'marketing',
+		clientId,
+		category
+	});
+
+	// Upload images to MinIO and collect metadata (with cleanup on failure)
+	interface AttachedImage {
+		filePath: string;
+		fileName: string;
+		fileSize: number;
+		mimeType: string;
+		dimensions: string | null;
+	}
+
+	const attachedImages: AttachedImage[] = [];
+	try {
+		for (const img of images) {
+			const imgUpload = await storage.uploadFile(tenantId, img, {
+				type: 'marketing',
+				clientId,
+				category
+			});
+
+			let dimensions: string | null = null;
+			const dims = await getImageDimensions(img);
+			if (dims) {
+				dimensions = `${dims.w}x${dims.h}`;
+			}
+
+			attachedImages.push({
+				filePath: imgUpload.path,
+				fileName: img.name,
+				fileSize: imgUpload.size,
+				mimeType: imgUpload.mimeType,
+				dimensions
+			});
+		}
+	} catch (uploadErr) {
+		// Cleanup: delete doc + any already-uploaded images
+		const filesToClean = [docUpload.path, ...attachedImages.map((i) => i.filePath)];
+		for (const fp of filesToClean) {
+			try { await storage.deleteFile(fp); } catch { /* best effort */ }
+		}
+		throw error(500, 'Eroare la încărcarea imaginilor. Fișierele au fost curățate.');
+	}
+
+	const materialId = generateMaterialId();
+
+	await db.insert(table.marketingMaterial).values({
+		id: materialId,
+		tenantId,
+		clientId,
+		category,
+		type: 'document',
+		title,
+		description,
+		filePath: docUpload.path,
+		fileSize: docUpload.size,
+		mimeType: docUpload.mimeType,
+		fileName: file.name,
+		attachedImages: attachedImages.length > 0 ? JSON.stringify(attachedImages) : null,
+		status: 'active',
 		uploadedByUserId: isClientUser ? null : userId,
 		uploadedByClientUserId: clientUserId || null,
 		tags
