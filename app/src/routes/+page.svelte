@@ -4,6 +4,7 @@
 	import LogInIcon from '@lucide/svelte/icons/log-in';
 	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
+	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
 
 	let { data }: { data: PageData } = $props();
 </script>
@@ -17,12 +18,12 @@
 	<div class="hidden lg:flex lg:w-1/2 items-center justify-center bg-primary/5 relative overflow-hidden">
 		<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-primary/5"></div>
 		<div class="relative z-10 flex flex-col items-center gap-6 px-12 text-center">
-			<div class="flex h-24 w-24 items-center justify-center rounded-2xl bg-primary/10">
-				<span class="text-4xl font-bold text-primary">OTS</span>
+			<div class="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
+				<LayoutDashboardIcon class="size-10 text-primary" />
 			</div>
 			<div>
-				<h2 class="text-2xl font-bold text-foreground">ONE TOP SOLUTION</h2>
-				<p class="mt-2 text-muted-foreground text-lg">Digital Marketing & Growth Solutions</p>
+				<h2 class="text-2xl font-bold text-foreground">Management Platform</h2>
+				<p class="mt-2 text-muted-foreground text-lg">Manage your business in one place</p>
 			</div>
 		</div>
 	</div>
@@ -32,10 +33,9 @@
 		<div class="w-full max-w-sm">
 			<!-- Mobile logo -->
 			<div class="mb-8 flex flex-col items-center lg:hidden">
-				<div class="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10">
-					<span class="text-xl font-bold text-primary">OTS</span>
+				<div class="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10">
+					<LayoutDashboardIcon class="size-7 text-primary" />
 				</div>
-				<h2 class="mt-4 text-xl font-semibold text-foreground">ONE TOP SOLUTION</h2>
 			</div>
 
 			{#if !data.user}
