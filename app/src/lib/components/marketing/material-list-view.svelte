@@ -50,6 +50,12 @@
 		archived: 'bg-gray-400'
 	};
 
+	const statusLabels: Record<string, string> = {
+		active: 'Activ',
+		draft: 'Ciornă',
+		archived: 'Arhivat'
+	};
+
 	function formatFileSize(bytes: number | null): string {
 		if (!bytes) return '--';
 		if (bytes < 1024) return `${bytes} B`;
@@ -262,7 +268,7 @@
 					<Table.Cell>
 						<div class="flex items-center gap-1.5">
 							<span class="h-2 w-2 rounded-full shrink-0 {statusDots[material.status] || 'bg-gray-400'}"></span>
-							<span class="text-xs capitalize">{material.status}</span>
+							<span class="text-xs">{statusLabels[material.status] || material.status}</span>
 						</div>
 					</Table.Cell>
 

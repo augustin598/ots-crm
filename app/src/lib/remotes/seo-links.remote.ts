@@ -211,6 +211,11 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		throw new Error('Unauthorized');
 	}
 
+	// Client portal: forțează clientId din sesiune
+	if (event.locals.isClientUser && event.locals.client) {
+		data.clientId = event.locals.client.id;
+	}
+
 	const [invoiceSettings] = await db
 		.select()
 		.from(table.invoiceSettings)
@@ -387,6 +392,13 @@ export const updateSeoLink = command(updateSeoLinkSchema,
 
 		if (!existing) {
 			throw new Error('Link SEO nu a fost găsit');
+		}
+
+		// Client portal: verifică că link-ul aparține clientului
+		if (event.locals.isClientUser && event.locals.client) {
+			if (existing.clientId !== event.locals.client.id) {
+				throw new Error('Unauthorized');
+			}
 		}
 
 		await db

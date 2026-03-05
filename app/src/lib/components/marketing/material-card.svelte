@@ -72,6 +72,12 @@
 		archived: 'bg-gray-400'
 	};
 
+	const statusLabels: Record<string, string> = {
+		active: 'Activ',
+		draft: 'Ciornă',
+		archived: 'Arhivat'
+	};
+
 	function formatFileSize(bytes: number | null): string {
 		if (!bytes) return '';
 		if (bytes < 1024) return `${bytes} B`;
@@ -315,7 +321,7 @@
 		<div class="flex items-center justify-between pt-1 border-t border-border/50">
 			<div class="flex items-center gap-1.5">
 				<span class="h-1.5 w-1.5 rounded-full {statusDots[material.status] || 'bg-gray-400'}"></span>
-				<span class="text-[10px] text-muted-foreground capitalize">{material.status}</span>
+				<span class="text-[10px] text-muted-foreground">{statusLabels[material.status] || material.status}</span>
 				{#if material.campaignType}
 					<span class="text-[9px] px-1 py-0 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
 						{CAMPAIGN_TYPE_LABELS[material.campaignType as GoogleAdsCampaignType] ?? material.campaignType}

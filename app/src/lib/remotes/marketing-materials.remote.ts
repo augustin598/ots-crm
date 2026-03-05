@@ -242,13 +242,15 @@ export const updateMarketingMaterial = command(updateSchema, async (data) => {
 		throw new Error('Material negăsit sau fără permisiune');
 	}
 
+	const isClientUser = event.locals.isClientUser;
 	const updateData: Record<string, any> = { updatedAt: new Date() };
 	if (data.title !== undefined) updateData.title = data.title;
 	if (data.description !== undefined) updateData.description = data.description;
 	if (data.textContent !== undefined) updateData.textContent = data.textContent;
 	if (data.externalUrl !== undefined) updateData.externalUrl = data.externalUrl;
 	if (data.seoLinkId !== undefined) updateData.seoLinkId = data.seoLinkId;
-	if (data.status !== undefined) updateData.status = data.status;
+	// Client users cannot change status (only admin can draft/archive)
+	if (data.status !== undefined && !isClientUser) updateData.status = data.status;
 	if (data.campaignType !== undefined) updateData.campaignType = data.campaignType;
 	if (data.tags !== undefined) updateData.tags = data.tags;
 
@@ -300,6 +302,11 @@ export const deleteMarketingMaterial = command(
 			throw new Error('Material negăsit sau fără permisiune');
 		}
 
+		// Delete DB record first, then storage (orphan file is less harmful than orphan record)
+		await db
+			.delete(table.marketingMaterial)
+			.where(conditions!);
+
 		// Delete file from MinIO if exists
 		if (material.filePath) {
 			try {
@@ -308,10 +315,6 @@ export const deleteMarketingMaterial = command(
 				console.error('Error deleting marketing material file:', e);
 			}
 		}
-
-		await db
-			.delete(table.marketingMaterial)
-			.where(conditions!);
 
 		return { success: true };
 	}

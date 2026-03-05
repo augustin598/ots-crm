@@ -17,6 +17,7 @@
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
 	import MaterialListView from '$lib/components/marketing/material-list-view.svelte';
 	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
+	import SocialUrlDialog from '$lib/components/marketing/social-url-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { toast } from 'svelte-sonner';
@@ -31,6 +32,7 @@
 	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let googleAdsDialogOpen = $state(false);
+	let socialUrlDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
 	let deleteConfirmOpen = $state(false);
@@ -69,25 +71,28 @@
 		}))
 	);
 
-	// Thumbnail URLs cache — clear on category switch
-	let thumbnailUrls = $state<Record<string, string>>({});
+	// Thumbnail URLs cache with TTL — clear on category switch
+	const THUMBNAIL_TTL_MS = 240_000; // 4 min (presigned URLs expire at 5 min)
+	let thumbnailCache = $state<Record<string, { url: string; fetchedAt: number }>>({});
+	let thumbnailUrls = $derived(Object.fromEntries(Object.entries(thumbnailCache).map(([id, v]) => [id, v.url])));
 	const loadingThumbnailIds = new Set<string>();
 
 	$effect(() => {
 		void activeCategory;
-		thumbnailUrls = {};
+		thumbnailCache = {};
 		loadingThumbnailIds.clear();
 	});
 
 	$effect(() => {
+		const now = Date.now();
 		const mediaMaterials = materials.filter(
-			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !thumbnailUrls[m.id] && !loadingThumbnailIds.has(m.id)
+			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !loadingThumbnailIds.has(m.id) && (!thumbnailCache[m.id] || now - thumbnailCache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
 		);
 		for (const m of mediaMaterials) {
 			loadingThumbnailIds.add(m.id);
 			getMaterialDownloadUrl(m.id)
 				.then((r) => {
-					thumbnailUrls = { ...thumbnailUrls, [m.id]: r.url };
+					thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
 				})
 				.catch(() => {})
 				.finally(() => loadingThumbnailIds.delete(m.id));
@@ -140,6 +145,7 @@
 		{#if !isFileFilterType}
 			<Button onclick={() => {
 				if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+				else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
 				else { uploadDialogOpen = true; }
 			}}>
 				<PlusIcon class="h-4 w-4 mr-2" />
@@ -247,6 +253,14 @@
 	bind:open={googleAdsDialogOpen}
 	{clientId}
 	{uploadUrl}
+	onSaved={handleUploaded}
+/>
+
+<!-- Social URL Dialog -->
+<SocialUrlDialog
+	bind:open={socialUrlDialogOpen}
+	{clientId}
+	category={activeCategory as 'tiktok-ads' | 'facebook-ads'}
 	onSaved={handleUploaded}
 />
 

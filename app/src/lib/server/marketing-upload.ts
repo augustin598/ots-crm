@@ -308,6 +308,15 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 	const materialId = generateMaterialId();
 	const materialType = detectType(file.type);
 
+	// Extract image dimensions for storage
+	let dimensions: string | null = null;
+	if (materialType === 'image') {
+		const dims = await getImageDimensions(file);
+		if (dims) {
+			dimensions = `${dims.w}x${dims.h}`;
+		}
+	}
+
 	await db.insert(table.marketingMaterial).values({
 		id: materialId,
 		tenantId,
@@ -320,6 +329,7 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		fileSize: uploadResult.size,
 		mimeType: uploadResult.mimeType,
 		fileName: file.name,
+		dimensions,
 		seoLinkId,
 		status: 'active',
 		campaignType,

@@ -70,25 +70,28 @@
 		}))
 	);
 
-	// Thumbnail URLs cache — clear on category switch
-	let thumbnailUrls = $state<Record<string, string>>({});
+	// Thumbnail URLs cache with TTL — clear on category switch
+	const THUMBNAIL_TTL_MS = 240_000; // 4 min (presigned URLs expire at 5 min)
+	let thumbnailCache = $state<Record<string, { url: string; fetchedAt: number }>>({});
+	let thumbnailUrls = $derived(Object.fromEntries(Object.entries(thumbnailCache).map(([id, v]) => [id, v.url])));
 	const loadingThumbnailIds = new Set<string>();
 
 	$effect(() => {
 		void activeCategory;
-		thumbnailUrls = {};
+		thumbnailCache = {};
 		loadingThumbnailIds.clear();
 	});
 
 	$effect(() => {
+		const now = Date.now();
 		const mediaMaterials = materials.filter(
-			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !thumbnailUrls[m.id] && !loadingThumbnailIds.has(m.id)
+			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !loadingThumbnailIds.has(m.id) && (!thumbnailCache[m.id] || now - thumbnailCache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
 		);
 		for (const m of mediaMaterials) {
 			loadingThumbnailIds.add(m.id);
 			getMaterialDownloadUrl(m.id)
 				.then((r) => {
-					thumbnailUrls = { ...thumbnailUrls, [m.id]: r.url };
+					thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
 				})
 				.catch(() => {})
 				.finally(() => loadingThumbnailIds.delete(m.id));

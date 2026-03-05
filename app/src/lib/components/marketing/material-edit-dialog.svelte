@@ -96,11 +96,12 @@
 
 		saving = true;
 		try {
+			const isStructured = material ? ['google-ads', 'tiktok-ads', 'facebook-ads'].includes(material.category) : false;
 			await updateMarketingMaterial({
 				id: material.id,
 				title: title.trim(),
 				description: description.trim() || null,
-				textContent: textContent.trim() || null,
+				...(isStructured ? {} : { textContent: textContent.trim() || null }),
 				externalUrl: externalUrl.trim() || null,
 				seoLinkId: seoLinkId || null,
 				status: status as 'draft' | 'active' | 'archived',
@@ -117,7 +118,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open onOpenChange={(o) => { if (!o) { title = ''; description = ''; textContent = ''; externalUrl = ''; seoLinkId = ''; status = 'active'; tags = ''; } }}>
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
 			<Dialog.Title>Editează Material</Dialog.Title>
@@ -136,9 +137,14 @@
 				</div>
 
 				{#if material.textContent !== null || material.type === 'text'}
+					{@const isStructured = ['google-ads', 'tiktok-ads', 'facebook-ads'].includes(material.category)}
 					<div class="space-y-1.5">
 						<Label for="edit-text">Conținut Text</Label>
-						<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={5000} />
+						{#if isStructured}
+							<p class="text-xs text-muted-foreground italic">Conținut structurat — editează prin dialogul dedicat categoriei.</p>
+						{:else}
+							<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={5000} />
+						{/if}
 					</div>
 				{/if}
 
@@ -185,19 +191,18 @@
 					<Label for="edit-tags">Taguri</Label>
 					<Input id="edit-tags" bind:value={tags} placeholder="separate prin virgulă" />
 				</div>
+				<Dialog.Footer class="pt-4">
+				<Button variant="outline" onclick={() => (open = false)}>Anulează</Button>
+				<Button onclick={handleSave} disabled={saving}>
+					{#if saving}
+						<LoaderIcon class="h-4 w-4 mr-2 animate-spin" />
+						Se salvează...
+					{:else}
+						Salvează
+					{/if}
+				</Button>
+			</Dialog.Footer>
 			</div>
 		{/if}
-
-		<Dialog.Footer class="pt-4">
-			<Button variant="outline" onclick={() => (open = false)}>Anulează</Button>
-			<Button onclick={handleSave} disabled={saving}>
-				{#if saving}
-					<LoaderIcon class="h-4 w-4 mr-2 animate-spin" />
-					Se salvează...
-				{:else}
-					Salvează
-				{/if}
-			</Button>
-		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

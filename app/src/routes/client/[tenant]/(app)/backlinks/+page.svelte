@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
+	import { getSeoLinks, createSeoLink, updateSeoLink } from '$lib/remotes/seo-links.remote';
+	import { getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getClientWebsites, getClientWebsitesSeoStats } from '$lib/remotes/client-websites.remote';
 	import { page } from '$app/state';
+	import { toast } from 'svelte-sonner';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -9,6 +11,14 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Calendar } from '$lib/components/ui/calendar';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
 	import {
 		Table,
 		TableBody,
@@ -26,6 +36,14 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import XIcon from '@lucide/svelte/icons/x';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import SaveIcon from '@lucide/svelte/icons/save';
+	import EditIcon from '@lucide/svelte/icons/pencil';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import EyeIcon from '@lucide/svelte/icons/eye';
+	import FileIcon from '@lucide/svelte/icons/file';
+	import Rows3Icon from '@lucide/svelte/icons/rows-3';
+	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import {
 		Tooltip,
 		TooltipContent,
@@ -227,6 +245,175 @@
 		}
 		return Object.entries(sums).map(([curr, cents]) => ({ currency: curr as Currency, cents }));
 	});
+
+	// ── Inline add row ──
+	let isAddingInlineRow = $state(false);
+	let rowPressTrust = $state('');
+	let rowKeyword = $state('');
+	let rowTargetUrl = $state('');
+	let rowArticleUrl = $state('');
+	let rowStatus = $state('pending');
+	let rowLinkAttribute = $state('dofollow');
+	let rowPrice = $state('');
+	let rowCurrency = $state<Currency>('RON');
+	let rowLoading = $state(false);
+	let rowError = $state<string | null>(null);
+
+	function resetInlineRow() {
+		rowPressTrust = '';
+		rowKeyword = '';
+		rowTargetUrl = '';
+		rowArticleUrl = '';
+		rowStatus = 'pending';
+		rowLinkAttribute = 'dofollow';
+		rowPrice = '';
+		rowCurrency = 'RON';
+		rowError = null;
+	}
+
+	function openInlineRow() {
+		resetInlineRow();
+		isAddingInlineRow = true;
+	}
+
+	function cancelInlineRow() {
+		isAddingInlineRow = false;
+		resetInlineRow();
+	}
+
+	function normalizeTargetUrl(url: string): string {
+		if (!url?.trim()) return '';
+		const u = url.trim();
+		if (u.startsWith('http://') || u.startsWith('https://')) return u;
+		return `https://${u}`;
+	}
+
+	async function saveInlineRow() {
+		if (!rowKeyword.trim()) {
+			rowError = 'Completați cuvântul cheie';
+			return;
+		}
+		if (!clientId) {
+			rowError = 'Client invalid';
+			return;
+		}
+
+		rowLoading = true;
+		rowError = null;
+		const monthToUse = filterMonth || new Date().toISOString().slice(0, 7);
+
+		try {
+			await createSeoLink({
+				clientId,
+				pressTrust: rowPressTrust || undefined,
+				month: monthToUse,
+				keyword: rowKeyword.trim(),
+				linkAttribute: rowLinkAttribute as 'dofollow' | 'nofollow',
+				status: rowStatus as 'pending' | 'submitted' | 'published' | 'rejected',
+				articleUrl: rowArticleUrl || '',
+				targetUrl: rowTargetUrl ? normalizeTargetUrl(rowTargetUrl) : undefined,
+				price: rowPrice ? parseFloat(rowPrice) : undefined,
+				currency: rowCurrency
+			}).updates(seoLinksQuery);
+			toast.success('Link adăugat');
+			cancelInlineRow();
+		} catch (e) {
+			rowError = e instanceof Error ? e.message : 'A apărut o eroare';
+		} finally {
+			rowLoading = false;
+		}
+	}
+
+	// ── Article Modal ──
+	let articleModalOpen = $state(false);
+	let articleModalLinkId = $state<string | null>(null);
+	let articleModalLink = $state<(typeof seoLinks)[0] | null>(null);
+	let articleModalOption = $state<'' | 'gdrive' | 'press-article' | 'seo-article'>('');
+	let articleModalGdriveUrl = $state('');
+	let articleModalFile = $state<File | null>(null);
+	let articleModalLoading = $state(false);
+	let articleModalFileInput = $state<HTMLInputElement | null>(null);
+
+	function openArticleModal(link: (typeof seoLinks)[0]) {
+		articleModalLinkId = link.id;
+		articleModalLink = link;
+		articleModalOption = (link.articleType as '' | 'gdrive' | 'press-article' | 'seo-article') || '';
+		articleModalGdriveUrl = link.gdriveUrl || '';
+		articleModalFile = null;
+		articleModalLoading = false;
+		articleModalOpen = true;
+	}
+
+	async function saveArticleModal() {
+		if (!articleModalLinkId || !articleModalLink) return;
+		articleModalLoading = true;
+		try {
+			if (articleModalOption === 'gdrive') {
+				if (!articleModalGdriveUrl.trim()) {
+					toast.error('Introduceți URL-ul GDrive');
+					articleModalLoading = false;
+					return;
+				}
+				await updateSeoLink({
+					seoLinkId: articleModalLinkId,
+					articleType: 'gdrive',
+					gdriveUrl: articleModalGdriveUrl.trim()
+				}).updates(seoLinksQuery);
+			} else if (articleModalOption === 'press-article' || articleModalOption === 'seo-article') {
+				if (!articleModalFile) {
+					toast.error('Selectați un fișier');
+					articleModalLoading = false;
+					return;
+				}
+				const formData = new FormData();
+				formData.append('file', articleModalFile);
+				formData.append('clientId', articleModalLink.clientId);
+				formData.append('category', articleModalOption);
+				formData.append('title', articleModalFile.name.replace(/\.[^.]+$/, ''));
+				formData.append('seoLinkId', articleModalLinkId);
+				const res = await fetch(`/client/${tenantSlug}/marketing/upload`, { method: 'POST', body: formData });
+				if (!res.ok) {
+					const errText = await res.text().catch(() => 'Upload eșuat');
+					throw new Error(errText);
+				}
+				await updateSeoLink({ seoLinkId: articleModalLinkId, articleType: articleModalOption }).updates(seoLinksQuery);
+			}
+			toast.success('Articol salvat');
+			articleModalOpen = false;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+		} finally {
+			articleModalLoading = false;
+		}
+	}
+
+	async function clearArticleType() {
+		if (!articleModalLinkId) return;
+		articleModalLoading = true;
+		try {
+			await updateSeoLink({
+				seoLinkId: articleModalLinkId,
+				articleType: null,
+				gdriveUrl: null
+			}).updates(seoLinksQuery);
+			toast.success('Articol șters');
+			articleModalOpen = false;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		} finally {
+			articleModalLoading = false;
+		}
+	}
+
+	async function downloadArticleMaterial(materialId: string | null) {
+		if (!materialId) return;
+		try {
+			const result = await getMaterialDownloadUrl(materialId);
+			window.open(result.url, '_blank');
+		} catch {
+			toast.error('Nu s-a putut descărca documentul');
+		}
+	}
 </script>
 
 <svelte:head>
@@ -234,27 +421,33 @@
 </svelte:head>
 
 <div class="space-y-6">
-	<div class="flex items-center gap-4">
-		{#if defaultWebsite}
-			<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted/30 shadow-sm overflow-hidden">
-				<img
-					src={getFaviconUrl(defaultWebsite.url)}
-					alt=""
-					class="h-8 w-8 object-contain"
-					loading="lazy"
-					onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget.parentElement as HTMLElement).innerHTML = '<svg xmlns=\'http://www.w3.org/2000/svg\' class=\'h-6 w-6 text-muted-foreground\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><path d=\'M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\'/></svg>'; }}
-				/>
-			</div>
-		{/if}
-		<div>
-			{#if clientName}
-				<p class="text-sm font-medium text-muted-foreground">Backlinks</p>
-				<h1 class="text-2xl font-bold leading-tight">{clientName}</h1>
-			{:else}
-				<h1 class="text-3xl font-bold">Backlinks</h1>
+	<div class="flex items-center justify-between gap-4">
+		<div class="flex items-center gap-4">
+			{#if defaultWebsite}
+				<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted/30 shadow-sm overflow-hidden">
+					<img
+						src={getFaviconUrl(defaultWebsite.url)}
+						alt=""
+						class="h-8 w-8 object-contain"
+						loading="lazy"
+						onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget.parentElement as HTMLElement).innerHTML = '<svg xmlns=\'http://www.w3.org/2000/svg\' class=\'h-6 w-6 text-muted-foreground\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><path d=\'M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\'/></svg>'; }}
+					/>
+				</div>
 			{/if}
-			<p class="text-muted-foreground text-sm">Linkurile SEO realizate pentru dvs.</p>
+			<div>
+				{#if clientName}
+					<p class="text-sm font-medium text-muted-foreground">Backlinks</p>
+					<h1 class="text-2xl font-bold leading-tight">{clientName}</h1>
+				{:else}
+					<h1 class="text-3xl font-bold">Backlinks</h1>
+				{/if}
+				<p class="text-muted-foreground text-sm">Linkurile SEO realizate pentru dvs.</p>
+			</div>
 		</div>
+		<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading}>
+			<Rows3Icon class="mr-2 h-4 w-4" />
+			Adaugă rând
+		</Button>
 	</div>
 
 	{#if !loading && seoLinks.length > 0}
@@ -421,7 +614,7 @@
 			{#if websites.length > 0}
 			<div class="space-y-1.5 min-w-[140px]">
 				<p class="text-xs font-medium text-muted-foreground">Website</p>
-				<Select val			<Select value={filterWebsiteId || 'all'} type="single" onValueChange={(v) => { filterWebsiteId = v === 'all' ? '' : v || ''; }}>
+				<Select value={filterWebsiteId || 'all'} type="single" onValueChange={(v) => { filterWebsiteId = v === 'all' ? '' : v || ''; }}>
 					<SelectTrigger class="h-9">
 						{#if filterWebsiteId}
 							{@const selW = websites.find(w => w.id === filterWebsiteId)}
@@ -528,7 +721,7 @@
 
 	{#if loading}
 		<p class="text-muted-foreground">Se încarcă...</p>
-	{:else if seoLinks.length === 0}
+	{:else if seoLinks.length === 0 && !isAddingInlineRow}
 		<Card>
 			<CardContent class="pt-6">
 				<p class="text-center text-muted-foreground">Nu există linkuri SEO.</p>
@@ -700,6 +893,12 @@
 							</TableHead>
 							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
 								<span class="inline-flex items-center gap-1.5">
+									<FileIcon class="h-3.5 w-3.5 shrink-0" />
+									Articol
+								</span>
+							</TableHead>
+							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
+								<span class="inline-flex items-center gap-1.5">
 									<BanknoteIcon class="h-3.5 w-3.5 shrink-0" />
 									Preț
 								</span>
@@ -707,6 +906,76 @@
 						</TableRow>
 					</TableHeader>
 					<TableBody>
+						{#if isAddingInlineRow}
+							<TableRow class="border-b border-primary/20 bg-primary/5">
+								<TableCell class="px-3 py-2 align-middle text-muted-foreground text-[13px]">—</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Input bind:value={rowPressTrust} placeholder="Trust presă" class="h-8 text-[13px]" />
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Input bind:value={rowKeyword} placeholder="Cuvânt cheie *" class="h-8 text-[13px]" />
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Input bind:value={rowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px]" />
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Input bind:value={rowArticleUrl} placeholder="Link articol" class="h-8 text-[13px]" />
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Select value={rowStatus} type="single" onValueChange={(v) => { if (v) rowStatus = v; }}>
+										<SelectTrigger class="h-8 text-[13px]">{getStatusLabel(rowStatus)}</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="pending">În așteptare</SelectItem>
+											<SelectItem value="submitted">Trimis</SelectItem>
+											<SelectItem value="published">Publicat</SelectItem>
+											<SelectItem value="rejected">Refuzat</SelectItem>
+										</SelectContent>
+									</Select>
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<Select value={rowLinkAttribute} type="single" onValueChange={(v) => { if (v) rowLinkAttribute = v; }}>
+										<SelectTrigger class="h-8 text-[13px]">{rowLinkAttribute}</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="dofollow">dofollow</SelectItem>
+											<SelectItem value="nofollow">nofollow</SelectItem>
+										</SelectContent>
+									</Select>
+								</TableCell>
+								<TableCell class="px-3 py-2 align-middle text-muted-foreground text-[13px]">—</TableCell>
+								<TableCell class="px-3 py-2 align-middle text-muted-foreground text-[13px]">—</TableCell>
+								<TableCell colspan={1} class="px-3 py-2 align-middle">
+									<div class="flex flex-col gap-1.5">
+										<div class="flex items-center gap-1.5">
+											<Input bind:value={rowPrice} type="number" inputmode="decimal" step="0.01" placeholder="Preț" class="h-8 w-20 text-[13px]" />
+											<Select value={rowCurrency} type="single" onValueChange={(v) => { if (v) rowCurrency = v as Currency; }}>
+												<SelectTrigger class="h-8 w-[72px] text-[13px]">{rowCurrency}</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="RON">RON</SelectItem>
+													<SelectItem value="EUR">EUR</SelectItem>
+													<SelectItem value="USD">USD</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+										<div class="flex items-center gap-1.5">
+											<Button size="sm" class="h-7 text-[12px]" onclick={saveInlineRow} disabled={rowLoading}>
+												{#if rowLoading}
+													<Loader2Icon class="h-3.5 w-3.5 mr-1 animate-spin" />
+												{:else}
+													<SaveIcon class="h-3.5 w-3.5 mr-1" />
+												{/if}
+												Salvează
+											</Button>
+											<Button variant="ghost" size="sm" class="h-7 text-[12px]" onclick={cancelInlineRow} disabled={rowLoading}>
+												Anulează
+											</Button>
+										</div>
+										{#if rowError}
+											<p class="text-[11px] text-destructive">{rowError}</p>
+										{/if}
+									</div>
+								</TableCell>
+							</TableRow>
+						{/if}
 						{#each seoLinks as link, index}
 							<TableRow class="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors duration-150">
 								<TableCell class="text-muted-foreground tabular-nums text-[13px] px-3 py-3.5 align-middle">
@@ -803,6 +1072,55 @@
 										{/if}
 									</div>
 								</TableCell>
+								<!-- Articol -->
+								<TableCell class="px-3 py-3.5 align-middle">
+									{#if link.articleType === 'gdrive' && link.gdriveUrl}
+										<div class="flex items-center gap-1.5">
+											<a href={link.gdriveUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-primary hover:underline text-[13px]">
+												<ExternalLinkIcon class="h-3.5 w-3.5" />
+												Vezi articol
+											</a>
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModal(link)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else if link.articleType === 'press-article'}
+										<div class="flex items-center gap-1.5">
+											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-orange-50 text-orange-700 border-orange-200">Presă</Badge>
+											{#if link.materialId}
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Vezi document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<EyeIcon class="h-3 w-3" />
+												</button>
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Descarcă document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<DownloadIcon class="h-3 w-3" />
+												</button>
+											{/if}
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModal(link)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else if link.articleType === 'seo-article'}
+										<div class="flex items-center gap-1.5">
+											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-blue-50 text-blue-700 border-blue-200">SEO</Badge>
+											{#if link.materialId}
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Vezi document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<EyeIcon class="h-3 w-3" />
+												</button>
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Descarcă document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<DownloadIcon class="h-3 w-3" />
+												</button>
+											{/if}
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModal(link)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else}
+										<Button variant="ghost" size="sm" class="h-7 text-[12px] text-muted-foreground" onclick={() => openArticleModal(link)}>
+											<PlusIcon class="h-3.5 w-3.5 mr-1" />
+											Adaugă
+										</Button>
+									{/if}
+								</TableCell>
 								<TableCell class="px-3 py-3.5 text-[13px] align-middle">
 									{link.price != null
 										? formatAmount(link.price, (link.currency || 'RON') as Currency)
@@ -813,7 +1131,7 @@
 					</TableBody>
 					<TableFooter>
 						<TableRow class="border-t-2 border-border/60 bg-muted/30 hover:bg-muted/30 font-medium">
-							<TableCell colspan={8} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
+							<TableCell colspan={9} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
 								Total preț
 							</TableCell>
 							<TableCell class="px-3 py-3.5 pr-5 text-[13px] font-semibold">
@@ -830,3 +1148,109 @@
 		</div>
 	{/if}
 </div>
+
+<!-- ── Article Modal ── -->
+<Dialog bind:open={articleModalOpen}>
+	<DialogContent class="max-w-md">
+		<DialogHeader>
+			<DialogTitle>Articol</DialogTitle>
+			<DialogDescription>
+				{articleModalLink?.keyword || ''}
+				{articleModalLink?.pressTrust ? ` — ${articleModalLink.pressTrust}` : ''}
+			</DialogDescription>
+		</DialogHeader>
+
+		<div class="space-y-4 py-2">
+			<!-- Option 1: GDrive -->
+			<button
+				type="button"
+				class="w-full text-left p-3 rounded-lg border transition-colors {articleModalOption === 'gdrive' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}"
+				onclick={() => { articleModalOption = 'gdrive'; articleModalFile = null; }}
+			>
+				<div class="flex items-center gap-2 font-medium text-sm">
+					<ExternalLinkIcon class="h-4 w-4" />
+					Link GDrive
+				</div>
+				<p class="text-xs text-muted-foreground mt-1">Adaugă un link către articol pe Google Drive</p>
+			</button>
+			{#if articleModalOption === 'gdrive'}
+				<div class="pl-3">
+					<Input
+						bind:value={articleModalGdriveUrl}
+						placeholder="https://drive.google.com/..."
+						class="h-9"
+					/>
+				</div>
+			{/if}
+
+			<!-- Option 2: Articol Presă -->
+			<button
+				type="button"
+				class="w-full text-left p-3 rounded-lg border transition-colors {articleModalOption === 'press-article' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}"
+				onclick={() => { articleModalOption = 'press-article'; articleModalGdriveUrl = ''; }}
+			>
+				<div class="flex items-center gap-2 font-medium text-sm">
+					<NewspaperIcon class="h-4 w-4" />
+					Articol Presă
+				</div>
+				<p class="text-xs text-muted-foreground mt-1">Upload fișier articol de presă</p>
+			</button>
+			{#if articleModalOption === 'press-article'}
+				<div class="pl-3">
+					<input
+						bind:this={articleModalFileInput}
+						type="file"
+						accept=".pdf,.doc,.docx"
+						class="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+						onchange={(e) => { articleModalFile = (e.currentTarget as HTMLInputElement).files?.[0] || null; }}
+					/>
+					{#if articleModalFile}
+						<p class="text-xs text-muted-foreground mt-1">{articleModalFile.name} ({(articleModalFile.size / 1024).toFixed(0)} KB)</p>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Option 3: Articol SEO -->
+			<button
+				type="button"
+				class="w-full text-left p-3 rounded-lg border transition-colors {articleModalOption === 'seo-article' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}"
+				onclick={() => { articleModalOption = 'seo-article'; articleModalGdriveUrl = ''; }}
+			>
+				<div class="flex items-center gap-2 font-medium text-sm">
+					<SearchIcon class="h-4 w-4" />
+					Articol SEO
+				</div>
+				<p class="text-xs text-muted-foreground mt-1">Upload fișier articol SEO</p>
+			</button>
+			{#if articleModalOption === 'seo-article'}
+				<div class="pl-3">
+					<input
+						type="file"
+						accept=".pdf,.doc,.docx"
+						class="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+						onchange={(e) => { articleModalFile = (e.currentTarget as HTMLInputElement).files?.[0] || null; }}
+					/>
+					{#if articleModalFile}
+						<p class="text-xs text-muted-foreground mt-1">{articleModalFile.name} ({(articleModalFile.size / 1024).toFixed(0)} KB)</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<DialogFooter class="flex items-center justify-between sm:justify-between">
+			{#if articleModalLink?.articleType}
+				<Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" onclick={clearArticleType} disabled={articleModalLoading}>
+					Golește
+				</Button>
+			{:else}
+				<div></div>
+			{/if}
+			<div class="flex gap-2">
+				<Button variant="outline" onclick={() => { articleModalOpen = false; }}>Anulează</Button>
+				<Button onclick={saveArticleModal} disabled={articleModalLoading || !articleModalOption}>
+					{articleModalLoading ? 'Se salvează...' : 'Salvează'}
+				</Button>
+			</div>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
