@@ -1095,8 +1095,8 @@
 			if (result.articlePublishedAt) formArticlePublishedAt = result.articlePublishedAt;
 			if (result.allLinks) extractedLinks = result.allLinks;
 			showAdvanced = true;
-		} catch (e) {
-			extractError = e instanceof Error ? e.message : 'Extragere eșuată';
+		} catch (e: any) {
+			extractError = e?.body?.message || e?.message || 'Extragere eșuată';
 		} finally {
 			extractLoading = false;
 		}

@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -759,7 +760,7 @@ export const extractSeoLinkData = command(
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			svelteError(401, 'Unauthorized');
 		}
 
 		// Determină clientUrl din websiteId dacă e furnizat
@@ -779,21 +780,21 @@ export const extractSeoLinkData = command(
 		}
 
 		if (!resolvedClientUrl) {
-			throw new Error('Furnizați un URL de client sau un websiteId valid');
+			svelteError(400, 'Furnizați un URL de client sau un websiteId valid');
 		}
 
 		const clientDomain = extractDomainFromUrl(resolvedClientUrl);
 		if (!clientDomain) {
-			throw new Error('URL client invalid');
+			svelteError(400, 'URL client invalid');
 		}
 
 		let html: string;
 		try {
 			html = await fetchArticleHtml(data.articleUrl);
 		} catch (e) {
-			throw new Error(
-				e instanceof Error ? e.message : 'Nu s-a putut încărca articolul. Verificați URL-ul.'
-			);
+			const msg = e instanceof Error ? e.message : 'Nu s-a putut încărca articolul';
+			console.error(`[SEO] fetchArticleHtml failed for ${data.articleUrl}:`, msg);
+			svelteError(502, `Eroare la încărcarea articolului: ${msg}`);
 		}
 
 		const links = extractLinksToRootFromHtml(html, clientDomain);

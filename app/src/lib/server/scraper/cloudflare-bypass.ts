@@ -281,21 +281,18 @@ export async function fetchWithCloudflareFallback(
 
 		return { html, usedPuppeteer: false };
 	} catch (e) {
-		// If fetch itself was blocked (e.g., 403), try Puppeteer as last resort
+		// Try Puppeteer as last resort for any fetch failure
 		const err = e instanceof Error ? e : new Error(String(e));
-		if (err.message.includes('HTTP 403') || err.message.includes('HTTP 503')) {
-			console.log(
-				`[SCRAPER] Fetch failed with ${err.message} for ${url} — trying Puppeteer`
-			);
-			try {
-				const html = await fetchWithPuppeteer(url, timeoutMs);
-				return { html, usedPuppeteer: true };
-			} catch (puppeteerErr) {
-				console.warn(`[SCRAPER] Puppeteer also failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
-				throw err;
-			}
+		console.log(
+			`[SCRAPER] Fetch failed with ${err.message} for ${url} — trying Puppeteer`
+		);
+		try {
+			const html = await fetchWithPuppeteer(url, timeoutMs);
+			return { html, usedPuppeteer: true };
+		} catch (puppeteerErr) {
+			console.warn(`[SCRAPER] Puppeteer also failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+			throw err;
 		}
-		throw err;
 	}
 }
 
