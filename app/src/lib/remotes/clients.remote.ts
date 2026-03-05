@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql, getTableColumns } from 'drizzle-orm';
+import { eq, and, ne, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function isPrivateHost(hostname: string): boolean {
@@ -291,10 +291,29 @@ export const createClient = command(clientSchema, async (data) => {
 	}
 
 	const clientId = generateClientId();
+	const tenantId = event.locals.tenant.id;
+
+	// Validate email uniqueness within tenant
+	if (data.email) {
+		const emailLower = data.email.toLowerCase().trim();
+		const [emailTaken] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, emailLower)))
+			.limit(1);
+		if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
+
+		const [secondaryTaken] = await db
+			.select({ id: table.clientSecondaryEmail.id })
+			.from(table.clientSecondaryEmail)
+			.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, emailLower)))
+			.limit(1);
+		if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+	}
 
 	await db.insert(table.client).values({
 		id: clientId,
-		tenantId: event.locals.tenant.id,
+		tenantId,
 		name: data.name,
 		businessName: data.businessName || null,
 		email: data.email || null,
@@ -320,6 +339,19 @@ export const createClient = command(clientSchema, async (data) => {
 	return { success: true, clientId };
 });
 
+/** Nullify FK references and delete a clientUser record */
+async function deleteClientUserWithFKs(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], clientUserId: string) {
+	await tx
+		.update(table.marketingMaterial)
+		.set({ uploadedByClientUserId: null })
+		.where(eq(table.marketingMaterial.uploadedByClientUserId, clientUserId));
+	await tx
+		.update(table.clientAccessData)
+		.set({ createdByClientUserId: null })
+		.where(eq(table.clientAccessData.createdByClientUserId, clientUserId));
+	await tx.delete(table.clientUser).where(eq(table.clientUser.id, clientUserId));
+}
+
 export const updateClient = command(
 	v.object({
 		clientId: v.pipe(v.string(), v.minLength(1)),
@@ -332,25 +364,120 @@ export const updateClient = command(
 		}
 
 		const { clientId, ...rest } = data;
+		const tenantId = event.locals.tenant.id;
 
 		// Verify client belongs to tenant
 		const [existing] = await db
 			.select()
 			.from(table.client)
-			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
 			.limit(1);
 
 		if (!existing) {
 			throw new Error('Client not found');
 		}
 
-		await db
-			.update(table.client)
-			.set({
-				...rest,
-				updatedAt: new Date()
-			})
-			.where(eq(table.client.id, clientId));
+		const oldEmail = (existing.email || '').toLowerCase().trim();
+		const newEmail = (rest.email || '').toLowerCase().trim();
+		const emailChanged = oldEmail !== newEmail && oldEmail !== '';
+
+		// Validate email uniqueness within tenant
+		if (newEmail && newEmail !== oldEmail) {
+			const [emailTaken] = await db
+				.select({ id: table.client.id })
+				.from(table.client)
+				.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, newEmail), ne(table.client.id, clientId)))
+				.limit(1);
+			if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
+
+			const [secondaryTaken] = await db
+				.select({ id: table.clientSecondaryEmail.id })
+				.from(table.clientSecondaryEmail)
+				.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, newEmail)))
+				.limit(1);
+			if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+		}
+
+		await db.transaction(async (tx) => {
+			// 1. Update the client record
+			await tx
+				.update(table.client)
+				.set({
+					...rest,
+					updatedAt: new Date()
+				})
+				.where(eq(table.client.id, clientId));
+
+			// 2. If primary email changed, sync clientUser association
+			if (emailChanged) {
+				const [oldUser] = await tx
+					.select()
+					.from(table.user)
+					.where(eq(table.user.email, oldEmail))
+					.limit(1);
+
+				if (oldUser) {
+					const [oldClientUser] = await tx
+						.select()
+						.from(table.clientUser)
+						.where(
+							and(
+								eq(table.clientUser.userId, oldUser.id),
+								eq(table.clientUser.clientId, clientId),
+								eq(table.clientUser.tenantId, tenantId),
+								eq(table.clientUser.isPrimary, true)
+							)
+						)
+						.limit(1);
+
+					if (oldClientUser) {
+						if (newEmail) {
+							const [newUser] = await tx
+								.select()
+								.from(table.user)
+								.where(eq(table.user.email, newEmail))
+								.limit(1);
+
+							if (newUser) {
+								// Check if newUser already has a clientUser for this client
+								const [existingNewCU] = await tx
+									.select()
+									.from(table.clientUser)
+									.where(
+										and(
+											eq(table.clientUser.userId, newUser.id),
+											eq(table.clientUser.clientId, clientId),
+											eq(table.clientUser.tenantId, tenantId)
+										)
+									)
+									.limit(1);
+
+								if (existingNewCU) {
+									// Promote existing to primary, delete old
+									await tx
+										.update(table.clientUser)
+										.set({ isPrimary: true, updatedAt: new Date() })
+										.where(eq(table.clientUser.id, existingNewCU.id));
+									await deleteClientUserWithFKs(tx, oldClientUser.id);
+								} else {
+									// Re-link old clientUser to new user
+									await tx
+										.update(table.clientUser)
+										.set({ userId: newUser.id, updatedAt: new Date() })
+										.where(eq(table.clientUser.id, oldClientUser.id));
+								}
+							} else {
+								// No user for new email yet — remove old clientUser
+								await deleteClientUserWithFKs(tx, oldClientUser.id);
+							}
+						} else {
+							// Email cleared — remove old primary clientUser
+							await deleteClientUserWithFKs(tx, oldClientUser.id);
+						}
+					}
+				}
+			}
+		});
 
 		return { success: true };
 	}

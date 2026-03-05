@@ -187,6 +187,15 @@
 		}
 	}
 
+	function parseExtractedLinks(link: { extractedLinks?: string | null }): { url: string; keyword: string }[] {
+		if (!link.extractedLinks) return [];
+		try {
+			const parsed = JSON.parse(link.extractedLinks);
+			if (!Array.isArray(parsed)) return [];
+			return parsed.filter((el: any) => el && typeof el.url === 'string' && typeof el.keyword === 'string');
+		} catch { return []; }
+	}
+
 	function getPressTrustDisplay(link: { pressTrust: string | null; articleUrl: string }): string {
 		if (link.pressTrust?.trim()) return link.pressTrust;
 		try {
@@ -718,10 +727,31 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
-									<span class="text-[13px] text-foreground/85 line-clamp-2">{link.keyword}</span>
+									{@const elLinks = parseExtractedLinks(link)}
+									{#if elLinks.length > 1}
+										<div class="flex flex-col gap-1">
+											{#each elLinks as el, i}
+												<span class="text-[13px] text-foreground/85">
+													<span class="text-muted-foreground/60 text-[11px] mr-1">{i + 1}.</span>{el.keyword}
+												</span>
+											{/each}
+										</div>
+									{:else}
+										<span class="text-[13px] text-foreground/85 line-clamp-2">{link.keyword}</span>
+									{/if}
 								</TableCell>
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle">
-									{#if link.targetUrl}
+									{@const elLinksTarget = parseExtractedLinks(link)}
+									{#if elLinksTarget.length > 1}
+										<div class="flex flex-col gap-1">
+											{#each elLinksTarget as el, i}
+												<div class="flex items-center gap-1">
+													<span class="text-muted-foreground/60 text-[11px] shrink-0">{i + 1}.</span>
+													<SeoLinkUrlCell url={el.url} maxChars={30} />
+												</div>
+											{/each}
+										</div>
+									{:else if link.targetUrl}
 										<SeoLinkUrlCell url={link.targetUrl} maxChars={35} />
 									{:else}
 										<span class="text-muted-foreground/90 text-[13px]">—</span>

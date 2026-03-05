@@ -347,9 +347,10 @@
 				isPartner
 			});
 
+			toast.success('Client actualizat');
 			goto(`/${tenantSlug}/clients/${clientId}`);
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to update client';
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
 		} finally {
 			saving = false;
 		}

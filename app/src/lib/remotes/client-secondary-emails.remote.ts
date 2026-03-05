@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, ne, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function generateId() {
@@ -69,6 +69,20 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 		)
 		.limit(1);
 	if (existing) throw new Error('Acest email este deja asociat unui client din acest tenant.');
+
+	// Check if email is already a primary email on another client
+	const [primaryTaken] = await db
+		.select({ id: table.client.id })
+		.from(table.client)
+		.where(
+			and(
+				eq(table.client.tenantId, tenantId),
+				eq(sql`lower(${table.client.email})`, data.email.toLowerCase()),
+				ne(table.client.id, data.clientId)
+			)
+		)
+		.limit(1);
+	if (primaryTaken) throw new Error('Acest email este deja emailul principal al altui client.');
 
 	const now = new Date();
 	const id = generateId();

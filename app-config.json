@@ -8,8 +8,6 @@
         "NODE_ENV": "production",
         "APP_NAME": "crm",
         "APP_ENV": "production",
-        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
-        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
         "GOOGLE_REDIRECT_URI": "https://clients.onetopsolution.ro/api/gmail/callback",
         "SQLITE_URI": "libsql://c9387e26-e3a4-4492-aaf1-47996666131d-ots.navitech.cloud",
         "SQLITE_AUTH_TOKEN": "eyJhbGciOiJFZERTQSJ9.e30.ZkXHopDsGezNhZdlKyrKb4yOh9KcEL0CMd6Tl0MvWYRJMlUccb-P1mebPsB_AogaJzqyhr4t7tl-1m6Mjba2Cw",
@@ -28,7 +26,11 @@
         "SMTP_PORT": "2525",
         "SMTP_USER": "notify@app.navitech.cloud",
         "SMTP_PASSWORD": "FCsteaua89@",
-        "SMTP_FROM": "notify@app.navitech.cloud"
+        "SMTP_FROM": "notify@app.navitech.cloud",
+        "GOOGLE_CLIENT_ID": "169740600525-ekovgj5rp6dd4jh3vafhprh61nq48079.apps.googleusercontent.com",
+        "GOOGLE_CLIENT_SECRET": "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",
+        "GOOGLE_CLIENT_LOGIN_REDIRECT_URI": "https://clients.onetopsolution.ro/api/client-auth/google/callback"
+
       }
     }
   ],
