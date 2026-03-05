@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, count, sum, sql } from 'drizzle-orm';
+import { eq, and, count, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function generateClientWebsiteId() {
@@ -57,65 +57,58 @@ export const getClientWebsitesSeoStats = query(
 
 		const tenantId = event.locals.tenant.id;
 
-		const websites = await db
-			.select()
+		const rows = await db
+			.select({
+				website: table.clientWebsite,
+				totalLinks: sql<number>`count(${table.seoLink.id})`.as('total_links'),
+				publishedLinks:
+					sql<number>`sum(case when ${table.seoLink.status} = 'published' then 1 else 0 end)`.as(
+						'published_links'
+					),
+				dofollowLinks:
+					sql<number>`sum(case when ${table.seoLink.lastCheckDofollow} = 'dofollow' or ${table.seoLink.linkAttribute} = 'dofollow' then 1 else 0 end)`.as(
+						'dofollow_links'
+					),
+				okLinks:
+					sql<number>`sum(case when ${table.seoLink.lastCheckStatus} = 'ok' then 1 else 0 end)`.as(
+						'ok_links'
+					),
+				totalPriceRON:
+					sql<number>`coalesce(sum(case when ${table.seoLink.currency} = 'RON' then ${table.seoLink.price} else 0 end), 0)`.as(
+						'total_price_ron'
+					)
+			})
 			.from(table.clientWebsite)
+			.leftJoin(
+				table.seoLink,
+				and(
+					eq(table.seoLink.websiteId, table.clientWebsite.id),
+					eq(table.seoLink.tenantId, tenantId)
+				)
+			)
 			.where(
 				and(
 					eq(table.clientWebsite.clientId, clientId),
 					eq(table.clientWebsite.tenantId, tenantId)
 				)
-			);
+			)
+			.groupBy(table.clientWebsite.id);
 
-		const stats = await Promise.all(
-			websites.map(async (website) => {
-				const links = await db
-					.select({
-						id: table.seoLink.id,
-						status: table.seoLink.status,
-						linkAttribute: table.seoLink.linkAttribute,
-						lastCheckDofollow: table.seoLink.lastCheckDofollow,
-						lastCheckStatus: table.seoLink.lastCheckStatus,
-						price: table.seoLink.price,
-						currency: table.seoLink.currency
-					})
-					.from(table.seoLink)
-					.where(
-						and(
-							eq(table.seoLink.websiteId, website.id),
-							eq(table.seoLink.tenantId, tenantId)
-						)
-					);
-
-				const totalLinks = links.length;
-				const publishedLinks = links.filter((l) => l.status === 'published').length;
-				const dofollowLinks = links.filter(
-					(l) => l.lastCheckDofollow === 'dofollow' || l.linkAttribute === 'dofollow'
-				).length;
-				const okLinks = links.filter((l) => l.lastCheckStatus === 'ok').length;
-				const totalPriceRON = links
-					.filter((l) => l.currency === 'RON' && l.price)
-					.reduce((acc, l) => acc + (l.price ?? 0), 0);
-
-				return {
-					website,
-					totalLinks,
-					publishedLinks,
-					dofollowLinks,
-					okLinks,
-					totalPriceRON
-				};
-			})
-		);
-
-		return stats;
+		return rows.map((row) => ({
+			website: row.website,
+			totalLinks: row.totalLinks || 0,
+			publishedLinks: row.publishedLinks || 0,
+			dofollowLinks: row.dofollowLinks || 0,
+			okLinks: row.okLinks || 0,
+			totalPriceRON: row.totalPriceRON || 0
+		}));
 	}
 );
 
 const clientWebsiteSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1, 'Clientul este obligatoriu')),
 	name: v.optional(v.string()),
-	url: v.pipe(v.string(), v.minLength(1, 'URL-ul este obligatoriu')),
+	url: v.pipe(v.string(), v.minLength(1, 'URL-ul este obligatoriu'), v.maxLength(500), v.url('URL invalid')),
 	isDefault: v.optional(v.boolean())
 });
 
@@ -127,6 +120,19 @@ export const createClientWebsite = command(clientWebsiteSchema, async (data) => 
 	}
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
+	}
+
+	// Verify client belongs to tenant
+	const [clientBelongsToTenant] = await db
+		.select({ id: table.client.id })
+		.from(table.client)
+		.where(
+			and(eq(table.client.id, data.clientId), eq(table.client.tenantId, event.locals.tenant.id))
+		)
+		.limit(1);
+
+	if (!clientBelongsToTenant) {
+		throw new Error('Client not found');
 	}
 
 	const websiteId = generateClientWebsiteId();
@@ -307,22 +313,24 @@ export const setDefaultClientWebsite = command(
 
 		const now = new Date();
 
-		// Resetează toate la false
-		await db
-			.update(table.clientWebsite)
-			.set({ isDefault: false, updatedAt: now })
-			.where(
-				and(
-					eq(table.clientWebsite.clientId, website.clientId),
-					eq(table.clientWebsite.tenantId, event.locals.tenant.id)
-				)
-			);
+		await db.transaction(async (tx) => {
+			// Resetează toate la false
+			await tx
+				.update(table.clientWebsite)
+				.set({ isDefault: false, updatedAt: now })
+				.where(
+					and(
+						eq(table.clientWebsite.clientId, website.clientId),
+						eq(table.clientWebsite.tenantId, event.locals.tenant.id)
+					)
+				);
 
-		// Setează cel selectat
-		await db
-			.update(table.clientWebsite)
-			.set({ isDefault: true, updatedAt: now })
-			.where(eq(table.clientWebsite.id, websiteId));
+			// Setează cel selectat
+			await tx
+				.update(table.clientWebsite)
+				.set({ isDefault: true, updatedAt: now })
+				.where(eq(table.clientWebsite.id, websiteId));
+		});
 
 		return { success: true };
 	}

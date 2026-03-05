@@ -5,6 +5,20 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
+function isPrivateHost(hostname: string): boolean {
+	if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+	const parts = hostname.split('.').map(Number);
+	if (parts.length === 4 && parts.every((p) => !isNaN(p))) {
+		if (parts[0] === 10) return true;
+		if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+		if (parts[0] === 192 && parts[1] === 168) return true;
+		if (parts[0] === 169 && parts[1] === 254) return true;
+		if (parts[0] === 0) return true;
+	}
+	if (/\.(local|internal|corp|home|lan)$/i.test(hostname)) return true;
+	return false;
+}
+
 async function getNormalizeVatId() {
 	const { normalizeVatId } = await import('$lib/server/plugins/anaf-spv/mapper');
 	return normalizeVatId;
@@ -21,26 +35,26 @@ function generatePartnerId() {
 }
 
 const clientSchema = v.object({
-	name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
-	businessName: v.optional(v.string()),
-	email: v.optional(v.pipe(v.string(), v.email('Invalid email'))),
-	phone: v.optional(v.string()),
-	website: v.optional(v.string()),
-	status: v.optional(v.string()),
-	companyType: v.optional(v.string()),
-	cui: v.optional(v.string()),
-	registrationNumber: v.optional(v.string()),
-	tradeRegister: v.optional(v.string()),
-	vatNumber: v.optional(v.string()),
-	legalRepresentative: v.optional(v.string()),
-	iban: v.optional(v.string()),
-	bankName: v.optional(v.string()),
-	address: v.optional(v.string()),
-	city: v.optional(v.string()),
-	county: v.optional(v.string()),
-	postalCode: v.optional(v.string()),
-	country: v.optional(v.string()),
-	notes: v.optional(v.string())
+	name: v.pipe(v.string(), v.minLength(1, 'Name is required'), v.maxLength(255)),
+	businessName: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	email: v.optional(v.pipe(v.string(), v.email('Invalid email'), v.maxLength(255))),
+	phone: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	website: v.optional(v.pipe(v.string(), v.maxLength(500))),
+	status: v.optional(v.picklist(['prospect', 'active', 'inactive'])),
+	companyType: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	cui: v.optional(v.pipe(v.string(), v.maxLength(20))),
+	registrationNumber: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	tradeRegister: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	vatNumber: v.optional(v.pipe(v.string(), v.maxLength(30))),
+	legalRepresentative: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	iban: v.optional(v.pipe(v.string(), v.maxLength(34))),
+	bankName: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	address: v.optional(v.pipe(v.string(), v.maxLength(500))),
+	city: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	county: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	postalCode: v.optional(v.pipe(v.string(), v.maxLength(20))),
+	country: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	notes: v.optional(v.pipe(v.string(), v.maxLength(5000)))
 });
 
 export const getClients = query(async () => {
@@ -102,7 +116,8 @@ export const getClientFirstInvoiceDates = query(async () => {
 				return iso ? { clientId: r.clientId!, firstDate: iso } : null;
 			})
 			.filter((x): x is { clientId: string; firstDate: string } => x != null);
-	} catch {
+	} catch (e) {
+		console.error('[getClientFirstInvoiceDates]', e);
 		return [];
 	}
 });
@@ -174,7 +189,8 @@ export const getClientsStats = query(async () => {
 		}
 
 		return Array.from(aggregated.values());
-	} catch {
+	} catch (e) {
+		console.error('[getClientsStats]', e);
 		return [];
 	}
 });
@@ -216,6 +232,12 @@ export const getLogoFromWebsite = query(v.pipe(v.string(), v.minLength(1)), asyn
 	}
 
 	const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+	try {
+		const parsed = new URL(url);
+		if (isPrivateHost(parsed.hostname)) return null;
+	} catch {
+		return null;
+	}
 	let html: string;
 	try {
 		const res = await fetch(url, {
@@ -309,7 +331,7 @@ export const updateClient = command(
 			throw new Error('Unauthorized');
 		}
 
-		const { clientId, ...updateData } = data;
+		const { clientId, ...rest } = data;
 
 		// Verify client belongs to tenant
 		const [existing] = await db
@@ -322,7 +344,6 @@ export const updateClient = command(
 			throw new Error('Client not found');
 		}
 
-		const { clientId: _cid, ...rest } = updateData;
 		await db
 			.update(table.client)
 			.set({
@@ -369,12 +390,18 @@ export const getClientPartnerInfo = query(
 		if (client.vatNumber) {
 			const normalizeVatId = await getNormalizeVatId();
 			const normalizedVat = normalizeVatId(client.vatNumber);
-			const tenants = await db.select().from(table.tenant);
+			const tenants = await db
+				.select()
+				.from(table.tenant)
+				.where(
+					and(
+						sql`${table.tenant.vatNumber} IS NOT NULL`,
+						sql`${table.tenant.id} != ${event.locals.tenant.id}`
+					)
+				);
 
 			for (const t of tenants) {
-				if (!t.vatNumber) continue;
-				if (t.id === event.locals.tenant.id) continue;
-				if (normalizeVatId(t.vatNumber) === normalizedVat) {
+				if (normalizeVatId(t.vatNumber!) === normalizedVat) {
 					matchedTenant = t;
 					break;
 				}
@@ -460,12 +487,18 @@ export const setClientPartnerStatus = command(
 
 		const normalizeVatId = await getNormalizeVatId();
 		const normalizedVat = normalizeVatId(client.vatNumber);
-		const tenants = await db.select().from(table.tenant);
+		const tenants = await db
+			.select()
+			.from(table.tenant)
+			.where(
+				and(
+					sql`${table.tenant.vatNumber} IS NOT NULL`,
+					sql`${table.tenant.id} != ${event.locals.tenant.id}`
+				)
+			);
 
 		const partnerTenant = tenants.find((t) => {
-			if (!t.vatNumber) return false;
-			if (t.id === event.locals.tenant.id) return false;
-			return normalizeVatId(t.vatNumber) === normalizedVat;
+			return normalizeVatId(t.vatNumber!) === normalizedVat;
 		});
 
 		if (!partnerTenant) {
@@ -522,7 +555,34 @@ export const deleteClient = command(v.pipe(v.string(), v.minLength(1)), async (c
 		throw new Error('Client not found');
 	}
 
-	await db.delete(table.client).where(eq(table.client.id, clientId));
+	// Check for related records before deleting
+	const [invoiceCount] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(table.invoice)
+		.where(eq(table.invoice.clientId, clientId));
+
+	const [contractCount] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(table.contract)
+		.where(eq(table.contract.clientId, clientId));
+
+	const [projectCount] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(table.project)
+		.where(eq(table.project.clientId, clientId));
+
+	const refs: string[] = [];
+	if (invoiceCount?.count > 0) refs.push(`${invoiceCount.count} facturi`);
+	if (contractCount?.count > 0) refs.push(`${contractCount.count} contracte`);
+	if (projectCount?.count > 0) refs.push(`${projectCount.count} proiecte`);
+
+	if (refs.length > 0) {
+		throw new Error(`Nu se poate șterge clientul — are ${refs.join(', ')} asociate`);
+	}
+
+	await db
+		.delete(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)));
 
 	return { success: true };
 });

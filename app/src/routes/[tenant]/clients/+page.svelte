@@ -29,6 +29,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { toast } from 'svelte-sonner';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
@@ -158,6 +159,9 @@
 	}
 
 	let isDialogOpen = $state(false);
+	let deleteConfirmOpen = $state(false);
+	let deleteTargetId = $state<string | null>(null);
+	let deleteTargetName = $state('');
 	let editingClientId = $state<string | null>(null);
 	let editingName = $state('');
 	let editingLoading = $state(false);
@@ -166,7 +170,7 @@
 	let formEmail = $state('');
 	let formPhone = $state('');
 	let formCompany = $state('');
-	let formStatus = $state('prospect');
+	let formStatus = $state<'prospect' | 'active' | 'inactive'>('prospect');
 	let formLoading = $state(false);
 	let formError = $state<string | null>(null);
 
@@ -210,15 +214,22 @@
 		}
 	}
 
-	async function handleDeleteClient(clientId: string) {
-		if (!confirm('Are you sure you want to delete this client?')) {
-			return;
-		}
+	function requestDeleteClient(clientId: string, clientName: string) {
+		deleteTargetId = clientId;
+		deleteTargetName = clientName;
+		deleteConfirmOpen = true;
+	}
 
+	async function confirmDeleteClient() {
+		if (!deleteTargetId) return;
 		try {
-			await deleteClient(clientId).updates(clientsQuery);
+			await deleteClient(deleteTargetId).updates(clientsQuery);
+			toast.success('Client șters cu succes');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to delete client');
+			toast.error(e instanceof Error ? e.message : 'Failed to delete client');
+		} finally {
+			deleteConfirmOpen = false;
+			deleteTargetId = null;
 		}
 	}
 
@@ -240,7 +251,7 @@
 			await updateClient({ clientId: editingClientId, name: trimmed }).updates(clientsQuery);
 			editingClientId = null;
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to update client name');
+			toast.error(e instanceof Error ? e.message : 'Failed to update client name');
 		} finally {
 			editingLoading = false;
 		}
@@ -329,23 +340,23 @@
 			<div class="grid gap-4 py-4">
 				<div class="grid gap-2">
 					<Label for="name">Full Name</Label>
-					<Input id="name" bind:value={formName} placeholder="John Doe" />
+					<Input id="name" bind:value={formName} placeholder="John Doe" disabled={formLoading} />
 				</div>
 				<div class="grid gap-2">
 					<Label for="email">Email</Label>
-					<Input id="email" type="email" bind:value={formEmail} placeholder="john@example.com" />
+					<Input id="email" type="email" bind:value={formEmail} placeholder="john@example.com" disabled={formLoading} />
 				</div>
 				<div class="grid gap-2">
 					<Label for="phone">Phone</Label>
-					<Input id="phone" type="tel" bind:value={formPhone} placeholder="+1 555-0123" />
+					<Input id="phone" type="tel" bind:value={formPhone} placeholder="+1 555-0123" disabled={formLoading} />
 				</div>
 				<div class="grid gap-2">
 					<Label for="company">Company</Label>
-					<Input id="company" bind:value={formCompany} placeholder="Acme Corp" />
+					<Input id="company" bind:value={formCompany} placeholder="Acme Corp" disabled={formLoading} />
 				</div>
 				<div class="grid gap-2">
 					<Label for="status">Status</Label>
-					<Select type="single" bind:value={formStatus}>
+					<Select type="single" bind:value={formStatus} disabled={formLoading}>
 						<SelectTrigger id="status">
 							{#if formStatus === 'prospect'}
 								Prospect
@@ -496,7 +507,7 @@
 							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/clients/${client.id}`)}>
 								Detalii
 							</DropdownMenuItem>
-							<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteClient(client.id)}>
+							<DropdownMenuItem class="text-destructive" onclick={() => requestDeleteClient(client.id, client.name)}>
 								Șterge
 							</DropdownMenuItem>
 						</DropdownMenuContent>
@@ -574,3 +585,18 @@
 		{/each}
 	</div>
 {/if}
+
+<Dialog bind:open={deleteConfirmOpen}>
+	<DialogContent class="sm:max-w-[400px]">
+		<DialogHeader>
+			<DialogTitle>Șterge client</DialogTitle>
+			<DialogDescription>
+				Ești sigur că vrei să ștergi clientul <strong>{deleteTargetName}</strong>? Această acțiune nu poate fi anulată.
+			</DialogDescription>
+		</DialogHeader>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (deleteConfirmOpen = false)}>Anulează</Button>
+			<Button variant="destructive" onclick={confirmDeleteClient}>Șterge</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
