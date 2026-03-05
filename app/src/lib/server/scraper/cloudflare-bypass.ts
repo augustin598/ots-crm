@@ -1,11 +1,6 @@
-import puppeteerCore from 'puppeteer-core';
-import { addExtra } from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import puppeteer from 'puppeteer-core';
 import type { Browser } from 'puppeteer-core';
 import { findChromePath } from './find-chrome';
-
-const puppeteer = addExtra(puppeteerCore);
-puppeteer.use(StealthPlugin());
 
 // ── Constants ──────────────────────────────────────────────────────
 const BROWSER_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -175,6 +170,13 @@ async function fetchWithPuppeteer(url: string, timeoutMs: number): Promise<strin
 	const page = await browser.newPage();
 
 	try {
+		// Manual stealth settings (replaces puppeteer-extra-plugin-stealth)
+		await page.setUserAgent(
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+		);
+		await page.evaluateOnNewDocument(() => {
+			Object.defineProperty(navigator, 'webdriver', { get: () => false });
+		});
 		await page.setViewport({ width: 1920, height: 1080 });
 		await page.setExtraHTTPHeaders({
 			'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7'
