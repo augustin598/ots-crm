@@ -16,7 +16,8 @@
 	import {
 		getClientSecondaryEmails,
 		createClientSecondaryEmail,
-		deleteClientSecondaryEmail
+		deleteClientSecondaryEmail,
+		updateClientSecondaryEmailNotifications
 	} from '$lib/remotes/client-secondary-emails.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { goto } from '$app/navigation';
@@ -115,6 +116,25 @@
 			toast.success('Email secundar șters');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		}
+	}
+
+	async function handleToggleNotification(
+		secondaryEmailId: string,
+		field: 'notifyInvoices' | 'notifyTasks' | 'notifyContracts',
+		value: boolean
+	) {
+		const se = secondaryEmails.find((s: any) => s.id === secondaryEmailId);
+		if (!se) return;
+		try {
+			await updateClientSecondaryEmailNotifications({
+				secondaryEmailId,
+				notifyInvoices: field === 'notifyInvoices' ? value : (se.notifyInvoices ?? false),
+				notifyTasks: field === 'notifyTasks' ? value : (se.notifyTasks ?? false),
+				notifyContracts: field === 'notifyContracts' ? value : (se.notifyContracts ?? false)
+			}).updates(secondaryEmailsQuery);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare notificări');
 		}
 	}
 
@@ -395,22 +415,51 @@
 							{#if secondaryEmails.length > 0}
 								<div class="space-y-2">
 									{#each secondaryEmails as se (se.id)}
-										<div class="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 group hover:bg-muted/30 transition-colors">
-											<div class="flex-1 min-w-0">
-												<p class="text-sm font-medium">{se.email}</p>
-												{#if se.label}
-													<p class="text-xs text-muted-foreground">{se.label}</p>
-												{/if}
+										<div class="rounded-lg border bg-card px-3 py-2.5 group hover:bg-muted/30 transition-colors">
+											<div class="flex items-center gap-2">
+												<div class="flex-1 min-w-0">
+													<p class="text-sm font-medium">{se.email}</p>
+													{#if se.label}
+														<p class="text-xs text-muted-foreground">{se.label}</p>
+													{/if}
+												</div>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													class="h-7 w-7 p-0 text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+													onclick={() => handleDeleteSecondaryEmail(se.id)}
+												>
+													<TrashIcon class="h-3.5 w-3.5" />
+												</Button>
 											</div>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												class="h-7 w-7 p-0 text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-												onclick={() => handleDeleteSecondaryEmail(se.id)}
-											>
-												<TrashIcon class="h-3.5 w-3.5" />
-											</Button>
+											<div class="flex items-center gap-1.5 mt-2">
+												<span class="text-[10px] text-muted-foreground mr-0.5">Notificări:</span>
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyInvoices ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
+													onclick={() => handleToggleNotification(se.id, 'notifyInvoices', !se.notifyInvoices)}
+												>
+													{#if se.notifyInvoices}<CheckIcon class="h-3 w-3" />{/if}
+													Facturi
+												</button>
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyTasks ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
+													onclick={() => handleToggleNotification(se.id, 'notifyTasks', !se.notifyTasks)}
+												>
+													{#if se.notifyTasks}<CheckIcon class="h-3 w-3" />{/if}
+													Taskuri
+												</button>
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyContracts ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
+													onclick={() => handleToggleNotification(se.id, 'notifyContracts', !se.notifyContracts)}
+												>
+													{#if se.notifyContracts}<CheckIcon class="h-3 w-3" />{/if}
+													Contracte
+												</button>
+											</div>
 										</div>
 									{/each}
 								</div>
@@ -456,7 +505,7 @@
 							{/if}
 
 							<p class="text-xs text-muted-foreground">
-								Emailurile secundare pot accesa portalul client dar nu pot vedea contractele sau facturile.
+								Emailul principal primește toate notificările. Bifați categoriile dorite pentru emailurile secundare.
 							</p>
 						</div>
 

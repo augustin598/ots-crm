@@ -1086,6 +1086,9 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 		.references(() => client.id),
 	email: text('email').notNull(),
 	label: text('label'),
+	notifyInvoices: boolean('notify_invoices').notNull().default(false),
+	notifyTasks: boolean('notify_tasks').notNull().default(false),
+	notifyContracts: boolean('notify_contracts').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

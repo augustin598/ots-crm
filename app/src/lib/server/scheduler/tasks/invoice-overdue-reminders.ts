@@ -1,7 +1,7 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lt, lte } from 'drizzle-orm';
-import { sendOverdueReminderEmail } from '../../email';
+import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 
 /**
  * Process invoice overdue reminders - finds overdue invoices for tenants
@@ -90,13 +90,16 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							continue;
 						}
 
-						// Send reminder email
-						await sendOverdueReminderEmail(
-							invoice.id,
-							client.email,
-							daysOverdue,
-							reminderCount + 1
-						);
+						// Send reminder email to primary + secondary with invoices enabled
+						const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
+						for (const recipientEmail of recipients) {
+							await sendOverdueReminderEmail(
+								invoice.id,
+								recipientEmail,
+								daysOverdue,
+								reminderCount + 1
+							);
+						}
 
 						// Update invoice tracking
 						await db

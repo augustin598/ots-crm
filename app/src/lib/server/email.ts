@@ -12,6 +12,56 @@ import {
 	logEmailFailure
 } from './email-logger';
 
+// ---------------------------------------------------------------------------
+// Notification recipients helper
+// ---------------------------------------------------------------------------
+
+export type NotificationCategory = 'invoices' | 'tasks' | 'contracts';
+
+/**
+ * Returns all email addresses that should receive a notification for a given client + category.
+ * Always includes the primary client.email, then any secondary emails with the matching toggle.
+ */
+export async function getNotificationRecipients(
+	clientId: string,
+	category: NotificationCategory
+): Promise<string[]> {
+	const [client] = await db
+		.select({ email: table.client.email })
+		.from(table.client)
+		.where(eq(table.client.id, clientId))
+		.limit(1);
+
+	const emails: string[] = [];
+	if (client?.email) {
+		emails.push(client.email);
+	}
+
+	const columnMap = {
+		invoices: table.clientSecondaryEmail.notifyInvoices,
+		tasks: table.clientSecondaryEmail.notifyTasks,
+		contracts: table.clientSecondaryEmail.notifyContracts
+	} as const;
+
+	const secondaryEmails = await db
+		.select({ email: table.clientSecondaryEmail.email })
+		.from(table.clientSecondaryEmail)
+		.where(
+			and(
+				eq(table.clientSecondaryEmail.clientId, clientId),
+				eq(columnMap[category], true)
+			)
+		);
+
+	for (const se of secondaryEmails) {
+		if (se.email && !emails.map((e) => e.toLowerCase()).includes(se.email.toLowerCase())) {
+			emails.push(se.email);
+		}
+	}
+
+	return emails;
+}
+
 // Cache tenant-specific transporters
 const tenantTransporters = new Map<string, nodemailer.Transporter>();
 

@@ -2,7 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
-import { sendInvoiceEmail } from '../../email';
+import { sendInvoiceEmail, getNotificationRecipients } from '../../email';
 
 /**
  * Process recurring invoices - finds active recurring invoices that are due
@@ -117,7 +117,10 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 		return;
 	}
 
-	await sendInvoiceEmail(invoiceId, client.email);
+	const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
+	for (const recipientEmail of recipients) {
+		await sendInvoiceEmail(invoiceId, recipientEmail);
+	}
 
 	await db
 		.update(table.invoice)
@@ -128,5 +131,5 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 		})
 		.where(eq(table.invoice.id, invoiceId));
 
-	console.log(`Auto-sent recurring invoice ${invoice.invoiceNumber} to ${client.email}`);
+	console.log(`Auto-sent recurring invoice ${invoice.invoiceNumber} to ${recipients.join(', ')}`);
 }

@@ -85,6 +85,45 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 	return { success: true, id };
 });
 
+/** Update notification preferences for a secondary email (admin only) */
+export const updateClientSecondaryEmailNotifications = command(
+	v.object({
+		secondaryEmailId: v.pipe(v.string(), v.minLength(1)),
+		notifyInvoices: v.boolean(),
+		notifyTasks: v.boolean(),
+		notifyContracts: v.boolean()
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+		const [record] = await db
+			.select({ id: table.clientSecondaryEmail.id })
+			.from(table.clientSecondaryEmail)
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.id, data.secondaryEmailId),
+					eq(table.clientSecondaryEmail.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+		if (!record) throw new Error('Email secundar negăsit');
+
+		await db
+			.update(table.clientSecondaryEmail)
+			.set({
+				notifyInvoices: data.notifyInvoices,
+				notifyTasks: data.notifyTasks,
+				notifyContracts: data.notifyContracts,
+				updatedAt: new Date()
+			})
+			.where(eq(table.clientSecondaryEmail.id, data.secondaryEmailId));
+
+		return { success: true };
+	}
+);
+
 /** Delete a secondary email */
 export const deleteClientSecondaryEmail = command(
 	v.object({ secondaryEmailId: v.pipe(v.string(), v.minLength(1)) }),

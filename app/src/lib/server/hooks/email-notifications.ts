@@ -1,5 +1,5 @@
 import { getHooksManager } from '../plugins/hooks';
-import { sendInvoicePaidEmail } from '../email';
+import { sendInvoicePaidEmail, getNotificationRecipients } from '../email';
 import { db } from '../db';
 import * as table from '../db/schema';
 import { eq } from 'drizzle-orm';
@@ -47,9 +47,12 @@ export function registerEmailNotificationHooks(): void {
 				return;
 			}
 
-			// Send payment confirmation email
-			await sendInvoicePaidEmail(invoice.id, client.email);
-			console.log(`Invoice paid email sent to ${client.email} for invoice ${invoice.invoiceNumber}`);
+			// Send payment confirmation email to primary + secondary with invoices enabled
+			const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
+			for (const recipientEmail of recipients) {
+				await sendInvoicePaidEmail(invoice.id, recipientEmail);
+			}
+			console.log(`Invoice paid email sent to ${recipients.join(', ')} for invoice ${invoice.invoiceNumber}`);
 		} catch (error) {
 			console.error('Failed to send invoice paid email notification:', error);
 			// Don't throw - hooks are designed to not fail other handlers

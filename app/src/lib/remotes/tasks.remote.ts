@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail } from '$lib/server/email';
+import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import { recordTaskActivity } from '$lib/server/task-activity';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
@@ -44,7 +44,7 @@ async function sendClientNotificationIfEnabled(
 
 		if (!task?.clientId) return;
 
-		// Get client email
+		// Get client + all secondary emails with tasks notification enabled
 		const [client] = await db
 			.select()
 			.from(table.client)
@@ -53,13 +53,16 @@ async function sendClientNotificationIfEnabled(
 
 		if (!client?.email) return;
 
-		await sendTaskClientNotificationEmail(
-			taskId,
-			client.email,
-			client.name || client.email,
-			notificationType,
-			extra
-		);
+		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
+		for (const recipientEmail of recipients) {
+			await sendTaskClientNotificationEmail(
+				taskId,
+				recipientEmail,
+				client.name || client.email,
+				notificationType,
+				extra
+			);
+		}
 	} catch (error) {
 		console.error(`Failed to send client notification (${notificationType}):`, error);
 	}

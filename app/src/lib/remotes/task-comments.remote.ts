@@ -5,7 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { recordTaskActivity } from '$lib/server/task-activity';
-import { sendTaskUpdateEmail, sendTaskClientNotificationEmail } from '$lib/server/email';
+import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 
 function generateTaskCommentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -130,13 +130,16 @@ export const createTaskComment = command(
 
 				if (client?.email) {
 					try {
-						await sendTaskClientNotificationEmail(
-							data.taskId,
-							client.email,
-							client.name || client.email,
-							'comment',
-							{ commentPreview: data.content }
-						);
+						const recipients = await getNotificationRecipients(task.clientId, 'tasks');
+						for (const recipientEmail of recipients) {
+							await sendTaskClientNotificationEmail(
+								data.taskId,
+								recipientEmail,
+								client.name || client.email,
+								'comment',
+								{ commentPreview: data.content }
+							);
+						}
 					} catch (error) {
 						console.error('Failed to send comment notification to client:', error);
 					}

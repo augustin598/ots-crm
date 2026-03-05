@@ -5,7 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, like, sql, lt, gte, lte, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from '$lib/server/plugins/hooks';
-import { sendInvoiceEmail } from '$lib/server/email';
+import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 
 function generateInvoiceLineItemId() {
@@ -877,7 +877,10 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	// Send email to client only if enabled
 	if (invoiceEmailsEnabled && client?.email) {
 		try {
-			await sendInvoiceEmail(invoiceId, client.email);
+			const recipients = await getNotificationRecipients(existing.clientId, 'invoices');
+			for (const recipientEmail of recipients) {
+				await sendInvoiceEmail(invoiceId, recipientEmail);
+			}
 			// Email sent successfully
 			updateData.lastEmailSentAt = new Date();
 			updateData.lastEmailStatus = 'sent';
