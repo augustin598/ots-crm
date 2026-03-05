@@ -325,7 +325,7 @@
 
 	<!-- Category tabs -->
 	<Tabs value={activeCategory} class="w-full">
-		<TabsList class="grid w-full grid-cols-3 sm:grid-cols-6">
+		<TabsList class="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
 			<TabsTrigger value="all" onclick={() => { activeCategory = 'all'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
 				<Layers3Icon class="h-4 w-4 mr-1.5 shrink-0" /> Toate
 			</TabsTrigger>
