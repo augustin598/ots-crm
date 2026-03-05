@@ -213,6 +213,8 @@
 			deleteTarget = null;
 		} catch (e: any) {
 			toast.error(e?.message || 'Eroare la ștergere');
+			deleteConfirmOpen = false;
+			deleteTarget = null;
 		} finally {
 			deleting = false;
 		}

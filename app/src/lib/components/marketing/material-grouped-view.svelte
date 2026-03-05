@@ -50,13 +50,27 @@
 			if (!map.has(cat)) map.set(cat, []);
 			map.get(cat)!.push(m);
 		}
-		return CATEGORY_ORDER
+		const result = CATEGORY_ORDER
 			.filter((cat) => map.has(cat))
 			.map((cat) => ({
-				category: cat,
+				category: cat as string,
 				meta: CATEGORY_META[cat],
 				materials: map.get(cat)!
 			}));
+		// Include materials with unknown categories under "Altele"
+		const knownCats = new Set<string>(CATEGORY_ORDER);
+		const unknownMaterials: any[] = [];
+		for (const [cat, mats] of map) {
+			if (!knownCats.has(cat)) unknownMaterials.push(...mats);
+		}
+		if (unknownMaterials.length > 0) {
+			result.push({
+				category: '_other',
+				meta: { label: 'Altele', icon: NewspaperIcon, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-950' },
+				materials: unknownMaterials
+			});
+		}
+		return result;
 	});
 
 	// Collapsed state per category

@@ -126,7 +126,7 @@
 		}
 	}
 
-	const sortedMaterials = $derived(() => {
+	const sortedMaterials = $derived.by(() => {
 		const arr = [...materials];
 		arr.sort((a, b) => {
 			let cmp = 0;
@@ -225,7 +225,7 @@
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
-			{#each sortedMaterials() as material (material.id)}
+			{#each sortedMaterials as material (material.id)}
 				{@const colors = typeColors[material.type] || { bg: 'bg-gray-50 dark:bg-gray-900', text: 'text-gray-500' }}
 				{@const IconComponent = typeIcons[material.type] || FileTextIcon}
 				{@const tags = parseTags(material.tags)}

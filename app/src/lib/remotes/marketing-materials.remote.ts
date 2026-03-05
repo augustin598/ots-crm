@@ -243,6 +243,18 @@ export const updateMarketingMaterial = command(updateSchema, async (data) => {
 		throw new Error('Material negăsit sau fără permisiune');
 	}
 
+	// Validate seoLinkId FK if being updated
+	if (data.seoLinkId) {
+		const [seoCheck] = await db
+			.select({ id: table.seoLink.id })
+			.from(table.seoLink)
+			.where(and(eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)))
+			.limit(1);
+		if (!seoCheck) {
+			throw new Error('SEO Link invalid');
+		}
+	}
+
 	const isClientUser = event.locals.isClientUser;
 	const updateData: Record<string, any> = { updatedAt: new Date() };
 	if (data.title !== undefined) updateData.title = data.title;
@@ -444,7 +456,7 @@ const socialUrlSetsSchema = v.object({
 		),
 		v.minLength(1)
 	),
-	tags: v.nullable(v.pipe(v.string(), v.maxLength(500))),
+	tags: v.nullable(v.pipe(v.string(), v.maxLength(500), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))),
 	taskId: v.nullable(v.string())
 });
 

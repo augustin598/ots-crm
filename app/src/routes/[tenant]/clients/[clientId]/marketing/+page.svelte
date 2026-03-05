@@ -138,6 +138,8 @@
 			deleteTarget = null;
 		} catch (e: any) {
 			toast.error(e?.message || 'Eroare la ștergere');
+			deleteConfirmOpen = false;
+			deleteTarget = null;
 		} finally {
 			deleting = false;
 		}
@@ -233,6 +235,7 @@
 						<Button variant="outline" class="mt-3" onclick={() => {
 							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 							else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
+							else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
 							else { uploadDialogOpen = true; }
 						}}>
 							<PlusIcon class="h-4 w-4 mr-2" />

@@ -29,7 +29,8 @@
 	const DOC_TYPES = [
 		'application/pdf',
 		'application/msword',
-		'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+		'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		'text/plain'
 	];
 
 	const CONFIG: Record<FileFilterType, { types: string[]; maxSize: number; accept: string; label: string; sizeLabel: string }> = {
@@ -51,7 +52,7 @@
 			types: DOC_TYPES,
 			maxSize: 10 * 1024 * 1024,
 			accept: DOC_TYPES.join(','),
-			label: 'PDF, DOC, DOCX',
+			label: 'PDF, DOC, DOCX, TXT',
 			sizeLabel: '10MB'
 		}
 	};
@@ -171,6 +172,11 @@
 		}
 
 		uploading = false;
+
+		// Re-check for items added while we were processing
+		if (fileQueue.some((f) => f.status === 'pending')) {
+			processQueue();
+		}
 	}
 
 	function handleDrop(e: DragEvent) {

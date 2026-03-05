@@ -212,8 +212,7 @@
 		try {
 			const result = await getMaterialDownloadUrl(material.id);
 			window.open(result.url, '_blank');
-		} catch (e) {
-			console.error('Download error:', e);
+		} catch {
 			toast.error('Eroare la descărcarea fișierului');
 		} finally {
 			downloading = false;

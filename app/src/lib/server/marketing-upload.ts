@@ -225,6 +225,16 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		throw error(400, 'clientId, category și title sunt obligatorii');
 	}
 
+	if (title.length > 200) {
+		throw error(400, 'Titlul nu poate depăși 200 de caractere');
+	}
+	if (description && description.length > 1000) {
+		throw error(400, 'Descrierea nu poate depăși 1000 de caractere');
+	}
+	if (tags && tags.length > 500) {
+		throw error(400, 'Tagurile nu pot depăși 500 de caractere');
+	}
+
 	const validCategories = ['google-ads', 'facebook-ads', 'tiktok-ads', 'press-article', 'seo-article'];
 	if (!validCategories.includes(category)) {
 		throw error(400, 'Categorie invalidă');
@@ -323,26 +333,32 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		}
 	}
 
-	await db.insert(table.marketingMaterial).values({
-		id: materialId,
-		tenantId,
-		clientId,
-		category,
-		type: materialType,
-		title,
-		description,
-		filePath: uploadResult.path,
-		fileSize: uploadResult.size,
-		mimeType: uploadResult.mimeType,
-		fileName: file.name,
-		dimensions,
-		seoLinkId,
-		status: 'active',
-		campaignType,
-		uploadedByUserId: isClientUser ? null : userId,
-		uploadedByClientUserId: clientUserId || null,
-		tags
-	});
+	try {
+		await db.insert(table.marketingMaterial).values({
+			id: materialId,
+			tenantId,
+			clientId,
+			category,
+			type: materialType,
+			title,
+			description,
+			filePath: uploadResult.path,
+			fileSize: uploadResult.size,
+			mimeType: uploadResult.mimeType,
+			fileName: file.name,
+			dimensions,
+			seoLinkId,
+			status: 'active',
+			campaignType,
+			uploadedByUserId: isClientUser ? null : userId,
+			uploadedByClientUserId: clientUserId || null,
+			tags
+		});
+	} catch (dbErr) {
+		// Cleanup orphan file from storage
+		try { await storage.deleteFile(uploadResult.path); } catch { /* best effort */ }
+		throw dbErr;
+	}
 
 	return json({ success: true, materialId });
 }
@@ -368,6 +384,16 @@ export async function handleArticleUpload(event: RequestEvent): Promise<Response
 
 	if (!clientId || !category || !title) {
 		throw error(400, 'clientId, category și title sunt obligatorii');
+	}
+
+	if (title.length > 200) {
+		throw error(400, 'Titlul nu poate depăși 200 de caractere');
+	}
+	if (description && description.length > 1000) {
+		throw error(400, 'Descrierea nu poate depăși 1000 de caractere');
+	}
+	if (tags && tags.length > 500) {
+		throw error(400, 'Tagurile nu pot depăși 500 de caractere');
 	}
 
 	if (category !== 'press-article' && category !== 'seo-article') {
@@ -487,24 +513,33 @@ export async function handleArticleUpload(event: RequestEvent): Promise<Response
 
 	const materialId = generateMaterialId();
 
-	await db.insert(table.marketingMaterial).values({
-		id: materialId,
-		tenantId,
-		clientId,
-		category,
-		type: 'document',
-		title,
-		description,
-		filePath: docUpload.path,
-		fileSize: docUpload.size,
-		mimeType: docUpload.mimeType,
-		fileName: file.name,
-		attachedImages: attachedImages.length > 0 ? JSON.stringify(attachedImages) : null,
-		status: 'active',
-		uploadedByUserId: isClientUser ? null : userId,
-		uploadedByClientUserId: clientUserId || null,
-		tags
-	});
+	try {
+		await db.insert(table.marketingMaterial).values({
+			id: materialId,
+			tenantId,
+			clientId,
+			category,
+			type: 'document',
+			title,
+			description,
+			filePath: docUpload.path,
+			fileSize: docUpload.size,
+			mimeType: docUpload.mimeType,
+			fileName: file.name,
+			attachedImages: attachedImages.length > 0 ? JSON.stringify(attachedImages) : null,
+			status: 'active',
+			uploadedByUserId: isClientUser ? null : userId,
+			uploadedByClientUserId: clientUserId || null,
+			tags
+		});
+	} catch (dbErr) {
+		// Cleanup orphan files from storage
+		const filesToClean = [docUpload.path, ...attachedImages.map((i) => i.filePath)];
+		for (const fp of filesToClean) {
+			try { await storage.deleteFile(fp); } catch { /* best effort */ }
+		}
+		throw dbErr;
+	}
 
 	return json({ success: true, materialId });
 }

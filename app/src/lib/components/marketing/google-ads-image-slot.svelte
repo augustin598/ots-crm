@@ -141,6 +141,11 @@
 		}
 
 		processing = false;
+
+		// Re-check for items added while we were processing
+		if (queue.some((q) => q.status === 'pending')) {
+			processQueue();
+		}
 	}
 
 	function handleDrop(e: DragEvent) {
