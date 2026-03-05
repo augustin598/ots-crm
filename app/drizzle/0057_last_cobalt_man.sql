@@ -1,4 +1,4 @@
-CREATE TABLE `marketing_material` (
+CREATE TABLE IF NOT EXISTS `marketing_material` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE `marketing_material` (
 	FOREIGN KEY (`uploaded_by_client_user_id`) REFERENCES `client_user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `task_marketing_material` (
+CREATE TABLE IF NOT EXISTS `task_marketing_material` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`task_id` text NOT NULL,
@@ -40,6 +40,3 @@ CREATE TABLE `task_marketing_material` (
 	FOREIGN KEY (`marketing_material_id`) REFERENCES `marketing_material`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`added_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
---> statement-breakpoint
-ALTER TABLE `seo_link` ADD `extracted_links` text;--> statement-breakpoint
-ALTER TABLE `tenant` ADD `theme_color` text;
