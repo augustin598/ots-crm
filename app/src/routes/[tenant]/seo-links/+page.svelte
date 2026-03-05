@@ -101,6 +101,9 @@
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import XIcon from '@lucide/svelte/icons/x';
 	import FileIcon from '@lucide/svelte/icons/file';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import EyeIcon from '@lucide/svelte/icons/eye';
+	import { getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import * as Popover from '$lib/components/ui/popover';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
@@ -478,6 +481,16 @@
 	let articleModalLoading = $state(false);
 	let articleModalFileInput = $state<HTMLInputElement | null>(null);
 
+	async function downloadArticleMaterial(materialId: string | null) {
+		if (!materialId) return;
+		try {
+			const result = await getMaterialDownloadUrl(materialId);
+			window.open(result.url, '_blank');
+		} catch (err) {
+			toast.error('Nu s-a putut descărca documentul');
+		}
+	}
+
 	function openArticleModal(link: (typeof seoLinks)[0]) {
 		articleModalLinkId = link.id;
 		articleModalLink = link;
@@ -515,7 +528,7 @@
 				formData.append('file', articleModalFile);
 				formData.append('clientId', articleModalLink.clientId);
 				formData.append('category', articleModalOption);
-				formData.append('title', `${articleModalLink.keyword}${articleModalLink.pressTrust ? ' - ' + articleModalLink.pressTrust : ''}`);
+				formData.append('title', articleModalFile.name.replace(/\.[^.]+$/, ''));
 				formData.append('seoLinkId', articleModalLinkId);
 
 				const res = await fetch(`/${tenantSlug}/marketing-materials/upload`, {
@@ -3170,6 +3183,14 @@
 									{:else if link.articleType === 'press-article'}
 										<div class="flex items-center gap-1.5">
 											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-orange-50 text-orange-700 border-orange-200">Presă</Badge>
+											{#if link.materialId}
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Vezi document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<EyeIcon class="h-3 w-3" />
+												</button>
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Descarcă document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<DownloadIcon class="h-3 w-3" />
+												</button>
+											{/if}
 											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModal(link)}>
 												<EditIcon class="h-3 w-3" />
 											</button>
@@ -3177,6 +3198,14 @@
 									{:else if link.articleType === 'seo-article'}
 										<div class="flex items-center gap-1.5">
 											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-blue-50 text-blue-700 border-blue-200">SEO</Badge>
+											{#if link.materialId}
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Vezi document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<EyeIcon class="h-3 w-3" />
+												</button>
+												<button type="button" class="text-muted-foreground hover:text-foreground" title="Descarcă document" onclick={() => downloadArticleMaterial(link.materialId)}>
+													<DownloadIcon class="h-3 w-3" />
+												</button>
+											{/if}
 											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModal(link)}>
 												<EditIcon class="h-3 w-3" />
 											</button>

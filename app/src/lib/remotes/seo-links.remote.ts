@@ -3,7 +3,7 @@ import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, asc, or, isNull, isNotNull, inArray, like, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, or, isNull, isNotNull, inArray, like, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
 import { fetchWithCloudflareFallback } from '$lib/server/scraper/cloudflare-bypass';
@@ -151,7 +151,14 @@ export const getSeoLinks = query(
 		}
 
 		const links = await db
-			.select()
+			.select({
+				...getTableColumns(table.seoLink),
+				materialId: sql<string | null>`(
+					SELECT "id" FROM "marketing_material"
+					WHERE "marketing_material"."seo_link_id" = "seo_link"."id"
+					LIMIT 1
+				)`.as('materialId')
+			})
 			.from(table.seoLink)
 			.where(conditions)
 			.orderBy(
@@ -417,13 +424,12 @@ export const updateSeoLink = command(updateSeoLinkSchema,
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
 
-		// Cleanup marketing material when articleType changes away from press/seo
+		// Cleanup marketing material when articleType changes
 		const newArticleType = updateData.articleType !== undefined ? updateData.articleType : existing.articleType;
 		const oldArticleType = existing.articleType;
 		const wasMarketingType = oldArticleType === 'press-article' || oldArticleType === 'seo-article';
-		const isStillMarketingType = newArticleType === 'press-article' || newArticleType === 'seo-article';
 
-		if (wasMarketingType && !isStillMarketingType) {
+		if (wasMarketingType && oldArticleType !== newArticleType) {
 			await db.delete(table.marketingMaterial)
 				.where(eq(table.marketingMaterial.seoLinkId, seoLinkId));
 		}
@@ -455,6 +461,7 @@ export const deleteSeoLink = command(
 			throw new Error('Link SEO nu a fost găsit');
 		}
 
+		await db.delete(table.marketingMaterial).where(eq(table.marketingMaterial.seoLinkId, seoLinkId));
 		await db.delete(table.seoLink).where(eq(table.seoLink.id, seoLinkId));
 
 		return { success: true };
@@ -471,6 +478,7 @@ export const deleteSeoLinksBulk = command(
 
 		if (ids.length === 0) return { deleted: 0 };
 
+		await db.delete(table.marketingMaterial).where(inArray(table.marketingMaterial.seoLinkId, ids));
 		await db.delete(table.seoLink).where(
 			and(
 				inArray(table.seoLink.id, ids),
