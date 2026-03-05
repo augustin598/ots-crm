@@ -38,6 +38,7 @@ export const getTaskMaterials = query(
 				materialExternalUrl: table.marketingMaterial.externalUrl,
 				materialFileName: table.marketingMaterial.fileName,
 				materialCategory: table.marketingMaterial.category,
+				materialTextContent: table.marketingMaterial.textContent,
 				createdAt: table.taskMarketingMaterial.createdAt
 			})
 			.from(table.taskMarketingMaterial)

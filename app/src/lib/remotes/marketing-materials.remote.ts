@@ -356,3 +356,99 @@ export const getMaterialDownloadUrl = query(
 		return { url, fileName: material.fileName, mimeType: material.mimeType };
 	}
 );
+
+// --- Social URL Sets (TikTok / Facebook) ---
+
+const socialUrlSetsSchema = v.object({
+	clientId: v.pipe(v.string(), v.minLength(1)),
+	category: v.picklist(['facebook-ads', 'tiktok-ads']),
+	sets: v.pipe(
+		v.array(
+			v.object({
+				title: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+				urls: v.pipe(v.array(v.pipe(v.string(), v.minLength(1))), v.minLength(1))
+			})
+		),
+		v.minLength(1)
+	),
+	tags: v.nullable(v.pipe(v.string(), v.maxLength(500))),
+	taskId: v.nullable(v.string())
+});
+
+export const createSocialUrlSets = command(socialUrlSetsSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const tenantId = event.locals.tenant.id;
+	const isClientUser = event.locals.isClientUser;
+
+	// Validate client belongs to tenant
+	if (isClientUser && event.locals.client) {
+		if (data.clientId !== event.locals.client.id) {
+			throw new Error('Nu puteți crea materiale pentru alt client');
+		}
+	} else {
+		const [clientCheck] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!clientCheck) throw new Error('Client invalid');
+	}
+
+	// Validate taskId if provided
+	if (data.taskId) {
+		const [taskCheck] = await db
+			.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId)))
+			.limit(1);
+		if (!taskCheck) throw new Error('Task invalid');
+	}
+
+	// Validate all URLs
+	for (const set of data.sets) {
+		for (const url of set.urls) {
+			if (!isValidHttpUrl(url)) {
+				throw new Error(`URL invalid în setul "${set.title}": ${url}`);
+			}
+		}
+	}
+
+	const categoryLabel = data.category === 'tiktok-ads' ? 'TikTok Ads' : 'Facebook Ads';
+	const dateStr = new Date().toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' });
+	const materialId = generateMaterialId();
+
+	await db.transaction(async (tx) => {
+		await tx.insert(table.marketingMaterial).values({
+			id: materialId,
+			tenantId,
+			clientId: data.clientId,
+			category: data.category,
+			type: 'url',
+			title: `${categoryLabel} — ${dateStr}`,
+			textContent: JSON.stringify(data.sets.map(s => ({ title: s.title, urls: s.urls }))),
+			externalUrl: data.sets[0].urls[0],
+			tags: data.tags || null,
+			status: 'active',
+			uploadedByUserId: isClientUser ? null : event.locals.user!.id,
+			uploadedByClientUserId: isClientUser
+				? (event.locals as any).clientUser?.id || null
+				: null
+		});
+
+		if (data.taskId) {
+			await tx.insert(table.taskMarketingMaterial).values({
+				id: generateMaterialId(),
+				tenantId,
+				taskId: data.taskId,
+				marketingMaterialId: materialId,
+				addedByUserId: event.locals.user!.id
+			});
+		}
+	});
+
+	return { success: true, materialIds: [materialId] };
+});

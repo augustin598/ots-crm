@@ -27,9 +27,10 @@
 		defaultMilestoneId?: string;
 		defaultDueDate?: string;
 		isClient?: boolean;
+		additionalQueriesToUpdate?: any[];
 	}
 
-	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, isClient = false }: Props = $props();
+	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, isClient = false, additionalQueriesToUpdate = [] }: Props = $props();
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
@@ -156,7 +157,7 @@
 				priority: priority || undefined,
 				dueDate: dueDate || undefined,
 				assignedToUserId: assignedToUserId || undefined
-			}).updates(getTasks(filterParams || {}));
+			}).updates(getTasks(filterParams || {}), ...additionalQueriesToUpdate);
 
 			onOpenChange(false);
 			onSuccess?.();

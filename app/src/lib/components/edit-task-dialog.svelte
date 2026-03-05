@@ -24,9 +24,10 @@
 		open: boolean;
 		onOpenChange: (open: boolean) => void;
 		onSuccess?: () => void;
+		additionalQueriesToUpdate?: any[];
 	}
 
-	let { task, open, onOpenChange, onSuccess }: Props = $props();
+	let { task, open, onOpenChange, onSuccess, additionalQueriesToUpdate = [] }: Props = $props();
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
@@ -153,7 +154,7 @@
 				priority: priority || undefined,
 				assignedToUserId: assignedToUserId || undefined,
 				dueDate: dueDate || undefined
-			}).updates(getTasks(filterParams || {}), getTask(task.id));
+			}).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
 
 			onOpenChange(false);
 			onSuccess?.();

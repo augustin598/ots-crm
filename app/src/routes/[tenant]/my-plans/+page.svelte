@@ -423,6 +423,7 @@
 	onOpenChange={(open) => (isCreateDialogOpen = open)}
 	onSuccess={handleCreateSuccess}
 	defaultDueDate={selectedDateStr}
+	additionalQueriesToUpdate={[tasksQuery, allTasksQuery]}
 />
 
 <Dialog bind:open={isAssignTasksDialogOpen}>
@@ -489,6 +490,7 @@
 		if (!open) selectedTask = null;
 	}}
 	{tenantSlug}
+	additionalQueriesToUpdate={[tasksQuery, allTasksQuery]}
 />
 
 <Dialog bind:open={isDayDialogOpen}>

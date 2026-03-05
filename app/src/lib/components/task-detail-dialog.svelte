@@ -26,9 +26,10 @@
 		onOpenChange: (open: boolean) => void;
 		tenantSlug?: string;
 		currentUserId?: string;
+		additionalQueriesToUpdate?: any[];
 	}
 
-	let { task, open, onOpenChange, tenantSlug = '', currentUserId }: Props = $props();
+	let { task, open, onOpenChange, tenantSlug = '', currentUserId, additionalQueriesToUpdate = [] }: Props = $props();
 
 	const filterParams = getTaskFilters();
 
@@ -184,7 +185,7 @@
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id }).updates(getTasks(filterParams || {}), getTask(task.id));
+			await approveTask({ taskId: task.id }).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
 			toast.success('Task approved');
 			onOpenChange(false);
 		} catch (e) {
@@ -199,7 +200,7 @@
 		if (!confirm('Are you sure you want to reject this task?')) return;
 		approvalLoading = true;
 		try {
-			await rejectTask(task.id).updates(getTasks(filterParams || {}), getTask(task.id));
+			await rejectTask(task.id).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
 			toast.success('Task rejected');
 			onOpenChange(false);
 		} catch (e) {
@@ -560,6 +561,7 @@
 			onSuccess={() => {
 				// Task data refreshed via .updates() in EditTaskDialog
 			}}
+			{additionalQueriesToUpdate}
 		/>
 	{/if}
 {/if}

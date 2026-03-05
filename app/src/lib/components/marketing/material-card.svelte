@@ -94,6 +94,22 @@
 		return tags.split(',').map(t => t.trim()).filter(Boolean);
 	}
 
+	function parseSocialSets(textContent: string | null): { title: string; urls: string[] }[] {
+		if (!textContent) return [];
+		try {
+			const parsed = JSON.parse(textContent);
+			if (!Array.isArray(parsed)) return [];
+			// New format: [{title, urls}]
+			if (parsed.length > 0 && typeof parsed[0] === 'object' && 'title' in parsed[0]) {
+				return parsed.filter((s: any) => s.title && Array.isArray(s.urls));
+			}
+			// Legacy flat URL array format
+			const urls = parsed.filter((u: any) => typeof u === 'string' && u.trim());
+			if (urls.length > 0) return [{ title: '', urls }];
+		} catch { /* not JSON */ }
+		return [];
+	}
+
 	const canModify = $derived(
 		!readonly && (
 			!currentClientUserId ||
@@ -104,6 +120,8 @@
 	const tagList = $derived(parseTags(material.tags));
 	const colors = $derived(typeColors[material.type] || { border: 'border-l-gray-300', bg: 'bg-gray-50 dark:bg-gray-900', text: 'text-gray-500' });
 	const TypeIconComponent = $derived(typeIcons[material.type] || FileTextIcon);
+	const socialSets = $derived(material.type === 'url' ? parseSocialSets(material.textContent) : []);
+	const totalUrls = $derived(socialSets.reduce((sum, s) => sum + s.urls.length, 0));
 
 	function getTextPreview(content: string | null, category?: string): string {
 		if (!content) return 'Text material';
@@ -189,6 +207,28 @@
 			<div class="p-3 text-[11px] text-muted-foreground line-clamp-4 font-mono leading-relaxed">
 				{getTextPreview(material.textContent, (material as any).category)}
 			</div>
+		{:else if material.type === 'url' && socialSets.length > 0}
+			<div class="p-3 w-full space-y-1 overflow-hidden">
+				{#each socialSets.slice(0, 3) as set}
+					<div>
+						{#if set.title}
+							<p class="text-[10px] font-semibold text-foreground/70 truncate">{set.title}</p>
+						{/if}
+						{#each set.urls.slice(0, 2) as url}
+							<div class="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 truncate pl-1">
+								<ExternalLinkIcon class="h-2.5 w-2.5 shrink-0 opacity-60" />
+								<span class="truncate">{url}</span>
+							</div>
+						{/each}
+						{#if set.urls.length > 2}
+							<p class="text-[9px] text-muted-foreground pl-1">+{set.urls.length - 2} URL-uri</p>
+						{/if}
+					</div>
+				{/each}
+				{#if socialSets.length > 3}
+					<p class="text-[9px] text-muted-foreground">+{socialSets.length - 3} seturi</p>
+				{/if}
+			</div>
 		{:else}
 			<div class="flex items-center justify-center h-10 w-10 rounded-xl {colors.bg}">
 				<TypeIconComponent class="h-5 w-5 {colors.text}" />
@@ -217,6 +257,13 @@
 		{#if material.dimensions && !videoPlaying}
 			<div class="absolute bottom-1.5 left-1.5">
 				<span class="text-[10px] text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded">{material.dimensions}</span>
+			</div>
+		{/if}
+
+		<!-- URL count badge -->
+		{#if material.type === 'url' && totalUrls > 0}
+			<div class="absolute bottom-1.5 left-1.5">
+				<span class="text-[10px] text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded">{socialSets.length} set{socialSets.length !== 1 ? 'uri' : ''} · {totalUrls} URL-uri</span>
 			</div>
 		{/if}
 

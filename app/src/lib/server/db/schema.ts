@@ -1451,7 +1451,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	seoLinks: many(seoLink),
 	websites: many(clientWebsite),
 	contracts: many(contract),
-	secondaryEmails: many(clientSecondaryEmail)
+	secondaryEmails: many(clientSecondaryEmail),
+	accessData: many(clientAccessData)
 }));
 
 export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({
@@ -2229,6 +2230,49 @@ export const marketingMaterialRelations = relations(marketingMaterial, ({ one, m
 	taskLinks: many(taskMarketingMaterial)
 }));
 
+// ==================== CLIENT ACCESS DATA ====================
+
+export const clientAccessData = sqliteTable('client_access_data', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	category: text('category').notNull().default('website'),
+	// 'website' | 'email' | 'cpanel' | 'hosting' | 'tiktok' | 'facebook' | 'instagram' | 'google' | 'altele'
+	label: text('label').notNull(),
+	url: text('url'),
+	username: text('username'),
+	password: text('password'), // AES-256-GCM encrypted: iv:tag:ciphertext
+	notes: text('notes'),
+	customFields: text('custom_fields'), // JSON: [{key: string, value: string}]
+	createdByUserId: text('created_by_user_id').references(() => user.id),
+	createdByClientUserId: text('created_by_client_user_id').references(() => clientUser.id),
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
+});
+
+export const clientAccessDataRelations = relations(clientAccessData, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [clientAccessData.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [clientAccessData.clientId],
+		references: [client.id]
+	}),
+	createdByUser: one(user, {
+		fields: [clientAccessData.createdByUserId],
+		references: [user.id]
+	}),
+	createdByClientUser: one(clientUser, {
+		fields: [clientAccessData.createdByClientUserId],
+		references: [clientUser.id]
+	})
+}));
+
 // Types
 export type Session = typeof session.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -2335,3 +2379,5 @@ export type MarketingMaterial = typeof marketingMaterial.$inferSelect;
 export type NewMarketingMaterial = typeof marketingMaterial.$inferInsert;
 export type ClientSecondaryEmail = typeof clientSecondaryEmail.$inferSelect;
 export type NewClientSecondaryEmail = typeof clientSecondaryEmail.$inferInsert;
+export type ClientAccessData = typeof clientAccessData.$inferSelect;
+export type NewClientAccessData = typeof clientAccessData.$inferInsert;

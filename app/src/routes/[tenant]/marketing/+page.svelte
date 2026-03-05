@@ -23,6 +23,7 @@
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
 	import MaterialListView from '$lib/components/marketing/material-list-view.svelte';
 	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
+	import SocialUrlDialog from '$lib/components/marketing/social-url-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
@@ -37,6 +38,7 @@
 	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let googleAdsDialogOpen = $state(false);
+	let socialUrlDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
 	let deleteConfirmOpen = $state(false);
@@ -283,6 +285,7 @@
 				<Button onclick={() => {
 					if (selectedClientIds.length !== 1) { toast.error('Selectează un singur client mai întâi'); return; }
 					if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+					else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
 					else { uploadDialogOpen = true; }
 				}}>
 					<PlusIcon class="h-4 w-4 mr-2" />
@@ -347,6 +350,7 @@
 					{#if !isFileFilterType && uploadClientId}
 						<Button variant="outline" class="mt-3" onclick={() => {
 							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
+							else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
 							else { uploadDialogOpen = true; }
 						}}>
 							<PlusIcon class="h-4 w-4 mr-2" />
@@ -399,6 +403,14 @@
 		bind:open={googleAdsDialogOpen}
 		clientId={uploadClientId}
 		{uploadUrl}
+		onSaved={handleUploaded}
+	/>
+
+	<!-- Social URL Dialog (TikTok / Facebook) -->
+	<SocialUrlDialog
+		bind:open={socialUrlDialogOpen}
+		clientId={uploadClientId}
+		category={activeCategory as 'tiktok-ads' | 'facebook-ads'}
 		onSaved={handleUploaded}
 	/>
 {/if}

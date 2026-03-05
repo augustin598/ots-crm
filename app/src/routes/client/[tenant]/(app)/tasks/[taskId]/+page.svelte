@@ -2,6 +2,7 @@
 	import { getTask } from '$lib/remotes/tasks.remote';
 	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
+	import { getTaskMaterials } from '$lib/remotes/task-materials.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -36,6 +37,12 @@
 	import UserCheckIcon from '@lucide/svelte/icons/user-check';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SendIcon from '@lucide/svelte/icons/send';
+	import LinkIcon from '@lucide/svelte/icons/link';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+	import ImageIcon from '@lucide/svelte/icons/image';
+	import VideoIcon from '@lucide/svelte/icons/video';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import TypeIcon from '@lucide/svelte/icons/type';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import UserIcon from '@lucide/svelte/icons/user';
@@ -54,6 +61,31 @@
 
 	const activitiesQuery = getTaskActivities(taskId);
 	const activities = $derived(activitiesQuery.current || []);
+
+	const materialsQuery = getTaskMaterials(taskId);
+	const taskMaterials = $derived(materialsQuery.current || []);
+
+	const MATERIAL_TYPE_ICONS: Record<string, any> = {
+		image: ImageIcon,
+		video: VideoIcon,
+		document: FileTextIcon,
+		text: TypeIcon,
+		url: ExternalLinkIcon
+	};
+
+	function parseSocialSets(textContent: string | null): { title: string; urls: string[] }[] {
+		if (!textContent) return [];
+		try {
+			const parsed = JSON.parse(textContent);
+			if (!Array.isArray(parsed)) return [];
+			if (parsed.length > 0 && typeof parsed[0] === 'object' && 'title' in parsed[0]) {
+				return parsed.filter((s: any) => s.title && Array.isArray(s.urls));
+			}
+			const urls = parsed.filter((u: any) => typeof u === 'string' && u.trim());
+			if (urls.length > 0) return [{ title: '', urls }];
+		} catch { /* not JSON */ }
+		return [];
+	}
 
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
@@ -86,6 +118,7 @@
 	let editingCommentId = $state<string | null>(null);
 	let editingContent = $state('');
 	let editLoading = $state(false);
+	let descExpanded = $state(false);
 
 	function getInitials(name: string): string {
 		return name
@@ -183,9 +216,9 @@
 	<title>{task?.title || 'Task'} - Client Portal</title>
 </svelte:head>
 
-<div class="max-w-3xl mx-auto space-y-6">
+<div class="max-w-5xl mx-auto">
 	<!-- Back button -->
-	<Button variant="ghost" size="sm" class="-ml-2" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
+	<Button variant="ghost" size="sm" class="-ml-2 mb-4" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
 		<ArrowLeftIcon class="mr-2 h-4 w-4" />
 		Back to Tasks
 	</Button>
@@ -200,8 +233,8 @@
 		</div>
 	{:else if task}
 		<!-- Header -->
-		<div class="space-y-3">
-			<h1 class="text-2xl font-bold leading-tight">{task.title}</h1>
+		<div class="mb-5">
+			<h1 class="text-xl font-bold leading-tight mb-2">{task.title}</h1>
 			<div class="flex items-center gap-2 flex-wrap">
 				<Badge variant={getStatusBadgeVariant(task.status)} class="text-[11px] h-5 rounded-full px-2 font-normal">
 					<span class="h-1.5 w-1.5 rounded-full {getStatusDotColor(task.status)} mr-1"></span>
@@ -220,232 +253,300 @@
 			</div>
 		</div>
 
-		<!-- Description -->
-		{#if task.description}
-			<div class="rounded-xl border border-border/40 bg-card/50 p-4">
-				<p class="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">{task.description}</p>
-			</div>
-		{/if}
-
-		<!-- Metadata grid -->
-		<div class="grid grid-cols-2 gap-4">
-			<!-- Status -->
-			<div class="rounded-xl border border-border/40 bg-card/50 p-4 flex items-center gap-3">
-				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/50">
-					<CircleDotIcon class="h-5 w-5 text-muted-foreground" />
-				</div>
-				<div>
-					<p class="text-xs text-muted-foreground">Status</p>
-					<p class="text-sm font-medium flex items-center gap-1.5">
-						<span class="h-2 w-2 rounded-full {getStatusDotColor(task.status)}"></span>
-						{formatStatus(task.status)}
-					</p>
-				</div>
-			</div>
-
-			<!-- Priority -->
-			<div class="rounded-xl border border-border/40 bg-card/50 p-4 flex items-center gap-3">
-				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/50">
-					<FlagIcon class="h-5 w-5 text-muted-foreground" />
-				</div>
-				<div>
-					<p class="text-xs text-muted-foreground">Priority</p>
-					<p class="text-sm font-medium flex items-center gap-1.5">
-						<span class="h-2 w-2 rounded-full {getPriorityDotColor(task.priority)}"></span>
-						{formatPriority(task.priority || 'medium')}
-					</p>
-				</div>
-			</div>
-
-			<!-- Due Date -->
-			<div class="rounded-xl border border-border/40 bg-card/50 p-4 flex items-center gap-3 {overdue ? 'border-red-300 dark:border-red-800' : ''}">
-				<div class="flex h-10 w-10 items-center justify-center rounded-lg {overdue ? 'bg-red-500/10' : 'bg-muted/50'}">
-					<CalendarIcon class="h-5 w-5 {overdue ? 'text-red-600' : 'text-muted-foreground'}" />
-				</div>
-				<div>
-					<p class="text-xs text-muted-foreground">Due Date</p>
-					{#if task.dueDate}
-						<p class="text-sm font-medium {overdue ? 'text-red-600' : ''}">{formatDate(task.dueDate)}</p>
-						{#if overdue}
-							<p class="text-xs text-red-500 mt-0.5">Overdue</p>
+		<!-- Two-column layout -->
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+			<!-- Main content (left, wider) -->
+			<div class="lg:col-span-2 space-y-5">
+				<!-- Description -->
+				{#if task.description}
+					{@const isLong = task.description.split('\n').length > 3 || task.description.length > 300}
+					<div class="rounded-lg border border-border/40 bg-card/50 p-4">
+						<p class="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap {!descExpanded && isLong ? 'line-clamp-3' : ''}">{task.description}</p>
+						{#if isLong}
+							<button
+								class="text-xs text-primary hover:underline mt-1 cursor-pointer"
+								onclick={() => descExpanded = !descExpanded}
+							>
+								{descExpanded ? 'Show less' : 'Read more...'}
+							</button>
 						{/if}
-					{:else}
-						<p class="text-sm text-muted-foreground">Not set</p>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Created -->
-			<div class="rounded-xl border border-border/40 bg-card/50 p-4 flex items-center gap-3">
-				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/50">
-					<ClockIcon class="h-5 w-5 text-muted-foreground" />
-				</div>
-				<div>
-					<p class="text-xs text-muted-foreground">Created</p>
-					<p class="text-sm font-medium">{formatDate(task.createdAt)}</p>
-					{#if getCreatorName(task.createdByUserId)}
-						<p class="text-xs text-muted-foreground mt-0.5">by {getCreatorName(task.createdByUserId)}</p>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Assignee -->
-			{#if task.assignedToUserId && userMap.get(task.assignedToUserId)}
-				<div class="rounded-xl border border-border/40 bg-card/50 p-4 flex items-center gap-3">
-					<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/50">
-						<UserIcon class="h-5 w-5 text-muted-foreground" />
 					</div>
+				{/if}
+
+				<!-- Materials -->
+				{#if taskMaterials.length > 0}
 					<div>
-						<p class="text-xs text-muted-foreground">Assignee</p>
-						<p class="text-sm font-medium">{userMap.get(task.assignedToUserId)}</p>
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<Separator />
-
-		<!-- Comments -->
-		<div>
-			<div class="flex items-center gap-2 mb-4">
-				<MessageSquareIcon class="h-4 w-4 text-muted-foreground" />
-				<h3 class="font-semibold">Comments ({comments.length})</h3>
-			</div>
-
-			<div class="space-y-4 mb-6">
-				{#if comments.length === 0}
-					<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
-				{:else}
-					{#each comments as comment}
-						{@const authorName = userMap.get(comment.userId) || 'User'}
-						{@const isOwnComment = currentUserId && comment.userId === currentUserId}
-						<div class="flex gap-3">
-							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold mt-0.5">
-								{getInitials(authorName)}
-							</div>
-							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-2 mb-1">
-									<p class="text-sm font-medium">{authorName}</p>
-									<p class="text-xs text-muted-foreground">
-										{timeAgo(comment.createdAt)}
-										{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
-											<span class="italic">(edited)</span>
-										{/if}
-									</p>
-									{#if isOwnComment && editingCommentId !== comment.id}
-										<div class="flex items-center gap-0.5 ml-auto">
-											<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
-												<PencilIcon class="h-3 w-3" />
-											</Button>
-											<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => handleDeleteComment(comment.id)}>
-												<Trash2Icon class="h-3 w-3" />
-											</Button>
+						<div class="flex items-center gap-2 mb-3">
+							<LinkIcon class="h-4 w-4 text-muted-foreground" />
+							<h3 class="text-sm font-semibold">Materiale ({taskMaterials.length})</h3>
+						</div>
+						<div class="space-y-2">
+							{#each taskMaterials as mat}
+								{@const Icon = MATERIAL_TYPE_ICONS[mat.materialType] || FileTextIcon}
+								{@const socialSets = mat.materialType === 'url' ? parseSocialSets(mat.materialTextContent) : []}
+								<div class="border rounded-lg p-3 space-y-2">
+									<div class="flex items-center gap-3">
+										<div class="flex h-8 w-8 items-center justify-center rounded-lg bg-muted shrink-0">
+											<Icon class="h-4 w-4 text-muted-foreground" />
+										</div>
+										<div class="flex-1 min-w-0">
+											{#if mat.materialExternalUrl}
+												<a href={mat.materialExternalUrl} target="_blank" rel="noopener noreferrer"
+													class="text-sm font-medium truncate block hover:text-primary">
+													{mat.materialTitle}
+												</a>
+											{:else}
+												<p class="text-sm font-medium truncate">{mat.materialTitle}</p>
+											{/if}
+											<p class="text-xs text-muted-foreground capitalize">{mat.materialCategory.replace(/-/g, ' ')} &middot; {mat.materialType}</p>
+										</div>
+									</div>
+									{#if socialSets.length > 0}
+										<div class="grid gap-2 sm:grid-cols-2 pl-2">
+											{#each socialSets as set}
+												<div class="border-l-2 border-muted pl-3">
+													{#if set.title}
+														<p class="text-xs font-semibold text-foreground/80 mb-0.5">{set.title}</p>
+													{/if}
+													<div class="space-y-0.5">
+														{#each set.urls as url}
+															<a href={url} target="_blank" rel="noopener noreferrer"
+																class="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline truncate">
+																<ExternalLinkIcon class="h-3 w-3 shrink-0 opacity-60" />
+																<span class="truncate">{url}</span>
+															</a>
+														{/each}
+													</div>
+												</div>
+											{/each}
 										</div>
 									{/if}
 								</div>
-								{#if editingCommentId === comment.id}
-									<div class="space-y-2">
-										<Textarea bind:value={editingContent} rows={3} class="text-sm" />
-										<div class="flex gap-2">
-											<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading || !editingContent.trim()}>
-												{editLoading ? 'Saving...' : 'Save'}
-											</Button>
-											<Button size="sm" variant="outline" onclick={() => { editingCommentId = null; editingContent = ''; }}>
-												Cancel
-											</Button>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<Separator />
+
+				<!-- Comments -->
+				<div>
+					<div class="flex items-center gap-2 mb-3">
+						<MessageSquareIcon class="h-4 w-4 text-muted-foreground" />
+						<h3 class="text-sm font-semibold">Comments ({comments.length})</h3>
+					</div>
+
+					<div class="space-y-3 mb-4">
+						{#if comments.length === 0}
+							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
+						{:else}
+							{#each comments as comment}
+								{@const authorName = userMap.get(comment.userId) || 'User'}
+								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
+								<div class="flex gap-3">
+									<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-semibold mt-0.5">
+										{getInitials(authorName)}
+									</div>
+									<div class="flex-1 min-w-0">
+										<div class="flex items-center gap-2 mb-1">
+											<p class="text-sm font-medium">{authorName}</p>
+											<p class="text-xs text-muted-foreground">
+												{timeAgo(comment.createdAt)}
+												{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
+													<span class="italic">(edited)</span>
+												{/if}
+											</p>
+											{#if isOwnComment && editingCommentId !== comment.id}
+												<div class="flex items-center gap-0.5 ml-auto">
+													<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
+														<PencilIcon class="h-3 w-3" />
+													</Button>
+													<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => handleDeleteComment(comment.id)}>
+														<Trash2Icon class="h-3 w-3" />
+													</Button>
+												</div>
+											{/if}
 										</div>
+										{#if editingCommentId === comment.id}
+											<div class="space-y-2">
+												<Textarea bind:value={editingContent} rows={2} class="text-sm" />
+												<div class="flex gap-2">
+													<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading || !editingContent.trim()}>
+														{editLoading ? 'Saving...' : 'Save'}
+													</Button>
+													<Button size="sm" variant="outline" onclick={() => { editingCommentId = null; editingContent = ''; }}>
+														Cancel
+													</Button>
+												</div>
+											</div>
+										{:else}
+											<div class="rounded-lg bg-muted/30 border border-border/30 px-3 py-2">
+												<p class="text-sm leading-relaxed">{comment.content}</p>
+											</div>
+										{/if}
 									</div>
-								{:else}
-									<div class="rounded-lg bg-muted/30 border border-border/30 px-3 py-2">
-										<p class="text-sm leading-relaxed">{comment.content}</p>
-									</div>
+								</div>
+							{/each}
+						{/if}
+					</div>
+
+					<!-- Add comment form -->
+					<div class="flex gap-3">
+						<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-semibold mt-0.5">
+							<UserIcon class="h-3.5 w-3.5" />
+						</div>
+						<div class="flex-1 space-y-2">
+							<Textarea
+								placeholder="Write a comment..."
+								bind:value={newComment}
+								rows={2}
+								class="text-sm"
+							/>
+							<Button size="sm" onclick={handleAddComment} disabled={!newComment.trim() || commentLoading}>
+								<SendIcon class="mr-2 h-3.5 w-3.5" />
+								{commentLoading ? 'Posting...' : 'Post Comment'}
+							</Button>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Sidebar (right) -->
+			<div class="space-y-4">
+				<!-- Metadata card -->
+				<div class="rounded-lg border border-border/40 bg-card/50 p-4 space-y-3">
+					<!-- Status -->
+					<div class="flex items-center gap-3">
+						<CircleDotIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+						<div class="flex-1 min-w-0">
+							<p class="text-[11px] text-muted-foreground">Status</p>
+							<p class="text-sm font-medium flex items-center gap-1.5">
+								<span class="h-1.5 w-1.5 rounded-full {getStatusDotColor(task.status)}"></span>
+								{formatStatus(task.status)}
+							</p>
+						</div>
+					</div>
+
+					<Separator />
+
+					<!-- Priority -->
+					<div class="flex items-center gap-3">
+						<FlagIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+						<div class="flex-1 min-w-0">
+							<p class="text-[11px] text-muted-foreground">Priority</p>
+							<p class="text-sm font-medium flex items-center gap-1.5">
+								<span class="h-1.5 w-1.5 rounded-full {getPriorityDotColor(task.priority)}"></span>
+								{formatPriority(task.priority || 'medium')}
+							</p>
+						</div>
+					</div>
+
+					<Separator />
+
+					<!-- Due Date -->
+					<div class="flex items-center gap-3">
+						<CalendarIcon class="h-4 w-4 {overdue ? 'text-red-600' : 'text-muted-foreground'} shrink-0" />
+						<div class="flex-1 min-w-0">
+							<p class="text-[11px] text-muted-foreground">Due Date</p>
+							{#if task.dueDate}
+								<p class="text-sm font-medium {overdue ? 'text-red-600' : ''}">{formatDate(task.dueDate)}</p>
+								{#if overdue}
+									<p class="text-[10px] text-red-500">Overdue</p>
 								{/if}
+							{:else}
+								<p class="text-sm text-muted-foreground">Not set</p>
+							{/if}
+						</div>
+					</div>
+
+					<Separator />
+
+					<!-- Assignee -->
+					{#if task.assignedToUserId && userMap.get(task.assignedToUserId)}
+						<div class="flex items-center gap-3">
+							<UserIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+							<div class="flex-1 min-w-0">
+								<p class="text-[11px] text-muted-foreground">Assignee</p>
+								<p class="text-sm font-medium">{userMap.get(task.assignedToUserId)}</p>
 							</div>
 						</div>
-					{/each}
-				{/if}
-			</div>
 
-			<!-- Add comment form -->
-			<div class="flex gap-3">
-				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-semibold mt-0.5">
-					<UserIcon class="h-4 w-4" />
-				</div>
-				<div class="flex-1 space-y-2">
-					<Textarea
-						placeholder="Write a comment..."
-						bind:value={newComment}
-						rows={3}
-						class="text-sm"
-					/>
-					<Button size="sm" onclick={handleAddComment} disabled={!newComment.trim() || commentLoading}>
-						<SendIcon class="mr-2 h-3.5 w-3.5" />
-						{commentLoading ? 'Posting...' : 'Post Comment'}
-					</Button>
-				</div>
-			</div>
-		</div>
+						<Separator />
+					{/if}
 
-		<Separator />
-
-		<!-- Activity timeline -->
-		<div>
-			<div class="flex items-center gap-2 mb-4">
-				<HistoryIcon class="h-4 w-4 text-muted-foreground" />
-				<h3 class="font-semibold">Activity ({activities.length})</h3>
-			</div>
-
-			{#if activities.length === 0}
-				<p class="text-sm text-muted-foreground">No activity recorded yet.</p>
-			{:else}
-				<div class="relative">
-					<div class="absolute left-[15px] top-0 bottom-0 w-px bg-border"></div>
-					<div class="space-y-4">
-						{#each activities as activity}
-							{@const actorName = activity.userName || userMap.get(activity.userId) || activity.userId}
-							<div class="flex items-start gap-3 relative">
-								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full {getActivityIconColor(activity.action)} z-10">
-									{#if activity.action === 'created'}
-										<PlusIcon class="h-3.5 w-3.5" />
-									{:else if activity.action === 'commented'}
-										<MessageSquareIcon class="h-3.5 w-3.5" />
-									{:else if activity.action === 'approved'}
-										<CheckIcon class="h-3.5 w-3.5" />
-									{:else if activity.action === 'rejected'}
-										<XIcon class="h-3.5 w-3.5" />
-									{:else if activity.action === 'status_changed'}
-										<ArrowRightIcon class="h-3.5 w-3.5" />
-									{:else if activity.action === 'assigned'}
-										<UserCheckIcon class="h-3.5 w-3.5" />
-									{:else}
-										<RefreshCwIcon class="h-3.5 w-3.5" />
-									{/if}
-								</div>
-								<div class="flex-1 min-w-0 pt-0.5">
-									<p class="text-sm">
-										<span class="font-medium">{actorName}</span>
-										<span class="text-muted-foreground"> {getActivityVerb(activity)}</span>
-									</p>
-									{#if activity.oldValue || activity.newValue}
-										<div class="flex items-center gap-1.5 mt-1 flex-wrap">
-											{#if activity.oldValue}
-												<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{activity.oldValue}</Badge>
-											{/if}
-											{#if activity.oldValue && activity.newValue}
-												<ArrowRightIcon class="h-3 w-3 text-muted-foreground shrink-0" />
-											{/if}
-											{#if activity.newValue}
-												<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{activity.newValue}</Badge>
-											{/if}
-										</div>
-									{/if}
-									<p class="text-xs text-muted-foreground mt-1">{timeAgo(activity.createdAt)}</p>
-								</div>
-							</div>
-						{/each}
+					<!-- Created -->
+					<div class="flex items-center gap-3">
+						<ClockIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+						<div class="flex-1 min-w-0">
+							<p class="text-[11px] text-muted-foreground">Created</p>
+							<p class="text-sm font-medium">{formatDate(task.createdAt)}</p>
+							{#if getCreatorName(task.createdByUserId)}
+								<p class="text-[10px] text-muted-foreground">by {getCreatorName(task.createdByUserId)}</p>
+							{/if}
+						</div>
 					</div>
 				</div>
-			{/if}
+
+				<!-- Activity timeline -->
+				<div class="rounded-lg border border-border/40 bg-card/50 p-4">
+					<div class="flex items-center gap-2 mb-3">
+						<HistoryIcon class="h-4 w-4 text-muted-foreground" />
+						<h3 class="text-sm font-semibold">Activity ({activities.length})</h3>
+					</div>
+
+					{#if activities.length === 0}
+						<p class="text-xs text-muted-foreground">No activity recorded yet.</p>
+					{:else}
+						<div class="relative">
+							<div class="absolute left-[11px] top-0 bottom-0 w-px bg-border"></div>
+							<div class="space-y-3">
+								{#each activities as activity}
+									{@const actorName = activity.userName || userMap.get(activity.userId) || activity.userId}
+									<div class="flex items-start gap-2.5 relative">
+										<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full {getActivityIconColor(activity.action)} z-10">
+											{#if activity.action === 'created'}
+												<PlusIcon class="h-3 w-3" />
+											{:else if activity.action === 'commented'}
+												<MessageSquareIcon class="h-3 w-3" />
+											{:else if activity.action === 'approved'}
+												<CheckIcon class="h-3 w-3" />
+											{:else if activity.action === 'rejected'}
+												<XIcon class="h-3 w-3" />
+											{:else if activity.action === 'status_changed'}
+												<ArrowRightIcon class="h-3 w-3" />
+											{:else if activity.action === 'assigned'}
+												<UserCheckIcon class="h-3 w-3" />
+											{:else}
+												<RefreshCwIcon class="h-3 w-3" />
+											{/if}
+										</div>
+										<div class="flex-1 min-w-0 pt-0.5">
+											<p class="text-xs leading-tight">
+												<span class="font-medium">{actorName}</span>
+												<span class="text-muted-foreground"> {getActivityVerb(activity)}</span>
+											</p>
+											{#if activity.oldValue || activity.newValue}
+												<div class="flex items-center gap-1 mt-0.5 flex-wrap">
+													{#if activity.oldValue}
+														<Badge variant="outline" class="text-[10px] h-4 px-1 font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{activity.oldValue}</Badge>
+													{/if}
+													{#if activity.oldValue && activity.newValue}
+														<ArrowRightIcon class="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+													{/if}
+													{#if activity.newValue}
+														<Badge variant="secondary" class="text-[10px] h-4 px-1 font-normal {getActivityValueColor(activity.field, activity.newValue)}">{activity.newValue}</Badge>
+													{/if}
+												</div>
+											{/if}
+											<p class="text-[10px] text-muted-foreground mt-0.5">{timeAgo(activity.createdAt)}</p>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
 		</div>
 	{:else}
 		<div class="flex flex-col items-center justify-center py-12">
