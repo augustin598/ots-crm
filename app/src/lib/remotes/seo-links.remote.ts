@@ -18,6 +18,52 @@ function generateSeoLinkCheckId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+function generateMaterialId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
+async function syncSeoLinkMarketingMaterial(
+	seoLinkId: string,
+	tenantId: string,
+	clientId: string,
+	category: 'press-article' | 'seo-article',
+	articleUrl: string | null,
+	keyword: string,
+	pressTrust: string | null,
+	userId: string
+) {
+	const title = pressTrust ? `${keyword} - ${pressTrust}` : keyword;
+
+	// Check if marketing material already exists for this seo link
+	const [existingMaterial] = await db
+		.select()
+		.from(table.marketingMaterial)
+		.where(eq(table.marketingMaterial.seoLinkId, seoLinkId))
+		.limit(1);
+
+	if (existingMaterial) {
+		// Update existing material's category
+		await db.update(table.marketingMaterial)
+			.set({ category, title, externalUrl: articleUrl, updatedAt: new Date() })
+			.where(eq(table.marketingMaterial.id, existingMaterial.id));
+	} else {
+		// Create new marketing material
+		await db.insert(table.marketingMaterial).values({
+			id: generateMaterialId(),
+			tenantId,
+			clientId,
+			category,
+			type: 'url',
+			title,
+			externalUrl: articleUrl,
+			seoLinkId,
+			status: 'active',
+			uploadedByUserId: userId
+		});
+	}
+}
+
 const seoLinkSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1, 'Client is required')),
 	websiteId: v.optional(v.string()),
@@ -35,7 +81,9 @@ const seoLinkSchema = v.object({
 	anchorText: v.optional(v.string()),
 	projectId: v.optional(v.string()),
 	notes: v.optional(v.string()),
-	extractedLinks: v.optional(v.string())
+	extractedLinks: v.optional(v.string()),
+	articleType: v.optional(v.picklist(['gdrive', 'press-article', 'seo-article'])),
+	gdriveUrl: v.optional(v.string())
 });
 
 /** Schema for partial updates - all fields optional except seoLinkId */
@@ -57,7 +105,9 @@ const updateSeoLinkSchema = v.object({
 	anchorText: v.optional(v.string()),
 	projectId: v.optional(v.string()),
 	notes: v.optional(v.string()),
-	extractedLinks: v.optional(v.nullable(v.string()))
+	extractedLinks: v.optional(v.nullable(v.string())),
+	articleType: v.optional(v.nullable(v.picklist(['gdrive', 'press-article', 'seo-article']))),
+	gdriveUrl: v.optional(v.nullable(v.string()))
 });
 
 export const getSeoLinks = query(
@@ -235,7 +285,7 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		linkType: data.linkType || null,
 		linkAttribute: data.linkAttribute || 'dofollow',
 		status: data.status || 'pending',
-		articleUrl: data.articleUrl,
+		articleUrl: data.articleUrl || '',
 		articlePublishedAt: data.articlePublishedAt || null,
 		targetUrl: data.targetUrl || null,
 		price: data.price != null ? Math.round(data.price * 100) : null,
@@ -243,8 +293,24 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		anchorText: data.anchorText || null,
 		projectId: data.projectId || null,
 		notes: data.notes || null,
-		extractedLinks: data.extractedLinks || null
+		extractedLinks: data.extractedLinks || null,
+		articleType: data.articleType || null,
+		gdriveUrl: data.articleType === 'gdrive' ? (data.gdriveUrl || null) : null
 	});
+
+	// Auto-create marketing material for press/seo articles
+	if (data.articleType === 'press-article' || data.articleType === 'seo-article') {
+		await syncSeoLinkMarketingMaterial(
+			seoLinkId,
+			event.locals.tenant.id,
+			data.clientId,
+			data.articleType,
+			data.articleUrl || null,
+			data.keyword,
+			data.pressTrust || null,
+			event.locals.user.id
+		);
+	}
 
 	return { success: true, seoLinkId };
 });
@@ -403,9 +469,42 @@ export const updateSeoLink = command(updateSeoLinkSchema,
 				projectId: updateData.projectId !== undefined ? updateData.projectId : existing.projectId,
 				notes: updateData.notes !== undefined ? updateData.notes : existing.notes,
 				extractedLinks: updateData.extractedLinks !== undefined ? updateData.extractedLinks || null : existing.extractedLinks,
+				articleType: updateData.articleType !== undefined ? updateData.articleType || null : existing.articleType,
+				gdriveUrl: updateData.articleType !== undefined
+					? (updateData.articleType === 'gdrive' ? (updateData.gdriveUrl || null) : null)
+					: (updateData.gdriveUrl !== undefined ? updateData.gdriveUrl : existing.gdriveUrl),
 				updatedAt: new Date()
 			})
 			.where(eq(table.seoLink.id, seoLinkId));
+
+		// Sync marketing material based on articleType change
+		const newArticleType = updateData.articleType !== undefined ? updateData.articleType : existing.articleType;
+		const oldArticleType = existing.articleType;
+
+		if (newArticleType !== oldArticleType) {
+			const isNewMarketingType = newArticleType === 'press-article' || newArticleType === 'seo-article';
+			const wasMarketingType = oldArticleType === 'press-article' || oldArticleType === 'seo-article';
+
+			if (isNewMarketingType) {
+				const effectiveArticleUrl = updateData.articleUrl ?? existing.articleUrl;
+				const effectiveKeyword = updateData.keyword ?? existing.keyword;
+				const effectivePressTrust = updateData.pressTrust !== undefined ? updateData.pressTrust : existing.pressTrust;
+				await syncSeoLinkMarketingMaterial(
+					seoLinkId,
+					event.locals.tenant.id,
+					updateData.clientId ?? existing.clientId,
+					newArticleType,
+					effectiveArticleUrl,
+					effectiveKeyword,
+					effectivePressTrust,
+					event.locals.user.id
+				);
+			} else if (wasMarketingType) {
+				// Changed away from press/seo → remove marketing material
+				await db.delete(table.marketingMaterial)
+					.where(eq(table.marketingMaterial.seoLinkId, seoLinkId));
+			}
+		}
 
 		return { success: true };
 	}

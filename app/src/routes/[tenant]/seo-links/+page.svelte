@@ -100,6 +100,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import XIcon from '@lucide/svelte/icons/x';
+	import FileIcon from '@lucide/svelte/icons/file';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import * as Popover from '$lib/components/ui/popover';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
@@ -445,6 +446,8 @@
 	let rowCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
 	let rowAnchorText = $state('');
 	let rowNotes = $state('');
+	let rowArticleType = $state('');
+	let rowGdriveUrl = $state('');
 	let rowLoading = $state(false);
 	let rowError = $state<string | null>(null);
 
@@ -460,8 +463,33 @@
 	let editRowLinkAttribute = $state('dofollow');
 	let editRowPrice = $state('');
 	let editRowCurrency = $state<Currency>('RON');
+	let editRowArticleType = $state('');
+	let editRowGdriveUrl = $state('');
 	let editRowLoading = $state(false);
 	let editRowError = $state<string | null>(null);
+
+	// Inline article type editor (display row click)
+	let editingArticleTypeId = $state<string | null>(null);
+	let editingArticleTypeValue = $state('');
+	let editingArticleGdriveUrl = $state('');
+	let editingArticleTypeLoading = $state(false);
+
+	async function saveArticleType(linkId: string) {
+		editingArticleTypeLoading = true;
+		try {
+			await updateSeoLink({
+				seoLinkId: linkId,
+				articleType: editingArticleTypeValue ? editingArticleTypeValue as 'gdrive' | 'press-article' | 'seo-article' : null,
+				gdriveUrl: editingArticleTypeValue === 'gdrive' ? editingArticleGdriveUrl : null
+			}).updates(seoLinksQuery);
+			toast.success('Articol actualizat');
+			editingArticleTypeId = null;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+		} finally {
+			editingArticleTypeLoading = false;
+		}
+	}
 
 	const projectsQuery = $derived(getProjects(formClientId || undefined));
 	const projects = $derived(projectsQuery.current || []);
@@ -536,6 +564,8 @@
 		rowCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
 		rowAnchorText = '';
 		rowNotes = '';
+		rowArticleType = '';
+		rowGdriveUrl = '';
 		rowError = null;
 	}
 
@@ -571,6 +601,8 @@
 		editRowLinkAttribute = link.linkAttribute || 'dofollow';
 		editRowPrice = link.price != null ? (link.price / 100).toFixed(2) : '';
 		editRowCurrency = (link.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
+		editRowArticleType = link.articleType || '';
+		editRowGdriveUrl = link.gdriveUrl || '';
 		editRowLoading = false;
 		editRowError = null;
 	}
@@ -587,6 +619,8 @@
 		editRowLinkAttribute = 'dofollow';
 		editRowPrice = '';
 		editRowCurrency = 'RON';
+		editRowArticleType = '';
+		editRowGdriveUrl = '';
 		editRowLoading = false;
 		editRowError = null;
 	}
@@ -614,7 +648,9 @@
 				linkAttribute: editRowLinkAttribute as 'dofollow' | 'nofollow',
 				price: editRowPrice ? parseFloat(editRowPrice) : undefined,
 				currency: editRowCurrency,
-				anchorText: editRowKeyword.trim()
+				anchorText: editRowKeyword.trim(),
+				articleType: editRowArticleType ? editRowArticleType as 'gdrive' | 'press-article' | 'seo-article' : null,
+				gdriveUrl: editRowArticleType === 'gdrive' ? editRowGdriveUrl : null
 			}).updates(seoLinksQuery);
 			toast.success('Link actualizat');
 			cancelEditRow();
@@ -664,7 +700,9 @@
 				currency: rowCurrency,
 				anchorText: rowAnchorText || undefined,
 				projectId: undefined,
-				notes: rowNotes || undefined
+				notes: rowNotes || undefined,
+				articleType: rowArticleType ? rowArticleType as 'gdrive' | 'press-article' | 'seo-article' : undefined,
+				gdriveUrl: rowArticleType === 'gdrive' ? rowGdriveUrl : undefined
 			}).updates(seoLinksQuery);
 			toast.success('Link adăugat');
 			cancelInlineRow();
@@ -2666,6 +2704,12 @@
 									Preț
 								</span>
 							</TableHead>
+							<TableHead class="h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90 px-3">
+								<span class="inline-flex items-center gap-1.5">
+									<FileIcon class="h-3.5 w-3.5 shrink-0" />
+									Articol
+								</span>
+							</TableHead>
 							<TableHead class="w-14 pr-5 h-12 text-xs font-medium uppercase tracking-wider text-muted-foreground/90"></TableHead>
 						</TableRow>
 					</TableHeader>
@@ -2747,6 +2791,24 @@
 										</Select>
 									</div>
 								</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									<div class="flex flex-col gap-1">
+										<Select type="single" bind:value={rowArticleType}>
+											<SelectTrigger class="h-8 w-[7rem] text-[12px] px-2">
+												{rowArticleType === 'gdrive' ? 'GDrive' : rowArticleType === 'press-article' ? 'Presă' : rowArticleType === 'seo-article' ? 'SEO' : 'Niciunul'}
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="">Niciunul</SelectItem>
+												<SelectItem value="gdrive">Link GDrive</SelectItem>
+												<SelectItem value="press-article">Articol Presă</SelectItem>
+												<SelectItem value="seo-article">Articol SEO</SelectItem>
+											</SelectContent>
+										</Select>
+										{#if rowArticleType === 'gdrive'}
+											<Input bind:value={rowGdriveUrl} placeholder="URL GDrive" class="h-8 text-[12px] w-[7rem]" />
+										{/if}
+									</div>
+								</TableCell>
 								<TableCell class="py-2 pr-5 align-middle">
 									<div class="flex items-center gap-1">
 										<Button size="sm" class="h-8" onclick={saveInlineRow} disabled={rowLoading}>
@@ -2760,7 +2822,7 @@
 							</TableRow>
 							{#if rowError}
 								<TableRow class="bg-destructive/10">
-									<TableCell colspan={11} class="px-5 py-2 text-sm text-destructive">
+									<TableCell colspan={12} class="px-5 py-2 text-sm text-destructive">
 										{rowError}
 									</TableCell>
 								</TableRow>
@@ -2873,6 +2935,24 @@
 									</Select>
 								</div>
 							</TableCell>
+							<TableCell class="px-3 py-2 align-middle">
+								<div class="flex flex-col gap-1">
+									<Select type="single" bind:value={editRowArticleType}>
+										<SelectTrigger class="h-8 w-[7rem] text-[12px] px-2">
+											{editRowArticleType === 'gdrive' ? 'GDrive' : editRowArticleType === 'press-article' ? 'Presă' : editRowArticleType === 'seo-article' ? 'SEO' : 'Niciunul'}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="">Niciunul</SelectItem>
+											<SelectItem value="gdrive">Link GDrive</SelectItem>
+											<SelectItem value="press-article">Articol Presă</SelectItem>
+											<SelectItem value="seo-article">Articol SEO</SelectItem>
+										</SelectContent>
+									</Select>
+									{#if editRowArticleType === 'gdrive'}
+										<Input bind:value={editRowGdriveUrl} placeholder="URL GDrive" class="h-8 text-[12px] w-[7rem]" />
+									{/if}
+								</div>
+							</TableCell>
 							<TableCell class="py-2 pr-5 align-middle">
 								<div class="flex items-center gap-1">
 									<Button size="sm" class="h-8" onclick={saveEditRow} disabled={editRowLoading}>
@@ -2886,7 +2966,7 @@
 						</TableRow>
 						{#if editRowError}
 							<TableRow class="bg-destructive/10">
-								<TableCell colspan={12} class="px-5 py-2 text-sm text-destructive">
+								<TableCell colspan={13} class="px-5 py-2 text-sm text-destructive">
 									{editRowError}
 								</TableCell>
 							</TableRow>
@@ -3096,6 +3176,58 @@
 										</button>
 									{/if}
 								</TableCell>
+								<TableCell class="px-3 py-3.5 align-middle">
+									{#if editingArticleTypeId === link.id}
+										<div class="flex flex-col gap-1.5">
+											<Select type="single" bind:value={editingArticleTypeValue}>
+												<SelectTrigger class="h-8 w-[7rem] text-[12px] px-2">
+													{editingArticleTypeValue === 'gdrive' ? 'GDrive' : editingArticleTypeValue === 'press-article' ? 'Presă' : editingArticleTypeValue === 'seo-article' ? 'SEO' : 'Niciunul'}
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="">Niciunul</SelectItem>
+													<SelectItem value="gdrive">Link GDrive</SelectItem>
+													<SelectItem value="press-article">Articol Presă</SelectItem>
+													<SelectItem value="seo-article">Articol SEO</SelectItem>
+												</SelectContent>
+											</Select>
+											{#if editingArticleTypeValue === 'gdrive'}
+												<Input bind:value={editingArticleGdriveUrl} placeholder="URL GDrive" class="h-8 text-[12px] w-[7rem]" />
+											{/if}
+											<div class="flex gap-1">
+												<Button size="sm" variant="outline" class="h-6 text-[11px] px-2" onclick={() => saveArticleType(link.id)} disabled={editingArticleTypeLoading}>
+													{editingArticleTypeLoading ? '...' : 'OK'}
+												</Button>
+												<Button size="sm" variant="ghost" class="h-6 text-[11px] px-2" onclick={() => { editingArticleTypeId = null; }}>
+													✕
+												</Button>
+											</div>
+										</div>
+									{:else}
+										<button
+											type="button"
+											class="text-left w-full min-w-[4rem] py-1 px-1.5 -mx-1.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors text-[13px]"
+											onclick={() => {
+												if (editingRowId === link.id) return;
+												editingArticleTypeId = link.id;
+												editingArticleTypeValue = link.articleType || '';
+												editingArticleGdriveUrl = link.gdriveUrl || '';
+											}}
+										>
+											{#if link.articleType === 'gdrive' && link.gdriveUrl}
+												<a href={link.gdriveUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-primary hover:underline" onclick={(e) => e.stopPropagation()}>
+													<ExternalLinkIcon class="h-3.5 w-3.5" />
+													Vezi articol
+												</a>
+											{:else if link.articleType === 'press-article'}
+												<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-orange-50 text-orange-700 border-orange-200">Presă</Badge>
+											{:else if link.articleType === 'seo-article'}
+												<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-blue-50 text-blue-700 border-blue-200">SEO</Badge>
+											{:else}
+												—
+											{/if}
+										</button>
+									{/if}
+								</TableCell>
 								<TableCell class="py-3.5 pr-5 align-middle">
 									<DropdownMenu>
 										<DropdownMenuTrigger>
@@ -3144,7 +3276,7 @@
 					</TableBody>
 					<TableFooter>
 						<TableRow class="border-t-2 border-border/60 bg-muted/30 hover:bg-muted/30 font-medium">
-							<TableCell colspan={9} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
+							<TableCell colspan={10} class="pl-5 pr-3 py-3.5 text-right text-[13px] text-muted-foreground">
 								Total preț
 							</TableCell>
 							<TableCell class="px-3 py-3.5 text-[13px] font-semibold">

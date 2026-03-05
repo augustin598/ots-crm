@@ -1049,6 +1049,8 @@ export const seoLink = sqliteTable('seo_link', {
 	lastCheckError: text('last_check_error'),
 	lastCheckDofollow: text('last_check_dofollow'), // 'dofollow' | 'nofollow' - verified from page, null = neverificat
 	extractedLinks: text('extracted_links'), // JSON: [{keyword, url}] - all links to client found in article
+	articleType: text('article_type'), // 'gdrive' | 'press-article' | 'seo-article' | null
+	gdriveUrl: text('gdrive_url'), // Google Drive link (used when articleType = 'gdrive')
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
