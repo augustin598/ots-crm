@@ -1,8 +1,10 @@
-import puppeteer from 'puppeteer-extra';
+import puppeteerCore from 'puppeteer-core';
+import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { Browser } from 'puppeteer-core';
 import { findChromePath } from './find-chrome';
 
+const puppeteer = addExtra(puppeteerCore);
 puppeteer.use(StealthPlugin());
 
 // ── Constants ──────────────────────────────────────────────────────
