@@ -3,7 +3,7 @@ import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, or, isNull, isNotNull, inArray, like } from 'drizzle-orm';
+import { eq, and, desc, asc, or, isNull, isNotNull, inArray, like, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
 import { fetchWithCloudflareFallback } from '$lib/server/scraper/cloudflare-bypass';
@@ -27,7 +27,7 @@ const seoLinkSchema = v.object({
 	linkType: v.optional(v.picklist(['article', 'guest-post', 'press-release', 'directory', 'other'])),
 	linkAttribute: v.optional(v.picklist(['dofollow', 'nofollow'])),
 	status: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
-	articleUrl: v.pipe(v.string(), v.minLength(1, 'Linkul articolului este obligatoriu')),
+	articleUrl: v.optional(v.string()),
 	articlePublishedAt: v.optional(v.string()),
 	targetUrl: v.optional(v.string()),
 	price: v.optional(v.number()),
@@ -150,7 +150,11 @@ export const getSeoLinks = query(
 			.select()
 			.from(table.seoLink)
 			.where(conditions)
-			.orderBy(desc(table.seoLink.month), desc(table.seoLink.createdAt));
+			.orderBy(
+				asc(sql`CASE WHEN ${table.seoLink.status} = 'pending' THEN 0 ELSE 1 END`),
+				desc(table.seoLink.month),
+				desc(table.seoLink.createdAt)
+			);
 
 		return links;
 	}
