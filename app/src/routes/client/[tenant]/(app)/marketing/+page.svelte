@@ -20,7 +20,9 @@
 	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
 	import ArticleUploadDialog from '$lib/components/marketing/article-upload-dialog.svelte';
 	import MaterialGroupedView from '$lib/components/marketing/material-grouped-view.svelte';
-	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
+	import ImageLightbox from '$lib/components/image-lightbox.svelte';
+	import MaterialPreviewDialog from '$lib/components/marketing/material-preview-dialog.svelte';
+	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl, getMaterialPreviewUrl } from '$lib/remotes/marketing-materials.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { toast } from 'svelte-sonner';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -152,6 +154,74 @@
 		refreshKey++;
 	}
 
+	// Preview state
+	let previewOpen = $state(false);
+	let previewMaterial = $state<any>(null);
+	let previewUrl = $state<string | null>(null);
+	let lightboxOpen = $state(false);
+	let lightboxSrc = $state('');
+
+	async function handlePreview(material: any) {
+		if (material.type === 'url') {
+			if (material.externalUrl) {
+				window.open(material.externalUrl, '_blank');
+			} else if (material.textContent) {
+				previewMaterial = material;
+				previewUrl = null;
+				previewOpen = true;
+			}
+			return;
+		}
+		if (material.type === 'image') {
+			const url = thumbnailUrls[material.id];
+			if (url) {
+				lightboxSrc = url;
+				lightboxOpen = true;
+			} else if (material.filePath) {
+				try {
+					const result = await getMaterialDownloadUrl(material.id);
+					lightboxSrc = result.url;
+					lightboxOpen = true;
+				} catch {
+					toast.error('Eroare la încărcarea imaginii');
+				}
+			}
+			return;
+		}
+		if (material.type === 'document') {
+			if (material.filePath) {
+				try {
+					const result = await getMaterialPreviewUrl(material.id);
+					previewUrl = result.url;
+					previewMaterial = material;
+					previewOpen = true;
+				} catch {
+					toast.error('Eroare la deschiderea documentului');
+				}
+			}
+			return;
+		}
+		if (material.type === 'video') {
+			if (material.filePath) {
+				try {
+					const result = await getMaterialDownloadUrl(material.id);
+					previewUrl = result.url;
+					previewMaterial = material;
+					previewOpen = true;
+				} catch {
+					toast.error('Eroare la încărcarea videoclipului');
+				}
+			}
+			return;
+		}
+		if (material.type === 'text') {
+			previewMaterial = material;
+			previewUrl = null;
+			previewOpen = true;
+			return;
+		}
+	}
+
 	const uploadUrl = $derived(`/client/${tenantSlug}/marketing/upload`);
 	const isFileFilterType = $derived(['image', 'video', 'document'].includes(filterType));
 </script>
@@ -248,6 +318,8 @@
 					{currentClientUserId}
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
+					onPreview={handlePreview}
+					activeTasks={[]}
 				/>
 			{:else if viewMode === 'list'}
 				<MaterialListView
@@ -255,6 +327,8 @@
 					{currentClientUserId}
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
+					onPreview={handlePreview}
+					activeTasks={[]}
 				/>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -265,6 +339,8 @@
 							{currentClientUserId}
 							onEdit={handleEdit}
 							onDelete={handleDeleteClick}
+							onPreview={handlePreview}
+							activeTasks={[]}
 						/>
 					{/each}
 				</div>
@@ -309,6 +385,21 @@
 	material={editMaterial}
 	{seoLinks}
 	onUpdated={handleUpdated}
+/>
+
+<!-- Image Lightbox -->
+<ImageLightbox
+	src={lightboxSrc}
+	alt={previewMaterial?.title || ''}
+	open={lightboxOpen}
+	onClose={() => { lightboxOpen = false; }}
+/>
+
+<!-- Preview Dialog (video, text, Google Ads, social URLs) -->
+<MaterialPreviewDialog
+	bind:open={previewOpen}
+	material={previewMaterial}
+	presignedUrl={previewUrl}
 />
 
 <!-- Delete Confirmation -->

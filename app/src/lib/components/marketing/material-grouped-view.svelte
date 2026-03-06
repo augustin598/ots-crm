@@ -31,7 +31,11 @@
 		currentClientUserId = null,
 		clientNameFn,
 		onEdit,
-		onDelete
+		onDelete,
+		onPreview,
+		activeTasks = [],
+		onLinkTask,
+		onUnlinkTask
 	}: {
 		materials: any[];
 		thumbnailUrls?: Record<string, string | null>;
@@ -40,6 +44,10 @@
 		clientNameFn?: (clientId: string) => string;
 		onEdit?: (material: any) => void;
 		onDelete?: (material: any) => void;
+		onPreview?: (material: any) => void;
+		activeTasks?: { id: string; title: string; status: string; clientId: string | null }[];
+		onLinkTask?: (materialId: string, taskId: string) => void;
+		onUnlinkTask?: (materialId: string, taskId: string) => void;
 	} = $props();
 
 	// Group materials by category
@@ -116,6 +124,10 @@
 							{clientNameFn}
 							{onEdit}
 							{onDelete}
+							{onPreview}
+							{activeTasks}
+							{onLinkTask}
+							{onUnlinkTask}
 						/>
 					{:else}
 						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -126,6 +138,10 @@
 									{currentClientUserId}
 									onEdit={onEdit}
 									onDelete={onDelete}
+									{onPreview}
+									{activeTasks}
+									{onLinkTask}
+									{onUnlinkTask}
 								/>
 							{/each}
 						</div>

@@ -10,6 +10,8 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import { toast } from 'svelte-sonner';
+	import MaterialColorTagPicker from './material-color-tag-picker.svelte';
+	import { serializeColorTags, type ColorTag } from './tag-colors';
 
 	interface SeoLinkOption {
 		id: string;
@@ -40,7 +42,7 @@
 	let title = $state('');
 	let description = $state('');
 	let seoLinkId = $state('');
-	let tags = $state('');
+	let tags = $state<ColorTag[]>([]);
 	let textContent = $state('');
 	let materialType = $state<'file' | 'text' | 'url'>(initialType || 'file');
 
@@ -58,7 +60,7 @@
 		title = '';
 		description = '';
 		seoLinkId = '';
-		tags = '';
+		tags = [];
 		textContent = '';
 		materialType = initialType || 'file';
 		externalUrl = '';
@@ -142,11 +144,6 @@
 		}
 	}
 
-	function validateTagsInput(value: string): boolean {
-		const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
-		return parts.length <= 10 && parts.every((t) => t.length <= 50);
-	}
-
 	async function handleUpload() {
 		if (!title.trim()) {
 			toast.error('Titlul este obligatoriu');
@@ -156,11 +153,6 @@
 			toast.error('Titlul nu poate depăși 200 de caractere');
 			return;
 		}
-		if (tags.trim() && !validateTagsInput(tags)) {
-			toast.error('Maximum 10 taguri, fiecare maxim 50 caractere');
-			return;
-		}
-
 		uploading = true;
 
 		try {
@@ -178,7 +170,8 @@
 				formData.append('title', title.trim());
 				if (description.trim()) formData.append('description', description.trim());
 				if (seoLinkId) formData.append('seoLinkId', seoLinkId);
-				if (tags.trim()) formData.append('tags', tags.trim());
+				const serializedTags = serializeColorTags(tags);
+				if (serializedTags) formData.append('tags', serializedTags);
 
 				const response = await fetch(uploadUrl, {
 					method: 'POST',
@@ -208,7 +201,7 @@
 					description: description.trim() || null,
 					textContent: textContent.trim(),
 					seoLinkId: seoLinkId || null,
-					tags: tags.trim() || null
+					tags: serializeColorTags(tags)
 				});
 
 				toast.success('Material text creat cu succes');
@@ -233,7 +226,7 @@
 					description: description.trim() || null,
 					externalUrl: externalUrl.trim(),
 					seoLinkId: seoLinkId || null,
-					tags: tags.trim() || null
+					tags: serializeColorTags(tags)
 				});
 
 				toast.success('Material URL creat cu succes');
@@ -396,8 +389,8 @@
 
 			<!-- Tags -->
 			<div class="space-y-1.5">
-				<Label for="material-tags">Taguri (opțional, separate prin virgulă)</Label>
-				<Input id="material-tags" bind:value={tags} placeholder="banner, promo, campanie-iarna" />
+				<Label>Taguri (opțional)</Label>
+				<MaterialColorTagPicker value={tags} onChange={(v) => { tags = v; }} />
 			</div>
 		</div>
 

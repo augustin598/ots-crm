@@ -8,7 +8,9 @@
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
-	import MaterialActionsMenu from './material-actions-menu.svelte';
+	import MaterialActionButtons from './material-action-buttons.svelte';
+	import MaterialTaskPicker from './material-task-picker.svelte';
+	import MaterialColorTags from './material-color-tags.svelte';
 	import { getMaterialDownloadUrl } from '$lib/remotes/marketing-materials.remote';
 	import { toast } from 'svelte-sonner';
 
@@ -18,7 +20,11 @@
 		currentClientUserId = null,
 		clientNameFn,
 		onEdit,
-		onDelete
+		onDelete,
+		onPreview,
+		activeTasks = [],
+		onLinkTask,
+		onUnlinkTask
 	}: {
 		materials: any[];
 		readonly?: boolean;
@@ -26,6 +32,10 @@
 		clientNameFn?: (clientId: string) => string;
 		onEdit?: (material: any) => void;
 		onDelete?: (material: any) => void;
+		onPreview?: (material: any) => void;
+		activeTasks?: { id: string; title: string; status: string; clientId: string | null }[];
+		onLinkTask?: (materialId: string, taskId: string) => void;
+		onUnlinkTask?: (materialId: string, taskId: string) => void;
 	} = $props();
 
 	const typeIcons: Record<string, any> = {
@@ -75,17 +85,6 @@
 		} catch {
 			return 0;
 		}
-	}
-
-	function parseTags(tags: string | null): string[] {
-		if (!tags) return [];
-		try {
-			const parsed = JSON.parse(tags);
-			if (Array.isArray(parsed)) return parsed.map((t: string) => t.trim()).filter(Boolean);
-		} catch {
-			// fallback
-		}
-		return tags.split(',').map(t => t.trim()).filter(Boolean);
 	}
 
 	interface SocialSet { title: string; urls: string[] }
@@ -207,6 +206,7 @@
 					</button>
 				</Table.Head>
 				<Table.Head class="w-[160px]">Taguri</Table.Head>
+				<Table.Head class="w-[170px]">Task</Table.Head>
 				<Table.Head class="w-[110px]">
 					<button class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('createdAt')}>
 						Data
@@ -221,14 +221,13 @@
 						{/if}
 					</button>
 				</Table.Head>
-				<Table.Head class="w-[50px]"></Table.Head>
+				<Table.Head class="w-[150px]">Acțiuni</Table.Head>
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
 			{#each sortedMaterials as material (material.id)}
 				{@const colors = typeColors[material.type] || { bg: 'bg-gray-50 dark:bg-gray-900', text: 'text-gray-500' }}
 				{@const IconComponent = typeIcons[material.type] || FileTextIcon}
-				{@const tags = parseTags(material.tags)}
 				{@const socialSets = material.type === 'url' ? parseSocialSets(material.textContent) : []}
 				{@const imgCount = parseAttachedImageCount(material.attachedImages)}
 				<Table.Row class="hover:bg-accent/50">
@@ -296,18 +295,19 @@
 
 					<!-- Tags -->
 					<Table.Cell>
-						{#if tags.length > 0}
-							<div class="flex flex-wrap gap-1">
-								{#each tags.slice(0, 2) as tag}
-									<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">{tag}</span>
-								{/each}
-								{#if tags.length > 2}
-									<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">+{tags.length - 2}</span>
-								{/if}
-							</div>
-						{:else}
-							<span class="text-xs text-muted-foreground">--</span>
-						{/if}
+						<MaterialColorTags tags={material.tags} />
+					</Table.Cell>
+
+					<!-- Task -->
+					<Table.Cell>
+						<MaterialTaskPicker
+							materialId={material.id}
+							linkedTasks={material.linkedTasks || []}
+							{activeTasks}
+							readonly={readonly || !!currentClientUserId}
+							onLink={onLinkTask}
+							onUnlink={onUnlinkTask}
+						/>
 					</Table.Cell>
 
 					<!-- Date -->
@@ -317,13 +317,15 @@
 
 					<!-- Actions -->
 					<Table.Cell>
-						<MaterialActionsMenu
+						<MaterialActionButtons
 							{material}
 							canModify={canModify(material)}
-							{onEdit}
-							{onDelete}
+							onPreview={() => onPreview?.(material)}
+							onEdit={onEdit}
+							onDelete={onDelete}
 							onDownload={() => handleDownload(material)}
 							onOpenUrl={() => window.open(material.externalUrl!, '_blank')}
+							variant="row"
 						/>
 					</Table.Cell>
 				</Table.Row>

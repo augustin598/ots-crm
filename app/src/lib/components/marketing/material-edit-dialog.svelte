@@ -8,6 +8,8 @@
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import ImageIcon from '@lucide/svelte/icons/image';
 	import { toast } from 'svelte-sonner';
+	import MaterialColorTagPicker from './material-color-tag-picker.svelte';
+	import { parseColorTags, serializeColorTags, type ColorTag } from './tag-colors';
 	import { updateMarketingMaterial } from '$lib/remotes/marketing-materials.remote';
 
 	interface Material {
@@ -48,7 +50,7 @@
 	let externalUrl = $state('');
 	let seoLinkId = $state('');
 	let status = $state('active');
-	let tags = $state('');
+	let tags = $state<ColorTag[]>([]);
 	let saving = $state(false);
 
 	$effect(() => {
@@ -59,7 +61,7 @@
 			externalUrl = material.externalUrl || '';
 			seoLinkId = material.seoLinkId || '';
 			status = material.status || 'active';
-			tags = material.tags || '';
+			tags = parseColorTags(material.tags);
 		}
 	});
 
@@ -70,11 +72,6 @@
 		} catch {
 			return false;
 		}
-	}
-
-	function validateTagsInput(value: string): boolean {
-		const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
-		return parts.length <= 10 && parts.every((t) => t.length <= 50);
 	}
 
 	async function handleSave() {
@@ -91,11 +88,6 @@
 			toast.error('URL extern invalid. Trebuie să înceapă cu https:// sau http://');
 			return;
 		}
-		if (tags.trim() && !validateTagsInput(tags)) {
-			toast.error('Maximum 10 taguri, fiecare maxim 50 caractere');
-			return;
-		}
-
 		saving = true;
 		try {
 			const isStructured = material ? ['google-ads', 'tiktok-ads', 'facebook-ads'].includes(material.category) : false;
@@ -107,7 +99,7 @@
 				externalUrl: externalUrl.trim() || null,
 				seoLinkId: seoLinkId || null,
 				status: status as 'draft' | 'active' | 'archived',
-				tags: tags.trim() || null
+				tags: serializeColorTags(tags)
 			});
 			toast.success('Material actualizat');
 			open = false;
@@ -120,7 +112,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={(o) => { if (!o) { title = ''; description = ''; textContent = ''; externalUrl = ''; seoLinkId = ''; status = 'active'; tags = ''; } }}>
+<Dialog.Root bind:open onOpenChange={(o) => { if (!o) { title = ''; description = ''; textContent = ''; externalUrl = ''; seoLinkId = ''; status = 'active'; tags = []; } }}>
 	<Dialog.Content class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Editează Material</Dialog.Title>
@@ -200,8 +192,8 @@
 				</div>
 
 				<div class="space-y-1.5">
-					<Label for="edit-tags">Taguri</Label>
-					<Input id="edit-tags" bind:value={tags} placeholder="separate prin virgulă" />
+					<Label>Taguri</Label>
+					<MaterialColorTagPicker value={tags} onChange={(v) => { tags = v; }} />
 				</div>
 				<Dialog.Footer class="pt-4">
 				<Button variant="outline" onclick={() => (open = false)}>Anulează</Button>

@@ -11,9 +11,23 @@ function generateMaterialId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+const VALID_TAG_COLORS = new Set(['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray']);
+
 function validateTags(value: string): boolean {
-	const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
-	return parts.length <= 10 && parts.every((t) => t.length <= 50);
+	try {
+		const parsed = JSON.parse(value);
+		if (Array.isArray(parsed)) {
+			// New format: [{color, label}]
+			if (parsed.length > 0 && typeof parsed[0] === 'object' && 'color' in parsed[0]) {
+				return parsed.length <= 7 && parsed.every((t: any) => VALID_TAG_COLORS.has(t.color) && (!t.label || t.label.length <= 30));
+			}
+			// Old format: ["red", "blue"]
+			return parsed.length <= 7 && parsed.every((t: unknown) => typeof t === 'string' && VALID_TAG_COLORS.has(t as string));
+		}
+	} catch {
+		// Legacy format: allow passthrough
+	}
+	return value.length <= 500;
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -118,7 +132,28 @@ export const getMarketingMaterials = query(
 			.orderBy(desc(table.marketingMaterial.createdAt))
 			.limit(500);
 
-		return results;
+		if (results.length === 0) return results.map((r) => ({ ...r, linkedTasks: [] as { id: string; title: string; status: string }[] }));
+
+		// Batch-fetch linked tasks for all materials
+		const materialIds = results.map((r) => r.id);
+		const taskLinks = await db
+			.select({
+				materialId: table.taskMarketingMaterial.marketingMaterialId,
+				taskId: table.task.id,
+				taskTitle: table.task.title,
+				taskStatus: table.task.status
+			})
+			.from(table.taskMarketingMaterial)
+			.innerJoin(table.task, eq(table.taskMarketingMaterial.taskId, table.task.id))
+			.where(inArray(table.taskMarketingMaterial.marketingMaterialId, materialIds));
+
+		const tasksByMaterial = new Map<string, { id: string; title: string; status: string }[]>();
+		for (const link of taskLinks) {
+			if (!tasksByMaterial.has(link.materialId)) tasksByMaterial.set(link.materialId, []);
+			tasksByMaterial.get(link.materialId)!.push({ id: link.taskId, title: link.taskTitle, status: link.taskStatus });
+		}
+
+		return results.map((r) => ({ ...r, linkedTasks: tasksByMaterial.get(r.id) || [] }));
 	}
 );
 
@@ -386,6 +421,53 @@ export const getMaterialDownloadUrl = query(
 		}
 
 		const url = await storage.getDownloadUrl(material.filePath, 300);
+		return { url, fileName: material.fileName, mimeType: material.mimeType };
+	}
+);
+
+export const getMaterialPreviewUrl = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (materialId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		let conditions = and(
+			eq(table.marketingMaterial.id, materialId),
+			eq(table.marketingMaterial.tenantId, tenantId)
+		);
+
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(
+				conditions,
+				eq(table.marketingMaterial.clientId, event.locals.client.id)
+			) as typeof conditions;
+		}
+
+		const [material] = await db
+			.select({
+				filePath: table.marketingMaterial.filePath,
+				fileName: table.marketingMaterial.fileName,
+				mimeType: table.marketingMaterial.mimeType
+			})
+			.from(table.marketingMaterial)
+			.where(conditions!)
+			.limit(1);
+
+		if (!material || !material.filePath) {
+			throw new Error('Material negăsit sau fără fișier');
+		}
+
+		const respHeaders: Record<string, string> = {
+			'response-content-disposition': 'inline'
+		};
+		if (material.mimeType) {
+			respHeaders['response-content-type'] = material.mimeType;
+		}
+
+		const url = await storage.getDownloadUrl(material.filePath, 300, respHeaders);
 		return { url, fileName: material.fileName, mimeType: material.mimeType };
 	}
 );

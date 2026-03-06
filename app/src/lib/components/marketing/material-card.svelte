@@ -7,8 +7,10 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
-	import MaterialActionsMenu from './material-actions-menu.svelte';
-	import { getMaterialDownloadUrl, getMaterialAttachedImageUrl } from '$lib/remotes/marketing-materials.remote';
+	import MaterialActionButtons from './material-action-buttons.svelte';
+	import MaterialTaskPicker from './material-task-picker.svelte';
+	import MaterialColorTags from './material-color-tags.svelte';
+	import { getMaterialDownloadUrl, getMaterialPreviewUrl, getMaterialAttachedImageUrl } from '$lib/remotes/marketing-materials.remote';
 	import { toast } from 'svelte-sonner';
 	import { CAMPAIGN_TYPE_LABELS, type GoogleAdsCampaignType } from '$lib/shared/google-ads-specs';
 
@@ -41,7 +43,11 @@
 		readonly = false,
 		currentClientUserId = null,
 		onEdit,
-		onDelete
+		onDelete,
+		onPreview,
+		activeTasks = [],
+		onLinkTask,
+		onUnlinkTask
 	}: {
 		material: Material;
 		thumbnailUrl?: string | null;
@@ -49,6 +55,10 @@
 		currentClientUserId?: string | null;
 		onEdit?: (material: Material) => void;
 		onDelete?: (material: Material) => void;
+		onPreview?: (material: Material) => void;
+		activeTasks?: { id: string; title: string; status: string; clientId: string | null }[];
+		onLinkTask?: (materialId: string, taskId: string) => void;
+		onUnlinkTask?: (materialId: string, taskId: string) => void;
 	} = $props();
 
 	const typeIcons: Record<string, any> = {
@@ -90,17 +100,6 @@
 		return new Date(date).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' });
 	}
 
-	function parseTags(tags: string | null): string[] {
-		if (!tags) return [];
-		try {
-			const parsed = JSON.parse(tags);
-			if (Array.isArray(parsed)) return parsed.map((t: string) => t.trim()).filter(Boolean);
-		} catch {
-			// fallback: comma-separated
-		}
-		return tags.split(',').map(t => t.trim()).filter(Boolean);
-	}
-
 	function parseSocialSets(textContent: string | null): { title: string; urls: string[] }[] {
 		if (!textContent) return [];
 		try {
@@ -134,7 +133,6 @@
 		)
 	);
 
-	const tagList = $derived(parseTags(material.tags));
 	const colors = $derived(typeColors[material.type] || { border: 'border-l-gray-300', bg: 'bg-gray-50 dark:bg-gray-900', text: 'text-gray-500' });
 	const TypeIconComponent = $derived(typeIcons[material.type] || FileTextIcon);
 	const socialSets = $derived(material.type === 'url' ? parseSocialSets(material.textContent) : []);
@@ -160,14 +158,18 @@
 	let videoPlaying = $state(false);
 	let attachedImgUrl = $state<string | null>(null);
 	let attachedImgLoading = $state(false);
+	let docPreviewUrl = $state<string | null>(null);
+	let docPreviewLoading = $state(false);
 
-	// Reset attached image URL when material changes
+	// Reset URLs when material changes
 	let prevMaterialId = $state(material.id);
 	$effect(() => {
 		if (material.id !== prevMaterialId) {
 			prevMaterialId = material.id;
 			attachedImgUrl = null;
 			attachedImgLoading = false;
+			docPreviewUrl = null;
+			docPreviewLoading = false;
 		}
 	});
 
@@ -181,6 +183,24 @@
 				.finally(() => { attachedImgLoading = false; });
 		}
 	});
+
+	// Load presigned URL for document preview (PDF/DOCX/TXT) when no attached images
+	$effect(() => {
+		if (material.type === 'document' && material.filePath && attachedImageCount === 0 && !docPreviewUrl && !docPreviewLoading) {
+			docPreviewLoading = true;
+			getMaterialPreviewUrl(material.id)
+				.then((r) => { docPreviewUrl = r.url; })
+				.catch(() => {})
+				.finally(() => { docPreviewLoading = false; });
+		}
+	});
+
+	const isDocx = $derived(
+		material.mimeType === 'application/msword' ||
+		material.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+	);
+	const isPdf = $derived(material.mimeType === 'application/pdf');
+	const isTxt = $derived(material.mimeType === 'text/plain');
 
 	async function handlePlayVideo() {
 		if (videoUrl) {
@@ -222,7 +242,11 @@
 
 <Card class="group overflow-hidden transition-all hover:shadow-md border-l-4 {colors.border}">
 	<!-- Thumbnail area -->
-	<div class="relative aspect-video bg-muted flex items-center justify-center overflow-hidden">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="relative aspect-video bg-muted flex items-center justify-center overflow-hidden {onPreview ? 'cursor-pointer' : ''}"
+		onclick={() => { if (onPreview && material.type !== 'video') onPreview(material); }}
+	>
 		{#if material.type === 'video' && videoPlaying && videoUrl}
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video
@@ -270,6 +294,20 @@
 			</div>
 		{:else if material.type === 'document' && attachedImgUrl}
 			<img src={attachedImgUrl} alt={material.title} class="w-full h-full object-cover" />
+		{:else if material.type === 'document' && docPreviewUrl && isPdf}
+			<iframe
+				src={docPreviewUrl}
+				title={material.title}
+				class="w-full h-full pointer-events-none border-0"
+				loading="lazy"
+			></iframe>
+		{:else if material.type === 'document' && docPreviewUrl && isDocx}
+			<iframe
+				src="https://docs.google.com/gview?url={encodeURIComponent(docPreviewUrl)}&embedded=true"
+				title={material.title}
+				class="w-full h-full pointer-events-none border-0"
+				loading="lazy"
+			></iframe>
 		{:else}
 			<div class="flex items-center justify-center h-10 w-10 rounded-xl {colors.bg}">
 				<TypeIconComponent class="h-5 w-5 {colors.text}" />
@@ -318,16 +356,17 @@
 			</div>
 		{/if}
 
-		<!-- Actions menu -->
+		<!-- Action buttons -->
 		<div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
-			<MaterialActionsMenu
+			<MaterialActionButtons
 				{material}
 				{canModify}
+				{onPreview}
 				{onEdit}
 				{onDelete}
 				onDownload={handleDownload}
 				onOpenUrl={() => window.open(material.externalUrl!, '_blank')}
-				triggerClass="bg-white/80 dark:bg-black/60 backdrop-blur-sm hover:bg-white dark:hover:bg-black/80"
+				variant="overlay"
 			/>
 		</div>
 	</div>
@@ -347,19 +386,28 @@
 		{/if}
 
 		<!-- Tags -->
-		{#if tagList.length > 0}
-			<div class="flex flex-wrap gap-0.5 pl-6.5">
-				{#each tagList.slice(0, 2) as tag}
-					<span class="text-[9px] px-1 py-0 rounded-full bg-secondary text-secondary-foreground">{tag}</span>
-				{/each}
-				{#if tagList.length > 2}
-					<span class="text-[9px] px-1 py-0 rounded-full bg-secondary text-secondary-foreground">+{tagList.length - 2}</span>
-				{/if}
+		{#if material.tags}
+			<div class="pl-6.5">
+				<MaterialColorTags tags={material.tags} />
 			</div>
 		{/if}
 
 		{#if material.seoLinkKeyword}
 			<p class="text-[11px] text-blue-600 dark:text-blue-400 truncate pl-6.5">SEO: {material.seoLinkKeyword}</p>
+		{/if}
+
+		<!-- Task -->
+		{#if (material as any).linkedTasks?.length > 0 || (onLinkTask && !readonly && !currentClientUserId)}
+			<div class="pl-6.5">
+				<MaterialTaskPicker
+					materialId={material.id}
+					linkedTasks={(material as any).linkedTasks || []}
+					{activeTasks}
+					readonly={readonly || !!currentClientUserId}
+					onLink={onLinkTask}
+					onUnlink={onUnlinkTask}
+				/>
+			</div>
 		{/if}
 
 		<!-- Footer -->

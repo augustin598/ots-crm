@@ -10,6 +10,8 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import { toast } from 'svelte-sonner';
+	import MaterialColorTagPicker from './material-color-tag-picker.svelte';
+	import { serializeColorTags, type ColorTag } from './tag-colors';
 
 	let {
 		open = $bindable(false),
@@ -27,7 +29,7 @@
 
 	let title = $state('');
 	let description = $state('');
-	let tags = $state('');
+	let tags = $state<ColorTag[]>([]);
 	let docFile = $state<File | null>(null);
 	let imageFiles = $state<File[]>([]);
 	let imagePreviews = $state<string[]>([]);
@@ -38,7 +40,7 @@
 	function resetForm() {
 		title = '';
 		description = '';
-		tags = '';
+		tags = [];
 		docFile = null;
 		imageFiles = [];
 		revokeImagePreviews();
@@ -166,11 +168,6 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	function validateTagsInput(value: string): boolean {
-		const parts = value.split(',').map((t) => t.trim()).filter(Boolean);
-		return parts.length <= 10 && parts.every((t) => t.length <= 50);
-	}
-
 	async function handleUpload() {
 		if (!docFile) {
 			toast.error('Fișierul document este obligatoriu');
@@ -184,11 +181,6 @@
 			toast.error('Titlul nu poate depăși 200 de caractere');
 			return;
 		}
-		if (tags.trim() && !validateTagsInput(tags)) {
-			toast.error('Maximum 10 taguri, fiecare maxim 50 caractere');
-			return;
-		}
-
 		uploading = true;
 
 		try {
@@ -201,7 +193,8 @@
 			formData.append('category', category);
 			formData.append('title', title.trim());
 			if (description.trim()) formData.append('description', description.trim());
-			if (tags.trim()) formData.append('tags', tags.trim());
+			const serializedTags = serializeColorTags(tags);
+			if (serializedTags) formData.append('tags', serializedTags);
 
 			const articleUploadUrl = uploadUrl.replace(/\/upload$/, '/upload-article');
 			const response = await fetch(articleUploadUrl, {
@@ -351,8 +344,8 @@
 
 			<!-- Tags -->
 			<div class="space-y-1.5">
-				<Label for="article-tags">Taguri (opțional, separate prin virgulă)</Label>
-				<Input id="article-tags" bind:value={tags} placeholder="seo, blog, campanie" />
+				<Label>Taguri (opțional)</Label>
+				<MaterialColorTagPicker value={tags} onChange={(v) => { tags = v; }} />
 			</div>
 		</div>
 

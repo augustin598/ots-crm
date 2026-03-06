@@ -75,10 +75,10 @@ export async function uploadFile(
 /**
  * Get a presigned URL for downloading a file
  */
-export async function getDownloadUrl(filePath: string, expirySeconds = 3600): Promise<string> {
+export async function getDownloadUrl(filePath: string, expirySeconds = 3600, respHeaders?: Record<string, string>): Promise<string> {
 	try {
 		const client = getMinioClient();
-		return await client.presignedGetObject(BUCKET_NAME, filePath, expirySeconds);
+		return await client.presignedGetObject(BUCKET_NAME, filePath, expirySeconds, respHeaders);
 	} catch (error) {
 		console.error('Error generating download URL:', error);
 		throw error;
