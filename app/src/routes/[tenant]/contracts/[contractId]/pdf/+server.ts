@@ -51,7 +51,7 @@ export const GET: RequestHandler = async (event) => {
 		.select()
 		.from(table.contractLineItem)
 		.where(eq(table.contractLineItem.contractId, contractId))
-		.orderBy(asc(table.contractLineItem.id));
+		.orderBy(asc(table.contractLineItem.sortOrder));
 
 	const [client] = await db
 		.select()

@@ -14,6 +14,8 @@
 	import { Download, Search, Eye, PenLine, Upload, FileText } from '@lucide/svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import { toast } from 'svelte-sonner';
+	import { formatContractDate } from '$lib/utils/contract-utils';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -33,7 +35,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcarea PDF');
 		}
 	}
 
@@ -45,7 +47,7 @@
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
+			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizarea PDF');
 		}
 	}
 
@@ -144,15 +146,7 @@
 		}
 	}
 
-	function formatDate(date: Date | string | null | undefined): string {
-		if (!date) return '-';
-		try {
-			const d = date instanceof Date ? date : new Date(date);
-			return d.toLocaleDateString('ro-RO', { year: 'numeric', month: 'short', day: 'numeric' });
-		} catch {
-			return '-';
-		}
-	}
+	// Using shared formatContractDate from contract-utils
 
 	function getSortIcon(column: string): string {
 		if (sortColumn !== column) return '';
@@ -266,7 +260,7 @@
 									</div>
 								</TableCell>
 								<TableCell>{contract.contractTitle}</TableCell>
-								<TableCell>{formatDate(contract.contractDate)}</TableCell>
+								<TableCell>{formatContractDate(contract.contractDate)}</TableCell>
 								<TableCell>
 									<span
 										class="inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-medium capitalize {getStatusColor(contract.status)}"

@@ -41,6 +41,13 @@
 		PenLine
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import {
+		getContractStatusLabel,
+		getContractStatusVariant,
+		formatContractDate,
+		formatContractPrice,
+		getBillingFrequencyLabel
+	} from '$lib/utils/contract-utils';
 
 	let { data }: { data: any } = $props();
 
@@ -86,75 +93,7 @@
 	);
 	const total = $derived(subtotal - discountAmount);
 
-	function formatPrice(cents: number): string {
-		return (cents / 100).toFixed(2);
-	}
-
-	function formatDate(date: Date | string | null | undefined): string {
-		if (!date) return '-';
-		try {
-			const d = date instanceof Date ? date : new Date(date);
-			if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
-				return d.toLocaleDateString('ro-RO');
-			}
-		} catch {
-			// ignore
-		}
-		return '-';
-	}
-
-	function getStatusVariant(status: string) {
-		switch (status) {
-			case 'active':
-				return 'success';
-			case 'expired':
-				return 'destructive';
-			case 'signed':
-				return 'secondary';
-			case 'sent':
-				return 'outline';
-			case 'draft':
-				return 'outline';
-			case 'cancelled':
-				return 'destructive';
-			default:
-				return 'secondary';
-		}
-	}
-
-	function getStatusLabel(status: string) {
-		switch (status) {
-			case 'active':
-				return 'Activ';
-			case 'expired':
-				return 'Expirat';
-			case 'signed':
-				return 'Semnat';
-			case 'sent':
-				return 'Trimis la semnat';
-			case 'draft':
-				return 'Ciorna';
-			case 'cancelled':
-				return 'Anulat';
-			default:
-				return status;
-		}
-	}
-
-	function getBillingFrequencyLabel(freq: string | null | undefined) {
-		switch (freq) {
-			case 'monthly':
-				return 'Lunar';
-			case 'one-time':
-				return 'O singura data';
-			case 'quarterly':
-				return 'Trimestrial';
-			case 'yearly':
-				return 'Anual';
-			default:
-				return freq || '-';
-		}
-	}
+	// Using shared utils: getContractStatusVariant, getContractStatusLabel, formatContractDate, formatContractPrice, getBillingFrequencyLabel
 
 	async function handleSendForSigning() {
 		if (!contractId || !sendEmail) return;
@@ -232,17 +171,22 @@
 		}
 	}
 
-	async function handleDelete() {
+	let showDeleteDialog = $state(false);
+	let deleting = $state(false);
+
+	async function executeDelete() {
 		if (!contractId) return;
-		if (!confirm('Esti sigur ca vrei sa stergi acest contract?')) return;
+		deleting = true;
 		try {
 			await deleteContract(contractId).updates(contractQuery, getContracts({}));
-			toast.success('Contract sters cu succes');
+			toast.success('Contract șters cu succes');
 			goto(`/${tenantSlug}/contracts`);
 		} catch (e) {
 			console.error('Delete contract error:', e);
-			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la stergerea contractului';
+			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la ștergerea contractului';
 			toast.error(message);
+		} finally {
+			deleting = false;
 		}
 	}
 </script>
@@ -273,8 +217,8 @@
 						<h1 class="text-3xl font-bold tracking-tight">
 							Contract NR {contract.contractNumber}
 						</h1>
-						<Badge variant={getStatusVariant(contract.status)}>
-							{getStatusLabel(contract.status)}
+						<Badge variant={getContractStatusVariant(contract.status)}>
+							{getContractStatusLabel(contract.status)}
 						</Badge>
 					</div>
 					<p class="text-lg text-muted-foreground">{client?.name || 'Client necunoscut'}</p>
@@ -305,13 +249,15 @@
 							Semneaza
 						</Button>
 					{/if}
-					<Button
-						variant="outline"
-						onclick={() => goto(`/${tenantSlug}/contracts/${contractId}/edit`)}
-					>
-						<Edit class="mr-2 h-4 w-4" />
-						Editeaza
-					</Button>
+					{#if contract.status === 'draft' || contract.status === 'sent'}
+						<Button
+							variant="outline"
+							onclick={() => goto(`/${tenantSlug}/contracts/${contractId}/edit`)}
+						>
+							<Edit class="mr-2 h-4 w-4" />
+							Editeaza
+						</Button>
+					{/if}
 					<Button variant="outline" onclick={handleDuplicate}>
 						<Copy class="mr-2 h-4 w-4" />
 						Duplica
@@ -377,7 +323,7 @@
 								</div>
 								<div class="flex justify-between">
 									<span class="text-muted-foreground">Data contract:</span>
-									<span class="font-medium">{formatDate(contract.contractDate)}</span>
+									<span class="font-medium">{formatContractDate(contract.contractDate)}</span>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-muted-foreground">Moneda:</span>
@@ -423,7 +369,7 @@
 											<p class="font-medium">{item.description}</p>
 										</td>
 										<td class="text-right py-4 font-medium">
-											{formatPrice(item.price)} {contract.currency || 'EUR'}
+											{formatContractPrice(item.price)} {contract.currency || 'EUR'}
 										</td>
 										<td class="py-4">{item.unitOfMeasure || 'Luna'}</td>
 									</tr>
@@ -444,7 +390,7 @@
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Subtotal:</span>
 								<span class="font-medium">
-									{formatPrice(subtotal)} {contract.currency || 'EUR'}
+									{formatContractPrice(subtotal)} {contract.currency || 'EUR'}
 								</span>
 							</div>
 							{#if contract.discountPercent && contract.discountPercent > 0}
@@ -453,7 +399,7 @@
 										Discount ({contract.discountPercent}%):
 									</span>
 									<span class="font-medium">
-										-{formatPrice(discountAmount)} {contract.currency || 'EUR'}
+										-{formatContractPrice(discountAmount)} {contract.currency || 'EUR'}
 									</span>
 								</div>
 							{/if}
@@ -461,7 +407,7 @@
 							<div class="flex justify-between text-lg">
 								<span class="font-semibold">Total:</span>
 								<span class="font-bold">
-									{formatPrice(total)} {contract.currency || 'EUR'}
+									{formatContractPrice(total)} {contract.currency || 'EUR'}
 								</span>
 							</div>
 						</div>
@@ -492,15 +438,15 @@
 					<CardContent class="space-y-4">
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Status</p>
-							<Badge variant={getStatusVariant(contract.status)}>
-								{getStatusLabel(contract.status)}
+							<Badge variant={getContractStatusVariant(contract.status)}>
+								{getContractStatusLabel(contract.status)}
 							</Badge>
 						</div>
 						<Separator />
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Valoare totala</p>
 							<p class="text-2xl font-bold">
-								{formatPrice(total)} {contract.currency || 'EUR'}
+								{formatContractPrice(total)} {contract.currency || 'EUR'}
 							</p>
 						</div>
 						<Separator />
@@ -508,7 +454,7 @@
 							<Calendar class="h-4 w-4 text-muted-foreground" />
 							<div>
 								<p class="text-sm text-muted-foreground">Data contract</p>
-								<p class="font-medium">{formatDate(contract.contractDate)}</p>
+								<p class="font-medium">{formatContractDate(contract.contractDate)}</p>
 							</div>
 						</div>
 						<div class="flex items-center gap-2">
@@ -666,14 +612,16 @@
 							<Download class="mr-2 h-4 w-4" />
 							Download PDF
 						</Button>
-						<Button
-							variant="outline"
-							class="w-full bg-transparent"
-							onclick={() => goto(`/${tenantSlug}/contracts/${contractId}/edit`)}
-						>
-							<Edit class="mr-2 h-4 w-4" />
-							Editeaza
-						</Button>
+						{#if contract.status === 'draft' || contract.status === 'sent'}
+							<Button
+								variant="outline"
+								class="w-full bg-transparent"
+								onclick={() => goto(`/${tenantSlug}/contracts/${contractId}/edit`)}
+							>
+								<Edit class="mr-2 h-4 w-4" />
+								Editeaza
+							</Button>
+						{/if}
 						<Button variant="outline" class="w-full bg-transparent" onclick={handleDuplicate}>
 							<Copy class="mr-2 h-4 w-4" />
 							Duplica contract
@@ -681,7 +629,7 @@
 						<Button
 							variant="destructive"
 							class="w-full"
-							onclick={handleDelete}
+							onclick={() => (showDeleteDialog = true)}
 						>
 							<Trash2 class="mr-2 h-4 w-4" />
 							Sterge contract
@@ -760,6 +708,22 @@
 				disabled={signingInProgress || !prestatorSignName.trim() || !prestatorSignatureDataUrl}
 			>
 				{signingInProgress ? 'Se semnează...' : 'Semnez'}
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<!-- Delete confirmation dialog -->
+<Dialog bind:open={showDeleteDialog}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<DialogTitle>Confirmare ștergere</DialogTitle>
+		</DialogHeader>
+		<p class="text-sm text-muted-foreground py-2">Ești sigur că vrei să ștergi acest contract? Acțiunea este ireversibilă.</p>
+		<DialogFooter class="gap-2">
+			<Button variant="outline" onclick={() => (showDeleteDialog = false)} disabled={deleting}>Anulează</Button>
+			<Button variant="destructive" onclick={executeDelete} disabled={deleting}>
+				{deleting ? 'Se șterge...' : 'Șterge contractul'}
 			</Button>
 		</DialogFooter>
 	</DialogContent>

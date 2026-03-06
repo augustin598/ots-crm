@@ -234,7 +234,7 @@
 					.filter((item) => item.description.trim())
 					.map((item, index) => ({
 						description: item.description,
-						price: Math.round(item.price * 100),
+						price: Math.round((item.price + Number.EPSILON) * 100),
 						unitOfMeasure: item.unitOfMeasure || 'Luna',
 						sortOrder: index
 					}))

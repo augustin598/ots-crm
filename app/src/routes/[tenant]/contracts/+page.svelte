@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { formatAmount, type Currency } from '$lib/utils/currency';
+	// formatAmount removed — using shared contract-utils
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -34,6 +34,12 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import { Upload, X, Loader2, FileText, CheckCircle2, AlertCircle, Info } from '@lucide/svelte';
 	import { cn } from '$lib/utils';
+	import {
+		getContractStatusLabel,
+		getContractStatusVariant,
+		getContractStatusClass,
+		formatContractDate
+	} from '$lib/utils/contract-utils';
 
 	const fieldLabels: Record<string, string> = {
 		cui: 'CUI',
@@ -75,73 +81,32 @@
 	const clients = $derived(clientsQuery.current || []);
 	const clientMap = $derived(new Map(clients.map((client) => [client.id, client.name])));
 
-	function getStatusVariant(status: string): string {
-		switch (status) {
-			case 'draft':
-				return 'outline';
-			case 'sent':
-				return 'secondary';
-			case 'signed':
-				return 'default';
-			case 'active':
-				return 'default';
-			case 'expired':
-				return 'destructive';
-			case 'cancelled':
-				return 'destructive';
-			default:
-				return 'secondary';
-		}
+	// Using shared utils: getContractStatusVariant, getContractStatusClass, getContractStatusLabel, formatContractDate
+
+	// Delete confirmation dialog
+	let showDeleteDialog = $state(false);
+	let deleteTargetId = $state('');
+	let deleting = $state(false);
+
+	function confirmDeleteContract(contractId: string) {
+		deleteTargetId = contractId;
+		showDeleteDialog = true;
 	}
 
-	function getStatusClass(status: string): string {
-		if (status === 'active') {
-			return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800';
-		}
-		return '';
-	}
-
-	function getStatusLabel(status: string): string {
-		const labels: Record<string, string> = {
-			draft: 'Ciorna',
-			sent: 'Trimis',
-			signed: 'Semnat',
-			active: 'Activ',
-			expired: 'Expirat',
-			cancelled: 'Anulat'
-		};
-		return labels[status] || status;
-	}
-
-	function formatDate(date: Date | string | null | undefined): string {
-		if (!date) return '-';
+	async function executeDeleteContract() {
+		if (!deleteTargetId) return;
+		deleting = true;
 		try {
-			const d = date instanceof Date ? date : new Date(date);
-			if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
-				return d.toLocaleDateString('ro-RO', {
-					year: 'numeric',
-					month: 'short',
-					day: 'numeric'
-				});
-			}
-		} catch {
-			// ignore
-		}
-		return '-';
-	}
-
-	async function handleDeleteContract(contractId: string) {
-		if (!confirm('Esti sigur ca vrei sa stergi acest contract?')) {
-			return;
-		}
-
-		try {
-			await deleteContract(contractId).updates(contractsQuery);
-			toast.success('Contractul a fost sters.');
+			await deleteContract(deleteTargetId).updates(contractsQuery);
+			toast.success('Contractul a fost șters.');
+			showDeleteDialog = false;
+			deleteTargetId = '';
 		} catch (e) {
 			console.error('Delete contract error:', e);
-			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la stergerea contractului';
+			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la ștergerea contractului';
 			toast.error(message);
+		} finally {
+			deleting = false;
 		}
 	}
 
@@ -303,6 +268,7 @@
 				}
 			} catch (extractErr) {
 				console.error('[Upload] extractClientFromContract error:', extractErr);
+				toast.warning('Nu s-au putut extrage date din PDF. Poți completa manual datele clientului.');
 			}
 		} catch (e) {
 			uploadError = e instanceof Error ? e.message : 'Eroare la încărcarea contractului';
@@ -387,16 +353,16 @@
 									{#if contract.status === 'active'}
 										<Badge
 											variant="default"
-											class="text-xs font-semibold px-2 py-0.5 shadow-sm {getStatusClass(contract.status)}"
+											class="text-xs font-semibold px-2 py-0.5 shadow-sm {getContractStatusClass(contract.status)}"
 										>
-											{getStatusLabel(contract.status)}
+											{getContractStatusLabel(contract.status)}
 										</Badge>
 									{:else}
 										<Badge
-											variant={getStatusVariant(contract.status)}
+											variant={getContractStatusVariant(contract.status)}
 											class="text-xs font-semibold px-2 py-0.5 shadow-sm"
 										>
-											{getStatusLabel(contract.status)}
+											{getContractStatusLabel(contract.status)}
 										</Badge>
 									{/if}
 								</div>
@@ -421,7 +387,7 @@
 											<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Data Contract</p>
 										</div>
 										<p class="text-sm font-semibold text-foreground">
-											{formatDate(contract.contractDate)}
+											{formatContractDate(contract.contractDate)}
 										</p>
 									</div>
 
@@ -490,7 +456,7 @@
 											<CopyIcon class="mr-2 h-4 w-4" />
 											Duplica
 										</DropdownMenuItem>
-										<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteContract(contract.id)}>
+										<DropdownMenuItem class="text-destructive" onclick={() => confirmDeleteContract(contract.id)}>
 											Sterge
 										</DropdownMenuItem>
 									</DropdownMenuContent>
@@ -694,6 +660,25 @@
 		{/if}
 		<DialogFooter>
 			<Button onclick={() => (showExtractionReport = false)}>Închide</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={showDeleteDialog}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<DialogTitle>Confirmare ștergere</DialogTitle>
+			<DialogDescription>Ești sigur că vrei să ștergi acest contract? Acțiunea este ireversibilă.</DialogDescription>
+		</DialogHeader>
+		<DialogFooter class="gap-2">
+			<Button variant="outline" onclick={() => (showDeleteDialog = false)} disabled={deleting}>Anulează</Button>
+			<Button variant="destructive" onclick={executeDeleteContract} disabled={deleting}>
+				{#if deleting}
+					Se șterge...
+				{:else}
+					Șterge contractul
+				{/if}
+			</Button>
 		</DialogFooter>
 	</DialogContent>
 </Dialog>

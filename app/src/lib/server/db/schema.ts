@@ -1285,7 +1285,7 @@ export const contractSignToken = sqliteTable('contract_sign_token', {
 	token: text('token').notNull().unique(), // Hashed token
 	contractId: text('contract_id')
 		.notNull()
-		.references(() => contract.id),
+		.references(() => contract.id, { onDelete: 'cascade' }),
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),

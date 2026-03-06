@@ -117,10 +117,13 @@ export const actions: Actions = {
 		const { signToken, contract } = result;
 
 		// Atomic: mark token as used + save signature in one transaction
+		const now = new Date();
+		const newStatus = contract.prestatorSignedAt ? 'signed' : contract.status;
+
 		await db.transaction(async (tx) => {
 			await tx
 				.update(table.contractSignToken)
-				.set({ used: true, usedAt: new Date() })
+				.set({ used: true, usedAt: now })
 				.where(eq(table.contractSignToken.id, signToken.id));
 
 			await tx
@@ -128,9 +131,9 @@ export const actions: Actions = {
 				.set({
 					beneficiarSignatureName: signatureName,
 					beneficiarSignatureImage: signatureImage,
-					beneficiarSignedAt: new Date(),
-					status: 'signed',
-					updatedAt: new Date()
+					beneficiarSignedAt: now,
+					status: newStatus,
+					updatedAt: now
 				})
 				.where(eq(table.contract.id, contract.id));
 		});

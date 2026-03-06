@@ -97,7 +97,7 @@ export const POST: RequestHandler = async (event) => {
 			contractNumber: finalContractNumber,
 			contractDate: contractDate ? new Date(contractDate) : new Date(),
 			contractTitle: contractTitle || file.name.replace(/\.pdf$/i, ''),
-			status: 'signed',
+			status: 'draft',
 			currency: 'EUR',
 			paymentTermsDays: 5,
 			penaltyRate: 50,

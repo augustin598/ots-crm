@@ -9,6 +9,9 @@ import { sendContractSigningEmail } from '$lib/server/email';
 import * as storage from '$lib/server/storage';
 import { env as publicEnv } from '$env/dynamic/public';
 import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
+import { env } from '$env/dynamic/private';
+
+const DEBUG_EXTRACTION = () => env.DEBUG_CONTRACT_EXTRACTION === 'true';
 
 const CONTRACT_STATUSES = ['draft', 'sent', 'signed', 'active', 'expired', 'cancelled'] as const;
 type ContractStatus = (typeof CONTRACT_STATUSES)[number];
@@ -104,37 +107,34 @@ export const getContracts = query(
 			throw new Error('Unauthorized');
 		}
 
-		let conditions: any = eq(table.contract.tenantId, event.locals.tenant.id);
+		const whereConditions = [eq(table.contract.tenantId, event.locals.tenant.id)];
 
 		// If user is a client user, filter by their client ID
 		if (event.locals.isClientUser && event.locals.client) {
 			// Secondary email users cannot see contracts
 			if (!event.locals.isClientUserPrimary) return [];
-			conditions = and(conditions, eq(table.contract.clientId, event.locals.client.id)) as any;
+			whereConditions.push(eq(table.contract.clientId, event.locals.client.id));
 		} else if (filters.clientId) {
 			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
-			conditions = and(conditions, inArray(table.contract.clientId, clientIds)) as any;
+			whereConditions.push(inArray(table.contract.clientId, clientIds));
 		}
 
 		// Status filter
 		if (filters.status) {
 			const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-			conditions = and(conditions, inArray(table.contract.status, statuses)) as any;
+			whereConditions.push(inArray(table.contract.status, statuses));
 		}
 
 		// Search filter (contract number)
 		if (filters.search) {
 			const searchPattern = `%${filters.search}%`;
-			conditions = and(
-				conditions,
-				like(table.contract.contractNumber, searchPattern)
-			) as any;
+			whereConditions.push(like(table.contract.contractNumber, searchPattern));
 		}
 
 		const contracts = await db
 			.select()
 			.from(table.contract)
-			.where(conditions)
+			.where(and(...whereConditions))
 			.orderBy(desc(table.contract.contractDate));
 
 		// For client users, attach signing URLs for draft/sent contracts
@@ -191,11 +191,11 @@ export const createContract = command(
 		serviceDescription: v.optional(v.string()),
 		offerLink: v.optional(v.string()),
 		currency: v.optional(v.string()),
-		paymentTermsDays: v.optional(v.number()),
-		penaltyRate: v.optional(v.number()),
+		paymentTermsDays: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(365))),
+		penaltyRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(10000))),
 		billingFrequency: v.optional(v.string()),
-		contractDurationMonths: v.optional(v.number()),
-		discountPercent: v.optional(v.number()),
+		contractDurationMonths: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(600))),
+		discountPercent: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))),
 		prestatorEmail: v.optional(v.string()),
 		beneficiarEmail: v.optional(v.string()),
 		hourlyRate: v.optional(v.number()),
@@ -331,11 +331,11 @@ export const updateContract = command(
 		serviceDescription: v.optional(v.string()),
 		offerLink: v.optional(v.string()),
 		currency: v.optional(v.string()),
-		paymentTermsDays: v.optional(v.number()),
-		penaltyRate: v.optional(v.number()),
+		paymentTermsDays: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(365))),
+		penaltyRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(10000))),
 		billingFrequency: v.optional(v.string()),
-		contractDurationMonths: v.optional(v.number()),
-		discountPercent: v.optional(v.number()),
+		contractDurationMonths: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(600))),
+		discountPercent: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))),
 		prestatorEmail: v.optional(v.string()),
 		beneficiarEmail: v.optional(v.string()),
 		hourlyRate: v.optional(v.number()),
@@ -368,6 +368,11 @@ export const updateContract = command(
 
 		if (!existing) {
 			throw new Error('Contract not found');
+		}
+
+		// Only allow editing draft or sent contracts
+		if (existing.status !== 'draft' && existing.status !== 'sent') {
+			throw new Error(`Nu se poate edita un contract cu statusul "${existing.status}". Doar contractele în starea "draft" sau "sent" pot fi editate.`);
 		}
 
 		// Validate status transition if status is being changed
@@ -739,15 +744,25 @@ export const signContractAsPrestator = command(
 		const imageToSave =
 			signatureImage?.startsWith('data:image/png;base64,') ? signatureImage : null;
 
+		const now = new Date();
+
 		await db
 			.update(table.contract)
 			.set({
 				prestatorSignatureName: signatureName,
 				prestatorSignatureImage: imageToSave,
-				prestatorSignedAt: new Date(),
-				updatedAt: new Date()
+				prestatorSignedAt: now,
+				updatedAt: now
 			})
 			.where(eq(table.contract.id, contractId));
+
+		// Auto-transition to 'signed' if both parties have now signed
+		if (contract.beneficiarSignedAt) {
+			await db
+				.update(table.contract)
+				.set({ status: 'signed', updatedAt: now })
+				.where(eq(table.contract.id, contractId));
+		}
 
 		return { success: true };
 	}
@@ -798,9 +813,11 @@ export const extractClientFromContract = command(
 		};
 		const emptyResult = (reason: string) => {
 			step(`EARLY_EXIT: ${reason}`);
-			console.log('\n========== extractClientFromContract DEBUG ==========');
-			console.log(JSON.stringify(debug, null, 2));
-			console.log('=====================================================\n');
+			if (DEBUG_EXTRACTION()) {
+				console.log('\n========== extractClientFromContract DEBUG ==========');
+				console.log(JSON.stringify(debug, null, 2));
+				console.log('=====================================================\n');
+			}
 			return { clientUpdated: false, extracted: {} as Record<string, string>, updated: {} as Record<string, string>, skipped: {} as Record<string, string> };
 		};
 
@@ -902,9 +919,11 @@ export const extractClientFromContract = command(
 
 		if (Object.keys(fieldsToUpdate).length === 0) {
 			step('RESULT: no fields to update');
-			console.log('\n========== extractClientFromContract DEBUG ==========');
-			console.log(JSON.stringify(debug, null, 2));
-			console.log('=====================================================\n');
+			if (DEBUG_EXTRACTION()) {
+				console.log('\n========== extractClientFromContract DEBUG ==========');
+				console.log(JSON.stringify(debug, null, 2));
+				console.log('=====================================================\n');
+			}
 			return { clientUpdated: false, extracted, updated: {} as Record<string, string>, skipped: extracted };
 		}
 

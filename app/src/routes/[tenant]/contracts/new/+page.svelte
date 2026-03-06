@@ -58,7 +58,7 @@
 		}))
 	);
 
-	// Load clauses when template is selected
+	// Load clauses when template is selected, reset on deselect
 	$effect(() => {
 		if (templateId) {
 			const selectedTemplate = templates.find((t: any) => t.id === templateId);
@@ -71,6 +71,10 @@
 					}
 				});
 			}
+		} else {
+			untrack(() => {
+				clauses = defaultClauses.map((c) => ({ ...c, paragraphs: [...c.paragraphs] }));
+			});
 		}
 	});
 
@@ -203,7 +207,7 @@
 					.filter((item) => item.description.trim())
 					.map((item, index) => ({
 						description: item.description,
-						price: Math.round(item.price * 100),
+						price: Math.round((item.price + Number.EPSILON) * 100),
 						unitOfMeasure: item.unitOfMeasure || 'Luna',
 						sortOrder: index
 					}))
