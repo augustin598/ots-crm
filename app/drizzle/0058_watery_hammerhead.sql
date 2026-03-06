@@ -1,4 +1,4 @@
-CREATE TABLE `client_access_data` (
+CREATE TABLE IF NOT EXISTS `client_access_data` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE `client_access_data` (
 	FOREIGN KEY (`created_by_client_user_id`) REFERENCES `client_user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `client_secondary_email` (
+CREATE TABLE IF NOT EXISTS `client_secondary_email` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -34,7 +34,4 @@ CREATE TABLE `client_secondary_email` (
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-ALTER TABLE `client_user` ADD `is_primary` number DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `marketing_material` ADD `attached_images` text;--> statement-breakpoint
-ALTER TABLE `seo_link` ADD `article_type` text;--> statement-breakpoint
-ALTER TABLE `seo_link` ADD `gdrive_url` text;
+ALTER TABLE `marketing_material` ADD `attached_images` text;
