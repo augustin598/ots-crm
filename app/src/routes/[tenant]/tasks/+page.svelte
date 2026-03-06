@@ -247,6 +247,7 @@
 		{tasks}
 		{projectMap}
 		{userMap}
+		{clientMap}
 		{tenantSlug}
 		onTaskClick={handleTaskClick}
 		onEditTask={handleEditTask}

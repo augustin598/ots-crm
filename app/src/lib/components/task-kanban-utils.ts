@@ -121,6 +121,21 @@ export function getActivityValueColor(field: string | null | undefined, value: s
 	return '';
 }
 
+export function getPriorityCardClass(priority: string | null): string {
+	switch (priority) {
+		case 'urgent':
+			return 'border-l-4 border-l-red-500';
+		case 'high':
+			return 'border-l-4 border-l-orange-500';
+		case 'medium':
+			return 'border-l-4 border-l-green-500';
+		case 'low':
+			return 'border-l-4 border-l-gray-400';
+		default:
+			return 'border-l-4 border-l-gray-400';
+	}
+}
+
 export function formatPriority(priority: string): string {
 	return priority.charAt(0).toUpperCase() + priority.slice(1);
 }

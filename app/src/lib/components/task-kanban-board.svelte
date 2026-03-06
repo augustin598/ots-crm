@@ -10,7 +10,7 @@
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import type { Task } from '$lib/server/db/schema';
 	import { updateTaskPosition, getTasks } from '$lib/remotes/tasks.remote';
-	import { formatStatus, getPriorityColor, getPriorityDotColor, formatPriority, formatDate } from './task-kanban-utils';
+	import { formatStatus, getPriorityColor, getPriorityDotColor, getPriorityCardClass, formatPriority, formatDate } from './task-kanban-utils';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { toast } from 'svelte-sonner';
 	import { tick } from 'svelte';
@@ -19,6 +19,7 @@
 		tasks: Task[];
 		projectMap: Map<string, string>;
 		userMap: Map<string, string>;
+		clientMap: Map<string, string>;
 		tenantSlug: string;
 		onTaskClick: (task: Task) => void;
 		onEditTask: (task: Task) => void;
@@ -30,6 +31,7 @@
 		tasks,
 		projectMap,
 		userMap,
+		clientMap,
 		tenantSlug,
 		onTaskClick,
 		onEditTask,
@@ -321,11 +323,13 @@
 				ondrop={(e) => handleDrop(e, status, statusTasks.length)}
 			>
 				{#each statusTasks as task, index}
-					{@const projectName = task.projectId ? projectMap.get(task.projectId) || 'No project' : 'No project'}
+					{@const projectName = task.projectId ? projectMap.get(task.projectId) || '' : ''}
+					{@const clientName = task.clientId ? clientMap.get(task.clientId) || '' : ''}
+					{@const assigneeName = task.assignedToUserId ? userMap.get(task.assignedToUserId) || '' : ''}
 					{@const isDragged = draggedTask?.id === task.id}
 					{@const isDragOver = dragOverStatus === status && dragOverIndex === index}
 					<Card
-						class="p-4 cursor-move hover:shadow-md transition-all {isDragged
+						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {getPriorityCardClass(task.priority || 'medium')} {isDragged
 							? 'opacity-50'
 							: ''} {isDragOver ? 'ring-2 ring-primary' : ''} {pickedUpTask?.id === task.id ? 'ring-2 ring-primary bg-primary/5' : ''}"
 						draggable={true}
@@ -339,61 +343,80 @@
 						onclick={() => onTaskClick(task)}
 						onkeydown={(e) => handleCardKeyDown(e, task, status, index)}
 					>
-						<div class="flex items-start justify-between mb-3">
-							<div class="flex-1">
-								<h4 class="font-medium text-sm mb-1">{task.title}</h4>
-								{#if task.projectId}
-									<a
-										href="/{tenantSlug}/projects/{task.projectId}"
-										onclick={(e) => e.stopPropagation()}
-										class="text-xs text-muted-foreground hover:text-primary"
-									>
-										{projectName}
-									</a>
-								{:else}
-									<p class="text-xs text-muted-foreground">{projectName}</p>
-								{/if}
-							</div>
-							<DropdownMenu>
-								<DropdownMenuTrigger>
-									{#snippet child({props})}
-									<Button {...props} variant="ghost" size="icon" class="h-6 w-6">
-										<MoreVerticalIcon class="h-3 w-3" />
-									</Button>
-									{/snippet}
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="end">
-									<DropdownMenuItem onclick={(e) => {
-										e.stopPropagation();
-										onEditTask(task);
-									}}>
-										Edit
-									</DropdownMenuItem>
-									<DropdownMenuItem
-										class="text-destructive"
-										onclick={(e) => {
+						<div class="p-3.5">
+							<!-- Header: priority badge + title + menu -->
+							<div class="flex items-start justify-between gap-2 mb-2">
+								<div class="flex-1 min-w-0">
+									<div class="flex items-center gap-1.5 mb-1">
+										<span class="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded {getPriorityColor(task.priority || 'medium')}">
+											{formatPriority(task.priority || 'medium')}
+										</span>
+									</div>
+									<h4 class="font-medium text-sm leading-snug line-clamp-2">{task.title}</h4>
+								</div>
+								<DropdownMenu>
+									<DropdownMenuTrigger>
+										{#snippet child({props})}
+										<Button {...props} variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+											<MoreVerticalIcon class="h-3 w-3" />
+										</Button>
+										{/snippet}
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										<DropdownMenuItem onclick={(e) => {
 											e.stopPropagation();
-											onDeleteTask(task.id);
-										}}
-									>
-										Delete
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						</div>
+											onEditTask(task);
+										}}>
+											Edit
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											class="text-destructive"
+											onclick={(e) => {
+												e.stopPropagation();
+												onDeleteTask(task.id);
+											}}
+										>
+											Delete
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							</div>
 
-						<div class="space-y-2">
-							<div class="flex items-center gap-2">
-								<span class={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${getPriorityColor(task.priority || 'medium')}`}>
-									{task.priority || 'medium'}
-								</span>
+							<!-- Tags row: client + project -->
+							{#if clientName || projectName}
+								<div class="flex flex-wrap gap-1.5 mb-2.5">
+									{#if clientName}
+										<span class="inline-flex items-center gap-1 text-[11px] font-medium bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 px-1.5 py-0.5 rounded">
+											{clientName}
+										</span>
+									{/if}
+									{#if projectName}
+										<a
+											href="/{tenantSlug}/projects/{task.projectId}"
+											onclick={(e) => e.stopPropagation()}
+											class="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 px-1.5 py-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors"
+										>
+											{projectName}
+										</a>
+									{/if}
+								</div>
+							{/if}
+
+							<!-- Dates row -->
+							<div class="flex items-center gap-3 mb-2.5 text-[11px] text-muted-foreground">
+								<span title="Due date">Due: {formatDueDate(task.dueDate)}</span>
+								<span title="Created">Creat: {formatDate(task.createdAt, 'short')}</span>
 							</div>
-							<div class="text-xs text-muted-foreground">
-								<p>Due: {formatDueDate(task.dueDate)}</p>
-								{#if task.assignedToUserId}
-									<p class="mt-1">Assignee: {userMap.get(task.assignedToUserId) || task.assignedToUserId.substring(0, 8)}</p>
-								{/if}
-							</div>
+
+							<!-- Footer: assignee -->
+							{#if assigneeName}
+								<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+									<div class="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-semibold shrink-0">
+										{assigneeName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+									</div>
+									<span class="truncate max-w-[120px]">{assigneeName}</span>
+								</div>
+							{/if}
 						</div>
 					</Card>
 				{/each}

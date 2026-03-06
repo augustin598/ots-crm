@@ -715,9 +715,10 @@
 		/>
 	{/if}
 
-	<ImageLightbox
-		src={lightboxSrc}
-		open={lightboxOpen}
-		onClose={() => (lightboxOpen = false)}
-	/>
 {/if}
+
+<ImageLightbox
+	src={lightboxSrc}
+	open={lightboxOpen}
+	onClose={() => (lightboxOpen = false)}
+/>
