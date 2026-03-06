@@ -33,5 +33,3 @@ CREATE TABLE IF NOT EXISTS `client_secondary_email` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action
 );
---> statement-breakpoint
-ALTER TABLE `marketing_material` ADD `attached_images` text;
