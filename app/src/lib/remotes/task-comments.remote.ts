@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
+import * as storage from '$lib/server/storage';
 
 function generateTaskCommentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -44,7 +45,11 @@ export const getTaskComments = query(
 export const createTaskComment = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
-		content: v.pipe(v.string(), v.minLength(1, 'Content is required'))
+		content: v.string(),
+		attachmentPath: v.optional(v.string()),
+		attachmentMimeType: v.optional(v.string()),
+		attachmentFileName: v.optional(v.string()),
+		attachmentFileSize: v.optional(v.number())
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -63,13 +68,21 @@ export const createTaskComment = command(
 			throw new Error('Task not found');
 		}
 
+		if (!data.content.trim() && !data.attachmentPath) {
+			throw new Error('Comment must have text or an image');
+		}
+
 		const commentId = generateTaskCommentId();
 
 		await db.insert(table.taskComment).values({
 			id: commentId,
 			taskId: data.taskId,
 			userId: event.locals.user.id,
-			content: data.content
+			content: data.content || '',
+			attachmentPath: data.attachmentPath || null,
+			attachmentMimeType: data.attachmentMimeType || null,
+			attachmentFileName: data.attachmentFileName || null,
+			attachmentFileSize: data.attachmentFileSize || null
 		});
 
 		await recordTaskActivity({
@@ -235,5 +248,39 @@ export const deleteTaskComment = command(
 		await db.delete(table.taskComment).where(eq(table.taskComment.id, commentId));
 
 		return { success: true };
+	}
+);
+
+export const getCommentAttachmentUrl = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (commentId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const [comment] = await db
+			.select({
+				attachmentPath: table.taskComment.attachmentPath,
+				attachmentFileName: table.taskComment.attachmentFileName,
+				attachmentMimeType: table.taskComment.attachmentMimeType,
+				taskTenantId: table.task.tenantId
+			})
+			.from(table.taskComment)
+			.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
+			.where(
+				and(
+					eq(table.taskComment.id, commentId),
+					eq(table.task.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!comment || !comment.attachmentPath) {
+			throw new Error('Attachment not found');
+		}
+
+		const url = await storage.getDownloadUrl(comment.attachmentPath, 300);
+		return { url, fileName: comment.attachmentFileName, mimeType: comment.attachmentMimeType };
 	}
 );

@@ -364,6 +364,10 @@ export const taskComment = sqliteTable('task_comment', {
 		.notNull()
 		.references(() => user.id),
 	content: text('content').notNull(),
+	attachmentPath: text('attachment_path'),
+	attachmentMimeType: text('attachment_mime_type'),
+	attachmentFileName: text('attachment_file_name'),
+	attachmentFileSize: integer('attachment_file_size'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

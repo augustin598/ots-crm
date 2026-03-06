@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
+	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getCommentAttachmentUrl } from '$lib/remotes/task-comments.remote';
 	import { getTaskMaterials, getAvailableMaterialsForTask, linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -16,6 +16,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Popover from '$lib/components/ui/popover';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
+	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import { formatStatus, getStatusBadgeVariant, formatDate, getPriorityColor, getPriorityDotColor, formatPriority, getActivityValueColor } from '$lib/components/task-kanban-utils';
 	import { Calendar, User, Building, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
@@ -41,6 +42,18 @@
 	let editingCommentId = $state<string | null>(null);
 	let editingContent = $state('');
 	let editLoading = $state(false);
+
+	// Image paste/attachment state
+	let pendingAttachment = $state<{ path: string; mimeType: string; fileName: string; size: number } | null>(null);
+	let pendingPreviewUrl = $state<string | null>(null);
+	let uploadingImage = $state(false);
+
+	// Lightbox state
+	let lightboxSrc = $state('');
+	let lightboxOpen = $state(false);
+
+	// Cache for attachment URLs (commentId -> url)
+	let attachmentUrls = $state<Record<string, string>>({});
 
 	const commentsQuery = $derived(task ? getTaskComments(task.id) : null);
 	const comments = $derived(commentsQuery?.current || []);
@@ -140,16 +153,96 @@
 			.slice(0, 2);
 	}
 
+	async function handlePaste(e: ClipboardEvent) {
+		const items = e.clipboardData?.items;
+		if (!items || !task) return;
+
+		for (const item of items) {
+			if (item.type.startsWith('image/')) {
+				e.preventDefault();
+				const file = item.getAsFile();
+				if (!file) return;
+				await uploadImage(file);
+				return;
+			}
+		}
+	}
+
+	async function uploadImage(file: File) {
+		if (!task) return;
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error('Image must be under 10MB');
+			return;
+		}
+
+		uploadingImage = true;
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('taskId', task.id);
+
+			const response = await fetch(`/${tenantSlug}/task-comments/upload`, {
+				method: 'POST',
+				body: formData
+			});
+
+			if (!response.ok) {
+				const err = await response.json().catch(() => ({ message: 'Upload failed' }));
+				throw new Error(err.message || `HTTP ${response.status}`);
+			}
+
+			const result = await response.json();
+			pendingAttachment = result;
+			pendingPreviewUrl = URL.createObjectURL(file);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to upload image');
+		} finally {
+			uploadingImage = false;
+		}
+	}
+
+	function removePendingAttachment() {
+		if (pendingPreviewUrl) {
+			URL.revokeObjectURL(pendingPreviewUrl);
+		}
+		pendingAttachment = null;
+		pendingPreviewUrl = null;
+	}
+
+	async function loadAttachmentUrl(commentId: string) {
+		if (attachmentUrls[commentId]) return;
+		try {
+			const result = await getCommentAttachmentUrl(commentId).current;
+			if (result?.url) {
+				attachmentUrls = { ...attachmentUrls, [commentId]: result.url };
+			}
+		} catch {
+			// Silently fail
+		}
+	}
+
+	function openLightbox(src: string) {
+		lightboxSrc = src;
+		lightboxOpen = true;
+	}
+
 	async function handleAddComment() {
-		if (!newComment.trim() || !task) return;
+		if ((!newComment.trim() && !pendingAttachment) || !task) return;
 
 		commentLoading = true;
 		try {
 			await createTaskComment({
 				taskId: task.id,
-				content: newComment.trim()
+				content: newComment.trim() || '',
+				...(pendingAttachment ? {
+					attachmentPath: pendingAttachment.path,
+					attachmentMimeType: pendingAttachment.mimeType,
+					attachmentFileName: pendingAttachment.fileName,
+					attachmentFileSize: pendingAttachment.size
+				} : {})
 			}).updates(getTaskComments(task.id));
 			newComment = '';
+			removePendingAttachment();
 			toast.success('Comment added');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to add comment');
@@ -489,6 +582,24 @@
 									{:else}
 										<p class="text-sm leading-relaxed">{comment.content}</p>
 									{/if}
+									{#if comment.attachmentPath}
+										{@const url = attachmentUrls[comment.id]}
+										{#if !url}
+											{(loadAttachmentUrl(comment.id), '')}
+											<div class="mt-2 h-32 w-48 bg-muted rounded-lg animate-pulse"></div>
+										{:else}
+											<button
+												class="mt-2 block cursor-pointer"
+												onclick={() => openLightbox(url)}
+											>
+												<img
+													src={url}
+													alt={comment.attachmentFileName || 'Attachment'}
+													class="max-h-48 rounded-lg border hover:opacity-90 transition-opacity"
+												/>
+											</button>
+										{/if}
+									{/if}
 								</div>
 							{/each}
 						{/if}
@@ -496,11 +607,33 @@
 
 					<div class="space-y-2">
 						<Textarea
-							placeholder="Add a comment..."
+							placeholder="Add a comment... (paste an image with Ctrl+V)"
 							bind:value={newComment}
 							rows={3}
+							onpaste={handlePaste}
 						/>
-						<Button size="sm" onclick={handleAddComment} disabled={!newComment.trim() || commentLoading}>
+						{#if uploadingImage}
+							<div class="flex items-center gap-2 text-sm text-muted-foreground">
+								<div class="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+								Uploading image...
+							</div>
+						{/if}
+						{#if pendingPreviewUrl}
+							<div class="relative inline-block">
+								<img
+									src={pendingPreviewUrl}
+									alt="Preview"
+									class="max-h-32 rounded-lg border"
+								/>
+								<button
+									class="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground p-0.5 hover:bg-destructive/90"
+									onclick={removePendingAttachment}
+								>
+									<X class="h-4 w-4" />
+								</button>
+							</div>
+						{/if}
+						<Button size="sm" onclick={handleAddComment} disabled={(!newComment.trim() && !pendingAttachment) || commentLoading || uploadingImage}>
 							{commentLoading ? 'Posting...' : 'Post Comment'}
 						</Button>
 					</div>
@@ -581,4 +714,10 @@
 			{additionalQueriesToUpdate}
 		/>
 	{/if}
+
+	<ImageLightbox
+		src={lightboxSrc}
+		open={lightboxOpen}
+		onClose={() => (lightboxOpen = false)}
+	/>
 {/if}
