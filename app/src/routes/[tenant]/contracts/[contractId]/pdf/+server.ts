@@ -26,21 +26,25 @@ export const GET: RequestHandler = async (event) => {
 
 	// If this is an uploaded contract, serve the uploaded file directly
 	if (contract.uploadedFilePath) {
-		const fileBuffer = await storage.getFileBuffer(contract.uploadedFilePath);
-		const safeFilename = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
-		const download = event.url.searchParams.get('download') === 'true';
-		const disposition = download
-			? `attachment; filename="${safeFilename}"`
-			: `inline; filename="${safeFilename}"`;
+		try {
+			const fileBuffer = await storage.getFileBuffer(contract.uploadedFilePath);
+			const safeFilename = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			const download = event.url.searchParams.get('download') === 'true';
+			const disposition = download
+				? `attachment; filename="${safeFilename}"`
+				: `inline; filename="${safeFilename}"`;
 
-		return new Response(new Uint8Array(fileBuffer), {
-			status: 200,
-			headers: {
-				'Content-Type': 'application/pdf',
-				'Content-Disposition': disposition,
-				'Content-Length': fileBuffer.length.toString()
-			}
-		});
+			return new Response(new Uint8Array(fileBuffer), {
+				status: 200,
+				headers: {
+					'Content-Type': 'application/pdf',
+					'Content-Disposition': disposition,
+					'Content-Length': fileBuffer.length.toString()
+				}
+			});
+		} catch (err) {
+			console.warn(`Uploaded file missing from storage: ${contract.uploadedFilePath}, falling back to PDF generation`);
+		}
 	}
 
 	const lineItems = await db

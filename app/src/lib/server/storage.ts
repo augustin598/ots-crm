@@ -130,7 +130,6 @@ export async function getFileBuffer(filePath: string): Promise<Buffer> {
 		}
 		return Buffer.concat(chunks);
 	} catch (error) {
-		console.error('Error getting file buffer:', error);
 		throw error;
 	}
 }

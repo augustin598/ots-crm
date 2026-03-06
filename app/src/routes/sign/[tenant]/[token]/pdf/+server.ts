@@ -6,6 +6,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
+import * as storage from '$lib/server/storage';
 
 function hashToken(token: string): string {
 	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
@@ -51,6 +52,25 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	if (!contract) {
 		throw error(404, 'Contract not found');
+	}
+
+	// If this is an uploaded contract, serve the uploaded file directly
+	if (contract.uploadedFilePath) {
+		try {
+			const fileBuffer = await storage.getFileBuffer(contract.uploadedFilePath);
+			const safeFilename = `Contract-${contract.contractNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+
+			return new Response(new Uint8Array(fileBuffer), {
+				status: 200,
+				headers: {
+					'Content-Type': 'application/pdf',
+					'Content-Disposition': `inline; filename="${safeFilename}"`,
+					'Content-Length': fileBuffer.length.toString()
+				}
+			});
+		} catch (err) {
+			console.warn(`Uploaded file missing from storage: ${contract.uploadedFilePath}, falling back to PDF generation`);
+		}
 	}
 
 	const lineItems = await db
