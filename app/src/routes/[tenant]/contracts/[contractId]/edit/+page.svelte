@@ -211,6 +211,7 @@
 		try {
 			const result = await updateContract({
 				contractId,
+				version: contract.version ?? 1,
 				clientId,
 				templateId: templateId || undefined,
 				contractDate: contractDate || undefined,

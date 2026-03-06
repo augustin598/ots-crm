@@ -13,6 +13,7 @@
 	import { getBnrRate } from '$lib/remotes/bnr.remote';
 	import { getPlugins } from '$lib/remotes/plugins.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
+	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -110,9 +111,14 @@
 
 	// Form state
 	let clientId = $state('');
+	let contractId = $state('');
 	let selectedClient = $derived(clientId ? clients.find((c) => c.id === clientId) : null);
 	let clientQuery = $derived(clientId ? getClient(clientId) : null);
 	let clientData = $derived(clientQuery?.current);
+
+	// Contracts for selected client
+	const clientContractsQuery = $derived(clientId ? getContracts({ clientId, status: ['signed', 'active'] }) : null);
+	const clientContracts = $derived(clientContractsQuery?.current?.contracts || []);
 
 	// Use clientData if available, otherwise use selectedClient
 	const currentClient = $derived(clientData || selectedClient);
@@ -629,6 +635,7 @@
 				const result = await createInvoice({
 					status,
 					clientId,
+					contractId: contractId || undefined,
 					projectId: projectId || undefined,
 					serviceId: serviceId || undefined,
 					lineItems: lineItems.map((item) => ({
@@ -902,6 +909,21 @@
 							Add New Client
 						</Button>
 					</div>
+
+					{#if clientContracts.length > 0}
+						<div class="space-y-1.5 mt-3">
+							<Label class="text-xs text-muted-foreground">Contract asociat (opțional)</Label>
+							<select
+								class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+								bind:value={contractId}
+							>
+								<option value="">— Fără contract —</option>
+								{#each clientContracts as c}
+									<option value={c.id}>{c.contractNumber} — {c.contractTitle || 'Contract'}</option>
+								{/each}
+							</select>
+						</div>
+					{/if}
 
 					{#if currentClient}
 						<!-- Contact -->

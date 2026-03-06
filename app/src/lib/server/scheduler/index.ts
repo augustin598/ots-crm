@@ -9,6 +9,7 @@ import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
 import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
 import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
+import { processContractLifecycle } from './tasks/contract-lifecycle';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -65,7 +66,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	keez_invoice_sync: processKeezInvoiceSync,
 	gmail_invoice_sync: processGmailInvoiceSync,
 	bnr_rate_sync: processBnrRateSync,
-	invoice_overdue_reminders: processInvoiceOverdueReminders
+	invoice_overdue_reminders: processInvoiceOverdueReminders,
+	contract_lifecycle: processContractLifecycle
 };
 
 /**
@@ -302,6 +304,24 @@ export const startScheduler = () => {
 	);
 
 	console.log('Scheduled invoice overdue reminders: weekdays at 9:00 AM');
+
+	// Schedule contract lifecycle (auto-activate, auto-expire) daily at 1:00 AM
+	schedulerQueue.add(
+		'contract-lifecycle',
+		{
+			type: 'contract_lifecycle',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 1 * * *', // Every day at 1:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'contract-lifecycle'
+		}
+	);
+
+	console.log('Scheduled contract lifecycle: daily at 1:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };

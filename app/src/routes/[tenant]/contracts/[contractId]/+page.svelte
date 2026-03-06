@@ -6,9 +6,11 @@
 		duplicateContract,
 		sendContractForSigning,
 		signContractAsPrestator,
-		getActiveSigningToken
+		getActiveSigningToken,
+		getContractInvoices
 	} from '$lib/remotes/contracts.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
+	import { getContractActivities } from '$lib/remotes/contract-activities.remote';
 	import SignaturePad from '$lib/components/SignaturePad.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -92,6 +94,30 @@
 		contract?.discountPercent ? (subtotal * contract.discountPercent) / 100 : 0
 	);
 	const total = $derived(subtotal - discountAmount);
+
+	// Linked invoices
+	const contractInvoicesQuery = $derived(contractId ? getContractInvoices(contractId) : null);
+	const contractInvoices = $derived(contractInvoicesQuery?.current || []);
+
+	// Activities
+	const activitiesQuery = $derived(contractId ? getContractActivities(contractId) : null);
+	const activities = $derived(activitiesQuery?.current || []);
+	const activitiesLoading = $derived(activitiesQuery?.loading ?? false);
+
+	function formatTimeAgo(date: string | Date | null): string {
+		if (!date) return '';
+		const d = typeof date === 'string' ? new Date(date) : date;
+		const now = new Date();
+		const diffMs = now.getTime() - d.getTime();
+		const diffMin = Math.floor(diffMs / 60000);
+		if (diffMin < 1) return 'acum';
+		if (diffMin < 60) return `acum ${diffMin} min`;
+		const diffHours = Math.floor(diffMin / 60);
+		if (diffHours < 24) return `acum ${diffHours}h`;
+		const diffDays = Math.floor(diffHours / 24);
+		if (diffDays < 30) return `acum ${diffDays}z`;
+		return formatContractDate(date);
+	}
 
 	// Using shared utils: getContractStatusVariant, getContractStatusLabel, formatContractDate, formatContractPrice, getBillingFrequencyLabel
 
@@ -426,6 +452,87 @@
 						</CardContent>
 					</Card>
 				{/if}
+
+				<!-- Linked invoices -->
+				{#if contractInvoices.length > 0}
+					<Card class="p-6">
+						<CardHeader>
+							<CardTitle>Facturi Asociate</CardTitle>
+						</CardHeader>
+						<CardContent>
+							<div class="overflow-x-auto">
+								<table class="w-full text-sm">
+									<thead>
+										<tr class="border-b">
+											<th class="text-left py-2 font-medium">Număr</th>
+											<th class="text-left py-2 font-medium">Data</th>
+											<th class="text-right py-2 font-medium">Total</th>
+											<th class="text-left py-2 font-medium">Status</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each contractInvoices as inv}
+											<tr class="border-b hover:bg-muted/50 cursor-pointer" onclick={() => goto(`/${tenantSlug}/invoices/${inv.id}`)}>
+												<td class="py-2">{inv.invoiceNumber}</td>
+												<td class="py-2">{formatContractDate(inv.issueDate)}</td>
+												<td class="py-2 text-right">{inv.totalAmount ? formatContractPrice(inv.totalAmount) : '-'} {inv.currency || 'RON'}</td>
+												<td class="py-2"><Badge variant="outline">{inv.status}</Badge></td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						</CardContent>
+					</Card>
+				{/if}
+
+				<!-- Activity timeline -->
+				<Card class="p-6">
+					<CardHeader>
+						<CardTitle>Istoric Modificări</CardTitle>
+					</CardHeader>
+					<CardContent>
+						{#if activitiesLoading}
+							<p class="text-sm text-muted-foreground">Se încarcă...</p>
+						{:else if activities.length === 0}
+							<p class="text-sm text-muted-foreground">Nicio activitate înregistrată.</p>
+						{:else}
+							<div class="space-y-4">
+								{#each activities as activity}
+									<div class="flex gap-3">
+										<div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+											<span class="text-xs font-medium text-primary">
+												{activity.userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+											</span>
+										</div>
+										<div class="flex-1 min-w-0">
+											<p class="text-sm">
+												<span class="font-medium">{activity.userName}</span>
+												{' '}
+												{#if activity.action === 'created'}
+													a creat contractul
+												{:else if activity.action === 'updated' && activity.field}
+													a modificat <span class="font-mono text-xs bg-muted px-1 rounded">{activity.field}</span>
+												{:else if activity.action === 'status_changed'}
+													a schimbat statusul{#if activity.oldValue} de la <Badge variant="outline" class="text-xs">{getContractStatusLabel(activity.oldValue)}</Badge>{/if} la <Badge variant="outline" class="text-xs">{getContractStatusLabel(activity.newValue || '')}</Badge>
+												{:else if activity.action === 'sent_for_signing'}
+													a trimis contractul pentru semnare{#if activity.newValue} la <span class="font-medium">{activity.newValue}</span>{/if}
+												{:else if activity.action === 'signed_prestator'}
+													a semnat ca prestator
+												{:else if activity.action === 'duplicated'}
+													a duplicat contractul
+												{:else}
+													{activity.action}
+												{/if}
+											</p>
+											<p class="text-xs text-muted-foreground">{formatTimeAgo(activity.createdAt)}</p>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</CardContent>
+				</Card>
 			</div>
 
 			<!-- Right column (sidebar) -->

@@ -282,6 +282,7 @@ const lineItemSchema = v.object({
 export const createInvoice = command(
 	v.object({
 		clientId: v.pipe(v.string(), v.minLength(1)),
+		contractId: v.optional(v.string()),
 		projectId: v.optional(v.string()),
 		serviceId: v.optional(v.string()),
 		amount: v.optional(v.number()), // Legacy support - will be calculated from lineItems if provided
@@ -457,6 +458,7 @@ export const createInvoice = command(
 			id: invoiceId,
 			tenantId: event.locals.tenant.id,
 			clientId: data.clientId,
+			contractId: data.contractId || null,
 			projectId: data.projectId || null,
 			serviceId: data.serviceId || null,
 			invoiceNumber,

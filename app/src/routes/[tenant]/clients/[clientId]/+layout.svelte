@@ -36,7 +36,7 @@
 	const invoicesQuery = getInvoices({ clientId });
 	const invoices = $derived(invoicesQuery.current || []);
 	const contractsQuery = getContracts({ clientId });
-	const contracts = $derived(contractsQuery.current || []);
+	const contracts = $derived(contractsQuery.current?.contracts || []);
 
 	const breadcrumbItems = $derived([
 		{ label: data.tenant?.name || 'Organization', href: `/${tenantSlug}` },

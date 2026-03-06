@@ -18,7 +18,7 @@
 	const invoicesLoading = $derived(invoicesQuery.loading);
 
 	const contractsQuery = getContracts({});
-	const contracts = $derived(contractsQuery.current || []);
+	const contracts = $derived(contractsQuery.current?.contracts || []);
 
 	const pendingTasks = $derived(tasks.filter((t) => t.status === 'pending-approval').length);
 	const activeTasks = $derived(tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length);

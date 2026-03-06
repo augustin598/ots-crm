@@ -5,7 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 
 export const load: PageServerLoad = async (event) => {
-	const contracts = await getContracts({});
+	const result = await getContracts({});
 
 	// Fetch clients for display
 	const clients = await db
@@ -13,5 +13,5 @@ export const load: PageServerLoad = async (event) => {
 		.from(table.client)
 		.where(eq(table.client.tenantId, event.locals.tenant!.id));
 
-	return { contracts, clients };
+	return { ...result, clients };
 };

@@ -20,7 +20,7 @@
 	const tenantSlug = $derived(page.params.tenant as string);
 
 	const contractsQuery = getContracts({});
-	const contracts = $derived(contractsQuery.current || []);
+	const contracts = $derived(contractsQuery.current?.contracts || []);
 	const loading = $derived(contractsQuery.loading);
 
 	async function handleDownloadPDF(contractId: string, contractNumber: string) {

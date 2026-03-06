@@ -71,9 +71,22 @@
 		}, 300);
 	}
 
+	// Pagination state
+	let currentPage = $state(1);
+	let pageSize = $state(25);
+
+	// Reset page when search changes
+	$effect(() => {
+		activeSearch;
+		currentPage = 1;
+	});
+
 	// Queries
-	const contractsQuery = $derived(getContracts({ search: activeSearch || undefined }));
-	const contracts = $derived(contractsQuery.current || []);
+	const contractsQuery = $derived(getContracts({ search: activeSearch || undefined, page: currentPage, pageSize }));
+	const contractsResult = $derived(contractsQuery.current);
+	const contracts = $derived(contractsResult?.contracts || []);
+	const totalCount = $derived(contractsResult?.totalCount || 0);
+	const totalPages = $derived(contractsResult?.totalPages || 0);
 	const contractsLoading = $derived(contractsQuery.loading);
 	const contractsError = $derived(contractsQuery.error);
 
@@ -467,6 +480,45 @@
 				</Card>
 			{/each}
 		</div>
+
+		<!-- Pagination controls -->
+		{#if totalPages > 1}
+			<div class="flex items-center justify-between mt-4">
+				<p class="text-sm text-muted-foreground">
+					Arată {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, totalCount)} din {totalCount} contracte
+				</p>
+				<div class="flex items-center gap-2">
+					<select
+						class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+						value={pageSize}
+						onchange={(e) => { pageSize = Number(e.currentTarget.value); currentPage = 1; }}
+					>
+						<option value={10}>10</option>
+						<option value={25}>25</option>
+						<option value={50}>50</option>
+					</select>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={currentPage <= 1}
+						onclick={() => currentPage--}
+					>
+						Anterior
+					</Button>
+					<span class="text-sm text-muted-foreground">
+						Pagina {currentPage} din {totalPages}
+					</span>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={currentPage >= totalPages}
+						onclick={() => currentPage++}
+					>
+						Următor
+					</Button>
+				</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 

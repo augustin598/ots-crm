@@ -439,6 +439,7 @@ export const invoice = sqliteTable('invoice', {
 	clientId: text('client_id')
 		.notNull()
 		.references(() => client.id),
+	contractId: text('contract_id').references(() => contract.id),
 	projectId: text('project_id').references(() => project.id),
 	serviceId: text('service_id').references(() => service.id),
 	invoiceNumber: text('invoice_number').notNull(),
@@ -513,6 +514,7 @@ export const recurringInvoice = sqliteTable('recurring_invoice', {
 	clientId: text('client_id')
 		.notNull()
 		.references(() => client.id),
+	contractId: text('contract_id').references(() => contract.id),
 	projectId: text('project_id').references(() => project.id),
 	serviceId: text('service_id').references(() => service.id),
 	name: text('name').notNull(),
@@ -1177,6 +1179,9 @@ export const contract = sqliteTable('contract', {
 	uploadedFileSize: integer('uploaded_file_size'),
 	uploadedFileMimeType: text('uploaded_file_mime_type'),
 
+	// Optimistic locking
+	version: integer('version').notNull().default(1),
+
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -1186,6 +1191,24 @@ export const contract = sqliteTable('contract', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
+});
+
+export const contractActivity = sqliteTable('contract_activity', {
+	id: text('id').primaryKey(),
+	contractId: text('contract_id')
+		.notNull()
+		.references(() => contract.id, { onDelete: 'cascade' }),
+	userId: text('user_id'),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	action: text('action').notNull(),
+	field: text('field'),
+	oldValue: text('old_value'),
+	newValue: text('new_value'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
 });
 
 export const contractLineItem = sqliteTable('contract_line_item', {
@@ -1694,6 +1717,10 @@ export const invoiceRelations = relations(invoice, ({ one, many }) => ({
 		fields: [invoice.clientId],
 		references: [client.id]
 	}),
+	contract: one(contract, {
+		fields: [invoice.contractId],
+		references: [contract.id]
+	}),
 	project: one(project, {
 		fields: [invoice.projectId],
 		references: [project.id]
@@ -1729,6 +1756,10 @@ export const recurringInvoiceRelations = relations(recurringInvoice, ({ one }) =
 	client: one(client, {
 		fields: [recurringInvoice.clientId],
 		references: [client.id]
+	}),
+	contract: one(contract, {
+		fields: [recurringInvoice.contractId],
+		references: [contract.id]
 	}),
 	project: one(project, {
 		fields: [recurringInvoice.projectId],
@@ -2076,13 +2107,27 @@ export const contractRelations = relations(contract, ({ one, many }) => ({
 		fields: [contract.createdByUserId],
 		references: [user.id]
 	}),
-	lineItems: many(contractLineItem)
+	lineItems: many(contractLineItem),
+	activities: many(contractActivity),
+	invoices: many(invoice),
+	recurringInvoices: many(recurringInvoice)
 }));
 
 export const contractLineItemRelations = relations(contractLineItem, ({ one }) => ({
 	contract: one(contract, {
 		fields: [contractLineItem.contractId],
 		references: [contract.id]
+	})
+}));
+
+export const contractActivityRelations = relations(contractActivity, ({ one }) => ({
+	contract: one(contract, {
+		fields: [contractActivity.contractId],
+		references: [contract.id]
+	}),
+	tenant: one(tenant, {
+		fields: [contractActivity.tenantId],
+		references: [tenant.id]
 	})
 }));
 

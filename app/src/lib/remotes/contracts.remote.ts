@@ -10,6 +10,7 @@ import * as storage from '$lib/server/storage';
 import { env as publicEnv } from '$env/dynamic/public';
 import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
 import { env } from '$env/dynamic/private';
+import { recordContractActivity } from '$lib/server/contract-activity';
 
 const DEBUG_EXTRACTION = () => env.DEBUG_CONTRACT_EXTRACTION === 'true';
 
@@ -99,7 +100,9 @@ export const getContracts = query(
 	v.object({
 		clientId: v.optional(v.union([v.string(), v.array(v.string())])),
 		status: v.optional(v.union([v.string(), v.array(v.string())])),
-		search: v.optional(v.string())
+		search: v.optional(v.string()),
+		page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+		pageSize: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)))
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -107,12 +110,16 @@ export const getContracts = query(
 			throw new Error('Unauthorized');
 		}
 
+		const page = filters.page || 1;
+		const pageSize = filters.pageSize || 25;
+		const offset = (page - 1) * pageSize;
+
 		const whereConditions = [eq(table.contract.tenantId, event.locals.tenant.id)];
 
 		// If user is a client user, filter by their client ID
 		if (event.locals.isClientUser && event.locals.client) {
 			// Secondary email users cannot see contracts
-			if (!event.locals.isClientUserPrimary) return [];
+			if (!event.locals.isClientUserPrimary) return { contracts: [], totalCount: 0, page, pageSize, totalPages: 0 };
 			whereConditions.push(eq(table.contract.clientId, event.locals.client.id));
 		} else if (filters.clientId) {
 			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
@@ -131,11 +138,25 @@ export const getContracts = query(
 			whereConditions.push(like(table.contract.contractNumber, searchPattern));
 		}
 
+		const whereClause = and(...whereConditions);
+
+		// Count query
+		const [countResult] = await db
+			.select({ count: sql<number>`count(*)` })
+			.from(table.contract)
+			.where(whereClause);
+
+		const totalCount = countResult?.count || 0;
+		const totalPages = Math.ceil(totalCount / pageSize);
+
+		// Data query with pagination
 		const contracts = await db
 			.select()
 			.from(table.contract)
-			.where(and(...whereConditions))
-			.orderBy(desc(table.contract.contractDate));
+			.where(whereClause)
+			.orderBy(desc(table.contract.contractDate))
+			.limit(pageSize)
+			.offset(offset);
 
 		// For client users, attach signing URLs for draft/sent contracts
 		if (event.locals.isClientUser) {
@@ -163,14 +184,20 @@ export const getContracts = query(
 					}
 				}
 
-				return contracts.map(c => ({
-					...c,
-					signingUrl: tokenMap.get(c.id) ?? null
-				}));
+				return {
+					contracts: contracts.map(c => ({
+						...c,
+						signingUrl: tokenMap.get(c.id) ?? null
+					})),
+					totalCount,
+					page,
+					pageSize,
+					totalPages
+				};
 			}
 		}
 
-		return contracts;
+		return { contracts, totalCount, page, pageSize, totalPages };
 	}
 );
 
@@ -312,6 +339,14 @@ export const createContract = command(
 			.where(eq(table.contractLineItem.contractId, contractId))
 			.orderBy(asc(table.contractLineItem.sortOrder));
 
+		// Audit trail
+		await recordContractActivity({
+			contractId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'created'
+		});
+
 		return {
 			success: true,
 			contractId,
@@ -323,6 +358,7 @@ export const createContract = command(
 export const updateContract = command(
 	v.object({
 		contractId: v.pipe(v.string(), v.minLength(1)),
+		version: v.pipe(v.number(), v.integer(), v.minValue(1)),
 		clientId: v.optional(v.string()),
 		templateId: v.optional(v.string()),
 		contractDate: v.optional(v.string()),
@@ -352,7 +388,7 @@ export const updateContract = command(
 			throw new Error('Unauthorized');
 		}
 
-		const { contractId, lineItems, ...updateData } = data;
+		const { contractId, version, lineItems, ...updateData } = data;
 
 		// Verify contract belongs to tenant
 		const [existing] = await db
@@ -373,6 +409,11 @@ export const updateContract = command(
 		// Only allow editing draft or sent contracts
 		if (existing.status !== 'draft' && existing.status !== 'sent') {
 			throw new Error(`Nu se poate edita un contract cu statusul "${existing.status}". Doar contractele în starea "draft" sau "sent" pot fi editate.`);
+		}
+
+		// Optimistic locking check
+		if (version !== existing.version) {
+			throw new Error('Contractul a fost modificat de altcineva. Reîncărcați pagina și încercați din nou.');
 		}
 
 		// Validate status transition if status is being changed
@@ -426,9 +467,10 @@ export const updateContract = command(
 					clausesJson:
 						updateData.clausesJson !== undefined ? updateData.clausesJson || null : undefined,
 					notes: updateData.notes !== undefined ? updateData.notes || null : undefined,
+					version: existing.version + 1,
 					updatedAt: new Date()
 				})
-				.where(eq(table.contract.id, contractId));
+				.where(and(eq(table.contract.id, contractId), eq(table.contract.version, version)));
 
 			// Replace line items if provided
 			if (lineItems !== undefined) {
@@ -452,6 +494,40 @@ export const updateContract = command(
 				}
 			}
 		});
+
+		// Audit trail: record field-level changes
+		const trackableFields = [
+			'clientId', 'templateId', 'contractDate', 'contractTitle', 'status',
+			'serviceDescription', 'offerLink', 'currency', 'paymentTermsDays',
+			'penaltyRate', 'billingFrequency', 'contractDurationMonths', 'discountPercent',
+			'prestatorEmail', 'beneficiarEmail', 'hourlyRate', 'hourlyRateCurrency',
+			'notes'
+		] as const;
+
+		for (const field of trackableFields) {
+			if (updateData[field] !== undefined && String(updateData[field] ?? '') !== String((existing as any)[field] ?? '')) {
+				const action = field === 'status' ? 'status_changed' : 'updated';
+				await recordContractActivity({
+					contractId,
+					userId: event.locals.user.id,
+					tenantId: event.locals.tenant.id,
+					action,
+					field,
+					oldValue: String((existing as any)[field] ?? ''),
+					newValue: String(updateData[field] ?? '')
+				});
+			}
+		}
+
+		if (lineItems !== undefined) {
+			await recordContractActivity({
+				contractId,
+				userId: event.locals.user.id,
+				tenantId: event.locals.tenant.id,
+				action: 'updated',
+				field: 'lineItems'
+			});
+		}
 
 		return { success: true };
 	}
@@ -608,6 +684,16 @@ export const duplicateContract = command(
 			.where(eq(table.contractLineItem.contractId, newContractId))
 			.orderBy(asc(table.contractLineItem.sortOrder));
 
+		// Audit trail
+		await recordContractActivity({
+			contractId: newContractId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'duplicated',
+			field: 'sourceContractId',
+			newValue: contractId
+		});
+
 		return {
 			success: true,
 			contractId: newContractId,
@@ -707,6 +793,27 @@ export const sendContractForSigning = command(
 			console.error('Email sending failed (non-fatal):', err);
 		}
 
+		// Audit trail
+		await recordContractActivity({
+			contractId,
+			userId: event.locals.user.id,
+			tenantId,
+			action: 'sent_for_signing',
+			field: 'email',
+			newValue: email
+		});
+		if (contract.status !== 'sent') {
+			await recordContractActivity({
+				contractId,
+				userId: event.locals.user.id,
+				tenantId,
+				action: 'status_changed',
+				field: 'status',
+				oldValue: contract.status,
+				newValue: 'sent'
+			});
+		}
+
 		return { success: true, signingUrl, emailSent };
 	}
 );
@@ -762,6 +869,25 @@ export const signContractAsPrestator = command(
 				.update(table.contract)
 				.set({ status: 'signed', updatedAt: now })
 				.where(eq(table.contract.id, contractId));
+		}
+
+		// Audit trail
+		await recordContractActivity({
+			contractId,
+			userId: event.locals.user.id,
+			tenantId,
+			action: 'signed_prestator'
+		});
+		if (contract.beneficiarSignedAt) {
+			await recordContractActivity({
+				contractId,
+				userId: event.locals.user.id,
+				tenantId,
+				action: 'status_changed',
+				field: 'status',
+				oldValue: contract.status,
+				newValue: 'signed'
+			});
 		}
 
 		return { success: true };
@@ -936,5 +1062,35 @@ export const extractClientFromContract = command(
 		console.log(JSON.stringify(debug, null, 2));
 		console.log('=====================================================\n');
 		return { clientUpdated: true, extracted, updated: fieldsToUpdate, skipped };
+	}
+);
+
+export const getContractInvoices = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (contractId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const invoices = await db
+			.select({
+				id: table.invoice.id,
+				invoiceNumber: table.invoice.invoiceNumber,
+				status: table.invoice.status,
+				totalAmount: table.invoice.totalAmount,
+				currency: table.invoice.currency,
+				issueDate: table.invoice.issueDate
+			})
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.contractId, contractId),
+					eq(table.invoice.tenantId, event.locals.tenant.id)
+				)
+			)
+			.orderBy(desc(table.invoice.issueDate));
+
+		return invoices;
 	}
 );

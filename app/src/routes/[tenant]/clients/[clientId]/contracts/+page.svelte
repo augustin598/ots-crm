@@ -38,7 +38,7 @@
 	const clientId = $derived(page.params.clientId);
 
 	const contractsQuery = getContracts({ clientId });
-	const contracts = $derived(contractsQuery.current || []);
+	const contracts = $derived(contractsQuery.current?.contracts || []);
 	const loading = $derived(contractsQuery.loading);
 
 	// Extraction report state
