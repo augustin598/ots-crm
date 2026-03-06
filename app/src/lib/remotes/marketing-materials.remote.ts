@@ -467,8 +467,61 @@ export const getMaterialPreviewUrl = query(
 			respHeaders['response-content-type'] = material.mimeType;
 		}
 
-		const url = await storage.getDownloadUrl(material.filePath, 300, respHeaders);
+		const url = await storage.getDownloadUrl(material.filePath, 3600, respHeaders);
 		return { url, fileName: material.fileName, mimeType: material.mimeType };
+	}
+);
+
+const MAX_TEXT_CONTENT_BYTES = 512 * 1024; // 500KB
+
+export const getMaterialTextContent = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (materialId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		let conditions = and(
+			eq(table.marketingMaterial.id, materialId),
+			eq(table.marketingMaterial.tenantId, tenantId)
+		);
+
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(
+				conditions,
+				eq(table.marketingMaterial.clientId, event.locals.client.id)
+			) as typeof conditions;
+		}
+
+		const [material] = await db
+			.select({
+				filePath: table.marketingMaterial.filePath,
+				mimeType: table.marketingMaterial.mimeType
+			})
+			.from(table.marketingMaterial)
+			.where(conditions!)
+			.limit(1);
+
+		if (!material || !material.filePath) {
+			throw new Error('Material negăsit sau fără fișier');
+		}
+
+		if (material.mimeType !== 'text/plain') {
+			throw new Error('Materialul nu este de tip text');
+		}
+
+		const buffer = await storage.getFileBuffer(material.filePath);
+		const truncated = buffer.length > MAX_TEXT_CONTENT_BYTES
+			? buffer.subarray(0, MAX_TEXT_CONTENT_BYTES)
+			: buffer;
+		const text = truncated.toString('utf-8');
+		return {
+			content: text,
+			truncated: buffer.length > MAX_TEXT_CONTENT_BYTES,
+			totalSize: buffer.length
+		};
 	}
 );
 

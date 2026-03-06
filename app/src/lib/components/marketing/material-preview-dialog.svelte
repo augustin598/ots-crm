@@ -3,7 +3,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import { GOOGLE_ADS_SPECS, CAMPAIGN_TYPE_LABELS, type GoogleAdsCampaignType } from '$lib/shared/google-ads-specs';
+	import { getMaterialTextContent } from '$lib/remotes/marketing-materials.remote';
 
 	let {
 		open = $bindable(false),
@@ -59,22 +62,63 @@
 	);
 	const isDocTxt = $derived(material?.type === 'document' && material?.mimeType === 'text/plain');
 
-	let txtContent = $state<string | null>(null);
-	let txtLoading = $state(false);
+	// Iframe loading/error state
+	let iframeLoading = $state(true);
+	let iframeError = $state(false);
+	let iframeTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
 
-	// Fetch text content for TXT files when dialog opens
+	function handleIframeLoad() {
+		iframeLoading = false;
+		if (iframeTimeoutId) { clearTimeout(iframeTimeoutId); iframeTimeoutId = null; }
+	}
+
+	function handleIframeError() {
+		iframeLoading = false;
+		iframeError = true;
+		if (iframeTimeoutId) { clearTimeout(iframeTimeoutId); iframeTimeoutId = null; }
+	}
+
+	// TXT content via server-side fetch
+	let txtContent = $state<string | null>(null);
+	let txtTruncated = $state(false);
+	let txtLoading = $state(false);
+	let txtError = $state(false);
+
+	// Reset states when dialog opens/closes
 	$effect(() => {
-		if (open && isDocTxt && presignedUrl && !txtContent && !txtLoading) {
-			txtLoading = true;
-			fetch(presignedUrl)
-				.then((r) => r.text())
-				.then((text) => { txtContent = text; })
-				.catch(() => { txtContent = 'Eroare la încărcarea fișierului'; })
-				.finally(() => { txtLoading = false; });
-		}
-		if (!open) {
+		if (open) {
+			iframeLoading = true;
+			iframeError = false;
+			// Set timeout for iframes (20s)
+			if (isDocPdf || isDocx) {
+				iframeTimeoutId = setTimeout(() => {
+					if (iframeLoading) {
+						iframeLoading = false;
+						iframeError = true;
+					}
+				}, 20000);
+			}
+			// Fetch TXT content via server
+			if (isDocTxt && material?.id && !txtContent && !txtLoading) {
+				txtLoading = true;
+				txtError = false;
+				getMaterialTextContent(material.id)
+					.then((r) => {
+						txtContent = r.content;
+						txtTruncated = r.truncated;
+					})
+					.catch(() => { txtError = true; })
+					.finally(() => { txtLoading = false; });
+			}
+		} else {
+			// Cleanup on close
 			txtContent = null;
+			txtTruncated = false;
 			txtLoading = false;
+			txtError = false;
+			iframeLoading = true;
+			iframeError = false;
+			if (iframeTimeoutId) { clearTimeout(iframeTimeoutId); iframeTimeoutId = null; }
 		}
 	});
 </script>
@@ -99,12 +143,31 @@
 
 		{:else if isDocPdf && presignedUrl}
 			<!-- PDF preview -->
-			<iframe
-				src={presignedUrl}
-				title={material.title}
-				class="w-full border-0"
-				style="height: 80vh;"
-			></iframe>
+			<div class="relative" style="height: 80vh;">
+				{#if iframeLoading}
+					<div class="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
+						<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
+					</div>
+				{/if}
+				{#if iframeError}
+					<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted z-10">
+						<FileTextIcon class="h-12 w-12 text-muted-foreground" />
+						<p class="text-sm text-muted-foreground">Nu se poate previzualiza documentul.</p>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+							<DownloadIcon class="h-4 w-4 mr-1.5" />
+							Descarcă
+						</Button>
+					</div>
+				{:else}
+					<iframe
+						src={presignedUrl}
+						title={material.title}
+						class="w-full h-full border-0"
+						onload={handleIframeLoad}
+						onerror={handleIframeError}
+					></iframe>
+				{/if}
+			</div>
 			<div class="px-4 py-3 flex items-center justify-between">
 				<div>
 					<p class="text-sm font-medium">{material.title}</p>
@@ -120,12 +183,31 @@
 
 		{:else if isDocx && presignedUrl}
 			<!-- DOCX preview via Google Docs Viewer -->
-			<iframe
-				src="https://docs.google.com/gview?url={encodeURIComponent(presignedUrl)}&embedded=true"
-				title={material.title}
-				class="w-full border-0"
-				style="height: 80vh;"
-			></iframe>
+			<div class="relative" style="height: 80vh;">
+				{#if iframeLoading}
+					<div class="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
+						<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
+					</div>
+				{/if}
+				{#if iframeError}
+					<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted z-10">
+						<FileTextIcon class="h-12 w-12 text-muted-foreground" />
+						<p class="text-sm text-muted-foreground">Nu se poate previzualiza acest document.</p>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+							<DownloadIcon class="h-4 w-4 mr-1.5" />
+							Descarcă fișierul
+						</Button>
+					</div>
+				{:else}
+					<iframe
+						src="https://docs.google.com/gview?url={encodeURIComponent(presignedUrl)}&embedded=true"
+						title={material.title}
+						class="w-full h-full border-0"
+						onload={handleIframeLoad}
+						onerror={handleIframeError}
+					></iframe>
+				{/if}
+			</div>
 			<div class="px-4 py-3 flex items-center justify-between">
 				<div>
 					<p class="text-sm font-medium">{material.title}</p>
@@ -139,25 +221,42 @@
 				</Button>
 			</div>
 
-		{:else if isDocTxt && presignedUrl}
-			<!-- TXT preview -->
+		{:else if isDocTxt}
+			<!-- TXT preview via server-side fetch -->
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center justify-between">
 					<span>{material.title}</span>
-					<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
-						<DownloadIcon class="h-4 w-4 mr-1.5" />
-						Descarcă
-					</Button>
+					{#if presignedUrl}
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+							<DownloadIcon class="h-4 w-4 mr-1.5" />
+							Descarcă
+						</Button>
+					{/if}
 				</Dialog.Title>
 			</Dialog.Header>
 			{#if txtLoading}
 				<div class="flex items-center justify-center py-12">
+					<LoaderIcon class="h-5 w-5 animate-spin text-muted-foreground mr-2" />
 					<span class="text-sm text-muted-foreground">Se încarcă...</span>
+				</div>
+			{:else if txtError}
+				<div class="flex flex-col items-center justify-center py-12 gap-3">
+					<FileTextIcon class="h-10 w-10 text-muted-foreground" />
+					<p class="text-sm text-muted-foreground">Eroare la încărcarea fișierului.</p>
+					{#if presignedUrl}
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+							<DownloadIcon class="h-4 w-4 mr-1.5" />
+							Descarcă
+						</Button>
+					{/if}
 				</div>
 			{:else}
 				<div class="whitespace-pre-wrap font-mono text-sm p-4 bg-muted rounded-lg max-h-[60vh] overflow-y-auto">
 					{txtContent || 'Conținut gol'}
 				</div>
+				{#if txtTruncated}
+					<p class="text-xs text-muted-foreground px-4 pb-2">Fișierul a fost trunchiat (prea mare). Descărcați pentru a vedea complet.</p>
+				{/if}
 			{/if}
 
 		{:else if isGoogleAds && googleAdsData}

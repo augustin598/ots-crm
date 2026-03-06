@@ -184,9 +184,9 @@
 		}
 	});
 
-	// Load presigned URL for document preview (PDF/DOCX/TXT) when no attached images
+	// Load presigned URL for PDF thumbnail preview (only PDFs render in iframe)
 	$effect(() => {
-		if (material.type === 'document' && material.filePath && attachedImageCount === 0 && !docPreviewUrl && !docPreviewLoading) {
+		if (material.type === 'document' && material.mimeType === 'application/pdf' && material.filePath && attachedImageCount === 0 && !docPreviewUrl && !docPreviewLoading) {
 			docPreviewLoading = true;
 			getMaterialPreviewUrl(material.id)
 				.then((r) => { docPreviewUrl = r.url; })
@@ -194,13 +194,6 @@
 				.finally(() => { docPreviewLoading = false; });
 		}
 	});
-
-	const isDocx = $derived(
-		material.mimeType === 'application/msword' ||
-		material.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-	);
-	const isPdf = $derived(material.mimeType === 'application/pdf');
-	const isTxt = $derived(material.mimeType === 'text/plain');
 
 	async function handlePlayVideo() {
 		if (videoUrl) {
@@ -294,16 +287,9 @@
 			</div>
 		{:else if material.type === 'document' && attachedImgUrl}
 			<img src={attachedImgUrl} alt={material.title} class="w-full h-full object-cover" />
-		{:else if material.type === 'document' && docPreviewUrl && isPdf}
+		{:else if material.type === 'document' && docPreviewUrl}
 			<iframe
 				src={docPreviewUrl}
-				title={material.title}
-				class="w-full h-full pointer-events-none border-0"
-				loading="lazy"
-			></iframe>
-		{:else if material.type === 'document' && docPreviewUrl && isDocx}
-			<iframe
-				src="https://docs.google.com/gview?url={encodeURIComponent(docPreviewUrl)}&embedded=true"
 				title={material.title}
 				class="w-full h-full pointer-events-none border-0"
 				loading="lazy"
