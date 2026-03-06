@@ -3,6 +3,7 @@
 	import { getTaskMaterials, getAvailableMaterialsForTask, linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getClients } from '$lib/remotes/clients.remote';
 	import { approveTask, rejectTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
@@ -16,7 +17,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import { formatStatus, getStatusBadgeVariant, formatDate, getPriorityColor, getPriorityDotColor, formatPriority, getActivityValueColor } from '$lib/components/task-kanban-utils';
-	import { Calendar, User, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink } from '@lucide/svelte';
+	import { Calendar, User, Building, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
 
@@ -88,6 +89,10 @@
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 	const projectMap = $derived(new Map(projects.map((p) => [p.id, p.name])));
+
+	const clientsQuery = getClients();
+	const clientsList = $derived(clientsQuery.current || []);
+	const clientMap = $derived(new Map(clientsList.map((c: any) => [c.id, c.name])));
 
 
 	function getActivityVerb(activity: { action: string; field?: string | null }): string {
@@ -302,6 +307,18 @@
 				{/if}
 
 				<div class="grid gap-4 md:grid-cols-2">
+					{#if task.clientId}
+						<div class="flex items-center gap-3">
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
+								<Building class="h-5 w-5 text-orange-600" />
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Client</p>
+								<p class="font-medium">{clientMap.get(task.clientId) || '-'}</p>
+							</div>
+						</div>
+					{/if}
+
 					{#if task.assignedToUserId}
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">

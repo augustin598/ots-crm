@@ -24,6 +24,7 @@
 		tasks: Task[];
 		projectMap: Map<string, string>;
 		userMap: Map<string, string>;
+		clientMap: Map<string, string>;
 		tenantSlug: string;
 		sortBy?: string | null;
 		sortDir?: 'asc' | 'desc' | null;
@@ -37,6 +38,7 @@
 		tasks,
 		projectMap,
 		userMap,
+		clientMap,
 		tenantSlug,
 		sortBy = null,
 		sortDir = 'asc',
@@ -110,6 +112,7 @@
 						{/if}
 					</button>
 				</TableHead>
+				<TableHead>Client</TableHead>
 				<TableHead>Project</TableHead>
 				<TableHead>Assignee</TableHead>
 				<TableHead>
@@ -142,7 +145,7 @@
 		<TableBody>
 			{#if tasks.length === 0}
 				<TableRow>
-					<TableCell colspan="8" class="text-center text-muted-foreground py-8">
+					<TableCell colspan="9" class="text-center text-muted-foreground py-8">
 						No tasks found
 					</TableCell>
 				</TableRow>
@@ -160,6 +163,13 @@
 							<span class={`text-xs font-medium px-2 py-1 rounded ${getPriorityColor(task.priority || 'medium')}`}>
 								{formatPriority(task.priority || 'medium')}
 							</span>
+						</TableCell>
+						<TableCell>
+							{#if task.clientId}
+								{clientMap.get(task.clientId) || '-'}
+							{:else}
+								<span class="text-muted-foreground">-</span>
+							{/if}
 						</TableCell>
 						<TableCell>
 							{#if task.projectId}

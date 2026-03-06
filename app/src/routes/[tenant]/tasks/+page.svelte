@@ -3,6 +3,7 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getMilestones } from '$lib/remotes/milestones.remote';
+	import { getClients } from '$lib/remotes/clients.remote';
 	import { page } from '$app/state';
 	import { useQueryState } from 'nuqs-svelte';
 	import { parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
@@ -75,6 +76,9 @@
 	const milestonesQuery = getMilestones(undefined);
 	const milestones = $derived(milestonesQuery.current || []);
 
+	const clientsQuery = getClients();
+	const clients = $derived(clientsQuery.current || []);
+
 	// Create maps
 	const projectMap = $derived(new Map(projects.map((project) => [project.id, project.name])));
 	const userMap = $derived(
@@ -86,6 +90,7 @@
 		)
 	);
 	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
+	const clientMap = $derived(new Map(clients.map((c: any) => [c.id, c.name])));
 
 	// Pagination state (table view only)
 	let currentPage = $state(1);
@@ -255,6 +260,7 @@
 			tasks={paginatedTasks}
 			{projectMap}
 			{userMap}
+			{clientMap}
 			{tenantSlug}
 			sortBy={sortBy.current || null}
 			sortDir={(sortDir.current as 'asc' | 'desc' | null) || 'asc'}
