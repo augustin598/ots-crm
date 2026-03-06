@@ -124,7 +124,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="{material?.type === 'video' ? 'sm:max-w-4xl p-0 overflow-hidden' : material?.type === 'document' ? 'sm:max-w-5xl p-0 overflow-hidden' : 'sm:max-w-2xl max-h-[85vh] overflow-y-auto'}">
+	<Dialog.Content class="{material?.type === 'video' ? 'sm:max-w-4xl p-0 overflow-hidden' : (isDocPdf || isDocx) ? 'sm:max-w-5xl p-0 overflow-hidden' : 'sm:max-w-2xl max-h-[85vh] overflow-y-auto'}">
 		{#if material?.type === 'video' && presignedUrl}
 			<!-- Video preview -->
 			<!-- svelte-ignore a11y_media_has_caption -->
@@ -153,7 +153,7 @@
 					<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted z-10">
 						<FileTextIcon class="h-12 w-12 text-muted-foreground" />
 						<p class="text-sm text-muted-foreground">Nu se poate previzualiza documentul.</p>
-						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 							<DownloadIcon class="h-4 w-4 mr-1.5" />
 							Descarcă
 						</Button>
@@ -175,14 +175,14 @@
 						<p class="text-xs text-muted-foreground mt-0.5">{material.description}</p>
 					{/if}
 				</div>
-				<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+				<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 					<DownloadIcon class="h-4 w-4 mr-1.5" />
 					Descarcă
 				</Button>
 			</div>
 
 		{:else if isDocx && presignedUrl}
-			<!-- DOCX preview via Google Docs Viewer -->
+			<!-- DOCX preview via Microsoft Office Online viewer -->
 			<div class="relative" style="height: 80vh;">
 				{#if iframeLoading}
 					<div class="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
@@ -192,15 +192,15 @@
 				{#if iframeError}
 					<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted z-10">
 						<FileTextIcon class="h-12 w-12 text-muted-foreground" />
-						<p class="text-sm text-muted-foreground">Nu se poate previzualiza acest document.</p>
-						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+						<p class="text-sm text-muted-foreground">Nu se poate previzualiza documentul.</p>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 							<DownloadIcon class="h-4 w-4 mr-1.5" />
-							Descarcă fișierul
+							Descarcă
 						</Button>
 					</div>
 				{:else}
 					<iframe
-						src="https://docs.google.com/gview?url={encodeURIComponent(presignedUrl)}&embedded=true"
+						src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(presignedUrl)}`}
 						title={material.title}
 						class="w-full h-full border-0"
 						onload={handleIframeLoad}
@@ -215,7 +215,7 @@
 						<p class="text-xs text-muted-foreground mt-0.5">{material.description}</p>
 					{/if}
 				</div>
-				<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+				<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 					<DownloadIcon class="h-4 w-4 mr-1.5" />
 					Descarcă
 				</Button>
@@ -227,7 +227,7 @@
 				<Dialog.Title class="flex items-center justify-between">
 					<span>{material.title}</span>
 					{#if presignedUrl}
-						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 							<DownloadIcon class="h-4 w-4 mr-1.5" />
 							Descarcă
 						</Button>
@@ -244,7 +244,7 @@
 					<FileTextIcon class="h-10 w-10 text-muted-foreground" />
 					<p class="text-sm text-muted-foreground">Eroare la încărcarea fișierului.</p>
 					{#if presignedUrl}
-						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank')}>
+						<Button variant="outline" size="sm" onclick={() => window.open(presignedUrl!, '_blank', 'noopener,noreferrer')}>
 							<DownloadIcon class="h-4 w-4 mr-1.5" />
 							Descarcă
 						</Button>

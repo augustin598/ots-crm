@@ -342,8 +342,8 @@
 			{#if materialType === 'text'}
 				<div class="space-y-1.5">
 					<Label for="text-content">Conținut Text</Label>
-					<Textarea id="text-content" bind:value={textContent} rows={4} maxlength={5000} placeholder="Textul materialului publicitar..." />
-					<p class="text-xs text-muted-foreground text-right">{textContent.length}/5000</p>
+					<Textarea id="text-content" bind:value={textContent} rows={4} maxlength={50000} placeholder="Textul materialului publicitar..." />
+					<p class="text-xs text-muted-foreground text-right">{textContent.length}/50000</p>
 				</div>
 			{/if}
 
@@ -365,6 +365,7 @@
 			<div class="space-y-1.5">
 				<Label for="material-desc">Descriere (opțional)</Label>
 				<Textarea id="material-desc" bind:value={description} rows={2} maxlength={1000} placeholder="Descriere scurtă..." />
+				<p class="text-xs text-muted-foreground text-right">{description.length}/1000</p>
 			</div>
 
 			<!-- SEO Link selector (only for seo-article category) -->

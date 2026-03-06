@@ -102,6 +102,7 @@
 			});
 			toast.success('Text assets salvate cu succes');
 			onSaved?.();
+			open = false;
 		} catch (e: any) {
 			toast.error(e.message || 'Eroare la salvare');
 		} finally {

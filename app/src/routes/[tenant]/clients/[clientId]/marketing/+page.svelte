@@ -4,6 +4,7 @@
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -70,6 +71,7 @@
 		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
+	const loading = $derived(!materialsQuery.current && !materialsQuery.error);
 	const filteredMaterials = $derived.by(() => {
 		if (!dateRange.start) return materials;
 		return materials.filter((m: any) => {
@@ -167,11 +169,13 @@
 	async function handlePreview(material: any) {
 		if (material.type === 'url') {
 			if (material.externalUrl) {
-				window.open(material.externalUrl, '_blank');
+				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
 			} else if (material.textContent) {
 				previewMaterial = material;
 				previewUrl = null;
 				previewOpen = true;
+			} else {
+				toast.error('Materialul nu are conținut de previzualizat');
 			}
 			return;
 		}
@@ -310,6 +314,12 @@
 				/>
 			{/if}
 
+			<!-- Loading -->
+			{#if loading}
+				<div class="flex items-center justify-center py-12">
+					<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
+				</div>
+			{:else}
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<span>{filteredMaterials.length} materiale</span>
@@ -376,6 +386,7 @@
 						/>
 					{/each}
 				</div>
+			{/if}
 			{/if}
 		</TabsContent>
 	</Tabs>

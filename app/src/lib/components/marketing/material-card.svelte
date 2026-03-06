@@ -184,12 +184,21 @@
 		}
 	});
 
-	// Load presigned URL for PDF thumbnail preview (only PDFs render in iframe)
+	const isDocx = $derived(
+		material.mimeType === 'application/msword' ||
+		material.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+	);
+
+	// Load presigned URL for document thumbnail preview (PDF direct, DOCX via Office viewer)
 	$effect(() => {
-		if (material.type === 'document' && material.mimeType === 'application/pdf' && material.filePath && attachedImageCount === 0 && !docPreviewUrl && !docPreviewLoading) {
+		if (material.type === 'document' && (material.mimeType === 'application/pdf' || isDocx) && material.filePath && attachedImageCount === 0 && !docPreviewUrl && !docPreviewLoading) {
 			docPreviewLoading = true;
 			getMaterialPreviewUrl(material.id)
-				.then((r) => { docPreviewUrl = r.url; })
+				.then((r) => {
+					docPreviewUrl = isDocx
+						? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(r.url)}`
+						: r.url;
+				})
 				.catch(() => {})
 				.finally(() => { docPreviewLoading = false; });
 		}
@@ -224,7 +233,7 @@
 		downloading = true;
 		try {
 			const result = await getMaterialDownloadUrl(material.id);
-			window.open(result.url, '_blank');
+			window.open(result.url, '_blank', 'noopener,noreferrer');
 		} catch {
 			toast.error('Eroare la descărcarea fișierului');
 		} finally {
@@ -288,12 +297,15 @@
 		{:else if material.type === 'document' && attachedImgUrl}
 			<img src={attachedImgUrl} alt={material.title} class="w-full h-full object-cover" />
 		{:else if material.type === 'document' && docPreviewUrl}
-			<iframe
-				src={docPreviewUrl}
-				title={material.title}
-				class="w-full h-full pointer-events-none border-0"
-				loading="lazy"
-			></iframe>
+			<div class="w-full h-full overflow-hidden">
+				<iframe
+					src={docPreviewUrl}
+					title={material.title}
+					class="pointer-events-none border-0 origin-top-left"
+					style="width: 200%; height: 200%; transform: scale(0.5); transform-origin: top left;"
+					loading="lazy"
+				></iframe>
+			</div>
 		{:else}
 			<div class="flex items-center justify-center h-10 w-10 rounded-xl {colors.bg}">
 				<TypeIconComponent class="h-5 w-5 {colors.text}" />
@@ -351,7 +363,7 @@
 				{onEdit}
 				{onDelete}
 				onDownload={handleDownload}
-				onOpenUrl={() => window.open(material.externalUrl!, '_blank')}
+				onOpenUrl={() => window.open(material.externalUrl!, '_blank', 'noopener,noreferrer')}
 				variant="overlay"
 			/>
 		</div>

@@ -168,7 +168,7 @@ const createSchema = v.object({
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
 	campaignType: v.optional(v.nullable(v.picklist(['display', 'pmax', 'search', 'demand-gen']))),
-	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
+	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 7 taguri, fiecare maxim 30 caractere'))))
 });
 
 export const createMarketingMaterial = command(createSchema, async (data) => {
@@ -208,6 +208,12 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 		}
 	}
 
+	// Guard: client user must have clientUserId
+	const clientUserId = isClientUser ? (event.locals as any).clientUser?.id : null;
+	if (isClientUser && !clientUserId) {
+		throw new Error('Sesiune client invalidă');
+	}
+
 	const materialId = generateMaterialId();
 
 	await db.insert(table.marketingMaterial).values({
@@ -225,7 +231,7 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 		campaignType: data.campaignType || null,
 		tags: data.tags || null,
 		uploadedByUserId: isClientUser ? null : event.locals.user.id,
-		uploadedByClientUserId: isClientUser ? (event.locals as any).clientUser?.id || null : null
+		uploadedByClientUserId: clientUserId
 	});
 
 	return { success: true, materialId };
@@ -240,7 +246,7 @@ const updateSchema = v.object({
 	seoLinkId: v.optional(v.nullable(v.string())),
 	status: v.optional(v.picklist(['draft', 'active', 'archived'])),
 	campaignType: v.optional(v.nullable(v.picklist(['display', 'pmax', 'search', 'demand-gen']))),
-	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))))
+	tags: v.optional(v.nullable(v.pipe(v.string(), v.check(validateTags, 'Maximum 7 taguri, fiecare maxim 30 caractere'))))
 });
 
 export const updateMarketingMaterial = command(updateSchema, async (data) => {
@@ -591,7 +597,7 @@ const socialUrlSetsSchema = v.object({
 		),
 		v.minLength(1)
 	),
-	tags: v.nullable(v.pipe(v.string(), v.maxLength(500), v.check(validateTags, 'Maximum 10 taguri, fiecare maxim 50 caractere'))),
+	tags: v.nullable(v.pipe(v.string(), v.maxLength(500), v.check(validateTags, 'Maximum 7 taguri, fiecare maxim 30 caractere'))),
 	taskId: v.nullable(v.string())
 });
 
@@ -603,6 +609,12 @@ export const createSocialUrlSets = command(socialUrlSetsSchema, async (data) => 
 
 	const tenantId = event.locals.tenant.id;
 	const isClientUser = event.locals.isClientUser;
+
+	// Guard: client user must have clientUserId
+	const clientUserId = isClientUser ? (event.locals as any).clientUser?.id : null;
+	if (isClientUser && !clientUserId) {
+		throw new Error('Sesiune client invalidă');
+	}
 
 	// Validate client belongs to tenant
 	if (isClientUser && event.locals.client) {
@@ -654,9 +666,7 @@ export const createSocialUrlSets = command(socialUrlSetsSchema, async (data) => 
 			tags: data.tags || null,
 			status: 'active',
 			uploadedByUserId: isClientUser ? null : event.locals.user!.id,
-			uploadedByClientUserId: isClientUser
-				? (event.locals as any).clientUser?.id || null
-				: null
+			uploadedByClientUserId: clientUserId
 		});
 
 		if (data.taskId) {

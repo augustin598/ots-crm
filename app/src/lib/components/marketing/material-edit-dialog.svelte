@@ -36,11 +36,13 @@
 		open = $bindable(false),
 		material = null,
 		seoLinks = [],
+		isClientUser = false,
 		onUpdated
 	}: {
 		open: boolean;
 		material: Material | null;
 		seoLinks?: SeoLinkOption[];
+		isClientUser?: boolean;
 		onUpdated?: () => void;
 	} = $props();
 
@@ -128,6 +130,7 @@
 				<div class="space-y-1.5">
 					<Label for="edit-desc">Descriere</Label>
 					<Textarea id="edit-desc" bind:value={description} rows={2} maxlength={1000} />
+					<p class="text-xs text-muted-foreground text-right">{description.length}/1000</p>
 				</div>
 
 				{#if material.textContent !== null || material.type === 'text'}
@@ -137,7 +140,7 @@
 						{#if isStructured}
 							<p class="text-xs text-muted-foreground italic">Conținut structurat — editează prin dialogul dedicat categoriei.</p>
 						{:else}
-							<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={5000} />
+							<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={50000} />
 						{/if}
 					</div>
 				{/if}
@@ -179,17 +182,19 @@
 					{/if}
 				{/if}
 
-				<div class="space-y-1.5">
-					<Label>Status</Label>
-					<Select.Root type="single" bind:value={status}>
-						<Select.Trigger>{status === 'active' ? 'Activ' : status === 'draft' ? 'Draft' : 'Arhivat'}</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="active">Activ</Select.Item>
-							<Select.Item value="draft">Draft</Select.Item>
-							<Select.Item value="archived">Arhivat</Select.Item>
-						</Select.Content>
-					</Select.Root>
-				</div>
+				{#if !isClientUser}
+					<div class="space-y-1.5">
+						<Label>Status</Label>
+						<Select.Root type="single" bind:value={status}>
+							<Select.Trigger>{status === 'active' ? 'Activ' : status === 'draft' ? 'Ciornă' : 'Arhivat'}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="active">Activ</Select.Item>
+								<Select.Item value="draft">Ciornă</Select.Item>
+								<Select.Item value="archived">Arhivat</Select.Item>
+							</Select.Content>
+						</Select.Root>
+					</div>
+				{/if}
 
 				<div class="space-y-1.5">
 					<Label>Taguri</Label>

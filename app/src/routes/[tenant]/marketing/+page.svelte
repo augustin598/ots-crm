@@ -9,6 +9,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -141,6 +142,7 @@
 		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
+	const loading = $derived(!materialsQuery.current && !materialsQuery.error);
 	const filteredMaterials = $derived.by(() => {
 		if (!dateRange.start) return materials;
 		return materials.filter((m: any) => {
@@ -158,7 +160,7 @@
 	// For upload dialogs — pick first selected client or empty
 	const uploadClientId = $derived(selectedClientIds.length === 1 ? selectedClientIds[0] : '');
 
-	// SEO links for the seo-article combobox
+	// SEO links for the seo-article combobox (upload)
 	const seoLinksQuery = $derived(getSeoLinks({ clientId: uploadClientId || undefined }));
 	const seoLinks = $derived(
 		(seoLinksQuery.current || []).map((l: any) => ({
@@ -166,6 +168,18 @@
 			keyword: l.keyword,
 			articleUrl: l.articleUrl
 		}))
+	);
+
+	// SEO links scoped to the edited material's client (BUG 6)
+	const editSeoLinksQuery = $derived(editMaterial?.clientId ? getSeoLinks({ clientId: editMaterial.clientId }) : null);
+	const editSeoLinks = $derived(
+		editSeoLinksQuery
+			? (editSeoLinksQuery.current || []).map((l: any) => ({
+					id: l.id,
+					keyword: l.keyword,
+					articleUrl: l.articleUrl
+				}))
+			: []
 	);
 
 	// Thumbnail URLs cache with TTL — clear on context switch
@@ -242,11 +256,13 @@
 	async function handlePreview(material: any) {
 		if (material.type === 'url') {
 			if (material.externalUrl) {
-				window.open(material.externalUrl, '_blank');
+				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
 			} else if (material.textContent) {
 				previewMaterial = material;
 				previewUrl = null;
 				previewOpen = true;
+			} else {
+				toast.error('Materialul nu are conținut de previzualizat');
 			}
 			return;
 		}
@@ -459,6 +475,12 @@
 				/>
 			{/if}
 
+			<!-- Loading -->
+			{#if loading}
+				<div class="flex items-center justify-center py-12">
+					<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
+				</div>
+			{:else}
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<span>{filteredMaterials.length} materiale</span>
@@ -533,6 +555,7 @@
 					{/each}
 				</div>
 			{/if}
+			{/if}
 		</TabsContent>
 	</Tabs>
 </div>
@@ -579,7 +602,7 @@
 <MaterialEditDialog
 	bind:open={editDialogOpen}
 	material={editMaterial}
-	{seoLinks}
+	seoLinks={editSeoLinks}
 	onUpdated={handleUpdated}
 />
 

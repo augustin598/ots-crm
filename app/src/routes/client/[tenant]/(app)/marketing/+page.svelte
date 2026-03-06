@@ -4,6 +4,7 @@
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -67,6 +68,7 @@
 		} as any)
 	);
 	const materials = $derived(materialsQuery.current || []);
+	const loading = $derived(!materialsQuery.current && !materialsQuery.error);
 	const filteredMaterials = $derived.by(() => {
 		if (!dateRange.start) return materials;
 		return materials.filter((m: any) => {
@@ -164,11 +166,13 @@
 	async function handlePreview(material: any) {
 		if (material.type === 'url') {
 			if (material.externalUrl) {
-				window.open(material.externalUrl, '_blank');
+				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
 			} else if (material.textContent) {
 				previewMaterial = material;
 				previewUrl = null;
 				previewOpen = true;
+			} else {
+				toast.error('Materialul nu are conținut de previzualizat');
 			}
 			return;
 		}
@@ -232,7 +236,7 @@
 			<MegaphoneIcon class="h-6 w-6 text-primary" />
 			<h2 class="text-xl font-semibold">Materiale Marketing</h2>
 		</div>
-		{#if !isFileFilterType && activeCategory !== 'all'}
+		{#if !isFileFilterType && activeCategory !== 'all' && activeCategory !== 'tiktok-ads' && activeCategory !== 'facebook-ads'}
 			<Button onclick={() => {
 				if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 				else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
@@ -282,6 +286,12 @@
 				/>
 			{/if}
 
+			<!-- Loading -->
+			{#if loading}
+				<div class="flex items-center justify-center py-12">
+					<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
+				</div>
+			{:else}
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<span>{filteredMaterials.length} materiale</span>
@@ -299,7 +309,7 @@
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
 					<p class="text-sm">Niciun material în această categorie.</p>
-					{#if !isFileFilterType && activeCategory !== 'all'}
+					{#if !isFileFilterType && activeCategory !== 'all' && activeCategory !== 'tiktok-ads' && activeCategory !== 'facebook-ads'}
 						<Button variant="outline" class="mt-3" onclick={() => {
 							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 							else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
@@ -345,6 +355,7 @@
 					{/each}
 				</div>
 			{/if}
+			{/if}
 		</TabsContent>
 	</Tabs>
 </div>
@@ -384,6 +395,7 @@
 	bind:open={editDialogOpen}
 	material={editMaterial}
 	{seoLinks}
+	isClientUser={true}
 	onUpdated={handleUpdated}
 />
 

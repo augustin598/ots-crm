@@ -16,6 +16,8 @@
 	import { toast } from 'svelte-sonner';
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { createSocialUrlSets } from '$lib/remotes/marketing-materials.remote';
+	import MaterialColorTagPicker from './material-color-tag-picker.svelte';
+	import { serializeColorTags, type ColorTag } from './tag-colors';
 
 	interface UrlSet {
 		title: string;
@@ -37,8 +39,7 @@
 	} = $props();
 
 	let sets = $state<UrlSet[]>([{ title: '', urls: [''], bulkMode: false, bulkText: '' }]);
-	let mentions = $state('');
-	let hashtags = $state('');
+	let tags = $state<ColorTag[]>([]);
 	let selectedTaskId = $state<string | undefined>(undefined);
 	let saving = $state(false);
 
@@ -54,8 +55,7 @@
 
 	function resetDialog() {
 		sets = [{ title: '', urls: [''], bulkMode: false, bulkText: '' }];
-		mentions = '';
-		hashtags = '';
+		tags = [];
 		selectedTaskId = undefined;
 		saving = false;
 	}
@@ -143,9 +143,8 @@
 			}
 		}
 
-		// Build tags from mentions + hashtags
-		const tagParts = [mentions.trim(), hashtags.trim()].filter(Boolean);
-		const tagsStr = tagParts.join(', ') || null;
+		// Serialize color tags
+		const tagsStr = serializeColorTags(tags);
 
 		saving = true;
 		try {
@@ -254,12 +253,8 @@
 			<!-- Global fields -->
 			<div class="space-y-3">
 				<div class="space-y-1.5">
-					<Label for="social-mentions">Mențiuni</Label>
-					<Input id="social-mentions" bind:value={mentions} placeholder="@heylux @brand" />
-				</div>
-				<div class="space-y-1.5">
-					<Label for="social-hashtags">Taguri</Label>
-					<Input id="social-hashtags" bind:value={hashtags} placeholder="#promo #beauty" />
+					<Label>Taguri</Label>
+					<MaterialColorTagPicker value={tags} onChange={(v) => { tags = v; }} />
 				</div>
 				<div class="space-y-1.5">
 					<Label>Task asociat (opțional)</Label>

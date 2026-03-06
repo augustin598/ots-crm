@@ -152,7 +152,7 @@
 		if (!material.filePath) return;
 		try {
 			const result = await getMaterialDownloadUrl(material.id);
-			window.open(result.url, '_blank');
+			window.open(result.url, '_blank', 'noopener,noreferrer');
 		} catch {
 			toast.error('Eroare la descărcarea fișierului');
 		}
@@ -324,7 +324,7 @@
 							onEdit={onEdit}
 							onDelete={onDelete}
 							onDownload={() => handleDownload(material)}
-							onOpenUrl={() => window.open(material.externalUrl!, '_blank')}
+							onOpenUrl={() => window.open(material.externalUrl!, '_blank', 'noopener,noreferrer')}
 							variant="row"
 						/>
 					</Table.Cell>

@@ -340,6 +340,7 @@
 			<div class="space-y-1.5">
 				<Label for="article-desc">Descriere (opțional)</Label>
 				<Textarea id="article-desc" bind:value={description} rows={2} maxlength={1000} placeholder="Descriere scurtă..." />
+				<p class="text-xs text-muted-foreground text-right">{description.length}/1000</p>
 			</div>
 
 			<!-- Tags -->
