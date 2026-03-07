@@ -26,6 +26,7 @@
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import XCircleIcon from '@lucide/svelte/icons/x-circle';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 
 	const jobsQuery = getSchedulerJobs();
 	const jobs = $derived(jobsQuery.current || []);
@@ -37,8 +38,63 @@
 	let editingJobKey = $state<string | null>(null);
 	let editPattern = $state('');
 
-	const completedLogs = $derived(history.filter((l) => l.level === 'info' && l.message.includes('completed')));
-	const failedLogs = $derived(history.filter((l) => l.level === 'error' && l.message.includes('failed')));
+	// Fix BUG 1: Use startsWith for accurate matching of worker-level logs
+	const completedLogs = $derived(history.filter((l) => l.level === 'info' && l.message.startsWith('Job completed:')));
+	const failedLogs = $derived(history.filter((l) => l.level === 'error' && l.message.startsWith('Job failed:')));
+
+	// Per-job last run stats from history
+	const jobStats = $derived.by(() => {
+		const map: Record<string, { time: string | null; status: 'success' | 'error' | null; successCount: number; failCount: number }> = {};
+		for (const job of jobs) {
+			const ht = job.handlerType;
+			let lastTime: string | null = null;
+			let lastStatus: 'success' | 'error' | null = null;
+			let successCount = 0;
+			let failCount = 0;
+
+			for (const log of history) {
+				const isCompleted = log.level === 'info' && log.message === `Job completed: ${ht}`;
+				const isFailed = log.level === 'error' && log.message.startsWith(`Job failed: ${ht}`);
+
+				if (isCompleted || isFailed) {
+					if (!lastTime) {
+						lastTime = log.createdAt;
+						lastStatus = isFailed ? 'error' : 'success';
+					}
+					if (isFailed) failCount++;
+					else successCount++;
+				}
+			}
+
+			map[job.typeKey] = { time: lastTime, status: lastStatus, successCount, failCount };
+		}
+		return map;
+	});
+
+	// History filter by job type
+	let historyFilter = $state<string>('all');
+
+	const JOB_LOG_FILTERS: Record<string, string[]> = {
+		recurring_invoices: ['Recurring invoices', 'recurring_invoices'],
+		task_reminders: ['Task reminders', 'task_reminders'],
+		daily_work_reminders: ['Daily work reminders', 'daily_work_reminders'],
+		spv_invoice_sync: ['SPV invoice sync', 'spv_invoice_sync'],
+		revolut_transaction_sync: ['Revolut transaction sync', 'revolut_transaction_sync'],
+		keez_invoice_sync: ['Keez invoice sync', 'keez_invoice_sync'],
+		gmail_invoice_sync: ['Gmail invoice sync', 'gmail_invoice_sync'],
+		bnr_rate_sync: ['BNR rate sync', 'bnr_rate_sync'],
+		invoice_overdue_reminders: ['Invoice overdue reminders', 'invoice_overdue_reminders', 'overdue reminder'],
+		contract_lifecycle: ['Contract lifecycle', 'contract_lifecycle']
+	};
+
+	const filteredHistory = $derived(
+		historyFilter === 'all'
+			? history
+			: history.filter((l) => {
+					const markers = JOB_LOG_FILTERS[historyFilter] || [];
+					return markers.some((m) => l.message.includes(m));
+				})
+	);
 
 	async function refresh() {
 		refreshing = true;
@@ -81,7 +137,7 @@
 
 	async function handleTriggerNow(job: (typeof jobs)[0]) {
 		try {
-			await triggerJobNow({ name: job.name, typeKey: job.typeKey });
+			await triggerJobNow({ name: job.name, typeKey: job.typeKey, params: job.params });
 			toast.success(`Job lansat manual: ${job.label}`);
 			setTimeout(() => historyQuery.updates(), 2000);
 		} catch (e: any) {
@@ -102,6 +158,17 @@
 		});
 	}
 
+	function formatDateShort(date: Date | string | null) {
+		if (!date) return '-';
+		const d = typeof date === 'string' ? new Date(date) : date;
+		return d.toLocaleString('ro-RO', {
+			day: '2-digit',
+			month: '2-digit',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+
 	function cronToHuman(pattern: string): string {
 		const parts = pattern.split(' ');
 		if (parts.length !== 5) return pattern;
@@ -112,11 +179,17 @@
 		return pattern;
 	}
 
-	// Pagination for history
+	// Pagination for filtered history
 	let historyPage = $state(0);
 	const historyPerPage = 20;
-	const paginatedHistory = $derived(history.slice(historyPage * historyPerPage, (historyPage + 1) * historyPerPage));
-	const totalHistoryPages = $derived(Math.ceil(history.length / historyPerPage));
+	const paginatedHistory = $derived(filteredHistory.slice(historyPage * historyPerPage, (historyPage + 1) * historyPerPage));
+	const totalHistoryPages = $derived(Math.ceil(filteredHistory.length / historyPerPage));
+
+	// Reset page when filter changes
+	$effect(() => {
+		historyFilter;
+		historyPage = 0;
+	});
 </script>
 
 <div class="space-y-6">
@@ -164,12 +237,35 @@
 			{:else}
 				<div class="divide-y">
 					{#each jobs as job (job.key)}
+						{@const stats = jobStats[job.typeKey]}
 						<div class="py-3 flex items-center gap-4">
 							<div class="flex-1 min-w-0">
 								<div class="font-medium">{job.label}</div>
 								<div class="text-xs text-muted-foreground mt-0.5">
 									{job.name} &middot; {job.tz}
 								</div>
+							</div>
+							<!-- Per-job stats -->
+							<div class="text-xs min-w-[100px] text-center">
+								{#if stats}
+									<div class="flex items-center justify-center gap-1.5">
+										<span class="text-green-600 font-medium">{stats.successCount}</span>
+										<span class="text-muted-foreground">/</span>
+										<span class="text-red-600 font-medium">{stats.failCount}</span>
+									</div>
+									{#if stats.time}
+										<div class="text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+											{#if stats.status === 'error'}
+												<XCircleIcon class="size-3 text-red-500" />
+											{:else}
+												<CheckCircleIcon class="size-3 text-green-500" />
+											{/if}
+											{formatDateShort(stats.time)}
+										</div>
+									{:else}
+										<div class="text-muted-foreground mt-0.5">Nicio executie</div>
+									{/if}
+								{/if}
 							</div>
 							<div class="text-sm text-center min-w-[140px]">
 								{#if editingJobKey === job.key}
@@ -220,11 +316,24 @@
 		<CardHeader>
 			<div class="flex items-center justify-between">
 				<CardTitle>Istoric Executii</CardTitle>
-				<span class="text-sm text-muted-foreground">{history.length} inregistrari</span>
+				<div class="flex items-center gap-3">
+					<!-- Job type filter -->
+					<select
+						bind:value={historyFilter}
+						class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+					>
+						<option value="all">Toate ({history.length})</option>
+						{#each Object.entries(JOB_LOG_FILTERS) as [key, _]}
+							{@const jobLabel = jobs.find((j) => j.handlerType === key)?.label || key}
+							<option value={key}>{jobLabel}</option>
+						{/each}
+					</select>
+					<span class="text-sm text-muted-foreground">{filteredHistory.length} inregistrari</span>
+				</div>
 			</div>
 		</CardHeader>
 		<CardContent>
-			{#if history.length === 0}
+			{#if filteredHistory.length === 0}
 				<p class="text-muted-foreground text-sm">Nu exista inregistrari.</p>
 			{:else}
 				<div class="space-y-2">
@@ -234,6 +343,8 @@
 								<div class="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 text-left w-full">
 									{#if log.level === 'error'}
 										<XCircleIcon class="size-4 text-red-500 shrink-0" />
+									{:else if log.level === 'warning'}
+										<TriangleAlertIcon class="size-4 text-amber-500 shrink-0" />
 									{:else}
 										<CheckCircleIcon class="size-4 text-green-500 shrink-0" />
 									{/if}

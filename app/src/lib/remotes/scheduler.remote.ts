@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, desc } from 'drizzle-orm';
-import { getSchedulerQueue, JOB_LABELS } from '$lib/server/scheduler';
+import { getSchedulerQueue, JOB_LABELS, JOB_PARAMS } from '$lib/server/scheduler';
 
 function requireAdmin() {
 	const event = getRequestEvent();
@@ -23,15 +23,18 @@ export const getSchedulerJobs = query(async () => {
 	const repeatableJobs = await queue.getRepeatableJobs();
 
 	return repeatableJobs.map((job) => {
-		const typeKey = job.name.replace(/-/g, '_').replace(/_evening$/, '');
+		const typeKey = job.name.replace(/-/g, '_');
+		const handlerType = typeKey.replace(/_evening$/, '');
 		return {
 			key: job.key,
 			name: job.name,
 			typeKey,
+			handlerType,
 			pattern: job.pattern,
 			tz: job.tz || 'Europe/Bucharest',
 			next: job.next ? new Date(job.next).toISOString() : null,
-			label: JOB_LABELS[typeKey] || job.name
+			label: JOB_LABELS[typeKey] || job.name,
+			params: JOB_PARAMS[typeKey] || {}
 		};
 	});
 });
@@ -51,7 +54,7 @@ export const getSchedulerHistory = query(async () => {
 		.from(table.debugLog)
 		.where(eq(table.debugLog.source, 'scheduler'))
 		.orderBy(desc(table.debugLog.createdAt))
-		.limit(200);
+		.limit(500);
 
 	return logs;
 });
@@ -71,15 +74,16 @@ export const updateJobSchedule = command(
 		// Remove old repeatable job by key
 		await queue.removeRepeatableByKey(jobId);
 
-		// Find the original job data from current repeatable jobs to get the type
-		const jobType = name.replace(/-/g, '_');
+		const typeKey = name.replace(/-/g, '_');
+		const handlerType = typeKey.replace(/_evening$/, '');
+		const params = JOB_PARAMS[typeKey] || {};
 
 		// Re-add with new pattern
 		await queue.add(
 			name,
 			{
-				type: jobType,
-				params: {}
+				type: handlerType,
+				params
 			},
 			{
 				repeat: {
@@ -109,18 +113,20 @@ export const removeSchedulerJob = command(
 export const triggerJobNow = command(
 	v.object({
 		name: v.string(),
-		typeKey: v.string()
+		typeKey: v.string(),
+		params: v.optional(v.record(v.string(), v.any()), {})
 	}),
-	async ({ name, typeKey }) => {
+	async ({ name, typeKey, params }) => {
 		requireAdmin();
 
 		const queue = getSchedulerQueue();
+		const handlerType = typeKey.replace(/_evening$/, '');
 
 		await queue.add(
 			`${name}-manual`,
 			{
-				type: typeKey,
-				params: {}
+				type: handlerType,
+				params: params || {}
 			},
 			{
 				jobId: `${name}-manual-${Date.now()}`
