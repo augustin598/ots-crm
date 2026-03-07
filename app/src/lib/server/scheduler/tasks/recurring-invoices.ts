@@ -3,6 +3,7 @@ import * as table from '../../db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
 import { sendInvoiceEmail, getNotificationRecipients } from '../../email';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process recurring invoices - finds active recurring invoices that are due
@@ -47,25 +48,20 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 							result.invoiceId
 						);
 					} catch (autoSendError) {
-						console.error(
-							`Failed to auto-send recurring invoice ${result.invoiceId}:`,
-							autoSendError
-						);
+						const { message, stack } = serializeError(autoSendError);
+						logError('scheduler', `Recurring invoices: failed to auto-send invoice ${result.invoiceId}: ${message}`, { tenantId: recurringInvoice.tenantId, stackTrace: stack });
 					}
 				}
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(
-					`Error generating invoice for recurring invoice ${recurringInvoice.id}:`,
-					errorMessage
-				);
-				errors.push({ id: recurringInvoice.id, error: errorMessage });
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Recurring invoices: error generating invoice for template ${recurringInvoice.id}: ${message}`, { tenantId: recurringInvoice.tenantId, stackTrace: stack });
+				errors.push({ id: recurringInvoice.id, error: message });
 			}
 		}
 
-		console.log(`Recurring invoices processed: ${invoicesGenerated} invoices generated`);
+		logInfo('scheduler', `Recurring invoices processed: ${invoicesGenerated} generated`, { metadata: { invoicesGenerated, errorCount: errors.length } });
 		if (errors.length > 0) {
-			console.error(`Recurring invoice errors: ${errors.length}`, errors);
+			logError('scheduler', `Recurring invoices: ${errors.length} errors`, { metadata: { errorCount: errors.length } });
 		}
 
 		return {
@@ -74,7 +70,8 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('Process recurring invoices error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Recurring invoices: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			invoicesGenerated: 0,
@@ -113,7 +110,7 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 		.limit(1);
 
 	if (!client?.email) {
-		console.warn(`Cannot auto-send invoice ${invoiceId}: client email not found`);
+		logWarning('scheduler', `Recurring invoices: cannot auto-send invoice, client email not found`, { tenantId, metadata: { invoiceId } });
 		return;
 	}
 
@@ -131,5 +128,5 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 		})
 		.where(eq(table.invoice.id, invoiceId));
 
-	console.log(`Auto-sent recurring invoice ${invoice.invoiceNumber} to ${recipients.join(', ')}`);
+	logInfo('scheduler', `Recurring invoices: auto-sent invoice ${invoice.invoiceNumber}`, { tenantId, metadata: { invoiceId, recipientCount: recipients.length } });
 }

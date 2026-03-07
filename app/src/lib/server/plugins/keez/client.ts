@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 const DEFAULT_BASE_URL = 'https://app.keez.ro/api/v1.0/public-api';
 const DEFAULT_TOKEN_URL = 'https://app.keez.ro/idp/connect/token';
@@ -252,7 +253,8 @@ export class KeezClient {
 				await this.onTokenRefreshed(this.cachedToken, this.tokenExpiresAt);
 			} catch (err) {
 				// Non-fatal: log but don't fail the request
-				console.warn('[Keez] Failed to persist token to DB:', err);
+				const tokenErr = serializeError(err);
+				logWarning('keez', `Failed to persist token to DB: ${tokenErr.message}`, { stackTrace: tokenErr.stack });
 			}
 		}
 
@@ -566,7 +568,8 @@ export class KeezClient {
 
 			return null;
 		} catch (error) {
-			console.error(`[Keez] Error getting item by code ${code}:`, error);
+			const itemErr = serializeError(error);
+			logError('keez', `Error getting item by code ${code}: ${itemErr.message}`, { stackTrace: itemErr.stack });
 			return null;
 		}
 	}
@@ -620,7 +623,7 @@ export class KeezClient {
 
 			if (!response.data || response.data.length === 0) {
 				// No invoices found with this series, start from 1
-				console.log(`[Keez] No invoices found for series ${series}, starting from 1`);
+				logInfo('keez', `No invoices found for series ${series}, starting from 1`);
 				return 1;
 			}
 
@@ -662,10 +665,11 @@ export class KeezClient {
 
 			// Return next number (max + 1)
 			const nextNumber = maxNumber + 1;
-			console.log(`[Keez] Found max invoice number ${maxNumber} for series ${series}, next number: ${nextNumber}`);
+			logInfo('keez', `Found max invoice number ${maxNumber} for series ${series}, next number: ${nextNumber}`);
 			return nextNumber;
 		} catch (error) {
-			console.error(`[Keez] Error getting next invoice number for series ${series}:`, error);
+			const numErr = serializeError(error);
+			logError('keez', `Error getting next invoice number for series ${series}: ${numErr.message}`, { stackTrace: numErr.stack });
 			return null;
 		}
 	}

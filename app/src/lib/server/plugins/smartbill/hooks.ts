@@ -4,6 +4,7 @@ import type {
 	InvoiceUpdatedEvent,
 	InvoiceDeletedEvent
 } from '../types';
+import { logInfo, logWarning, logError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
@@ -40,7 +41,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.limit(1);
 
 	if (existingSync) {
-		console.log(`[SmartBill] Invoice ${invoice.id} already synced, skipping duplicate sync`);
+		logInfo('smartbill', 'Invoice already synced, skipping duplicate sync', { tenantId, metadata: { invoiceId: invoice.id } });
 		return;
 	}
 
@@ -75,7 +76,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	}
 
 	if (!settings || !settings.smartbillSeries || !settings.smartbillStartNumber) {
-		console.warn(`[SmartBill] Invoice settings not configured for tenant ${tenantId}`);
+		logWarning('smartbill', 'Invoice settings not configured for tenant', { tenantId });
 		return;
 	}
 
@@ -87,7 +88,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.limit(1);
 
 	if (!tenant) {
-		console.error(`[SmartBill] Tenant not found: ${tenantId}`);
+		logError('smartbill', 'Tenant not found', { tenantId });
 		return;
 	}
 
@@ -98,7 +99,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.limit(1);
 
 	if (!client) {
-		console.error(`[SmartBill] Client not found: ${invoice.clientId}`);
+		logError('smartbill', 'Client not found', { tenantId, metadata: { clientId: invoice.clientId } });
 		return;
 	}
 
@@ -149,9 +150,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			// No invoice number, generate next one
 			invoiceNumber = generateNextInvoiceNumber(settings.smartbillLastSyncedNumber);
 		}
-		console.log(
-			`[SmartBill] Using invoice series ${seriesName} and number ${invoiceNumber} from invoice`
-		);
+		logInfo('smartbill', 'Using invoice series and number from invoice', { tenantId, metadata: { seriesName, invoiceNumber, invoiceId: invoice.id } });
 	} else {
 		// Generate next invoice number
 		invoiceNumber = generateNextInvoiceNumber(settings.smartbillLastSyncedNumber);
@@ -224,7 +223,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		})
 		.where(eq(table.smartbillIntegration.id, integration.id));
 
-	console.log(`[SmartBill] Successfully synced invoice ${invoice.id} to SmartBill`);
+	logInfo('smartbill', 'Successfully synced invoice to SmartBill', { tenantId, metadata: { invoiceId: invoice.id, series: response.series, number: response.number } });
 };
 
 /**
@@ -264,9 +263,7 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 
 	// Check if invoice has SmartBill sync data
 	if (!invoice.smartbillSeries || !invoice.smartbillNumber) {
-		console.log(
-			`[SmartBill] Invoice ${invoice.id} does not have SmartBill sync data, skipping deletion`
-		);
+		logInfo('smartbill', 'Invoice does not have SmartBill sync data, skipping deletion', { tenantId, metadata: { invoiceId: invoice.id } });
 		return;
 	}
 
@@ -283,9 +280,7 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		.limit(1);
 
 	if (!integration) {
-		console.log(
-			`[SmartBill] SmartBill integration not active for tenant ${tenantId}, skipping deletion`
-		);
+		logInfo('smartbill', 'SmartBill integration not active for tenant, skipping deletion', { tenantId });
 		return;
 	}
 
@@ -304,9 +299,7 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 
 	// Only allow deletion if invoice is draft or most recent
 	if (!isDraft && !isMostRecent) {
-		console.log(
-			`[SmartBill] Invoice ${invoice.id} cannot be deleted from SmartBill: not draft and not most recent invoice`
-		);
+		logInfo('smartbill', 'Invoice cannot be deleted from SmartBill: not draft and not most recent invoice', { tenantId, metadata: { invoiceId: invoice.id } });
 		return;
 	}
 
@@ -318,13 +311,13 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		.limit(1);
 
 	if (!tenant) {
-		console.error(`[SmartBill] Tenant not found: ${tenantId}`);
+		logError('smartbill', 'Tenant not found', { tenantId });
 		return;
 	}
 
 	const cif = tenant.cui || tenant.vatNumber || '';
 	if (!cif) {
-		console.error(`[SmartBill] Tenant ${tenantId} does not have CUI or VAT number`);
+		logError('smartbill', 'Tenant does not have CUI or VAT number', { tenantId });
 		return;
 	}
 
@@ -351,10 +344,8 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 
 	// Log success message if available
 	if (response.message) {
-		console.log(`[SmartBill] ${response.message}`);
+		logInfo('smartbill', response.message, { tenantId, metadata: { invoiceId: invoice.id } });
 	}
 
-	console.log(
-		`[SmartBill] Successfully deleted invoice ${invoice.id} (${invoice.smartbillSeries}-${invoice.smartbillNumber}) from SmartBill`
-	);
+	logInfo('smartbill', 'Successfully deleted invoice from SmartBill', { tenantId, metadata: { invoiceId: invoice.id, series: invoice.smartbillSeries, number: invoice.smartbillNumber } });
 };

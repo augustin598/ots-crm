@@ -5,6 +5,7 @@ import { encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { lucia } from './lucia';
+import { logError, serializeError } from '$lib/server/logger';
 
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
@@ -159,7 +160,8 @@ export async function verifyAdminMagicLinkToken(
 
 		return { success: true };
 	} catch (error) {
-		console.error('Verify admin magic link error:', error);
+		const { message: errMsg, stack } = serializeError(error);
+		logError('server', `Verify admin magic link error: ${errMsg}`, { stackTrace: stack });
 		const message = error instanceof Error ? error.message : 'Verification failed';
 		return { success: false, error: message };
 	}

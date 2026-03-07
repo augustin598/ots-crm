@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lte, gte, or, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { sendTaskReminderEmail } from '../../email';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process task reminders - finds tasks with due dates in the next 24 hours
@@ -21,7 +22,7 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			.where(eq(table.taskSettings.taskRemindersEnabled, true));
 
 		if (tenantsWithRemindersEnabled.length === 0) {
-			console.log('No tenants have task reminders enabled. Skipping task reminder processing.');
+			logInfo('scheduler', 'Task reminders: no tenants have reminders enabled, skipping');
 			return {
 				success: true,
 				remindersSent: 0
@@ -72,7 +73,7 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 					.limit(1);
 
 				if (!assignee?.email) {
-					console.warn(`Cannot send reminder for task ${task.id}: assignee email not found`);
+					logWarning('scheduler', `Task reminders: cannot send reminder, assignee email not found`, { tenantId: task.tenantId, metadata: { taskId: task.id } });
 					continue;
 				}
 
@@ -91,15 +92,15 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 
 				remindersSent++;
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(`Error sending reminder for task ${task.id}:`, errorMessage);
-				errors.push({ id: task.id, error: errorMessage });
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Task reminders: error sending reminder for task ${task.id}: ${message}`, { tenantId: task.tenantId, stackTrace: stack });
+				errors.push({ id: task.id, error: message });
 			}
 		}
 
-		console.log(`Task reminders processed: ${remindersSent} reminders sent`);
+		logInfo('scheduler', `Task reminders processed: ${remindersSent} reminders sent`, { metadata: { remindersSent, errorCount: errors.length } });
 		if (errors.length > 0) {
-			console.error(`Task reminder errors: ${errors.length}`, errors);
+			logError('scheduler', `Task reminders: ${errors.length} errors`, { metadata: { errorCount: errors.length } });
 		}
 
 		return {
@@ -108,7 +109,8 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('Process task reminders error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Task reminders: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			remindersSent: 0,

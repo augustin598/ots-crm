@@ -2,6 +2,7 @@ import type { Plugin, PluginConfig } from './types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Plugin registry
@@ -14,7 +15,7 @@ class PluginRegistry {
 	 */
 	register(plugin: Plugin): void {
 		if (this.plugins.has(plugin.id)) {
-			console.warn(`Plugin ${plugin.id} is already registered`);
+			logWarning('plugin', `Plugin ${plugin.id} is already registered`);
 		} else {
 			this.plugins.set(plugin.id, plugin);
 		}
@@ -71,7 +72,8 @@ class PluginRegistry {
 					try {
 						await plugin.initialize(tenantPlugin.config as PluginConfig);
 					} catch (error) {
-						console.error(`[PluginRegistry] Failed to initialize plugin ${plugin.id}:`, error);
+						const { message, stack } = serializeError(error);
+					logError('plugin', `Failed to initialize plugin ${plugin.id}: ${message}`, { tenantId, stackTrace: stack });
 						continue;
 					}
 				}

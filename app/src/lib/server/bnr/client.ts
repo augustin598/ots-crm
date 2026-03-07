@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const BNR_XML_URL = 'https://www.bnr.ro/nbrfxrates.xml';
 
@@ -84,7 +85,7 @@ export async function syncBnrRates(): Promise<{ synced: number; date: string }> 
 			});
 	}
 
-	console.log(`[BNR] Synced ${rates.length} rates for ${date}`);
+	logInfo('bnr', `Synced ${rates.length} rates for ${date}`);
 	return { synced: rates.length, date };
 }
 
@@ -180,7 +181,8 @@ export async function ensureBnrRatesSynced(): Promise<void> {
 		try {
 			await syncBnrRates();
 		} catch (err) {
-			console.error('[BNR] Failed to sync rates at startup:', err);
+			const { message, stack } = serializeError(err);
+			logError('bnr', `Failed to sync rates at startup: ${message}`, { stackTrace: stack });
 		}
 	}
 }

@@ -66,6 +66,21 @@ export async function logEmailProcessing(logId: string) {
 	}
 }
 
+export async function logEmailRetry(logId: string, attempt: number, errorMessage: string) {
+	try {
+		await db
+			.update(table.emailLog)
+			.set({
+				attempts: attempt,
+				errorMessage,
+				updatedAt: new Date()
+			})
+			.where(eq(table.emailLog.id, logId));
+	} catch (err) {
+		console.error('[email-logger] Failed to log email retry:', err);
+	}
+}
+
 export async function logEmailSuccess(
 	logId: string,
 	smtpInfo?: { messageId?: string; response?: string }

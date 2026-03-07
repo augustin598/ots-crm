@@ -8,6 +8,7 @@ import { extractInvoiceDataFromPdf } from '../../gmail/pdf-parser';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -25,7 +26,7 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 			.where(eq(table.gmailIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			console.log('[Gmail-Sync] No active Gmail integrations found. Skipping.');
+			logInfo('scheduler', 'Gmail invoice sync: no active integrations found, skipping');
 			return { success: true, tenantsProcessed: 0, totalImported: 0 };
 		}
 
@@ -39,7 +40,7 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 			try {
 				// Skip tenants with sync disabled
 				if (!integration.syncEnabled) {
-					console.log(`[Gmail-Sync] Sync disabled for tenant ${integration.tenantId}. Skipping.`);
+					logInfo('scheduler', `Gmail invoice sync: sync disabled for tenant, skipping`, { tenantId: integration.tenantId });
 					continue;
 				}
 
@@ -52,7 +53,7 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 					if (now.getDay() !== 1 /* Monday */) continue;
 				}
 
-				console.log(`[Gmail-Sync] Processing tenant ${integration.tenantId}...`);
+				logInfo('scheduler', `Gmail invoice sync: processing tenant`, { tenantId: integration.tenantId });
 
 				// Use tenant-specific date range
 				const daysBack = integration.syncDateRangeDays || 7;
@@ -180,7 +181,8 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 
 						imported++;
 					} catch (err) {
-						console.error(`[Gmail-Sync] Error processing message ${msg.id}:`, err);
+						const { message, stack } = serializeError(err);
+						logError('scheduler', `Gmail invoice sync: error processing message ${msg.id}: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
 					}
 				}
 
@@ -202,11 +204,11 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 				tenantsProcessed++;
 				totalImported += imported;
 
-				console.log(`[Gmail-Sync] Tenant ${integration.tenantId}: imported ${imported} invoices`);
+				logInfo('scheduler', `Gmail invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported } });
 			} catch (err) {
-				const message = err instanceof Error ? err.message : 'Unknown error';
+				const { message, stack } = serializeError(err);
 				errors.push({ tenantId: integration.tenantId, error: message });
-				console.error(`[Gmail-Sync] Error for tenant ${integration.tenantId}:`, err);
+				logError('scheduler', `Gmail invoice sync: error for tenant: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
 
 				// Save error results
 				try {
@@ -228,7 +230,8 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 
 		return { success: true, tenantsProcessed, totalImported, errors };
 	} catch (err) {
-		console.error('[Gmail-Sync] Fatal error:', err);
+		const { message, stack } = serializeError(err);
+		logError('scheduler', `Gmail invoice sync: fatal error: ${message}`, { stackTrace: stack });
 		throw err;
 	}
 }

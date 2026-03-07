@@ -8,6 +8,7 @@ import type {
 } from '$lib/server/db/schema';
 import type { ParsedUblInvoice } from './xml-parser';
 import type { AnafCompanyData } from './client';
+import { logInfo } from '$lib/server/logger';
 
 /**
  * Map parsed UBL invoice to CRM invoice format
@@ -44,16 +45,15 @@ export function mapUblInvoiceToCrm(
 			amount: Math.round(item.amount * 100), // Convert to cents
 			taxRate: item.taxRate !== undefined && item.taxRate !== null ? Math.round(item.taxRate * 100) : null // Convert percentage to basis points (21% = 2100)
 		};
-		
-		// Log tax rate conversion for debugging
-		if (item.taxRate !== undefined && item.taxRate !== null) {
-			console.log(`[UBL Mapper] Line item ${index + 1}: Tax rate ${item.taxRate}% → ${lineItemData.taxRate} basis points`);
-		} else {
-			console.log(`[UBL Mapper] Line item ${index + 1}: No tax rate found in UBL data`);
-		}
-		
+
 		return lineItemData;
 	});
+
+	// Log tax rate summary for all line items
+	const withTaxRate = lineItems.filter(li => li.taxRate !== null);
+	const withoutTaxRate = lineItems.filter(li => li.taxRate === null);
+	const taxRates = [...new Set(withTaxRate.map(li => li.taxRate))];
+	logInfo('anaf-spv', `Mapped ${lineItems.length} line items: ${withTaxRate.length} with tax rates (${taxRates.join(', ')} bps), ${withoutTaxRate.length} without`, { metadata: { invoiceNumber: ublData.invoiceNumber } });
 
 	return {
 		tenantId,

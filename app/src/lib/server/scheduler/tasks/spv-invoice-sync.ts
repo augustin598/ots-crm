@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { syncSpvInvoicesForTenant, syncSentInvoicesFromSpv } from '../../plugins/anaf-spv/sync';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process SPV invoice sync - finds all tenants with active SPV integrations
@@ -18,7 +19,7 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 			.where(eq(table.anafSpvIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			console.log('[SPV-Sync] No tenants with active SPV integrations. Skipping sync.');
+			logInfo('scheduler', 'SPV invoice sync: no tenants with active integrations, skipping');
 			return {
 				success: true,
 				tenantsProcessed: 0,
@@ -39,14 +40,14 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 		// Process each tenant
 		for (const integration of integrations) {
 			try {
-				console.log(`[SPV-Sync] Syncing invoices for tenant ${integration.tenantId}...`);
+				logInfo('scheduler', `SPV invoice sync: syncing invoices for tenant`, { tenantId: integration.tenantId });
 
 				// Sync received invoices (expenses from suppliers)
-				console.log(`[SPV-Sync] Syncing received invoices (expenses) for tenant ${integration.tenantId}...`);
+				logInfo('scheduler', `SPV invoice sync: syncing received invoices (expenses)`, { tenantId: integration.tenantId });
 				const receivedResult = await syncSpvInvoicesForTenant(integration.tenantId, 'P', 2); // 'P' for received invoices, 2 days
 
 				// Sync sent invoices (invoices you created and sent to clients)
-				console.log(`[SPV-Sync] Syncing sent invoices for tenant ${integration.tenantId}...`);
+				logInfo('scheduler', `SPV invoice sync: syncing sent invoices`, { tenantId: integration.tenantId });
 				const sentResult = await syncSentInvoicesFromSpv(integration.tenantId, 2); // 2 days
 
 				tenantsProcessed++;
@@ -55,26 +56,19 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 				totalSkipped += receivedResult.skipped + sentResult.skipped;
 				totalErrors += receivedResult.errors + sentResult.errors;
 
-				console.log(
-					`[SPV-Sync] Tenant ${integration.tenantId}: ${receivedResult.imported + sentResult.imported} imported, ${receivedResult.updated + sentResult.updated} updated (${receivedResult.imported} received, ${sentResult.imported} sent), ${receivedResult.skipped + sentResult.skipped} skipped, ${receivedResult.errors + sentResult.errors} errors`
-				);
+				logInfo('scheduler', `SPV invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported: receivedResult.imported + sentResult.imported, updated: receivedResult.updated + sentResult.updated, skipped: receivedResult.skipped + sentResult.skipped, errors: receivedResult.errors + sentResult.errors } });
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(
-					`[SPV-Sync] Error syncing invoices for tenant ${integration.tenantId}:`,
-					errorMessage
-				);
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `SPV invoice sync: error syncing invoices for tenant: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
 				errors.push({
 					tenantId: integration.tenantId,
-					error: errorMessage
+					error: message
 				});
 				// Continue with other tenants
 			}
 		}
 
-		console.log(
-			`[SPV-Sync] Completed: ${tenantsProcessed} tenants processed, ${totalImported} invoices imported, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalErrors} errors`
-		);
+		logInfo('scheduler', `SPV invoice sync completed`, { metadata: { tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors } });
 
 		return {
 			success: true,
@@ -86,7 +80,8 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('[SPV-Sync] Process error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `SPV invoice sync: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			tenantsProcessed: 0,

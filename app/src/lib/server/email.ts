@@ -9,8 +9,10 @@ import {
 	logEmailAttempt,
 	logEmailProcessing,
 	logEmailSuccess,
-	logEmailFailure
+	logEmailFailure,
+	logEmailRetry
 } from './email-logger';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 // ---------------------------------------------------------------------------
 // Notification recipients helper
@@ -74,9 +76,7 @@ function getDefaultTransporter(): nodemailer.Transporter {
 
 	// Check if SMTP is configured
 	if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASSWORD) {
-		console.warn(
-			'SMTP not configured. Email sending will be disabled. Set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD environment variables.'
-		);
+		logWarning('email', 'SMTP not configured, email sending disabled');
 		// Create a test transporter that won't actually send emails
 		defaultTransporter = nodemailer.createTransport({
 			host: 'localhost',
@@ -112,6 +112,7 @@ export async function getTenantTransporter(
 ): Promise<nodemailer.Transporter | null> {
 	// Check cache first
 	if (tenantTransporters.has(tenantId)) {
+		logInfo('email', 'Using cached transporter', { tenantId });
 		return tenantTransporters.get(tenantId)!;
 	}
 
@@ -126,7 +127,7 @@ export async function getTenantTransporter(
 
 		emailSettings = settings;
 	} catch (error) {
-		console.error('Failed to load email settings:', error);
+		logError('email', 'Failed to load email settings', { tenantId, stackTrace: serializeError(error).stack });
 	}
 
 	// If tenant has email settings configured and enabled, use them
@@ -157,14 +158,16 @@ export async function getTenantTransporter(
 
 			// Cache the transporter
 			tenantTransporters.set(tenantId, transporter);
+			logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
 			return transporter;
 		} catch (error) {
-			console.error('Failed to create tenant-specific transporter:', error);
+			logError('email', 'Failed to create tenant transporter', { tenantId, stackTrace: serializeError(error).stack });
 			// Fall through to default transporter
 		}
 	}
 
 	// Fall back to environment variables (default transporter)
+	logInfo('email', 'Falling back to default transporter', { tenantId });
 	return getDefaultTransporter();
 }
 
@@ -173,6 +176,70 @@ export async function getTenantTransporter(
  */
 export function clearTenantTransporterCache(tenantId: string): void {
 	tenantTransporters.delete(tenantId);
+}
+
+/**
+ * Check if an SMTP error is retryable (transient) vs permanent
+ */
+function isRetryableSmtpError(error: Error): boolean {
+	const msg = error.message || '';
+	// Permanent 5xx failures (except 421, 450, 451, 452 which are transient)
+	const permanentMatch = msg.match(/\b(5\d{2})\b/);
+	if (permanentMatch) {
+		const code = parseInt(permanentMatch[1]);
+		// These are transient even though 4xx/5xx
+		if ([421, 450, 451, 452].includes(code)) return true;
+		// Other 5xx = permanent
+		if (code >= 500) return false;
+	}
+	// Connection errors, timeouts, etc. are retryable
+	return true;
+}
+
+/**
+ * Send email with retry logic
+ */
+async function sendMailWithRetry(
+	transporter: nodemailer.Transporter,
+	mailOptions: nodemailer.SendMailOptions,
+	tenantId: string,
+	logId: string,
+	maxAttempts = 3
+): Promise<{ messageId?: string; response?: string }> {
+	let lastError: Error | null = null;
+
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		try {
+			if (attempt > 1) {
+				logInfo('email', `Retry attempt ${attempt}/${maxAttempts}`, { tenantId, metadata: { email: mailOptions.to as string } });
+			}
+			const info = await transporter.sendMail(mailOptions);
+			return { messageId: info.messageId, response: info.response };
+		} catch (error) {
+			lastError = error as Error;
+			logError('email', `Attempt ${attempt}/${maxAttempts} failed`, { tenantId, metadata: { email: mailOptions.to as string, error: lastError.message } });
+
+			if (!isRetryableSmtpError(lastError)) {
+				logWarning('email', 'Permanent SMTP error, not retrying', { tenantId, metadata: { error: lastError.message } });
+				break;
+			}
+
+			if (attempt < maxAttempts) {
+				// Clear cached transporter and get fresh one
+				clearTenantTransporterCache(tenantId);
+				const freshTransporter = await getTenantTransporter(tenantId);
+				if (freshTransporter) {
+					transporter = freshTransporter;
+				}
+				await logEmailRetry(logId, attempt, lastError.message);
+				// Exponential backoff: 1s, 3s
+				const delay = attempt * 1000 + (attempt - 1) * 1000;
+				await new Promise(resolve => setTimeout(resolve, delay));
+			}
+		}
+	}
+
+	throw lastError || new Error('Email send failed after retries');
 }
 
 /**
@@ -265,10 +332,10 @@ export async function sendInvitationEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Invitation email sent to ${email}`);
+		logInfo('email', 'Invitation email sent', { tenantId, metadata: { email } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send invitation email:', error);
+		logError('email', 'Failed to send invitation email', { tenantId, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send invitation email');
 	}
 }
@@ -398,10 +465,10 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Invoice email sent to ${clientEmail} for invoice ${invoice.invoiceNumber}`);
+		logInfo('email', 'Invoice email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send invoice email:', error);
+		logError('email', 'Failed to send invoice email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send invoice email');
 	}
 }
@@ -512,10 +579,10 @@ export async function sendMagicLinkEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Magic link email sent to ${email} for tenant ${tenantSlug}`);
+		logInfo('email', 'Magic link email sent', { tenantId: tenant.id, metadata: { email } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send magic link email:', error);
+		logError('email', 'Failed to send magic link email', { tenantId: tenant.id, metadata: { email }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send magic link email');
 	}
 }
@@ -599,10 +666,10 @@ export async function sendAdminMagicLinkEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Admin magic link email sent to ${email}`);
+		logInfo('email', 'Admin magic link email sent', { metadata: { email } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send admin magic link email:', error);
+		logError('email', 'Failed to send admin magic link email', { metadata: { email }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send magic link email');
 	}
 }
@@ -685,10 +752,10 @@ export async function sendPasswordResetEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Password reset email sent to ${email}`);
+		logInfo('email', 'Password reset email sent', { metadata: { email } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send password reset email:', error);
+		logError('email', 'Failed to send password reset email', { metadata: { email }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send password reset email');
 	}
 }
@@ -799,10 +866,10 @@ export async function sendTaskAssignmentEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Task assignment email sent to ${assigneeEmail} for task ${task.title}`);
+		logInfo('email', 'Task assignment email sent', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send task assignment email:', error);
+		logError('email', 'Failed to send task assignment email', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send task assignment email');
 	}
 }
@@ -926,10 +993,10 @@ export async function sendTaskUpdateEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Task update email sent to ${watcherEmail} for task ${task.title}`);
+		logInfo('email', 'Task update email sent', { tenantId: task.tenantId, metadata: { email: watcherEmail, taskId } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send task update email:', error);
+		logError('email', 'Failed to send task update email', { tenantId: task.tenantId, metadata: { email: watcherEmail, taskId }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send task update email');
 	}
 }
@@ -1076,12 +1143,13 @@ Vezi task: ${taskUrl}
 
 	try {
 		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Task client notification email sent to ${clientEmail} for task ${task.title} (${notificationType})`);
+		logInfo('email', `Sending task client ${notificationType} notification`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId } });
+		const info = await sendMailWithRetry(transporter, mailOptions, task.tenantId, logId);
+		await logEmailSuccess(logId, info);
+		logInfo('email', `Task client ${notificationType} notification sent`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send task client notification email:', error);
+		logError('email', `Failed to send task client ${notificationType} notification`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send task client notification email');
 	}
 }
@@ -1210,10 +1278,10 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Invoice paid email sent to ${clientEmail} for invoice ${invoice.invoiceNumber}`);
+		logInfo('email', 'Invoice paid email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send invoice paid email:', error);
+		logError('email', 'Failed to send invoice paid email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send invoice paid email');
 	}
 }
@@ -1353,10 +1421,10 @@ export async function sendOverdueReminderEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Overdue reminder email sent to ${clientEmail} for invoice ${invoice.invoiceNumber} (${daysOverdue} days overdue, reminder #${reminderNumber})`);
+		logInfo('email', 'Overdue reminder email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send overdue reminder email:', error);
+		logError('email', 'Failed to send overdue reminder email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send overdue reminder email');
 	}
 }
@@ -1474,10 +1542,10 @@ export async function sendTaskReminderEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Task reminder email sent to ${assigneeEmail} for task ${task.title}`);
+		logInfo('email', 'Task reminder email sent', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send task reminder email:', error);
+		logError('email', 'Failed to send task reminder email', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send task reminder email');
 	}
 }
@@ -1644,10 +1712,10 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Daily work reminder email sent to ${user.email} with ${tasks.length} tasks`);
+		logInfo('email', 'Daily work reminder email sent', { tenantId, metadata: { email: user.email, taskCount: tasks.length } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send daily work reminder email:', error);
+		logError('email', 'Failed to send daily work reminder email', { tenantId, metadata: { email: user.email }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send daily work reminder email');
 	}
 }
@@ -1756,10 +1824,10 @@ export async function sendContractSigningEmail(
 		await logEmailProcessing(logId);
 		const info = await transporter.sendMail(mailOptions);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		console.log(`Contract signing email sent to ${email} for contract ${contractNumber}`);
+		logInfo('email', 'Contract signing email sent', { tenantId: tenant.id, metadata: { email, contractNumber } });
 	} catch (error) {
 		await logEmailFailure(logId, (error as Error).message);
-		console.error('Failed to send contract signing email:', error);
+		logError('email', 'Failed to send contract signing email', { tenantId: tenant.id, metadata: { email, contractNumber }, stackTrace: serializeError(error).stack });
 		throw new Error('Failed to send contract signing email');
 	}
 }

@@ -1,4 +1,5 @@
 import { syncBnrRates } from '$lib/server/bnr/client';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Scheduled task: sync BNR exchange rates daily.
@@ -9,14 +10,15 @@ export async function processBnrRateSync(): Promise<{
 	synced: number;
 	date: string;
 }> {
-	console.log('[BNR Sync] Starting BNR rate sync...');
+	logInfo('scheduler', 'BNR rate sync starting');
 
 	try {
 		const result = await syncBnrRates();
-		console.log(`[BNR Sync] Completed: ${result.synced} rates for ${result.date}`);
+		logInfo('scheduler', `BNR rate sync completed: ${result.synced} rates for ${result.date}`, { metadata: { synced: result.synced, date: result.date } });
 		return { success: true, ...result };
 	} catch (error) {
-		console.error('[BNR Sync] Failed:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `BNR rate sync failed: ${message}`, { stackTrace: stack });
 		throw error;
 	}
 }

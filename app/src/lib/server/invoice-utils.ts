@@ -8,6 +8,7 @@ import { KeezClient } from './plugins/keez/client';
 import { decrypt } from './plugins/keez/crypto';
 import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './plugins/keez/mapper';
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
+import { logWarning } from '$lib/server/logger';
 
 function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -69,7 +70,7 @@ export async function generateInvoiceNumber(tenantId: string): Promise<string> {
 			return generateKeezInvoiceNumber(series, nextNumber);
 		}
 	} catch (error) {
-		console.warn(`[Invoice] Failed to get next number from Keez, using fallback:`, error);
+		logWarning('server', `Failed to get next number from Keez, using fallback`, { tenantId, stackTrace: error instanceof Error ? error.stack : undefined });
 	}
 
 	// Fallback: use last synced number or start number
@@ -143,7 +144,7 @@ export async function getNextInvoiceNumberFromPlugin(
 						return generateKeezInvoiceNumber(keezSeries, nextNumber);
 					}
 				} catch (error) {
-					console.warn(`[Invoice] Failed to get next number from Keez, using fallback:`, error);
+					logWarning('server', `Failed to get next number from Keez, using fallback`, { tenantId, stackTrace: error instanceof Error ? error.stack : undefined });
 				}
 
 				// Fallback: use last synced number or start number
@@ -303,7 +304,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		try {
 			lineItems = JSON.parse(recurringInvoice.lineItemsJson);
 		} catch (e) {
-			console.warn(`[Invoice] Failed to parse lineItemsJson:`, e);
+			logWarning('server', `Failed to parse lineItemsJson`, { tenantId: recurringInvoice.tenantId, stackTrace: e instanceof Error ? e.stack : undefined });
 		}
 	}
 
@@ -422,10 +423,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 								latestRate = Math.round(keezItem.lastPrice * 100); // Convert to cents
 							}
 						} catch (error) {
-							console.warn(
-								`[Invoice] Failed to fetch Keez item ${item.keezItemExternalId}:`,
-								error
-							);
+							logWarning('server', `Failed to fetch Keez item ${item.keezItemExternalId}`, { tenantId: recurringInvoice.tenantId, stackTrace: error instanceof Error ? error.stack : undefined });
 							// Use stored rate (already converted to cents above) as fallback
 						}
 					}

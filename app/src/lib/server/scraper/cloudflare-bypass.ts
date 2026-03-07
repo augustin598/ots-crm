@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer-core';
 import type { Browser } from 'puppeteer-core';
 import { findChromePath } from './find-chrome';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 // ── Constants ──────────────────────────────────────────────────────
 const BROWSER_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -42,7 +43,7 @@ async function ensureBrowser(): Promise<Browser> {
 
 	// If browser exists but disconnected, clean up
 	if (state.browser && !state.browser.connected) {
-		console.log('[SCRAPER] Browser disconnected, resetting state');
+		logInfo('server', 'Scraper: Browser disconnected, resetting state');
 		state.browser = null;
 		state.launching = null;
 		state.activePages = 0;
@@ -59,12 +60,11 @@ async function ensureBrowser(): Promise<Browser> {
 		try {
 			chromePath = findChromePath();
 		} catch (e) {
-			console.error(`[SCRAPER] Chrome not found:`, e instanceof Error ? e.message : e);
-			console.error(`[SCRAPER] CHROME_PATH env: ${process.env.CHROME_PATH || '(not set)'}`);
-			console.error(`[SCRAPER] Platform: ${process.platform}`);
+			const { message, stack } = serializeError(e);
+			logError('server', `Scraper: Chrome not found: ${message}`, { stackTrace: stack, metadata: { chromePath: process.env.CHROME_PATH || '(not set)', platform: process.platform } });
 			throw e;
 		}
-		console.log(`[SCRAPER] Launching browser (Chrome at ${chromePath})`);
+		logInfo('server', `Scraper: Launching browser`, { metadata: { chromePath } });
 
 		const browser = await puppeteer.launch({
 			headless: true,
@@ -84,11 +84,11 @@ async function ensureBrowser(): Promise<Browser> {
 		state.browser = browser;
 		state.launching = null;
 		resetIdleTimer();
-		console.log('[SCRAPER] Browser launched successfully');
+		logInfo('server', 'Scraper: Browser launched successfully');
 		return browser;
 	})().catch((err) => {
 		state.launching = null;
-		console.error(`[SCRAPER] Browser launch FAILED:`, err instanceof Error ? err.message : err);
+		logError('server', `Scraper: Browser launch failed: ${err instanceof Error ? err.message : String(err)}`, { stackTrace: err instanceof Error ? err.stack : undefined });
 		throw err;
 	});
 
@@ -114,7 +114,7 @@ async function closeBrowser(): Promise<void> {
 	if (state.browser) {
 		try {
 			await state.browser.close();
-			console.log('[SCRAPER] Browser closed');
+			logInfo('server', 'Scraper: Browser closed');
 		} catch {
 			// Browser may already be closed
 		}
@@ -199,10 +199,10 @@ async function fetchWithPuppeteer(url: string, timeoutMs: number): Promise<strin
 
 		const html = await page.content();
 		const elapsed = Date.now() - start;
-		console.log(`[SCRAPER] Puppeteer fetched ${url} in ${elapsed}ms`);
+		logInfo('server', `Scraper: Puppeteer fetched ${url} in ${elapsed}ms`);
 
 		if (isCloudflareHtml(html)) {
-			console.warn(`[SCRAPER] Puppeteer still got Cloudflare challenge page for ${url}`);
+			logWarning('server', `Scraper: Puppeteer still got Cloudflare challenge page for ${url}`);
 		}
 
 		return html;
@@ -247,12 +247,12 @@ export async function fetchWithCloudflareFallback(
 		// Check for Cloudflare at response level
 		if (isCloudflareChallenge(res)) {
 			res.body?.cancel();
-			console.log(`[SCRAPER] Cloudflare detected for ${url} — falling back to Puppeteer`);
+			logInfo('server', `Scraper: Cloudflare detected for ${url}, falling back to Puppeteer`);
 			try {
 				const html = await fetchWithPuppeteer(url, timeoutMs);
 				return { html, usedPuppeteer: true };
 			} catch (puppeteerErr) {
-				console.warn(`[SCRAPER] Puppeteer fallback failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+				logWarning('server', `Scraper: Puppeteer fallback failed for ${url}: ${puppeteerErr instanceof Error ? puppeteerErr.message : String(puppeteerErr)}`);
 				// Return empty so caller can handle gracefully
 				return { html: '', usedPuppeteer: false };
 			}
@@ -266,14 +266,12 @@ export async function fetchWithCloudflareFallback(
 
 		// Check for Cloudflare in HTML body
 		if (isCloudflareHtml(html)) {
-			console.log(
-				`[SCRAPER] Cloudflare HTML detected for ${url} — falling back to Puppeteer`
-			);
+			logInfo('server', `Scraper: Cloudflare HTML detected for ${url}, falling back to Puppeteer`);
 			try {
 				const puppeteerHtml = await fetchWithPuppeteer(url, timeoutMs);
 				return { html: puppeteerHtml, usedPuppeteer: true };
 			} catch (puppeteerErr) {
-				console.warn(`[SCRAPER] Puppeteer fallback failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+				logWarning('server', `Scraper: Puppeteer fallback failed for ${url}: ${puppeteerErr instanceof Error ? puppeteerErr.message : String(puppeteerErr)}`);
 				// Return the Cloudflare HTML — caller can decide
 				return { html, usedPuppeteer: false };
 			}
@@ -283,14 +281,12 @@ export async function fetchWithCloudflareFallback(
 	} catch (e) {
 		// Try Puppeteer as last resort for any fetch failure
 		const err = e instanceof Error ? e : new Error(String(e));
-		console.log(
-			`[SCRAPER] Fetch failed with ${err.message} for ${url} — trying Puppeteer`
-		);
+		logInfo('server', `Scraper: Fetch failed with ${err.message} for ${url}, trying Puppeteer`);
 		try {
 			const html = await fetchWithPuppeteer(url, timeoutMs);
 			return { html, usedPuppeteer: true };
 		} catch (puppeteerErr) {
-			console.warn(`[SCRAPER] Puppeteer also failed for ${url}:`, puppeteerErr instanceof Error ? puppeteerErr.message : puppeteerErr);
+			logWarning('server', `Scraper: Puppeteer also failed for ${url}: ${puppeteerErr instanceof Error ? puppeteerErr.message : String(puppeteerErr)}`);
 			throw err;
 		}
 	}

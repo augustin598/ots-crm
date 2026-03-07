@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lt, lte } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process invoice overdue reminders - finds overdue invoices for tenants
@@ -25,7 +26,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 			);
 
 		if (enabledSettings.length === 0) {
-			console.log('No tenants have overdue invoice reminders enabled');
+			logInfo('scheduler', 'Invoice overdue reminders: no tenants have reminders enabled, skipping');
 			return { success: true, remindersSent: 0 };
 		}
 
@@ -84,9 +85,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							.limit(1);
 
 						if (!client?.email) {
-							console.warn(
-								`Cannot send overdue reminder for invoice ${invoice.invoiceNumber}: client email not found`
-							);
+							logWarning('scheduler', `Invoice overdue reminders: cannot send reminder, client email not found`, { tenantId: settings.tenantId, metadata: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber } });
 							continue;
 						}
 
@@ -112,29 +111,22 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							.where(eq(table.invoice.id, invoice.id));
 
 						remindersSent++;
-						console.log(
-							`Sent overdue reminder #${reminderCount + 1} for invoice ${invoice.invoiceNumber} (${daysOverdue} days overdue)`
-						);
+						logInfo('scheduler', `Invoice overdue reminders: sent reminder #${reminderCount + 1} for invoice ${invoice.invoiceNumber} (${daysOverdue} days overdue)`, { tenantId: settings.tenantId, metadata: { invoiceId: invoice.id, reminderNumber: reminderCount + 1, daysOverdue } });
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-						console.error(
-							`Error sending overdue reminder for invoice ${invoice.id}:`,
-							errorMessage
-						);
-						errors.push({ invoiceId: invoice.id, error: errorMessage });
+						const { message, stack } = serializeError(error);
+						logError('scheduler', `Invoice overdue reminders: error sending reminder for invoice ${invoice.id}: ${message}`, { tenantId: settings.tenantId, stackTrace: stack });
+						errors.push({ invoiceId: invoice.id, error: message });
 					}
 				}
 			} catch (error) {
-				console.error(
-					`Error processing overdue reminders for tenant ${settings.tenantId}:`,
-					error
-				);
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Invoice overdue reminders: error processing tenant: ${message}`, { tenantId: settings.tenantId, stackTrace: stack });
 			}
 		}
 
-		console.log(`Invoice overdue reminders processed: ${remindersSent} reminders sent`);
+		logInfo('scheduler', `Invoice overdue reminders processed: ${remindersSent} reminders sent`, { metadata: { remindersSent, errorCount: errors.length } });
 		if (errors.length > 0) {
-			console.error(`Invoice overdue reminder errors: ${errors.length}`, errors);
+			logError('scheduler', `Invoice overdue reminders: ${errors.length} errors`, { metadata: { errorCount: errors.length } });
 		}
 
 		return {
@@ -143,7 +135,8 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('Process invoice overdue reminders error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Invoice overdue reminders: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			remindersSent: 0,

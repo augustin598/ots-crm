@@ -4,6 +4,7 @@
  */
 
 import { DOMParser } from '@xmldom/xmldom';
+import { logWarning } from '$lib/server/logger';
 
 const UBL_NS = {
 	ubl: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
@@ -197,7 +198,7 @@ export function parseUblInvoice(xml: string): ParsedUblInvoice {
 	// If still no VAT ID found, use whatever we have (but log warning)
 	if (!customerVatId) {
 		customerVatId = customerIdFromIdentification || '';
-		console.warn(`[UBL Parser] No valid VAT ID found for customer ${customerName}, using: ${customerVatId}`);
+		logWarning('anaf-spv', `No valid VAT ID found for customer ${customerName}, using: ${customerVatId}`);
 	}
 
 	const customerAddress = customerPartyInfo?.getElementsByTagNameNS(UBL_NS.cac, 'PostalAddress')[0];

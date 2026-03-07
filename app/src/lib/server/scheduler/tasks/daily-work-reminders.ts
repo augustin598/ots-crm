@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, gte, lte, isNotNull } from 'drizzle-orm';
 import { sendDailyWorkReminderEmail } from '../../email';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process daily work reminders - finds users whose work start time matches current hour
@@ -53,7 +54,7 @@ export async function processDailyWorkReminders(params: Record<string, any> = {}
 				.limit(1);
 
 			if (!user?.email) {
-				console.warn(`Cannot send reminder for user ${workHours.userId}: email not found`);
+				logWarning('scheduler', `Daily work reminders: cannot send reminder, user email not found`, { tenantId: workHours.tenantId, metadata: { userId: workHours.userId } });
 				continue;
 			}
 
@@ -87,22 +88,19 @@ export async function processDailyWorkReminders(params: Record<string, any> = {}
 
 				remindersSent++;
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(
-					`Error sending work reminder for user ${workHours.userId} in tenant ${workHours.tenantId}:`,
-					errorMessage
-				);
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Daily work reminders: error sending reminder: ${message}`, { tenantId: workHours.tenantId, metadata: { userId: workHours.userId }, stackTrace: stack });
 				errors.push({
 					userId: workHours.userId,
 					tenantId: workHours.tenantId,
-					error: errorMessage
+					error: message
 				});
 			}
 		}
 
-		console.log(`Daily work reminders processed: ${remindersSent} reminders sent`);
+		logInfo('scheduler', `Daily work reminders processed: ${remindersSent} reminders sent`, { metadata: { remindersSent, errorCount: errors.length } });
 		if (errors.length > 0) {
-			console.error(`Work reminder errors: ${errors.length}`, errors);
+			logError('scheduler', `Daily work reminders: ${errors.length} errors`, { metadata: { errorCount: errors.length } });
 		}
 
 		return {
@@ -111,7 +109,8 @@ export async function processDailyWorkReminders(params: Record<string, any> = {}
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('Process daily work reminders error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Daily work reminders: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			remindersSent: 0,

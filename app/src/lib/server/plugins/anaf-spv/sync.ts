@@ -5,13 +5,14 @@
 
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, like } from 'drizzle-orm';
+import { eq, and, or, like, sql } from 'drizzle-orm';
 import { AnafSpvClient } from './client';
 import { decrypt } from './crypto';
 import { parseUblInvoice } from './xml-parser';
 import { mapUblInvoiceToExpense, mapAnafCompanyToSupplier, mapUblInvoiceToCrm, mapAnafCompanyToClient, normalizeVatId, normalizeInvoiceNumber } from './mapper';
 import { uploadBuffer } from '$lib/server/storage';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 function generateSyncId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -181,10 +182,10 @@ export async function syncSpvInvoicesForTenant(
 
 				// Find or create supplier, and update with latest data from invoice
 				let supplierId: string;
-				
+
 				if (existingExpense && existingExpense.supplierId) {
 					supplierId = existingExpense.supplierId;
-					
+
 					// Update existing supplier with fresh data from invoice
 					await db
 						.update(table.supplier)
@@ -212,7 +213,7 @@ export async function syncSpvInvoicesForTenant(
 
 					if (existingSupplier) {
 						supplierId = existingSupplier.id;
-						
+
 						// Update existing supplier with fresh data from invoice
 						await db
 							.update(table.supplier)
@@ -337,10 +338,8 @@ export async function syncSpvInvoicesForTenant(
 							.where(eq(table.expense.id, expenseId));
 					}
 				} catch (pdfError) {
-					console.error(
-						`[ANAF-SPV] Failed to convert UBL to PDF for invoice ${spvInvoice.id}:`,
-						pdfError
-					);
+					const err = serializeError(pdfError);
+					logError('anaf-spv', `Failed to convert UBL to PDF for invoice ${spvInvoice.id}: ${err.message}`, { tenantId, stackTrace: err.stack });
 					// Continue even if PDF conversion fails
 				}
 
@@ -382,7 +381,8 @@ export async function syncSpvInvoicesForTenant(
 					});
 				}
 			} catch (error) {
-				console.error(`[ANAF-SPV] Failed to sync invoice ${spvInvoice.id}:`, error);
+				const err = serializeError(error);
+				logError('anaf-spv', `Failed to sync invoice ${spvInvoice.id}: ${err.message}`, { tenantId, stackTrace: err.stack });
 				errors++;
 
 				// Create error sync record
@@ -398,7 +398,8 @@ export async function syncSpvInvoicesForTenant(
 						errorMessage: error instanceof Error ? error.message : String(error)
 					});
 				} catch (syncError) {
-					console.error(`[ANAF-SPV] Failed to create error sync record:`, syncError);
+					const err2 = serializeError(syncError);
+					logError('anaf-spv', `Failed to create error sync record: ${err2.message}`, { tenantId, stackTrace: err2.stack });
 				}
 			}
 		}
@@ -420,7 +421,8 @@ export async function syncSpvInvoicesForTenant(
 			errors
 		};
 	} catch (error) {
-		console.error(`[ANAF-SPV] Failed to sync invoices for tenant ${tenantId}:`, error);
+		const err = serializeError(error);
+		logError('anaf-spv', `Failed to sync invoices for tenant ${tenantId}: ${err.message}`, { tenantId, stackTrace: err.stack });
 		throw error;
 	}
 }
@@ -546,14 +548,14 @@ export async function syncSentInvoicesFromSpv(
 				// Check if invoice already exists by invoice number (may have been synced from another provider)
 				// Normalize invoice numbers for comparison (handle NTS00144 vs NTS-00144)
 				const normalizedInvoiceNumber = normalizeInvoiceNumber(ublData.invoiceNumber);
-				
+
 				// Get all invoices with similar numbers and filter by normalized comparison
 				const potentialInvoices = await db
 					.select()
 					.from(table.invoice)
 					.where(eq(table.invoice.tenantId, tenantId));
-				
-				const existingInvoice = potentialInvoices.find(inv => 
+
+				const existingInvoice = potentialInvoices.find(inv =>
 					normalizeInvoiceNumber(inv.invoiceNumber) === normalizedInvoiceNumber
 				);
 
@@ -563,10 +565,10 @@ export async function syncSentInvoicesFromSpv(
 
 				// Find or create client, and update with latest data from invoice
 				let clientId: string;
-				
+
 				if (existingInvoice) {
 					clientId = existingInvoice.clientId;
-					
+
 					// Update existing client with fresh data from invoice
 					await db
 						.update(table.client)
@@ -609,16 +611,16 @@ export async function syncSentInvoicesFromSpv(
 
 					if (existingClient) {
 						clientId = existingClient.id;
-						
+
 						// Check if existing client has incorrect data (registration number in wrong fields)
-						const needsCorrection = 
-							(existingClient.cui && existingClient.cui.startsWith('J')) || 
+						const needsCorrection =
+							(existingClient.cui && existingClient.cui.startsWith('J')) ||
 							(existingClient.vatNumber && existingClient.vatNumber.startsWith('J'));
-						
+
 						if (needsCorrection) {
-							console.log(`[ANAF-SPV-SYNC] ⚠️  Client ${existingClient.name} has incorrect data (J... in CUI/VAT fields), correcting...`);
+							logWarning('anaf-spv', `Client ${existingClient.name} has incorrect data (J... in CUI/VAT fields), correcting`, { tenantId, metadata: { clientId: existingClient.id } });
 						}
-						
+
 						// Update existing client with fresh data from invoice
 						// Always update CUI to ensure it's correct (numeric only, no RO prefix)
 						await db
@@ -688,10 +690,9 @@ export async function syncSentInvoicesFromSpv(
 				if (existingInvoice) {
 					// Update existing invoice with SPV data
 					invoiceId = existingInvoice.id;
-					
-					console.log(`[ANAF-SPV-SYNC] Found existing invoice: ${existingInvoice.invoiceNumber} (ID: ${invoiceId})`);
-					console.log(`[ANAF-SPV-SYNC] Keeping existing invoice number format: "${existingInvoice.invoiceNumber}" (SPV has: "${ublData.invoiceNumber}")`);
-					
+
+					logInfo('anaf-spv', `Found existing invoice ${existingInvoice.invoiceNumber}, keeping format (SPV has: "${ublData.invoiceNumber}")`, { tenantId, metadata: { invoiceId, spvId: spvInvoice.id } });
+
 					await db
 						.update(table.invoice)
 						.set({
@@ -714,100 +715,77 @@ export async function syncSentInvoicesFromSpv(
 						.select()
 						.from(table.invoiceLineItem)
 						.where(eq(table.invoiceLineItem.invoiceId, existingInvoice.id));
-					
-					console.log(`[ANAF-SPV-SYNC] Existing line items: ${existingLineItems.length}, New line items: ${invoiceData.lineItems.length}`);
+
+					logInfo('anaf-spv', `Line items sync: ${existingLineItems.length} existing, ${invoiceData.lineItems.length} from SPV`, { tenantId, metadata: { invoiceId } });
 
 					if (existingLineItems.length === 0 && invoiceData.lineItems.length > 0) {
 					// Invoice has no line items, add them
-					console.log(`[ANAF-SPV-SYNC] ⚠️  Invoice has no line items, adding ${invoiceData.lineItems.length} items...`);
-					
+					logWarning('anaf-spv', `Invoice has no line items, adding ${invoiceData.lineItems.length} items`, { tenantId, metadata: { invoiceId } });
+
 					for (const [index, lineItem] of invoiceData.lineItems.entries()) {
 						const lineItemId = generateLineItemId();
 						const { invoiceId: _unused, ...lineItemData } = lineItem;
-						
-						console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} data:`, {
-							description: lineItemData.description?.substring(0, 50),
-							quantity: lineItemData.quantity,
-							rate: lineItemData.rate,
-							amount: lineItemData.amount,
-							taxRate: lineItemData.taxRate
-						});
-						
+
 						await db.insert(table.invoiceLineItem).values({
 							id: lineItemId,
 							invoiceId: invoiceId,
 							...lineItemData
 						});
-						console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} created successfully`);
 					}
-						
+
 						// Verify - count final line items
 						const finalLineItems = await db
 							.select()
 							.from(table.invoiceLineItem)
 							.where(eq(table.invoiceLineItem.invoiceId, existingInvoice.id));
-						
-						console.log(`[ANAF-SPV-SYNC] ✅ All ${finalLineItems.length} line items added to existing invoice (expected: ${invoiceData.lineItems.length})`);
-						
+
+						logInfo('anaf-spv', `Added ${finalLineItems.length} line items to existing invoice (expected: ${invoiceData.lineItems.length})`, { tenantId, metadata: { invoiceId } });
+
 						if (finalLineItems.length !== invoiceData.lineItems.length) {
-							console.error(`[ANAF-SPV-SYNC] ⚠️  WARNING: Line item count mismatch! Expected ${invoiceData.lineItems.length}, got ${finalLineItems.length}`);
+							logError('anaf-spv', `Line item count mismatch after adding! Expected ${invoiceData.lineItems.length}, got ${finalLineItems.length}`, { tenantId, metadata: { invoiceId } });
 						}
 					} else if (existingLineItems.length > 0) {
 						// Line items exist - always recreate to ensure sync
-						console.log(`[ANAF-SPV-SYNC] 🔄 Syncing ${invoiceData.lineItems.length} line items (recreating to ensure data is up to date)...`);
-						console.log(`[ANAF-SPV-SYNC] Deleting ${existingLineItems.length} existing line items first...`);
-						
+						logInfo('anaf-spv', `Recreating ${invoiceData.lineItems.length} line items (deleting ${existingLineItems.length} existing)`, { tenantId, metadata: { invoiceId } });
+
 						// Delete ALL existing line items first to prevent duplicates
 						const deletedCount = await db
 							.delete(table.invoiceLineItem)
 							.where(eq(table.invoiceLineItem.invoiceId, existingInvoice.id));
-						
-						console.log(`[ANAF-SPV-SYNC] Deleted ${existingLineItems.length} line items`);
-						
+
 						// Verify deletion - double check no line items remain
 						const remainingLineItems = await db
 							.select()
 							.from(table.invoiceLineItem)
 							.where(eq(table.invoiceLineItem.invoiceId, existingInvoice.id));
-						
+
 						if (remainingLineItems.length > 0) {
-							console.error(`[ANAF-SPV-SYNC] ❌ ERROR: ${remainingLineItems.length} line items still exist after deletion! Aborting sync to prevent duplicates.`);
+							logError('anaf-spv', `${remainingLineItems.length} line items still exist after deletion, aborting sync to prevent duplicates`, { tenantId, metadata: { invoiceId } });
 							throw new Error(`Failed to delete line items for invoice ${existingInvoice.id}`);
 						}
-						
-						console.log(`[ANAF-SPV-SYNC] ✅ Verified: All old line items deleted. Creating ${invoiceData.lineItems.length} new items...`);
 
 					// Create new line items
 					for (const [index, lineItem] of invoiceData.lineItems.entries()) {
 						const lineItemId = generateLineItemId();
 						const { invoiceId: _unused, ...lineItemData } = lineItem;
-						
-						console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} data:`, {
-							description: lineItemData.description?.substring(0, 50),
-							quantity: lineItemData.quantity,
-							rate: lineItemData.rate,
-							amount: lineItemData.amount,
-							taxRate: lineItemData.taxRate
-						});
-						
+
 						await db.insert(table.invoiceLineItem).values({
 							id: lineItemId,
 							invoiceId: invoiceId,
 							...lineItemData
 						});
-						console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} synced successfully`);
 					}
-						
+
 						// Final verification - count line items
 						const finalLineItems = await db
 							.select()
 							.from(table.invoiceLineItem)
 							.where(eq(table.invoiceLineItem.invoiceId, existingInvoice.id));
-						
-						console.log(`[ANAF-SPV-SYNC] ✅ All ${finalLineItems.length} line items synced (expected: ${invoiceData.lineItems.length})`);
-						
+
+						logInfo('anaf-spv', `Synced ${finalLineItems.length} line items (expected: ${invoiceData.lineItems.length})`, { tenantId, metadata: { invoiceId } });
+
 						if (finalLineItems.length !== invoiceData.lineItems.length) {
-							console.error(`[ANAF-SPV-SYNC] ⚠️  WARNING: Line item count mismatch! Expected ${invoiceData.lineItems.length}, got ${finalLineItems.length}`);
+							logError('anaf-spv', `Line item count mismatch after sync! Expected ${invoiceData.lineItems.length}, got ${finalLineItems.length}`, { tenantId, metadata: { invoiceId } });
 						}
 					}
 
@@ -825,22 +803,15 @@ export async function syncSentInvoicesFromSpv(
 				for (const [index, lineItem] of invoiceData.lineItems.entries()) {
 					const lineItemId = generateLineItemId();
 					const { invoiceId: _unused, ...lineItemData } = lineItem;
-					
-					console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} data:`, {
-						description: lineItemData.description?.substring(0, 30),
-						quantity: lineItemData.quantity,
-						rate: lineItemData.rate,
-						amount: lineItemData.amount,
-						taxRate: lineItemData.taxRate
-					});
-					
+
 					await db.insert(table.invoiceLineItem).values({
 						id: lineItemId,
 						invoiceId: invoiceId,
 						...lineItemData
 					});
-					console.log(`[ANAF-SPV-SYNC] Line item ${index + 1} synced successfully`);
 				}
+
+				logInfo('anaf-spv', `Created new invoice with ${invoiceData.lineItems.length} line items`, { tenantId, metadata: { invoiceId, invoiceNumber: ublData.invoiceNumber, spvId: spvInvoice.id } });
 
 					imported++;
 				}
@@ -873,10 +844,8 @@ export async function syncSentInvoicesFromSpv(
 						// For now we just store it in MinIO, accessible via file browser
 					}
 				} catch (pdfError) {
-					console.error(
-						`[ANAF-SPV] Failed to convert UBL to PDF for invoice ${spvInvoice.id}:`,
-						pdfError
-					);
+					const err = serializeError(pdfError);
+					logError('anaf-spv', `Failed to convert UBL to PDF for invoice ${spvInvoice.id}: ${err.message}`, { tenantId, stackTrace: err.stack });
 					// Continue even if PDF conversion fails
 				}
 
@@ -918,7 +887,8 @@ export async function syncSentInvoicesFromSpv(
 					});
 				}
 			} catch (error) {
-				console.error(`[ANAF-SPV] Failed to sync sent invoice ${spvInvoice.id}:`, error);
+				const err = serializeError(error);
+				logError('anaf-spv', `Failed to sync sent invoice ${spvInvoice.id}: ${err.message}`, { tenantId, stackTrace: err.stack });
 				errors++;
 
 				// Create error sync record
@@ -935,7 +905,8 @@ export async function syncSentInvoicesFromSpv(
 						errorMessage: error instanceof Error ? error.message : String(error)
 					});
 				} catch (syncError) {
-					console.error(`[ANAF-SPV] Failed to create error sync record:`, syncError);
+					const err2 = serializeError(syncError);
+					logError('anaf-spv', `Failed to create error sync record: ${err2.message}`, { tenantId, stackTrace: err2.stack });
 				}
 			}
 		}
@@ -957,7 +928,8 @@ export async function syncSentInvoicesFromSpv(
 			errors
 		};
 	} catch (error) {
-		console.error(`[ANAF-SPV] Failed to sync sent invoices for tenant ${tenantId}:`, error);
+		const err = serializeError(error);
+		logError('anaf-spv', `Failed to sync sent invoices for tenant ${tenantId}: ${err.message}`, { tenantId, stackTrace: err.stack });
 		throw error;
 	}
 }

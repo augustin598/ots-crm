@@ -9,6 +9,7 @@ import { BaseBankClient } from '../shared/base-client';
 import type { OAuthTokens, BankAccountInfo, BankTransaction } from '../shared/types';
 import { env } from '$env/dynamic/private';
 import jwt from 'jsonwebtoken';
+import { logInfo } from '$lib/server/logger';
 
 export class RevolutClient extends BaseBankClient {
 	private privateKey: string;
@@ -69,7 +70,7 @@ export class RevolutClient extends BaseBankClient {
 		this.privateKey = privateKey;
 		this.redirectUri = redirectUri;
 		this.dev = dev;
-		console.log('RevolutClient initialized', { clientId, privateKey, redirectUri, baseUrl, dev });
+		logInfo('banking', 'Revolut: Client initialized', { metadata: { clientId, baseUrl, dev } });
 	}
 
 	/**

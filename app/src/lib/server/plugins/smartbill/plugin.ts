@@ -1,4 +1,5 @@
 import type { Plugin, PluginConfig, HooksManager } from '../types';
+import { logInfo } from '$lib/server/logger';
 import { onInvoiceCreated, onInvoiceUpdated, onInvoiceDeleted } from './hooks';
 
 export class SmartBillPlugin implements Plugin {
@@ -22,12 +23,12 @@ export class SmartBillPlugin implements Plugin {
 
 	async onEnable(tenantId: string): Promise<void> {
 		// Called when plugin is enabled for a tenant
-		console.log(`[SmartBill] Plugin enabled for tenant ${tenantId}`);
+		logInfo('smartbill', 'Plugin enabled for tenant', { tenantId });
 	}
 
 	async onDisable(tenantId: string): Promise<void> {
 		// Called when plugin is disabled for a tenant
-		console.log(`[SmartBill] Plugin disabled for tenant ${tenantId}`);
+		logInfo('smartbill', 'Plugin disabled for tenant', { tenantId });
 	}
 }
 

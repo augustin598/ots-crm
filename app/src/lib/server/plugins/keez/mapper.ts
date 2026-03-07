@@ -10,6 +10,7 @@ import { db } from '$lib/server/db';
 import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getLatestBnrRate } from '$lib/server/bnr/client';
+import { logWarning, logError, serializeError } from '$lib/server/logger';
 import type {
 	KeezInvoice,
 	KeezInvoiceDetail,
@@ -716,7 +717,8 @@ export function mapKeezInvoiceToCRM(
 			}
 			return null;
 		} catch (error) {
-			console.error(`[Keez Mapper] parseDate: Error parsing date:`, dateValue, error);
+			const parseErr = serializeError(error);
+			logError('keez', `Mapper parseDate error: ${parseErr.message}`, { metadata: { dateValue } });
 			return null;
 		}
 	};
@@ -736,20 +738,10 @@ export function mapKeezInvoiceToCRM(
 
 	// Log warnings only if dates are missing when sources exist
 	if (!issueDate && issueDateSource) {
-		console.warn(
-			`[Keez Mapper] Could not parse issueDate. Source:`,
-			issueDateSource,
-			'Type:',
-			typeof issueDateSource
-		);
+		logWarning('keez', `Mapper could not parse issueDate`, { metadata: { source: issueDateSource, type: typeof issueDateSource } });
 	}
 	if (!dueDate && dueDateSource) {
-		console.warn(
-			`[Keez Mapper] Could not parse dueDate. Source:`,
-			dueDateSource,
-			'Type:',
-			typeof dueDateSource
-		);
+		logWarning('keez', `Mapper could not parse dueDate`, { metadata: { source: dueDateSource, type: typeof dueDateSource } });
 	}
 
 	// Determine status based on Keez status + remainingAmount

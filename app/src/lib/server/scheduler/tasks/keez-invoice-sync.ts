@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { syncKeezInvoicesForTenant } from '../../plugins/keez/sync';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process Keez invoice sync - finds all tenants with active Keez integrations
@@ -16,7 +17,7 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 			.where(eq(table.keezIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			console.log('[Keez-Sync] No tenants with active Keez integrations. Skipping sync.');
+			logInfo('scheduler', 'Keez invoice sync: no tenants with active integrations, skipping');
 			return {
 				success: true,
 				tenantsProcessed: 0,
@@ -36,7 +37,7 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 
 		for (const integration of integrations) {
 			try {
-				console.log(`[Keez-Sync] Syncing invoices for tenant ${integration.tenantId}...`);
+				logInfo('scheduler', `Keez invoice sync: syncing invoices`, { tenantId: integration.tenantId });
 
 				const result = await syncKeezInvoicesForTenant(integration.tenantId);
 
@@ -46,22 +47,15 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 				totalSkipped += result.skipped;
 				totalErrors += result.errors;
 
-				console.log(
-					`[Keez-Sync] Tenant ${integration.tenantId}: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped, ${result.errors} errors`
-				);
+				logInfo('scheduler', `Keez invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors } });
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(
-					`[Keez-Sync] Error syncing invoices for tenant ${integration.tenantId}:`,
-					errorMessage
-				);
-				errors.push({ tenantId: integration.tenantId, error: errorMessage });
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Keez invoice sync: error syncing invoices: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
+				errors.push({ tenantId: integration.tenantId, error: message });
 			}
 		}
 
-		console.log(
-			`[Keez-Sync] Completed: ${tenantsProcessed} tenants processed, ${totalImported} imported, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalErrors} errors`
-		);
+		logInfo('scheduler', `Keez invoice sync completed`, { metadata: { tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors } });
 
 		return {
 			success: true,
@@ -73,7 +67,8 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('[Keez-Sync] Process error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Keez invoice sync: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			tenantsProcessed: 0,

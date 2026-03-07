@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { createKeezClientForTenant } from './factory';
 import { mapInvoiceToKeez, generateNextInvoiceNumber, mapKeezDetailsToLineItems } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 function generateSyncId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -16,7 +17,7 @@ function generateSyncId() {
  */
 export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) => {
 	const { invoice, tenantId } = event;
-	console.log(`[Keez] Invoice created event:`, invoice);
+	logInfo('keez', `Invoice created event for invoice ${invoice.id}`, { tenantId, metadata: { invoiceId: invoice.id, clientId: invoice.clientId } });
 
 	// Check if Keez integration is active for tenant
 	const [integration] = await db
@@ -48,7 +49,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// Allow proceeding if the invoice itself has a series (even if keezSeries/keezStartNumber not set in settings)
 	const effectiveSeries = settings?.keezSeries || invoice.invoiceSeries;
 	if (!effectiveSeries) {
-		console.warn(`[Keez] Invoice settings not configured for tenant ${tenantId}: no keezSeries in settings and invoice has no invoiceSeries`);
+		logWarning('keez', 'Invoice settings not configured: no keezSeries in settings and invoice has no invoiceSeries', { tenantId });
 		return;
 	}
 
@@ -60,7 +61,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.limit(1);
 
 	if (!tenant) {
-		console.error(`[Keez] Tenant not found: ${tenantId}`);
+		logError('keez', `Tenant not found: ${tenantId}`, { tenantId });
 		return;
 	}
 
@@ -71,7 +72,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.limit(1);
 
 	if (!client) {
-		console.error(`[Keez] Client not found: ${invoice.clientId}`);
+		logError('keez', `Client not found: ${invoice.clientId}`, { tenantId });
 		return;
 	}
 
@@ -84,9 +85,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// Create Keez client with DB token cache
 	const keezClient = await createKeezClientForTenant(tenantId, integration);
 
-	console.log(
-		`[Keez] Starting invoice sync for invoice ${invoice.id} with ${lineItems.length} line items`
-	);
+	logInfo('keez', `Starting invoice sync for invoice ${invoice.id} with ${lineItems.length} line items`, { tenantId, metadata: { invoiceId: invoice.id, lineItemCount: lineItems.length } });
 
 	// Ensure all items exist in Keez before creating invoice
 	const itemExternalIds = new Map<string, string>();
@@ -100,9 +99,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		// If line item already has a Keez external ID (set on recurring invoice template items,
 		// copied to generated invoice line items), use it directly — no API call needed.
 		if (lineItem.keezItemExternalId) {
-			console.log(
-				`[Keez] Line item ${lineItem.id} has pre-configured keezItemExternalId: ${lineItem.keezItemExternalId}, using it directly`
-			);
+			logInfo('keez', `Line item ${lineItem.id} has pre-configured keezItemExternalId, using it directly`, { tenantId, metadata: { lineItemId: lineItem.id, keezItemExternalId: lineItem.keezItemExternalId } });
 			itemExternalIds.set(lineItem.id, lineItem.keezItemExternalId);
 			continue;
 		}
@@ -110,7 +107,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		// Generate code for item (similar to WHMCS implementation)
 		const itemCode = `CRM_${lineItem.id}`;
 
-		console.log(`[Keez] Checking item ${itemCode} for line item ${lineItem.id}`);
+		logInfo('keez', `Checking item ${itemCode} for line item ${lineItem.id}`, { tenantId });
 
 		// Use per-item tax rate if available, otherwise use invoice tax rate
 		const itemVatPercent = lineItem.taxRate ? lineItem.taxRate / 100 : defaultVatPercent;
@@ -133,7 +130,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 
 		if (!keezItem) {
 			// Item doesn't exist, create it
-			console.log(`[Keez] Item ${itemCode} not found, creating new item in Keez`);
+			logInfo('keez', `Item ${itemCode} not found, creating new item in Keez`, { tenantId });
 
 			try {
 				const newItem = await keezClient.createItem({
@@ -148,25 +145,24 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 					isStockable: false
 				});
 
-				console.log(`[Keez] Created item ${itemCode} with externalId: ${newItem.externalId}`);
+				logInfo('keez', `Created item ${itemCode} with externalId: ${newItem.externalId}`, { tenantId });
 				itemExternalIds.set(lineItem.id, newItem.externalId);
 			} catch (itemError) {
-				console.error(`[Keez] Failed to create item ${itemCode}:`, itemError);
+				const err = serializeError(itemError);
+				logError('keez', `Failed to create item ${itemCode}: ${err.message}`, { tenantId, stackTrace: err.stack });
 				// Try to continue with item ID as fallback
 				itemExternalIds.set(lineItem.id, lineItem.id);
 			}
 		} else {
 			// Item exists, use its externalId
-			console.log(`[Keez] Found existing item ${itemCode} with externalId: ${keezItem.externalId}`);
+			logInfo('keez', `Found existing item ${itemCode} with externalId: ${keezItem.externalId}`, { tenantId });
 			itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
 		}
 	}
 
 	// If no line items, we'll create a generic item in the mapper
 	if (lineItems.length === 0) {
-		console.log(
-			`[Keez] Invoice ${invoice.id} has no line items, will create generic item in mapper`
-		);
+		logInfo('keez', `Invoice ${invoice.id} has no line items, will create generic item in mapper`, { tenantId, metadata: { invoiceId: invoice.id } });
 	}
 
 	// Generate external ID (use invoice ID or generate one)
@@ -199,21 +195,17 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				}
 			}
 		}
-		console.log(
-			`[Keez] Using invoice series ${invoiceSeries} and number ${invoiceNumber} from invoice`
-		);
+		logInfo('keez', `Using invoice series ${invoiceSeries} and number ${invoiceNumber} from invoice`, { tenantId });
 	} else if (settings?.keezSeries) {
 		// Use Keez series from settings
 		invoiceSeries = settings.keezSeries.trim();
-		console.log(`[Keez] Checking latest invoice number in Keez for series: ${invoiceSeries}`);
+		logInfo('keez', `Checking latest invoice number in Keez for series: ${invoiceSeries}`, { tenantId });
 
 		try {
 			const nextNumber = await keezClient.getNextInvoiceNumber(invoiceSeries);
 			if (nextNumber !== null) {
 				invoiceNumber = String(nextNumber);
-				console.log(
-					`[Keez] Next invoice number from Keez for series ${invoiceSeries}: ${invoiceNumber}`
-				);
+				logInfo('keez', `Next invoice number from Keez for series ${invoiceSeries}: ${invoiceNumber}`, { tenantId });
 			} else {
 				// Fallback: use the number from invoice or start number
 				if (invoice.invoiceNumber) {
@@ -225,13 +217,11 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				if (!invoiceNumber && settings.keezStartNumber) {
 					invoiceNumber = settings.keezStartNumber;
 				}
-				console.log(`[Keez] Using fallback number: ${invoiceNumber}`);
+				logInfo('keez', `Using fallback number: ${invoiceNumber}`, { tenantId });
 			}
 		} catch (error) {
-			console.warn(
-				`[Keez] Failed to get next invoice number from Keez, using invoice number:`,
-				error
-			);
+			const err = serializeError(error);
+			logWarning('keez', `Failed to get next invoice number from Keez, using invoice number: ${err.message}`, { tenantId, stackTrace: err.stack });
 			// Fallback: extract number from invoice number
 			if (invoice.invoiceNumber) {
 				const match = invoice.invoiceNumber.match(/(\d+)$/);
@@ -260,27 +250,21 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	if (invoiceSeries && invoiceNumber) {
 		keezInvoice.series = invoiceSeries;
 		keezInvoice.number = parseInt(invoiceNumber, 10);
-		console.log(
-			`[Keez] Using series: ${invoiceSeries}, number: ${invoiceNumber} for invoice ${invoice.id}`
-		);
+		logInfo('keez', `Using series: ${invoiceSeries}, number: ${invoiceNumber} for invoice ${invoice.id}`, { tenantId });
 	}
 
-	console.log(
-		`[Keez] Mapped invoice to Keez format with ${keezInvoice.invoiceDetails.length} details`
-	);
+	logInfo('keez', `Mapped invoice to Keez format with ${keezInvoice.invoiceDetails.length} details`, { tenantId, metadata: { invoiceId: invoice.id, detailCount: keezInvoice.invoiceDetails.length } });
 
 	// Create invoice in Keez
-	console.log(`[Keez] Creating invoice in Keez with externalId: ${externalId}`);
-	console.log(`[Keez] Full invoice JSON:`, JSON.stringify(keezInvoice, null, 2));
+	logInfo('keez', `Creating invoice in Keez with externalId: ${externalId}`, { tenantId, metadata: { externalId, invoiceId: invoice.id } });
 
 	let response;
 	try {
 		response = await keezClient.createInvoice(keezInvoice);
-		console.log(
-			`[Keez] Invoice created successfully in Keez with externalId: ${response.externalId}`
-		);
+		logInfo('keez', `Invoice created successfully in Keez with externalId: ${response.externalId}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
 	} catch (createError) {
-		console.error(`[Keez] Failed to create invoice in Keez:`, createError);
+		const createErr = serializeError(createError);
+		logError('keez', `Failed to create invoice in Keez: ${createErr.message}`, { tenantId, stackTrace: createErr.stack });
 		// Do NOT re-throw — the CRM invoice must be preserved even if Keez sync fails.
 		// Record the failure so it can be retried manually.
 		const syncId = generateSyncId();
@@ -297,7 +281,8 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				errorMessage: createError instanceof Error ? createError.message : 'Failed to create invoice in Keez'
 			});
 		} catch (dbError) {
-			console.error(`[Keez] Failed to record sync error:`, dbError);
+			const dbErr = serializeError(dbError);
+			logError('keez', `Failed to record sync error: ${dbErr.message}`, { tenantId, stackTrace: dbErr.stack });
 		}
 		return; // Exit hook gracefully
 	}
@@ -322,10 +307,12 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				keezInvoiceHeader = invoicesList.data[0];
 			}
 		} catch (listError) {
-			console.warn(`[Keez] Could not fetch invoice from list:`, listError);
+			const listErr = serializeError(listError);
+			logWarning('keez', `Could not fetch invoice from list: ${listErr.message}`, { tenantId, stackTrace: listErr.stack });
 		}
 	} catch (error) {
-		console.warn(`[Keez] Could not fetch invoice ${response.externalId} from Keez:`, error);
+		const fetchErr = serializeError(error);
+		logWarning('keez', `Could not fetch invoice ${response.externalId} from Keez: ${fetchErr.message}`, { tenantId, stackTrace: fetchErr.stack });
 	}
 
 	// Calculate totals and extract data from Keez response
@@ -418,7 +405,8 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 
 			return null;
 		} catch (error) {
-			console.warn(`[Keez] Error parsing date:`, dateValue, error);
+			const parseErr = serializeError(error);
+			logWarning('keez', `Error parsing date: ${parseErr.message}`, { tenantId, metadata: { dateValue } });
 			return null;
 		}
 	};
@@ -435,7 +423,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		if (issueDate) {
 			updateData.issueDate = issueDate;
 		} else {
-			console.warn(`[Keez] Could not parse issue date from Keez:`, issueDateSource);
+			logWarning('keez', `Could not parse issue date from Keez`, { tenantId, metadata: { issueDateSource } });
 		}
 	}
 
@@ -445,7 +433,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		if (dueDate) {
 			updateData.dueDate = dueDate;
 		} else {
-			console.warn(`[Keez] Could not parse due date from Keez:`, dueDateSource);
+			logWarning('keez', `Could not parse due date from Keez`, { tenantId, metadata: { dueDateSource } });
 		}
 	}
 
@@ -511,12 +499,11 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 					id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
 				}));
 				await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
-				console.log(
-					`[Keez] Added ${lineItemsToInsert.length} line items from Keez for invoice ${invoice.id}`
-				);
+				logInfo('keez', `Added ${lineItemsToInsert.length} line items from Keez for invoice ${invoice.id}`, { tenantId });
 			}
 		} catch (error) {
-			console.error(`[Keez] Failed to save line items for invoice ${invoice.id}:`, error);
+			const lineErr = serializeError(error);
+			logError('keez', `Failed to save line items for invoice ${invoice.id}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
 			// Don't fail the entire sync if line items fail
 		}
 	}
@@ -561,9 +548,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		})
 		.where(eq(table.keezIntegration.id, integration.id));
 
-	console.log(
-		`[Keez] Successfully synced invoice ${invoice.id} to Keez with externalId: ${response.externalId}`
-	);
+	logInfo('keez', `Successfully synced invoice ${invoice.id} to Keez with externalId: ${response.externalId}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
 };
 
 /**
@@ -609,7 +594,7 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 		.limit(1);
 
 	if (!tenant) {
-		console.error(`[Keez] Tenant not found: ${tenantId}`);
+		logError('keez', `Tenant not found: ${tenantId}`, { tenantId });
 		return;
 	}
 
@@ -620,7 +605,7 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 		.limit(1);
 
 	if (!client) {
-		console.error(`[Keez] Client not found for invoice update: ${invoice.clientId}`);
+		logError('keez', `Client not found for invoice update: ${invoice.clientId}`, { tenantId });
 		return;
 	}
 
@@ -658,11 +643,10 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 				.where(eq(table.keezInvoiceSync.id, existingSync.id));
 		}
 
-		console.log(
-			`[Keez] Invoice ${invoice.id} updated in Keez (externalId: ${invoice.keezExternalId})`
-		);
+		logInfo('keez', `Invoice ${invoice.id} updated in Keez (externalId: ${invoice.keezExternalId})`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: invoice.keezExternalId } });
 	} catch (error) {
-		console.error(`[Keez] Failed to update invoice ${invoice.id} in Keez:`, error);
+		const updateErr = serializeError(error);
+		logError('keez', `Failed to update invoice ${invoice.id} in Keez: ${updateErr.message}`, { tenantId, stackTrace: updateErr.stack });
 
 		// Mark sync as error
 		const [existingSync] = await db
@@ -688,11 +672,11 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
  */
 export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) => {
 	const { invoice, tenantId } = event;
-	console.log(`[Keez] onInvoiceDeleted hook fired for invoice ${invoice.id} (keezExternalId: ${invoice.keezExternalId}, keezStatus: ${invoice.keezStatus})`);
+	logInfo('keez', `onInvoiceDeleted hook fired for invoice ${invoice.id}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: invoice.keezExternalId, keezStatus: invoice.keezStatus } });
 
 	// Check if invoice has Keez sync data
 	if (!invoice.keezExternalId) {
-		console.log(`[Keez] Invoice ${invoice.id} not synced with Keez, skipping deletion`);
+		logInfo('keez', `Invoice ${invoice.id} not synced with Keez, skipping deletion`, { tenantId });
 		return;
 	}
 
@@ -709,7 +693,7 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		.limit(1);
 
 	if (!integration) {
-		console.log(`[Keez] Keez integration not active for tenant ${tenantId}, skipping deletion`);
+		logInfo('keez', `Keez integration not active for tenant ${tenantId}, skipping deletion`, { tenantId });
 		return;
 	}
 
@@ -719,12 +703,12 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		// Only draft/proforma invoices can be deleted in Keez
 		// Validated fiscal invoices cannot be deleted (must be storno'd)
 		if (invoice.keezStatus === 'Valid' || invoice.keezStatus === 'Cancelled') {
-			console.log(`[Keez] Invoice ${invoice.id} is ${invoice.keezStatus} in Keez — cannot delete validated/cancelled invoices, skipping`);
+			logInfo('keez', `Invoice ${invoice.id} is ${invoice.keezStatus} in Keez — cannot delete validated/cancelled invoices, skipping`, { tenantId });
 			return;
 		}
 
 		await keezClient.deleteInvoice(invoice.keezExternalId);
-		console.log(`[Keez] Successfully deleted invoice ${invoice.id} from Keez`);
+		logInfo('keez', `Successfully deleted invoice ${invoice.id} from Keez`, { tenantId });
 
 		// Clean up sync records
 		const [syncRecord] = await db
@@ -738,6 +722,7 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		}
 	} catch (error) {
 		// Don't fail the CRM deletion if Keez deletion fails
-		console.error(`[Keez] Failed to delete invoice ${invoice.id} from Keez:`, error);
+		const delErr = serializeError(error);
+		logError('keez', `Failed to delete invoice ${invoice.id} from Keez: ${delErr.message}`, { tenantId, stackTrace: delErr.stack });
 	}
 };

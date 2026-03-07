@@ -3,6 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { KeezClient } from './client';
 import { decrypt, encrypt } from './crypto';
+import { logInfo } from '$lib/server/logger';
 
 interface IntegrationCredentials {
 	clientEid: string;
@@ -45,7 +46,7 @@ export async function createKeezClientForTenant(
 				.update(table.keezIntegration)
 				.set({ accessToken: encryptedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })
 				.where(eq(table.keezIntegration.tenantId, tenantId));
-			console.log(`[Keez] Token refreshed and persisted to DB for tenant ${tenantId}`);
+			logInfo('keez', `Token refreshed and persisted to DB`, { tenantId });
 		}
 	});
 }

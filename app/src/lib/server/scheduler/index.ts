@@ -10,6 +10,7 @@ import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
 import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
 import { processContractLifecycle } from './tasks/contract-lifecycle';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -39,7 +40,8 @@ function createSchedulerQueue() {
 	});
 
 	queue.on('error', (error) => {
-		console.error('Scheduler queue error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Queue error: ${message}`, { stackTrace: stack });
 	});
 
 	return queue;
@@ -98,11 +100,12 @@ function createSchedulerWorker() {
 	);
 
 	worker.on('completed', (job) => {
-		console.log(`Scheduler job completed: ${job.id} (${job.data.type})`);
+		logInfo('scheduler', `Job completed: ${job.data.type}`, { metadata: { jobId: job.id } });
 	});
 
 	worker.on('failed', (job, err) => {
-		console.error(`Scheduler job failed: ${job?.id} (${job?.data.type})`, err);
+		const { message, stack } = serializeError(err);
+		logError('scheduler', `Job failed: ${job?.data.type} - ${message}`, { metadata: { jobId: job?.id }, stackTrace: stack });
 	});
 
 	return worker;
@@ -119,11 +122,11 @@ export function registerTask(type: string, handler: TaskHandler) {
  * Start the scheduler - sets up recurring jobs and starts the worker
  */
 export const startScheduler = () => {
-	console.log('Starting scheduler...');
+	logInfo('scheduler', 'Starting scheduler...');
 
 	// Create scheduler worker
 	const worker = createSchedulerWorker();
-	console.log('Scheduler worker created');
+	logInfo('scheduler', 'Scheduler worker created');
 
 	// Schedule recurring invoice job to run daily at 2:00 AM
 	schedulerQueue.add(
@@ -141,7 +144,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled recurring invoice generation: daily at 2:00 AM');
+	logInfo('scheduler', 'Scheduled recurring invoice generation: daily at 2:00 AM');
 
 	// Schedule task reminders job to run daily at 9:00 AM
 	schedulerQueue.add(
@@ -159,7 +162,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled task reminders: daily at 9:00 AM');
+	logInfo('scheduler', 'Scheduled task reminders: daily at 9:00 AM');
 
 	// Schedule daily work reminders job to run every hour
 	schedulerQueue.add(
@@ -177,7 +180,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled daily work reminders: every hour at minute 0');
+	logInfo('scheduler', 'Scheduled daily work reminders: every hour at minute 0');
 
 	// Schedule SPV invoice sync job to run daily at 3:00 AM
 	schedulerQueue.add(
@@ -195,7 +198,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled SPV invoice sync: daily at 3:00 AM');
+	logInfo('scheduler', 'Scheduled SPV invoice sync: daily at 3:00 AM');
 
 	// Schedule Revolut transaction sync job to run daily at 3:00 AM
 	schedulerQueue.add(
@@ -213,7 +216,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled Revolut transaction sync: daily at 3:00 AM');
+	logInfo('scheduler', 'Scheduled Revolut transaction sync: daily at 3:00 AM');
 
 	// Schedule Keez invoice sync job to run daily at 4:00 AM
 	schedulerQueue.add(
@@ -231,7 +234,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled Keez invoice sync: daily at 4:00 AM');
+	logInfo('scheduler', 'Scheduled Keez invoice sync: daily at 4:00 AM');
 
 	// Schedule Gmail invoice sync job to run daily at 5:00 AM
 	schedulerQueue.add(
@@ -249,7 +252,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled Gmail invoice sync: daily at 5:00 AM');
+	logInfo('scheduler', 'Scheduled Gmail invoice sync: daily at 5:00 AM');
 
 	// Schedule Gmail invoice sync evening run for twice_daily tenants
 	schedulerQueue.add(
@@ -267,7 +270,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled Gmail invoice sync (evening): daily at 5:00 PM');
+	logInfo('scheduler', 'Scheduled Gmail invoice sync (evening): daily at 5:00 PM');
 
 	// Schedule BNR exchange rate sync daily at 10:00 AM (BNR publishes around 10:00)
 	schedulerQueue.add(
@@ -285,7 +288,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled BNR rate sync: daily at 10:00 AM');
+	logInfo('scheduler', 'Scheduled BNR rate sync: daily at 10:00 AM');
 
 	// Schedule invoice overdue reminders weekdays at 9:00 AM
 	schedulerQueue.add(
@@ -303,7 +306,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled invoice overdue reminders: weekdays at 9:00 AM');
+	logInfo('scheduler', 'Scheduled invoice overdue reminders: weekdays at 9:00 AM');
 
 	// Schedule contract lifecycle (auto-activate, auto-expire) daily at 1:00 AM
 	schedulerQueue.add(
@@ -321,7 +324,7 @@ export const startScheduler = () => {
 		}
 	);
 
-	console.log('Scheduled contract lifecycle: daily at 1:00 AM');
+	logInfo('scheduler', 'Scheduled contract lifecycle: daily at 1:00 AM');
 
 	return { queue: schedulerQueue, worker };
 };

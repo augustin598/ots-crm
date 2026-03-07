@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { syncRevolutTransactionsForAccount } from '../../plugins/banking/revolut/sync';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process Revolut transaction sync - finds all active Revolut bank accounts
@@ -19,7 +20,7 @@ export async function processRevolutTransactionSync(params: Record<string, any> 
 			.where(and(eq(table.bankAccount.bankName, 'revolut'), eq(table.bankAccount.isActive, true)));
 
 		if (accounts.length === 0) {
-			console.log('[Revolut-Sync] No active Revolut bank accounts found. Skipping sync.');
+			logInfo('scheduler', 'Revolut transaction sync: no active accounts found, skipping');
 			return {
 				success: true,
 				accountsProcessed: 0,
@@ -34,9 +35,7 @@ export async function processRevolutTransactionSync(params: Record<string, any> 
 		// Process each account
 		for (const account of accounts) {
 			try {
-				console.log(
-					`[Revolut-Sync] Syncing transactions for account ${account.id} (tenant ${account.tenantId})...`
-				);
+				logInfo('scheduler', `Revolut transaction sync: syncing account`, { tenantId: account.tenantId, metadata: { accountId: account.id } });
 
 				const result = await syncRevolutTransactionsForAccount(
 					account.tenantId,
@@ -47,27 +46,20 @@ export async function processRevolutTransactionSync(params: Record<string, any> 
 				accountsProcessed++;
 				totalTransactionsSynced += result.transactionsSynced;
 
-				console.log(
-					`[Revolut-Sync] Account ${account.id}: ${result.transactionsSynced} transactions synced`
-				);
+				logInfo('scheduler', `Revolut transaction sync: account completed`, { tenantId: account.tenantId, metadata: { accountId: account.id, transactionsSynced: result.transactionsSynced } });
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-				console.error(
-					`[Revolut-Sync] Error syncing transactions for account ${account.id}:`,
-					errorMessage
-				);
+				const { message, stack } = serializeError(error);
+				logError('scheduler', `Revolut transaction sync: error syncing account ${account.id}: ${message}`, { tenantId: account.tenantId, stackTrace: stack });
 				errors.push({
 					accountId: account.id,
 					tenantId: account.tenantId,
-					error: errorMessage
+					error: message
 				});
 				// Continue with other accounts
 			}
 		}
 
-		console.log(
-			`[Revolut-Sync] Completed: ${accountsProcessed} accounts processed, ${totalTransactionsSynced} transactions synced`
-		);
+		logInfo('scheduler', `Revolut transaction sync completed`, { metadata: { accountsProcessed, totalTransactionsSynced } });
 
 		return {
 			success: true,
@@ -76,7 +68,8 @@ export async function processRevolutTransactionSync(params: Record<string, any> 
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('[Revolut-Sync] Process error:', error);
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Revolut transaction sync: process error: ${message}`, { stackTrace: stack });
 		return {
 			success: false,
 			accountsProcessed: 0,

@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -101,11 +102,7 @@ export async function syncKeezInvoicesForTenant(
 		filter: options?.filter
 	});
 
-	console.log(
-		`[Keez-Sync] Fetched ${response.data?.length || 0} invoices` +
-			` (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'})` +
-			` [${response.first}-${response.last}]`
-	);
+	logInfo('keez', `Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`, { tenantId });
 
 	for (const invoiceHeader of response.data || []) {
 		try {
@@ -122,9 +119,7 @@ export async function syncKeezInvoicesForTenant(
 				keezInvoice = await keezClient.getInvoice(invoiceHeader.externalId);
 			} catch (e) {
 				if (e instanceof Error && e.message === 'Not found') {
-					console.warn(
-						`[Keez-Sync] Skipping invoice ${invoiceHeader.externalId} - not found in Keez`
-					);
+					logWarning('keez', `Sync skipping invoice ${invoiceHeader.externalId} - not found in Keez`, { tenantId });
 					result.skipped++;
 					continue;
 				}
@@ -256,11 +251,7 @@ export async function syncKeezInvoicesForTenant(
 				if (keezNetAmount > 0 || keezVatAmount > 0 || keezGrossAmount > 0) {
 					const newTotalCents = Math.round(keezGrossAmount * 100);
 					if (newTotalCents !== existing.totalAmount) {
-						console.log(
-							`[Keez-Sync] Amount update ${existing.invoiceNumber}: ` +
-								`${existing.totalAmount} -> ${newTotalCents} ` +
-								`(Keez gross: ${keezGrossAmount})`
-						);
+						logInfo('keez', `Sync amount update ${existing.invoiceNumber}: ${existing.totalAmount} -> ${newTotalCents} (Keez gross: ${keezGrossAmount})`, { tenantId, metadata: { invoiceId: existing.id, oldAmount: existing.totalAmount, newAmount: newTotalCents } });
 					}
 					updateData.amount = Math.round(keezNetAmount * 100);
 					updateData.taxAmount = Math.round(keezVatAmount * 100);
@@ -281,11 +272,7 @@ export async function syncKeezInvoicesForTenant(
 					);
 					if (correctClientId && correctClientId !== existing.clientId) {
 						updateData.clientId = correctClientId;
-						console.log(
-							`[Keez-Sync] Re-matched invoice ${existing.invoiceNumber}: ` +
-								`client ${existing.clientId} -> ${correctClientId} ` +
-								`(CUI: ${keezInvoice.partner.identificationNumber || 'N/A'})`
-						);
+						logInfo('keez', `Sync re-matched invoice ${existing.invoiceNumber}: client ${existing.clientId} -> ${correctClientId}`, { tenantId, metadata: { invoiceId: existing.id, oldClientId: existing.clientId, newClientId: correctClientId, cui: keezInvoice.partner.identificationNumber || 'N/A' } });
 					}
 				}
 
@@ -307,10 +294,8 @@ export async function syncKeezInvoicesForTenant(
 							);
 						}
 					} catch (lineItemError) {
-						console.error(
-							`[Keez-Sync] Failed to update line items for invoice ${existing.id}:`,
-							lineItemError
-						);
+						const lineErr = serializeError(lineItemError);
+						logError('keez', `Sync failed to update line items for invoice ${existing.id}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
 					}
 				}
 
@@ -418,7 +403,8 @@ export async function syncKeezInvoicesForTenant(
 
 			result.imported++;
 		} catch (error) {
-			console.error(`[Keez-Sync] Failed to process invoice ${invoiceHeader.externalId}:`, error);
+			const processErr = serializeError(error);
+			logError('keez', `Sync failed to process invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
 			result.errors++;
 		}
 	}

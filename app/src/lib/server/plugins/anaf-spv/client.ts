@@ -1,3 +1,5 @@
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+
 const DEFAULT_BASE_URL = 'https://api.anaf.ro/prod/FCTEL/rest';
 const DEFAULT_TOKEN_URL = 'https://logincert.anaf.ro/anaf-oauth2/v1/token';
 const DEFAULT_AUTHORIZE_URL = 'https://logincert.anaf.ro/anaf-oauth2/v1/authorize';
@@ -130,14 +132,7 @@ export class AnafSpvClient {
 		const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
 		// Log request details for debugging (without sensitive data)
-		console.log('ANAF Token Exchange Request:', {
-			url: DEFAULT_TOKEN_URL,
-			method: 'POST',
-			redirect_uri: redirectUri,
-			code_length: code.length,
-			code_preview: code.substring(0, 20) + '...',
-			body_preview: bodyString.substring(0, 100) + '...'
-		});
+		logInfo('anaf-spv', 'Token exchange request', { metadata: { url: DEFAULT_TOKEN_URL, redirectUri, codeLength: code.length } });
 
 		const response = await fetch(DEFAULT_TOKEN_URL, {
 			method: 'POST',
@@ -155,7 +150,7 @@ export class AnafSpvClient {
 			try {
 				const errorData = await response.json();
 				errorDetails = errorData;
-				console.error('ANAF Error Response (JSON):', errorData);
+				logError('anaf-spv', `Token exchange error response (JSON): ${errorData.error || response.status}`, { metadata: { status: response.status, error: errorData.error, errorDescription: errorData.error_description } });
 				errorMessage = errorData.error_description || errorData.error || errorMessage;
 				if (errorData.error) {
 					errorMessage = `${errorMessage} (${errorData.error})`;
@@ -164,12 +159,13 @@ export class AnafSpvClient {
 				try {
 					const errorText = await response.text();
 					errorDetails = errorText;
-					console.error('ANAF Error Response (text):', errorText);
+					logError('anaf-spv', `Token exchange error response (text): ${errorText.substring(0, 200)}`, { metadata: { status: response.status } });
 					if (errorText) {
 						errorMessage = `${errorMessage}: ${errorText}`;
 					}
 				} catch (e) {
-					console.error('ANAF Error Response (could not read):', e);
+					const err = serializeError(e);
+					logError('anaf-spv', `Token exchange error response could not be read: ${err.message}`, { stackTrace: err.stack });
 				}
 			}
 
@@ -191,7 +187,7 @@ Original error: ${errorMessage}`;
 		const data = await response.json();
 
 		if (!data.access_token) {
-			console.error('ANAF Token Response (missing access_token):', data);
+			logError('anaf-spv', 'Token response missing access_token', { metadata: { hasRefreshToken: !!data.refresh_token, tokenType: data.token_type } });
 			throw new Error('Invalid token response: missing access_token');
 		}
 
@@ -525,7 +521,7 @@ Original error: ${errorMessage}`;
 
 			if (!response.ok) {
 				const errorText = await response.text();
-				console.error(`[ANAF-SPV] UBL to PDF conversion failed: ${response.status} ${errorText}`);
+				logError('anaf-spv', `UBL to PDF conversion failed: ${response.status} ${errorText.substring(0, 200)}`, { metadata: { status: response.status, invoiceMetadata: metadata } });
 				return null;
 			}
 
@@ -536,11 +532,11 @@ Original error: ${errorMessage}`;
 				return pdfBuffer;
 			}
 
-			console.error(`[ANAF-SPV] Bad content format, expected PDF (UBL2PDF) - ${metadata}`);
-			console.error(`[ANAF-SPV] Response preview: ${pdfBuffer.toString('utf-8', 0, 200)}`);
+			logError('anaf-spv', `Bad content format, expected PDF (UBL2PDF)`, { metadata: { invoiceMetadata: metadata, responsePreview: pdfBuffer.toString('utf-8', 0, 200) } });
 			return null;
 		} catch (error) {
-			console.error(`[ANAF-SPV] UBL to PDF conversion error:`, error);
+			const err = serializeError(error);
+			logError('anaf-spv', `UBL to PDF conversion error: ${err.message}`, { stackTrace: err.stack, metadata: { invoiceMetadata: metadata } });
 			return null;
 		}
 	}

@@ -4,6 +4,7 @@ import { db } from '../db';
 import * as table from '../db/schema';
 import { eq } from 'drizzle-orm';
 import type { InvoicePaidEvent } from '../plugins/types';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Register email notification hooks
@@ -27,9 +28,7 @@ export function registerEmailNotificationHooks(): void {
 			const paidEmailEnabled = invoiceSettings?.paidConfirmationEmailEnabled ?? true;
 
 			if (!masterEnabled || !paidEmailEnabled) {
-				console.log(
-					`Invoice paid emails are disabled for tenant ${tenantId}. Skipping email for invoice ${invoice.invoiceNumber}.`
-				);
+				logInfo('email', 'Invoice paid emails disabled, skipping', { tenantId, metadata: { invoiceNumber: invoice.invoiceNumber } });
 				return;
 			}
 
@@ -41,9 +40,7 @@ export function registerEmailNotificationHooks(): void {
 				.limit(1);
 
 			if (!client?.email) {
-				console.warn(
-					`Cannot send invoice paid email for invoice ${invoice.invoiceNumber}: client email not found`
-				);
+				logWarning('email', 'Cannot send invoice paid email, client email not found', { tenantId, metadata: { invoiceNumber: invoice.invoiceNumber } });
 				return;
 			}
 
@@ -52,12 +49,12 @@ export function registerEmailNotificationHooks(): void {
 			for (const recipientEmail of recipients) {
 				await sendInvoicePaidEmail(invoice.id, recipientEmail);
 			}
-			console.log(`Invoice paid email sent to ${recipients.join(', ')} for invoice ${invoice.invoiceNumber}`);
+			logInfo('email', 'Invoice paid email sent', { tenantId, metadata: { invoiceNumber: invoice.invoiceNumber, recipients: recipients.join(', ') } });
 		} catch (error) {
-			console.error('Failed to send invoice paid email notification:', error);
+			logError('email', 'Failed to send invoice paid email notification', { tenantId: event.tenantId, stackTrace: serializeError(error).stack });
 			// Don't throw - hooks are designed to not fail other handlers
 		}
 	});
 
-	console.log('Email notification hooks registered');
+	logInfo('email', 'Email notification hooks registered');
 }

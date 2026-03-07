@@ -10,6 +10,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Initialize and register all plugins
@@ -64,10 +65,11 @@ async function ensureSmartBillPluginInDatabase(): Promise<void> {
 				isActive: true,
 				config: {}
 			});
-			console.log('[Plugins] Created SmartBill plugin in database');
+			logInfo('plugin', 'Created SmartBill plugin in database');
 		}
 	} catch (error) {
-		console.error('[Plugins] Failed to ensure SmartBill plugin:', error);
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure SmartBill plugin: ${message}`, { stackTrace: stack });
 		// Don't throw - allow app to continue
 	}
 }
@@ -94,10 +96,11 @@ async function ensureKeezPluginInDatabase(): Promise<void> {
 				isActive: true,
 				config: {}
 			});
-			console.log('[Plugins] Created Keez plugin in database');
+			logInfo('plugin', 'Created Keez plugin in database');
 		}
 	} catch (error) {
-		console.error('[Plugins] Failed to ensure Keez plugin:', error);
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure Keez plugin: ${message}`, { stackTrace: stack });
 		// Don't throw - allow app to continue
 	}
 }
@@ -124,10 +127,11 @@ async function ensureAnafSpvPluginInDatabase(): Promise<void> {
 				isActive: true,
 				config: {}
 			});
-			console.log('[Plugins] Created ANAF SPV plugin in database');
+			logInfo('plugin', 'Created ANAF SPV plugin in database');
 		}
 	} catch (error) {
-		console.error('[Plugins] Failed to ensure ANAF SPV plugin:', error);
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure ANAF SPV plugin: ${message}`, { stackTrace: stack });
 		// Don't throw - allow app to continue
 	}
 }
@@ -176,10 +180,11 @@ async function ensureBankingPluginsInDatabase(): Promise<void> {
 					isActive: true,
 					config: {}
 				});
-				console.log(`[Plugins] Created ${pluginData.name} plugin in database`);
+				logInfo('plugin', `Created ${pluginData.name} plugin in database`);
 			}
 		} catch (error) {
-			console.error(`[Plugins] Failed to ensure ${pluginData.name} plugin:`, error);
+			const { message, stack } = serializeError(error);
+			logError('plugin', `Failed to ensure ${pluginData.name} plugin: ${message}`, { stackTrace: stack });
 			// Don't throw - allow app to continue
 		}
 	}

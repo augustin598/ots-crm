@@ -1,4 +1,5 @@
 import type { Plugin, PluginConfig, HooksManager } from '../../types';
+import { logInfo } from '$lib/server/logger';
 
 export class BankingBCRPlugin implements Plugin {
 	id = 'banking-bcr';
@@ -19,12 +20,12 @@ export class BankingBCRPlugin implements Plugin {
 
 	async onEnable(tenantId: string): Promise<void> {
 		// Called when plugin is enabled for a tenant
-		console.log(`[Banking BCR] Plugin enabled for tenant ${tenantId}`);
+		logInfo('banking', 'BCR: Plugin enabled', { tenantId });
 	}
 
 	async onDisable(tenantId: string): Promise<void> {
 		// Called when plugin is disabled for a tenant
-		console.log(`[Banking BCR] Plugin disabled for tenant ${tenantId}`);
+		logInfo('banking', 'BCR: Plugin disabled', { tenantId });
 	}
 }
 

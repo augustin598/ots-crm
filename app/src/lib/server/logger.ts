@@ -2,8 +2,8 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
-type LogLevel = 'info' | 'warning' | 'error';
-type LogSource =
+export type LogLevel = 'info' | 'warning' | 'error';
+export type LogSource =
 	| 'server'
 	| 'client'
 	| 'scheduler'
@@ -12,10 +12,26 @@ type LogSource =
 	| 'gmail'
 	| 'keez'
 	| 'smartbill'
-	| 'bnr';
+	| 'bnr'
+	| 'anaf-spv'
+	| 'banking'
+	| 'storage';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
+
+const CONSOLE_METHOD: Record<LogLevel, 'log' | 'warn' | 'error'> = {
+	info: 'log',
+	warning: 'warn',
+	error: 'error'
+};
+
+export function serializeError(err: unknown): { message: string; stack?: string } {
+	if (err instanceof Error) {
+		return { message: err.message, stack: err.stack };
+	}
+	return { message: String(err) };
 }
 
 export async function logDebug(params: {
@@ -28,6 +44,16 @@ export async function logDebug(params: {
 	metadata?: Record<string, unknown>;
 	userId?: string;
 }) {
+	// Always write to console for dev visibility and container logs
+	const method = CONSOLE_METHOD[params.level];
+	const prefix = `[${params.source.toUpperCase()}]`;
+	if (params.metadata && Object.keys(params.metadata).length > 0) {
+		console[method](prefix, params.message, params.metadata);
+	} else {
+		console[method](prefix, params.message);
+	}
+
+	// Write to DB
 	try {
 		await db.insert(table.debugLog).values({
 			id: generateId(),
@@ -42,6 +68,7 @@ export async function logDebug(params: {
 			createdAt: new Date()
 		});
 	} catch (err) {
+		// KEEP: raw console — cannot recursively call logger
 		console.error('[logger] Failed to write debug log:', err);
 	}
 }

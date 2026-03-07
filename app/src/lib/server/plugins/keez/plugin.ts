@@ -1,5 +1,6 @@
 import type { Plugin, PluginConfig, HooksManager } from '../types';
 import { onInvoiceCreated, onInvoiceUpdated, onInvoiceDeleted } from './hooks';
+import { logInfo } from '$lib/server/logger';
 
 export class KeezPlugin implements Plugin {
 	id = 'keez';
@@ -22,12 +23,12 @@ export class KeezPlugin implements Plugin {
 
 	async onEnable(tenantId: string): Promise<void> {
 		// Called when plugin is enabled for a tenant
-		console.log(`[Keez] Plugin enabled for tenant ${tenantId}`);
+		logInfo('keez', 'Plugin enabled', { tenantId });
 	}
 
 	async onDisable(tenantId: string): Promise<void> {
 		// Called when plugin is disabled for a tenant
-		console.log(`[Keez] Plugin disabled for tenant ${tenantId}`);
+		logInfo('keez', 'Plugin disabled', { tenantId });
 	}
 }
 

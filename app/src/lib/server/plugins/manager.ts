@@ -1,6 +1,7 @@
 import type { Plugin, PluginConfig } from './types';
 import { getPluginRegistry } from './registry';
 import { getHooksManager } from './hooks';
+import { logError, serializeError } from '$lib/server/logger';
 
 /**
  * Plugin manager for lifecycle management
@@ -13,7 +14,8 @@ class PluginManager {
 		try {
 			await plugin.initialize(config || {});
 		} catch (error) {
-			console.error(`[PluginManager] Failed to initialize plugin ${plugin.id}:`, error);
+			const { message, stack } = serializeError(error);
+			logError('plugin', `Failed to initialize plugin ${plugin.id}: ${message}`, { stackTrace: stack });
 			throw error;
 		}
 	}
@@ -38,7 +40,8 @@ class PluginManager {
 
 			plugin.registerHooks(hooksWithPluginId);
 		} catch (error) {
-			console.error(`[PluginManager] Failed to register hooks for plugin ${plugin.id}:`, error);
+			const { message, stack } = serializeError(error);
+			logError('plugin', `Failed to register hooks for plugin ${plugin.id}: ${message}`, { stackTrace: stack });
 			throw error;
 		}
 	}
@@ -50,10 +53,8 @@ class PluginManager {
 		try {
 			await plugin.onEnable(tenantId);
 		} catch (error) {
-			console.error(
-				`[PluginManager] Failed to enable plugin ${plugin.id} for tenant ${tenantId}:`,
-				error
-			);
+			const { message, stack } = serializeError(error);
+			logError('plugin', `Failed to enable plugin ${plugin.id}: ${message}`, { tenantId, stackTrace: stack });
 			throw error;
 		}
 	}
@@ -65,10 +66,8 @@ class PluginManager {
 		try {
 			await plugin.onDisable(tenantId);
 		} catch (error) {
-			console.error(
-				`[PluginManager] Failed to disable plugin ${plugin.id} for tenant ${tenantId}:`,
-				error
-			);
+			const { message, stack } = serializeError(error);
+			logError('plugin', `Failed to disable plugin ${plugin.id}: ${message}`, { tenantId, stackTrace: stack });
 			throw error;
 		}
 	}
@@ -85,7 +84,8 @@ class PluginManager {
 				await this.initializePlugin(plugin);
 				this.registerPluginHooks(plugin);
 			} catch (error) {
-				console.error(`[PluginManager] Failed to load plugin ${plugin.id}:`, error);
+				const { message, stack } = serializeError(error);
+				logError('plugin', `Failed to load plugin ${plugin.id}: ${message}`, { stackTrace: stack });
 				// Continue loading other plugins
 			}
 		}

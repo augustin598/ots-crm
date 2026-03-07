@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { recordContractActivity } from '../../contract-activity';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process contract lifecycle transitions:
@@ -89,7 +90,7 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 			}
 		}
 
-		console.log(`Contract lifecycle: ${activated} activated, ${expired} expired`);
+		logInfo('scheduler', `Contract lifecycle completed: ${activated} activated, ${expired} expired`, { metadata: { activated, expired } });
 		return {
 			success: true,
 			activated,
@@ -97,7 +98,8 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {
-		console.error('Contract lifecycle error:', error);
-		return { success: false, activated: 0, expired: 0, error: String(error) };
+		const { message, stack } = serializeError(error);
+		logError('scheduler', `Contract lifecycle: process error: ${message}`, { stackTrace: stack });
+		return { success: false, activated: 0, expired: 0, error: message };
 	}
 }

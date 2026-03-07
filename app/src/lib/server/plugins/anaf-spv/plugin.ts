@@ -1,5 +1,6 @@
 import type { Plugin, PluginConfig, HooksManager } from '../types';
 import { onInvoiceCreated, onInvoiceUpdated } from './hooks';
+import { logInfo } from '$lib/server/logger';
 
 export class AnafSpvPlugin implements Plugin {
 	id = 'anaf-spv';
@@ -21,12 +22,12 @@ export class AnafSpvPlugin implements Plugin {
 
 	async onEnable(tenantId: string): Promise<void> {
 		// Called when plugin is enabled for a tenant
-		console.log(`[ANAF-SPV] Plugin enabled for tenant ${tenantId}`);
+		logInfo('anaf-spv', 'Plugin enabled', { tenantId });
 	}
 
 	async onDisable(tenantId: string): Promise<void> {
 		// Called when plugin is disabled for a tenant
-		console.log(`[ANAF-SPV] Plugin disabled for tenant ${tenantId}`);
+		logInfo('anaf-spv', 'Plugin disabled', { tenantId });
 	}
 }
 

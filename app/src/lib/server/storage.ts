@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { Client as MinioClient } from 'minio';
+import { logError, serializeError } from '$lib/server/logger';
 
 let minioClient: MinioClient | null = null;
 
@@ -36,7 +37,8 @@ export async function ensureBucket() {
 			await client.makeBucket(BUCKET_NAME);
 		}
 	} catch (error) {
-		console.error('Error ensuring bucket:', error);
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to ensure bucket: ${message}`, { stackTrace: stack });
 		throw error;
 	}
 }
@@ -67,7 +69,8 @@ export async function uploadFile(
 			mimeType: file.type
 		};
 	} catch (error) {
-		console.error('Error uploading file:', error);
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to upload file: ${message}`, { tenantId, stackTrace: stack });
 		throw error;
 	}
 }
@@ -80,7 +83,8 @@ export async function getDownloadUrl(filePath: string, expirySeconds = 3600, res
 		const client = getMinioClient();
 		return await client.presignedGetObject(BUCKET_NAME, filePath, expirySeconds, respHeaders);
 	} catch (error) {
-		console.error('Error generating download URL:', error);
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to generate download URL: ${message}`, { stackTrace: stack });
 		throw error;
 	}
 }
@@ -112,7 +116,8 @@ export async function uploadBuffer(
 			mimeType
 		};
 	} catch (error) {
-		console.error('Error uploading buffer:', error);
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to upload buffer: ${message}`, { tenantId, stackTrace: stack });
 		throw error;
 	}
 }
@@ -142,7 +147,8 @@ export async function deleteFile(filePath: string): Promise<void> {
 		const client = getMinioClient();
 		await client.removeObject(BUCKET_NAME, filePath);
 	} catch (error) {
-		console.error('Error deleting file:', error);
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to delete file: ${message}`, { stackTrace: stack });
 		throw error;
 	}
 }

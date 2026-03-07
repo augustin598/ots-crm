@@ -3,7 +3,8 @@
 		getEmailLogs,
 		getEmailLogStats,
 		deleteEmailLog,
-		deleteAllEmailLogs
+		deleteAllEmailLogs,
+		retryEmailLog
 	} from '$lib/remotes/email-logs.remote';
 	import {
 		getDebugLogs,
@@ -34,6 +35,7 @@
 	import type { DateRange } from 'bits-ui';
 	import { toast } from 'svelte-sonner';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import MailIcon from '@lucide/svelte/icons/mail';
@@ -279,6 +281,20 @@
 			toast.success('Log sters');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la stergere');
+		}
+	}
+
+	let retryingLogId = $state<string | null>(null);
+
+	async function handleRetryEmailLog(logId: string) {
+		retryingLogId = logId;
+		try {
+			await retryEmailLog(logId).updates(emailLogsQuery, emailStatsQuery);
+			toast.success('Email retrimis cu succes');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la retrimitere');
+		} finally {
+			retryingLogId = null;
 		}
 	}
 
@@ -579,6 +595,17 @@
 														<ChevronDownIcon class="h-4 w-4" />
 													</Button>
 												</CollapsibleTrigger>
+												{#if log.status === 'failed'}
+													<Button
+														variant="ghost"
+														size="sm"
+														title="Retrimite email"
+														disabled={retryingLogId === log.id}
+														onclick={() => handleRetryEmailLog(log.id)}
+													>
+														<RotateCcwIcon class="h-4 w-4 text-blue-500 {retryingLogId === log.id ? 'animate-spin' : ''}" />
+													</Button>
+												{/if}
 												<Button variant="ghost" size="sm" onclick={() => handleDeleteEmailLog(log.id)}>
 													<Trash2Icon class="h-4 w-4 text-red-500" />
 												</Button>
@@ -781,6 +808,9 @@
 							<SelectItem value="keez">Keez</SelectItem>
 							<SelectItem value="smartbill">SmartBill</SelectItem>
 							<SelectItem value="bnr">BNR</SelectItem>
+							<SelectItem value="anaf-spv">ANAF SPV</SelectItem>
+							<SelectItem value="banking">Banking</SelectItem>
+							<SelectItem value="storage">Storage</SelectItem>
 						</SelectContent>
 					</Select>
 				</div>

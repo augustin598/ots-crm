@@ -10,6 +10,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { RevolutClient } from './client';
 import { getRevolutConfigForClient } from './config';
 import { encryptToken, decryptToken } from '../shared/crypto';
+import { logError, serializeError } from '$lib/server/logger';
 
 function generateTransactionId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -578,10 +579,8 @@ export async function syncRevolutTransactionsForAccount(
 
 		return { success: true, transactionsSynced: transactionIds.length };
 	} catch (error) {
-		console.error(
-			`[Revolut] Failed to sync transactions for account ${bankAccountId}:`,
-			error
-		);
+		const err = error instanceof Error ? error : new Error(String(error));
+		logError('banking', `Revolut: Failed to sync transactions for account ${bankAccountId}`, { tenantId, stackTrace: err.stack });
 		throw error;
 	}
 }
