@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getClientUserPreferences } from '$lib/remotes/client-user-preferences.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -56,12 +57,17 @@
 		return userMap.get(userId) || clientRepresentative || '';
 	}
 
+	// User preferences
+	const prefsQuery = getClientUserPreferences();
+	const prefs = $derived(prefsQuery.current);
+
 	let createDialogOpen = $state(false);
 
 	// Filters
 	let filterSearch = $state('');
 	let filterStatus = $state('');
 	let filterPriority = $state('');
+	let sortBy = $state('date');
 
 	const filteredTasks = $derived.by(() => {
 		let result = tasks;
@@ -79,6 +85,21 @@
 		if (filterPriority) {
 			result = result.filter((t) => t.priority === filterPriority);
 		}
+		// Sort
+		const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+		const statusOrder: Record<string, number> = { 'pending-approval': 0, 'todo': 1, 'in-progress': 2, 'review': 3, 'done': 4, 'cancelled': 5 };
+		result = [...result].sort((a, b) => {
+			if (sortBy === 'priority') {
+				return (priorityOrder[a.priority ?? 'medium'] ?? 2) - (priorityOrder[b.priority ?? 'medium'] ?? 2);
+			}
+			if (sortBy === 'status') {
+				return (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
+			}
+			// Default: date (newest first)
+			const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+			const db_ = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+			return db_ - da;
+		});
 		return result;
 	});
 
@@ -95,17 +116,25 @@
 		[filterSearch.trim(), filterStatus, filterPriority].filter(Boolean).length
 	);
 
+	// Sync preferences
+	$effect(() => {
+		if (prefs) {
+			sortBy = prefs.defaultTaskSort ?? 'date';
+			pageSize = prefs.itemsPerPage ?? 25;
+		}
+	});
+
 	// Pagination
 	let currentPage = $state(1);
-	const pageSize = 25;
+	let pageSize = $state(25);
 	const totalPages = $derived(Math.ceil(filteredTasks.length / pageSize));
 	const paginatedTasks = $derived(
 		filteredTasks.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 	);
 
-	// Reset page on filter change
+	// Reset page on filter/sort/pageSize change
 	$effect(() => {
-		filterSearch; filterStatus; filterPriority;
+		filterSearch; filterStatus; filterPriority; sortBy; pageSize;
 		currentPage = 1;
 	});
 
@@ -279,6 +308,36 @@
 					</SelectContent>
 				</Select>
 			</div>
+
+			<!-- Sort -->
+			<div class="space-y-1.5 min-w-[130px]">
+				<p class="text-xs font-medium text-muted-foreground">Sortare</p>
+				<Select value={sortBy} type="single" onValueChange={(v) => { if (v) sortBy = v; }}>
+					<SelectTrigger class="h-9">
+						{sortBy === 'date' ? 'Dată' : sortBy === 'priority' ? 'Prioritate' : 'Status'}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="date">Dată</SelectItem>
+						<SelectItem value="priority">Prioritate</SelectItem>
+						<SelectItem value="status">Status</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
+
+			<!-- Page size -->
+			<div class="space-y-1.5 min-w-[90px]">
+				<p class="text-xs font-medium text-muted-foreground">Pe pagină</p>
+				<Select value={String(pageSize)} type="single" onValueChange={(v) => { if (v) pageSize = Number(v); }}>
+					<SelectTrigger class="h-9">
+						{pageSize}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="10">10</SelectItem>
+						<SelectItem value="25">25</SelectItem>
+						<SelectItem value="50">50</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
 		</div>
 
 		<!-- Active filter chips -->
@@ -429,6 +488,7 @@
 <CreateTaskDialog
 	open={createDialogOpen}
 	isClient={true}
+	defaultPriority={prefs?.defaultPriority}
 	onSuccess={() => {
 		createDialogOpen = false;
 		tasksQuery.refresh();

@@ -26,11 +26,12 @@
 		defaultClientId?: string;
 		defaultMilestoneId?: string;
 		defaultDueDate?: string;
+		defaultPriority?: string;
 		isClient?: boolean;
 		additionalQueriesToUpdate?: any[];
 	}
 
-	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, isClient = false, additionalQueriesToUpdate = [] }: Props = $props();
+	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, defaultPriority: defaultPriorityProp, isClient = false, additionalQueriesToUpdate = [] }: Props = $props();
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
@@ -70,7 +71,7 @@
 	let milestoneId = $state('');
 	let previousProjectId = $state('');
 	let status = $state('todo');
-	let priority = $state('medium');
+	let priority = $state(defaultPriorityProp || 'medium');
 	let assignedToUserId = $state('');
 	let dueDate = $state('');
 	let dueDateOpen = $state(false);
@@ -121,7 +122,7 @@
 			previousProjectId = defaultProjectId || '';
 			milestoneId = defaultMilestoneId || '';
 			status = isClient ? 'pending-approval' : 'todo';
-			priority = 'medium';
+			priority = defaultPriorityProp || 'medium';
 			assignedToUserId = '';
 			dueDate = defaultDueDate || '';
 			error = null;

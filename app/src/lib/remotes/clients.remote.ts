@@ -665,6 +665,78 @@ export const getTenantPartners = query(async () => {
 	return partners;
 });
 
+// --- Client-facing: update own company data ---
+const clientCompanyUpdateSchema = v.object({
+	businessName: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	name: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	email: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	phone: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	companyType: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	cui: v.optional(v.pipe(v.string(), v.maxLength(20))),
+	registrationNumber: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	tradeRegister: v.optional(v.pipe(v.string(), v.maxLength(50))),
+	vatNumber: v.optional(v.pipe(v.string(), v.maxLength(30))),
+	legalRepresentative: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	iban: v.optional(v.pipe(v.string(), v.maxLength(34))),
+	bankName: v.optional(v.pipe(v.string(), v.maxLength(255))),
+	address: v.optional(v.pipe(v.string(), v.maxLength(500))),
+	city: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	county: v.optional(v.pipe(v.string(), v.maxLength(100))),
+	postalCode: v.optional(v.pipe(v.string(), v.maxLength(20))),
+	country: v.optional(v.pipe(v.string(), v.maxLength(100)))
+});
+
+export const updateClientCompanyData = command(clientCompanyUpdateSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.isClientUser || !event?.locals.clientUser || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const clientId = (event.locals as any).client?.id;
+	if (!clientId) throw new Error('Unauthorized');
+	const tenantId = event.locals.tenant.id;
+
+	// Email uniqueness check
+	const newEmail = (data.email || '').toLowerCase().trim();
+	if (newEmail) {
+		const [existing] = await db
+			.select({ id: table.client.id, email: table.client.email })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+
+		const oldEmail = (existing?.email || '').toLowerCase().trim();
+		if (newEmail !== oldEmail) {
+			const [emailTaken] = await db
+				.select({ id: table.client.id })
+				.from(table.client)
+				.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, newEmail), ne(table.client.id, clientId)))
+				.limit(1);
+			if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
+
+			const [secondaryTaken] = await db
+				.select({ id: table.clientSecondaryEmail.id })
+				.from(table.clientSecondaryEmail)
+				.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, newEmail)))
+				.limit(1);
+			if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+		}
+	}
+
+	// Convert empty strings to null
+	const cleanData: Record<string, any> = {};
+	for (const [k, val] of Object.entries(data)) {
+		cleanData[k] = val === '' ? null : val;
+	}
+
+	await db
+		.update(table.client)
+		.set({ ...cleanData, updatedAt: new Date() })
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
+
+	return { success: true };
+});
+
 export const deleteClient = command(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {

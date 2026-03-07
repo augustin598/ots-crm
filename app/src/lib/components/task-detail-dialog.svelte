@@ -240,7 +240,7 @@
 					attachmentFileName: pendingAttachment.fileName,
 					attachmentFileSize: pendingAttachment.size
 				} : {})
-			}).updates(getTaskComments(task.id));
+			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
 			newComment = '';
 			removePendingAttachment();
 			toast.success('Comment added');
@@ -258,7 +258,7 @@
 			await updateTaskComment({
 				commentId,
 				content: editingContent.trim()
-			}).updates(getTaskComments(task.id));
+			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
 			editingCommentId = null;
 			editingContent = '';
 			toast.success('Comment updated');
@@ -272,7 +272,7 @@
 	async function handleDeleteComment(commentId: string) {
 		if (!task || !confirm('Delete this comment?')) return;
 		try {
-			await deleteTaskComment(commentId).updates(getTaskComments(task.id));
+			await deleteTaskComment(commentId).updates(getTaskComments(task.id), getTaskActivities(task.id));
 			toast.success('Comment deleted');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to delete comment');
