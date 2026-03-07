@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from '$lib/components/ui/sidebar';
+	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, SidebarFooter } from '$lib/components/ui/sidebar';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { logout } from '$lib/remotes/auth.remote';
 	import { goto } from '$app/navigation';
@@ -18,6 +18,7 @@
 import LinkIcon from '@lucide/svelte/icons/link';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
+	import ClockIcon from '@lucide/svelte/icons/clock';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import FileDownIcon from '@lucide/svelte/icons/file-down';
@@ -253,7 +254,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/admin/logs`)}>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/admin`)}>
 						{#snippet child({ props })}
 							<a href="/{tenantSlug}/admin/logs" {...props}>
 								<ScrollTextIcon />
@@ -261,6 +262,29 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							</a>
 						{/snippet}
 					</SidebarMenuButton>
+					{#if currentPath.startsWith(`/${tenantSlug}/admin`)}
+						<SidebarMenuSub>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/admin/logs`}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/admin/logs" {...props}>
+											<span>Logs</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/admin/scheduler`}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/admin/scheduler" {...props}>
+											<ClockIcon class="size-3.5" />
+											<span>Scheduler</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+						</SidebarMenuSub>
+					{/if}
 				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings`) && !currentPath.startsWith(`/${tenantSlug}/settings/gmail`)}>

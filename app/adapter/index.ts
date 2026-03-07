@@ -91,8 +91,12 @@ export default function (options: AdapterOptions = {}): Adapter {
 				external: [
 					// dependencies could have deep exports, so we need a regex
 					...Object.keys(pkg.dependencies || {}).map((d) => new RegExp(`^${d}(\\/.*)?$`)),
-					// Node.js built-in modules
-					/^node:/
+					// Node.js built-in modules (with and without node: prefix)
+					/^node:/,
+					'crypto',
+					'path',
+					'fs',
+					'fs/promises'
 				]
 			});
 

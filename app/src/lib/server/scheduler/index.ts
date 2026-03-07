@@ -328,3 +328,22 @@ export const startScheduler = () => {
 
 	return { queue: schedulerQueue, worker };
 };
+
+/** Expose the queue singleton for admin operations */
+export function getSchedulerQueue(): Queue {
+	return schedulerQueue;
+}
+
+/** Human-readable labels for job types */
+export const JOB_LABELS: Record<string, string> = {
+	recurring_invoices: 'Facturi Recurente',
+	task_reminders: 'Reminder-e Task-uri',
+	daily_work_reminders: 'Reminder-e Zilnice Lucru',
+	spv_invoice_sync: 'Sync Facturi SPV',
+	revolut_transaction_sync: 'Sync Tranzactii Revolut',
+	keez_invoice_sync: 'Sync Facturi Keez',
+	gmail_invoice_sync: 'Sync Facturi Gmail',
+	bnr_rate_sync: 'Sync Curs BNR',
+	invoice_overdue_reminders: 'Reminder-e Facturi Restante',
+	contract_lifecycle: 'Lifecycle Contracte'
+};
