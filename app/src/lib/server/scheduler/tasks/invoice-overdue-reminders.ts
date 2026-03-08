@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lt, lte } from 'drizzle-orm';
+import { eq, and, or, lt, lte } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
@@ -36,8 +36,20 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 				const repeatDays = settings.overdueReminderRepeatDays ?? 7;
 				const maxCount = settings.overdueReminderMaxCount ?? 3;
 
+				// Auto-transition sent invoices past due date to overdue
+				await db
+					.update(table.invoice)
+					.set({ status: 'overdue', updatedAt: now })
+					.where(
+						and(
+							eq(table.invoice.tenantId, settings.tenantId),
+							eq(table.invoice.status, 'sent'),
+							lt(table.invoice.dueDate, now)
+						)
+					);
+
 				// Find overdue invoices for this tenant
-				// Status must be 'sent' (not draft, not paid, not cancelled)
+				// Status must be 'sent' or 'overdue' (not draft, not paid, not cancelled)
 				// dueDate must be in the past
 				const overdueInvoices = await db
 					.select()
@@ -45,11 +57,16 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 					.where(
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
-							eq(table.invoice.status, 'sent'),
+							or(eq(table.invoice.status, 'sent'), eq(table.invoice.status, 'overdue')),
 							lt(table.invoice.dueDate, now),
 							lte(table.invoice.overdueReminderCount, maxCount - 1)
 						)
 					);
+
+				logInfo('scheduler', `Invoice overdue reminders: found ${overdueInvoices.length} overdue invoices for tenant`, {
+					tenantId: settings.tenantId,
+					metadata: { invoiceCount: overdueInvoices.length, daysAfterDue, repeatDays, maxCount }
+				});
 
 				for (const invoice of overdueInvoices) {
 					try {
@@ -106,6 +123,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							.set({
 								overdueReminderCount: reminderCount + 1,
 								lastOverdueReminderAt: now,
+								...(invoice.status === 'sent' ? { status: 'overdue' as const } : {}),
 								updatedAt: now
 							})
 							.where(eq(table.invoice.id, invoice.id));

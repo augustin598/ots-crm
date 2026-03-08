@@ -2436,3 +2436,19 @@ export type ClientSecondaryEmail = typeof clientSecondaryEmail.$inferSelect;
 export type NewClientSecondaryEmail = typeof clientSecondaryEmail.$inferInsert;
 export type ClientAccessData = typeof clientAccessData.$inferSelect;
 export type NewClientAccessData = typeof clientAccessData.$inferInsert;
+
+// Invoice view tokens — public access to invoices via email links (no login required)
+export const invoiceViewToken = sqliteTable('invoice_view_token', {
+	id: text('id').primaryKey(),
+	token: text('token').notNull().unique(), // SHA-256 hashed
+	invoiceId: text('invoice_id')
+		.notNull()
+		.references(() => invoice.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+});

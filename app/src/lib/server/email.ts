@@ -13,6 +13,9 @@ import {
 	logEmailRetry
 } from './email-logger';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
+import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
+import { createInvoiceViewToken } from '$lib/server/invoice-token';
 
 // ---------------------------------------------------------------------------
 // Notification recipients helper
@@ -1342,7 +1345,44 @@ export async function sendOverdueReminderEmail(
 		env.SMTP_USER ||
 		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
-	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
+
+	// Generate public view token and URL
+	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
+
+	// Get invoice settings for PDF generation
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	// Generate PDF attachment
+	const lineItems = await db
+		.select()
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
+
+	let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
+	try {
+		const pdfBuffer = await generateInvoicePDF({
+			invoice,
+			lineItems,
+			tenant: tenant!,
+			client: client!,
+			displayInvoiceNumber,
+			invoiceLogo: invoiceSettings?.invoiceLogo || null
+		});
+		const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+		pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
+	} catch (pdfError) {
+		logWarning('email', 'Could not generate PDF attachment for overdue reminder', {
+			tenantId: invoice.tenantId,
+			metadata: { invoiceId, error: (pdfError as Error).message }
+		});
+	}
 
 	// Format amounts
 	const formatAmount = (cents: number | null | undefined, currency: string) => {
@@ -1359,6 +1399,7 @@ export async function sendOverdueReminderEmail(
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
 		subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
+		...(pdfAttachment ? { attachments: [pdfAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -1380,8 +1421,9 @@ export async function sendOverdueReminderEmail(
 						${reminderNumber > 1 ? `<p style="font-size: 12px; color: #999;">Reminder #${reminderNumber}</p>` : ''}
 					</div>
 					<p>Va rugam sa efectuati plata cat mai curand posibil.</p>
+					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
 					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura</a>
+						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura Online</a>
 					</div>
 					<p style="font-size: 12px; color: #999; margin-top: 30px;">Daca ati efectuat deja plata, va rugam sa ignorati acest email. Pentru intrebari, nu ezitati sa ne contactati.</p>
 				</div>
