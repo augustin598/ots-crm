@@ -359,7 +359,8 @@ export async function sendInvitationEmail(
 		toEmail: email,
 		subject: mailOptions.subject,
 		emailType: 'invitation',
-		metadata: { invitationToken, tenantName }
+		metadata: { invitationToken, tenantName },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -503,7 +504,8 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		toEmail: clientEmail,
 		subject: mailOptions.subject,
 		emailType: 'invoice',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber }
+		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -617,7 +619,8 @@ export async function sendMagicLinkEmail(
 		toEmail: email,
 		subject: mailOptions.subject,
 		emailType: 'magic-link',
-		metadata: { tenantSlug, clientName }
+		metadata: { tenantSlug, clientName },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -704,7 +707,8 @@ export async function sendAdminMagicLinkEmail(
 		toEmail: email,
 		subject: mailOptions.subject,
 		emailType: 'admin-magic-link',
-		metadata: { userName }
+		metadata: { userName },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -790,7 +794,8 @@ export async function sendPasswordResetEmail(
 		toEmail: email,
 		subject: mailOptions.subject,
 		emailType: 'password-reset',
-		metadata: { userName }
+		metadata: { userName },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -904,7 +909,8 @@ export async function sendTaskAssignmentEmail(
 		toEmail: assigneeEmail,
 		subject: mailOptions.subject,
 		emailType: 'task-assignment',
-		metadata: { taskId, taskTitle: task.title }
+		metadata: { taskId, taskTitle: task.title },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1031,7 +1037,8 @@ export async function sendTaskUpdateEmail(
 		toEmail: watcherEmail,
 		subject: mailOptions.subject,
 		emailType: 'task-update',
-		metadata: { taskId, taskTitle: task.title, changeType }
+		metadata: { taskId, taskTitle: task.title, changeType },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1183,7 +1190,8 @@ Vezi task: ${taskUrl}
 		toEmail: clientEmail,
 		subject: mailOptions.subject,
 		emailType: 'task-client-notification',
-		metadata: { taskId, taskTitle: task.title, notificationType, ...extra }
+		metadata: { taskId, taskTitle: task.title, notificationType, ...extra },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1327,7 +1335,8 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		toEmail: clientEmail,
 		subject: mailOptions.subject,
 		emailType: 'invoice-paid',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber }
+		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1532,7 +1541,8 @@ export async function sendOverdueReminderEmail(
 		toEmail: clientEmail,
 		subject: mailOptions.subject,
 		emailType: 'invoice-overdue-reminder',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber }
+		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1653,7 +1663,8 @@ export async function sendTaskReminderEmail(
 		toEmail: assigneeEmail,
 		subject: mailOptions.subject,
 		emailType: 'task-reminder',
-		metadata: { taskId, taskTitle: task.title, isOverdue }
+		metadata: { taskId, taskTitle: task.title, isOverdue },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1823,7 +1834,8 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 		toEmail: user.email,
 		subject: mailOptions.subject,
 		emailType: 'daily-reminder',
-		metadata: { userName, taskCount: tasks.length }
+		metadata: { userName, taskCount: tasks.length },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {
@@ -1946,7 +1958,8 @@ export async function sendContractSigningEmail(
 		toEmail: email,
 		subject: mailOptions.subject,
 		emailType: 'contract-signing',
-		metadata: { contractNumber, clientName, tenantSlug }
+		metadata: { contractNumber, clientName, tenantSlug },
+		htmlBody: mailOptions.html as string
 	});
 
 	try {

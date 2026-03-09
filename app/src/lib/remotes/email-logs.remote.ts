@@ -23,7 +23,25 @@ export const getEmailLogs = query(async () => {
 	}
 
 	return await db
-		.select()
+		.select({
+			id: table.emailLog.id,
+			tenantId: table.emailLog.tenantId,
+			toEmail: table.emailLog.toEmail,
+			subject: table.emailLog.subject,
+			emailType: table.emailLog.emailType,
+			status: table.emailLog.status,
+			attempts: table.emailLog.attempts,
+			maxAttempts: table.emailLog.maxAttempts,
+			errorMessage: table.emailLog.errorMessage,
+			smtpMessageId: table.emailLog.smtpMessageId,
+			smtpResponse: table.emailLog.smtpResponse,
+			processedAt: table.emailLog.processedAt,
+			completedAt: table.emailLog.completedAt,
+			metadata: table.emailLog.metadata,
+			createdAt: table.emailLog.createdAt,
+			updatedAt: table.emailLog.updatedAt,
+			hasHtmlBody: sql<boolean>`(${table.emailLog.htmlBody} IS NOT NULL)`.as('has_html_body')
+		})
 		.from(table.emailLog)
 		.where(eq(table.emailLog.tenantId, event.locals.tenant.id))
 		.orderBy(desc(table.emailLog.createdAt))

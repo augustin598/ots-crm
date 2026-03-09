@@ -2170,6 +2170,7 @@ export const emailLog = sqliteTable('email_log', {
 	processedAt: timestamp('processed_at'),
 	completedAt: timestamp('completed_at'),
 	metadata: text('metadata'), // JSON string
+	htmlBody: text('html_body'),
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
 });

@@ -49,6 +49,8 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import XIcon from '@lucide/svelte/icons/x';
+	import EyeIcon from '@lucide/svelte/icons/eye';
+	import { page } from '$app/state';
 
 	// ---- Email Logs ----
 	const emailLogsQuery = getEmailLogs();
@@ -296,6 +298,11 @@
 		} finally {
 			retryingLogId = null;
 		}
+	}
+
+	function handlePreviewEmail(logId: string) {
+		const tenant = page.params.tenant;
+		window.open(`/${tenant}/admin/logs/email-preview/${logId}`, '_blank');
 	}
 
 	async function handleDeleteAllEmailLogs() {
@@ -590,6 +597,16 @@
 												{/if}
 											</div>
 											<div class="flex items-center gap-2 shrink-0">
+												{#if log.hasHtmlBody}
+													<Button
+														variant="ghost"
+														size="sm"
+														title="Previzualizare email"
+														onclick={() => handlePreviewEmail(log.id)}
+													>
+														<EyeIcon class="h-4 w-4 text-purple-500" />
+													</Button>
+												{/if}
 												<CollapsibleTrigger>
 													<Button variant="ghost" size="sm">
 														<ChevronDownIcon class="h-4 w-4" />
