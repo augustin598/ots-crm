@@ -1,16 +1,18 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, or, lt, lte } from 'drizzle-orm';
+import { eq, and, lt, lte, notInArray } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
- * Process invoice overdue reminders - finds overdue invoices for tenants
- * with reminders enabled and sends reminder emails to clients
+ * Process invoice overdue reminders - finds overdue invoices (keezStatus='Valid')
+ * for tenants with reminders enabled and sends reminder emails to clients
  */
 export async function processInvoiceOverdueReminders(params: Record<string, any> = {}) {
 	try {
 		const now = new Date();
+		const nowMidnight = new Date(now);
+		nowMidnight.setHours(0, 0, 0, 0);
 		let remindersSent = 0;
 		const errors: Array<{ invoiceId: string; error: string }> = [];
 
@@ -36,28 +38,29 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 				const repeatDays = settings.overdueReminderRepeatDays ?? 7;
 				const maxCount = settings.overdueReminderMaxCount ?? 3;
 
-				// Auto-transition sent invoices past due date to overdue
+				// Auto-transition keezStatus='Valid' invoices past due date to 'overdue'
+				// Only for invoices not already overdue/paid/cancelled
 				await db
 					.update(table.invoice)
 					.set({ status: 'overdue', updatedAt: now })
 					.where(
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
-							eq(table.invoice.status, 'sent'),
+							eq(table.invoice.keezStatus, 'Valid'),
+							notInArray(table.invoice.status, ['overdue', 'paid', 'cancelled']),
 							lt(table.invoice.dueDate, now)
 						)
 					);
 
-				// Find overdue invoices for this tenant
-				// Status must be 'sent' or 'overdue' (not draft, not paid, not cancelled)
-				// dueDate must be in the past
+				// Find overdue invoices: strictly keezStatus='Valid', dueDate past, not paid/cancelled
 				const overdueInvoices = await db
 					.select()
 					.from(table.invoice)
 					.where(
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
-							or(eq(table.invoice.status, 'sent'), eq(table.invoice.status, 'overdue')),
+							eq(table.invoice.keezStatus, 'Valid'),
+							notInArray(table.invoice.status, ['paid', 'cancelled']),
 							lt(table.invoice.dueDate, now),
 							lte(table.invoice.overdueReminderCount, maxCount - 1)
 						)
@@ -72,8 +75,11 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 					try {
 						if (!invoice.dueDate) continue;
 
+						// Normalize to midnight to avoid timezone off-by-one
+						const dueDateMidnight = new Date(invoice.dueDate);
+						dueDateMidnight.setHours(0, 0, 0, 0);
 						const daysOverdue = Math.floor(
-							(now.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+							(nowMidnight.getTime() - dueDateMidnight.getTime()) / (1000 * 60 * 60 * 24)
 						);
 
 						// Check if it's time for a reminder
@@ -81,17 +87,24 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 
 						if (reminderCount === 0) {
 							// First reminder: check if enough days have passed since due date
-							if (daysOverdue < daysAfterDue) continue;
+							if (daysOverdue < daysAfterDue) {
+								logInfo('scheduler', `Invoice overdue reminders: skipping ${invoice.invoiceNumber} - only ${daysOverdue} days overdue (need ${daysAfterDue})`, { tenantId: settings.tenantId });
+								continue;
+							}
 						} else {
 							// Subsequent reminders: check repeat interval
-							if (repeatDays === 0) continue; // No repeat configured
+							if (repeatDays === 0) continue;
 							if (!invoice.lastOverdueReminderAt) continue;
 
+							const lastReminderMidnight = new Date(invoice.lastOverdueReminderAt);
+							lastReminderMidnight.setHours(0, 0, 0, 0);
 							const daysSinceLastReminder = Math.floor(
-								(now.getTime() - new Date(invoice.lastOverdueReminderAt).getTime()) /
-									(1000 * 60 * 60 * 24)
+								(nowMidnight.getTime() - lastReminderMidnight.getTime()) / (1000 * 60 * 60 * 24)
 							);
-							if (daysSinceLastReminder < repeatDays) continue;
+							if (daysSinceLastReminder < repeatDays) {
+								logInfo('scheduler', `Invoice overdue reminders: skipping ${invoice.invoiceNumber} - ${daysSinceLastReminder} days since last reminder (need ${repeatDays})`, { tenantId: settings.tenantId });
+								continue;
+							}
 						}
 
 						// Get client email
@@ -117,13 +130,13 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							);
 						}
 
-						// Update invoice tracking
+						// Update invoice tracking + ensure status is 'overdue'
 						await db
 							.update(table.invoice)
 							.set({
 								overdueReminderCount: reminderCount + 1,
 								lastOverdueReminderAt: now,
-								...(invoice.status === 'sent' ? { status: 'overdue' as const } : {}),
+								...(invoice.status !== 'overdue' ? { status: 'overdue' as const } : {}),
 								updatedAt: now
 							})
 							.where(eq(table.invoice.id, invoice.id));

@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lte, gte, or, isNull, isNotNull, inArray } from 'drizzle-orm';
+import { eq, and, lte, gte, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { sendTaskReminderEmail } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
@@ -43,6 +43,7 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			.where(
 				and(
 					inArray(table.task.tenantId, enabledTenantIds),
+					notInArray(table.task.status, ['done', 'cancelled']),
 					isNotNull(table.task.dueDate),
 					isNotNull(table.task.assignedToUserId),
 					gte(table.task.dueDate, now),
