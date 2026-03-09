@@ -18,6 +18,37 @@ import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a date as dd.MM.yyyy (Romanian locale, consistent across environments).
+ */
+function formatDateRo(date: string | Date | null | undefined): string {
+	if (!date) return 'N/A';
+	const d = new Date(date);
+	if (isNaN(d.getTime())) return 'N/A';
+	return d.toLocaleDateString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/**
+ * Prepare logo as inline CID attachment for HTML emails.
+ * Returns { logoAttachment, logoHtml } or nulls if no logo available.
+ */
+function prepareLogoAttachment(invoiceLogo: string | null | undefined) {
+	if (!invoiceLogo) return { logoAttachment: null, logoHtml: '' };
+	const logoAttachment = {
+		filename: 'logo.png',
+		content: Buffer.from(invoiceLogo.replace(/^data:image\/\w+;base64,/, ''), 'base64'),
+		cid: 'companylogo',
+		contentType: 'image/png'
+	};
+	const logoHtml =
+		'<div style="text-align: center; margin-bottom: 20px;"><img src="cid:companylogo" alt="" style="max-width: 200px; max-height: 80px;" /></div>';
+	return { logoAttachment, logoHtml };
+}
+
+// ---------------------------------------------------------------------------
 // Notification recipients helper
 // ---------------------------------------------------------------------------
 
@@ -396,6 +427,15 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 	const tenantName = tenant?.name || 'CRM';
 	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
 
+	// Get invoice settings for logo
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
 	// Format amounts
 	const formatAmount = (cents: number | null | undefined, currency: string) => {
 		if (cents === null || cents === undefined) return 'N/A';
@@ -407,6 +447,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
 		subject: `Invoice ${invoice.invoiceNumber} from ${tenantName}`,
+		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -417,20 +458,21 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${logoHtml}
 					<h1 style="color: #2563eb; margin-top: 0;">Invoice ${invoice.invoiceNumber}</h1>
 					<p>Dear ${client?.name || 'Valued Customer'},</p>
 					<p>Please find attached your invoice from <strong>${tenantName}</strong>.</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
 						<p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
-						${invoice.issueDate ? `<p><strong>Issue Date:</strong> ${new Date(invoice.issueDate).toLocaleDateString()}</p>` : ''}
-						${invoice.dueDate ? `<p><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</p>` : ''}
+						${invoice.issueDate ? `<p><strong>Issue Date:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
+						${invoice.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(invoice.dueDate)}</p>` : ''}
 						<p><strong>Total Amount:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
 						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Paid</p>' : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Invoice</a>
 					</div>
-					${invoice.dueDate && invoice.status !== 'paid' ? `<p style="font-size: 14px; color: #666;">Payment is due by ${new Date(invoice.dueDate).toLocaleDateString()}.</p>` : ''}
+					${invoice.dueDate && invoice.status !== 'paid' ? `<p style="font-size: 14px; color: #666;">Payment is due by ${formatDateRo(invoice.dueDate)}.</p>` : ''}
 					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please don't hesitate to contact us.</p>
 				</div>
 			</body>
@@ -444,13 +486,13 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			Please find your invoice from ${tenantName}.
 
 			Invoice Number: ${invoice.invoiceNumber}
-			${invoice.issueDate ? `Issue Date: ${new Date(invoice.issueDate).toLocaleDateString()}\n` : ''}
-			${invoice.dueDate ? `Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}\n` : ''}
+			${invoice.issueDate ? `Issue Date: ${formatDateRo(invoice.issueDate)}\n` : ''}
+			${invoice.dueDate ? `Due Date: ${formatDateRo(invoice.dueDate)}\n` : ''}
 			Total Amount: ${formatAmount(invoice.totalAmount, invoice.currency)}
 
 			View invoice: ${invoiceUrl}
 
-			${invoice.dueDate && invoice.status !== 'paid' ? `Payment is due by ${new Date(invoice.dueDate).toLocaleDateString()}.\n` : ''}
+			${invoice.dueDate && invoice.status !== 'paid' ? `Payment is due by ${formatDateRo(invoice.dueDate)}.\n` : ''}
 
 			If you have any questions, please don't hesitate to contact us.
 		`
@@ -831,7 +873,7 @@ export async function sendTaskAssignmentEmail(
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
 						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
 						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
-						${task.dueDate ? `<p><strong>Due Date:</strong> ${new Date(task.dueDate).toLocaleDateString()}</p>` : ''}
+						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
@@ -851,7 +893,7 @@ export async function sendTaskAssignmentEmail(
 			${task.description ? `\n${task.description}\n` : ''}
 			Priority: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
-			${task.dueDate ? `Due Date: ${new Date(task.dueDate).toLocaleDateString()}\n` : ''}
+			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
 
 			View task: ${taskUrl}
 		`
@@ -956,7 +998,7 @@ export async function sendTaskUpdateEmail(
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
 						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
 						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
-						${task.dueDate ? `<p><strong>Due Date:</strong> ${new Date(task.dueDate).toLocaleDateString()}</p>` : ''}
+						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
@@ -978,7 +1020,7 @@ export async function sendTaskUpdateEmail(
 			${task.description ? `\n${task.description}\n` : ''}
 			Priority: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
-			${task.dueDate ? `Due Date: ${new Date(task.dueDate).toLocaleDateString()}\n` : ''}
+			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
 
 			View task: ${taskUrl}
 		`
@@ -1109,7 +1151,7 @@ export async function sendTaskClientNotificationEmail(
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
 						<p><strong>Prioritate:</strong> ${task.priority || 'Medium'}</p>
 						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
-						${task.dueDate ? `<p><strong>Termen:</strong> ${new Date(task.dueDate).toLocaleDateString('ro-RO')}</p>` : ''}
+						${task.dueDate ? `<p><strong>Termen:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Task</a>
@@ -1130,7 +1172,7 @@ ${task.title}
 ${task.description ? `\n${task.description}\n` : ''}
 Prioritate: ${task.priority || 'Medium'}
 Status: ${task.status || 'Todo'}
-${task.dueDate ? `Termen: ${new Date(task.dueDate).toLocaleDateString('ro-RO')}\n` : ''}
+${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
 
 Vezi task: ${taskUrl}
 		`
@@ -1210,6 +1252,15 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 	const tenantName = tenant?.name || 'CRM';
 	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
 
+	// Get invoice settings for logo
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+		.limit(1);
+
+	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
 	// Format amounts
 	const formatAmount = (cents: number | null | undefined, currency: string) => {
 		if (cents === null || cents === undefined) return 'N/A';
@@ -1221,6 +1272,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
 		subject: `Payment Received: Invoice ${invoice.invoiceNumber}`,
+		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -1231,14 +1283,15 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${logoHtml}
 					<h1 style="color: #10b981; margin-top: 0;">Payment Received</h1>
 					<p>Dear ${client?.name || 'Valued Customer'},</p>
 					<p>We've received your payment for the following invoice:</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
 						<p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
 						<p><strong>Amount Paid:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.paidDate ? `<p><strong>Payment Date:</strong> ${new Date(invoice.paidDate).toLocaleDateString()}</p>` : ''}
-						${invoice.issueDate ? `<p><strong>Invoice Date:</strong> ${new Date(invoice.issueDate).toLocaleDateString()}</p>` : ''}
+						${invoice.paidDate ? `<p><strong>Payment Date:</strong> ${formatDateRo(invoice.paidDate)}</p>` : ''}
+						${invoice.issueDate ? `<p><strong>Invoice Date:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
 					</div>
 					<p style="color: #10b981; font-weight: bold;">Thank you for your payment!</p>
 					<div style="text-align: center; margin: 30px 0;">
@@ -1258,8 +1311,8 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 
 			Invoice Number: ${invoice.invoiceNumber}
 			Amount Paid: ${formatAmount(invoice.totalAmount, invoice.currency)}
-			${invoice.paidDate ? `Payment Date: ${new Date(invoice.paidDate).toLocaleDateString()}\n` : ''}
-			${invoice.issueDate ? `Invoice Date: ${new Date(invoice.issueDate).toLocaleDateString()}\n` : ''}
+			${invoice.paidDate ? `Payment Date: ${formatDateRo(invoice.paidDate)}\n` : ''}
+			${invoice.issueDate ? `Invoice Date: ${formatDateRo(invoice.issueDate)}\n` : ''}
 
 			Thank you for your payment!
 
@@ -1391,15 +1444,35 @@ export async function sendOverdueReminderEmail(
 		return `${amount} ${currency}`;
 	};
 
-	const dueDateStr = invoice.dueDate
-		? new Date(invoice.dueDate).toLocaleDateString()
-		: 'N/A';
+	const dueDateStr = formatDateRo(invoice.dueDate);
+
+	// Prepare logo
+	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
+	// IBAN payment details
+	const ibanHtml = tenant?.iban
+		? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
+				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
+				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
+				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
+				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
+			</div>`
+		: '';
+
+	const ibanText = tenant?.iban
+		? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
+		: '';
+
+	const attachments = [
+		...(pdfAttachment ? [pdfAttachment] : []),
+		...(logoAttachment ? [logoAttachment] : [])
+	];
 
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
 		subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
-		...(pdfAttachment ? { attachments: [pdfAttachment] } : {}),
+		...(attachments.length > 0 ? { attachments } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -1410,6 +1483,7 @@ export async function sendOverdueReminderEmail(
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${logoHtml}
 					<h1 style="color: #d97706; margin-top: 0;">Reminder plata factura</h1>
 					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
 					<p>Va reamintim ca factura de mai jos este restanta de <strong>${daysOverdue} zile</strong>.</p>
@@ -1420,6 +1494,7 @@ export async function sendOverdueReminderEmail(
 						<p style="color: #d97706;"><strong>Zile restanta:</strong> ${daysOverdue}</p>
 						${reminderNumber > 1 ? `<p style="font-size: 12px; color: #999;">Reminder #${reminderNumber}</p>` : ''}
 					</div>
+					${ibanHtml}
 					<p>Va rugam sa efectuati plata cat mai curand posibil.</p>
 					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
 					<div style="text-align: center; margin: 30px 0;">
@@ -1443,6 +1518,7 @@ export async function sendOverdueReminderEmail(
 			Zile restanta: ${daysOverdue}
 			${reminderNumber > 1 ? `Reminder #${reminderNumber}` : ''}
 
+			${ibanText}
 			Va rugam sa efectuati plata cat mai curand posibil.
 
 			Vezi factura: ${invoiceUrl}
@@ -1546,7 +1622,7 @@ export async function sendTaskReminderEmail(
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
 						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
 						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
-						<p><strong>Due Date:</strong> <span style="color: ${isOverdue ? '#dc2626' : '#333'};">${dueDate.toLocaleDateString()}</span></p>
+						<p><strong>Due Date:</strong> <span style="color: ${isOverdue ? '#dc2626' : '#333'};">${formatDateRo(dueDate)}</span></p>
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
@@ -1566,7 +1642,7 @@ export async function sendTaskReminderEmail(
 			${task.description ? `\n${task.description}\n` : ''}
 			Priority: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
-			Due Date: ${dueDate.toLocaleDateString()}
+			Due Date: ${formatDateRo(dueDate)}
 
 			View task: ${taskUrl}
 		`
@@ -1660,7 +1736,7 @@ export async function sendDailyWorkReminderEmail(
 		.map((task) => {
 			const priorityColor = getPriorityColor(task.priority);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
-			const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date';
+			const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
 			return `
 				<div style="background-color: white; padding: 16px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid ${priorityColor};">
 					<h3 style="margin: 0 0 8px 0; color: #2563eb;">
@@ -1680,7 +1756,7 @@ export async function sendDailyWorkReminderEmail(
 	// Format tasks list text
 	const tasksListText = tasks
 		.map((task) => {
-			const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date';
+			const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
 			return `
 ${task.title}
@@ -1692,7 +1768,7 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 		})
 		.join('\n---\n');
 
-	const today = new Date().toLocaleDateString('en-US', {
+	const today = new Date().toLocaleDateString('ro-RO', {
 		weekday: 'long',
 		year: 'numeric',
 		month: 'long',
@@ -1804,10 +1880,20 @@ export async function sendContractSigningEmail(
 	const tenantName = tenant.name || 'CRM';
 	const signingUrl = `${baseUrl}/sign/${tenantSlug}/${encodeURIComponent(rawToken)}`;
 
+	// Get invoice settings for logo
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenant.id))
+		.limit(1);
+
+	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: email,
 		subject: `Semnare contract ${contractNumber} - ${tenantName}`,
+		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -1818,6 +1904,7 @@ export async function sendContractSigningEmail(
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${logoHtml}
 					<h1 style="color: #1e293b; margin-top: 0;">${tenantName}</h1>
 					<p>Stimate/Stimată ${clientName},</p>
 					<p>Ați primit o invitație pentru a semna contractul <strong>${contractNumber}</strong> emis de <strong>${tenantName}</strong>.</p>

@@ -15,7 +15,8 @@ export type LogSource =
 	| 'bnr'
 	| 'anaf-spv'
 	| 'banking'
-	| 'storage';
+	| 'storage'
+	| 'invoice-view';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

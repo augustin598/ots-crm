@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
 import { validateInvoiceViewToken } from '$lib/server/invoice-token';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
+import { logInfo } from '$lib/server/logger';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const result = await validateInvoiceViewToken(params.tenant, params.token);
@@ -15,6 +16,17 @@ export const load: PageServerLoad = async ({ params }) => {
 	}
 
 	const { tenant, invoice, lineItems, client, invoiceSettings } = result;
+
+	// Log public invoice page access
+	logInfo('invoice-view', `Client accessed public invoice page: ${invoice.invoiceNumber}`, {
+		tenantId: tenant.id,
+		metadata: {
+			invoiceId: invoice.id,
+			invoiceNumber: invoice.invoiceNumber,
+			clientId: invoice.clientId,
+			clientName: client?.businessName || client?.name || null
+		}
+	});
 
 	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
 
