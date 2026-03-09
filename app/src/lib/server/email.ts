@@ -49,6 +49,39 @@ function prepareLogoAttachment(invoiceLogo: string | null | undefined) {
 }
 
 // ---------------------------------------------------------------------------
+// Task email badge color helpers (hex equivalents of Tailwind classes in task-kanban-utils.ts)
+// ---------------------------------------------------------------------------
+function getEmailStatusColors(status: string | null): { bg: string; text: string; dot: string } {
+	switch (status) {
+		case 'pending-approval': return { bg: '#fef3c7', text: '#92400e', dot: '#f59e0b' };
+		case 'todo':             return { bg: '#f1f5f9', text: '#334155', dot: '#94a3b8' };
+		case 'in-progress':      return { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' };
+		case 'review':           return { bg: '#f3e8ff', text: '#7e22ce', dot: '#a855f7' };
+		case 'done':             return { bg: '#dcfce7', text: '#15803d', dot: '#22c55e' };
+		case 'cancelled':        return { bg: '#fee2e2', text: '#b91c1c', dot: '#ef4444' };
+		default:                 return { bg: '#f1f5f9', text: '#334155', dot: '#94a3b8' };
+	}
+}
+
+function getEmailPriorityColors(priority: string | null): { bg: string; text: string } {
+	switch (priority) {
+		case 'urgent': return { bg: '#fee2e2', text: '#b91c1c' };
+		case 'high':   return { bg: '#ffedd5', text: '#c2410c' };
+		case 'medium': return { bg: '#dcfce7', text: '#15803d' };
+		case 'low':    return { bg: '#f3f4f6', text: '#374151' };
+		default:       return { bg: '#f3f4f6', text: '#374151' };
+	}
+}
+
+function formatStatusLabel(status: string): string {
+	return status.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function formatPriorityLabel(priority: string): string {
+	return priority.charAt(0).toUpperCase() + priority.slice(1);
+}
+
+// ---------------------------------------------------------------------------
 // Notification recipients helper
 // ---------------------------------------------------------------------------
 
@@ -847,6 +880,13 @@ export async function sendTaskAssignmentEmail(
 		.where(eq(table.emailSettings.tenantId, task.tenantId))
 		.limit(1);
 
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+		.limit(1);
+	const { logoAttachment: assignLogoAttachment, logoHtml: assignLogoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
 	const fromEmail =
 		emailSettings?.smtpFrom ||
 		emailSettings?.smtpUser ||
@@ -856,10 +896,20 @@ export async function sendTaskAssignmentEmail(
 	const tenantName = tenant?.name || 'CRM';
 	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
+	const assignStatusColors = getEmailStatusColors(task.status);
+	const assignPriorityColors = getEmailPriorityColors(task.priority);
+	const assignStatusLabel = formatStatusLabel(task.status || 'todo');
+	const assignPriorityLabel = formatPriorityLabel(task.priority || 'medium');
+	const assignBadgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+	const assignDotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+	const assignStatusBadge = `<span style="${assignBadgeStyle} background:${assignStatusColors.bg}; color:${assignStatusColors.text};"><span style="${assignDotStyle(assignStatusColors.dot)}"></span>${assignStatusLabel}</span>`;
+	const assignPriorityBadge = `<span style="${assignBadgeStyle} background:${assignPriorityColors.bg}; color:${assignPriorityColors.text};">${assignPriorityLabel}</span>`;
+
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: assigneeEmail,
 		subject: `New Task Assigned: ${task.title}`,
+		...(assignLogoAttachment ? { attachments: [assignLogoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -870,19 +920,21 @@ export async function sendTaskAssignmentEmail(
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${assignLogoHtml}
 					<h1 style="color: #2563eb; margin-top: 0;">Task Assigned to You</h1>
 					<p>Hello ${assigneeName || 'there'},</p>
 					<p>You have been assigned a new task:</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
 						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
-						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
+						<p><strong>Priority:</strong> ${assignPriorityBadge}</p>
+						<p><strong>Status:</strong> ${assignStatusBadge}</p>
 						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
 					</div>
+					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Sent automatically by ${tenantName}.</p>
 				</div>
 			</body>
 			</html>
@@ -963,6 +1015,13 @@ export async function sendTaskUpdateEmail(
 		.where(eq(table.emailSettings.tenantId, task.tenantId))
 		.limit(1);
 
+	const [updInvoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+		.limit(1);
+	const { logoAttachment: updLogoAttachment, logoHtml: updLogoHtml } = prepareLogoAttachment(updInvoiceSettings?.invoiceLogo);
+
 	const fromEmail =
 		emailSettings?.smtpFrom ||
 		emailSettings?.smtpUser ||
@@ -981,10 +1040,20 @@ export async function sendTaskUpdateEmail(
 					? 'due date was updated'
 					: 'task was updated';
 
+	const updStatusColors = getEmailStatusColors(task.status);
+	const updPriorityColors = getEmailPriorityColors(task.priority);
+	const updStatusLabel = formatStatusLabel(task.status || 'todo');
+	const updPriorityLabel = formatPriorityLabel(task.priority || 'medium');
+	const updBadgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+	const updDotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+	const updStatusBadge = `<span style="${updBadgeStyle} background:${updStatusColors.bg}; color:${updStatusColors.text};"><span style="${updDotStyle(updStatusColors.dot)}"></span>${updStatusLabel}</span>`;
+	const updPriorityBadge = `<span style="${updBadgeStyle} background:${updPriorityColors.bg}; color:${updPriorityColors.text};">${updPriorityLabel}</span>`;
+
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: watcherEmail,
 		subject: `Task Updated: ${task.title}`,
+		...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -995,6 +1064,7 @@ export async function sendTaskUpdateEmail(
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${updLogoHtml}
 					<h1 style="color: #2563eb; margin-top: 0;">Task Updated</h1>
 					<p>Hello ${watcherName || 'there'},</p>
 					<p>A task you're watching has been updated:</p>
@@ -1002,13 +1072,14 @@ export async function sendTaskUpdateEmail(
 						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
 						<p><strong>What changed:</strong> The task's ${changeDescription}.</p>
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
-						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
+						<p><strong>Priority:</strong> ${updPriorityBadge}</p>
+						<p><strong>Status:</strong> ${updStatusBadge}</p>
 						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
 					</div>
+					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Sent automatically by ${tenantName}.</p>
 				</div>
 			</body>
 			</html>
@@ -1087,6 +1158,13 @@ export async function sendTaskClientNotificationEmail(
 		.where(eq(table.emailSettings.tenantId, task.tenantId))
 		.limit(1);
 
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+		.limit(1);
+	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
 	const fromEmail =
 		emailSettings?.smtpFrom ||
 		emailSettings?.smtpUser ||
@@ -1136,10 +1214,22 @@ export async function sendTaskClientNotificationEmail(
 			break;
 	}
 
+	const statusColors = getEmailStatusColors(task.status);
+	const priorityColors = getEmailPriorityColors(task.priority);
+	const statusLabel = formatStatusLabel(task.status || 'todo');
+	const priorityLabel = formatPriorityLabel(task.priority || 'medium');
+
+	const badgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+	const dotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+
+	const statusBadge = `<span style="${badgeStyle} background:${statusColors.bg}; color:${statusColors.text};"><span style="${dotStyle(statusColors.dot)}"></span>${statusLabel}</span>`;
+	const priorityBadge = `<span style="${badgeStyle} background:${priorityColors.bg}; color:${priorityColors.text};">${priorityLabel}</span>`;
+
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
 		subject,
+		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
@@ -1150,20 +1240,21 @@ export async function sendTaskClientNotificationEmail(
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+					${logoHtml}
 					<h1 style="color: ${headerColor}; margin-top: 0;">${subject}</h1>
 					<p>Bună ${clientName || 'ziua'},</p>
 					<p>${changeDescription}</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
 						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
 						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Prioritate:</strong> ${task.priority || 'Medium'}</p>
-						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
+						<p><strong>Prioritate:</strong> ${priorityBadge}</p>
+						<p><strong>Status:</strong> ${statusBadge}</p>
 						${task.dueDate ? `<p><strong>Termen:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
 					</div>
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Task</a>
 					</div>
-					<p style="color: #999; font-size: 12px; margin-top: 20px;">Acest email a fost trimis automat de ${tenantName}.</p>
+					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Acest email a fost trimis automat de ${tenantName}.</p>
 				</div>
 			</body>
 			</html>

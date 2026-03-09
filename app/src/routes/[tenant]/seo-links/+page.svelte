@@ -468,6 +468,7 @@
 	let editRowCurrency = $state<Currency>('RON');
 	let editRowArticleType = $state('');
 	let editRowGdriveUrl = $state('');
+	let editRowWebsiteId = $state<string | null>(null);
 	let editRowLoading = $state(false);
 	let editRowError = $state<string | null>(null);
 
@@ -686,6 +687,7 @@
 		editRowCurrency = (link.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
 		editRowArticleType = link.articleType || '';
 		editRowGdriveUrl = link.gdriveUrl || '';
+		editRowWebsiteId = link.websiteId || null;
 		editRowLoading = false;
 		editRowError = null;
 	}
@@ -704,6 +706,7 @@
 		editRowCurrency = 'RON';
 		editRowArticleType = '';
 		editRowGdriveUrl = '';
+		editRowWebsiteId = null;
 		editRowLoading = false;
 		editRowError = null;
 	}
@@ -731,7 +734,8 @@
 				linkAttribute: editRowLinkAttribute as 'dofollow' | 'nofollow',
 				price: editRowPrice ? parseFloat(editRowPrice) : undefined,
 				currency: editRowCurrency,
-				anchorText: editRowKeyword.trim()
+				anchorText: editRowKeyword.trim(),
+				websiteId: editRowWebsiteId || undefined
 			}).updates(seoLinksQuery);
 			toast.success('Link actualizat');
 			cancelEditRow();
@@ -2914,11 +2918,36 @@
 								<Input bind:value={editRowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
 							</TableCell>
 							{#if filterClientIds.length === 1}
-							<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">
-								{#if link.websiteId && filterWebsiteMap.has(link.websiteId)}
-									{filterWebsiteMap.get(link.websiteId)}
+							<TableCell class="px-3 py-2 align-middle">
+								{#if filterWebsites.length > 0}
+									<Select type="single" value={editRowWebsiteId || ''} onValueChange={(v) => { editRowWebsiteId = v || null; }}>
+										<SelectTrigger class="h-8 text-[13px] min-w-[7rem]">
+											{#if editRowWebsiteId && filterWebsiteMap.has(editRowWebsiteId)}
+												<span class="flex items-center gap-1.5 min-w-0">
+													{@const selW = filterWebsites.find(w => w.id === editRowWebsiteId)}
+													{#if selW}
+														<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+													{/if}
+													<span class="truncate">{filterWebsiteMap.get(editRowWebsiteId)}</span>
+												</span>
+											{:else}
+												<span class="text-muted-foreground">Website</span>
+											{/if}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="">—</SelectItem>
+											{#each filterWebsites as w}
+												<SelectItem value={w.id}>
+													<span class="flex items-center gap-2">
+														<img src={getFaviconUrl(w.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+														{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+													</span>
+												</SelectItem>
+											{/each}
+										</SelectContent>
+									</Select>
 								{:else}
-									—
+									<span class="text-muted-foreground/50 text-[13px]">—</span>
 								{/if}
 							</TableCell>
 							{/if}
