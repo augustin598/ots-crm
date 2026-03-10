@@ -336,7 +336,7 @@
 
 {#if task}
 	<Dialog bind:open onOpenChange={onOpenChange}>
-		<DialogContent class="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+		<DialogContent class="sm:max-w-5xl max-h-[90vh] overflow-y-auto" showCloseButton={false}>
 			<DialogHeader>
 				<div class="flex items-start justify-between">
 					<div class="flex-1">
@@ -385,6 +385,9 @@
 					<Button variant="outline" size="sm" onclick={() => (isEditOpen = true)}>
 						<Edit class="mr-2 h-4 w-4" />
 						Edit
+					</Button>
+					<Button variant="ghost" size="sm" onclick={() => onOpenChange(false)}>
+						<X class="h-4 w-4" />
 					</Button>
 				</div>
 			</div>
