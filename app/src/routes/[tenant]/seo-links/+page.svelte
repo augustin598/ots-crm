@@ -3,6 +3,7 @@
 		getSeoLinks,
 		createSeoLink,
 		createSeoLinksBulk,
+		createSeoLinksMulti,
 		updateSeoLink,
 		deleteSeoLink,
 		deleteSeoLinksBulk,
@@ -436,23 +437,52 @@
 	}
 	// ──────────────────────────────────────────────────────────────────────────
 
-	// Inline row state
-	let isAddingInlineRow = $state(false);
-	let rowPressTrust = $state('');
-	let rowKeyword = $state('');
-	let rowTargetUrl = $state('');
-	let rowArticleUrl = $state('');
-	let rowStatus = $state('pending');
-	let rowLinkType = $state('');
-	let rowLinkAttribute = $state('dofollow');
-	let rowPrice = $state('');
-	let rowCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
-	let rowAnchorText = $state('');
-	let rowNotes = $state('');
-	let rowArticleType = $state('');
-	let rowGdriveUrl = $state('');
-	let rowLoading = $state(false);
-	let rowError = $state<string | null>(null);
+	// Inline multi-row state
+	type InlineRow = {
+		id: string;
+		pressTrust: string;
+		keyword: string;
+		targetUrl: string;
+		articleUrl: string;
+		status: string;
+		linkType: string;
+		linkAttribute: string;
+		price: string;
+		currency: Currency;
+		articleType: '' | 'gdrive' | 'press-article' | 'seo-article';
+		gdriveUrl: string;
+		articleFile: File | null;
+	};
+
+	function createEmptyRow(): InlineRow {
+		const defaultTargetUrl = (() => {
+			if (filterClientIds.length !== 1) return '';
+			const c = clientById.get(filterClientIds[0]);
+			if (c?.website) return c.website;
+			if (filterWebsites.length > 0) return filterWebsites[0].url;
+			return '';
+		})();
+		return {
+			id: crypto.randomUUID(),
+			pressTrust: '',
+			keyword: '',
+			targetUrl: defaultTargetUrl,
+			articleUrl: '',
+			status: 'pending',
+			linkType: '',
+			linkAttribute: 'dofollow',
+			price: '',
+			currency: (invoiceSettings?.defaultCurrency || 'RON') as Currency,
+			articleType: '',
+			gdriveUrl: '',
+			articleFile: null,
+		};
+	}
+
+	let inlineRows = $state<InlineRow[]>([]);
+	let isAddingInlineRows = $state(false);
+	let inlineRowsLoading = $state(false);
+	let inlineRowsError = $state<string | null>(null);
 
 	// ── Inline row EDIT state ──────────────────────────────────────────────
 	let editingRowId = $state<string | null>(null);
@@ -477,6 +507,7 @@
 	let articleModalLinkId = $state<string | null>(null);
 	let articleModalLink = $state<(typeof seoLinks)[0] | null>(null);
 	let articleModalOption = $state<'' | 'gdrive' | 'press-article' | 'seo-article'>('');
+	let articleModalInlineRowId = $state<string | null>(null);
 	let articleModalGdriveUrl = $state('');
 	let articleModalFile = $state<File | null>(null);
 	let articleModalLoading = $state(false);
@@ -493,6 +524,7 @@
 	}
 
 	function openArticleModal(link: (typeof seoLinks)[0]) {
+		articleModalInlineRowId = null;
 		articleModalLinkId = link.id;
 		articleModalLink = link;
 		articleModalOption = (link.articleType as '' | 'gdrive' | 'press-article' | 'seo-article') || '';
@@ -502,7 +534,53 @@
 		articleModalOpen = true;
 	}
 
+	function openArticleModalForInlineRow(row: InlineRow) {
+		articleModalInlineRowId = row.id;
+		articleModalLinkId = null;
+		articleModalLink = null;
+		articleModalOption = row.articleType || '';
+		articleModalGdriveUrl = row.gdriveUrl || '';
+		articleModalFile = row.articleFile || null;
+		articleModalLoading = false;
+		articleModalOpen = true;
+	}
+
 	async function saveArticleModal() {
+		// Inline row mode — store in InlineRow state, don't call server
+		if (articleModalInlineRowId) {
+			const row = inlineRows.find(r => r.id === articleModalInlineRowId);
+			if (row) {
+				if (articleModalOption === 'gdrive') {
+					if (!articleModalGdriveUrl.trim()) {
+						toast.error('Introduceți URL-ul GDrive');
+						return;
+					}
+					row.articleType = 'gdrive';
+					row.gdriveUrl = articleModalGdriveUrl.trim();
+					row.articleFile = null;
+				} else if (articleModalOption === 'press-article' || articleModalOption === 'seo-article') {
+					if (!articleModalFile) {
+						toast.error('Selectați un fișier');
+						return;
+					}
+					row.articleType = articleModalOption;
+					row.gdriveUrl = '';
+					row.articleFile = articleModalFile;
+				} else {
+					row.articleType = '';
+					row.gdriveUrl = '';
+					row.articleFile = null;
+				}
+			}
+			toast.success('Articol salvat');
+			articleModalInlineRowId = null;
+			articleModalOption = '';
+			articleModalGdriveUrl = '';
+			articleModalFile = null;
+			articleModalOpen = false;
+			return;
+		}
+
 		if (!articleModalLinkId || !articleModalLink) return;
 		articleModalLoading = true;
 
@@ -608,12 +686,6 @@
 		if (formBulkMode) showAdvanced = true;
 	});
 
-	$effect(() => {
-		if (invoiceSettings?.defaultCurrency && isAddingInlineRow) {
-			rowCurrency = invoiceSettings.defaultCurrency as Currency;
-		}
-	});
-
 	// Auto-fill URL client from client.website when adding new link
 	$effect(() => {
 		if (!isEditing && formClientId && !formTargetUrl) {
@@ -624,50 +696,109 @@
 		}
 	});
 
-	$effect(() => {
-		if (isAddingInlineRow && filterClientIds.length === 1 && !rowTargetUrl) {
-			const c = clientById.get(filterClientIds[0]);
-			if (c?.website) {
-				rowTargetUrl = c.website;
-			} else if (filterWebsites.length > 0) {
-				// Fallback: use first clientWebsite URL if client.website is empty
-				rowTargetUrl = filterWebsites[0].url;
-			}
-		}
-	});
-
-	function resetInlineRow() {
-		rowPressTrust = '';
-		rowKeyword = '';
-		rowTargetUrl = '';
-		rowArticleUrl = '';
-		rowStatus = 'pending';
-		rowLinkType = '';
-		rowLinkAttribute = 'dofollow';
-		rowPrice = '';
-		rowCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
-		rowAnchorText = '';
-		rowNotes = '';
-		rowArticleType = '';
-		rowGdriveUrl = '';
-		rowError = null;
-	}
-
-	function openInlineRow() {
+	function openInlineRows() {
 		if (editingRowId) cancelEditRow();
-		resetInlineRow();
-		isAddingInlineRow = true;
+		inlineRows = [createEmptyRow()];
+		isAddingInlineRows = true;
+		inlineRowsError = null;
 	}
 
-	function cancelInlineRow() {
-		isAddingInlineRow = false;
-		resetInlineRow();
+	function addInlineRow() {
+		inlineRows = [...inlineRows, createEmptyRow()];
+	}
+
+	function removeInlineRow(id: string) {
+		if (inlineRows.length <= 1) return;
+		inlineRows = inlineRows.filter(r => r.id !== id);
+	}
+
+	function cancelInlineRows() {
+		isAddingInlineRows = false;
+		inlineRows = [];
+		inlineRowsError = null;
+	}
+
+	async function saveInlineRows() {
+		const validRows = inlineRows.filter(r => r.keyword.trim());
+		if (validRows.length === 0) {
+			inlineRowsError = 'Completați cuvântul cheie pe cel puțin un rând';
+			return;
+		}
+		if (filterClientIds.length !== 1) {
+			inlineRowsError = 'Selectați un singur client în filtre';
+			return;
+		}
+
+		inlineRowsLoading = true;
+		inlineRowsError = null;
+		const monthToUse = filterMonth || new Date().toISOString().slice(0, 7);
+
+		try {
+			const result = await createSeoLinksMulti({
+				clientId: filterClientIds[0],
+				month: monthToUse,
+				rows: validRows.map(r => ({
+					pressTrust: r.pressTrust || undefined,
+					keyword: r.keyword.trim(),
+					articleUrl: r.articleUrl || undefined,
+					targetUrl: r.targetUrl ? normalizeTargetUrl(r.targetUrl) : undefined,
+					status: r.status as 'pending' | 'submitted' | 'published' | 'rejected',
+					linkType: parseLinkType(r.linkType),
+					linkAttribute: r.linkAttribute as 'dofollow' | 'nofollow',
+					price: r.price ? parseFloat(r.price) : undefined,
+					currency: r.currency,
+					articleType: r.articleType || undefined,
+					gdriveUrl: r.articleType === 'gdrive' ? r.gdriveUrl || undefined : undefined,
+				}))
+			}).updates(seoLinksQuery);
+
+			// Upload article files for press-article / seo-article rows
+			const seoLinkIds = result.seoLinkIds || [];
+			let uploadErrors = 0;
+			for (let i = 0; i < validRows.length; i++) {
+				const row = validRows[i];
+				const seoLinkId = seoLinkIds[i];
+				if (!seoLinkId || !row.articleFile || !row.articleType || row.articleType === 'gdrive') continue;
+
+				try {
+					const formData = new FormData();
+					formData.append('file', row.articleFile);
+					formData.append('clientId', filterClientIds[0]);
+					formData.append('category', row.articleType);
+					formData.append('title', row.articleFile.name.replace(/\.[^.]+$/, ''));
+					formData.append('seoLinkId', seoLinkId);
+
+					const res = await fetch(`/${tenantSlug}/marketing-materials/upload`, {
+						method: 'POST',
+						body: formData
+					});
+					if (!res.ok) {
+						uploadErrors++;
+					} else {
+						await updateSeoLink({ seoLinkId, articleType: row.articleType }).updates(seoLinksQuery);
+					}
+				} catch {
+					uploadErrors++;
+				}
+			}
+
+			if (uploadErrors > 0) {
+				toast.success(`${validRows.length} linkuri adăugate (${uploadErrors} fișiere nu s-au încărcat)`);
+			} else {
+				toast.success(`${validRows.length} linkuri adăugate`);
+			}
+			cancelInlineRows();
+		} catch (e) {
+			inlineRowsError = e instanceof Error ? e.message : 'A apărut o eroare';
+		} finally {
+			inlineRowsLoading = false;
+		}
 	}
 
 	// ── Inline row EDIT functions ─────────────────────────────────────────
 	function startEditRow(link: (typeof seoLinks)[0]) {
 		// Cancel any active inline add or single-field editors
-		if (isAddingInlineRow) cancelInlineRow();
+		if (isAddingInlineRows) cancelInlineRows();
 		editingKeywordId = null;
 		editingKeywordValue = '';
 		editingPriceId = null;
@@ -746,55 +877,6 @@
 		}
 	}
 	// ──────────────────────────────────────────────────────────────────────
-
-	async function saveInlineRow() {
-		const issues: string[] = [];
-		if (filterClientIds.length !== 1) issues.push('Selectați un singur client în filtre');
-		if (!rowKeyword) issues.push('completați cuvântul cheie');
-		if (issues.length > 0) {
-			rowError = issues.join(', ').replace(/^./, (c) => c.toUpperCase());
-			return;
-		}
-
-		rowLoading = true;
-		rowError = null;
-
-		const monthToUse = filterMonth || new Date().toISOString().slice(0, 7);
-
-		try {
-			// Auto-select websiteId from filterWebsites matching targetUrl domain
-			let inlineWebsiteId: string | undefined;
-			if (rowTargetUrl && filterWebsites.length > 0) {
-				const targetHost = (() => { try { return new URL(rowTargetUrl.startsWith('http') ? rowTargetUrl : `https://${rowTargetUrl}`).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-				const match = filterWebsites.find((w) => { try { return new URL(w.url).hostname.replace(/^www\./, '') === targetHost; } catch { return false; } });
-				if (match) inlineWebsiteId = match.id;
-			}
-
-			await createSeoLink({
-				clientId: filterClientIds[0],
-				websiteId: inlineWebsiteId,
-				pressTrust: rowPressTrust || undefined,
-				month: monthToUse,
-				keyword: rowKeyword,
-				linkType: parseLinkType(rowLinkType),
-				linkAttribute: rowLinkAttribute as 'dofollow' | 'nofollow',
-				status: rowStatus as 'pending' | 'submitted' | 'published' | 'rejected',
-				articleUrl: rowArticleUrl,
-				targetUrl: rowTargetUrl ? normalizeTargetUrl(rowTargetUrl) : undefined,
-				price: rowPrice ? parseFloat(rowPrice) : undefined,
-				currency: rowCurrency,
-				anchorText: rowAnchorText || undefined,
-				projectId: undefined,
-				notes: rowNotes || undefined
-			}).updates(seoLinksQuery);
-			toast.success('Link adăugat');
-			cancelInlineRow();
-		} catch (e) {
-			rowError = e instanceof Error ? e.message : 'A apărut o eroare';
-		} finally {
-			rowLoading = false;
-		}
-	}
 
 	function resetForm() {
 		isEditing = false;
@@ -1625,7 +1707,7 @@
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-			<Button variant="outline" onclick={openInlineRow} disabled={isAddingInlineRow || loading || filterClientIds.length !== 1 || editingRowId !== null}>
+			<Button variant="outline" onclick={openInlineRows} disabled={isAddingInlineRows || loading || filterClientIds.length !== 1 || editingRowId !== null}>
 				<Rows3Icon class="mr-2 h-4 w-4" />
 				Adaugă rând
 			</Button>
@@ -2565,7 +2647,7 @@
 
 	{#if loading}
 		<p class="text-muted-foreground">Se încarcă...</p>
-	{:else if seoLinks.length === 0 && !isAddingInlineRow}
+	{:else if seoLinks.length === 0 && !isAddingInlineRows}
 		<Card>
 			<div class="p-6 text-center">
 				<p class="text-muted-foreground">
@@ -2797,27 +2879,28 @@
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{#if isAddingInlineRow}
+						{#if isAddingInlineRows}
+							{#each inlineRows as row (row.id)}
 							<TableRow class="border-b border-border/30 bg-muted/30 hover:bg-muted/40">
 								<TableCell class="pl-5 pr-2 py-2 align-middle"></TableCell>
 								<TableCell class="text-muted-foreground text-[13px] px-3 py-2 align-middle">—</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
-									<Input bind:value={rowPressTrust} placeholder="Trust presă" class="h-8 text-[13px] w-full min-w-[6rem]" />
+									<Input bind:value={row.pressTrust} placeholder="Trust presă" class="h-8 text-[13px] w-full min-w-[6rem]" />
 								</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
-									<Input bind:value={rowKeyword} placeholder="Cuvânt cheie" class="h-8 text-[13px] w-full min-w-[7rem]" />
+									<Input bind:value={row.keyword} placeholder="Cuvânt cheie" class="h-8 text-[13px] w-full min-w-[7rem]" />
 								</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
-									<Input bind:value={rowTargetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
+									<Input bind:value={row.targetUrl} placeholder="URL țintă" class="h-8 text-[13px] w-full min-w-[8rem]" />
 								</TableCell>
 								{#if filterClientIds.length === 1}<TableCell class="px-3 py-2 align-middle text-muted-foreground/50 text-[13px]">—</TableCell>{/if}
 								<TableCell class="px-3 py-2 align-middle">
-									<Input bind:value={rowArticleUrl} placeholder="Link articol" class="h-8 text-[13px] w-full min-w-[10rem]" />
+									<Input bind:value={row.articleUrl} placeholder="Link articol" class="h-8 text-[13px] w-full min-w-[10rem]" />
 								</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
-									<Select type="single" bind:value={rowStatus}>
+									<Select type="single" bind:value={row.status}>
 										<SelectTrigger class="h-8 text-[13px] min-w-[6rem]">
-											{getStatusLabel(rowStatus)}
+											{getStatusLabel(row.status)}
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="pending">În așteptare</SelectItem>
@@ -2829,9 +2912,9 @@
 								</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
 									<div class="flex flex-col gap-1">
-										<Select type="single" bind:value={rowLinkType}>
+										<Select type="single" bind:value={row.linkType}>
 											<SelectTrigger class="h-8 text-[12px] min-w-[5rem]">
-												{rowLinkType ? getLinkTypeLabel(rowLinkType) : 'Tip'}
+												{row.linkType ? getLinkTypeLabel(row.linkType) : 'Tip'}
 											</SelectTrigger>
 											<SelectContent>
 												<SelectItem value="article">Articol</SelectItem>
@@ -2841,9 +2924,9 @@
 												<SelectItem value="other">Altul</SelectItem>
 											</SelectContent>
 										</Select>
-										<Select type="single" bind:value={rowLinkAttribute}>
+										<Select type="single" bind:value={row.linkAttribute}>
 											<SelectTrigger class="h-7 text-[11px] min-w-[5rem]">
-												{rowLinkAttribute}
+												{row.linkAttribute}
 											</SelectTrigger>
 											<SelectContent>
 												<SelectItem value="dofollow">Dofollow</SelectItem>
@@ -2853,19 +2936,47 @@
 									</div>
 								</TableCell>
 								<TableCell class="px-3 py-2 align-middle text-muted-foreground text-[13px]">—</TableCell>
-								<TableCell class="px-3 py-2 align-middle text-muted-foreground text-[13px]">—</TableCell>
+								<TableCell class="px-3 py-2 align-middle">
+									{#if row.articleType === 'gdrive'}
+										<div class="flex items-center gap-1.5">
+											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-emerald-50 text-emerald-700 border-emerald-200">GDrive</Badge>
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModalForInlineRow(row)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else if row.articleType === 'press-article'}
+										<div class="flex items-center gap-1.5">
+											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-amber-50 text-amber-700 border-amber-200">Presă</Badge>
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModalForInlineRow(row)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else if row.articleType === 'seo-article'}
+										<div class="flex items-center gap-1.5">
+											<Badge variant="outline" class="text-[11px] h-5 rounded-full px-2 font-normal bg-blue-50 text-blue-700 border-blue-200">SEO</Badge>
+											<button type="button" class="text-muted-foreground hover:text-foreground" onclick={() => openArticleModalForInlineRow(row)}>
+												<EditIcon class="h-3 w-3" />
+											</button>
+										</div>
+									{:else}
+										<Button variant="ghost" size="sm" class="h-7 text-[12px] text-muted-foreground" onclick={() => openArticleModalForInlineRow(row)}>
+											<PlusIcon class="h-3.5 w-3.5 mr-1" />
+											Adaugă
+										</Button>
+									{/if}
+								</TableCell>
 								<TableCell class="px-3 py-2 align-middle">
 									<div class="flex items-center gap-1.5">
 										<Input
 											type="number"
-											bind:value={rowPrice}
+											bind:value={row.price}
 											placeholder="0"
 											step="0.01"
 											class="h-8 w-16 text-[13px] px-2"
 										/>
-										<Select type="single" bind:value={rowCurrency}>
+										<Select type="single" bind:value={row.currency}>
 											<SelectTrigger class="h-8 w-[4.5rem] text-[12px] px-2">
-												{CURRENCY_LABELS[rowCurrency]}
+												{CURRENCY_LABELS[row.currency]}
 											</SelectTrigger>
 											<SelectContent>
 												{#each CURRENCIES as curr}
@@ -2876,20 +2987,36 @@
 									</div>
 								</TableCell>
 								<TableCell class="py-2 pr-5 align-middle">
-									<div class="flex items-center gap-1">
-										<Button size="sm" class="h-8" onclick={saveInlineRow} disabled={rowLoading}>
-											{rowLoading ? 'Se salvează...' : 'Salvează'}
+									{#if inlineRows.length > 1}
+										<Button size="sm" variant="ghost" class="h-8 w-8 p-0" onclick={() => removeInlineRow(row.id)}>
+											<XIcon class="h-4 w-4" />
 										</Button>
-										<Button size="sm" variant="ghost" class="h-8" onclick={cancelInlineRow} disabled={rowLoading}>
-											Anulează
+									{/if}
+								</TableCell>
+							</TableRow>
+							{/each}
+							<TableRow class="bg-muted/20 border-b border-border/30">
+								<TableCell colspan={filterClientIds.length === 1 ? 13 : 12} class="px-5 py-2">
+									<div class="flex items-center gap-2">
+										<Button size="sm" variant="outline" class="h-8" onclick={addInlineRow}>
+											<PlusIcon class="mr-1 h-3.5 w-3.5" />
+											Adaugă rând
 										</Button>
+										<div class="ml-auto flex items-center gap-1">
+											<Button size="sm" class="h-8" onclick={saveInlineRows} disabled={inlineRowsLoading}>
+												{inlineRowsLoading ? 'Se salvează...' : `Salvează tot (${inlineRows.length})`}
+											</Button>
+											<Button size="sm" variant="ghost" class="h-8" onclick={cancelInlineRows} disabled={inlineRowsLoading}>
+												Anulează
+											</Button>
+										</div>
 									</div>
 								</TableCell>
 							</TableRow>
-							{#if rowError}
+							{#if inlineRowsError}
 								<TableRow class="bg-destructive/10">
-									<TableCell colspan={12} class="px-5 py-2 text-sm text-destructive">
-										{rowError}
+									<TableCell colspan={filterClientIds.length === 1 ? 13 : 12} class="px-5 py-2 text-sm text-destructive">
+										{inlineRowsError}
 									</TableCell>
 								</TableRow>
 							{/if}
@@ -2923,8 +3050,8 @@
 									<Select type="single" value={editRowWebsiteId || ''} onValueChange={(v) => { editRowWebsiteId = v || null; }}>
 										<SelectTrigger class="h-8 text-[13px] min-w-[7rem]">
 											{#if editRowWebsiteId && filterWebsiteMap.has(editRowWebsiteId)}
+												{@const selW = filterWebsites.find(w => w.id === editRowWebsiteId)}
 												<span class="flex items-center gap-1.5 min-w-0">
-													{@const selW = filterWebsites.find(w => w.id === editRowWebsiteId)}
 													{#if selW}
 														<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
 													{/if}
@@ -3662,8 +3789,14 @@
 		<DialogHeader>
 			<DialogTitle>Articol</DialogTitle>
 			<DialogDescription>
-				{articleModalLink?.keyword || ''}
-				{articleModalLink?.pressTrust ? ` — ${articleModalLink.pressTrust}` : ''}
+				{#if articleModalInlineRowId}
+					{@const inlineRow = inlineRows.find(r => r.id === articleModalInlineRowId)}
+					{inlineRow?.keyword || 'Rând nou'}
+					{inlineRow?.pressTrust ? ` — ${inlineRow.pressTrust}` : ''}
+				{:else}
+					{articleModalLink?.keyword || ''}
+					{articleModalLink?.pressTrust ? ` — ${articleModalLink.pressTrust}` : ''}
+				{/if}
 			</DialogDescription>
 		</DialogHeader>
 
@@ -3745,7 +3878,15 @@
 		</div>
 
 		<DialogFooter class="flex items-center justify-between sm:justify-between">
-			{#if articleModalLink?.articleType}
+			{#if articleModalInlineRowId && articleModalOption}
+				<Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" onclick={() => {
+					const row = inlineRows.find(r => r.id === articleModalInlineRowId);
+					if (row) { row.articleType = ''; row.gdriveUrl = ''; row.articleFile = null; }
+					articleModalOpen = false;
+				}}>
+					Golește
+				</Button>
+			{:else if articleModalLink?.articleType}
 				<Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" onclick={clearArticleType} disabled={articleModalLoading}>
 					Golește
 				</Button>
@@ -3753,7 +3894,7 @@
 				<div></div>
 			{/if}
 			<div class="flex gap-2">
-				<Button variant="outline" onclick={() => { articleModalOpen = false; }}>Anulează</Button>
+				<Button variant="outline" onclick={() => { articleModalInlineRowId = null; articleModalOpen = false; }}>Anulează</Button>
 				<Button onclick={saveArticleModal} disabled={articleModalLoading || !articleModalOption}>
 					{articleModalLoading ? 'Se salvează...' : 'Salvează'}
 				</Button>

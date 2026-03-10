@@ -22,7 +22,17 @@ export async function createKeezClientForTenant(
 	tenantId: string,
 	integration: IntegrationCredentials
 ): Promise<KeezClient> {
-	const secret = decrypt(tenantId, integration.secret);
+	let secret: string;
+	try {
+		secret = decrypt(tenantId, integration.secret);
+	} catch (error) {
+		throw new Error(
+			`Failed to decrypt Keez secret for tenant ${tenantId}. ` +
+			`This usually means ENCRYPTION_SECRET changed since credentials were saved, ` +
+			`or the stored credentials are corrupted. Re-save Keez integration to fix. ` +
+			`Original: ${error instanceof Error ? error.message : error}`
+		);
+	}
 
 	// Try to load cached token from DB
 	let cachedTokenData: { token: string; expiresAt: Date } | undefined;

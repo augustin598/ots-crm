@@ -343,6 +343,84 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 	return { success: true, created: values.length, seoLinkIds: values.map((v) => v.id) };
 });
 
+const createSeoLinksMultiSchema = v.object({
+	clientId: v.pipe(v.string(), v.minLength(1, 'Client is required')),
+	month: v.pipe(v.string(), v.minLength(1, 'Luna este obligatorie')),
+	rows: v.pipe(
+		v.array(v.object({
+			pressTrust: v.optional(v.string()),
+			keyword: v.pipe(v.string(), v.minLength(1, 'Cuvântul cheie este obligatoriu')),
+			articleUrl: v.optional(v.string()),
+			targetUrl: v.optional(v.string()),
+			status: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
+			linkType: v.optional(v.picklist(['article', 'guest-post', 'press-release', 'directory', 'other'])),
+			linkAttribute: v.optional(v.picklist(['dofollow', 'nofollow'])),
+			price: v.optional(v.number()),
+			currency: v.optional(v.string()),
+			articleType: v.optional(v.picklist(['gdrive', 'press-article', 'seo-article'])),
+			gdriveUrl: v.optional(v.string()),
+		})),
+		v.minLength(1, 'Adăugați cel puțin un rând')
+	)
+});
+
+export const createSeoLinksMulti = command(createSeoLinksMultiSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	const defaultCurrency = invoiceSettings?.defaultCurrency || 'RON';
+
+	// Fetch client websites once for domain matching
+	const websites = await db
+		.select()
+		.from(table.clientWebsite)
+		.where(eq(table.clientWebsite.clientId, data.clientId));
+
+	const values = data.rows.map((row) => {
+		const currency = row.currency || defaultCurrency;
+		let websiteId: string | null = null;
+		if (row.targetUrl) {
+			const targetDomain = extractDomainFromUrl(row.targetUrl);
+			if (targetDomain) {
+				const match = websites.find((w) => extractDomainFromUrl(w.url) === targetDomain);
+				if (match) websiteId = match.id;
+			}
+		}
+
+		return {
+			id: generateSeoLinkId(),
+			tenantId: event.locals.tenant!.id,
+			clientId: data.clientId,
+			websiteId,
+			pressTrust: row.pressTrust || null,
+			month: data.month,
+			keyword: row.keyword,
+			linkType: row.linkType || null,
+			linkAttribute: row.linkAttribute || 'dofollow',
+			status: row.status || 'pending',
+			articleUrl: row.articleUrl || '',
+			targetUrl: row.targetUrl || null,
+			price: row.price != null ? Math.round(row.price * 100) : null,
+			currency,
+			anchorText: row.keyword || null,
+			articleType: row.articleType || null,
+			gdriveUrl: row.articleType === 'gdrive' ? (row.gdriveUrl || null) : null,
+		};
+	});
+
+	await db.insert(table.seoLink).values(values);
+
+	return { success: true, created: values.length, seoLinkIds: values.map((v) => v.id) };
+});
+
 export const getSeoLink = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (seoLinkId) => {
@@ -917,9 +995,21 @@ export const extractTargetUrlForSeoLink = command(
 			throw new Error('Clientul nu a fost găsit');
 		}
 
-		const clientDomain = clientRow.website
-			? extractDomainFromUrl(clientRow.website)
-			: inferClientDomainFromName(clientRow.name);
+		let clientDomain = '';
+		if (link.websiteId) {
+			const [website] = await db
+				.select()
+				.from(table.clientWebsite)
+				.where(eq(table.clientWebsite.id, link.websiteId))
+				.limit(1);
+			if (website) clientDomain = extractDomainFromUrl(website.url);
+		}
+		if (!clientDomain && clientRow.website) {
+			clientDomain = extractDomainFromUrl(clientRow.website);
+		}
+		if (!clientDomain) {
+			clientDomain = inferClientDomainFromName(clientRow.name);
+		}
 
 		if (!clientDomain) {
 			throw new Error('Adăugați website-ul clientului (ex: glemis.ro) în profilul clientului');
