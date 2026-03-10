@@ -58,7 +58,7 @@
 				</span>
 			</a>
 		</TooltipTrigger>
-		<TooltipContent side="top" class="max-w-[320px]">
+		<TooltipContent side="top" class="max-w-[320px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg">
 			<p class="break-all text-xs">{fullUrl}</p>
 			<p class="mt-1 text-xs text-muted-foreground">Click = deschide · Icon = copiază</p>
 		</TooltipContent>

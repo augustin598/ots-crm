@@ -719,9 +719,8 @@
 	}
 
 	async function saveInlineRows() {
-		const validRows = inlineRows.filter(r => r.keyword.trim());
-		if (validRows.length === 0) {
-			inlineRowsError = 'Completați cuvântul cheie pe cel puțin un rând';
+		if (inlineRows.length === 0) {
+			inlineRowsError = 'Adăugați cel puțin un rând';
 			return;
 		}
 		if (filterClientIds.length !== 1) {
@@ -737,9 +736,9 @@
 			const result = await createSeoLinksMulti({
 				clientId: filterClientIds[0],
 				month: monthToUse,
-				rows: validRows.map(r => ({
+				rows: inlineRows.map(r => ({
 					pressTrust: r.pressTrust || undefined,
-					keyword: r.keyword.trim(),
+					keyword: r.keyword.trim() || undefined,
 					articleUrl: r.articleUrl || undefined,
 					targetUrl: r.targetUrl ? normalizeTargetUrl(r.targetUrl) : undefined,
 					status: r.status as 'pending' | 'submitted' | 'published' | 'rejected',
@@ -755,8 +754,8 @@
 			// Upload article files for press-article / seo-article rows
 			const seoLinkIds = result.seoLinkIds || [];
 			let uploadErrors = 0;
-			for (let i = 0; i < validRows.length; i++) {
-				const row = validRows[i];
+			for (let i = 0; i < inlineRows.length; i++) {
+				const row = inlineRows[i];
 				const seoLinkId = seoLinkIds[i];
 				if (!seoLinkId || !row.articleFile || !row.articleType || row.articleType === 'gdrive') continue;
 
@@ -783,9 +782,9 @@
 			}
 
 			if (uploadErrors > 0) {
-				toast.success(`${validRows.length} linkuri adăugate (${uploadErrors} fișiere nu s-au încărcat)`);
+				toast.success(`${result.created} linkuri adăugate (${uploadErrors} fișiere nu s-au încărcat)`);
 			} else {
-				toast.success(`${validRows.length} linkuri adăugate`);
+				toast.success(`${result.created} linkuri adăugate`);
 			}
 			cancelInlineRows();
 		} catch (e) {
@@ -844,11 +843,6 @@
 
 	async function saveEditRow() {
 		if (!editingRowId) return;
-		if (!editRowKeyword.trim() || !editRowArticleUrl.trim()) {
-			editRowError = 'Cuvântul cheie și linkul articol sunt obligatorii';
-			return;
-		}
-
 		editRowLoading = true;
 		editRowError = null;
 
