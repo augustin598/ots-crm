@@ -8,6 +8,27 @@ import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 
 /**
+ * Parse Meta API amount to cents.
+ * Meta returns amount as a string — could be dollars ("123.45") or cents ("12345").
+ * We detect based on whether it contains a decimal point.
+ */
+function parseAmountToCents(amount: string | undefined | null): number {
+	if (!amount) return 0;
+	const str = String(amount).trim();
+	if (!str || str === '0') return 0;
+
+	const parsed = parseFloat(str);
+	if (isNaN(parsed)) return 0;
+
+	// If the string contains a decimal point, treat as dollars → convert to cents
+	// Otherwise treat as already in cents
+	if (str.includes('.')) {
+		return Math.round(parsed * 100);
+	}
+	return Math.round(parsed);
+}
+
+/**
  * Sync Meta Ads invoices for a specific tenant.
  * Iterates over ALL active integrations (Business Managers) for the tenant.
  */
@@ -90,6 +111,11 @@ async function syncForIntegration(
 		return { imported: 0, errors: 0, skipped: 0 };
 	}
 
+	logInfo('meta-ads-sync', `Found ${mappedAccounts.length} mapped accounts`, {
+		tenantId,
+		metadata: { accounts: mappedAccounts.map(a => ({ id: a.metaAdAccountId, client: a.clientId })) }
+	});
+
 	// Map: ad account ID → CRM client info
 	const adAccountToClient = new Map<string, { clientId: string; accountName: string; metaAdAccountId: string }>();
 	for (const mapping of mappedAccounts) {
@@ -107,6 +133,28 @@ async function syncForIntegration(
 
 	try {
 		const invoices = await listBusinessInvoices(integration.businessId, accessToken, startDate, endDate);
+
+		logInfo('meta-ads-sync', `API returned ${invoices.length} invoices`, {
+			tenantId,
+			metadata: { businessId: integration.businessId, startDate, endDate }
+		});
+
+		// Log first invoice raw data for debugging
+		if (invoices.length > 0) {
+			const sample = invoices[0];
+			logInfo('meta-ads-sync', `Sample invoice raw data`, {
+				tenantId,
+				metadata: {
+					invoiceId: sample.invoiceId,
+					invoiceNumber: sample.invoiceNumber,
+					amount: sample.amount,
+					currencyCode: sample.currencyCode,
+					adAccountIds: sample.adAccountIds,
+					invoiceDate: sample.invoiceDate,
+					paymentStatus: sample.paymentStatus
+				}
+			});
+		}
 
 		for (const inv of invoices) {
 			try {
@@ -130,24 +178,26 @@ async function syncForIntegration(
 				if (pdfUrl) {
 					try {
 						const pdfBuffer = await downloadInvoicePdf(pdfUrl);
-						const dir = join('uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`);
+						const dir = join(process.cwd(), 'uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`);
 						await mkdir(dir, { recursive: true });
-						pdfPath = join(dir, `${inv.invoiceId}.pdf`);
-						await writeFile(pdfPath, pdfBuffer);
+						// Store relative path for portability
+						pdfPath = join('uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`, `${inv.invoiceId}.pdf`);
+						await writeFile(join(process.cwd(), pdfPath), pdfBuffer);
 					} catch (pdfErr) {
 						logError('meta-ads-sync', `Failed to download PDF for invoice ${inv.invoiceId}`, {
 							tenantId,
-							metadata: { error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr) }
+							metadata: { error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr), pdfUrl }
 						});
 					}
 				}
 
 				const issueDate = inv.invoiceDate ? new Date(inv.invoiceDate) : null;
 				const dueDate = inv.dueDate ? new Date(inv.dueDate) : null;
+				const amountCents = parseAmountToCents(inv.amount);
 
 				// Create one record per matched client mapping
 				for (const mapping of matchedMappings) {
-					// Dedup: check if this invoice already exists
+					// Dedup: check if this invoice already exists for this client
 					const [existing] = await db
 						.select({ id: table.metaAdsInvoice.id })
 						.from(table.metaAdsInvoice)
@@ -175,7 +225,7 @@ async function syncForIntegration(
 						invoiceNumber: inv.invoiceNumber || inv.invoiceId,
 						issueDate,
 						dueDate,
-						amountCents: Math.round(parseFloat(inv.amount) * 100),
+						amountCents,
 						currencyCode: inv.currencyCode,
 						invoiceType: inv.invoiceType,
 						paymentStatus: inv.paymentStatus,
@@ -186,7 +236,10 @@ async function syncForIntegration(
 						updatedAt: new Date()
 					});
 
-					logInfo('meta-ads-sync', `Imported invoice ${inv.invoiceId} for account ${mapping.accountName}`, { tenantId });
+					logInfo('meta-ads-sync', `Imported invoice ${inv.invoiceId} for account ${mapping.accountName}`, {
+						tenantId,
+						metadata: { amountCents, currency: inv.currencyCode, rawAmount: inv.amount }
+					});
 					imported++;
 				}
 			} catch (invErr) {

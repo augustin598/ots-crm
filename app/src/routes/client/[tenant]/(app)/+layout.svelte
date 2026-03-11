@@ -121,7 +121,7 @@
 								<SidebarMenuSubButton isActive={currentPath === `/client/${tenantSlug}/invoices` || (currentPath.startsWith(`/client/${tenantSlug}/invoices`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`))}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/invoices" {...props}>
-											<span>Toate Facturile</span>
+											<span>Facturi Servicii</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>
@@ -130,7 +130,16 @@
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`)}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/invoices/google-ads" {...props}>
-											<span>Facturi Google Ads</span>
+											<span>Google Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/invoices/meta-ads" {...props}>
+											<span>Facebook Ads</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>

@@ -90,7 +90,12 @@ export async function listBusinessInvoices(
 	if (startDate) baseUrl += `&start_date=${startDate}`;
 	if (endDate) baseUrl += `&end_date=${endDate}`;
 
+	// Log request URL (without access_token for security)
+	const debugUrl = baseUrl.replace(/access_token=[^&]+/, 'access_token=REDACTED');
+	logInfo('meta-ads', `Requesting invoices`, { metadata: { url: debugUrl } });
+
 	let url: string | null = baseUrl;
+	let isFirstPage = true;
 
 	try {
 		while (url) {
@@ -98,7 +103,27 @@ export async function listBusinessInvoices(
 			const data = await res.json();
 
 			if (data.error) {
+				logError('meta-ads', `API error response`, {
+					metadata: { errorMessage: data.error.message, errorCode: data.error.code, errorType: data.error.type }
+				});
 				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			// Log raw response on first page for debugging
+			if (isFirstPage && data.data?.length > 0) {
+				const sample = data.data[0];
+				logInfo('meta-ads', `Raw invoice sample`, {
+					metadata: {
+						keys: Object.keys(sample),
+						id: sample.id,
+						amount: sample.amount,
+						amountType: typeof sample.amount,
+						currency: sample.currency,
+						ad_account_ids: sample.ad_account_ids,
+						invoice_date: sample.invoice_date
+					}
+				});
+				isFirstPage = false;
 			}
 
 			for (const inv of data.data || []) {

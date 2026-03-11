@@ -418,7 +418,8 @@ export const deleteMetaAdsInvoice = command(
 		if (invoice.pdfPath) {
 			try {
 				const { unlink } = await import('fs/promises');
-				await unlink(invoice.pdfPath);
+				const { join } = await import('path');
+				await unlink(join(process.cwd(), invoice.pdfPath));
 			} catch {
 				// File might not exist, that's ok
 			}

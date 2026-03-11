@@ -8,6 +8,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Download, Search, Eye } from '@lucide/svelte';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -33,7 +34,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to download PDF');
+			toast.error(e instanceof Error ? e.message : 'Failed to download PDF');
 		}
 	}
 
@@ -45,7 +46,7 @@
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to preview PDF');
+			toast.error(e instanceof Error ? e.message : 'Failed to preview PDF');
 		}
 	}
 

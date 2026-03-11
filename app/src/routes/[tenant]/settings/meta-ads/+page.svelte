@@ -94,9 +94,12 @@
 		window.location.href = `/api/meta-ads/auth?tenant=${tenantSlug}&integration=${integrationId}`;
 	}
 
+	let disconnecting = $state(false);
+
 	async function handleDisconnect(integrationId: string) {
 		if (!confirm('Ești sigur că vrei să deconectezi acest Business Manager?')) return;
 
+		disconnecting = true;
 		try {
 			const res = await fetch(`/api/meta-ads/disconnect`, {
 				method: 'POST',
@@ -104,9 +107,13 @@
 				body: JSON.stringify({ integrationId })
 			});
 			if (!res.ok) throw new Error('Failed to disconnect');
-			window.location.reload();
+			toast.success('Business Manager deconectat');
+			// Refresh connections query instead of page reload
+			connectionsQuery.revalidate();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la deconectare');
+		} finally {
+			disconnecting = false;
 		}
 	}
 
