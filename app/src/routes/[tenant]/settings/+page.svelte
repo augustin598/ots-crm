@@ -16,7 +16,10 @@
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
+	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
+	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
 	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto } from '$app/navigation';
@@ -67,6 +70,15 @@
 	// Gmail status
 	const gmailStatusQuery = getGmailConnectionStatus();
 	const gmailStatus = $derived(gmailStatusQuery.current);
+
+	// Google Ads status
+	const googleAdsStatusQuery = getGoogleAdsConnectionStatus();
+	const googleAdsStatus = $derived(googleAdsStatusQuery.current);
+
+	// Meta Ads status
+	const metaAdsStatusQuery = getMetaAdsConnectionStatus();
+	const metaAdsConnections = $derived(metaAdsStatusQuery.current || []);
+	const metaAdsActiveCount = $derived(metaAdsConnections.filter((c: any) => c.connected).length);
 
 	// BNR exchange rates
 	const bnrRatesQuery = getBnrRates();
@@ -513,6 +525,62 @@
 					<div class="flex items-center gap-2">
 						{#if gmailStatus?.isConnected}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/google-ads`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<div>
+							<CardTitle>Google Ads</CardTitle>
+							<CardDescription>
+								{#if googleAdsStatus?.connected}
+									Conectat ca {googleAdsStatus.email}
+								{:else}
+									Conecteaza Google Ads pentru descarcarea automata a facturilor
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if googleAdsStatus?.connected}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/meta-ads`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<div>
+							<CardTitle>Meta Ads</CardTitle>
+							<CardDescription>
+								{#if metaAdsActiveCount > 0}
+									{metaAdsActiveCount} Business Manager{metaAdsActiveCount > 1 ? '-uri' : ''} conectat{metaAdsActiveCount > 1 ? 'e' : ''}
+								{:else}
+									Conecteaza Meta/Facebook Ads pentru descarcarea automata a facturilor
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if metaAdsActiveCount > 0}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">{metaAdsActiveCount} Conectat{metaAdsActiveCount > 1 ? 'e' : ''}</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
 						{/if}

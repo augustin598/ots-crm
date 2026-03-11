@@ -202,6 +202,28 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							</a>
 						{/snippet}
 					</SidebarMenuButton>
+					{#if currentPath.startsWith(`/${tenantSlug}/invoices`)}
+						<SidebarMenuSub>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/invoices` || (currentPath.startsWith(`/${tenantSlug}/invoices`) && !currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/meta-ads`))}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/invoices" {...props}>
+											<span>Toate Facturile</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/invoices/google-ads" {...props}>
+											<span>Facturi Google Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+						</SidebarMenuSub>
+					{/if}
 				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/contracts`)}>

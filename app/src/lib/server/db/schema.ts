@@ -126,6 +126,7 @@ export const client = sqliteTable('client', {
 	country: text('country').default('România'),
 	keezPartnerId: text('keez_partner_id'),
 	notes: text('notes'),
+	googleAdsCustomerId: text('google_ads_customer_id'), // Google Ads customer ID (e.g., "1234567890")
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1376,6 +1377,152 @@ export const supplierInvoice = sqliteTable('supplier_invoice', {
 		.default(sql`current_date`)
 });
 
+export const googleAdsIntegration = sqliteTable('google_ads_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	accessToken: text('access_token').notNull(),
+	refreshToken: text('refresh_token').notNull(),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	mccAccountId: text('mcc_account_id').notNull(), // MCC (Manager) account ID, no dashes
+	developerToken: text('developer_token').notNull(),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	syncEnabled: boolean('sync_enabled').notNull().default(true),
+	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// Google Ads sub-accounts cached from MCC — each can be assigned to a CRM client
+export const googleAdsAccount = sqliteTable('google_ads_account', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	googleAdsCustomerId: text('google_ads_customer_id').notNull(), // Sub-account ID (no dashes)
+	accountName: text('account_name').notNull(), // Descriptive name from Google Ads
+	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
+	isActive: boolean('is_active').notNull().default(true),
+	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const googleAdsInvoice = sqliteTable('google_ads_invoice', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	googleAdsCustomerId: text('google_ads_customer_id').notNull(),
+	googleInvoiceId: text('google_invoice_id').notNull(), // For deduplication
+	invoiceNumber: text('invoice_number'),
+	issueDate: timestamp('issue_date', { withTimezone: true, mode: 'date' }),
+	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
+	subtotalAmountMicros: integer('subtotal_amount_micros'),
+	totalAmountMicros: integer('total_amount_micros'),
+	currencyCode: text('currency_code').notNull().default('EUR'),
+	invoiceType: text('invoice_type'), // 'INVOICE', 'CREDIT_MEMO'
+	pdfPath: text('pdf_path'),
+	status: text('status').notNull().default('synced'), // 'synced', 'download_failed'
+	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// Meta Ads integration — multiple per tenant (one per Business Manager)
+export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	businessId: text('business_id').notNull(), // Meta Business Manager ID
+	businessName: text('business_name').notNull().default(''),
+	email: text('email').notNull().default(''),
+	accessToken: text('access_token').notNull().default(''),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }),
+	isActive: boolean('is_active').notNull().default(false),
+	syncEnabled: boolean('sync_enabled').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// Meta Ads ad accounts cached from Business Manager — each can be assigned to a CRM client
+export const metaAdsAccount = sqliteTable('meta_ads_account', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => metaAdsIntegration.id, { onDelete: 'cascade' }),
+	metaAdAccountId: text('meta_ad_account_id').notNull(), // e.g. act_XXXXXXXXX
+	accountName: text('account_name').notNull().default(''),
+	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
+	isActive: boolean('is_active').notNull().default(true),
+	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const metaAdsInvoice = sqliteTable('meta_ads_invoice', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => metaAdsIntegration.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	metaAdAccountId: text('meta_ad_account_id').notNull(),
+	metaInvoiceId: text('meta_invoice_id').notNull(), // For deduplication
+	invoiceNumber: text('invoice_number'),
+	issueDate: timestamp('issue_date', { withTimezone: true, mode: 'date' }),
+	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),
+	amountCents: integer('amount_cents'), // Meta uses cents, not micros
+	currencyCode: text('currency_code').notNull().default('USD'),
+	invoiceType: text('invoice_type').default('INVOICE'),
+	paymentStatus: text('payment_status'),
+	pdfPath: text('pdf_path'),
+	status: text('status').notNull().default('synced'), // 'synced', 'download_failed'
+	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const passwordResetToken = sqliteTable('password_reset_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -1449,7 +1596,13 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	contracts: many(contract),
 	contractTemplates: many(contractTemplate),
 	gmailIntegration: one(gmailIntegration),
+	googleAdsIntegration: one(googleAdsIntegration),
 	supplierInvoices: many(supplierInvoice),
+	googleAdsAccounts: many(googleAdsAccount),
+	googleAdsInvoices: many(googleAdsInvoice),
+	metaAdsIntegrations: many(metaAdsIntegration),
+	metaAdsAccounts: many(metaAdsAccount),
+	metaAdsInvoices: many(metaAdsInvoice),
 	emailLogs: many(emailLog),
 	debugLogs: many(debugLog)
 }));
@@ -1484,7 +1637,11 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	websites: many(clientWebsite),
 	contracts: many(contract),
 	secondaryEmails: many(clientSecondaryEmail),
-	accessData: many(clientAccessData)
+	accessData: many(clientAccessData),
+	googleAdsAccounts: many(googleAdsAccount),
+	googleAdsInvoices: many(googleAdsInvoice),
+	metaAdsAccounts: many(metaAdsAccount),
+	metaAdsInvoices: many(metaAdsInvoice)
 }));
 
 export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({
@@ -1966,6 +2123,74 @@ export const supplierInvoiceRelations = relations(supplierInvoice, ({ one, many 
 	expenses: many(expense)
 }));
 
+export const googleAdsIntegrationRelations = relations(googleAdsIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleAdsIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const googleAdsAccountRelations = relations(googleAdsAccount, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleAdsAccount.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [googleAdsAccount.clientId],
+		references: [client.id]
+	})
+}));
+
+export const googleAdsInvoiceRelations = relations(googleAdsInvoice, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleAdsInvoice.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [googleAdsInvoice.clientId],
+		references: [client.id]
+	})
+}));
+
+export const metaAdsIntegrationRelations = relations(metaAdsIntegration, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [metaAdsIntegration.tenantId],
+		references: [tenant.id]
+	}),
+	accounts: many(metaAdsAccount),
+	invoices: many(metaAdsInvoice)
+}));
+
+export const metaAdsAccountRelations = relations(metaAdsAccount, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [metaAdsAccount.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(metaAdsIntegration, {
+		fields: [metaAdsAccount.integrationId],
+		references: [metaAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [metaAdsAccount.clientId],
+		references: [client.id]
+	})
+}));
+
+export const metaAdsInvoiceRelations = relations(metaAdsInvoice, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [metaAdsInvoice.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(metaAdsIntegration, {
+		fields: [metaAdsInvoice.integrationId],
+		references: [metaAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [metaAdsInvoice.clientId],
+		references: [client.id]
+	})
+}));
+
 export const userBankAccountRelations = relations(userBankAccount, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [userBankAccount.tenantId],
@@ -2437,6 +2662,18 @@ export type ClientSecondaryEmail = typeof clientSecondaryEmail.$inferSelect;
 export type NewClientSecondaryEmail = typeof clientSecondaryEmail.$inferInsert;
 export type ClientAccessData = typeof clientAccessData.$inferSelect;
 export type NewClientAccessData = typeof clientAccessData.$inferInsert;
+export type GoogleAdsIntegration = typeof googleAdsIntegration.$inferSelect;
+export type NewGoogleAdsIntegration = typeof googleAdsIntegration.$inferInsert;
+export type GoogleAdsAccount = typeof googleAdsAccount.$inferSelect;
+export type NewGoogleAdsAccount = typeof googleAdsAccount.$inferInsert;
+export type GoogleAdsInvoice = typeof googleAdsInvoice.$inferSelect;
+export type NewGoogleAdsInvoice = typeof googleAdsInvoice.$inferInsert;
+export type MetaAdsIntegration = typeof metaAdsIntegration.$inferSelect;
+export type NewMetaAdsIntegration = typeof metaAdsIntegration.$inferInsert;
+export type MetaAdsAccount = typeof metaAdsAccount.$inferSelect;
+export type NewMetaAdsAccount = typeof metaAdsAccount.$inferInsert;
+export type MetaAdsInvoice = typeof metaAdsInvoice.$inferSelect;
+export type NewMetaAdsInvoice = typeof metaAdsInvoice.$inferInsert;
 
 // Invoice view tokens — public access to invoices via email links (no login required)
 export const invoiceViewToken = sqliteTable('invoice_view_token', {

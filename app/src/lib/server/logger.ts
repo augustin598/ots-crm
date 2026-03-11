@@ -16,7 +16,9 @@ export type LogSource =
 	| 'anaf-spv'
 	| 'banking'
 	| 'storage'
-	| 'invoice-view';
+	| 'invoice-view'
+	| 'google-ads'
+	| 'google-ads-sync';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

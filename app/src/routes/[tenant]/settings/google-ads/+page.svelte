@@ -1,0 +1,339 @@
+<script lang="ts">
+	import {
+		getGoogleAdsConnectionStatus,
+		getGoogleAdsAccounts,
+		getClientsForMapping,
+		saveGoogleAdsConfig,
+		fetchGoogleAdsAccounts,
+		assignGoogleAdsAccountToClient,
+		triggerGoogleAdsSync
+	} from '$lib/remotes/google-ads-invoices.remote';
+	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Button } from '$lib/components/ui/button';
+	import { Separator } from '$lib/components/ui/separator';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
+	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Save, RefreshCw, Download } from '@lucide/svelte';
+	import { page } from '$app/state';
+	import { toast } from 'svelte-sonner';
+
+	const tenantSlug = $derived(page.params.tenant);
+
+	const statusQuery = getGoogleAdsConnectionStatus();
+	const status = $derived(statusQuery.current);
+	const loading = $derived(statusQuery.loading);
+
+	const accountsQuery = getGoogleAdsAccounts();
+	const accounts = $derived(accountsQuery.current || []);
+
+	const clientsQuery = getClientsForMapping();
+	const clients = $derived(clientsQuery.current || []);
+
+	let mccAccountId = $state('');
+	let developerToken = $state('');
+	let syncEnabled = $state(true);
+	let savingConfig = $state(false);
+	let syncing = $state(false);
+	let disconnecting = $state(false);
+	let fetchingAccounts = $state(false);
+
+	// Initialize from status
+	$effect(() => {
+		if (status) {
+			mccAccountId = status.mccAccountId || '';
+			developerToken = status.developerToken || '';
+			syncEnabled = status.syncEnabled ?? true;
+		}
+	});
+
+	// URL params from OAuth callback
+	const urlSuccess = $derived(page.url.searchParams.get('success') === 'true');
+	const urlError = $derived(page.url.searchParams.get('error'));
+
+	async function handleSaveConfig() {
+		savingConfig = true;
+		try {
+			await saveGoogleAdsConfig({
+				mccAccountId,
+				developerToken,
+				syncEnabled
+			}).updates(statusQuery);
+			toast.success('Configurare salvată');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+		} finally {
+			savingConfig = false;
+		}
+	}
+
+	async function handleConnect() {
+		if (!mccAccountId || !developerToken) {
+			toast.error('Completează MCC Account ID și Developer Token înainte de conectare');
+			return;
+		}
+		await handleSaveConfig();
+		window.location.href = `/api/google-ads/auth?tenant=${tenantSlug}`;
+	}
+
+	async function handleDisconnect() {
+		if (!confirm('Ești sigur că vrei să deconectezi Google Ads? Sincronizarea automată va fi oprită.')) {
+			return;
+		}
+
+		disconnecting = true;
+		try {
+			const res = await fetch(`/api/google-ads/disconnect`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ tenant: tenantSlug })
+			});
+			if (!res.ok) throw new Error('Failed to disconnect');
+			window.location.reload();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la deconectare');
+		} finally {
+			disconnecting = false;
+		}
+	}
+
+	async function handleFetchAccounts() {
+		fetchingAccounts = true;
+		try {
+			const result = await fetchGoogleAdsAccounts().updates(accountsQuery);
+			toast.success(`${result.fetched} conturi Google Ads găsite`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la extragere conturi');
+		} finally {
+			fetchingAccounts = false;
+		}
+	}
+
+	async function handleAssignClient(accountId: string, clientId: string) {
+		try {
+			await assignGoogleAdsAccountToClient({
+				accountId,
+				clientId: clientId || null
+			}).updates(accountsQuery);
+			toast.success('Client atribuit');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la atribuire');
+		}
+	}
+
+	async function handleSync() {
+		syncing = true;
+		try {
+			const result = await triggerGoogleAdsSync().updates(statusQuery);
+			toast.success(`Sync complet: ${result.imported} importate, ${result.skipped} existente, ${result.errors} erori`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+		} finally {
+			syncing = false;
+		}
+	}
+
+	function formatCustomerIdDisplay(id: string): string {
+		const clean = id.replace(/-/g, '');
+		if (clean.length !== 10) return id;
+		return `${clean.slice(0, 3)}-${clean.slice(3, 6)}-${clean.slice(6)}`;
+	}
+
+	function formatDate(date: Date | string | null): string {
+		if (!date) return '-';
+		const d = date instanceof Date ? date : new Date(date);
+		return d.toLocaleString('ro-RO');
+	}
+</script>
+
+<div class="space-y-6">
+	<div>
+		<h1 class="text-3xl font-bold">Google Ads</h1>
+		<p class="text-muted-foreground">Configurare integrare Google Ads pentru descărcare automată facturi</p>
+	</div>
+
+	{#if urlSuccess}
+		<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
+			<p class="text-sm text-green-800 dark:text-green-200">Conectare Google Ads reușită!</p>
+		</div>
+	{/if}
+
+	{#if urlError}
+		<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
+			<p class="text-sm text-red-800 dark:text-red-200">Eroare: {urlError}</p>
+		</div>
+	{/if}
+
+	{#if loading}
+		<p class="text-muted-foreground">Se încarcă...</p>
+	{:else}
+		<!-- Connection Card -->
+		<Card>
+			<CardHeader>
+				<CardTitle class="flex items-center gap-2">
+					{#if status?.connected}
+						<CheckCircle2 class="h-5 w-5 text-green-500" />
+						Conectat
+					{:else}
+						<XCircle class="h-5 w-5 text-red-500" />
+						Neconectat
+					{/if}
+				</CardTitle>
+				<CardDescription>
+					{#if status?.connected}
+						Conectat cu {status.email}
+					{:else}
+						Conectează-te cu Google pentru a sincroniza facturile Google Ads
+					{/if}
+				</CardDescription>
+			</CardHeader>
+			<CardContent class="space-y-4">
+				<div class="grid gap-4 sm:grid-cols-2">
+					<div class="space-y-2">
+						<Label for="mcc-id">MCC Account ID</Label>
+						<Input
+							id="mcc-id"
+							type="text"
+							placeholder="123-456-7890"
+							bind:value={mccAccountId}
+						/>
+						<p class="text-xs text-muted-foreground">ID-ul contului Manager (MCC)</p>
+					</div>
+					<div class="space-y-2">
+						<Label for="dev-token">Developer Token</Label>
+						<Input
+							id="dev-token"
+							type="password"
+							placeholder="Developer Token"
+							bind:value={developerToken}
+						/>
+						<p class="text-xs text-muted-foreground">Token-ul de dezvoltator Google Ads API</p>
+					</div>
+				</div>
+
+				<div class="flex items-center gap-2">
+					<Switch bind:checked={syncEnabled} id="sync-enabled" />
+					<Label for="sync-enabled">Sincronizare automată activă</Label>
+				</div>
+
+				<Separator />
+
+				<div class="flex items-center gap-2 flex-wrap">
+					{#if status?.connected}
+						<Button variant="outline" onclick={handleSaveConfig} disabled={savingConfig}>
+							{#if savingConfig}
+								<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Save class="mr-2 h-4 w-4" />
+							{/if}
+							Salvează Configurare
+						</Button>
+						<Button variant="outline" onclick={handleFetchAccounts} disabled={fetchingAccounts}>
+							{#if fetchingAccounts}
+								<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+								Extragere...
+							{:else}
+								<Download class="mr-2 h-4 w-4" />
+								Extrage Conturi Google Ads
+							{/if}
+						</Button>
+						<Button variant="outline" onclick={handleSync} disabled={syncing}>
+							{#if syncing}
+								<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+								Sincronizare...
+							{:else}
+								<RefreshCw class="mr-2 h-4 w-4" />
+								Sync Facturi
+							{/if}
+						</Button>
+						<Button variant="destructive" onclick={handleDisconnect} disabled={disconnecting}>
+							<Unlink class="mr-2 h-4 w-4" />
+							Deconectează
+						</Button>
+					{:else}
+						<Button variant="outline" onclick={handleSaveConfig} disabled={savingConfig}>
+							<Save class="mr-2 h-4 w-4" />
+							Salvează Configurare
+						</Button>
+						<Button onclick={handleConnect}>
+							<LinkIcon class="mr-2 h-4 w-4" />
+							Conectează Google Ads
+						</Button>
+					{/if}
+				</div>
+
+				{#if status?.lastSyncAt}
+					<div class="text-sm text-muted-foreground">
+						Ultimul sync: {formatDate(status.lastSyncAt)}
+						{#if status.lastSyncResults}
+							— {status.lastSyncResults.imported} importate, {status.lastSyncResults.skipped || 0} existente, {status.lastSyncResults.errors || 0} erori
+						{/if}
+					</div>
+				{/if}
+			</CardContent>
+		</Card>
+
+		<!-- Account Mapping Card -->
+		{#if status?.connected}
+			<Card>
+				<CardHeader>
+					<CardTitle>Conturi Google Ads → Clienți</CardTitle>
+					<CardDescription>
+						Atribuie conturile Google Ads din MCC la clienții din CRM. Apasă „Extrage Conturi Google Ads" pentru a aduce lista de conturi.
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					{#if accounts.length === 0}
+						<div class="text-center py-6">
+							<p class="text-sm text-muted-foreground mb-3">Nu sunt conturi Google Ads extrase.</p>
+							<Button variant="outline" onclick={handleFetchAccounts} disabled={fetchingAccounts}>
+								{#if fetchingAccounts}
+									<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+									Extragere...
+								{:else}
+									<Download class="mr-2 h-4 w-4" />
+									Extrage Conturi Google Ads
+								{/if}
+							</Button>
+						</div>
+					{:else}
+						<div class="rounded-md border">
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Cont Google Ads</TableHead>
+										<TableHead>Customer ID</TableHead>
+										<TableHead>Client CRM</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{#each accounts as account}
+										<TableRow>
+											<TableCell class="font-medium">{account.accountName}</TableCell>
+											<TableCell class="text-muted-foreground font-mono text-sm">
+												{formatCustomerIdDisplay(account.googleAdsCustomerId)}
+											</TableCell>
+											<TableCell>
+												<select
+													class="h-9 w-full max-w-[250px] rounded-md border border-input bg-background px-3 text-sm"
+													value={account.clientId || ''}
+													onchange={(e) => handleAssignClient(account.id, e.currentTarget.value)}
+												>
+													<option value="">— Neatribuit —</option>
+													{#each clients as client}
+														<option value={client.id}>{client.name}</option>
+													{/each}
+												</select>
+											</TableCell>
+										</TableRow>
+									{/each}
+								</TableBody>
+							</Table>
+						</div>
+					{/if}
+				</CardContent>
+			</Card>
+		{/if}
+	{/if}
+</div>

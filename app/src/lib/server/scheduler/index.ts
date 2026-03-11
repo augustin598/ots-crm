@@ -10,6 +10,8 @@ import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
 import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
 import { processContractLifecycle } from './tasks/contract-lifecycle';
+import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
+import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
@@ -69,7 +71,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	gmail_invoice_sync: processGmailInvoiceSync,
 	bnr_rate_sync: processBnrRateSync,
 	invoice_overdue_reminders: processInvoiceOverdueReminders,
-	contract_lifecycle: processContractLifecycle
+	contract_lifecycle: processContractLifecycle,
+	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
+	meta_ads_invoice_sync: processMetaAdsInvoiceSync
 };
 
 /**
@@ -304,7 +308,39 @@ export const startScheduler = () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 11 jobs registered`);
+	// Schedule Google Ads invoice sync monthly (1st of each month at 6:00 AM)
+	schedulerQueue.add(
+		'google-ads-invoice-sync',
+		{
+			type: 'google_ads_invoice_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 6 1 * *', // 1st of each month at 6:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'google-ads-invoice-sync'
+		}
+	);
+
+	// Schedule Meta Ads invoice sync monthly (1st of each month at 7:00 AM)
+	schedulerQueue.add(
+		'meta-ads-invoice-sync',
+		{
+			type: 'meta_ads_invoice_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 7 1 * *', // 1st of each month at 7:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'meta-ads-invoice-sync'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 13 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -326,7 +362,9 @@ export const JOB_LABELS: Record<string, string> = {
 	gmail_invoice_sync_evening: 'Sync Facturi Gmail (Seara)',
 	bnr_rate_sync: 'Sync Curs BNR',
 	invoice_overdue_reminders: 'Reminder-e Facturi Restante',
-	contract_lifecycle: 'Lifecycle Contracte'
+	contract_lifecycle: 'Lifecycle Contracte',
+	google_ads_invoice_sync: 'Sync Facturi Google Ads',
+	meta_ads_invoice_sync: 'Sync Facturi Meta Ads'
 };
 
 /** Default params for jobs that need specific parameters */

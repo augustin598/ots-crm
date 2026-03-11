@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from '../$types';
-	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from '$lib/components/ui/sidebar';
+	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, SidebarFooter } from '$lib/components/ui/sidebar';
 	import { logout } from '$lib/remotes/auth.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -115,6 +115,28 @@
 							</a>
 						{/snippet}
 					</SidebarMenuButton>
+					{#if currentPath.startsWith(`/client/${tenantSlug}/invoices`)}
+						<SidebarMenuSub>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath === `/client/${tenantSlug}/invoices` || (currentPath.startsWith(`/client/${tenantSlug}/invoices`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`))}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/invoices" {...props}>
+											<span>Toate Facturile</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/invoices/google-ads" {...props}>
+											<span>Facturi Google Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+						</SidebarMenuSub>
+					{/if}
 				</SidebarMenuItem>
 				{/if}
 				<SidebarMenuItem>
