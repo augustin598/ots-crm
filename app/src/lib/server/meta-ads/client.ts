@@ -188,19 +188,29 @@ export async function downloadInvoicePdf(downloadUri: string): Promise<Buffer> {
 
 /**
  * Get the date range to query for invoice sync (current + previous 2 months)
+ * Returns Unix timestamps (seconds) as Meta Graph API expects.
  */
 export function getSyncDateRange(referenceDate?: Date): { startDate: string; endDate: string } {
 	const date = referenceDate || new Date();
 
 	// Start: 2 months ago, 1st day
 	const startMonth = new Date(date.getFullYear(), date.getMonth() - 2, 1);
-	// End: current month, last day
-	const endMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+	// End: current month, last day (23:59:59)
+	const endMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
 
-	const formatDate = (d: Date) => d.toISOString().split('T')[0]; // YYYY-MM-DD
+	// Meta Graph API business_invoices expects Unix timestamps (seconds)
+	const startTimestamp = Math.floor(startMonth.getTime() / 1000);
+	const endTimestamp = Math.floor(endMonth.getTime() / 1000);
+
+	console.log('[META-ADS CLIENT] getSyncDateRange', {
+		startDate: startMonth.toISOString(),
+		endDate: endMonth.toISOString(),
+		startTimestamp,
+		endTimestamp
+	});
 
 	return {
-		startDate: formatDate(startMonth),
-		endDate: formatDate(endMonth)
+		startDate: String(startTimestamp),
+		endDate: String(endTimestamp)
 	};
 }
