@@ -34,6 +34,10 @@ export const GET: RequestHandler = async (event) => {
 	}
 
 	const absolutePath = join(process.cwd(), row.pdfPath);
+	const uploadsDir = join(process.cwd(), 'uploads');
+	if (!absolutePath.startsWith(uploadsDir)) {
+		throw error(403, 'Invalid file path');
+	}
 
 	try {
 		const fileStat = await stat(absolutePath);

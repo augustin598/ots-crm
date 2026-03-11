@@ -1,10 +1,11 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDecryptedFbCookies } from './fb-cookies';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
+import JSZip from 'jszip';
 import type { FbCookie } from './fb-cookies';
 
 const INVOICES_GENERATOR_URL = 'https://business.facebook.com/ads/manage/invoices_generator/';
@@ -43,8 +44,28 @@ function getMonthTimestamps(year: number, month: number): { ts: number; timeEnd:
 	};
 }
 
+/** Check if buffer starts with PDF magic bytes (%PDF) */
+function isPdf(buf: Buffer): boolean {
+	return buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+}
+
+/** Check if buffer starts with ZIP magic bytes (PK) */
+function isZip(buf: Buffer): boolean {
+	return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4B;
+}
+
+/** Extract the first PDF file from a ZIP archive */
+async function extractPdfFromZip(zipBuffer: Buffer): Promise<Buffer | null> {
+	const zip = await JSZip.loadAsync(zipBuffer);
+	const pdfFiles = Object.keys(zip.files).filter(name => name.toLowerCase().endsWith('.pdf'));
+	if (pdfFiles.length === 0) return null;
+	const content = await zip.files[pdfFiles[0]].async('nodebuffer');
+	return isPdf(content) ? content : null;
+}
+
 /**
  * Download a single receipt PDF from Facebook's invoices_generator.
+ * Facebook may return a ZIP archive containing multiple transaction PDFs.
  */
 export async function downloadReceipt(params: DownloadParams): Promise<DownloadResult> {
 	const { adAccountId, year, month, cookies } = params;
@@ -62,8 +83,12 @@ export async function downloadReceipt(params: DownloadParams): Promise<DownloadR
 			headers: {
 				'Cookie': cookieHeader,
 				'User-Agent': USER_AGENT,
-				'Accept': 'application/pdf,*/*',
-				'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8'
+				'Accept': '*/*',
+				'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
+				'Sec-Fetch-Dest': 'document',
+				'Sec-Fetch-Mode': 'navigate',
+				'Sec-Fetch-Site': 'same-origin',
+				'Referer': 'https://business.facebook.com/'
 			},
 			redirect: 'manual'
 		});
@@ -80,20 +105,27 @@ export async function downloadReceipt(params: DownloadParams): Promise<DownloadR
 		const contentType = response.headers.get('content-type') || '';
 		const buffer = Buffer.from(await response.arrayBuffer());
 
-		// Validate PDF magic bytes: %PDF
-		if (buffer.length < 4 || buffer[0] !== 0x25 || buffer[1] !== 0x50 || buffer[2] !== 0x44 || buffer[3] !== 0x46) {
-			// Not a PDF — might be HTML login page
-			if (contentType.includes('text/html')) {
-				return { success: false, error: 'session_expired' };
+		let pdfBuffer: Buffer;
+
+		if (isPdf(buffer)) {
+			pdfBuffer = buffer;
+		} else if (isZip(buffer)) {
+			const extracted = await extractPdfFromZip(buffer);
+			if (!extracted) {
+				return { success: false, error: 'zip_no_pdf_inside' };
 			}
-			return { success: false, error: 'no_pdf_received' };
+			pdfBuffer = extracted;
+		} else if (contentType.includes('text/html')) {
+			return { success: false, error: 'session_expired' };
+		} else {
+			return { success: false, error: `unexpected_content (type: ${contentType}, size: ${buffer.length})` };
 		}
 
-		if (buffer.length < 100) {
+		if (pdfBuffer.length < 100) {
 			return { success: false, error: 'empty_pdf' };
 		}
 
-		return { success: true, pdfBuffer: buffer };
+		return { success: true, pdfBuffer };
 	} catch (err) {
 		return {
 			success: false,
@@ -193,41 +225,46 @@ export async function downloadAllReceiptsForMonth(
 			if (result.success && result.pdfBuffer) {
 				// Save to filesystem
 				const dir = join(process.cwd(), 'uploads', 'meta-invoices', tenantId);
-				await mkdir(dir, { recursive: true });
 				const relativePath = join('uploads', 'meta-invoices', tenantId, `${account.metaAdAccountId}_${year}-${monthStr}.pdf`);
-				await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
 
-				if (existing) {
-					// Update existing record
-					await db
-						.update(table.metaInvoiceDownload)
-						.set({
-							pdfPath: relativePath,
-							status: 'downloaded',
-							downloadedAt: new Date(),
-							errorMessage: null,
-							updatedAt: new Date()
-						})
-						.where(eq(table.metaInvoiceDownload.id, existing.id));
-				} else {
-					// Insert new record
-					await db.insert(table.metaInvoiceDownload).values({
-						id: crypto.randomUUID(),
+				try {
+					await mkdir(dir, { recursive: true });
+					await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
+				} catch (fsErr) {
+					logError('invoice-downloader', `Failed to write PDF file for ${account.metaAdAccountId}`, {
 						tenantId,
-						integrationId: integration.id,
-						clientId: account.clientId!,
-						metaAdAccountId: account.metaAdAccountId,
-						adAccountName: account.accountName,
-						bmName: integration.businessName,
-						periodStart,
-						periodEnd,
-						pdfPath: relativePath,
-						status: 'downloaded',
-						downloadedAt: new Date(),
-						createdAt: new Date(),
-						updatedAt: new Date()
+						metadata: { error: fsErr instanceof Error ? fsErr.message : String(fsErr), period: periodStart }
 					});
+					errors++;
+					continue;
 				}
+
+				// Upsert: handles race conditions via unique index (tenant_id, meta_ad_account_id, period_start)
+				await db.insert(table.metaInvoiceDownload).values({
+					id: existing?.id || crypto.randomUUID(),
+					tenantId,
+					integrationId: integration.id,
+					clientId: account.clientId!,
+					metaAdAccountId: account.metaAdAccountId,
+					adAccountName: account.accountName,
+					bmName: integration.businessName,
+					periodStart,
+					periodEnd,
+					pdfPath: relativePath,
+					status: 'downloaded',
+					downloadedAt: new Date(),
+					createdAt: new Date(),
+					updatedAt: new Date()
+				}).onConflictDoUpdate({
+					target: [table.metaInvoiceDownload.tenantId, table.metaInvoiceDownload.metaAdAccountId, table.metaInvoiceDownload.periodStart],
+					set: {
+						pdfPath: sql`excluded.pdf_path`,
+						status: sql`'downloaded'`,
+						downloadedAt: new Date(),
+						errorMessage: null,
+						updatedAt: new Date()
+					}
+				});
 
 				downloaded++;
 				logInfo('invoice-downloader', `Downloaded receipt for ${account.accountName}`, {
@@ -250,32 +287,29 @@ export async function downloadAllReceiptsForMonth(
 
 				const errorMsg = result.error || 'Unknown error';
 
-				if (existing) {
-					await db
-						.update(table.metaInvoiceDownload)
-						.set({
-							status: 'error',
-							errorMessage: errorMsg,
-							updatedAt: new Date()
-						})
-						.where(eq(table.metaInvoiceDownload.id, existing.id));
-				} else {
-					await db.insert(table.metaInvoiceDownload).values({
-						id: crypto.randomUUID(),
-						tenantId,
-						integrationId: integration.id,
-						clientId: account.clientId!,
-						metaAdAccountId: account.metaAdAccountId,
-						adAccountName: account.accountName,
-						bmName: integration.businessName,
-						periodStart,
-						periodEnd,
-						status: 'error',
-						errorMessage: errorMsg,
-						createdAt: new Date(),
+				// Upsert error status
+				await db.insert(table.metaInvoiceDownload).values({
+					id: existing?.id || crypto.randomUUID(),
+					tenantId,
+					integrationId: integration.id,
+					clientId: account.clientId!,
+					metaAdAccountId: account.metaAdAccountId,
+					adAccountName: account.accountName,
+					bmName: integration.businessName,
+					periodStart,
+					periodEnd,
+					status: 'error',
+					errorMessage: errorMsg,
+					createdAt: new Date(),
+					updatedAt: new Date()
+				}).onConflictDoUpdate({
+					target: [table.metaInvoiceDownload.tenantId, table.metaInvoiceDownload.metaAdAccountId, table.metaInvoiceDownload.periodStart],
+					set: {
+						status: sql`'error'`,
+						errorMessage: sql`excluded.error_message`,
 						updatedAt: new Date()
-					});
-				}
+					}
+				});
 
 				errors++;
 				logError('invoice-downloader', `Download failed for ${account.metaAdAccountId}`, {

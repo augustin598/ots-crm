@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getMetaAdsConnections } from '$lib/server/meta-ads/auth';
+import { logWarning } from '$lib/server/logger';
 
 // ---- Queries ----
 
@@ -583,13 +584,20 @@ export const clearMetaAdsCookies = command(
 	}
 );
 
-/** Get all invoice downloads for the tenant */
+/** Get all invoice downloads for the tenant (or filtered by client for client users) */
 export const getMetaInvoiceDownloads = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
-	if (event.locals.isClientUser) return [];
+
+	let conditions: any = eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id);
+
+	// Client users: only primary client user sees their own downloads
+	if (event.locals.isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary) return [];
+		conditions = and(conditions, eq(table.metaInvoiceDownload.clientId, event.locals.client.id));
+	}
 
 	const rows = await db
 		.select({
@@ -610,7 +618,7 @@ export const getMetaInvoiceDownloads = query(async () => {
 		})
 		.from(table.metaInvoiceDownload)
 		.leftJoin(table.client, eq(table.metaInvoiceDownload.clientId, table.client.id))
-		.where(eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id))
+		.where(conditions)
 		.orderBy(desc(table.metaInvoiceDownload.periodStart))
 		.limit(500);
 
@@ -669,16 +677,28 @@ export const redownloadInvoice = command(
 
 		// Parse period to get year/month
 		const [year, month] = dl.periodStart.split('-').map(Number);
+		if (!year || !month || month < 1 || month > 12) {
+			throw new Error('Format perioadă invalid');
+		}
 
-		// Get integration info
+		// Get integration info (scoped to tenant for defense-in-depth)
 		const [integration] = await db
 			.select()
 			.from(table.metaAdsIntegration)
-			.where(eq(table.metaAdsIntegration.id, dl.integrationId))
+			.where(
+				and(
+					eq(table.metaAdsIntegration.id, dl.integrationId),
+					eq(table.metaAdsIntegration.tenantId, tenantId)
+				)
+			)
 			.limit(1);
 
 		if (!integration) {
 			throw new Error('Integrare negăsită');
+		}
+
+		if (integration.fbSessionStatus !== 'active') {
+			throw new Error('Sesiune Facebook expirată — actualizează cookies din Settings');
 		}
 
 		const { downloadReceipt } = await import('$lib/server/meta-ads/invoice-downloader');
@@ -766,8 +786,10 @@ export const deleteInvoiceDownload = command(
 				const { unlink } = await import('fs/promises');
 				const { join } = await import('path');
 				await unlink(join(process.cwd(), dl.pdfPath));
-			} catch {
-				// File might not exist
+			} catch (err: any) {
+				if (err?.code !== 'ENOENT') {
+					logWarning('meta-ads', `Failed to delete PDF file: ${dl.pdfPath}`, { tenantId: event.locals.tenant.id });
+				}
 			}
 		}
 
@@ -811,8 +833,10 @@ export const deleteMetaAdsSpending = command(
 				const { unlink } = await import('fs/promises');
 				const { join } = await import('path');
 				await unlink(join(process.cwd(), row.pdfPath));
-			} catch {
-				// File might not exist
+			} catch (err: any) {
+				if (err?.code !== 'ENOENT') {
+					logWarning('meta-ads', `Failed to delete spending PDF: ${row.pdfPath}`, { tenantId: event.locals.tenant.id });
+				}
 			}
 		}
 
