@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, getMetaInvoiceDownloads } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -15,6 +15,10 @@
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
 	const loading = $derived(spendingQuery.loading);
+
+	const invoiceDownloadsQuery = getMetaInvoiceDownloads();
+	const invoiceDownloads = $derived((invoiceDownloadsQuery.current || []).filter((d: any) => d.status === 'downloaded'));
+
 
 	let searchQuery = $state('');
 	let sortColumn = $state<'periodStart' | 'spendCents'>('periodStart');
@@ -47,6 +51,34 @@
 			window.open(url, '_blank');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+		}
+	}
+
+	async function handlePreviewInvoicePDF(downloadId: string) {
+		try {
+			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/downloads/${downloadId}/pdf`);
+			if (!response.ok) throw new Error('Failed to load PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+		}
+	}
+
+	async function handleDownloadInvoicePDF(downloadId: string, period: string) {
+		try {
+			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/downloads/${downloadId}/pdf`);
+			if (!response.ok) throw new Error('Failed to download PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `MetaAds-Factura-${period}.pdf`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
 		}
 	}
 
@@ -239,5 +271,47 @@
 				</div>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- Facturi PDF Facebook -->
+	{#if invoiceDownloads.length > 0}
+		<div class="pt-4">
+			<div class="mb-4">
+				<h2 class="text-xl font-semibold">Facturi PDF Facebook</h2>
+				<p class="text-sm text-muted-foreground">Facturile oficiale descărcate din Facebook Business Manager</p>
+			</div>
+
+			<div class="rounded-md border overflow-x-auto">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Ad Account</TableHead>
+							<TableHead>Perioadă</TableHead>
+							<TableHead class="w-[100px]"></TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{#each invoiceDownloads as dl}
+							<TableRow>
+								<TableCell>
+									<div class="font-medium">{dl.adAccountName || dl.metaAdAccountId}</div>
+								</TableCell>
+								<TableCell>{formatPeriod(dl.periodStart)}</TableCell>
+								<TableCell>
+									<div class="flex items-center gap-1">
+										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview PDF">
+											<Eye class="h-4 w-4" />
+										</Button>
+										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download PDF">
+											<Download class="h-4 w-4" />
+										</Button>
+									</div>
+								</TableCell>
+							</TableRow>
+						{/each}
+					</TableBody>
+				</Table>
+			</div>
+		</div>
 	{/if}
 </div>

@@ -583,13 +583,20 @@ export const clearMetaAdsCookies = command(
 	}
 );
 
-/** Get all invoice downloads for the tenant */
+/** Get all invoice downloads for the tenant (or filtered by client for client users) */
 export const getMetaInvoiceDownloads = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
-	if (event.locals.isClientUser) return [];
+
+	let conditions: any = eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id);
+
+	// Client users only see their own downloads
+	if (event.locals.isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary) return [];
+		conditions = and(conditions, eq(table.metaInvoiceDownload.clientId, event.locals.client.id));
+	}
 
 	const rows = await db
 		.select({
@@ -610,7 +617,7 @@ export const getMetaInvoiceDownloads = query(async () => {
 		})
 		.from(table.metaInvoiceDownload)
 		.leftJoin(table.client, eq(table.metaInvoiceDownload.clientId, table.client.id))
-		.where(eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id))
+		.where(conditions)
 		.orderBy(desc(table.metaInvoiceDownload.periodStart))
 		.limit(500);
 

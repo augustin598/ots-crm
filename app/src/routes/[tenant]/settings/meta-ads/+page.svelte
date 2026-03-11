@@ -442,7 +442,7 @@
 											<div class="space-y-2">
 												<textarea
 													class="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-													placeholder='[{"name":"c_user","value":"...","domain":".facebook.com"}, ...]'
+													placeholder={'[{"name":"c_user","value":"...","domain":".facebook.com"}, ...]'}
 													value={cookieJsonInputs[conn.id] || ''}
 													oninput={(e) => { cookieJsonInputs = { ...cookieJsonInputs, [conn.id]: e.currentTarget.value }; }}
 												></textarea>
