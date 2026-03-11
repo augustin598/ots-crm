@@ -7,7 +7,9 @@
 		removeMetaAdsConnection,
 		fetchMetaAdsAccounts,
 		assignMetaAdsAccountToClient,
-		triggerMetaAdsSync
+		triggerMetaAdsSync,
+		setMetaAdsCookies,
+		clearMetaAdsCookies
 	} from '$lib/remotes/meta-ads-invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -40,6 +42,38 @@
 	// Accounts cache per integration
 	let accountsCache = $state<Record<string, any[]>>({});
 	let fetchingAccountsFor = $state<string | null>(null);
+
+	// Cookie management
+	let cookieJsonInputs = $state<Record<string, string>>({});
+	let savingCookiesFor = $state<string | null>(null);
+
+	async function handleSaveCookies(integrationId: string) {
+		const json = cookieJsonInputs[integrationId]?.trim();
+		if (!json) {
+			toast.error('Inserează JSON-ul cookies din Cookie-Editor');
+			return;
+		}
+		savingCookiesFor = integrationId;
+		try {
+			await setMetaAdsCookies({ integrationId, cookiesJson: json }).updates(connectionsQuery);
+			toast.success('Cookies Facebook salvate');
+			cookieJsonInputs = { ...cookieJsonInputs, [integrationId]: '' };
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare cookies');
+		} finally {
+			savingCookiesFor = null;
+		}
+	}
+
+	async function handleClearCookies(integrationId: string) {
+		if (!confirm('Ștergi sesiunea Facebook? Download-ul facturilor nu va mai funcționa.')) return;
+		try {
+			await clearMetaAdsCookies(integrationId).updates(connectionsQuery);
+			toast.success('Sesiune Facebook ștearsă');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere sesiune');
+		}
+	}
 
 	// URL params from OAuth callback
 	const urlSuccess = $derived(page.url.searchParams.get('success') === 'true');
@@ -374,6 +408,52 @@
 														{/each}
 													</TableBody>
 												</Table>
+											</div>
+										{/if}
+									</div>
+								{/if}
+
+								<!-- Facebook Session Cookies (for invoice PDF download) -->
+								{#if conn.connected}
+									<Separator />
+									<div class="space-y-3">
+										<div class="flex items-center gap-2">
+											<h3 class="text-sm font-semibold">Sesiune Facebook (Facturi PDF)</h3>
+											{#if conn.fbSessionStatus === 'active'}
+												<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
+													Active
+												</span>
+											{:else}
+												<span class="inline-flex items-center rounded-full border border-gray-400 px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-50">
+													Lipsă
+												</span>
+											{/if}
+										</div>
+										<p class="text-xs text-muted-foreground">
+											Exportă cookies-urile de pe facebook.com cu extensia „Cookie-Editor" (format JSON) și inserează-le aici.
+											Sunt necesare pentru descărcarea automată a facturilor PDF.
+										</p>
+										{#if conn.fbSessionStatus === 'active'}
+											<Button variant="outline" size="sm" onclick={() => handleClearCookies(conn.id)}>
+												<Trash2 class="mr-2 h-4 w-4" />
+												Șterge Sesiune
+											</Button>
+										{:else}
+											<div class="space-y-2">
+												<textarea
+													class="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+													placeholder='[{"name":"c_user","value":"...","domain":".facebook.com"}, ...]'
+													value={cookieJsonInputs[conn.id] || ''}
+													oninput={(e) => { cookieJsonInputs = { ...cookieJsonInputs, [conn.id]: e.currentTarget.value }; }}
+												></textarea>
+												<Button size="sm" onclick={() => handleSaveCookies(conn.id)} disabled={savingCookiesFor === conn.id}>
+													{#if savingCookiesFor === conn.id}
+														<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+														Salvare...
+													{:else}
+														Salvează Cookies
+													{/if}
+												</Button>
 											</div>
 										{/if}
 									</div>
