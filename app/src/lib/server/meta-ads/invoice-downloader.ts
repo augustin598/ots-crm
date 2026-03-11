@@ -3,8 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { getDecryptedFbCookies } from './fb-cookies';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { uploadBuffer } from '$lib/server/storage';
 import JSZip from 'jszip';
 import type { FbCookie } from './fb-cookies';
 
@@ -223,17 +222,21 @@ export async function downloadAllReceiptsForMonth(
 			});
 
 			if (result.success && result.pdfBuffer) {
-				// Save to filesystem
-				const dir = join(process.cwd(), 'uploads', 'meta-invoices', tenantId);
-				const relativePath = join('uploads', 'meta-invoices', tenantId, `${account.metaAdAccountId}_${year}-${monthStr}.pdf`);
-
+				// Upload to MinIO
+				let storagePath: string;
 				try {
-					await mkdir(dir, { recursive: true });
-					await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
-				} catch (fsErr) {
-					logError('invoice-downloader', `Failed to write PDF file for ${account.metaAdAccountId}`, {
+					const upload = await uploadBuffer(
 						tenantId,
-						metadata: { error: fsErr instanceof Error ? fsErr.message : String(fsErr), period: periodStart }
+						result.pdfBuffer,
+						`meta-invoice-${account.metaAdAccountId}_${year}-${monthStr}.pdf`,
+						'application/pdf',
+						{ type: 'meta-invoice', adAccountId: account.metaAdAccountId, period: periodStart }
+					);
+					storagePath = upload.path;
+				} catch (uploadErr) {
+					logError('invoice-downloader', `Failed to upload PDF for ${account.metaAdAccountId}`, {
+						tenantId,
+						metadata: { error: uploadErr instanceof Error ? uploadErr.message : String(uploadErr), period: periodStart }
 					});
 					errors++;
 					continue;
@@ -250,7 +253,7 @@ export async function downloadAllReceiptsForMonth(
 					bmName: integration.businessName,
 					periodStart,
 					periodEnd,
-					pdfPath: relativePath,
+					pdfPath: storagePath,
 					status: 'downloaded',
 					downloadedAt: new Date(),
 					createdAt: new Date(),
