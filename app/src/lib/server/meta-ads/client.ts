@@ -35,6 +35,7 @@ export async function listBusinessAdAccounts(
 	businessId: string,
 	accessToken: string
 ): Promise<MetaAdsAdAccount[]> {
+	console.log('[META-ADS CLIENT] listBusinessAdAccounts called', { businessId });
 	logInfo('meta-ads', `Listing ad accounts for BM`, { metadata: { businessId } });
 
 	const accounts: MetaAdsAdAccount[] = [];
@@ -44,9 +45,15 @@ export async function listBusinessAdAccounts(
 		while (url) {
 			const res = await fetch(url);
 			const data = await res.json();
+			console.log('[META-ADS CLIENT] Ad accounts response', { hasError: !!data.error, dataCount: data.data?.length || 0, hasNext: !!data.paging?.next });
 
 			if (data.error) {
+				console.error('[META-ADS CLIENT] Ad accounts API error', data.error);
 				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			if (data.data?.[0]) {
+				console.log('[META-ADS CLIENT] Sample ad account', JSON.stringify(data.data[0]));
 			}
 
 			for (const acc of data.data || []) {
@@ -81,6 +88,7 @@ export async function listBusinessInvoices(
 	startDate?: string,
 	endDate?: string
 ): Promise<MetaAdsInvoiceData[]> {
+	console.log('[META-ADS CLIENT] listBusinessInvoices called', { businessId, startDate, endDate });
 	logInfo('meta-ads', `Listing BM invoices`, { metadata: { businessId, startDate, endDate } });
 
 	const invoices: MetaAdsInvoiceData[] = [];
@@ -99,10 +107,14 @@ export async function listBusinessInvoices(
 
 	try {
 		while (url) {
+			console.log('[META-ADS CLIENT] Fetching invoices page...');
 			const res = await fetch(url);
+			console.log('[META-ADS CLIENT] Invoices response status', { status: res.status, ok: res.ok });
 			const data = await res.json();
+			console.log('[META-ADS CLIENT] Invoices response parsed', { hasError: !!data.error, dataCount: data.data?.length || 0, hasNext: !!data.paging?.next, rawKeys: Object.keys(data) });
 
 			if (data.error) {
+				console.error('[META-ADS CLIENT] Invoices API error', JSON.stringify(data.error));
 				logError('meta-ads', `API error response`, {
 					metadata: { errorMessage: data.error.message, errorCode: data.error.code, errorType: data.error.type }
 				});
@@ -112,6 +124,7 @@ export async function listBusinessInvoices(
 			// Log raw response on first page for debugging
 			if (isFirstPage && data.data?.length > 0) {
 				const sample = data.data[0];
+				console.log('[META-ADS CLIENT] FIRST INVOICE RAW DATA:', JSON.stringify(sample));
 				logInfo('meta-ads', `Raw invoice sample`, {
 					metadata: {
 						keys: Object.keys(sample),
@@ -160,13 +173,16 @@ export async function listBusinessInvoices(
  * Download an invoice PDF from Meta's download URI
  */
 export async function downloadInvoicePdf(downloadUri: string): Promise<Buffer> {
+	console.log('[META-ADS CLIENT] downloadInvoicePdf called', { uri: downloadUri.substring(0, 100) + '...' });
 	const response = await fetch(downloadUri);
+	console.log('[META-ADS CLIENT] PDF download response', { status: response.status, ok: response.ok, contentType: response.headers.get('content-type') });
 
 	if (!response.ok) {
 		throw new Error(`Failed to download PDF: ${response.status}`);
 	}
 
 	const arrayBuffer = await response.arrayBuffer();
+	console.log('[META-ADS CLIENT] PDF downloaded', { size: arrayBuffer.byteLength });
 	return Buffer.from(arrayBuffer);
 }
 

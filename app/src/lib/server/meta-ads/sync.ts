@@ -33,6 +33,7 @@ function parseAmountToCents(amount: string | undefined | null): number {
  * Iterates over ALL active integrations (Business Managers) for the tenant.
  */
 export async function syncMetaAdsInvoicesForTenant(tenantId: string) {
+	console.log('[META-ADS SYNC] ========== SYNC STARTED ==========', { tenantId });
 	logInfo('meta-ads-sync', `Starting sync for tenant`, { tenantId });
 
 	// Get all active integrations for this tenant
@@ -47,7 +48,10 @@ export async function syncMetaAdsInvoicesForTenant(tenantId: string) {
 			)
 		);
 
+	console.log('[META-ADS SYNC] Found integrations', { count: integrations.length, ids: integrations.map(i => i.businessId) });
+
 	if (integrations.length === 0) {
+		console.log('[META-ADS SYNC] No active integrations found, aborting');
 		logInfo('meta-ads-sync', 'No active integrations found', { tenantId });
 		return { imported: 0, errors: 0, skipped: 0 };
 	}
@@ -78,10 +82,12 @@ async function syncForIntegration(
 	tenantId: string,
 	integration: table.MetaAdsIntegration
 ) {
+	console.log('[META-ADS SYNC] syncForIntegration started', { businessId: integration.businessId, integrationId: integration.id });
 	logInfo('meta-ads-sync', `Syncing BM ${integration.businessId}`, { tenantId });
 
 	const authResult = await getAuthenticatedToken(integration.id);
 	if (!authResult) {
+		console.log('[META-ADS SYNC] AUTH FAILED — no token');
 		logWarning('meta-ads-sync', 'Could not get authenticated token', { tenantId, metadata: { integrationId: integration.id } });
 		return { imported: 0, errors: 1, skipped: 0 };
 	}
@@ -103,8 +109,11 @@ async function syncForIntegration(
 			)
 		);
 
+	console.log('[META-ADS SYNC] Account mappings from DB', { total: accountMappings.length, accounts: accountMappings.map(a => ({ id: a.metaAdAccountId, name: a.accountName, clientId: a.clientId })) });
+
 	// Filter to only accounts that have a client assigned
 	const mappedAccounts = accountMappings.filter(a => a.clientId);
+	console.log('[META-ADS SYNC] Mapped accounts (with client)', { count: mappedAccounts.length });
 
 	if (mappedAccounts.length === 0) {
 		logInfo('meta-ads-sync', 'No ad accounts mapped to CRM clients', { tenantId, metadata: { businessId: integration.businessId } });
@@ -132,8 +141,10 @@ async function syncForIntegration(
 	let skipped = 0;
 
 	try {
+		console.log('[META-ADS SYNC] Fetching invoices from API...', { businessId: integration.businessId, startDate, endDate });
 		const invoices = await listBusinessInvoices(integration.businessId, accessToken, startDate, endDate);
 
+		console.log('[META-ADS SYNC] API returned invoices', { count: invoices.length });
 		logInfo('meta-ads-sync', `API returned ${invoices.length} invoices`, {
 			tenantId,
 			metadata: { businessId: integration.businessId, startDate, endDate }
@@ -142,6 +153,17 @@ async function syncForIntegration(
 		// Log first invoice raw data for debugging
 		if (invoices.length > 0) {
 			const sample = invoices[0];
+			console.log('[META-ADS SYNC] Sample invoice', {
+				invoiceId: sample.invoiceId,
+				invoiceNumber: sample.invoiceNumber,
+				amount: sample.amount,
+				currencyCode: sample.currencyCode,
+				adAccountIds: sample.adAccountIds,
+				invoiceDate: sample.invoiceDate,
+				paymentStatus: sample.paymentStatus,
+				downloadUri: sample.downloadUri ? 'YES' : 'NO',
+				cdnDownloadUri: sample.cdnDownloadUri ? 'YES' : 'NO'
+			});
 			logInfo('meta-ads-sync', `Sample invoice raw data`, {
 				tenantId,
 				metadata: {
@@ -158,12 +180,17 @@ async function syncForIntegration(
 
 		for (const inv of invoices) {
 			try {
+				console.log('[META-ADS SYNC] Processing invoice', { invoiceId: inv.invoiceId, adAccountIds: inv.adAccountIds });
+
 				// Match invoice to CRM clients via ad account IDs
 				const matchedMappings = inv.adAccountIds
 					.map(accId => adAccountToClient.get(accId))
 					.filter(Boolean) as { clientId: string; accountName: string; metaAdAccountId: string }[];
 
+				console.log('[META-ADS SYNC] Invoice matching result', { invoiceId: inv.invoiceId, matchedCount: matchedMappings.length, adAccountIds: inv.adAccountIds });
+
 				if (matchedMappings.length === 0) {
+					console.log('[META-ADS SYNC] SKIPPED — no matching CRM client', { invoiceId: inv.invoiceId, adAccountIds: inv.adAccountIds });
 					logWarning('meta-ads-sync', `Invoice ${inv.invoiceId} has no matching CRM client`, {
 						tenantId,
 						metadata: { adAccountIds: inv.adAccountIds }
@@ -175,15 +202,19 @@ async function syncForIntegration(
 				// Download PDF once (shared across matched clients)
 				let pdfPath: string | null = null;
 				const pdfUrl = inv.downloadUri || inv.cdnDownloadUri;
+				console.log('[META-ADS SYNC] PDF URL check', { invoiceId: inv.invoiceId, hasPdfUrl: !!pdfUrl, source: inv.downloadUri ? 'downloadUri' : inv.cdnDownloadUri ? 'cdnDownloadUri' : 'none' });
 				if (pdfUrl) {
 					try {
 						const pdfBuffer = await downloadInvoicePdf(pdfUrl);
+						console.log('[META-ADS SYNC] PDF downloaded OK', { invoiceId: inv.invoiceId, size: pdfBuffer.length });
 						const dir = join(process.cwd(), 'uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`);
 						await mkdir(dir, { recursive: true });
 						// Store relative path for portability
 						pdfPath = join('uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`, `${inv.invoiceId}.pdf`);
 						await writeFile(join(process.cwd(), pdfPath), pdfBuffer);
+						console.log('[META-ADS SYNC] PDF saved', { pdfPath });
 					} catch (pdfErr) {
+						console.error('[META-ADS SYNC] PDF download FAILED', { invoiceId: inv.invoiceId, error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr) });
 						logError('meta-ads-sync', `Failed to download PDF for invoice ${inv.invoiceId}`, {
 							tenantId,
 							metadata: { error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr), pdfUrl }
@@ -194,9 +225,12 @@ async function syncForIntegration(
 				const issueDate = inv.invoiceDate ? new Date(inv.invoiceDate) : null;
 				const dueDate = inv.dueDate ? new Date(inv.dueDate) : null;
 				const amountCents = parseAmountToCents(inv.amount);
+				console.log('[META-ADS SYNC] Amount parsed', { invoiceId: inv.invoiceId, rawAmount: inv.amount, amountCents, issueDate, dueDate });
 
 				// Create one record per matched client mapping
 				for (const mapping of matchedMappings) {
+					console.log('[META-ADS SYNC] Checking dedup for', { invoiceId: inv.invoiceId, clientId: mapping.clientId, accountName: mapping.accountName });
+
 					// Dedup: check if this invoice already exists for this client
 					const [existing] = await db
 						.select({ id: table.metaAdsInvoice.id })
@@ -211,10 +245,12 @@ async function syncForIntegration(
 						.limit(1);
 
 					if (existing) {
+						console.log('[META-ADS SYNC] DEDUP — already exists', { invoiceId: inv.invoiceId, clientId: mapping.clientId, existingId: existing.id });
 						skipped++;
 						continue;
 					}
 
+					console.log('[META-ADS SYNC] INSERTING invoice', { invoiceId: inv.invoiceId, clientId: mapping.clientId, amountCents, currency: inv.currencyCode });
 					await db.insert(table.metaAdsInvoice).values({
 						id: crypto.randomUUID(),
 						tenantId,
@@ -236,6 +272,7 @@ async function syncForIntegration(
 						updatedAt: new Date()
 					});
 
+					console.log('[META-ADS SYNC] INSERT OK', { invoiceId: inv.invoiceId, clientId: mapping.clientId });
 					logInfo('meta-ads-sync', `Imported invoice ${inv.invoiceId} for account ${mapping.accountName}`, {
 						tenantId,
 						metadata: { amountCents, currency: inv.currencyCode, rawAmount: inv.amount }
@@ -243,6 +280,7 @@ async function syncForIntegration(
 					imported++;
 				}
 			} catch (invErr) {
+				console.error('[META-ADS SYNC] INVOICE ERROR', { invoiceId: inv.invoiceId, error: invErr instanceof Error ? invErr.message : String(invErr), stack: invErr instanceof Error ? invErr.stack : undefined });
 				logError('meta-ads-sync', `Failed to process invoice ${inv.invoiceId}`, {
 					tenantId,
 					metadata: { error: invErr instanceof Error ? invErr.message : String(invErr) }
@@ -251,6 +289,7 @@ async function syncForIntegration(
 			}
 		}
 	} catch (err) {
+		console.error('[META-ADS SYNC] FATAL — Failed to list BM invoices', { businessId: integration.businessId, error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
 		logError('meta-ads-sync', `Failed to list BM invoices`, {
 			tenantId,
 			metadata: { businessId: integration.businessId, error: err instanceof Error ? err.message : String(err) }
@@ -259,6 +298,7 @@ async function syncForIntegration(
 	}
 
 	// Update integration status
+	console.log('[META-ADS SYNC] syncForIntegration DONE', { businessId: integration.businessId, imported, errors, skipped });
 	const syncResults = JSON.stringify({ imported, errors, skipped, timestamp: new Date().toISOString() });
 	await db
 		.update(table.metaAdsIntegration)

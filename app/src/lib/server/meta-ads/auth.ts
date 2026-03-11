@@ -11,6 +11,7 @@ const SCOPES = 'ads_read,business_management';
  * Generate Meta/Facebook OAuth2 authorization URL
  */
 export function getOAuthUrl(state: string): string {
+	console.log('[META-ADS AUTH] getOAuthUrl called', { state, META_APP_ID: env.META_APP_ID, META_REDIRECT_URI: env.META_REDIRECT_URI });
 	const params = new URLSearchParams({
 		client_id: env.META_APP_ID!,
 		redirect_uri: env.META_REDIRECT_URI!,
@@ -20,6 +21,7 @@ export function getOAuthUrl(state: string): string {
 	});
 
 	const url = `https://www.facebook.com/v25.0/dialog/oauth?${params.toString()}`;
+	console.log('[META-ADS AUTH] OAuth URL generated', { url: url.replace(/access_token=[^&]+/, 'REDACTED') });
 	logInfo('meta-ads', 'OAuth: Generated auth URL', { metadata: { redirectUri: env.META_REDIRECT_URI } });
 	return url;
 }
@@ -28,6 +30,7 @@ export function getOAuthUrl(state: string): string {
  * Exchange short-lived token for long-lived token (60 days)
  */
 async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresIn: number }> {
+	console.log('[META-ADS AUTH] exchangeForLongLivedToken called');
 	const params = new URLSearchParams({
 		grant_type: 'fb_exchange_token',
 		client_id: env.META_APP_ID!,
@@ -37,8 +40,10 @@ async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ acc
 
 	const res = await fetch(`${META_GRAPH_URL}/oauth/access_token?${params.toString()}`);
 	const data = await res.json();
+	console.log('[META-ADS AUTH] Long-lived token response', { hasError: !!data.error, expiresIn: data.expires_in, hasToken: !!data.access_token });
 
 	if (data.error) {
+		console.error('[META-ADS AUTH] Token exchange FAILED', data.error);
 		throw new Error(`Meta token exchange failed: ${data.error.message}`);
 	}
 
@@ -56,6 +61,7 @@ export async function handleCallback(
 	tenantId: string,
 	integrationId: string
 ): Promise<{ email: string }> {
+	console.log('[META-ADS AUTH] handleCallback called', { tenantId, integrationId, codeLength: code?.length });
 	logInfo('meta-ads', 'OAuth: handleCallback started', { tenantId });
 
 	// Exchange code for short-lived token
@@ -66,10 +72,13 @@ export async function handleCallback(
 		code
 	});
 
+	console.log('[META-ADS AUTH] Exchanging code for short-lived token...');
 	const tokenRes = await fetch(`${META_GRAPH_URL}/oauth/access_token?${tokenParams.toString()}`);
 	const tokenData = await tokenRes.json();
+	console.log('[META-ADS AUTH] Short-lived token response', { hasError: !!tokenData.error, hasToken: !!tokenData.access_token, tokenType: tokenData.token_type });
 
 	if (tokenData.error) {
+		console.error('[META-ADS AUTH] Code exchange FAILED', tokenData.error);
 		logError('meta-ads', 'OAuth: Failed to exchange code', { tenantId, metadata: { error: tokenData.error.message } });
 		throw new Error(`Failed to obtain token from Meta: ${tokenData.error.message}`);
 	}
@@ -79,11 +88,14 @@ export async function handleCallback(
 
 	// Exchange for long-lived token
 	const { accessToken, expiresIn } = await exchangeForLongLivedToken(shortLivedToken);
+	console.log('[META-ADS AUTH] Long-lived token OK', { expiresIn });
 	logInfo('meta-ads', 'OAuth: Long-lived token received', { tenantId, metadata: { expiresIn } });
 
 	// Get user email
+	console.log('[META-ADS AUTH] Fetching user profile...');
 	const meRes = await fetch(`${META_GRAPH_URL}/me?fields=email,name&access_token=${accessToken}`);
 	const meData = await meRes.json();
+	console.log('[META-ADS AUTH] Profile response', { email: meData.email, name: meData.name, error: meData.error });
 	const email = meData.email || meData.name || 'Unknown';
 	logInfo('meta-ads', 'OAuth: Got profile', { tenantId, metadata: { email } });
 
@@ -109,6 +121,7 @@ export async function handleCallback(
  * Get a valid access token for a specific integration, auto-refreshing if needed
  */
 export async function getAuthenticatedToken(integrationId: string): Promise<{ accessToken: string; integration: table.MetaAdsIntegration } | null> {
+	console.log('[META-ADS AUTH] getAuthenticatedToken called', { integrationId });
 	const [integration] = await db
 		.select()
 		.from(table.metaAdsIntegration)
@@ -116,8 +129,10 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 		.limit(1);
 
 	if (!integration || !integration.accessToken) {
+		console.log('[META-ADS AUTH] No active integration or token found', { integrationId, found: !!integration, hasToken: !!integration?.accessToken });
 		return null;
 	}
+	console.log('[META-ADS AUTH] Integration found', { businessId: integration.businessId, tokenExpiresAt: integration.tokenExpiresAt, isActive: integration.isActive });
 
 	// Check if token needs refresh (< 7 days remaining)
 	const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
