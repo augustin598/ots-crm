@@ -18,6 +18,7 @@
 	const loading = $derived(spendingQuery.loading);
 
 	let syncing = $state(false);
+	let regeneratingAll = $state(false);
 	let regeneratingId = $state<string | null>(null);
 	let searchQuery = $state('');
 	let sortColumn = $state<'clientName' | 'periodStart' | 'spendCents'>('periodStart');
@@ -56,6 +57,27 @@
 			toast.error(e instanceof Error ? e.message : 'Eroare la regenerare PDF');
 		} finally {
 			regeneratingId = null;
+		}
+	}
+
+	async function handleRegenerateAll() {
+		regeneratingAll = true;
+		try {
+			// Get unique account+client combos and regenerate one per combo
+			const seen = new Set<string>();
+			let regenerated = 0;
+			for (const row of spending) {
+				const key = `${row.metaAdAccountId}_${row.clientId}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				await regenerateSpendingPdf(row.id).updates(spendingQuery);
+				regenerated++;
+			}
+			toast.success(`${regenerated} PDF-uri regenerate`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la regenerare PDF-uri');
+		} finally {
+			regeneratingAll = false;
 		}
 	}
 
@@ -171,15 +193,26 @@
 			<h1 class="text-3xl font-bold">Cheltuieli Meta Ads</h1>
 			<p class="text-muted-foreground">Rapoarte cheltuieli Meta/Facebook Ads pentru toți clienții</p>
 		</div>
-		<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
-			{#if syncing}
-				<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
-				Sincronizare...
-			{:else}
-				<RefreshCwIcon class="mr-2 h-4 w-4" />
-				Sync Acum
-			{/if}
-		</Button>
+		<div class="flex items-center gap-2">
+			<Button variant="outline" size="sm" onclick={handleRegenerateAll} disabled={regeneratingAll || spending.length === 0}>
+				{#if regeneratingAll}
+					<Download class="mr-2 h-4 w-4 animate-bounce" />
+					Regenerare...
+				{:else}
+					<Download class="mr-2 h-4 w-4" />
+					Regenerează PDF-uri
+				{/if}
+			</Button>
+			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
+				{#if syncing}
+					<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
+					Sincronizare...
+				{:else}
+					<RefreshCwIcon class="mr-2 h-4 w-4" />
+					Sync Acum
+				{/if}
+			</Button>
+		</div>
 	</div>
 
 	{#if loading}
@@ -257,15 +290,13 @@
 											<Download class="h-4 w-4" />
 										</Button>
 									{/if}
-									{#if !row.pdfPath}
 										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRegenerate(row.id)} disabled={regeneratingId === row.id} title="Regenerează PDF">
-											{#if regeneratingId === row.id}
-												<RefreshCwIcon class="h-4 w-4 animate-spin" />
-											{:else}
-												<RefreshCwIcon class="h-4 w-4" />
-											{/if}
-										</Button>
-									{/if}
+										{#if regeneratingId === row.id}
+											<RefreshCwIcon class="h-4 w-4 animate-spin" />
+										{:else}
+											<RefreshCwIcon class="h-4 w-4" />
+										{/if}
+									</Button>
 									<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDelete(row.id)} title="Șterge">
 										<Trash2 class="h-4 w-4" />
 									</Button>
