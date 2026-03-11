@@ -1,10 +1,9 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDecryptedFbCookies } from './fb-cookies';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { uploadBuffer } from '$lib/server/storage';
 import JSZip from 'jszip';
 import type { FbCookie } from './fb-cookies';
 
@@ -44,36 +43,28 @@ function getMonthTimestamps(year: number, month: number): { ts: number; timeEnd:
 	};
 }
 
-// ZIP magic bytes: PK (0x50 0x4B)
-function isZip(buf: Buffer): boolean {
-	return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4B;
-}
-
-// PDF magic bytes: %PDF (0x25 0x50 0x44 0x46)
+/** Check if buffer starts with PDF magic bytes (%PDF) */
 function isPdf(buf: Buffer): boolean {
 	return buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
 }
 
-/**
- * Extract the first PDF file from a ZIP buffer.
- */
+/** Check if buffer starts with ZIP magic bytes (PK) */
+function isZip(buf: Buffer): boolean {
+	return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4B;
+}
+
+/** Extract the first PDF file from a ZIP archive */
 async function extractPdfFromZip(zipBuffer: Buffer): Promise<Buffer | null> {
 	const zip = await JSZip.loadAsync(zipBuffer);
 	const pdfFiles = Object.keys(zip.files).filter(name => name.toLowerCase().endsWith('.pdf'));
-
-	if (pdfFiles.length === 0) {
-		console.log(`[INVOICE-DL] ZIP contains no PDF files. Files: ${Object.keys(zip.files).join(', ')}`);
-		return null;
-	}
-
-	console.log(`[INVOICE-DL] ZIP contains ${pdfFiles.length} PDF(s): ${pdfFiles.join(', ')}`);
-	const pdfData = await zip.files[pdfFiles[0]].async('nodebuffer');
-	return pdfData;
+	if (pdfFiles.length === 0) return null;
+	const content = await zip.files[pdfFiles[0]].async('nodebuffer');
+	return isPdf(content) ? content : null;
 }
 
 /**
  * Download a single receipt PDF from Facebook's invoices_generator.
- * Facebook returns a ZIP containing the PDF — we extract it automatically.
+ * Facebook may return a ZIP archive containing multiple transaction PDFs.
  */
 export async function downloadReceipt(params: DownloadParams): Promise<DownloadResult> {
 	const { adAccountId, year, month, cookies } = params;
@@ -87,8 +78,6 @@ export async function downloadReceipt(params: DownloadParams): Promise<DownloadR
 	const cookieHeader = buildCookieHeader(cookies);
 
 	try {
-		console.log(`[INVOICE-DL] Fetching: ${url}`);
-
 		const response = await fetch(url, {
 			headers: {
 				'Cookie': cookieHeader,
@@ -103,42 +92,31 @@ export async function downloadReceipt(params: DownloadParams): Promise<DownloadR
 			redirect: 'manual'
 		});
 
-		const contentType = response.headers.get('content-type') || '';
-		console.log(`[INVOICE-DL] Response: ${response.status}, content-type: ${contentType}`);
-
 		// Check for redirect (session expired → login page)
 		if (response.status >= 300 && response.status < 400) {
 			return { success: false, error: 'session_expired' };
 		}
 
 		if (!response.ok) {
-			let body = '';
-			try { body = await response.text(); } catch {}
-			console.log(`[INVOICE-DL] Error body: ${body.slice(0, 2000)}`);
-			return { success: false, error: `HTTP ${response.status}: ${body.slice(0, 300)}` };
+			return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
 		}
 
+		const contentType = response.headers.get('content-type') || '';
 		const buffer = Buffer.from(await response.arrayBuffer());
-		console.log(`[INVOICE-DL] Buffer size: ${buffer.length}, first bytes: ${buffer.slice(0, 4).toString('hex')}`);
 
 		let pdfBuffer: Buffer;
 
 		if (isPdf(buffer)) {
-			// Direct PDF response
 			pdfBuffer = buffer;
 		} else if (isZip(buffer)) {
-			// ZIP response — extract PDF from inside
-			console.log(`[INVOICE-DL] Got ZIP, extracting PDF...`);
 			const extracted = await extractPdfFromZip(buffer);
 			if (!extracted) {
 				return { success: false, error: 'zip_no_pdf_inside' };
 			}
 			pdfBuffer = extracted;
 		} else if (contentType.includes('text/html')) {
-			// HTML = login page (session expired)
 			return { success: false, error: 'session_expired' };
 		} else {
-			console.log(`[INVOICE-DL] Unknown response: content-type=${contentType}, preview: ${buffer.slice(0, 200).toString('utf-8')}`);
 			return { success: false, error: `unexpected_content (type: ${contentType}, size: ${buffer.length})` };
 		}
 
@@ -146,7 +124,6 @@ export async function downloadReceipt(params: DownloadParams): Promise<DownloadR
 			return { success: false, error: 'empty_pdf' };
 		}
 
-		console.log(`[INVOICE-DL] Success! PDF size: ${pdfBuffer.length} bytes`);
 		return { success: true, pdfBuffer };
 	} catch (err) {
 		return {
@@ -245,43 +222,52 @@ export async function downloadAllReceiptsForMonth(
 			});
 
 			if (result.success && result.pdfBuffer) {
-				// Save to filesystem
-				const dir = join(process.cwd(), 'uploads', 'meta-invoices', tenantId);
-				await mkdir(dir, { recursive: true });
-				const relativePath = join('uploads', 'meta-invoices', tenantId, `${account.metaAdAccountId}_${year}-${monthStr}.pdf`);
-				await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
-
-				if (existing) {
-					// Update existing record
-					await db
-						.update(table.metaInvoiceDownload)
-						.set({
-							pdfPath: relativePath,
-							status: 'downloaded',
-							downloadedAt: new Date(),
-							errorMessage: null,
-							updatedAt: new Date()
-						})
-						.where(eq(table.metaInvoiceDownload.id, existing.id));
-				} else {
-					// Insert new record
-					await db.insert(table.metaInvoiceDownload).values({
-						id: crypto.randomUUID(),
+				// Upload to MinIO
+				let storagePath: string;
+				try {
+					const upload = await uploadBuffer(
 						tenantId,
-						integrationId: integration.id,
-						clientId: account.clientId!,
-						metaAdAccountId: account.metaAdAccountId,
-						adAccountName: account.accountName,
-						bmName: integration.businessName,
-						periodStart,
-						periodEnd,
-						pdfPath: relativePath,
-						status: 'downloaded',
-						downloadedAt: new Date(),
-						createdAt: new Date(),
-						updatedAt: new Date()
+						result.pdfBuffer,
+						`meta-invoice-${account.metaAdAccountId}_${year}-${monthStr}.pdf`,
+						'application/pdf',
+						{ type: 'meta-invoice', adAccountId: account.metaAdAccountId, period: periodStart }
+					);
+					storagePath = upload.path;
+				} catch (uploadErr) {
+					logError('invoice-downloader', `Failed to upload PDF for ${account.metaAdAccountId}`, {
+						tenantId,
+						metadata: { error: uploadErr instanceof Error ? uploadErr.message : String(uploadErr), period: periodStart }
 					});
+					errors++;
+					continue;
 				}
+
+				// Upsert: handles race conditions via unique index (tenant_id, meta_ad_account_id, period_start)
+				await db.insert(table.metaInvoiceDownload).values({
+					id: existing?.id || crypto.randomUUID(),
+					tenantId,
+					integrationId: integration.id,
+					clientId: account.clientId!,
+					metaAdAccountId: account.metaAdAccountId,
+					adAccountName: account.accountName,
+					bmName: integration.businessName,
+					periodStart,
+					periodEnd,
+					pdfPath: storagePath,
+					status: 'downloaded',
+					downloadedAt: new Date(),
+					createdAt: new Date(),
+					updatedAt: new Date()
+				}).onConflictDoUpdate({
+					target: [table.metaInvoiceDownload.tenantId, table.metaInvoiceDownload.metaAdAccountId, table.metaInvoiceDownload.periodStart],
+					set: {
+						pdfPath: sql`excluded.pdf_path`,
+						status: sql`'downloaded'`,
+						downloadedAt: new Date(),
+						errorMessage: null,
+						updatedAt: new Date()
+					}
+				});
 
 				downloaded++;
 				logInfo('invoice-downloader', `Downloaded receipt for ${account.accountName}`, {
@@ -304,32 +290,29 @@ export async function downloadAllReceiptsForMonth(
 
 				const errorMsg = result.error || 'Unknown error';
 
-				if (existing) {
-					await db
-						.update(table.metaInvoiceDownload)
-						.set({
-							status: 'error',
-							errorMessage: errorMsg,
-							updatedAt: new Date()
-						})
-						.where(eq(table.metaInvoiceDownload.id, existing.id));
-				} else {
-					await db.insert(table.metaInvoiceDownload).values({
-						id: crypto.randomUUID(),
-						tenantId,
-						integrationId: integration.id,
-						clientId: account.clientId!,
-						metaAdAccountId: account.metaAdAccountId,
-						adAccountName: account.accountName,
-						bmName: integration.businessName,
-						periodStart,
-						periodEnd,
-						status: 'error',
-						errorMessage: errorMsg,
-						createdAt: new Date(),
+				// Upsert error status
+				await db.insert(table.metaInvoiceDownload).values({
+					id: existing?.id || crypto.randomUUID(),
+					tenantId,
+					integrationId: integration.id,
+					clientId: account.clientId!,
+					metaAdAccountId: account.metaAdAccountId,
+					adAccountName: account.accountName,
+					bmName: integration.businessName,
+					periodStart,
+					periodEnd,
+					status: 'error',
+					errorMessage: errorMsg,
+					createdAt: new Date(),
+					updatedAt: new Date()
+				}).onConflictDoUpdate({
+					target: [table.metaInvoiceDownload.tenantId, table.metaInvoiceDownload.metaAdAccountId, table.metaInvoiceDownload.periodStart],
+					set: {
+						status: sql`'error'`,
+						errorMessage: sql`excluded.error_message`,
 						updatedAt: new Date()
-					});
-				}
+					}
+				});
 
 				errors++;
 				logError('invoice-downloader', `Download failed for ${account.metaAdAccountId}`, {

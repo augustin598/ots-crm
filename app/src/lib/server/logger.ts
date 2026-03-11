@@ -18,7 +18,10 @@ export type LogSource =
 	| 'storage'
 	| 'invoice-view'
 	| 'google-ads'
-	| 'google-ads-sync';
+	| 'google-ads-sync'
+	| 'meta-ads'
+	| 'invoice-downloader'
+	| 'fb-cookies';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

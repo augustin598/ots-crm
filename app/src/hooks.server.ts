@@ -8,7 +8,6 @@ import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
 import { runMigrations } from '$lib/server/db/migrate';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
-import { dev } from '$app/environment';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -130,10 +129,8 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 };
 
 export const init = async () => {
-	// Run migrations in production (when dev is false)
-	if (!dev) {
-		await runMigrations();
-	}
+	// Run migrations on every startup (dev + production)
+	await runMigrations();
 	await ensurePluginsInitialized();
 	registerEmailNotificationHooks();
 	await ensureSchedulerInitialized();

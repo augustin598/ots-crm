@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getMetaAdsConnections } from '$lib/server/meta-ads/auth';
+import { logWarning } from '$lib/server/logger';
 
 // ---- Queries ----
 
@@ -462,8 +463,7 @@ export const regenerateSpendingPdf = command(
 			.limit(1);
 
 		const { generateSpendingReportPdf } = await import('$lib/server/meta-ads/spending-report-pdf');
-		const { writeFile, mkdir } = await import('fs/promises');
-		const { join } = await import('path');
+		const { uploadBuffer } = await import('$lib/server/storage');
 
 		const periods = allRows.map(r => ({
 			periodStart: r.periodStart,
@@ -483,21 +483,23 @@ export const regenerateSpendingPdf = command(
 			generatedAt: new Date()
 		});
 
-		// Save to filesystem
+		// Upload to MinIO
 		const firstPeriod = allRows[0]?.periodStart?.slice(0, 7) || 'unknown';
 		const lastPeriod = allRows[allRows.length - 1]?.periodStart?.slice(0, 7) || 'unknown';
 		const periodLabel = `${firstPeriod}_${lastPeriod}`;
-		const dir = join(process.cwd(), 'uploads', 'meta-ads-reports', tenantId, row.clientId);
-		await mkdir(dir, { recursive: true });
-
-		const relativePath = join('uploads', 'meta-ads-reports', tenantId, row.clientId, `${row.metaAdAccountId}_${periodLabel}.pdf`);
-		await writeFile(join(process.cwd(), relativePath), pdfBuffer);
+		const upload = await uploadBuffer(
+			tenantId,
+			Buffer.from(pdfBuffer),
+			`meta-spending-${row.metaAdAccountId}_${periodLabel}.pdf`,
+			'application/pdf',
+			{ type: 'meta-spending', adAccountId: row.metaAdAccountId, clientId: row.clientId }
+		);
 
 		// Update pdfPath on ALL rows for this account+client
 		for (const r of allRows) {
 			await db
 				.update(table.metaAdsSpending)
-				.set({ pdfPath: relativePath, updatedAt: new Date() })
+				.set({ pdfPath: upload.path, updatedAt: new Date() })
 				.where(eq(table.metaAdsSpending.id, r.id));
 		}
 
@@ -592,7 +594,7 @@ export const getMetaInvoiceDownloads = query(async () => {
 
 	let conditions: any = eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id);
 
-	// Client users only see their own downloads
+	// Client users: only primary client user sees their own downloads
 	if (event.locals.isClientUser && event.locals.client) {
 		if (!event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.metaInvoiceDownload.clientId, event.locals.client.id));
@@ -676,16 +678,28 @@ export const redownloadInvoice = command(
 
 		// Parse period to get year/month
 		const [year, month] = dl.periodStart.split('-').map(Number);
+		if (!year || !month || month < 1 || month > 12) {
+			throw new Error('Format perioadă invalid');
+		}
 
-		// Get integration info
+		// Get integration info (scoped to tenant for defense-in-depth)
 		const [integration] = await db
 			.select()
 			.from(table.metaAdsIntegration)
-			.where(eq(table.metaAdsIntegration.id, dl.integrationId))
+			.where(
+				and(
+					eq(table.metaAdsIntegration.id, dl.integrationId),
+					eq(table.metaAdsIntegration.tenantId, tenantId)
+				)
+			)
 			.limit(1);
 
 		if (!integration) {
 			throw new Error('Integrare negăsită');
+		}
+
+		if (integration.fbSessionStatus !== 'active') {
+			throw new Error('Sesiune Facebook expirată — actualizează cookies din Settings');
 		}
 
 		const { downloadReceipt } = await import('$lib/server/meta-ads/invoice-downloader');
@@ -695,9 +709,6 @@ export const redownloadInvoice = command(
 		if (!cookies) {
 			throw new Error('Sesiune Facebook lipsă — setează cookies din Settings');
 		}
-
-		const { writeFile, mkdir } = await import('fs/promises');
-		const { join } = await import('path');
 
 		const result = await downloadReceipt({
 			adAccountId: dl.metaAdAccountId,
@@ -718,17 +729,21 @@ export const redownloadInvoice = command(
 			throw new Error(result.error || 'Download eșuat');
 		}
 
-		// Save PDF to filesystem
+		// Upload PDF to MinIO
 		const monthStr = String(month).padStart(2, '0');
-		const dir = join(process.cwd(), 'uploads', 'meta-invoices', tenantId);
-		await mkdir(dir, { recursive: true });
-		const relativePath = join('uploads', 'meta-invoices', tenantId, `${dl.metaAdAccountId}_${year}-${monthStr}.pdf`);
-		await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
+		const { uploadBuffer } = await import('$lib/server/storage');
+		const upload = await uploadBuffer(
+			tenantId,
+			result.pdfBuffer,
+			`meta-invoice-${dl.metaAdAccountId}_${year}-${monthStr}.pdf`,
+			'application/pdf',
+			{ type: 'meta-invoice', adAccountId: dl.metaAdAccountId, period: dl.periodStart }
+		);
 
 		await db
 			.update(table.metaInvoiceDownload)
 			.set({
-				pdfPath: relativePath,
+				pdfPath: upload.path,
 				status: 'downloaded',
 				downloadedAt: new Date(),
 				errorMessage: null,
@@ -767,14 +782,13 @@ export const deleteInvoiceDownload = command(
 			throw new Error('Download negăsit');
 		}
 
-		// Delete PDF file if exists
+		// Delete PDF from MinIO if exists
 		if (dl.pdfPath) {
 			try {
-				const { unlink } = await import('fs/promises');
-				const { join } = await import('path');
-				await unlink(join(process.cwd(), dl.pdfPath));
+				const { deleteFile } = await import('$lib/server/storage');
+				await deleteFile(dl.pdfPath);
 			} catch {
-				// File might not exist
+				logWarning('meta-ads', `Failed to delete PDF file: ${dl.pdfPath}`, { tenantId: event.locals.tenant.id });
 			}
 		}
 
@@ -812,14 +826,13 @@ export const deleteMetaAdsSpending = command(
 			throw new Error('Raport cheltuieli negăsit');
 		}
 
-		// Delete PDF file if exists
+		// Delete PDF from MinIO if exists
 		if (row.pdfPath) {
 			try {
-				const { unlink } = await import('fs/promises');
-				const { join } = await import('path');
-				await unlink(join(process.cwd(), row.pdfPath));
+				const { deleteFile } = await import('$lib/server/storage');
+				await deleteFile(row.pdfPath);
 			} catch {
-				// File might not exist
+				logWarning('meta-ads', `Failed to delete spending PDF: ${row.pdfPath}`, { tenantId: event.locals.tenant.id });
 			}
 		}
 
