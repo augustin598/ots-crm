@@ -14,7 +14,24 @@ export const getMetaAdsConnectionStatus = query(async () => {
 	}
 	if (event.locals.isClientUser) return [];
 
-	return getMetaAdsConnections(event.locals.tenant.id);
+	const connections = await getMetaAdsConnections(event.locals.tenant.id);
+
+	// Enrich with FB session status
+	const enriched = await Promise.all(
+		connections.map(async (conn: any) => {
+			const [integration] = await db
+				.select({ fbSessionStatus: table.metaAdsIntegration.fbSessionStatus })
+				.from(table.metaAdsIntegration)
+				.where(eq(table.metaAdsIntegration.id, conn.id))
+				.limit(1);
+			return {
+				...conn,
+				fbSessionStatus: integration?.fbSessionStatus || 'none'
+			};
+		})
+	);
+
+	return enriched;
 });
 
 export const getMetaAdsSpendingList = query(async () => {
@@ -483,6 +500,280 @@ export const regenerateSpendingPdf = command(
 				.set({ pdfPath: relativePath, updatedAt: new Date() })
 				.where(eq(table.metaAdsSpending.id, r.id));
 		}
+
+		return { success: true };
+	}
+);
+
+// ---- Invoice Download Commands ----
+
+/** Save Facebook session cookies (from Cookie-Editor export) for invoice downloading */
+export const setMetaAdsCookies = command(
+	v.object({
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		cookiesJson: v.pipe(v.string(), v.minLength(2))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Verify integration belongs to tenant
+		const [integration] = await db
+			.select({ id: table.metaAdsIntegration.id })
+			.from(table.metaAdsIntegration)
+			.where(
+				and(
+					eq(table.metaAdsIntegration.id, data.integrationId),
+					eq(table.metaAdsIntegration.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Integrare Meta Ads negăsită');
+		}
+
+		const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
+		await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
+
+		return { success: true };
+	}
+);
+
+/** Clear Facebook session cookies for an integration */
+export const clearMetaAdsCookies = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (integrationId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const [integration] = await db
+			.select({ id: table.metaAdsIntegration.id })
+			.from(table.metaAdsIntegration)
+			.where(
+				and(
+					eq(table.metaAdsIntegration.id, integrationId),
+					eq(table.metaAdsIntegration.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Integrare Meta Ads negăsită');
+		}
+
+		const { clearFbSession } = await import('$lib/server/meta-ads/fb-cookies');
+		await clearFbSession(integrationId, tenantId);
+
+		return { success: true };
+	}
+);
+
+/** Get all invoice downloads for the tenant */
+export const getMetaInvoiceDownloads = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.isClientUser) return [];
+
+	const rows = await db
+		.select({
+			id: table.metaInvoiceDownload.id,
+			tenantId: table.metaInvoiceDownload.tenantId,
+			integrationId: table.metaInvoiceDownload.integrationId,
+			clientId: table.metaInvoiceDownload.clientId,
+			metaAdAccountId: table.metaInvoiceDownload.metaAdAccountId,
+			adAccountName: table.metaInvoiceDownload.adAccountName,
+			bmName: table.metaInvoiceDownload.bmName,
+			periodStart: table.metaInvoiceDownload.periodStart,
+			periodEnd: table.metaInvoiceDownload.periodEnd,
+			pdfPath: table.metaInvoiceDownload.pdfPath,
+			status: table.metaInvoiceDownload.status,
+			downloadedAt: table.metaInvoiceDownload.downloadedAt,
+			errorMessage: table.metaInvoiceDownload.errorMessage,
+			clientName: table.client.name
+		})
+		.from(table.metaInvoiceDownload)
+		.leftJoin(table.client, eq(table.metaInvoiceDownload.clientId, table.client.id))
+		.where(eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id))
+		.orderBy(desc(table.metaInvoiceDownload.periodStart))
+		.limit(500);
+
+	return rows;
+});
+
+/** Trigger invoice download for a specific month */
+export const triggerInvoiceDownload = command(
+	v.object({
+		year: v.pipe(v.number(), v.minValue(2020), v.maxValue(2030)),
+		month: v.pipe(v.number(), v.minValue(1), v.maxValue(12))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const { downloadAllReceiptsForMonth } = await import('$lib/server/meta-ads/invoice-downloader');
+		const result = await downloadAllReceiptsForMonth(event.locals.tenant.id, data.year, data.month);
+		return result;
+	}
+);
+
+/** Re-download a single invoice PDF */
+export const redownloadInvoice = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (downloadId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const [dl] = await db
+			.select()
+			.from(table.metaInvoiceDownload)
+			.where(
+				and(
+					eq(table.metaInvoiceDownload.id, downloadId),
+					eq(table.metaInvoiceDownload.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!dl) {
+			throw new Error('Download negăsit');
+		}
+
+		// Parse period to get year/month
+		const [year, month] = dl.periodStart.split('-').map(Number);
+
+		// Get integration info
+		const [integration] = await db
+			.select()
+			.from(table.metaAdsIntegration)
+			.where(eq(table.metaAdsIntegration.id, dl.integrationId))
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Integrare negăsită');
+		}
+
+		const { downloadReceipt } = await import('$lib/server/meta-ads/invoice-downloader');
+		const { getDecryptedFbCookies } = await import('$lib/server/meta-ads/fb-cookies');
+
+		const cookies = await getDecryptedFbCookies(integration.id, tenantId);
+		if (!cookies) {
+			throw new Error('Sesiune Facebook lipsă — setează cookies din Settings');
+		}
+
+		const { writeFile, mkdir } = await import('fs/promises');
+		const { join } = await import('path');
+
+		const result = await downloadReceipt({
+			adAccountId: dl.metaAdAccountId,
+			year,
+			month,
+			cookies
+		});
+
+		if (!result.success || !result.pdfBuffer) {
+			await db
+				.update(table.metaInvoiceDownload)
+				.set({
+					status: 'error',
+					errorMessage: result.error || 'Download eșuat',
+					updatedAt: new Date()
+				})
+				.where(eq(table.metaInvoiceDownload.id, dl.id));
+			throw new Error(result.error || 'Download eșuat');
+		}
+
+		// Save PDF to filesystem
+		const monthStr = String(month).padStart(2, '0');
+		const dir = join(process.cwd(), 'uploads', 'meta-invoices', tenantId);
+		await mkdir(dir, { recursive: true });
+		const relativePath = join('uploads', 'meta-invoices', tenantId, `${dl.metaAdAccountId}_${year}-${monthStr}.pdf`);
+		await writeFile(join(process.cwd(), relativePath), result.pdfBuffer);
+
+		await db
+			.update(table.metaInvoiceDownload)
+			.set({
+				pdfPath: relativePath,
+				status: 'downloaded',
+				downloadedAt: new Date(),
+				errorMessage: null,
+				updatedAt: new Date()
+			})
+			.where(eq(table.metaInvoiceDownload.id, dl.id));
+
+		return { success: true };
+	}
+);
+
+/** Delete an invoice download record */
+export const deleteInvoiceDownload = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (downloadId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const [dl] = await db
+			.select()
+			.from(table.metaInvoiceDownload)
+			.where(
+				and(
+					eq(table.metaInvoiceDownload.id, downloadId),
+					eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!dl) {
+			throw new Error('Download negăsit');
+		}
+
+		// Delete PDF file if exists
+		if (dl.pdfPath) {
+			try {
+				const { unlink } = await import('fs/promises');
+				const { join } = await import('path');
+				await unlink(join(process.cwd(), dl.pdfPath));
+			} catch {
+				// File might not exist
+			}
+		}
+
+		await db
+			.delete(table.metaInvoiceDownload)
+			.where(eq(table.metaInvoiceDownload.id, dl.id));
 
 		return { success: true };
 	}

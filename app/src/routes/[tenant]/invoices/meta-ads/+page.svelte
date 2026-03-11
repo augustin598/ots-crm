@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync, regenerateSpendingPdf } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync, regenerateSpendingPdf, getMetaInvoiceDownloads, triggerInvoiceDownload, redownloadInvoice, deleteInvoiceDownload } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -185,6 +185,107 @@
 		}
 		currentPage = 1;
 	}
+
+	// ---- Invoice Downloads ----
+	const downloadsQuery = getMetaInvoiceDownloads();
+	const downloads = $derived(downloadsQuery.current || []);
+	const downloadsLoading = $derived(downloadsQuery.loading);
+
+	let downloadingMonth = $state(false);
+	let redownloadingId = $state<string | null>(null);
+
+	function getPreviousMonth(): { year: number; month: number; label: string } {
+		const now = new Date();
+		const month = now.getMonth() === 0 ? 12 : now.getMonth();
+		const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+		const label = new Date(year, month - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+		return { year, month, label };
+	}
+
+	const prevMonth = $derived(getPreviousMonth());
+
+	// Check which accounts are missing invoices for current month
+	const missingInvoiceAccounts = $derived(() => {
+		const downloaded = new Set(
+			downloads
+				.filter((d: any) => d.status === 'downloaded' && d.periodStart === `${prevMonth.year}-${String(prevMonth.month).padStart(2, '0')}-01`)
+				.map((d: any) => d.metaAdAccountId)
+		);
+		// Get unique account IDs from spending data
+		const allAccounts = new Set(spending.map((s: any) => s.metaAdAccountId));
+		return [...allAccounts].filter(id => !downloaded.has(id));
+	});
+
+	async function handleDownloadMonth() {
+		downloadingMonth = true;
+		try {
+			const result = await triggerInvoiceDownload({ year: prevMonth.year, month: prevMonth.month }).updates(downloadsQuery);
+			toast.success(`Download complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare facturi');
+		} finally {
+			downloadingMonth = false;
+		}
+	}
+
+	async function handleRedownloadInvoice(downloadId: string) {
+		redownloadingId = downloadId;
+		try {
+			await redownloadInvoice(downloadId).updates(downloadsQuery);
+			toast.success('Factură re-descărcată');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la re-descărcare');
+		} finally {
+			redownloadingId = null;
+		}
+	}
+
+	async function handleDeleteDownload(id: string) {
+		if (!confirm('Ești sigur că vrei să ștergi această factură?')) return;
+		try {
+			await deleteInvoiceDownload(id).updates(downloadsQuery);
+			toast.success('Factură ștearsă');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		}
+	}
+
+	async function handlePreviewInvoicePDF(id: string) {
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/meta-ads/downloads/${id}/pdf`);
+			if (!response.ok) throw new Error('Failed to load PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+		}
+	}
+
+	async function handleDownloadInvoicePDF(id: string, period: string) {
+		try {
+			const response = await fetch(`/${tenantSlug}/invoices/meta-ads/downloads/${id}/pdf`);
+			if (!response.ok) throw new Error('Failed to download PDF');
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `MetaAds-Factura-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+		}
+	}
+
+	function formatDownloadPeriod(start: string): string {
+		try {
+			const d = new Date(start + 'T00:00:00');
+			return d.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+		} catch {
+			return start;
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -331,5 +432,114 @@
 				</div>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- Facturi PDF Facebook -->
+	<div class="flex items-center justify-between pt-4 border-t">
+		<div>
+			<h2 class="text-2xl font-bold">Facturi PDF Facebook</h2>
+			<p class="text-muted-foreground text-sm">Facturi oficiale descărcate din Facebook Business Manager</p>
+		</div>
+		<div class="flex items-center gap-2">
+			{#if missingInvoiceAccounts().length > 0}
+				<span class="inline-flex items-center rounded-full border border-red-500 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50">
+					{missingInvoiceAccounts().length} conturi fără factură {prevMonth.label}
+				</span>
+			{/if}
+			<Button variant="outline" size="sm" onclick={handleDownloadMonth} disabled={downloadingMonth}>
+				{#if downloadingMonth}
+					<Download class="mr-2 h-4 w-4 animate-bounce" />
+					Descărcare...
+				{:else}
+					<Download class="mr-2 h-4 w-4" />
+					Download {prevMonth.label}
+				{/if}
+			</Button>
+		</div>
+	</div>
+
+	{#if downloadsLoading}
+		<p class="text-muted-foreground">Se încarcă facturile...</p>
+	{:else if downloads.length === 0}
+		<div class="rounded-md border p-8 text-center">
+			<p class="text-muted-foreground">Nu sunt facturi PDF descărcate. Apasă "Download {prevMonth.label}" pentru a descărca facturile lunii trecute.</p>
+		</div>
+	{:else}
+		<div class="rounded-md border overflow-x-auto">
+			<Table>
+				<TableHeader>
+					<TableRow>
+						<TableHead>Ad Account</TableHead>
+						<TableHead>BM</TableHead>
+						<TableHead>Perioadă</TableHead>
+						<TableHead>Status</TableHead>
+						<TableHead class="w-[180px]">Acțiuni</TableHead>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					{#each downloads as dl}
+						<TableRow>
+							<TableCell>
+								<div>
+									<span class="font-medium">{dl.adAccountName || dl.metaAdAccountId}</span>
+									{#if dl.clientName}
+										<span class="block text-xs text-muted-foreground">{dl.clientName}</span>
+									{/if}
+								</div>
+							</TableCell>
+							<TableCell class="text-sm text-muted-foreground">{dl.bmName || '-'}</TableCell>
+							<TableCell>{formatDownloadPeriod(dl.periodStart)}</TableCell>
+							<TableCell>
+								{#if dl.status === 'downloaded'}
+									<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
+										Descărcat
+									</span>
+								{:else if dl.status === 'pending'}
+									<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
+										Pending
+									</span>
+								{:else if dl.status === 'error'}
+									<span class="inline-flex items-center rounded-full border border-red-500 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={dl.errorMessage || ''}>
+										Eroare
+									</span>
+								{:else if dl.status === 'session_expired'}
+									<span class="inline-flex items-center rounded-full border border-orange-500 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">
+										Sesiune expirată
+									</span>
+								{:else}
+									<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+										{dl.status}
+									</span>
+								{/if}
+							</TableCell>
+							<TableCell>
+								<div class="flex items-center gap-1">
+									{#if dl.status === 'downloaded' && dl.pdfPath}
+										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview PDF">
+											<Eye class="h-4 w-4" />
+										</Button>
+										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download PDF">
+											<Download class="h-4 w-4" />
+										</Button>
+									{/if}
+									{#if dl.status === 'error' || dl.status === 'session_expired'}
+										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRedownloadInvoice(dl.id)} disabled={redownloadingId === dl.id} title="Re-download">
+											{#if redownloadingId === dl.id}
+												<RefreshCwIcon class="h-4 w-4 animate-spin" />
+											{:else}
+												<RefreshCwIcon class="h-4 w-4" />
+											{/if}
+										</Button>
+									{/if}
+									<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDeleteDownload(dl.id)} title="Șterge">
+										<Trash2 class="h-4 w-4" />
+									</Button>
+								</div>
+							</TableCell>
+						</TableRow>
+					{/each}
+				</TableBody>
+			</Table>
+		</div>
 	{/if}
 </div>

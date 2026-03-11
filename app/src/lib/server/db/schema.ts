@@ -1462,6 +1462,8 @@ export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	syncEnabled: boolean('sync_enabled').notNull().default(true),
 	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
+	fbSessionCookies: text('fb_session_cookies'), // AES-256-GCM encrypted Facebook session cookies
+	fbSessionStatus: text('fb_session_status').notNull().default('none'), // 'none' | 'active'
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1545,6 +1547,33 @@ export const metaAdsSpending = sqliteTable('meta_ads_spending', {
 	clicks: integer('clicks').default(0),
 	pdfPath: text('pdf_path'),
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// Meta Ads invoice downloads — real Facebook billing PDF receipts downloaded via invoices_generator
+export const metaInvoiceDownload = sqliteTable('meta_invoice_download', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => metaAdsIntegration.id, { onDelete: 'cascade' }),
+	clientId: text('client_id').references(() => client.id),
+	metaAdAccountId: text('meta_ad_account_id').notNull(),
+	adAccountName: text('ad_account_name'),
+	bmName: text('bm_name'),
+	periodStart: text('period_start').notNull(), // "2026-02-01"
+	periodEnd: text('period_end').notNull(), // "2026-02-28"
+	pdfPath: text('pdf_path'),
+	status: text('status').notNull().default('pending'), // 'pending' | 'downloaded' | 'error'
+	downloadedAt: timestamp('downloaded_at', { withTimezone: true, mode: 'date' }),
+	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -2191,7 +2220,8 @@ export const metaAdsIntegrationRelations = relations(metaAdsIntegration, ({ one,
 	}),
 	accounts: many(metaAdsAccount),
 	invoices: many(metaAdsInvoice),
-	spending: many(metaAdsSpending)
+	spending: many(metaAdsSpending),
+	invoiceDownloads: many(metaInvoiceDownload)
 }));
 
 export const metaAdsAccountRelations = relations(metaAdsAccount, ({ one }) => ({
@@ -2235,6 +2265,21 @@ export const metaAdsSpendingRelations = relations(metaAdsSpending, ({ one }) => 
 	}),
 	client: one(client, {
 		fields: [metaAdsSpending.clientId],
+		references: [client.id]
+	})
+}));
+
+export const metaInvoiceDownloadRelations = relations(metaInvoiceDownload, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [metaInvoiceDownload.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(metaAdsIntegration, {
+		fields: [metaInvoiceDownload.integrationId],
+		references: [metaAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [metaInvoiceDownload.clientId],
 		references: [client.id]
 	})
 }));
@@ -2724,6 +2769,8 @@ export type MetaAdsInvoice = typeof metaAdsInvoice.$inferSelect;
 export type NewMetaAdsInvoice = typeof metaAdsInvoice.$inferInsert;
 export type MetaAdsSpending = typeof metaAdsSpending.$inferSelect;
 export type NewMetaAdsSpending = typeof metaAdsSpending.$inferInsert;
+export type MetaInvoiceDownload = typeof metaInvoiceDownload.$inferSelect;
+export type NewMetaInvoiceDownload = typeof metaInvoiceDownload.$inferInsert;
 
 // Invoice view tokens — public access to invoices via email links (no login required)
 export const invoiceViewToken = sqliteTable('invoice_view_token', {
