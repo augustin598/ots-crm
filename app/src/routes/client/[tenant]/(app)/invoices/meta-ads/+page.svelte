@@ -166,13 +166,14 @@
 						</TableHead>
 						<TableHead class="text-right">Afișări</TableHead>
 						<TableHead class="text-right">Click-uri</TableHead>
+						<TableHead>Status</TableHead>
 						<TableHead class="w-[80px]"></TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
 					{#if paginatedSpending.length === 0}
 						<TableRow>
-							<TableCell colspan={5} class="text-center text-muted-foreground py-8">
+							<TableCell colspan={6} class="text-center text-muted-foreground py-8">
 								Niciun raport găsit.
 							</TableCell>
 						</TableRow>
@@ -185,6 +186,17 @@
 								</TableCell>
 								<TableCell class="text-right">{formatNumber(row.impressions)}</TableCell>
 								<TableCell class="text-right">{formatNumber(row.clicks)}</TableCell>
+								<TableCell>
+									{#if row.pdfPath}
+										<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
+											OK
+										</span>
+									{:else}
+										<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
+											Pending
+										</span>
+									{/if}
+								</TableCell>
 								<TableCell>
 									<div class="flex items-center gap-1">
 										{#if row.pdfPath}

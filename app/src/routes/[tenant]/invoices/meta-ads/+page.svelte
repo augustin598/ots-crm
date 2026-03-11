@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync, regenerateSpendingPdf } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -18,6 +18,7 @@
 	const loading = $derived(spendingQuery.loading);
 
 	let syncing = $state(false);
+	let regeneratingId = $state<string | null>(null);
 	let searchQuery = $state('');
 	let sortColumn = $state<'clientName' | 'periodStart' | 'spendCents'>('periodStart');
 	let sortDirection = $state<'asc' | 'desc'>('desc');
@@ -43,6 +44,18 @@
 			toast.success('Raport șters');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		}
+	}
+
+	async function handleRegenerate(spendingId: string) {
+		regeneratingId = spendingId;
+		try {
+			await regenerateSpendingPdf(spendingId).updates(spendingQuery);
+			toast.success('PDF regenerat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la regenerare PDF');
+		} finally {
+			regeneratingId = null;
 		}
 	}
 
@@ -208,7 +221,8 @@
 						</TableHead>
 						<TableHead class="text-right">Afișări</TableHead>
 						<TableHead class="text-right">Click-uri</TableHead>
-						<TableHead class="w-[120px]"></TableHead>
+						<TableHead>Status</TableHead>
+						<TableHead class="w-[150px]"></TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
@@ -223,6 +237,17 @@
 							<TableCell class="text-right">{formatNumber(row.impressions)}</TableCell>
 							<TableCell class="text-right">{formatNumber(row.clicks)}</TableCell>
 							<TableCell>
+								{#if row.pdfPath}
+									<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
+										OK
+									</span>
+								{:else}
+									<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
+										Pending
+									</span>
+								{/if}
+							</TableCell>
+							<TableCell>
 								<div class="flex items-center gap-1">
 									{#if row.pdfPath}
 										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
@@ -230,6 +255,15 @@
 										</Button>
 										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
 											<Download class="h-4 w-4" />
+										</Button>
+									{/if}
+									{#if !row.pdfPath}
+										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRegenerate(row.id)} disabled={regeneratingId === row.id} title="Regenerează PDF">
+											{#if regeneratingId === row.id}
+												<RefreshCwIcon class="h-4 w-4 animate-spin" />
+											{:else}
+												<RefreshCwIcon class="h-4 w-4" />
+											{/if}
 										</Button>
 									{/if}
 									<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDelete(row.id)} title="Șterge">

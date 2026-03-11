@@ -377,6 +377,117 @@ export const triggerMetaAdsSync = command(async () => {
 	return result;
 });
 
+/** Regenerate spending report PDF for a specific spending row's account+client */
+export const regenerateSpendingPdf = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (spendingId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Get the target spending row
+		const [row] = await db
+			.select()
+			.from(table.metaAdsSpending)
+			.where(
+				and(
+					eq(table.metaAdsSpending.id, spendingId),
+					eq(table.metaAdsSpending.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!row) {
+			throw new Error('Raport cheltuieli negăsit');
+		}
+
+		// Get ALL spending rows for same account + client (for combined PDF)
+		const allRows = await db
+			.select()
+			.from(table.metaAdsSpending)
+			.where(
+				and(
+					eq(table.metaAdsSpending.tenantId, tenantId),
+					eq(table.metaAdsSpending.metaAdAccountId, row.metaAdAccountId),
+					eq(table.metaAdsSpending.clientId, row.clientId)
+				)
+			)
+			.orderBy(table.metaAdsSpending.periodStart);
+
+		// Get client + tenant + account info for PDF
+		const [clientInfo] = await db
+			.select({ name: table.client.name })
+			.from(table.client)
+			.where(eq(table.client.id, row.clientId))
+			.limit(1);
+
+		const [tenantInfo] = await db
+			.select({ name: table.tenant.name })
+			.from(table.tenant)
+			.where(eq(table.tenant.id, tenantId))
+			.limit(1);
+
+		const [accountInfo] = await db
+			.select({ accountName: table.metaAdsAccount.accountName })
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.metaAdAccountId, row.metaAdAccountId),
+					eq(table.metaAdsAccount.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		const { generateSpendingReportPdf } = await import('$lib/server/meta-ads/spending-report-pdf');
+		const { writeFile, mkdir } = await import('fs/promises');
+		const { join } = await import('path');
+
+		const periods = allRows.map(r => ({
+			periodStart: r.periodStart,
+			periodEnd: r.periodEnd,
+			spend: r.spendAmount,
+			impressions: r.impressions ?? 0,
+			clicks: r.clicks ?? 0
+		}));
+
+		const pdfBuffer = await generateSpendingReportPdf({
+			tenantName: tenantInfo?.name || '',
+			clientName: clientInfo?.name || '',
+			adAccountId: row.metaAdAccountId,
+			adAccountName: accountInfo?.accountName || row.metaAdAccountId,
+			currencyCode: row.currencyCode,
+			periods,
+			generatedAt: new Date()
+		});
+
+		// Save to filesystem
+		const firstPeriod = allRows[0]?.periodStart?.slice(0, 7) || 'unknown';
+		const lastPeriod = allRows[allRows.length - 1]?.periodStart?.slice(0, 7) || 'unknown';
+		const periodLabel = `${firstPeriod}_${lastPeriod}`;
+		const dir = join(process.cwd(), 'uploads', 'meta-ads-reports', tenantId, row.clientId);
+		await mkdir(dir, { recursive: true });
+
+		const relativePath = join('uploads', 'meta-ads-reports', tenantId, row.clientId, `${row.metaAdAccountId}_${periodLabel}.pdf`);
+		await writeFile(join(process.cwd(), relativePath), pdfBuffer);
+
+		// Update pdfPath on ALL rows for this account+client
+		for (const r of allRows) {
+			await db
+				.update(table.metaAdsSpending)
+				.set({ pdfPath: relativePath, updatedAt: new Date() })
+				.where(eq(table.metaAdsSpending.id, r.id));
+		}
+
+		return { success: true };
+	}
+);
+
 export const deleteMetaAdsSpending = command(
 	v.pipe(v.string(), v.minLength(1)),
 	async (spendingId) => {
