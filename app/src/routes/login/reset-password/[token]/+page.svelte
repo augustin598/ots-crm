@@ -39,7 +39,7 @@
 			});
 			success = true;
 			setTimeout(() => {
-				goto('/login');
+				goto('/login?reset=success');
 			}, 2000);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to reset password';
@@ -65,7 +65,7 @@
 					<div class="rounded-md bg-green-50 p-3">
 						<p class="text-sm text-green-800">Password reset successfully! Redirecting to login...</p>
 					</div>
-					<Button class="w-full" onclick={() => goto('/login')}>Go to Login</Button>
+					<Button class="w-full" onclick={() => goto('/login?reset=success')}>Go to Login</Button>
 				</div>
 			{:else}
 				<form onsubmit={handleSubmit} class="space-y-4">

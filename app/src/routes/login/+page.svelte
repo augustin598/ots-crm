@@ -15,6 +15,8 @@
 	const urlError = $derived(page.url.searchParams.get('error'));
 	const resetParam = $derived(page.url.searchParams.get('reset'));
 
+	const isResetSuccess = $derived(resetParam === 'success');
+
 	let loginMethod = $state<'password' | 'magic-link' | 'reset-password'>(
 		resetParam === '1' ? 'reset-password' : 'password'
 	);
@@ -99,6 +101,12 @@
 		</CardHeader>
 		<CardContent>
 			<div class="space-y-4">
+				{#if isResetSuccess}
+					<div class="rounded-md bg-green-50 border border-green-200 p-3">
+						<p class="text-sm font-medium text-green-800">Parola a fost resetată cu succes. Te poți autentifica.</p>
+					</div>
+				{/if}
+
 				<div class="space-y-2">
 					<Label>Login Method</Label>
 					<div class="grid grid-cols-3 gap-2 rounded-lg border p-1 bg-muted">

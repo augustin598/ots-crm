@@ -89,11 +89,12 @@ export const clientSignup = command(
 
 			const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
-			// Store token in database
+			// Store token in database (normalized email)
+			const normalizedEmail = email.toLowerCase();
 			await db.insert(table.magicLinkToken).values({
 				id: tokenId,
 				token: hashedToken,
-				email,
+				email: normalizedEmail,
 				clientId: client.id,
 				tenantId: tenant.id,
 				expiresAt,
@@ -102,10 +103,10 @@ export const clientSignup = command(
 
 			// Send magic link email
 			try {
-				await sendMagicLinkEmail(email, plainToken, tenantSlug, client.name);
+				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, client.name);
 			} catch (emailError) {
 				console.error('Failed to send magic link email:', emailError);
-				// Don't throw - token is created, user can request another link
+				throw new Error('Nu am putut trimite email-ul. Încearcă din nou.');
 			}
 
 			return { success: true, message: 'Magic link sent to your email' };
@@ -175,11 +176,12 @@ export const requestMagicLink = command(
 
 			const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
-			// Store token in database
+			// Store token in database (normalized email)
+			const normalizedEmail = email.toLowerCase();
 			await db.insert(table.magicLinkToken).values({
 				id: tokenId,
 				token: hashedToken,
-				email,
+				email: normalizedEmail,
 				clientId: client.id,
 				tenantId: tenant.id,
 				expiresAt,
@@ -188,7 +190,7 @@ export const requestMagicLink = command(
 
 			// Send magic link email
 			try {
-				await sendMagicLinkEmail(email, plainToken, tenantSlug, client.name);
+				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, client.name);
 			} catch (emailError) {
 				console.error('Failed to send magic link email:', emailError);
 				throw new Error('Failed to send email. Please try again later.');
