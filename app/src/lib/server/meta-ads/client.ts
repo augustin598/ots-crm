@@ -1,16 +1,22 @@
 import { logInfo, logError } from '$lib/server/logger';
 
-const META_GRAPH_URL = 'https://graph.facebook.com/v21.0';
+const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
 
 export interface MetaAdsInvoiceData {
+	/** Internal ID (numeric string) */
 	invoiceId: string;
+	/** Actual invoice number (invoice_id field from API) */
+	invoiceNumber: string | null;
 	invoiceDate: string | null;
 	dueDate: string | null;
-	amountCents: number;
+	/** Amount as string from API (e.g. "123.45") */
+	amount: string;
 	currencyCode: string;
 	paymentStatus: string | null;
 	invoiceType: string;
+	billingPeriod: string | null;
 	downloadUri: string | null;
+	cdnDownloadUri: string | null;
 	/** Ad account IDs covered by this invoice */
 	adAccountIds: string[];
 }
@@ -78,7 +84,7 @@ export async function listBusinessInvoices(
 	logInfo('meta-ads', `Listing BM invoices`, { metadata: { businessId, startDate, endDate } });
 
 	const invoices: MetaAdsInvoiceData[] = [];
-	const fields = 'id,invoice_date,due_date,amount,currency,payment_status,invoice_type,download_uri,ad_account_ids';
+	const fields = 'id,invoice_id,invoice_date,due_date,amount,currency,payment_status,invoice_type,billing_period,download_uri,cdn_download_uri,ad_account_ids';
 
 	let baseUrl = `${META_GRAPH_URL}/${businessId}/business_invoices?fields=${fields}&limit=100&access_token=${accessToken}`;
 	if (startDate) baseUrl += `&start_date=${startDate}`;
@@ -98,13 +104,16 @@ export async function listBusinessInvoices(
 			for (const inv of data.data || []) {
 				invoices.push({
 					invoiceId: inv.id || '',
+					invoiceNumber: inv.invoice_id || null,
 					invoiceDate: inv.invoice_date || null,
 					dueDate: inv.due_date || null,
-					amountCents: Number(inv.amount || 0),
+					amount: String(inv.amount || '0'),
 					currencyCode: inv.currency || 'USD',
 					paymentStatus: inv.payment_status || null,
 					invoiceType: inv.invoice_type || 'INVOICE',
+					billingPeriod: inv.billing_period || null,
 					downloadUri: inv.download_uri || null,
+					cdnDownloadUri: inv.cdn_download_uri || null,
 					adAccountIds: inv.ad_account_ids || []
 				});
 			}

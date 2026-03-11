@@ -4,7 +4,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError } from '$lib/server/logger';
 
-const META_GRAPH_URL = 'https://graph.facebook.com/v21.0';
+const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
 const SCOPES = 'ads_read,business_management';
 
 /**
@@ -19,7 +19,7 @@ export function getOAuthUrl(state: string): string {
 		response_type: 'code'
 	});
 
-	const url = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+	const url = `https://www.facebook.com/v25.0/dialog/oauth?${params.toString()}`;
 	logInfo('meta-ads', 'OAuth: Generated auth URL', { metadata: { redirectUri: env.META_REDIRECT_URI } });
 	return url;
 }

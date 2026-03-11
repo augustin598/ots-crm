@@ -126,9 +126,10 @@ async function syncForIntegration(
 
 				// Download PDF once (shared across matched clients)
 				let pdfPath: string | null = null;
-				if (inv.downloadUri) {
+				const pdfUrl = inv.downloadUri || inv.cdnDownloadUri;
+				if (pdfUrl) {
 					try {
-						const pdfBuffer = await downloadInvoicePdf(inv.downloadUri);
+						const pdfBuffer = await downloadInvoicePdf(pdfUrl);
 						const dir = join('uploads', 'meta-ads-invoices', tenantId, integration.businessId, `${startDate.slice(0, 7)}`);
 						await mkdir(dir, { recursive: true });
 						pdfPath = join(dir, `${inv.invoiceId}.pdf`);
@@ -171,10 +172,10 @@ async function syncForIntegration(
 						clientId: mapping.clientId,
 						metaAdAccountId: mapping.metaAdAccountId,
 						metaInvoiceId: inv.invoiceId,
-						invoiceNumber: inv.invoiceId,
+						invoiceNumber: inv.invoiceNumber || inv.invoiceId,
 						issueDate,
 						dueDate,
-						amountCents: inv.amountCents,
+						amountCents: Math.round(parseFloat(inv.amount) * 100),
 						currencyCode: inv.currencyCode,
 						invoiceType: inv.invoiceType,
 						paymentStatus: inv.paymentStatus,
