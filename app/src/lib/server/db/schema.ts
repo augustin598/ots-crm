@@ -1523,6 +1523,36 @@ export const metaAdsInvoice = sqliteTable('meta_ads_invoice', {
 		.default(sql`current_date`)
 });
 
+// Meta Ads spending data synced from /insights endpoint per ad account
+export const metaAdsSpending = sqliteTable('meta_ads_spending', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => metaAdsIntegration.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	metaAdAccountId: text('meta_ad_account_id').notNull(),
+	periodStart: text('period_start').notNull(), // "2026-02-01"
+	periodEnd: text('period_end').notNull(), // "2026-02-28"
+	spendAmount: text('spend_amount').notNull().default('0'), // raw from API e.g. "2207.59"
+	spendCents: integer('spend_cents').notNull().default(0),
+	currencyCode: text('currency_code').notNull().default('RON'),
+	impressions: integer('impressions').default(0),
+	clicks: integer('clicks').default(0),
+	pdfPath: text('pdf_path'),
+	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const passwordResetToken = sqliteTable('password_reset_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -1603,6 +1633,7 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	metaAdsIntegrations: many(metaAdsIntegration),
 	metaAdsAccounts: many(metaAdsAccount),
 	metaAdsInvoices: many(metaAdsInvoice),
+	metaAdsSpending: many(metaAdsSpending),
 	emailLogs: many(emailLog),
 	debugLogs: many(debugLog)
 }));
@@ -1641,7 +1672,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	googleAdsAccounts: many(googleAdsAccount),
 	googleAdsInvoices: many(googleAdsInvoice),
 	metaAdsAccounts: many(metaAdsAccount),
-	metaAdsInvoices: many(metaAdsInvoice)
+	metaAdsInvoices: many(metaAdsInvoice),
+	metaAdsSpending: many(metaAdsSpending)
 }));
 
 export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({
@@ -2158,7 +2190,8 @@ export const metaAdsIntegrationRelations = relations(metaAdsIntegration, ({ one,
 		references: [tenant.id]
 	}),
 	accounts: many(metaAdsAccount),
-	invoices: many(metaAdsInvoice)
+	invoices: many(metaAdsInvoice),
+	spending: many(metaAdsSpending)
 }));
 
 export const metaAdsAccountRelations = relations(metaAdsAccount, ({ one }) => ({
@@ -2187,6 +2220,21 @@ export const metaAdsInvoiceRelations = relations(metaAdsInvoice, ({ one }) => ({
 	}),
 	client: one(client, {
 		fields: [metaAdsInvoice.clientId],
+		references: [client.id]
+	})
+}));
+
+export const metaAdsSpendingRelations = relations(metaAdsSpending, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [metaAdsSpending.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(metaAdsIntegration, {
+		fields: [metaAdsSpending.integrationId],
+		references: [metaAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [metaAdsSpending.clientId],
 		references: [client.id]
 	})
 }));
@@ -2674,6 +2722,8 @@ export type MetaAdsAccount = typeof metaAdsAccount.$inferSelect;
 export type NewMetaAdsAccount = typeof metaAdsAccount.$inferInsert;
 export type MetaAdsInvoice = typeof metaAdsInvoice.$inferSelect;
 export type NewMetaAdsInvoice = typeof metaAdsInvoice.$inferInsert;
+export type MetaAdsSpending = typeof metaAdsSpending.$inferSelect;
+export type NewMetaAdsSpending = typeof metaAdsSpending.$inferInsert;
 
 // Invoice view tokens — public access to invoices via email links (no login required)
 export const invoiceViewToken = sqliteTable('invoice_view_token', {

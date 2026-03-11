@@ -158,7 +158,7 @@
 		syncing = true;
 		try {
 			const result = await triggerMetaAdsSync().updates(connectionsQuery);
-			toast.success(`Sync complet: ${result.imported} importate, ${result.skipped} existente, ${result.errors} erori`);
+			toast.success(`Sync complet: ${result.imported} noi, ${result.updated || 0} actualizate, ${result.errors} erori`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
 		} finally {
@@ -177,7 +177,7 @@
 	<div class="flex items-center justify-between">
 		<div>
 			<h1 class="text-3xl font-bold">Meta Ads</h1>
-			<p class="text-muted-foreground">Configurare integrare Meta/Facebook Ads pentru descărcare automată facturi</p>
+			<p class="text-muted-foreground">Configurare integrare Meta/Facebook Ads pentru rapoarte cheltuieli automate</p>
 		</div>
 		{#if connections.some((c: any) => c.connected)}
 			<Button variant="outline" size="sm" onclick={handleSyncAll} disabled={syncing}>
@@ -212,7 +212,7 @@
 			<CardHeader>
 				<CardTitle>Adaugă Business Manager</CardTitle>
 				<CardDescription>
-					Conectează un Business Manager Meta pentru a sincroniza facturile. Poți adăuga mai multe BM-uri.
+					Conectează un Business Manager Meta pentru a sincroniza cheltuielile. Poți adăuga mai multe BM-uri.
 				</CardDescription>
 			</CardHeader>
 			<CardContent class="space-y-4">
@@ -296,7 +296,7 @@
 									<div class="text-sm text-muted-foreground">
 										Ultimul sync: {formatDate(conn.lastSyncAt)}
 										{#if conn.lastSyncResults}
-											— {conn.lastSyncResults.imported} importate, {conn.lastSyncResults.skipped || 0} existente, {conn.lastSyncResults.errors || 0} erori
+											— {conn.lastSyncResults.imported} noi, {conn.lastSyncResults.updated || 0} actualizate, {conn.lastSyncResults.errors || 0} erori
 										{/if}
 									</div>
 								{/if}

@@ -11,29 +11,29 @@ export const GET: RequestHandler = async (event) => {
 		throw error(401, 'Unauthorized');
 	}
 
-	const invoiceId = event.params.invoiceId;
+	const spendingId = event.params.invoiceId;
 	const tenantId = event.locals.tenant.id;
 
-	const [invoice] = await db
+	const [row] = await db
 		.select()
-		.from(table.metaAdsInvoice)
+		.from(table.metaAdsSpending)
 		.where(
 			and(
-				eq(table.metaAdsInvoice.id, invoiceId),
-				eq(table.metaAdsInvoice.tenantId, tenantId)
+				eq(table.metaAdsSpending.id, spendingId),
+				eq(table.metaAdsSpending.tenantId, tenantId)
 			)
 		)
 		.limit(1);
 
-	if (!invoice) {
-		throw error(404, 'Meta Ads invoice not found');
+	if (!row) {
+		throw error(404, 'Raport cheltuieli Meta Ads negăsit');
 	}
 
-	if (!invoice.pdfPath) {
-		throw error(404, 'No PDF available for this invoice');
+	if (!row.pdfPath) {
+		throw error(404, 'Nu există PDF pentru acest raport');
 	}
 
-	const absolutePath = join(process.cwd(), invoice.pdfPath);
+	const absolutePath = join(process.cwd(), row.pdfPath);
 
 	try {
 		const fileStat = await stat(absolutePath);
@@ -47,7 +47,7 @@ export const GET: RequestHandler = async (event) => {
 	}
 
 	const fileBuffer = await readFile(absolutePath);
-	const safeFilename = `MetaAds-${(invoice.invoiceNumber || invoice.id).replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+	const safeFilename = `MetaAds-Cheltuieli-${row.periodStart}.pdf`;
 
 	return new Response(new Uint8Array(fileBuffer), {
 		status: 200,

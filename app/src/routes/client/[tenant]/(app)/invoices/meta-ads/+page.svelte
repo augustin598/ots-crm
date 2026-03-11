@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsInvoices } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -12,41 +12,41 @@
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	const invoicesQuery = getMetaAdsInvoices();
-	const invoices = $derived(invoicesQuery.current || []);
-	const loading = $derived(invoicesQuery.loading);
+	const spendingQuery = getMetaAdsSpendingList();
+	const spending = $derived(spendingQuery.current || []);
+	const loading = $derived(spendingQuery.loading);
 
 	let searchQuery = $state('');
-	let sortColumn = $state<'invoiceNumber' | 'issueDate' | 'dueDate' | 'amountCents'>('issueDate');
+	let sortColumn = $state<'periodStart' | 'spendCents'>('periodStart');
 	let sortDirection = $state<'asc' | 'desc'>('desc');
 	let pageSize = $state(10);
 	let currentPage = $state(1);
 
-	async function handleDownloadPDF(invoiceId: string, invoiceNumber: string | null) {
+	async function handleDownloadPDF(id: string, period: string) {
 		try {
-			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/${invoiceId}/pdf`);
+			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to download PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `MetaAds-${(invoiceNumber || invoiceId).replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			a.download = `MetaAds-Cheltuieli-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to download PDF');
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
 		}
 	}
 
-	async function handlePreviewPDF(invoiceId: string) {
+	async function handlePreviewPDF(id: string) {
 		try {
-			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/${invoiceId}/pdf`);
+			const response = await fetch(`/client/${tenantSlug}/invoices/meta-ads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to load PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to preview PDF');
+			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
 		}
 	}
 
@@ -56,57 +56,49 @@
 		return new Intl.NumberFormat('ro-RO', { style: 'currency', currency }).format(amount);
 	}
 
-	function formatDate(date: Date | string | null): string {
-		if (!date) return '-';
+	function formatPeriod(start: string): string {
 		try {
-			const d = date instanceof Date ? date : new Date(date);
-			const day = d.getDate();
-			const month = d.toLocaleDateString('en-US', { month: 'short' });
-			const year = d.getFullYear();
-			return `${day} ${month} ${year}`;
+			const d = new Date(start + 'T00:00:00');
+			return d.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
 		} catch {
-			return '-';
+			return start;
 		}
 	}
 
-	const filteredInvoices = $derived(
+	function formatNumber(n: number | null): string {
+		if (n == null) return '-';
+		return n.toLocaleString('ro-RO');
+	}
+
+	const filteredSpending = $derived(
 		searchQuery.trim() === ''
-			? invoices
-			: invoices.filter((inv: any) =>
-				(inv.invoiceNumber || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+			? spending
+			: spending.filter((s: any) =>
+				(s.periodStart || '').includes(searchQuery.trim()) ||
+				(s.metaAdAccountId || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
 			)
 	);
 
-	const sortedInvoices = $derived(
-		[...filteredInvoices].sort((a: any, b: any) => {
+	const sortedSpending = $derived(
+		[...filteredSpending].sort((a: any, b: any) => {
 			const dir = sortDirection === 'asc' ? 1 : -1;
 			switch (sortColumn) {
-				case 'invoiceNumber':
-					return dir * (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '', undefined, { numeric: true });
-				case 'issueDate': {
-					const da = a.issueDate ? new Date(a.issueDate).getTime() : 0;
-					const db2 = b.issueDate ? new Date(b.issueDate).getTime() : 0;
-					return dir * (da - db2);
-				}
-				case 'dueDate': {
-					const da = a.dueDate ? new Date(a.dueDate).getTime() : 0;
-					const db2 = b.dueDate ? new Date(b.dueDate).getTime() : 0;
-					return dir * (da - db2);
-				}
-				case 'amountCents':
-					return dir * ((a.amountCents || 0) - (b.amountCents || 0));
+				case 'periodStart':
+					return dir * (a.periodStart || '').localeCompare(b.periodStart || '');
+				case 'spendCents':
+					return dir * ((a.spendCents || 0) - (b.spendCents || 0));
 				default:
 					return 0;
 			}
 		})
 	);
 
-	const totalEntries = $derived(filteredInvoices.length);
+	const totalEntries = $derived(filteredSpending.length);
 	const totalPages = $derived(Math.max(1, Math.ceil(totalEntries / pageSize)));
 	const safePage = $derived(Math.min(Math.max(1, currentPage), totalPages));
 	const startIndex = $derived((safePage - 1) * pageSize);
 	const endIndex = $derived(Math.min(startIndex + pageSize, totalEntries));
-	const paginatedInvoices = $derived(sortedInvoices.slice(startIndex, endIndex));
+	const paginatedSpending = $derived(sortedSpending.slice(startIndex, endIndex));
 	const showingFrom = $derived(totalEntries === 0 ? 0 : startIndex + 1);
 	const showingTo = $derived(endIndex);
 
@@ -137,15 +129,15 @@
 
 <div class="space-y-6">
 	<div>
-		<h1 class="text-3xl font-bold">Facturi Meta Ads</h1>
-		<p class="text-muted-foreground">Facturile tale din Meta/Facebook Ads</p>
+		<h1 class="text-3xl font-bold">Cheltuieli Meta Ads</h1>
+		<p class="text-muted-foreground">Rapoartele tale de cheltuieli Meta/Facebook Ads</p>
 	</div>
 
 	{#if loading}
-		<p class="text-muted-foreground">Se încarcă facturile...</p>
-	{:else if invoices.length === 0}
+		<p class="text-muted-foreground">Se încarcă rapoartele...</p>
+	{:else if spending.length === 0}
 		<div class="rounded-md border p-8 text-center">
-			<p class="text-muted-foreground">Nu sunt facturi Meta Ads disponibile.</p>
+			<p class="text-muted-foreground">Nu sunt rapoarte de cheltuieli Meta Ads disponibile.</p>
 		</div>
 	{:else}
 		<div class="flex items-center justify-between gap-4 rounded-md bg-muted/50 px-4 py-3">
@@ -163,51 +155,43 @@
 				<TableHeader>
 					<TableRow>
 						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('invoiceNumber')}>
-								Invoice # <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('issueDate')}>
-								Data Emitere <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('dueDate')}>
-								Scadența <ArrowUpDownIcon class="h-4 w-4" />
+							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('periodStart')}>
+								Perioadă <ArrowUpDownIcon class="h-4 w-4" />
 							</button>
 						</TableHead>
 						<TableHead class="text-right">
-							<button class="ml-auto flex items-center gap-2 hover:text-primary" onclick={() => handleSort('amountCents')}>
-								Total <ArrowUpDownIcon class="h-4 w-4" />
+							<button class="ml-auto flex items-center gap-2 hover:text-primary" onclick={() => handleSort('spendCents')}>
+								Cheltuieli <ArrowUpDownIcon class="h-4 w-4" />
 							</button>
 						</TableHead>
+						<TableHead class="text-right">Afișări</TableHead>
+						<TableHead class="text-right">Click-uri</TableHead>
 						<TableHead class="w-[80px]"></TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
-					{#if paginatedInvoices.length === 0}
+					{#if paginatedSpending.length === 0}
 						<TableRow>
 							<TableCell colspan={5} class="text-center text-muted-foreground py-8">
-								Nicio factură găsită.
+								Niciun raport găsit.
 							</TableCell>
 						</TableRow>
 					{:else}
-						{#each paginatedInvoices as invoice}
+						{#each paginatedSpending as row}
 							<TableRow>
-								<TableCell class="font-medium">{invoice.invoiceNumber || '-'}</TableCell>
-								<TableCell>{formatDate(invoice.issueDate)}</TableCell>
-								<TableCell>{formatDate(invoice.dueDate)}</TableCell>
+								<TableCell class="font-medium">{formatPeriod(row.periodStart)}</TableCell>
 								<TableCell class="text-right font-semibold">
-									{formatAmount(invoice.amountCents, invoice.currencyCode)}
+									{formatAmount(row.spendCents, row.currencyCode)}
 								</TableCell>
+								<TableCell class="text-right">{formatNumber(row.impressions)}</TableCell>
+								<TableCell class="text-right">{formatNumber(row.clicks)}</TableCell>
 								<TableCell>
 									<div class="flex items-center gap-1">
-										{#if invoice.pdfPath}
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(invoice.id)} title="Preview PDF">
+										{#if row.pdfPath}
+											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
 												<Eye class="h-4 w-4" />
 											</Button>
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)} title="Download PDF">
+											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
 												<Download class="h-4 w-4" />
 											</Button>
 										{/if}

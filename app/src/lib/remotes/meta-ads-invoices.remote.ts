@@ -17,50 +17,48 @@ export const getMetaAdsConnectionStatus = query(async () => {
 	return getMetaAdsConnections(event.locals.tenant.id);
 });
 
-export const getMetaAdsInvoices = query(async () => {
+export const getMetaAdsSpendingList = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
 
-	let conditions: any = eq(table.metaAdsInvoice.tenantId, event.locals.tenant.id);
+	let conditions: any = eq(table.metaAdsSpending.tenantId, event.locals.tenant.id);
 
 	// If user is a client user, filter by their client ID
 	if (event.locals.isClientUser && event.locals.client) {
 		if (!event.locals.isClientUserPrimary) return [];
-		conditions = and(conditions, eq(table.metaAdsInvoice.clientId, event.locals.client.id));
+		conditions = and(conditions, eq(table.metaAdsSpending.clientId, event.locals.client.id));
 	}
 
-	const invoices = await db
+	const rows = await db
 		.select({
-			id: table.metaAdsInvoice.id,
-			tenantId: table.metaAdsInvoice.tenantId,
-			integrationId: table.metaAdsInvoice.integrationId,
-			clientId: table.metaAdsInvoice.clientId,
-			metaAdAccountId: table.metaAdsInvoice.metaAdAccountId,
-			metaInvoiceId: table.metaAdsInvoice.metaInvoiceId,
-			invoiceNumber: table.metaAdsInvoice.invoiceNumber,
-			issueDate: table.metaAdsInvoice.issueDate,
-			dueDate: table.metaAdsInvoice.dueDate,
-			amountCents: table.metaAdsInvoice.amountCents,
-			currencyCode: table.metaAdsInvoice.currencyCode,
-			invoiceType: table.metaAdsInvoice.invoiceType,
-			paymentStatus: table.metaAdsInvoice.paymentStatus,
-			pdfPath: table.metaAdsInvoice.pdfPath,
-			status: table.metaAdsInvoice.status,
-			syncedAt: table.metaAdsInvoice.syncedAt,
-			createdAt: table.metaAdsInvoice.createdAt,
+			id: table.metaAdsSpending.id,
+			tenantId: table.metaAdsSpending.tenantId,
+			integrationId: table.metaAdsSpending.integrationId,
+			clientId: table.metaAdsSpending.clientId,
+			metaAdAccountId: table.metaAdsSpending.metaAdAccountId,
+			periodStart: table.metaAdsSpending.periodStart,
+			periodEnd: table.metaAdsSpending.periodEnd,
+			spendAmount: table.metaAdsSpending.spendAmount,
+			spendCents: table.metaAdsSpending.spendCents,
+			currencyCode: table.metaAdsSpending.currencyCode,
+			impressions: table.metaAdsSpending.impressions,
+			clicks: table.metaAdsSpending.clicks,
+			pdfPath: table.metaAdsSpending.pdfPath,
+			syncedAt: table.metaAdsSpending.syncedAt,
+			createdAt: table.metaAdsSpending.createdAt,
 			clientName: table.client.name,
 			businessName: table.metaAdsIntegration.businessName
 		})
-		.from(table.metaAdsInvoice)
-		.leftJoin(table.client, eq(table.metaAdsInvoice.clientId, table.client.id))
-		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsInvoice.integrationId, table.metaAdsIntegration.id))
+		.from(table.metaAdsSpending)
+		.leftJoin(table.client, eq(table.metaAdsSpending.clientId, table.client.id))
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsSpending.integrationId, table.metaAdsIntegration.id))
 		.where(conditions)
-		.orderBy(desc(table.metaAdsInvoice.issueDate))
+		.orderBy(desc(table.metaAdsSpending.periodStart))
 		.limit(500);
 
-	return invoices;
+	return rows;
 });
 
 /** Get Meta Ads ad accounts for a specific integration */
@@ -154,7 +152,6 @@ export const addMetaAdsConnection = command(
 			.limit(1);
 
 		if (existing) {
-			// Update existing
 			await db
 				.update(table.metaAdsIntegration)
 				.set({
@@ -165,7 +162,6 @@ export const addMetaAdsConnection = command(
 			return { id: existing.id, created: false };
 		}
 
-		// Create new placeholder integration
 		const id = crypto.randomUUID();
 		await db.insert(table.metaAdsIntegration).values({
 			id,
@@ -197,7 +193,6 @@ export const removeMetaAdsConnection = command(
 
 		const tenantId = event.locals.tenant.id;
 
-		// Verify belongs to tenant
 		const [integration] = await db
 			.select({ id: table.metaAdsIntegration.id })
 			.from(table.metaAdsIntegration)
@@ -213,11 +208,9 @@ export const removeMetaAdsConnection = command(
 			throw new Error('Integrare Meta Ads negăsită');
 		}
 
-		// Disconnect first (revoke token)
 		const { disconnectMetaAds } = await import('$lib/server/meta-ads/auth');
 		await disconnectMetaAds(integrationId);
 
-		// Delete integration (cascade deletes accounts)
 		await db
 			.delete(table.metaAdsIntegration)
 			.where(eq(table.metaAdsIntegration.id, integrationId));
@@ -240,7 +233,6 @@ export const fetchMetaAdsAccounts = command(
 
 		const tenantId = event.locals.tenant.id;
 
-		// Verify integration belongs to tenant and is active
 		const [integration] = await db
 			.select()
 			.from(table.metaAdsIntegration)
@@ -269,7 +261,6 @@ export const fetchMetaAdsAccounts = command(
 		const now = new Date();
 
 		for (const account of adAccounts) {
-			// Upsert: update if exists, insert if not
 			const [existing] = await db
 				.select({ id: table.metaAdsAccount.id })
 				.from(table.metaAdsAccount)
@@ -328,7 +319,6 @@ export const assignMetaAdsAccountToClient = command(
 
 		const tenantId = event.locals.tenant.id;
 
-		// Verify account belongs to this tenant
 		const [account] = await db
 			.select({ id: table.metaAdsAccount.id })
 			.from(table.metaAdsAccount)
@@ -344,7 +334,6 @@ export const assignMetaAdsAccountToClient = command(
 			throw new Error('Cont Meta Ads negăsit');
 		}
 
-		// If clientId provided, verify it belongs to this tenant
 		if (data.clientId) {
 			const [clientRow] = await db
 				.select({ id: table.client.id })
@@ -388,9 +377,9 @@ export const triggerMetaAdsSync = command(async () => {
 	return result;
 });
 
-export const deleteMetaAdsInvoice = command(
+export const deleteMetaAdsSpending = command(
 	v.pipe(v.string(), v.minLength(1)),
-	async (invoiceId) => {
+	async (spendingId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
@@ -399,35 +388,35 @@ export const deleteMetaAdsInvoice = command(
 			throw new Error('Unauthorized');
 		}
 
-		const [invoice] = await db
+		const [row] = await db
 			.select()
-			.from(table.metaAdsInvoice)
+			.from(table.metaAdsSpending)
 			.where(
 				and(
-					eq(table.metaAdsInvoice.id, invoiceId),
-					eq(table.metaAdsInvoice.tenantId, event.locals.tenant.id)
+					eq(table.metaAdsSpending.id, spendingId),
+					eq(table.metaAdsSpending.tenantId, event.locals.tenant.id)
 				)
 			)
 			.limit(1);
 
-		if (!invoice) {
-			throw new Error('Invoice not found');
+		if (!row) {
+			throw new Error('Raport cheltuieli negăsit');
 		}
 
 		// Delete PDF file if exists
-		if (invoice.pdfPath) {
+		if (row.pdfPath) {
 			try {
 				const { unlink } = await import('fs/promises');
 				const { join } = await import('path');
-				await unlink(join(process.cwd(), invoice.pdfPath));
+				await unlink(join(process.cwd(), row.pdfPath));
 			} catch {
-				// File might not exist, that's ok
+				// File might not exist
 			}
 		}
 
 		await db
-			.delete(table.metaAdsInvoice)
-			.where(eq(table.metaAdsInvoice.id, invoice.id));
+			.delete(table.metaAdsSpending)
+			.where(eq(table.metaAdsSpending.id, row.id));
 
 		return { success: true };
 	}
