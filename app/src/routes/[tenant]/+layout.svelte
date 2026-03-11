@@ -28,6 +28,8 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn, getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -217,6 +219,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`)}>
 									{#snippet child({ props })}
 										<a href="/{tenantSlug}/invoices/google-ads" {...props}>
+											<IconGoogleAds class="h-4 w-4" />
 											<span>Google Ads</span>
 										</a>
 									{/snippet}
@@ -226,6 +229,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/invoices/meta-ads`)}>
 									{#snippet child({ props })}
 										<a href="/{tenantSlug}/invoices/meta-ads" {...props}>
+											<IconFacebook class="h-4 w-4" />
 											<span>Facebook Ads</span>
 										</a>
 									{/snippet}

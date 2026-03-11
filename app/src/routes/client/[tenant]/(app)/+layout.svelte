@@ -21,6 +21,8 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { browser } from '$app/environment';
 	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -130,6 +132,7 @@
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`)}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/invoices/google-ads" {...props}>
+											<IconGoogleAds class="h-4 w-4" />
 											<span>Google Ads</span>
 										</a>
 									{/snippet}
@@ -139,6 +142,7 @@
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`)}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/invoices/meta-ads" {...props}>
+											<IconFacebook class="h-4 w-4" />
 											<span>Facebook Ads</span>
 										</a>
 									{/snippet}
