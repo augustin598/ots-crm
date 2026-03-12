@@ -59,7 +59,7 @@
 			toast.success('Cookies Facebook salvate');
 			cookieJsonInputs = { ...cookieJsonInputs, [integrationId]: '' };
 		} catch (e: any) {
-			const msg = e?.message || e?.body?.message || 'Eroare la salvare cookies';
+			const msg = e?.body?.message || e?.message || 'Eroare la salvare cookies';
 			toast.error(msg);
 			console.error('[Meta Ads] Save cookies error:', e);
 		} finally {
@@ -72,8 +72,8 @@
 		try {
 			await clearMetaAdsCookies(integrationId).updates(connectionsQuery);
 			toast.success('Sesiune Facebook ștearsă');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere sesiune');
+		} catch (e: any) {
+			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere sesiune'));
 		}
 	}
 
@@ -142,7 +142,10 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ integrationId })
 			});
-			if (!res.ok) throw new Error('Failed to disconnect');
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error || 'Eroare la deconectare');
+			}
 			toast.success('Business Manager deconectat');
 			// Refresh connections query instead of page reload
 			connectionsQuery.revalidate();
@@ -159,8 +162,8 @@
 		try {
 			await removeMetaAdsConnection(integrationId).updates(connectionsQuery);
 			toast.success('Conexiune ștearsă');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+		} catch (e: any) {
+			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere'));
 		}
 	}
 

@@ -4,7 +4,13 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { getMetaAdsConnections } from '$lib/server/meta-ads/auth';
+import { getMetaAdsConnections, disconnectMetaAds, getAuthenticatedToken } from '$lib/server/meta-ads/auth';
+import { listBusinessAdAccounts } from '$lib/server/meta-ads/client';
+import { saveFbSessionCookies, clearFbSession, getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
+import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
+import { generateSpendingReportPdf } from '$lib/server/meta-ads/spending-report-pdf';
+import { downloadAllReceiptsForMonth, downloadReceipt } from '$lib/server/meta-ads/invoice-downloader';
+import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
 
 // ---- Queries ----
@@ -227,7 +233,6 @@ export const removeMetaAdsConnection = command(
 			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
-		const { disconnectMetaAds } = await import('$lib/server/meta-ads/auth');
 		await disconnectMetaAds(integrationId);
 
 		await db
@@ -268,13 +273,11 @@ export const fetchMetaAdsAccounts = command(
 			throw error(404, 'Meta Ads nu este conectat');
 		}
 
-		const { getAuthenticatedToken } = await import('$lib/server/meta-ads/auth');
 		const authResult = await getAuthenticatedToken(integrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads');
 		}
 
-		const { listBusinessAdAccounts } = await import('$lib/server/meta-ads/client');
 		const adAccounts = await listBusinessAdAccounts(integration.businessId, authResult.accessToken);
 
 		const now = new Date();
@@ -391,7 +394,6 @@ export const triggerMetaAdsSync = command(async () => {
 		throw error(401, 'Unauthorized');
 	}
 
-	const { syncMetaAdsInvoicesForTenant } = await import('$lib/server/meta-ads/sync');
 	const result = await syncMetaAdsInvoicesForTenant(event.locals.tenant.id);
 	return result;
 });
@@ -462,9 +464,6 @@ export const regenerateSpendingPdf = command(
 				)
 			)
 			.limit(1);
-
-		const { generateSpendingReportPdf } = await import('$lib/server/meta-ads/spending-report-pdf');
-		const { uploadBuffer } = await import('$lib/server/storage');
 
 		const periods = allRows.map(r => ({
 			periodStart: r.periodStart,
@@ -543,7 +542,6 @@ export const setMetaAdsCookies = command(
 			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
-		const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
 		try {
 			await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
 			return { success: true };
@@ -583,7 +581,6 @@ export const clearMetaAdsCookies = command(
 			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
-		const { clearFbSession } = await import('$lib/server/meta-ads/fb-cookies');
 		await clearFbSession(integrationId, tenantId);
 
 		return { success: true };
@@ -646,7 +643,6 @@ export const triggerInvoiceDownload = command(
 			throw error(401, 'Unauthorized');
 		}
 
-		const { downloadAllReceiptsForMonth } = await import('$lib/server/meta-ads/invoice-downloader');
 		const result = await downloadAllReceiptsForMonth(event.locals.tenant.id, data.year, data.month);
 		return result;
 	}
@@ -707,9 +703,6 @@ export const redownloadInvoice = command(
 			throw error(400, 'Sesiune Facebook expirată — actualizează cookies din Settings');
 		}
 
-		const { downloadReceipt } = await import('$lib/server/meta-ads/invoice-downloader');
-		const { getDecryptedFbCookies } = await import('$lib/server/meta-ads/fb-cookies');
-
 		const cookies = await getDecryptedFbCookies(integration.id, tenantId);
 		if (!cookies) {
 			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
@@ -736,7 +729,6 @@ export const redownloadInvoice = command(
 
 		// Upload PDF to MinIO
 		const monthStr = String(month).padStart(2, '0');
-		const { uploadBuffer } = await import('$lib/server/storage');
 		const upload = await uploadBuffer(
 			tenantId,
 			result.pdfBuffer,
@@ -790,7 +782,6 @@ export const deleteInvoiceDownload = command(
 		// Delete PDF from MinIO if exists
 		if (dl.pdfPath) {
 			try {
-				const { deleteFile } = await import('$lib/server/storage');
 				await deleteFile(dl.pdfPath);
 			} catch {
 				logWarning('meta-ads', `Failed to delete PDF file: ${dl.pdfPath}`, { tenantId: event.locals.tenant.id });
@@ -834,7 +825,6 @@ export const deleteMetaAdsSpending = command(
 		// Delete PDF from MinIO if exists
 		if (row.pdfPath) {
 			try {
-				const { deleteFile } = await import('$lib/server/storage');
 				await deleteFile(row.pdfPath);
 			} catch {
 				logWarning('meta-ads', `Failed to delete spending PDF: ${row.pdfPath}`, { tenantId: event.locals.tenant.id });

@@ -54,7 +54,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		console.log('[META-ADS API] /disconnect — SUCCESS');
 		return json({ success: true });
 	} catch (err) {
-		console.error('[META-ADS API] /disconnect — ERROR', { error: err instanceof Error ? err.message : String(err) });
-		return json({ error: 'Failed to disconnect' }, { status: 500 });
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error('[META-ADS API] /disconnect — ERROR', { error: msg });
+		return json({ error: msg || 'Eroare la deconectare' }, { status: 500 });
 	}
 };
