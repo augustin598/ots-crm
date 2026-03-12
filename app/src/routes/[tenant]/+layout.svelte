@@ -28,6 +28,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
+	import IconKeez from '$lib/components/marketing/icon-keez.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
@@ -211,6 +212,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/invoices` || (currentPath.startsWith(`/${tenantSlug}/invoices`) && !currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/meta-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/tiktok-ads`))}>
 									{#snippet child({ props })}
 										<a href="/{tenantSlug}/invoices" {...props}>
+											<IconKeez class="h-4 w-4" />
 											<span>Keez</span>
 										</a>
 									{/snippet}
