@@ -187,12 +187,13 @@
 		</div>
 
 		<!-- Payment Info -->
-		{#if tenant.iban}
+		{@const displayIban = invoice.currency === 'EUR' && tenant.ibanEuro ? tenant.ibanEuro : tenant.iban}
+		{#if displayIban}
 			<div class="mt-6 rounded-lg border bg-white p-6 shadow-sm">
 				<h3 class="mb-3 text-sm font-medium uppercase text-gray-500">Date plata</h3>
 				<div class="space-y-1 text-sm text-gray-700">
 					<p><span class="font-medium">Beneficiar:</span> {tenant.name}</p>
-					<p><span class="font-medium">IBAN:</span> {tenant.iban}</p>
+					<p><span class="font-medium">IBAN ({invoice.currency === 'EUR' && tenant.ibanEuro ? 'EUR' : 'LEI'}):</span> {displayIban}</p>
 					{#if tenant.bankName}
 						<p><span class="font-medium">Banca:</span> {tenant.bankName}</p>
 					{/if}

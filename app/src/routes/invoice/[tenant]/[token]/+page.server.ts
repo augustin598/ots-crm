@@ -58,6 +58,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			slug: tenant.slug,
 			email: tenant.email,
 			iban: tenant.iban,
+			ibanEuro: tenant.ibanEuro || null,
 			bankName: tenant.bankName,
 			invoiceLogo: tenant.invoiceLogo || null
 		},
