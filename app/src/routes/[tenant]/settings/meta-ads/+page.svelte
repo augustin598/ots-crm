@@ -58,8 +58,10 @@
 			await setMetaAdsCookies({ integrationId, cookiesJson: json }).updates(connectionsQuery);
 			toast.success('Cookies Facebook salvate');
 			cookieJsonInputs = { ...cookieJsonInputs, [integrationId]: '' };
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare cookies');
+		} catch (e: any) {
+			const msg = e?.message || e?.body?.message || 'Eroare la salvare cookies';
+			toast.error(msg);
+			console.error('[Meta Ads] Save cookies error:', e);
 		} finally {
 			savingCookiesFor = null;
 		}
