@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -11,7 +12,7 @@ import { logWarning } from '$lib/server/logger';
 export const getMetaAdsConnectionStatus = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 	if (event.locals.isClientUser) return [];
 
@@ -38,7 +39,7 @@ export const getMetaAdsConnectionStatus = query(async () => {
 export const getMetaAdsSpendingList = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	let conditions: any = eq(table.metaAdsSpending.tenantId, event.locals.tenant.id);
@@ -85,10 +86,10 @@ export const getMetaAdsAccounts = query(
 	async (integrationId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const accounts = await db
@@ -119,10 +120,10 @@ export const getMetaAdsAccounts = query(
 export const getClientsForMetaMapping = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 	if (event.locals.isClientUser) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	const clients = await db
@@ -148,10 +149,10 @@ export const addMetaAdsConnection = command(
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -203,10 +204,10 @@ export const removeMetaAdsConnection = command(
 	async (integrationId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -223,7 +224,7 @@ export const removeMetaAdsConnection = command(
 			.limit(1);
 
 		if (!integration) {
-			throw new Error('Integrare Meta Ads negăsită');
+			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
 		const { disconnectMetaAds } = await import('$lib/server/meta-ads/auth');
@@ -243,10 +244,10 @@ export const fetchMetaAdsAccounts = command(
 	async (integrationId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -264,13 +265,13 @@ export const fetchMetaAdsAccounts = command(
 			.limit(1);
 
 		if (!integration) {
-			throw new Error('Meta Ads nu este conectat');
+			throw error(404, 'Meta Ads nu este conectat');
 		}
 
 		const { getAuthenticatedToken } = await import('$lib/server/meta-ads/auth');
 		const authResult = await getAuthenticatedToken(integrationId);
 		if (!authResult) {
-			throw new Error('Nu s-a putut obține token-ul Meta Ads');
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads');
 		}
 
 		const { listBusinessAdAccounts } = await import('$lib/server/meta-ads/client');
@@ -329,10 +330,10 @@ export const assignMetaAdsAccountToClient = command(
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -349,7 +350,7 @@ export const assignMetaAdsAccountToClient = command(
 			.limit(1);
 
 		if (!account) {
-			throw new Error('Cont Meta Ads negăsit');
+			throw error(404, 'Cont Meta Ads negăsit');
 		}
 
 		if (data.clientId) {
@@ -365,7 +366,7 @@ export const assignMetaAdsAccountToClient = command(
 				.limit(1);
 
 			if (!clientRow) {
-				throw new Error('Client negăsit');
+				throw error(404, 'Client negăsit');
 			}
 		}
 
@@ -384,10 +385,10 @@ export const assignMetaAdsAccountToClient = command(
 export const triggerMetaAdsSync = command(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 	if (event.locals.isClientUser) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	const { syncMetaAdsInvoicesForTenant } = await import('$lib/server/meta-ads/sync');
@@ -401,10 +402,10 @@ export const regenerateSpendingPdf = command(
 	async (spendingId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -422,7 +423,7 @@ export const regenerateSpendingPdf = command(
 			.limit(1);
 
 		if (!row) {
-			throw new Error('Raport cheltuieli negăsit');
+			throw error(404, 'Raport cheltuieli negăsit');
 		}
 
 		// Get ALL spending rows for same account + client (for combined PDF)
@@ -518,14 +519,13 @@ export const setMetaAdsCookies = command(
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
-		console.log('[Meta Ads] setMetaAdsCookies called', { integrationId: data.integrationId, tenantId, jsonLength: data.cookiesJson.length });
 
 		// Verify integration belongs to tenant
 		const [integration] = await db
@@ -540,18 +540,16 @@ export const setMetaAdsCookies = command(
 			.limit(1);
 
 		if (!integration) {
-			console.error('[Meta Ads] Integration not found for tenant', { integrationId: data.integrationId, tenantId });
-			throw new Error('Integrare Meta Ads negăsită');
+			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
+		const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
 		try {
-			const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
 			await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
-			console.log('[Meta Ads] Cookies saved successfully', { integrationId: data.integrationId });
 			return { success: true };
 		} catch (err) {
 			console.error('[Meta Ads] saveFbSessionCookies failed:', err);
-			throw err;
+			throw error(400, err instanceof Error ? err.message : 'Eroare la salvare cookies');
 		}
 	}
 );
@@ -562,10 +560,10 @@ export const clearMetaAdsCookies = command(
 	async (integrationId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -582,7 +580,7 @@ export const clearMetaAdsCookies = command(
 			.limit(1);
 
 		if (!integration) {
-			throw new Error('Integrare Meta Ads negăsită');
+			throw error(404, 'Integrare Meta Ads negăsită');
 		}
 
 		const { clearFbSession } = await import('$lib/server/meta-ads/fb-cookies');
@@ -596,7 +594,7 @@ export const clearMetaAdsCookies = command(
 export const getMetaInvoiceDownloads = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	let conditions: any = eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id);
@@ -642,10 +640,10 @@ export const triggerInvoiceDownload = command(
 	async (data) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const { downloadAllReceiptsForMonth } = await import('$lib/server/meta-ads/invoice-downloader');
@@ -660,10 +658,10 @@ export const redownloadInvoice = command(
 	async (downloadId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const tenantId = event.locals.tenant.id;
@@ -680,13 +678,13 @@ export const redownloadInvoice = command(
 			.limit(1);
 
 		if (!dl) {
-			throw new Error('Download negăsit');
+			throw error(404, 'Download negăsit');
 		}
 
 		// Parse period to get year/month
 		const [year, month] = dl.periodStart.split('-').map(Number);
 		if (!year || !month || month < 1 || month > 12) {
-			throw new Error('Format perioadă invalid');
+			throw error(400, 'Format perioadă invalid');
 		}
 
 		// Get integration info (scoped to tenant for defense-in-depth)
@@ -702,11 +700,11 @@ export const redownloadInvoice = command(
 			.limit(1);
 
 		if (!integration) {
-			throw new Error('Integrare negăsită');
+			throw error(404, 'Integrare negăsită');
 		}
 
 		if (integration.fbSessionStatus !== 'active') {
-			throw new Error('Sesiune Facebook expirată — actualizează cookies din Settings');
+			throw error(400, 'Sesiune Facebook expirată — actualizează cookies din Settings');
 		}
 
 		const { downloadReceipt } = await import('$lib/server/meta-ads/invoice-downloader');
@@ -714,7 +712,7 @@ export const redownloadInvoice = command(
 
 		const cookies = await getDecryptedFbCookies(integration.id, tenantId);
 		if (!cookies) {
-			throw new Error('Sesiune Facebook lipsă — setează cookies din Settings');
+			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
 		}
 
 		const result = await downloadReceipt({
@@ -733,7 +731,7 @@ export const redownloadInvoice = command(
 					updatedAt: new Date()
 				})
 				.where(eq(table.metaInvoiceDownload.id, dl.id));
-			throw new Error(result.error || 'Download eșuat');
+			throw error(500, result.error || 'Download eșuat');
 		}
 
 		// Upload PDF to MinIO
@@ -768,10 +766,10 @@ export const deleteInvoiceDownload = command(
 	async (downloadId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const [dl] = await db
@@ -786,7 +784,7 @@ export const deleteInvoiceDownload = command(
 			.limit(1);
 
 		if (!dl) {
-			throw new Error('Download negăsit');
+			throw error(404, 'Download negăsit');
 		}
 
 		// Delete PDF from MinIO if exists
@@ -812,10 +810,10 @@ export const deleteMetaAdsSpending = command(
 	async (spendingId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 		if (event.locals.isClientUser) {
-			throw new Error('Unauthorized');
+			throw error(401, 'Unauthorized');
 		}
 
 		const [row] = await db
@@ -830,7 +828,7 @@ export const deleteMetaAdsSpending = command(
 			.limit(1);
 
 		if (!row) {
-			throw new Error('Raport cheltuieli negăsit');
+			throw error(404, 'Raport cheltuieli negăsit');
 		}
 
 		// Delete PDF from MinIO if exists
