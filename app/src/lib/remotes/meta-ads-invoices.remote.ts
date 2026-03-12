@@ -525,6 +525,7 @@ export const setMetaAdsCookies = command(
 		}
 
 		const tenantId = event.locals.tenant.id;
+		console.log('[Meta Ads] setMetaAdsCookies called', { integrationId: data.integrationId, tenantId, jsonLength: data.cookiesJson.length });
 
 		// Verify integration belongs to tenant
 		const [integration] = await db
@@ -539,13 +540,19 @@ export const setMetaAdsCookies = command(
 			.limit(1);
 
 		if (!integration) {
+			console.error('[Meta Ads] Integration not found for tenant', { integrationId: data.integrationId, tenantId });
 			throw new Error('Integrare Meta Ads negăsită');
 		}
 
-		const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
-		await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
-
-		return { success: true };
+		try {
+			const { saveFbSessionCookies } = await import('$lib/server/meta-ads/fb-cookies');
+			await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
+			console.log('[Meta Ads] Cookies saved successfully', { integrationId: data.integrationId });
+			return { success: true };
+		} catch (err) {
+			console.error('[Meta Ads] saveFbSessionCookies failed:', err);
+			throw err;
+		}
 	}
 );
 
