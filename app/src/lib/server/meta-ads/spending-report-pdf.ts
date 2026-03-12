@@ -1,7 +1,17 @@
 import PDFDocument from 'pdfkit';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 
-const ASSETS_DIR = resolve(import.meta.dirname ?? '.', '..', 'assets');
+function resolveAssetsDir(): string {
+	const dir = import.meta.dirname ?? '.';
+	// Production: Vite bundles all server modules into build/server/chunks/
+	const sameLevel = resolve(dir, 'assets');
+	if (existsSync(sameLevel)) return sameLevel;
+	// Dev: this file is in meta-ads/ subfolder, assets one level up
+	return resolve(dir, '..', 'assets');
+}
+
+const ASSETS_DIR = resolveAssetsDir();
 const FONT_REGULAR = resolve(ASSETS_DIR, 'DejaVuSans.ttf');
 const FONT_BOLD = resolve(ASSETS_DIR, 'DejaVuSans-Bold.ttf');
 
