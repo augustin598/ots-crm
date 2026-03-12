@@ -619,7 +619,7 @@ export function mapKeezInvoiceToCRM(
 	tenantId: string,
 	clientId: string | null,
 	userId: string
-): Partial<Invoice> & { lineItems: Array<Omit<InvoiceLineItem, 'id' | 'createdAt'>> } {
+): Partial<Invoice> {
 	// Calculate amounts from Keez
 	// For EUR invoices, Keez may return amounts in EUR (not RON) from the list endpoint
 	// Only if detail-level has netAmountCurrency can we get RON amounts
@@ -723,9 +723,6 @@ export function mapKeezInvoiceToCRM(
 		}
 	};
 
-	// Map line items - will be added later when invoice is created
-	const lineItems: Array<Omit<InvoiceLineItem, 'id' | 'createdAt'>> = [];
-
 	// Use documentDate from header if issueDate is not available in invoice
 	// documentDate is the field used in invoice list according to Keez documentation
 	// Try multiple sources: header documentDate, header issueDate, invoice issueDate
@@ -821,8 +818,7 @@ export function mapKeezInvoiceToCRM(
 		keezStatus: keezStatus || null,
 		keezInvoiceId: keezHeader.externalId || null,
 		keezExternalId: keezHeader.externalId || null,
-		createdByUserId: userId,
-		lineItems
+		createdByUserId: userId
 	};
 }
 

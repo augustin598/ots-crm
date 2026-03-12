@@ -213,7 +213,7 @@ export async function syncKeezInvoicesForTenant(
 					keezGrossAmount = keezInvoice.grossAmount ?? keezInvoice.grossAmountCurrency ?? 0;
 				}
 
-				const updateData: any = { updatedAt: new Date() };
+				const updateData: any = { updatedAt: new Date(), taxApplicationType: existing.taxApplicationType || 'apply' };
 
 				if (parsedIssueDate) updateData.issueDate = parsedIssueDate;
 				if (parsedDueDate) updateData.dueDate = parsedDueDate;
@@ -354,7 +354,7 @@ export async function syncKeezInvoicesForTenant(
 				'' // No user for scheduler-triggered imports
 			);
 
-			const { lineItems, ...invoiceInsertData } = invoiceData;
+			const invoiceInsertData = invoiceData;
 			const invoiceId = generateId();
 
 			await db.insert(table.invoice).values({
@@ -376,17 +376,25 @@ export async function syncKeezInvoicesForTenant(
 				keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
 				keezExternalId: invoiceInsertData.keezExternalId || null,
 				keezStatus: invoiceInsertData.keezStatus || null,
+				taxApplicationType: 'apply',
 				createdByUserId: systemUserId
 			});
 
-			if (lineItems && lineItems.length > 0) {
-				await db.insert(table.invoiceLineItem).values(
-					lineItems.map((item) => ({
-						...item,
-						invoiceId,
-						id: generateId()
-					}))
-				);
+			if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
+				try {
+					const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, invoiceId);
+					if (lineItemsData.length > 0) {
+						await db.insert(table.invoiceLineItem).values(
+							lineItemsData.map((item) => ({
+								...item,
+								id: generateId()
+							}))
+						);
+					}
+				} catch (lineItemError) {
+					const lineErr = serializeError(lineItemError);
+					logError('keez', `Sync failed to insert line items for new invoice ${invoiceId}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
+				}
 			}
 
 			// Create sync record
