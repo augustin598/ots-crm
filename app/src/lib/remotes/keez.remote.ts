@@ -943,7 +943,8 @@ export const syncInvoicesFromKeez = command(
 
 					// Update existing invoice with all data from Keez
 					const updateData: any = {
-						updatedAt: new Date()
+						updatedAt: new Date(),
+						taxApplicationType: existing.taxApplicationType || 'apply'
 					};
 
 					// Re-match client using CUI-first logic to fix wrong associations
@@ -1122,8 +1123,7 @@ export const syncInvoicesFromKeez = command(
 					event.locals.user.id
 				);
 
-				// Extract lineItems before inserting invoice
-				const { lineItems, ...invoiceInsertData } = invoiceData;
+				const invoiceInsertData = invoiceData as any;
 
 				// Ensure required fields are set
 				if (!invoiceInsertData.tenantId) {
@@ -1156,17 +1156,25 @@ export const syncInvoicesFromKeez = command(
 					keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
 					keezExternalId: invoiceInsertData.keezExternalId || null,
 					keezStatus: invoiceInsertData.keezStatus || null,
+					taxApplicationType: 'apply',
 					createdByUserId: invoiceInsertData.createdByUserId || event.locals.user.id
 				});
 
-				// Create line items
-				if (lineItems && lineItems.length > 0) {
-					const lineItemsToInsert = lineItems.map((item) => ({
-						...item,
-						invoiceId,
-						id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
-					}));
-					await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
+				// Create line items from Keez invoice details
+				if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
+					try {
+						const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, invoiceId);
+						if (lineItemsData.length > 0) {
+							await db.insert(table.invoiceLineItem).values(
+								lineItemsData.map((item) => ({
+									...item,
+									id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
+								}))
+							);
+						}
+					} catch (error) {
+						console.error(`[Keez] Failed to insert line items for new invoice ${invoiceId}:`, error);
+					}
 				}
 
 				// Create sync record
