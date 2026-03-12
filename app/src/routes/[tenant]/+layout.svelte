@@ -30,6 +30,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn, getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -207,7 +208,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 					{#if currentPath.startsWith(`/${tenantSlug}/invoices`)}
 						<SidebarMenuSub>
 							<SidebarMenuSubItem>
-								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/invoices` || (currentPath.startsWith(`/${tenantSlug}/invoices`) && !currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/meta-ads`))}>
+								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/invoices` || (currentPath.startsWith(`/${tenantSlug}/invoices`) && !currentPath.startsWith(`/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/meta-ads`) && !currentPath.startsWith(`/${tenantSlug}/invoices/tiktok-ads`))}>
 									{#snippet child({ props })}
 										<a href="/{tenantSlug}/invoices" {...props}>
 											<span>Keez</span>
@@ -231,6 +232,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 										<a href="/{tenantSlug}/invoices/meta-ads" {...props}>
 											<IconFacebook class="h-4 w-4" />
 											<span>Facebook Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/invoices/tiktok-ads`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/invoices/tiktok-ads" {...props}>
+											<IconTiktok class="h-4 w-4" />
+											<span>TikTok Ads</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>

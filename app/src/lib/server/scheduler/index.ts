@@ -12,6 +12,7 @@ import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminder
 import { processContractLifecycle } from './tasks/contract-lifecycle';
 import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
+import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
@@ -73,7 +74,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	invoice_overdue_reminders: processInvoiceOverdueReminders,
 	contract_lifecycle: processContractLifecycle,
 	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
-	meta_ads_invoice_sync: processMetaAdsInvoiceSync
+	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
+	tiktok_ads_spending_sync: processTiktokAdsSpendingSync
 };
 
 /**
@@ -340,7 +342,23 @@ export const startScheduler = () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 13 jobs registered`);
+	// Schedule TikTok Ads spending sync monthly (2nd of each month at 8:00 AM)
+	schedulerQueue.add(
+		'tiktok-ads-spending-sync',
+		{
+			type: 'tiktok_ads_spending_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 8 2 * *', // 2nd of each month at 8:00 AM
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'tiktok-ads-spending-sync'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 14 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -364,7 +382,8 @@ export const JOB_LABELS: Record<string, string> = {
 	invoice_overdue_reminders: 'Reminder-e Facturi Restante',
 	contract_lifecycle: 'Lifecycle Contracte',
 	google_ads_invoice_sync: 'Sync Facturi Google Ads',
-	meta_ads_invoice_sync: 'Sync Facturi Meta Ads'
+	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
+	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads'
 };
 
 /** Default params for jobs that need specific parameters */

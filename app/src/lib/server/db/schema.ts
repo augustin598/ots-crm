@@ -1582,6 +1582,117 @@ export const metaInvoiceDownload = sqliteTable('meta_invoice_download', {
 		.default(sql`current_date`)
 });
 
+// TikTok Ads integration — one per tenant connection (OAuth2 + session cookies)
+export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	appId: text('app_id').notNull().default(''),
+	orgId: text('org_id').notNull().default(''), // TikTok Business Center bc_id
+	paymentAccountId: text('payment_account_id').notNull().default(''), // TikTok pa_id for billing API
+	email: text('email').notNull().default(''),
+	accessToken: text('access_token').notNull().default(''),
+	refreshToken: text('refresh_token').notNull().default(''),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }),
+	refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true, mode: 'date' }),
+	isActive: boolean('is_active').notNull().default(false),
+	syncEnabled: boolean('sync_enabled').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
+	ttSessionCookies: text('tt_session_cookies'), // AES-256-GCM encrypted TikTok session cookies
+	ttSessionStatus: text('tt_session_status').notNull().default('none'), // 'none' | 'active'
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// TikTok Ads advertiser accounts cached — each can be assigned to a CRM client
+export const tiktokAdsAccount = sqliteTable('tiktok_ads_account', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => tiktokAdsIntegration.id, { onDelete: 'cascade' }),
+	tiktokAdvertiserId: text('tiktok_advertiser_id').notNull(),
+	accountName: text('account_name').notNull().default(''),
+	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
+	isActive: boolean('is_active').notNull().default(true),
+	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// TikTok Ads spending data synced from Reporting API per advertiser
+export const tiktokAdsSpending = sqliteTable('tiktok_ads_spending', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => tiktokAdsIntegration.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	tiktokAdvertiserId: text('tiktok_advertiser_id').notNull(),
+	periodStart: text('period_start').notNull(), // "2026-02-01"
+	periodEnd: text('period_end').notNull(), // "2026-02-28"
+	spendAmount: text('spend_amount').notNull().default('0'), // raw from API e.g. "2207.59"
+	spendCents: integer('spend_cents').notNull().default(0),
+	currencyCode: text('currency_code').notNull().default('RON'),
+	impressions: integer('impressions').default(0),
+	clicks: integer('clicks').default(0),
+	conversions: integer('conversions').default(0),
+	pdfPath: text('pdf_path'),
+	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// TikTok invoice downloads — billing PDF receipts downloaded via cookie-based API
+export const tiktokInvoiceDownload = sqliteTable('tiktok_invoice_download', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => tiktokAdsIntegration.id, { onDelete: 'cascade' }),
+	clientId: text('client_id').references(() => client.id),
+	tiktokAdvertiserId: text('tiktok_advertiser_id').notNull(),
+	adAccountName: text('ad_account_name'),
+	tiktokInvoiceId: text('tiktok_invoice_id').notNull(), // TikTok internal invoice ID
+	invoiceNumber: text('invoice_number'), // e.g. "BDUK20261596169"
+	amountCents: integer('amount_cents'),
+	currencyCode: text('currency_code').notNull().default('RON'),
+	periodStart: text('period_start').notNull(),
+	periodEnd: text('period_end').notNull(),
+	pdfPath: text('pdf_path'),
+	status: text('status').notNull().default('pending'), // 'pending' | 'downloaded' | 'error'
+	downloadedAt: timestamp('downloaded_at', { withTimezone: true, mode: 'date' }),
+	errorMessage: text('error_message'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const passwordResetToken = sqliteTable('password_reset_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -1663,6 +1774,10 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	metaAdsAccounts: many(metaAdsAccount),
 	metaAdsInvoices: many(metaAdsInvoice),
 	metaAdsSpending: many(metaAdsSpending),
+	tiktokAdsIntegrations: many(tiktokAdsIntegration),
+	tiktokAdsAccounts: many(tiktokAdsAccount),
+	tiktokAdsSpending: many(tiktokAdsSpending),
+	tiktokInvoiceDownloads: many(tiktokInvoiceDownload),
 	emailLogs: many(emailLog),
 	debugLogs: many(debugLog)
 }));
@@ -1702,7 +1817,10 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	googleAdsInvoices: many(googleAdsInvoice),
 	metaAdsAccounts: many(metaAdsAccount),
 	metaAdsInvoices: many(metaAdsInvoice),
-	metaAdsSpending: many(metaAdsSpending)
+	metaAdsSpending: many(metaAdsSpending),
+	tiktokAdsAccounts: many(tiktokAdsAccount),
+	tiktokAdsSpending: many(tiktokAdsSpending),
+	tiktokInvoiceDownloads: many(tiktokInvoiceDownload)
 }));
 
 export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({
@@ -2284,6 +2402,61 @@ export const metaInvoiceDownloadRelations = relations(metaInvoiceDownload, ({ on
 	})
 }));
 
+export const tiktokAdsIntegrationRelations = relations(tiktokAdsIntegration, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [tiktokAdsIntegration.tenantId],
+		references: [tenant.id]
+	}),
+	accounts: many(tiktokAdsAccount),
+	spending: many(tiktokAdsSpending),
+	invoiceDownloads: many(tiktokInvoiceDownload)
+}));
+
+export const tiktokAdsAccountRelations = relations(tiktokAdsAccount, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [tiktokAdsAccount.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(tiktokAdsIntegration, {
+		fields: [tiktokAdsAccount.integrationId],
+		references: [tiktokAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [tiktokAdsAccount.clientId],
+		references: [client.id]
+	})
+}));
+
+export const tiktokAdsSpendingRelations = relations(tiktokAdsSpending, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [tiktokAdsSpending.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(tiktokAdsIntegration, {
+		fields: [tiktokAdsSpending.integrationId],
+		references: [tiktokAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [tiktokAdsSpending.clientId],
+		references: [client.id]
+	})
+}));
+
+export const tiktokInvoiceDownloadRelations = relations(tiktokInvoiceDownload, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [tiktokInvoiceDownload.tenantId],
+		references: [tenant.id]
+	}),
+	integration: one(tiktokAdsIntegration, {
+		fields: [tiktokInvoiceDownload.integrationId],
+		references: [tiktokAdsIntegration.id]
+	}),
+	client: one(client, {
+		fields: [tiktokInvoiceDownload.clientId],
+		references: [client.id]
+	})
+}));
+
 export const userBankAccountRelations = relations(userBankAccount, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [userBankAccount.tenantId],
@@ -2771,6 +2944,14 @@ export type MetaAdsSpending = typeof metaAdsSpending.$inferSelect;
 export type NewMetaAdsSpending = typeof metaAdsSpending.$inferInsert;
 export type MetaInvoiceDownload = typeof metaInvoiceDownload.$inferSelect;
 export type NewMetaInvoiceDownload = typeof metaInvoiceDownload.$inferInsert;
+export type TiktokAdsIntegration = typeof tiktokAdsIntegration.$inferSelect;
+export type NewTiktokAdsIntegration = typeof tiktokAdsIntegration.$inferInsert;
+export type TiktokAdsAccount = typeof tiktokAdsAccount.$inferSelect;
+export type NewTiktokAdsAccount = typeof tiktokAdsAccount.$inferInsert;
+export type TiktokAdsSpending = typeof tiktokAdsSpending.$inferSelect;
+export type NewTiktokAdsSpending = typeof tiktokAdsSpending.$inferInsert;
+export type TiktokInvoiceDownload = typeof tiktokInvoiceDownload.$inferSelect;
+export type NewTiktokInvoiceDownload = typeof tiktokInvoiceDownload.$inferInsert;
 
 // Invoice view tokens — public access to invoices via email links (no login required)
 export const invoiceViewToken = sqliteTable('invoice_view_token', {

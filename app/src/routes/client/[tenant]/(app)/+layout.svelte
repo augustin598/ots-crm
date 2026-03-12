@@ -23,6 +23,7 @@
 	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -120,7 +121,7 @@
 					{#if currentPath.startsWith(`/client/${tenantSlug}/invoices`)}
 						<SidebarMenuSub>
 							<SidebarMenuSubItem>
-								<SidebarMenuSubButton isActive={currentPath === `/client/${tenantSlug}/invoices` || (currentPath.startsWith(`/client/${tenantSlug}/invoices`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`))}>
+								<SidebarMenuSubButton isActive={currentPath === `/client/${tenantSlug}/invoices` || (currentPath.startsWith(`/client/${tenantSlug}/invoices`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/google-ads`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/meta-ads`) && !currentPath.startsWith(`/client/${tenantSlug}/invoices/tiktok-ads`))}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/invoices" {...props}>
 											<span>Facturi Servicii</span>
@@ -144,6 +145,16 @@
 										<a href="/client/{tenantSlug}/invoices/meta-ads" {...props}>
 											<IconFacebook class="h-4 w-4" />
 											<span>Facebook Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices/tiktok-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/invoices/tiktok-ads" {...props}>
+											<IconTiktok class="h-4 w-4" />
+											<span>TikTok Ads</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>

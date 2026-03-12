@@ -1,0 +1,30 @@
+import { redirect } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { getOAuthUrl } from '$lib/server/tiktok-ads/auth';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq } from 'drizzle-orm';
+
+export const GET: RequestHandler = async ({ url }) => {
+	const tenantSlug = url.searchParams.get('tenant');
+	const integrationId = url.searchParams.get('integration');
+
+	if (!tenantSlug || !integrationId) {
+		throw redirect(303, '/');
+	}
+
+	const [tenant] = await db
+		.select({ id: table.tenant.id })
+		.from(table.tenant)
+		.where(eq(table.tenant.slug, tenantSlug))
+		.limit(1);
+
+	if (!tenant) {
+		throw redirect(303, '/');
+	}
+
+	// State format: "tenantId:tenantSlug:integrationId"
+	const state = `${tenant.id}:${tenantSlug}:${integrationId}`;
+	const authUrl = getOAuthUrl(state);
+	throw redirect(303, authUrl);
+};

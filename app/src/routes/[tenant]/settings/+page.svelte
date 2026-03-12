@@ -20,6 +20,7 @@
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
 	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
 	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto } from '$app/navigation';
@@ -79,6 +80,11 @@
 	const metaAdsStatusQuery = getMetaAdsConnectionStatus();
 	const metaAdsConnections = $derived(metaAdsStatusQuery.current || []);
 	const metaAdsActiveCount = $derived(metaAdsConnections.filter((c: any) => c.connected).length);
+
+	// TikTok Ads status
+	const tiktokAdsStatusQuery = getTiktokAdsConnectionStatus();
+	const tiktokAdsConnections = $derived(tiktokAdsStatusQuery.current || []);
+	const tiktokAdsActiveCount = $derived(tiktokAdsConnections.filter((c: any) => c.connected).length);
 
 	// BNR exchange rates
 	const bnrRatesQuery = getBnrRates();
@@ -581,6 +587,34 @@
 					<div class="flex items-center gap-2">
 						{#if metaAdsActiveCount > 0}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">{metaAdsActiveCount} Conectat{metaAdsActiveCount > 1 ? 'e' : ''}</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/tiktok-ads`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<div>
+							<CardTitle>TikTok Ads</CardTitle>
+							<CardDescription>
+								{#if tiktokAdsActiveCount > 0}
+									{tiktokAdsActiveCount} integrare{tiktokAdsActiveCount > 1 ? ' conectate' : ' conectată'}
+								{:else}
+									Conectează TikTok Ads pentru descărcarea automată a facturilor
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if tiktokAdsActiveCount > 0}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">{tiktokAdsActiveCount} Conectat{tiktokAdsActiveCount > 1 ? 'e' : ''}</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
 						{/if}
