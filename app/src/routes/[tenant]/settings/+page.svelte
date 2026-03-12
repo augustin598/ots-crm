@@ -523,7 +523,7 @@
 						<div>
 							<CardTitle>Gmail Integration</CardTitle>
 							<CardDescription>
-								{#if gmailStatus?.isConnected}
+								{#if gmailStatus?.connected}
 									Conectat ca {gmailStatus.email}
 								{:else}
 									Conecteaza contul Gmail pentru import facturi furnizori
@@ -532,7 +532,7 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-2">
-						{#if gmailStatus?.isConnected}
+						{#if gmailStatus?.connected}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
@@ -561,7 +561,7 @@
 					</div>
 					<div class="flex items-center gap-2">
 						{#if googleAdsStatus?.connected}
-							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">1 Conectat</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
 						{/if}
