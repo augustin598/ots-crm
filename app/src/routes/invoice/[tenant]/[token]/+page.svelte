@@ -72,7 +72,11 @@
 	<div class="mx-auto max-w-3xl px-4 py-8">
 		<!-- Header -->
 		<div class="mb-6 text-center">
-			<h1 class="text-2xl font-bold text-gray-900">{tenant.name}</h1>
+			{#if tenant.invoiceLogo}
+				<img src={tenant.invoiceLogo} alt={tenant.name} class="mx-auto h-16 object-contain" />
+			{:else}
+				<h1 class="text-2xl font-bold text-gray-900">{tenant.name}</h1>
+			{/if}
 		</div>
 
 		<!-- Invoice Card -->
