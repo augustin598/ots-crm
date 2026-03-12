@@ -16,7 +16,10 @@
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import IconGmail from '$lib/components/marketing/icon-gmail.svelte';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
 	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
@@ -516,7 +519,7 @@
 			<CardHeader>
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<MailIcon class="h-5 w-5 text-muted-foreground" />
+						<IconGmail class="h-5 w-5" />
 						<div>
 							<CardTitle>Gmail Integration</CardTitle>
 							<CardDescription>
@@ -544,7 +547,7 @@
 			<CardHeader>
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<IconGoogleAds class="h-5 w-5" />
 						<div>
 							<CardTitle>Google Ads</CardTitle>
 							<CardDescription>
@@ -572,7 +575,7 @@
 			<CardHeader>
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<IconFacebook class="h-5 w-5" />
 						<div>
 							<CardTitle>Meta Ads</CardTitle>
 							<CardDescription>
@@ -600,7 +603,7 @@
 			<CardHeader>
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
-						<ReceiptIcon class="h-5 w-5 text-muted-foreground" />
+						<IconTiktok class="h-5 w-5" />
 						<div>
 							<CardTitle>TikTok Ads</CardTitle>
 							<CardDescription>
