@@ -60,7 +60,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			iban: tenant.iban,
 			ibanEuro: tenant.ibanEuro || null,
 			bankName: tenant.bankName,
-			invoiceLogo: tenant.invoiceLogo || null
+			invoiceLogo: invoiceSettings?.invoiceLogo || null
 		},
 		client: {
 			name: client?.businessName || client?.name || 'Client'
