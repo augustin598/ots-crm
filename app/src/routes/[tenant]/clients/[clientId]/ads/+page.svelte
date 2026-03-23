@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getClientAdAccount, getMetaCampaignInsights } from '$lib/remotes/reports.remote';
+	import { getClientAdAccount, getMetaCampaignInsights, getMetaActiveCampaigns } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -49,6 +49,7 @@
 
 	// Insights (only if ad account exists)
 	let insightsQuery = $state<ReturnType<typeof getMetaCampaignInsights> | null>(null);
+	let campaignsQuery = $state<ReturnType<typeof getMetaActiveCampaigns> | null>(null);
 
 	$effect(() => {
 		if (adAccount?.metaAdAccountId && adAccount?.integrationId && since && until) {
@@ -59,17 +60,49 @@
 				until,
 				timeIncrement: 'daily'
 			});
+			campaignsQuery = getMetaActiveCampaigns({
+				adAccountId: adAccount.metaAdAccountId,
+				integrationId: adAccount.integrationId
+			});
 		}
 	});
 
 	const insights = $derived(insightsQuery?.current || []);
 	const insightsLoading = $derived(insightsQuery?.loading ?? false);
 	const insightsError = $derived(insightsQuery?.error);
+	const campaigns = $derived(campaignsQuery?.current || []);
 
 	// Aggregated data
 	const dailyData = $derived(aggregateInsightsByDate(insights));
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
 	const totals = $derived(computeTotals(dailyData));
+
+	// Merge campaigns with insights to get status
+	const campaignTableData = $derived.by(() => {
+		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
+		const result: Array<CampaignAggregate & { status: string }> = [];
+		for (const ci of campaigns) {
+			const insight = insightMap.get(ci.campaignId);
+			if (insight) {
+				result.push({ ...insight, status: ci.status });
+				insightMap.delete(ci.campaignId);
+			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES') {
+				result.push({
+					campaignId: ci.campaignId, campaignName: ci.campaignName, objective: ci.objective,
+					spend: 0, impressions: 0, reach: 0, frequency: 0, clicks: 0,
+					conversions: 0, conversionValue: 0, cpc: 0, cpm: 0, ctr: 0,
+					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
+					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
+					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
+					status: ci.status
+				});
+			}
+		}
+		for (const [, c] of insightMap) {
+			result.push({ ...c, status: 'UNKNOWN' });
+		}
+		return result;
+	});
 
 	// Dynamic result KPI
 	const resultKpi = $derived.by(() => {
@@ -105,9 +138,14 @@
 	const STATUS_ORDER: Record<string, number> = { ACTIVE: 0, WITH_ISSUES: 1, IN_PROCESS: 2, PAUSED: 3, CAMPAIGN_PAUSED: 4, UNKNOWN: 5 };
 
 	const sortedCampaigns = $derived(
-		[...campaignData].sort((a, b) => {
+		[...campaignTableData].sort((a, b) => {
 			const dir = sortDirection === 'asc' ? 1 : -1;
-			if (sortColumn === 'status') return 0; // No status in campaign data from insights
+			if (sortColumn === 'status') {
+				const sa = STATUS_ORDER[a.status] ?? 9;
+				const sb = STATUS_ORDER[b.status] ?? 9;
+				if (sa !== sb) return dir * (sa - sb);
+				return b.spend - a.spend;
+			}
 			const av = a[sortColumn as keyof typeof a];
 			const bv = b[sortColumn as keyof typeof b];
 			if (typeof av === 'string' && typeof bv === 'string') return dir * av.localeCompare(bv);
@@ -115,6 +153,15 @@
 			return 0;
 		})
 	);
+
+	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
+		switch (status) {
+			case 'ACTIVE': return 'success';
+			case 'PAUSED': case 'CAMPAIGN_PAUSED': return 'warning';
+			case 'DELETED': return 'destructive';
+			default: return 'outline';
+		}
+	}
 
 	function handleSort(column: typeof sortColumn) {
 		if (sortColumn === column) {
@@ -209,7 +256,7 @@
 					<div class="flex items-center justify-between">
 						<h3 class="text-lg font-semibold">Performanță campanii</h3>
 						<div class="flex items-center gap-3">
-							<p class="text-sm text-muted-foreground">{campaignData.length} campanii</p>
+							<p class="text-sm text-muted-foreground">{campaignTableData.length} campanii</p>
 							<div class="flex items-center gap-1.5">
 								<ColumnsIcon class="h-4 w-4 text-muted-foreground" />
 								<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" value={selectedPresetKey} onchange={(e) => { selectedPresetKey = e.currentTarget.value; }}>
@@ -228,6 +275,11 @@
 									<TableHead>
 										<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('campaignName')}>
 											Campanie <ArrowUpDownIcon class="h-4 w-4" />
+										</button>
+									</TableHead>
+									<TableHead>
+										<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('status')}>
+											Status <ArrowUpDownIcon class="h-4 w-4" />
 										</button>
 									</TableHead>
 									{#each activePreset.columns as col}
@@ -250,6 +302,9 @@
 											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
 										</TableCell>
+										<TableCell>
+											<Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge>
+										</TableCell>
 										{#each activePreset.columns as col}
 											<TableCell class={col.align === 'right' ? 'text-right' : ''}>
 												<div>{col.getValue(campaign, currency)}</div>
@@ -265,10 +320,11 @@
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
-									<TableCell>Total {campaignData.length} campanii</TableCell>
+									<TableCell>Total {campaignTableData.length} campanii</TableCell>
+									<TableCell></TableCell>
 									{#each activePreset.columns as col}
 										<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-											{col.getTotalValue ? col.getTotalValue(campaignData, currency) : '-'}
+											{col.getTotalValue ? col.getTotalValue(campaignTableData, currency) : '-'}
 										</TableCell>
 									{/each}
 								</TableRow>

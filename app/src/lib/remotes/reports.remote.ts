@@ -332,8 +332,21 @@ export const getMetaActiveCampaigns = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+
+		// Client users can only access their own ad account
 		if (event.locals.isClientUser) {
-			throw error(401, 'Unauthorized');
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
+				.from(table.metaAdsAccount)
+				.where(and(
+					eq(table.metaAdsAccount.clientId, event.locals.client.id),
+					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
+				))
+				.limit(1);
+			if (!clientAccount || clientAccount.metaAdAccountId !== params.adAccountId) {
+				throw error(401, 'Unauthorized');
+			}
 		}
 
 		const tenantId = event.locals.tenant.id;
