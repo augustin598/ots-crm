@@ -490,6 +490,43 @@ export async function listCampaignReachFrequency(
 }
 
 /**
+ * Toggle campaign status (ACTIVE/PAUSED) via Meta API.
+ */
+export async function toggleCampaignStatus(
+	campaignId: string,
+	accessToken: string,
+	appSecret: string,
+	newStatus: 'ACTIVE' | 'PAUSED'
+): Promise<{ success: boolean }> {
+	logInfo('meta-ads', `Toggling campaign ${campaignId} to ${newStatus}`);
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const params = new URLSearchParams({
+		access_token: accessToken,
+		appsecret_proof: proof,
+		status: newStatus
+	});
+
+	try {
+		const res = await fetch(`${META_GRAPH_URL}/${campaignId}`, { method: 'POST', body: params });
+		const data = await res.json();
+		if (data.error) {
+			logError('meta-ads', `Failed to toggle campaign ${campaignId}`, {
+				metadata: { errorMessage: data.error.message, errorCode: data.error.code }
+			});
+			throw new Error(data.error.message);
+		}
+		logInfo('meta-ads', `Campaign ${campaignId} set to ${newStatus}`);
+		return { success: true };
+	} catch (err) {
+		logError('meta-ads', `Toggle failed for ${campaignId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
  * Update campaign budget via Meta API.
  * Budget values are in cents (e.g., 5000 = 50.00 RON).
  */

@@ -50,7 +50,6 @@
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
 		{ id: 'marketing', label: 'Marketing', href: `/${tenantSlug}/clients/${clientId}/marketing` },
-		{ id: 'ads', label: 'Ads', href: `/${tenantSlug}/clients/${clientId}/ads` },
 		{ id: 'access-data', label: 'Date de acces', href: `/${tenantSlug}/clients/${clientId}/access-data` }
 	]);
 
@@ -193,7 +192,7 @@
 	</Dialog.Root>
 
 	<Tabs value={activeTab()} class="w-full">
-			<TabsList class="grid w-full grid-cols-7">
+			<TabsList class="grid w-full grid-cols-6">
 				{#each tabs as tab}
 					<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 						{tab.label}

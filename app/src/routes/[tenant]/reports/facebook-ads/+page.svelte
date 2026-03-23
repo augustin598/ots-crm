@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, updateBudget } from '$lib/remotes/reports.remote';
+	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -9,6 +9,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Input } from '$lib/components/ui/input';
+	import { Switch } from '$lib/components/ui/switch';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import KpiCard from '$lib/components/reports/kpi-card.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
@@ -342,6 +343,31 @@
 		}
 	}
 
+	let togglingCampaignId = $state<string | null>(null);
+
+	async function handleToggleStatus(campaign: any) {
+		if (!selectedIntegrationId) return;
+		const newStatus = campaign.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+		const label = newStatus === 'ACTIVE' ? 'pornită' : 'oprită';
+		togglingCampaignId = campaign.campaignId;
+		try {
+			await toggleCampaignStatus({
+				campaignId: campaign.campaignId,
+				integrationId: selectedIntegrationId,
+				newStatus
+			});
+			toast.success(`Campania "${campaign.campaignName}" a fost ${label}`, { duration: 2000 });
+			setTimeout(() => window.location.reload(), 1000);
+		} catch (e) {
+			toast.error('Nu s-a putut schimba statusul', {
+				description: e instanceof Error ? e.message : 'Eroare necunoscută',
+				duration: 5000
+			});
+		} finally {
+			togglingCampaignId = null;
+		}
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
 			case 'ACTIVE': return 'success';
@@ -529,6 +555,7 @@
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead class="w-[50px]">On/Off</TableHead>
 									<TableHead>
 										<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('campaignName')}>
 											Campanie <ArrowUpDownIcon class="h-4 w-4" />
@@ -555,6 +582,13 @@
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
 									<TableRow>
+										<TableCell class="w-[50px]">
+											<Switch
+												checked={campaign.status === 'ACTIVE'}
+												disabled={togglingCampaignId === campaign.campaignId || (campaign.status !== 'ACTIVE' && campaign.status !== 'PAUSED')}
+												onCheckedChange={() => handleToggleStatus(campaign)}
+											/>
+										</TableCell>
 										<TableCell class="font-medium max-w-[250px]">
 											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
@@ -594,6 +628,7 @@
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
+									<TableCell></TableCell>
 									<TableCell>Rezultate din {campaignTableData.length} campanii</TableCell>
 									<TableCell></TableCell>
 									{#each activePreset.columns as col}

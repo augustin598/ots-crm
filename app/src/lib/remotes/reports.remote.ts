@@ -5,7 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
-import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, updateCampaignBudget as updateCampaignBudgetApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -429,6 +429,39 @@ export const updateBudget = command(
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			throw error(500, `Eroare la actualizare buget: ${msg}`);
+		}
+	}
+);
+
+/** Toggle campaign on/off (ACTIVE/PAUSED) via Meta API (admin only) */
+export const toggleCampaignStatus = command(
+	v.object({
+		campaignId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		newStatus: v.picklist(['ACTIVE', 'PAUSED'])
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Doar adminii pot schimba statusul campaniilor');
+		}
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) throw error(500, 'META_APP_SECRET nu este configurat');
+
+		try {
+			await toggleCampaignStatusApi(params.campaignId, authResult.accessToken, appSecret, params.newStatus);
+			cache.clear();
+			return { success: true };
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw error(500, `Eroare la schimbarea statusului: ${msg}`);
 		}
 	}
 );
