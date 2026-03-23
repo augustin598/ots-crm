@@ -315,7 +315,8 @@
 			});
 			toast.success(`Buget actualizat: ${amount} ${selectedCurrency}/${budgetEditCampaign.budgetType === 'daily' ? 'zi' : 'total'}`);
 			budgetDialogOpen = false;
-			handleRefresh();
+			// Force full page reload to get fresh data from API
+			setTimeout(() => window.location.reload(), 500);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare buget');
 		} finally {
