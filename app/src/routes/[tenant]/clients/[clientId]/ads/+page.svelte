@@ -134,10 +134,10 @@
 
 	// Status filter
 	let statusFilter = $state<'all' | 'active' | 'paused'>('all');
-	const STATUS_FILTERS: { key: typeof statusFilter; label: string }[] = [
-		{ key: 'all', label: 'Toate' },
-		{ key: 'active', label: 'Active' },
-		{ key: 'paused', label: 'Paused' },
+	const STATUS_FILTERS: { key: typeof statusFilter; label: string; activeClass: string }[] = [
+		{ key: 'all', label: 'Toate', activeClass: 'bg-primary text-primary-foreground' },
+		{ key: 'active', label: 'Active', activeClass: 'bg-green-600 text-white' },
+		{ key: 'paused', label: 'Paused', activeClass: 'bg-amber-500 text-white' },
 	];
 	const filteredCampaigns = $derived.by(() => {
 		if (statusFilter === 'all') return campaignTableData;
@@ -273,7 +273,7 @@
 							<div class="flex items-center gap-1 rounded-lg border p-0.5">
 								{#each STATUS_FILTERS as sf}
 									<button
-										class="px-3 py-1 text-xs rounded-md transition-colors {statusFilter === sf.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+										class="px-3 py-1 text-xs rounded-md transition-colors {statusFilter === sf.key ? sf.activeClass : 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => { statusFilter = sf.key; }}
 									>{sf.label}</button>
 								{/each}
