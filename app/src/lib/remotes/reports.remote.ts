@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
@@ -55,7 +55,8 @@ export const getReportAdAccounts = query(async () => {
 		.where(
 			and(
 				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
-				eq(table.metaAdsAccount.isActive, true)
+				eq(table.metaAdsAccount.isActive, true),
+				isNotNull(table.metaAdsAccount.clientId)
 			)
 		)
 		.orderBy(table.metaAdsAccount.accountName);
