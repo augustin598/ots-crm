@@ -190,6 +190,21 @@
 		return result;
 	});
 
+	// Status filter
+	let statusFilter = $state<'all' | 'active' | 'paused' | 'deleted'>('all');
+	const STATUS_FILTERS: { key: typeof statusFilter; label: string }[] = [
+		{ key: 'all', label: 'Toate' },
+		{ key: 'active', label: 'Active' },
+		{ key: 'paused', label: 'Paused' },
+	];
+	const filteredCampaigns = $derived.by(() => {
+		if (statusFilter === 'all') return campaignTableData;
+		if (statusFilter === 'active') return campaignTableData.filter(c => c.status === 'ACTIVE' || c.status === 'WITH_ISSUES' || c.status === 'IN_PROCESS');
+		if (statusFilter === 'paused') return campaignTableData.filter(c => c.status === 'PAUSED' || c.status === 'CAMPAIGN_PAUSED');
+		if (statusFilter === 'deleted') return campaignTableData.filter(c => c.status === 'DELETED' || c.status === 'ARCHIVED');
+		return campaignTableData;
+	});
+
 	// Sorting
 	let sortColumn = $state<keyof CampaignAggregate | 'status'>('status');
 	let sortDirection = $state<'asc' | 'desc'>('asc');
@@ -197,7 +212,7 @@
 	const STATUS_ORDER: Record<string, number> = { ACTIVE: 0, WITH_ISSUES: 1, IN_PROCESS: 2, PAUSED: 3, CAMPAIGN_PAUSED: 4, UNKNOWN: 5 };
 
 	const sortedCampaigns = $derived(
-		[...campaignTableData].sort((a, b) => {
+		[...filteredCampaigns].sort((a, b) => {
 			const dir = sortDirection === 'asc' ? 1 : -1;
 			if (sortColumn === 'status') {
 				const sa = STATUS_ORDER[a.status] ?? 9;
@@ -406,10 +421,20 @@
 		{#if !insightsLoading}
 			<div class="space-y-4">
 				<div class="flex items-center justify-between">
-					<h3 class="text-lg font-semibold">Performanță campanii</h3>
+					<div class="flex items-center gap-3">
+						<h3 class="text-lg font-semibold">Performanță campanii</h3>
+						<div class="flex items-center gap-1 rounded-lg border p-0.5">
+							{#each STATUS_FILTERS as sf}
+								<button
+									class="px-3 py-1 text-xs rounded-md transition-colors {statusFilter === sf.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => { statusFilter = sf.key; }}
+								>{sf.label}</button>
+							{/each}
+						</div>
+					</div>
 					<div class="flex items-center gap-3">
 						{#if totalEntries > 0}
-							<p class="text-sm text-muted-foreground">{totalEntries} campanii</p>
+							<p class="text-sm text-muted-foreground">{filteredCampaigns.length} campanii</p>
 						{/if}
 						<div class="flex items-center gap-1.5">
 							<ColumnsIcon class="h-4 w-4 text-muted-foreground" />
