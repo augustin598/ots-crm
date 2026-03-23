@@ -443,6 +443,51 @@ export async function listCampaignInsights(
 }
 
 /**
+ * Fetch aggregated reach and frequency per campaign (NOT daily — daily reach can't be summed).
+ * Returns a map of campaignId → { reach, frequency }.
+ */
+export async function listCampaignReachFrequency(
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	since: string,
+	until: string
+): Promise<Map<string, { reach: number; frequency: number }>> {
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const timeRange = JSON.stringify({ since, until });
+	const result = new Map<string, { reach: number; frequency: number }>();
+
+	let url: string | null = `${META_GRAPH_URL}/${adAccountId}/insights?${new URLSearchParams({
+		fields: 'campaign_id,reach,frequency',
+		level: 'campaign',
+		time_range: timeRange,
+		access_token: accessToken,
+		appsecret_proof: proof,
+		limit: '500'
+	}).toString()}`;
+
+	try {
+		while (url) {
+			const res = await fetch(url);
+			const data = await res.json();
+			if (data.error) break;
+
+			for (const row of data.data || []) {
+				result.set(row.campaign_id, {
+					reach: parseInt(row.reach || '0'),
+					frequency: parseFloat(row.frequency || '0')
+				});
+			}
+			url = data.paging?.next || null;
+		}
+	} catch {
+		// Non-critical — fallback to daily-summed values
+	}
+
+	return result;
+}
+
+/**
  * List active/paused campaigns for an ad account.
  */
 export async function listActiveCampaigns(

@@ -214,9 +214,12 @@ export function getDatePresets(): { label: string; since: string; until: string 
 
 	const yesterday = new Date(today);
 	yesterday.setDate(yesterday.getDate() - 1);
+	const yesterdayStr = fmt(yesterday);
 
+	// FB Ads Manager uses yesterday as "until" for "Last X days" presets
+	// because today's data is incomplete
 	const daysAgo = (n: number) => {
-		const d = new Date(today);
+		const d = new Date(yesterday);
 		d.setDate(d.getDate() - (n - 1));
 		return fmt(d);
 	};
@@ -245,10 +248,10 @@ export function getDatePresets(): { label: string; since: string; until: string 
 		{ label: 'Azi', since: todayStr, until: todayStr },
 		{ label: 'Ieri', since: fmt(yesterday), until: fmt(yesterday) },
 		{ label: 'Azi și ieri', since: fmt(yesterday), until: todayStr },
-		{ label: 'Ultimele 7 zile', since: daysAgo(7), until: todayStr },
-		{ label: 'Ultimele 14 zile', since: daysAgo(14), until: todayStr },
-		{ label: 'Ultimele 28 zile', since: daysAgo(28), until: todayStr },
-		{ label: 'Ultimele 30 zile', since: daysAgo(30), until: todayStr },
+		{ label: 'Ultimele 7 zile', since: daysAgo(7), until: yesterdayStr },
+		{ label: 'Ultimele 14 zile', since: daysAgo(14), until: yesterdayStr },
+		{ label: 'Ultimele 28 zile', since: daysAgo(28), until: yesterdayStr },
+		{ label: 'Ultimele 30 zile', since: daysAgo(30), until: yesterdayStr },
 		{ label: 'Săptămâna aceasta', since: fmt(thisWeekStart), until: todayStr },
 		{ label: 'Săptămâna trecută', since: fmt(lastWeekStart), until: fmt(lastWeekEnd) },
 		{ label: 'Luna aceasta', since: fmt(thisMonthStart), until: todayStr },

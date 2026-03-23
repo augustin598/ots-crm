@@ -5,7 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
-import { listCampaignInsights, listActiveCampaigns, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -128,8 +128,8 @@ export const getMetaCampaignInsights = query(
 		}
 
 		try {
-			// Fetch insights and campaigns in parallel
-			const [insights, campaigns] = await Promise.all([
+			// Fetch insights, campaigns, and aggregated reach/frequency in parallel
+			const [insights, campaigns, reachMap] = await Promise.all([
 				listCampaignInsights(
 					params.adAccountId,
 					authResult.accessToken,
@@ -142,6 +142,13 @@ export const getMetaCampaignInsights = query(
 					params.adAccountId,
 					authResult.accessToken,
 					appSecret
+				),
+				listCampaignReachFrequency(
+					params.adAccountId,
+					authResult.accessToken,
+					appSecret,
+					params.since,
+					params.until
 				)
 			]);
 
@@ -176,6 +183,23 @@ export const getMetaCampaignInsights = query(
 						insight.resultType = goalDef.label;
 						insight.cpaLabel = goalDef.cpaLabel;
 					}
+				}
+			}
+
+			// Override reach/frequency with aggregated values (daily reach can't be summed)
+			// Store aggregated reach per campaign on the FIRST insight row for that campaign
+			// so aggregateInsightsByCampaign picks it up correctly
+			const seenCampaigns = new Set<string>();
+			for (const insight of insights) {
+				const rf = reachMap.get(insight.campaignId);
+				if (rf && !seenCampaigns.has(insight.campaignId)) {
+					insight.reach = String(rf.reach);
+					insight.frequency = String(rf.frequency);
+					seenCampaigns.add(insight.campaignId);
+				} else if (seenCampaigns.has(insight.campaignId)) {
+					// Zero out reach on subsequent daily rows to prevent double-counting in aggregation
+					insight.reach = '0';
+					insight.frequency = '0';
 				}
 			}
 
