@@ -159,25 +159,17 @@ export const getMetaCampaignInsights = query(
 					const goalDef = OPTIMIZATION_GOAL_MAP[goal];
 					if (goalDef) {
 						if (goalDef.actionType) {
-							// Re-count using the correct action type for this optimization goal
-							// We need to look at the raw actions — but we already extracted individual counts
-							// For CALL goal, use click_to_call_native_call_placed which we don't have as a separate field
-							// So we use getActionCount-like lookup from the insight's existing data
-							// Since we can't access raw actions here, use the dedicated fields when available
-							let count = 0;
-							if (goal === 'CALL') {
-								count = insight.callsPlaced;
-							} else if (goalDef.actionType === 'link_click') {
-								count = insight.linkClicks;
-							} else if (goalDef.actionType === 'landing_page_view') {
-								count = insight.landingPageViews;
-							} else if (goalDef.actionType === 'video_view') {
-								count = insight.videoViews;
-							} else if (goalDef.actionType === 'post_engagement') {
-								count = insight.pageEngagement;
-							} else {
-								count = insight.conversions;
-							}
+							// Map actionType to the pre-extracted field on insight
+							const ACTION_TO_FIELD: Record<string, keyof typeof insight> = {
+								'click_to_call_native_call_placed': 'callsPlaced',
+								'link_click': 'linkClicks',
+								'landing_page_view': 'landingPageViews',
+								'video_view': 'videoViews',
+								'post_engagement': 'pageEngagement',
+								'page_engagement': 'pageEngagement'
+							};
+							const field = ACTION_TO_FIELD[goalDef.actionType];
+							const count = field ? (insight[field] as number) : insight.conversions;
 							insight.conversions = count;
 							insight.costPerConversion = count > 0 ? parseFloat(insight.spend) / count : 0;
 						}
