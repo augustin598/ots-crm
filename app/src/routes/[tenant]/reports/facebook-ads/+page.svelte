@@ -303,7 +303,14 @@
 	async function handleBudgetSave() {
 		if (!budgetEditCampaign || !selectedIntegrationId) return;
 		const amount = parseFloat(budgetNewAmount);
-		if (isNaN(amount) || amount < 1) { toast.error('Suma minimă este 1'); return; }
+		if (isNaN(amount) || amount <= 0) {
+			toast.error('Sumă invalidă', { description: 'Introdu o sumă mai mare de 0.' });
+			return;
+		}
+		if (amount < 1) {
+			toast.error('Buget prea mic', { description: 'Meta Ads necesită un buget minim de 1 RON/zi.' });
+			return;
+		}
 
 		budgetSaving = true;
 		try {
@@ -313,12 +320,23 @@
 				budgetType: budgetEditCampaign.budgetType,
 				budgetAmount: amount
 			});
-			toast.success(`Buget actualizat: ${amount} ${selectedCurrency}/${budgetEditCampaign.budgetType === 'daily' ? 'zi' : 'total'}`);
+			const tipBuget = budgetEditCampaign.budgetType === 'daily' ? 'zilnic' : 'total';
+			toast.success(`Bugetul ${tipBuget} pentru "${budgetEditCampaign.campaignName}" a fost actualizat la ${amount} ${selectedCurrency}`, {
+				description: 'Pagina se va reîncărca cu datele noi.',
+				duration: 3000
+			});
 			budgetDialogOpen = false;
-			// Force full page reload to get fresh data from API
-			setTimeout(() => window.location.reload(), 500);
+			setTimeout(() => window.location.reload(), 1500);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare buget');
+			const msg = e instanceof Error ? e.message : 'Eroare necunoscută';
+			toast.error(`Nu s-a putut actualiza bugetul`, {
+				description: msg.includes('permissions')
+					? 'Tokenul nu are permisiunea ads_management. Reconectează din Settings.'
+					: msg.includes('validating access token')
+						? 'Tokenul Meta Ads a expirat. Reconectează din Settings.'
+						: msg,
+				duration: 8000
+			});
 		} finally {
 			budgetSaving = false;
 		}
