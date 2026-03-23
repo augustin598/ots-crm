@@ -1,0 +1,250 @@
+import { query, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
+import * as v from 'valibot';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
+import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
+import { listCampaignInsights, listActiveCampaigns, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { env } from '$env/dynamic/private';
+
+// ---- Server-side cache (5 min TTL) ----
+
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached<T>(key: string): T | null {
+	const entry = cache.get(key);
+	if (!entry) return null;
+	if (Date.now() - entry.timestamp > CACHE_TTL) {
+		cache.delete(key);
+		return null;
+	}
+	return entry.data as T;
+}
+
+function setCache(key: string, data: any): void {
+	cache.set(key, { data, timestamp: Date.now() });
+}
+
+// ---- Queries ----
+
+/** Get all Meta Ads accounts for the tenant (for the ad account filter dropdown) */
+export const getReportAdAccounts = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	if (event.locals.isClientUser) return [];
+
+	const accounts = await db
+		.select({
+			id: table.metaAdsAccount.id,
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			accountName: table.metaAdsAccount.accountName,
+			integrationId: table.metaAdsAccount.integrationId,
+			clientId: table.metaAdsAccount.clientId,
+			clientName: table.client.name,
+			isActive: table.metaAdsAccount.isActive,
+			businessName: table.metaAdsIntegration.businessName,
+			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt
+		})
+		.from(table.metaAdsAccount)
+		.leftJoin(table.client, eq(table.metaAdsAccount.clientId, table.client.id))
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
+		.where(
+			and(
+				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
+				eq(table.metaAdsAccount.isActive, true)
+			)
+		)
+		.orderBy(table.metaAdsAccount.accountName);
+
+	// Lookup currency per ad account from spending data
+	const enriched = await Promise.all(
+		accounts.map(async (acc) => {
+			const [spending] = await db
+				.select({ currencyCode: table.metaAdsSpending.currencyCode })
+				.from(table.metaAdsSpending)
+				.where(eq(table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId))
+				.orderBy(desc(table.metaAdsSpending.periodStart))
+				.limit(1);
+			return { ...acc, currency: spending?.currencyCode || 'RON', tokenExpiresAt: acc.tokenExpiresAt };
+		})
+	);
+
+	return enriched;
+});
+
+/** Get campaign-level insights from Meta API (live, cached 5 min) */
+export const getMetaCampaignInsights = query(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		timeIncrement: v.picklist(['daily', 'monthly'])
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Check cache
+		const cacheKey = `insights:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${params.timeIncrement}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		// Verify account belongs to tenant
+		const [account] = await db
+			.select({ id: table.metaAdsAccount.id })
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.metaAdAccountId, params.adAccountId),
+					eq(table.metaAdsAccount.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!account) {
+			throw error(404, 'Cont Meta Ads negăsit');
+		}
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) {
+			throw error(500, 'META_APP_SECRET nu este configurat');
+		}
+
+		try {
+			// Fetch insights and campaigns in parallel
+			const [insights, campaigns] = await Promise.all([
+				listCampaignInsights(
+					params.adAccountId,
+					authResult.accessToken,
+					appSecret,
+					params.since,
+					params.until,
+					params.timeIncrement
+				),
+				listActiveCampaigns(
+					params.adAccountId,
+					authResult.accessToken,
+					appSecret
+				)
+			]);
+
+			// Build optimization_goal map from campaigns
+			const goalMap = new Map<string, string>();
+			for (const c of campaigns) {
+				if (c.optimizationGoal) {
+					goalMap.set(c.campaignId, c.optimizationGoal);
+				}
+			}
+			// Enrich insights with correct result type based on optimization_goal
+			for (const insight of insights) {
+				const goal = goalMap.get(insight.campaignId);
+				if (goal) {
+					const goalDef = OPTIMIZATION_GOAL_MAP[goal];
+					if (goalDef) {
+						if (goalDef.actionType) {
+							// Re-count using the correct action type for this optimization goal
+							// We need to look at the raw actions — but we already extracted individual counts
+							// For CALL goal, use click_to_call_native_call_placed which we don't have as a separate field
+							// So we use getActionCount-like lookup from the insight's existing data
+							// Since we can't access raw actions here, use the dedicated fields when available
+							let count = 0;
+							if (goal === 'CALL') {
+								count = insight.callsPlaced;
+							} else if (goalDef.actionType === 'link_click') {
+								count = insight.linkClicks;
+							} else if (goalDef.actionType === 'landing_page_view') {
+								count = insight.landingPageViews;
+							} else if (goalDef.actionType === 'video_view') {
+								count = insight.videoViews;
+							} else if (goalDef.actionType === 'post_engagement') {
+								count = insight.pageEngagement;
+							} else {
+								count = insight.conversions;
+							}
+							insight.conversions = count;
+							insight.costPerConversion = count > 0 ? parseFloat(insight.spend) / count : 0;
+						}
+						insight.resultType = goalDef.label;
+						insight.cpaLabel = goalDef.cpaLabel;
+					}
+				}
+			}
+
+			setCache(cacheKey, insights);
+			return insights;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
+				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
+			}
+			throw error(500, msg);
+		}
+	}
+);
+
+/** Get active campaigns for an ad account (live, cached 5 min) */
+export const getMetaActiveCampaigns = query(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const cacheKey = `campaigns:${tenantId}:${params.adAccountId}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) {
+			throw error(500, 'META_APP_SECRET nu este configurat');
+		}
+
+		try {
+			const campaigns = await listActiveCampaigns(
+				params.adAccountId,
+				authResult.accessToken,
+				appSecret
+			);
+
+			setCache(cacheKey, campaigns);
+			return campaigns;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
+				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
+			}
+			throw error(500, msg);
+		}
+	}
+);

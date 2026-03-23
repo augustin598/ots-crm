@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync, regenerateSpendingPdf, getMetaInvoiceDownloads, triggerInvoiceDownload, redownloadInvoice, deleteInvoiceDownload } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, deleteMetaAdsSpending, triggerMetaAdsSync, regenerateSpendingPdf, getMetaInvoiceDownloads, triggerInvoiceDownload, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -12,6 +12,21 @@
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	// Token expiration check
+	const tokenStatusQuery = getMetaTokenStatus();
+	const tokenWarning = $derived.by(() => {
+		const integrations = tokenStatusQuery.current || [];
+		for (const int of integrations) {
+			if (!int.tokenExpiresAt) continue;
+			const expiresAt = new Date(int.tokenExpiresAt);
+			const now = new Date();
+			const daysLeft = Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+			if (daysLeft < 0) return { expired: true, text: `Tokenul Meta Ads (${int.businessName}) a expirat pe ${expiresAt.toLocaleDateString('ro-RO')}. Reconectează din Settings.` };
+			if (daysLeft <= 7) return { expired: false, text: `Tokenul Meta Ads (${int.businessName}) expiră în ${daysLeft} zile (${expiresAt.toLocaleDateString('ro-RO')}).` };
+		}
+		return null;
+	});
 
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
@@ -315,6 +330,15 @@
 			</Button>
 		</div>
 	</div>
+
+	{#if tokenWarning}
+		<div class="rounded-md p-4 {tokenWarning.expired ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'}">
+			<p class="text-sm {tokenWarning.expired ? 'text-red-800' : 'text-amber-800'}">
+				{tokenWarning.text}
+				<a href="/{tenantSlug}/settings/meta-ads" class="underline font-medium ml-1">Settings → Meta Ads</a>
+			</p>
+		</div>
+	{/if}
 
 	{#if loading}
 		<p class="text-muted-foreground">Se încarcă rapoartele...</p>

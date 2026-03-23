@@ -42,6 +42,32 @@ export const getMetaAdsConnectionStatus = query(async () => {
 	return enriched;
 });
 
+/** Get token expiration status for all active integrations */
+export const getMetaTokenStatus = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	if (event.locals.isClientUser) return [];
+
+	const integrations = await db
+		.select({
+			id: table.metaAdsIntegration.id,
+			businessName: table.metaAdsIntegration.businessName,
+			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt,
+			isActive: table.metaAdsIntegration.isActive
+		})
+		.from(table.metaAdsIntegration)
+		.where(
+			and(
+				eq(table.metaAdsIntegration.tenantId, event.locals.tenant.id),
+				eq(table.metaAdsIntegration.isActive, true)
+			)
+		);
+
+	return integrations;
+});
+
 export const getMetaAdsSpendingList = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
@@ -234,6 +260,15 @@ export const removeMetaAdsConnection = command(
 		}
 
 		await disconnectMetaAds(integrationId);
+
+		// Delete dependent rows that don't have onDelete: cascade
+		await db
+			.delete(table.metaAdsSpending)
+			.where(eq(table.metaAdsSpending.integrationId, integrationId));
+
+		await db
+			.delete(table.metaAdsInvoice)
+			.where(eq(table.metaAdsInvoice.integrationId, integrationId));
 
 		await db
 			.delete(table.metaAdsIntegration)
