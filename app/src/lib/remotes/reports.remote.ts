@@ -85,6 +85,51 @@ export const getReportAdAccounts = query(async () => {
 	}));
 });
 
+/** Get the Meta Ads account associated with a specific CRM client */
+export const getClientAdAccount = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (clientId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const [account] = await db
+			.select({
+				id: table.metaAdsAccount.id,
+				metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+				accountName: table.metaAdsAccount.accountName,
+				integrationId: table.metaAdsAccount.integrationId,
+				clientId: table.metaAdsAccount.clientId
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					eq(table.metaAdsAccount.clientId, clientId)
+				)
+			)
+			.limit(1);
+
+		if (!account) return null;
+
+		// Lookup currency
+		const [spending] = await db
+			.select({ currencyCode: table.metaAdsSpending.currencyCode })
+			.from(table.metaAdsSpending)
+			.where(eq(table.metaAdsSpending.metaAdAccountId, account.metaAdAccountId))
+			.orderBy(desc(table.metaAdsSpending.periodStart))
+			.limit(1);
+
+		return {
+			...account,
+			currency: spending?.currencyCode || 'RON'
+		};
+	}
+);
+
 /** Get campaign-level insights from Meta API (live, cached 5 min) */
 export const getMetaCampaignInsights = query(
 	v.object({
