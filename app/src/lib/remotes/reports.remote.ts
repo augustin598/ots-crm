@@ -55,7 +55,6 @@ export const getReportAdAccounts = query(async () => {
 		.where(
 			and(
 				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
-				eq(table.metaAdsAccount.isActive, true),
 				isNotNull(table.metaAdsAccount.clientId)
 			)
 		)
