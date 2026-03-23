@@ -342,12 +342,10 @@
 
 								<div class="flex items-center gap-2 flex-wrap">
 									{#if conn.connected}
-										{#if conn.tokenExpired || conn.tokenExpiringSoon}
-											<Button onclick={() => handleConnect(conn.id)}>
-												<RefreshCw class="mr-2 h-4 w-4" />
-												Reconectează
-											</Button>
-										{/if}
+										<Button variant="outline" onclick={() => handleConnect(conn.id)}>
+											<RefreshCw class="mr-2 h-4 w-4" />
+											Reconectează
+										</Button>
 										<Button variant="outline" onclick={() => handleFetchAccounts(conn.id)} disabled={fetchingAccountsFor === conn.id}>
 											{#if fetchingAccountsFor === conn.id}
 												<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
