@@ -488,6 +488,51 @@ export async function listCampaignReachFrequency(
 }
 
 /**
+ * Update campaign budget via Meta API.
+ * Budget values are in cents (e.g., 5000 = 50.00 RON).
+ */
+export async function updateCampaignBudget(
+	campaignId: string,
+	accessToken: string,
+	appSecret: string,
+	budgetType: 'daily' | 'lifetime',
+	budgetCents: number
+): Promise<{ success: boolean }> {
+	logInfo('meta-ads', `Updating budget for campaign ${campaignId}`, { metadata: { budgetType, budgetCents } });
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+
+	const params = new URLSearchParams({
+		access_token: accessToken,
+		appsecret_proof: proof,
+		[budgetType === 'daily' ? 'daily_budget' : 'lifetime_budget']: String(budgetCents)
+	});
+
+	try {
+		const res = await fetch(`${META_GRAPH_URL}/${campaignId}`, {
+			method: 'POST',
+			body: params
+		});
+		const data = await res.json();
+
+		if (data.error) {
+			logError('meta-ads', `Failed to update budget for ${campaignId}`, {
+				metadata: { errorMessage: data.error.message, errorCode: data.error.code }
+			});
+			throw new Error(data.error.message);
+		}
+
+		logInfo('meta-ads', `Budget updated for ${campaignId}`, { metadata: { budgetType, budgetCents } });
+		return { success: true };
+	} catch (err) {
+		logError('meta-ads', `Budget update failed for ${campaignId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
  * List active/paused campaigns for an ad account.
  */
 export async function listActiveCampaigns(

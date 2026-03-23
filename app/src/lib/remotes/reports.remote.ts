@@ -1,11 +1,11 @@
-import { query, getRequestEvent } from '$app/server';
+import { query, command, getRequestEvent } from '$app/server';
 import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
-import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, updateCampaignBudget as updateCampaignBudgetApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -380,6 +380,57 @@ export const getMetaActiveCampaigns = query(
 				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
 			}
 			throw error(500, msg);
+		}
+	}
+);
+
+/** Update campaign budget via Meta API (admin only) */
+export const updateBudget = command(
+	v.object({
+		campaignId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		budgetType: v.picklist(['daily', 'lifetime']),
+		budgetAmount: v.pipe(v.number(), v.minValue(1))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Doar adminii pot modifica bugetul');
+		}
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) {
+			throw error(500, 'META_APP_SECRET nu este configurat');
+		}
+
+		const budgetCents = Math.round(params.budgetAmount * 100);
+
+		try {
+			await updateCampaignBudgetApi(
+				params.campaignId,
+				authResult.accessToken,
+				appSecret,
+				params.budgetType,
+				budgetCents
+			);
+
+			// Clear campaigns cache
+			for (const [key] of cache) {
+				if (key.startsWith('campaigns:')) cache.delete(key);
+			}
+
+			return { success: true };
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw error(500, `Eroare la actualizare buget: ${msg}`);
 		}
 	}
 );

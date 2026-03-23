@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns } from '$lib/remotes/reports.remote';
+	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, updateBudget } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -8,6 +8,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { Input } from '$lib/components/ui/input';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import KpiCard from '$lib/components/reports/kpi-card.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
@@ -18,6 +20,7 @@
 	import PercentIcon from '@lucide/svelte/icons/percent';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import ColumnsIcon from '@lucide/svelte/icons/columns-3';
 	import { toast } from 'svelte-sonner';
@@ -273,6 +276,45 @@
 		}
 	}
 
+	// Budget edit
+	let budgetDialogOpen = $state(false);
+	let budgetEditCampaign = $state<{ campaignId: string; campaignName: string; budgetType: 'daily' | 'lifetime'; currentAmount: number } | null>(null);
+	let budgetNewAmount = $state('');
+	let budgetSaving = $state(false);
+
+	function openBudgetEdit(campaign: any) {
+		const type = campaign.dailyBudget ? 'daily' : 'lifetime';
+		const current = campaign.dailyBudget
+			? parseFloat(campaign.dailyBudget) / 100
+			: campaign.lifetimeBudget ? parseFloat(campaign.lifetimeBudget) / 100 : 0;
+		budgetEditCampaign = { campaignId: campaign.campaignId, campaignName: campaign.campaignName, budgetType: type, currentAmount: current };
+		budgetNewAmount = String(current);
+		budgetDialogOpen = true;
+	}
+
+	async function handleBudgetSave() {
+		if (!budgetEditCampaign || !selectedIntegrationId) return;
+		const amount = parseFloat(budgetNewAmount);
+		if (isNaN(amount) || amount < 1) { toast.error('Suma minimă este 1'); return; }
+
+		budgetSaving = true;
+		try {
+			await updateBudget({
+				campaignId: budgetEditCampaign.campaignId,
+				integrationId: selectedIntegrationId,
+				budgetType: budgetEditCampaign.budgetType,
+				budgetAmount: amount
+			});
+			toast.success(`Buget actualizat: ${amount} ${selectedCurrency}/${budgetEditCampaign.budgetType === 'daily' ? 'zi' : 'total'}`);
+			budgetDialogOpen = false;
+			handleRefresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare buget');
+		} finally {
+			budgetSaving = false;
+		}
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
 			case 'ACTIVE': return 'success';
@@ -497,11 +539,26 @@
 										</TableCell>
 										{#each activePreset.columns as col}
 											<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-												<div>{col.getValue(campaign, selectedCurrency)}</div>
-												{#if col.getSubtext}
-													{@const sub = col.getSubtext(campaign)}
-													{#if sub}
-														<div class="text-xs text-muted-foreground">{sub}</div>
+												{#if col.key === 'budget'}
+													<div class="flex items-center justify-end gap-1">
+														<span>{col.getValue(campaign, selectedCurrency)}</span>
+														{#if campaign.dailyBudget || campaign.lifetimeBudget}
+															<button class="text-muted-foreground hover:text-primary" onclick={() => openBudgetEdit(campaign)} title="Editează buget">
+																<PencilIcon class="h-3 w-3" />
+															</button>
+														{/if}
+													</div>
+													{#if col.getSubtext}
+														{@const sub = col.getSubtext(campaign)}
+														{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}
+													{/if}
+												{:else}
+													<div>{col.getValue(campaign, selectedCurrency)}</div>
+													{#if col.getSubtext}
+														{@const sub = col.getSubtext(campaign)}
+														{#if sub}
+															<div class="text-xs text-muted-foreground">{sub}</div>
+														{/if}
 													{/if}
 												{/if}
 											</TableCell>
@@ -548,3 +605,49 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Budget Edit Dialog -->
+<Dialog.Root bind:open={budgetDialogOpen}>
+	<Dialog.Content class="sm:max-w-[400px]">
+		<Dialog.Header>
+			<Dialog.Title>Editare buget</Dialog.Title>
+			<Dialog.Description>{budgetEditCampaign?.campaignName || ''}</Dialog.Description>
+		</Dialog.Header>
+		<div class="space-y-4 py-4">
+			<div class="space-y-2">
+				<label class="text-sm font-medium">Tip buget</label>
+				<div class="flex gap-2">
+					<Button
+						variant={budgetEditCampaign?.budgetType === 'daily' ? 'default' : 'outline'}
+						size="sm"
+						onclick={() => { if (budgetEditCampaign) budgetEditCampaign.budgetType = 'daily'; }}
+					>Zilnic</Button>
+					<Button
+						variant={budgetEditCampaign?.budgetType === 'lifetime' ? 'default' : 'outline'}
+						size="sm"
+						onclick={() => { if (budgetEditCampaign) budgetEditCampaign.budgetType = 'lifetime'; }}
+					>Total</Button>
+				</div>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-medium">Sumă ({selectedCurrency})</label>
+				<Input
+					type="number"
+					min="1"
+					step="0.01"
+					bind:value={budgetNewAmount}
+					placeholder="Ex: 50.00"
+				/>
+				{#if budgetEditCampaign?.currentAmount}
+					<p class="text-xs text-muted-foreground">Buget actual: {budgetEditCampaign.currentAmount} {selectedCurrency}</p>
+				{/if}
+			</div>
+		</div>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => { budgetDialogOpen = false; }}>Anulează</Button>
+			<Button onclick={handleBudgetSave} disabled={budgetSaving}>
+				{budgetSaving ? 'Se salvează...' : 'Salvează'}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
