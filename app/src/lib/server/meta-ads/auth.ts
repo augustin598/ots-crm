@@ -16,6 +16,7 @@ export function getOAuthUrl(state: string): string {
 		client_id: env.META_APP_ID!,
 		redirect_uri: env.META_REDIRECT_URI!,
 		scope: SCOPES,
+		auth_type: 'rerequest',
 		state,
 		response_type: 'code'
 	});
