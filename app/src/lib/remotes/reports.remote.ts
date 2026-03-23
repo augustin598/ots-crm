@@ -387,7 +387,7 @@ export const getMetaActiveCampaigns = query(
 /** Update campaign budget via Meta API (admin only) */
 export const updateBudget = command(
 	v.object({
-		campaignId: v.pipe(v.string(), v.minLength(1)),
+		targetId: v.pipe(v.string(), v.minLength(1)), // campaign ID or ad set ID
 		integrationId: v.pipe(v.string(), v.minLength(1)),
 		budgetType: v.picklist(['daily', 'lifetime']),
 		budgetAmount: v.pipe(v.number(), v.minValue(1))
@@ -415,7 +415,7 @@ export const updateBudget = command(
 
 		try {
 			await updateCampaignBudgetApi(
-				params.campaignId,
+				params.targetId,
 				authResult.accessToken,
 				appSecret,
 				params.budgetType,

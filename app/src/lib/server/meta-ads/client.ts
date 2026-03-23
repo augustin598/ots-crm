@@ -54,9 +54,11 @@ export interface MetaAdsCampaignInfo {
 	campaignName: string;
 	status: string;
 	objective: string;
-	optimizationGoal: string; // from first ad set: CALL, LINK_CLICKS, REACH, etc.
+	optimizationGoal: string;
 	dailyBudget: string | null;
 	lifetimeBudget: string | null;
+	budgetSource: 'campaign' | 'adset'; // where budget comes from
+	adsetId: string | null; // first ad set ID (for budget updates when budget is on ad set)
 	startTime: string | null;
 	stopTime: string | null;
 }
@@ -572,9 +574,11 @@ export async function listActiveCampaigns(
 					campaignName: c.name || '',
 					status: c.status || 'UNKNOWN',
 					objective: c.objective || '',
-					optimizationGoal: '', // filled below
+					optimizationGoal: '',
 					dailyBudget: c.daily_budget || null,
 					lifetimeBudget: c.lifetime_budget || null,
+					budgetSource: (c.daily_budget || c.lifetime_budget) ? 'campaign' : 'adset',
+					adsetId: null, // filled below
 					startTime: c.start_time || null,
 					stopTime: c.stop_time || null
 				});
@@ -586,9 +590,8 @@ export async function listActiveCampaigns(
 		// Fetch optimization_goal for all ad sets in one request at account level
 		try {
 			const campaignIds = new Set(campaigns.map(c => c.campaignId));
-			let adsetUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/adsets?fields=campaign_id,optimization_goal,daily_budget,lifetime_budget&limit=500&access_token=${accessToken}&appsecret_proof=${proof}`;
-			// Map campaign_id → { optimization_goal, budget } (first ad set wins)
-			const adsetByCampaign = new Map<string, { goal: string; dailyBudget: string | null; lifetimeBudget: string | null }>();
+			let adsetUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/adsets?fields=id,campaign_id,optimization_goal,daily_budget,lifetime_budget&limit=500&access_token=${accessToken}&appsecret_proof=${proof}`;
+			const adsetByCampaign = new Map<string, { adsetId: string; goal: string; dailyBudget: string | null; lifetimeBudget: string | null }>();
 
 			while (adsetUrl) {
 				const adsetRes = await fetch(adsetUrl);
@@ -599,6 +602,7 @@ export async function listActiveCampaigns(
 					const cid = adset.campaign_id;
 					if (cid && campaignIds.has(cid) && !adsetByCampaign.has(cid)) {
 						adsetByCampaign.set(cid, {
+							adsetId: adset.id || '',
 							goal: adset.optimization_goal || '',
 							dailyBudget: adset.daily_budget || null,
 							lifetimeBudget: adset.lifetime_budget || null
@@ -614,10 +618,12 @@ export async function listActiveCampaigns(
 				const adsetInfo = adsetByCampaign.get(campaign.campaignId);
 				if (adsetInfo) {
 					if (adsetInfo.goal) campaign.optimizationGoal = adsetInfo.goal;
+					campaign.adsetId = adsetInfo.adsetId;
 					// If campaign has no budget, use ad set budget
 					if (!campaign.dailyBudget && !campaign.lifetimeBudget) {
 						campaign.dailyBudget = adsetInfo.dailyBudget;
 						campaign.lifetimeBudget = adsetInfo.lifetimeBudget;
+						campaign.budgetSource = 'adset';
 					}
 				}
 			}

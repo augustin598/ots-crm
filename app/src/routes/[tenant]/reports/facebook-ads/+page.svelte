@@ -147,7 +147,7 @@
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null }> = [];
 
 		// Merge campaigns with insights; only show campaigns without data if they're ACTIVE
 		for (const ci of campaigns) {
@@ -157,7 +157,9 @@
 					...insight,
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
-					lifetimeBudget: ci.lifetimeBudget || null
+					lifetimeBudget: ci.lifetimeBudget || null,
+					budgetSource: ci.budgetSource || 'campaign',
+					adsetId: ci.adsetId || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES' || ci.status === 'IN_PROCESS') {
@@ -175,7 +177,9 @@
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
-					lifetimeBudget: ci.lifetimeBudget || null
+					lifetimeBudget: ci.lifetimeBudget || null,
+					budgetSource: ci.budgetSource || 'campaign',
+					adsetId: ci.adsetId || null
 				});
 			}
 		}
@@ -186,7 +190,9 @@
 				...c,
 				status: 'UNKNOWN',
 				dailyBudget: null,
-				lifetimeBudget: null
+				lifetimeBudget: null,
+				budgetSource: 'campaign' as const,
+				adsetId: null
 			});
 		}
 
@@ -278,7 +284,7 @@
 
 	// Budget edit
 	let budgetDialogOpen = $state(false);
-	let budgetEditCampaign = $state<{ campaignId: string; campaignName: string; budgetType: 'daily' | 'lifetime'; currentAmount: number } | null>(null);
+	let budgetEditCampaign = $state<{ targetId: string; campaignName: string; budgetType: 'daily' | 'lifetime'; currentAmount: number } | null>(null);
 	let budgetNewAmount = $state('');
 	let budgetSaving = $state(false);
 
@@ -287,7 +293,9 @@
 		const current = campaign.dailyBudget
 			? parseFloat(campaign.dailyBudget) / 100
 			: campaign.lifetimeBudget ? parseFloat(campaign.lifetimeBudget) / 100 : 0;
-		budgetEditCampaign = { campaignId: campaign.campaignId, campaignName: campaign.campaignName, budgetType: type, currentAmount: current };
+		// Use ad set ID for budget update when budget is on ad set, otherwise campaign ID
+		const targetId = campaign.budgetSource === 'adset' && campaign.adsetId ? campaign.adsetId : campaign.campaignId;
+		budgetEditCampaign = { targetId, campaignName: campaign.campaignName, budgetType: type, currentAmount: current };
 		budgetNewAmount = String(current);
 		budgetDialogOpen = true;
 	}
@@ -300,7 +308,7 @@
 		budgetSaving = true;
 		try {
 			await updateBudget({
-				campaignId: budgetEditCampaign.campaignId,
+				targetId: budgetEditCampaign.targetId,
 				integrationId: selectedIntegrationId,
 				budgetType: budgetEditCampaign.budgetType,
 				budgetAmount: amount
