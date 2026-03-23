@@ -115,8 +115,12 @@ const COL = {
 	},
 	roas: {
 		key: 'roas', label: 'ROAS', align: 'right' as const, sortKey: 'roas' as const,
-		getValue: (c: any) => c.objective === 'OUTCOME_SALES' ? formatROAS(c.roas) : '-',
-		getTotalValue: () => '-'
+		getValue: (c: any) => c.roas > 0 ? formatROAS(c.roas) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const totalValue = campaigns.reduce((s: number, c: any) => s + c.conversionValue, 0);
+			const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
+			return totalSpend > 0 && totalValue > 0 ? formatROAS(totalValue / totalSpend) : '-';
+		}
 	},
 	pageEngagement: {
 		key: 'pageEngagement', label: 'Page engagement', align: 'right' as const, sortKey: 'pageEngagement' as const,

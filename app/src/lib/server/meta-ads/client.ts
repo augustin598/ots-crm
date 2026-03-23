@@ -392,9 +392,7 @@ export async function listCampaignInsights(
 				const conversionValue = parseConversionValue(row.action_values);
 				const spend = parseFloat(row.spend || '0');
 
-				const finalConversions = objective === 'OUTCOME_AWARENESS'
-					? parseInt(row.reach || row.impressions || '0')
-					: conversions;
+				const finalConversions = conversions;
 
 				insights.push({
 					campaignId: row.campaign_id || '',
@@ -480,8 +478,10 @@ export async function listCampaignReachFrequency(
 			}
 			url = data.paging?.next || null;
 		}
-	} catch {
-		// Non-critical — fallback to daily-summed values
+	} catch (err) {
+		logError('meta-ads', `Failed to fetch reach/frequency for ${adAccountId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
 	}
 
 	return result;

@@ -28,8 +28,6 @@
 		formatCurrency,
 		formatPercent,
 		formatNumber,
-		formatDecimal,
-		formatROAS,
 		getDefaultDateRange,
 		type CampaignAggregate
 	} from '$lib/utils/report-helpers';
@@ -59,7 +57,7 @@
 	});
 
 	// Get currency from selected account
-	const selectedCurrency = $derived(() => {
+	const selectedCurrency = $derived.by(() => {
 		const account = accounts.find((a: any) => a.metaAdAccountId === selectedAccountId);
 		return account?.currency || 'RON';
 	});
@@ -113,6 +111,35 @@
 	const dailyData = $derived(aggregateInsightsByDate(insights));
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
 	const totals = $derived(computeTotals(dailyData));
+
+	// Dynamic result KPI — detect dominant result type across campaigns
+	const resultKpi = $derived.by(() => {
+		const withResults = campaignData.filter(c => c.conversions > 0);
+		if (withResults.length === 0) return { label: 'Rezultate', value: '-', subtext: 'Fără date' };
+
+		const totalResults = withResults.reduce((s, c) => s + c.conversions, 0);
+		const totalSpend = withResults.reduce((s, c) => s + c.spend, 0);
+
+		// Find most common result type
+		const typeCounts = new Map<string, number>();
+		for (const c of withResults) {
+			if (c.resultType) typeCounts.set(c.resultType, (typeCounts.get(c.resultType) || 0) + c.conversions);
+		}
+		let dominantType = '';
+		let maxCount = 0;
+		for (const [type, count] of typeCounts) {
+			if (count > maxCount) { maxCount = count; dominantType = type; }
+		}
+
+		const costPer = totalResults > 0 ? totalSpend / totalResults : 0;
+		const costLabel = withResults[0]?.cpaLabel || 'Per result';
+
+		return {
+			label: dominantType || 'Rezultate',
+			value: formatNumber(totalResults),
+			subtext: totalResults > 0 ? `${formatCurrency(costPer, selectedCurrency)} ${costLabel}` : 'Fără date'
+		};
+	});
 
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
 	const campaignTableData = $derived.by(() => {
@@ -240,11 +267,6 @@
 			default: return 'outline';
 		}
 	}
-
-	function formatBudget(cents: string | null): string {
-		if (!cents) return '-';
-		return formatCurrency(parseFloat(cents) / 100, selectedCurrency());
-	}
 </script>
 
 <div class="space-y-6">
@@ -335,19 +357,19 @@
 			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 				<KpiCard
 					label="Cheltuieli totale"
-					value={formatCurrency(totals.totalSpend, selectedCurrency())}
+					value={formatCurrency(totals.totalSpend, selectedCurrency)}
 					icon={DollarSignIcon}
 					subtext="{formatNumber(totals.totalImpressions)} impresii"
 				/>
 				<KpiCard
 					label="CPM"
-					value={formatCurrency(totals.avgCpm, selectedCurrency())}
+					value={formatCurrency(totals.avgCpm, selectedCurrency)}
 					icon={EyeIcon}
 					subtext="Cost per 1000 impresii"
 				/>
 				<KpiCard
 					label="CPC"
-					value={formatCurrency(totals.avgCpc, selectedCurrency())}
+					value={formatCurrency(totals.avgCpc, selectedCurrency)}
 					icon={MousePointerClickIcon}
 					subtext="{formatNumber(totals.totalClicks)} click-uri"
 				/>
@@ -358,10 +380,10 @@
 					subtext="Click-through rate"
 				/>
 				<KpiCard
-					label="ROAS"
-					value={formatROAS(totals.roas)}
+					label={resultKpi.label}
+					value={resultKpi.value}
 					icon={TrendingUpIcon}
-					subtext="{formatNumber(totals.totalConversions)} conversii"
+					subtext={resultKpi.subtext}
 				/>
 			</div>
 		{/if}
@@ -371,11 +393,11 @@
 			<div class="grid gap-6 xl:grid-cols-2">
 				<Card class="p-4">
 					<h3 class="mb-4 text-lg font-semibold">Cheltuieli în timp</h3>
-					<SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency()} />
+					<SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency} />
 				</Card>
 				<Card class="p-4">
 					<h3 class="mb-4 text-lg font-semibold">Conversii & Cost per conversie</h3>
-					<ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} currency={selectedCurrency()} />
+					<ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} currency={selectedCurrency} />
 				</Card>
 			</div>
 		{/if}
@@ -450,7 +472,7 @@
 										</TableCell>
 										{#each activePreset.columns as col}
 											<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-												<div>{col.getValue(campaign, selectedCurrency())}</div>
+												<div>{col.getValue(campaign, selectedCurrency)}</div>
 												{#if col.getSubtext}
 													{@const sub = col.getSubtext(campaign)}
 													{#if sub}
@@ -467,7 +489,7 @@
 									<TableCell></TableCell>
 									{#each activePreset.columns as col}
 										<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-											{col.getTotalValue ? col.getTotalValue(campaignTableData, selectedCurrency()) : '-'}
+											{col.getTotalValue ? col.getTotalValue(campaignTableData, selectedCurrency) : '-'}
 										</TableCell>
 									{/each}
 								</TableRow>

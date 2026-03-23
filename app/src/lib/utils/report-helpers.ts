@@ -119,7 +119,7 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 		spend: d.spend,
 		impressions: d.impressions,
 		reach: d.reach,
-		frequency: d.impressions > 0 ? d.impressions / (d.reach || 1) : 0,
+		frequency: d.reach > 0 ? d.impressions / d.reach : 0,
 		clicks: d.clicks,
 		conversions: d.conversions,
 		conversionValue: d.conversionValue,

@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
@@ -60,20 +60,29 @@ export const getReportAdAccounts = query(async () => {
 		)
 		.orderBy(table.metaAdsAccount.accountName);
 
-	// Lookup currency per ad account from spending data
-	const enriched = await Promise.all(
-		accounts.map(async (acc) => {
-			const [spending] = await db
-				.select({ currencyCode: table.metaAdsSpending.currencyCode })
-				.from(table.metaAdsSpending)
-				.where(eq(table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId))
-				.orderBy(desc(table.metaAdsSpending.periodStart))
-				.limit(1);
-			return { ...acc, currency: spending?.currencyCode || 'RON', tokenExpiresAt: acc.tokenExpiresAt };
-		})
-	);
+	// Batch lookup currency per ad account from spending data (single query)
+	const accountIds = accounts.map(a => a.metaAdAccountId);
+	const currencyMap = new Map<string, string>();
 
-	return enriched;
+	if (accountIds.length > 0) {
+		const spendings = await db
+			.select({ metaAdAccountId: table.metaAdsSpending.metaAdAccountId, currencyCode: table.metaAdsSpending.currencyCode })
+			.from(table.metaAdsSpending)
+			.where(inArray(table.metaAdsSpending.metaAdAccountId, accountIds))
+			.orderBy(desc(table.metaAdsSpending.periodStart));
+
+		for (const s of spendings) {
+			if (!currencyMap.has(s.metaAdAccountId)) {
+				currencyMap.set(s.metaAdAccountId, s.currencyCode);
+			}
+		}
+	}
+
+	return accounts.map(acc => ({
+		...acc,
+		currency: currencyMap.get(acc.metaAdAccountId) || 'RON',
+		tokenExpiresAt: acc.tokenExpiresAt
+	}));
 });
 
 /** Get campaign-level insights from Meta API (live, cached 5 min) */
@@ -187,17 +196,20 @@ export const getMetaCampaignInsights = query(
 			}
 
 			// Override reach/frequency with aggregated values (daily reach can't be summed)
-			// Store aggregated reach per campaign on the FIRST insight row for that campaign
-			// so aggregateInsightsByCampaign picks it up correctly
+			// Sort by campaignId to ensure consistent first-row placement
+			insights.sort((a, b) => a.campaignId.localeCompare(b.campaignId) || a.dateStart.localeCompare(b.dateStart));
+
 			const seenCampaigns = new Set<string>();
 			for (const insight of insights) {
 				const rf = reachMap.get(insight.campaignId);
-				if (rf && !seenCampaigns.has(insight.campaignId)) {
-					insight.reach = String(rf.reach);
-					insight.frequency = String(rf.frequency);
+				if (!seenCampaigns.has(insight.campaignId)) {
 					seenCampaigns.add(insight.campaignId);
-				} else if (seenCampaigns.has(insight.campaignId)) {
-					// Zero out reach on subsequent daily rows to prevent double-counting in aggregation
+					if (rf) {
+						insight.reach = String(rf.reach);
+						insight.frequency = String(rf.frequency);
+					}
+				} else {
+					// Zero out reach on subsequent daily rows to prevent double-counting
 					insight.reach = '0';
 					insight.frequency = '0';
 				}
