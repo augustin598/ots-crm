@@ -419,7 +419,7 @@ export async function listCampaignInsights(
 					postReactions: getActionCount(row.actions, 'post_reaction'),
 					postComments: getActionCount(row.actions, 'comment'),
 					postSaves: getActionCount(row.actions, 'onsite_conversion.post_save'),
-					postShares: getActionCount(row.actions, 'post'),
+					postShares: getActionCount(row.actions, 'post_share'),
 					videoViews: getActionCount(row.actions, 'video_view'),
 					callsPlaced: getActionCount(row.actions, 'click_to_call_native_call_placed'),
 					dateStart: row.date_start,
@@ -676,6 +676,122 @@ export async function listActiveCampaigns(
 		});
 		throw err;
 	}
+}
+
+// ---- Demographics ----
+
+export interface DemographicSegment {
+	label: string; // "male", "18-24", "RO", "mobile_app"
+	spend: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+}
+
+export interface MetaDemographicBreakdown {
+	gender: DemographicSegment[];
+	age: DemographicSegment[];
+	region: DemographicSegment[];
+	devicePlatform: DemographicSegment[];
+}
+
+/**
+ * Fetch demographic breakdowns (gender, age, country, device_platform) for an ad account.
+ * Makes 4 parallel API calls, one per breakdown type.
+ * NOTE: Do NOT request `reach` — incompatible with some breakdowns.
+ */
+export async function listDemographicInsights(
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	since: string,
+	until: string,
+	campaignIds?: string[]
+): Promise<MetaDemographicBreakdown> {
+	logInfo('meta-ads', `Fetching demographics for ${adAccountId}`, { metadata: { since, until } });
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const timeRange = JSON.stringify({ since, until });
+	const fields = 'spend,impressions,clicks,actions';
+
+	const breakdownTypes = ['gender', 'age', 'region', 'device_platform'] as const;
+
+	function parseSegments(data: any, breakdownKey: string): DemographicSegment[] {
+		if (!data?.data) return [];
+		// When filtering by campaign, API returns per-campaign rows — aggregate by breakdown key
+		const byLabel = new Map<string, DemographicSegment>();
+		for (const row of data.data as any[]) {
+			const label = row[breakdownKey] || 'unknown';
+			const existing = byLabel.get(label) || { label, spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+			existing.spend += parseFloat(row.spend || '0');
+			existing.impressions += parseInt(row.impressions || '0', 10);
+			existing.clicks += parseInt(row.clicks || '0', 10);
+			if (row.actions) {
+				for (const action of row.actions) {
+					const t = action.action_type as string;
+					if (ACTION_TYPE_LABELS[t]) {
+						existing.conversions += parseFloat(action.value || '0');
+					}
+				}
+			}
+			byLabel.set(label, existing);
+		}
+		return Array.from(byLabel.values()).sort((a, b) => b.spend - a.spend);
+	}
+
+	const results = await Promise.allSettled(
+		breakdownTypes.map(async (breakdown) => {
+			const params = new URLSearchParams({
+				fields,
+				breakdowns: breakdown,
+				time_range: timeRange,
+				level: campaignIds && campaignIds.length > 0 ? 'campaign' : 'account',
+				access_token: accessToken,
+				appsecret_proof: proof
+			});
+			if (campaignIds && campaignIds.length > 0) {
+				params.set('filtering', JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: campaignIds }]));
+			}
+			const res = await fetch(`${META_GRAPH_URL}/${adAccountId}/insights?${params.toString()}`);
+			const data = await res.json();
+			if (data.error) {
+				logError('meta-ads', `Demographics ${breakdown} error for ${adAccountId}`, {
+					metadata: { errorMessage: data.error.message }
+				});
+				throw new Error(data.error.message);
+			}
+			return { breakdown, data };
+		})
+	);
+
+	const breakdown: MetaDemographicBreakdown = {
+		gender: [],
+		age: [],
+		region: [],
+		devicePlatform: []
+	};
+
+	for (const result of results) {
+		if (result.status === 'fulfilled') {
+			const { breakdown: type, data } = result.value;
+			switch (type) {
+				case 'gender': breakdown.gender = parseSegments(data, 'gender'); break;
+				case 'age': breakdown.age = parseSegments(data, 'age'); break;
+				case 'region': breakdown.region = parseSegments(data, 'region'); break;
+				case 'device_platform': breakdown.devicePlatform = parseSegments(data, 'device_platform'); break;
+			}
+		} else {
+			logError('meta-ads', `Demographics breakdown failed for ${adAccountId}`, {
+				metadata: { reason: result.reason instanceof Error ? result.reason.message : String(result.reason) }
+			});
+		}
+	}
+
+	logInfo('meta-ads', `Demographics loaded for ${adAccountId}`, {
+		metadata: { gender: breakdown.gender.length, age: breakdown.age.length, region: breakdown.region.length, devicePlatform: breakdown.devicePlatform.length }
+	});
+
+	return breakdown;
 }
 
 /**

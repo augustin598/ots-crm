@@ -204,6 +204,49 @@ export function formatROAS(value: number): string {
 	return `${value.toFixed(2)}x`;
 }
 
+// ---- Demographic label maps ----
+
+export const GENDER_LABELS: Record<string, string> = {
+	male: 'Bărbați',
+	female: 'Femei',
+	unknown: 'Necunoscut'
+};
+
+export const DEVICE_LABELS: Record<string, string> = {
+	mobile_app: 'Mobil App',
+	mobile_web: 'Mobil Web',
+	desktop: 'Desktop',
+	unknown: 'Necunoscut'
+};
+
+export const COUNTRY_NAMES: Record<string, string> = {
+	RO: 'România', DE: 'Germania', AT: 'Austria', HU: 'Ungaria',
+	IT: 'Italia', ES: 'Spania', FR: 'Franța', GB: 'UK', US: 'SUA',
+	BG: 'Bulgaria', MD: 'Moldova', PL: 'Polonia', NL: 'Olanda',
+	CZ: 'Cehia', BE: 'Belgia', CH: 'Elveția', GR: 'Grecia',
+	TR: 'Turcia', SE: 'Suedia', PT: 'Portugalia', HR: 'Croația',
+	RS: 'Serbia', UA: 'Ucraina', SK: 'Slovacia', SI: 'Slovenia',
+	DK: 'Danemarca', FI: 'Finlanda', NO: 'Norvegia', IE: 'Irlanda',
+	CA: 'Canada', AU: 'Australia', BR: 'Brazilia', IN: 'India',
+	JP: 'Japonia', KR: 'Coreea de Sud', MX: 'Mexic', AR: 'Argentina',
+	CL: 'Chile', CO: 'Columbia', ZA: 'Africa de Sud', EG: 'Egipt',
+	IL: 'Israel', AE: 'Emiratele Arabe', SA: 'Arabia Saudită'
+};
+
+export function getCountryName(code: string): string {
+	return COUNTRY_NAMES[code] || code;
+}
+
+export function getDemographicLabel(type: 'gender' | 'age' | 'region' | 'devicePlatform', label: string): string {
+	switch (type) {
+		case 'gender': return GENDER_LABELS[label] || label;
+		case 'region': return label; // Meta API returns region names directly (e.g. "Bacau")
+		case 'devicePlatform': return DEVICE_LABELS[label] || label;
+		case 'age': return label;
+		default: return label;
+	}
+}
+
 /** Get date presets for the date range picker (Facebook Ads Manager style) */
 export function getDatePresets(): { label: string; since: string; until: string }[] {
 	const today = new Date();

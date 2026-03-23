@@ -65,7 +65,10 @@ const COL = {
 	reach: {
 		key: 'reach', label: 'Reach', align: 'right' as const, sortKey: 'reach' as const,
 		getValue: (c: any) => c.reach > 0 ? formatNumber(c.reach) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.reach, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.reach, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	frequency: {
 		key: 'frequency', label: 'Frecvență', align: 'right' as const, sortKey: 'frequency' as const,
@@ -102,7 +105,10 @@ const COL = {
 	linkClicks: {
 		key: 'linkClicks', label: 'Link clicks', align: 'right' as const, sortKey: 'linkClicks' as const,
 		getValue: (c: any) => c.linkClicks > 0 ? formatNumber(c.linkClicks) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.linkClicks, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.linkClicks, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	cpc: {
 		key: 'cpc', label: 'CPC', align: 'right' as const, sortKey: 'cpc' as const,
@@ -114,7 +120,7 @@ const COL = {
 		}
 	},
 	ctrLink: {
-		key: 'ctrLink', label: 'CTR (link)', align: 'right' as const,
+		key: 'ctrLink', label: 'CTR (link)', align: 'right' as const, sortKey: 'linkClicks' as const,
 		getValue: (c: any) => c.impressions > 0 && c.linkClicks > 0 ? formatPercent((c.linkClicks / c.impressions) * 100) : '-',
 		getTotalValue: (campaigns: any[]) => {
 			const totalLC = campaigns.reduce((s: number, c: any) => s + c.linkClicks, 0);
@@ -139,32 +145,50 @@ const COL = {
 	pageEngagement: {
 		key: 'pageEngagement', label: 'Page engagement', align: 'right' as const, sortKey: 'pageEngagement' as const,
 		getValue: (c: any) => c.pageEngagement > 0 ? formatNumber(c.pageEngagement) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.pageEngagement, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.pageEngagement, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	postReactions: {
 		key: 'postReactions', label: 'Post reactions', align: 'right' as const, sortKey: 'postReactions' as const,
 		getValue: (c: any) => c.postReactions > 0 ? formatNumber(c.postReactions) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.postReactions, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.postReactions, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	postComments: {
 		key: 'postComments', label: 'Post comments', align: 'right' as const, sortKey: 'postComments' as const,
 		getValue: (c: any) => c.postComments > 0 ? formatNumber(c.postComments) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.postComments, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.postComments, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	postSaves: {
 		key: 'postSaves', label: 'Post saves', align: 'right' as const, sortKey: 'postSaves' as const,
 		getValue: (c: any) => c.postSaves > 0 ? formatNumber(c.postSaves) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.postSaves, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.postSaves, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	postShares: {
 		key: 'postShares', label: 'Post shares', align: 'right' as const, sortKey: 'postShares' as const,
 		getValue: (c: any) => c.postShares > 0 ? formatNumber(c.postShares) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.postShares, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.postShares, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	},
 	videoViews: {
 		key: 'videoViews', label: 'Video views', align: 'right' as const, sortKey: 'videoViews' as const,
 		getValue: (c: any) => c.videoViews > 0 ? formatNumber(c.videoViews) : '-',
-		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.videoViews, 0))
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.videoViews, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
 	}
 };
 

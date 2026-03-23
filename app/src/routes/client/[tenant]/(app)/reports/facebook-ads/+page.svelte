@@ -12,6 +12,7 @@
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
 	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
+	import DemographicsSection from '$lib/components/reports/demographics-section.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
@@ -261,6 +262,17 @@
 						<ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} {currency} />
 					</Card>
 				</div>
+			{/if}
+
+			<!-- Demographics -->
+			{#if adAccount}
+				<DemographicsSection
+					adAccountId={adAccount.metaAdAccountId}
+					integrationId={adAccount.integrationId}
+					{since}
+					{until}
+					{currency}
+				/>
 			{/if}
 
 			<!-- Campaign Table -->

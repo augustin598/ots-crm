@@ -5,13 +5,14 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
-import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, listDemographicInsights, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
 // ---- Server-side cache (5 min TTL) ----
 
 const cache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 200;
 
 function getCached<T>(key: string): T | null {
 	const entry = cache.get(key);
@@ -24,6 +25,11 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCache(key: string, data: any): void {
+	// Evict oldest entry if cache is full
+	if (cache.size >= MAX_CACHE_SIZE) {
+		const firstKey = cache.keys().next().value;
+		if (firstKey) cache.delete(firstKey);
+	}
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
@@ -281,7 +287,8 @@ export const getMetaCampaignInsights = query(
 							const field = ACTION_TO_FIELD[goalDef.actionType];
 							const count = field ? (insight[field] as number) : insight.conversions;
 							insight.conversions = count;
-							insight.costPerConversion = count > 0 ? parseFloat(insight.spend) / count : 0;
+							const cpc = count > 0 ? parseFloat(insight.spend) / count : 0;
+							insight.costPerConversion = isFinite(cpc) ? cpc : 0;
 						}
 						insight.resultType = goalDef.label;
 						insight.cpaLabel = goalDef.cpaLabel;
@@ -374,6 +381,76 @@ export const getMetaActiveCampaigns = query(
 
 			setCache(cacheKey, campaigns);
 			return campaigns;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
+				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
+			}
+			throw error(500, msg);
+		}
+	}
+);
+
+/** Get demographic breakdowns (gender, age, country, device) for an ad account */
+export const getMetaDemographicInsights = query(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		campaignIds: v.optional(v.array(v.string()))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+
+		// Client users can only access their own ad account
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
+				.from(table.metaAdsAccount)
+				.where(and(
+					eq(table.metaAdsAccount.clientId, event.locals.client.id),
+					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
+				))
+				.limit(1);
+			if (!clientAccount || clientAccount.metaAdAccountId !== params.adAccountId) {
+				throw error(401, 'Unauthorized');
+			}
+		}
+
+		const tenantId = event.locals.tenant.id;
+		const campaignKey = params.campaignIds?.length ? params.campaignIds.sort().join(',') : 'all';
+
+		const cacheKey = `demographics:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) {
+			throw error(500, 'META_APP_SECRET nu este configurat');
+		}
+
+		try {
+			const demographics = await listDemographicInsights(
+				params.adAccountId,
+				authResult.accessToken,
+				appSecret,
+				params.since,
+				params.until,
+				params.campaignIds
+			);
+
+			setCache(cacheKey, demographics);
+			return demographics;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {

@@ -22,16 +22,15 @@
 	}
 
 	$effect(() => {
+		if (chart) {
+			chart.destroy();
+			chart = undefined;
+		}
 		if (!browser || !canvas || data.length < 2 || !hasConversions) return;
 
 		(async () => {
 			const { Chart, registerables } = await import('chart.js');
 			Chart.register(...registerables);
-
-			if (chart) {
-				chart.destroy();
-				chart = undefined;
-			}
 
 			const labels = data.map((d) => formatDateLabel(d.date));
 			const conversions = data.map((d) => d.conversions);

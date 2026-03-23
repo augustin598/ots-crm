@@ -10,11 +10,13 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import KpiCard from '$lib/components/reports/kpi-card.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
 	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
+	import DemographicsSection from '$lib/components/reports/demographics-section.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
@@ -83,6 +85,8 @@
 		selectedAccountId = value;
 		const account = accounts.find((a: any) => a.metaAdAccountId === value);
 		selectedIntegrationId = account?.integrationId || '';
+		selectedCampaigns = new Set();
+		currentPage = 1;
 	}
 
 	// Campaign insights (reactive based on account + date range)
@@ -327,7 +331,7 @@
 				duration: 3000
 			});
 			budgetDialogOpen = false;
-			setTimeout(() => window.location.reload(), 1500);
+			handleRefresh();
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : 'Eroare necunoscută';
 			toast.error(`Nu s-a putut actualiza bugetul`, {
@@ -341,6 +345,26 @@
 		} finally {
 			budgetSaving = false;
 		}
+	}
+
+	// Selection state
+	let selectedCampaigns = $state<Set<string>>(new Set());
+	const allSelected = $derived(paginatedCampaigns.length > 0 && paginatedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
+	const someSelected = $derived(paginatedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedCampaigns = new Set();
+		} else {
+			selectedCampaigns = new Set(paginatedCampaigns.map(c => c.campaignId));
+		}
+	}
+
+	function toggleSelect(campaignId: string) {
+		const next = new Set(selectedCampaigns);
+		if (next.has(campaignId)) next.delete(campaignId);
+		else next.add(campaignId);
+		selectedCampaigns = next;
 	}
 
 	let togglingCampaignId = $state<string | null>(null);
@@ -357,7 +381,7 @@
 				newStatus
 			});
 			toast.success(`Campania "${campaign.campaignName}" a fost ${label}`, { duration: 2000 });
-			setTimeout(() => window.location.reload(), 1000);
+			handleRefresh();
 		} catch (e) {
 			toast.error('Nu s-a putut schimba statusul', {
 				description: e instanceof Error ? e.message : 'Eroare necunoscută',
@@ -512,6 +536,18 @@
 			</div>
 		{/if}
 
+		<!-- Demographics -->
+		{#if !insightsLoading && selectedAccountId && selectedIntegrationId}
+			<DemographicsSection
+				adAccountId={selectedAccountId}
+				integrationId={selectedIntegrationId}
+				{since}
+				{until}
+				currency={selectedCurrency}
+				campaignIds={[...selectedCampaigns]}
+			/>
+		{/if}
+
 		<!-- Campaign Performance Table -->
 		{#if !insightsLoading}
 			<div class="space-y-4">
@@ -522,7 +558,7 @@
 							{#each STATUS_FILTERS as sf}
 								<button
 									class="px-3 py-1 text-xs rounded-md transition-colors {statusFilter === sf.key ? sf.activeClass : 'text-muted-foreground hover:text-foreground'}"
-									onclick={() => { statusFilter = sf.key; }}
+									onclick={() => { statusFilter = sf.key; currentPage = 1; selectedCampaigns = new Set(); }}
 								>{sf.label}</button>
 							{/each}
 						</div>
@@ -555,6 +591,13 @@
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead class="w-[40px]">
+										<Checkbox
+											checked={allSelected}
+											indeterminate={someSelected && !allSelected}
+											onCheckedChange={() => toggleSelectAll()}
+										/>
+									</TableHead>
 									<TableHead class="w-[50px]">On/Off</TableHead>
 									<TableHead>
 										<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('campaignName')}>
@@ -582,6 +625,12 @@
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
 									<TableRow>
+										<TableCell class="w-[40px]">
+											<Checkbox
+												checked={selectedCampaigns.has(campaign.campaignId)}
+												onCheckedChange={() => toggleSelect(campaign.campaignId)}
+											/>
+										</TableCell>
 										<TableCell class="w-[50px]">
 											<Switch
 												checked={campaign.status === 'ACTIVE'}
@@ -629,11 +678,12 @@
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
 									<TableCell></TableCell>
-									<TableCell>Rezultate din {campaignTableData.length} campanii</TableCell>
+									<TableCell></TableCell>
+									<TableCell>Rezultate din {filteredCampaigns.length} campanii</TableCell>
 									<TableCell></TableCell>
 									{#each activePreset.columns as col}
 										<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-											{col.getTotalValue ? col.getTotalValue(campaignTableData, selectedCurrency) : '-'}
+											{col.getTotalValue ? col.getTotalValue(filteredCampaigns, selectedCurrency) : '-'}
 										</TableCell>
 									{/each}
 								</TableRow>
