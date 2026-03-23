@@ -541,9 +541,9 @@ export async function listActiveCampaigns(
 		// Fetch optimization_goal for all ad sets in one request at account level
 		try {
 			const campaignIds = new Set(campaigns.map(c => c.campaignId));
-			let adsetUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/adsets?fields=campaign_id,optimization_goal&limit=500&access_token=${accessToken}&appsecret_proof=${proof}`;
-			// Map campaign_id → optimization_goal (first ad set wins)
-			const goalByCampaign = new Map<string, string>();
+			let adsetUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/adsets?fields=campaign_id,optimization_goal,daily_budget,lifetime_budget&limit=500&access_token=${accessToken}&appsecret_proof=${proof}`;
+			// Map campaign_id → { optimization_goal, budget } (first ad set wins)
+			const adsetByCampaign = new Map<string, { goal: string; dailyBudget: string | null; lifetimeBudget: string | null }>();
 
 			while (adsetUrl) {
 				const adsetRes = await fetch(adsetUrl);
@@ -552,19 +552,29 @@ export async function listActiveCampaigns(
 
 				for (const adset of adsetData.data || []) {
 					const cid = adset.campaign_id;
-					if (cid && adset.optimization_goal && campaignIds.has(cid) && !goalByCampaign.has(cid)) {
-						goalByCampaign.set(cid, adset.optimization_goal);
+					if (cid && campaignIds.has(cid) && !adsetByCampaign.has(cid)) {
+						adsetByCampaign.set(cid, {
+							goal: adset.optimization_goal || '',
+							dailyBudget: adset.daily_budget || null,
+							lifetimeBudget: adset.lifetime_budget || null
+						});
 					}
 				}
 
-				// Stop paginating once we have all campaigns covered
-				if (goalByCampaign.size >= campaignIds.size) break;
+				if (adsetByCampaign.size >= campaignIds.size) break;
 				adsetUrl = adsetData.paging?.next || null;
 			}
 
 			for (const campaign of campaigns) {
-				const goal = goalByCampaign.get(campaign.campaignId);
-				if (goal) campaign.optimizationGoal = goal;
+				const adsetInfo = adsetByCampaign.get(campaign.campaignId);
+				if (adsetInfo) {
+					if (adsetInfo.goal) campaign.optimizationGoal = adsetInfo.goal;
+					// If campaign has no budget, use ad set budget
+					if (!campaign.dailyBudget && !campaign.lifetimeBudget) {
+						campaign.dailyBudget = adsetInfo.dailyBudget;
+						campaign.lifetimeBudget = adsetInfo.lifetimeBudget;
+					}
+				}
 			}
 		} catch {
 			// Non-critical — fallback to objective-based detection
