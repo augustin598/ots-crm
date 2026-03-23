@@ -38,6 +38,20 @@ const COL = {
 			return totalConv > 0 ? formatCurrency(totalSpend / totalConv, cur) : '-';
 		}
 	},
+	budget: {
+		key: 'budget', label: 'Buget', align: 'right' as const,
+		getValue: (c: any, cur: string) => {
+			if (c.dailyBudget) return `${formatCurrency(parseFloat(c.dailyBudget) / 100, cur)}/zi`;
+			if (c.lifetimeBudget) return formatCurrency(parseFloat(c.lifetimeBudget) / 100, cur);
+			return '-';
+		},
+		getSubtext: (c: any) => {
+			if (c.dailyBudget) return 'Zilnic';
+			if (c.lifetimeBudget) return 'Total';
+			return '';
+		},
+		getTotalValue: () => '-'
+	},
 	spend: {
 		key: 'spend', label: 'Cheltuieli', align: 'right' as const, sortKey: 'spend' as const,
 		getValue: (c: any, cur: string) => formatCurrency(c.spend, cur),
@@ -158,12 +172,12 @@ export const COLUMN_PRESETS: ColumnPreset[] = [
 	{
 		key: 'performance_clicks',
 		label: 'Performance and clicks',
-		columns: [COL.results, COL.costPerResult, COL.reach, COL.frequency, COL.spend, COL.impressions, COL.cpm, COL.linkClicks, COL.cpc, COL.ctrLink, COL.clicks, COL.ctr]
+		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.linkClicks, COL.cpc, COL.ctrLink, COL.clicks, COL.ctr]
 	},
 	{
 		key: 'performance',
 		label: 'Performance',
-		columns: [COL.results, COL.costPerResult, COL.spend, COL.impressions, COL.reach, COL.roas]
+		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.reach, COL.roas]
 	},
 	{
 		key: 'engagement',

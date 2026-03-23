@@ -79,11 +79,11 @@
 	// Merge campaigns with insights to get status
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null }> = [];
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
 			if (insight) {
-				result.push({ ...insight, status: ci.status });
+				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null });
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES') {
 				result.push({
@@ -93,12 +93,12 @@
 					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
 					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
-					status: ci.status
+					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null
 				});
 			}
 		}
 		for (const [, c] of insightMap) {
-			result.push({ ...c, status: 'UNKNOWN' });
+			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null });
 		}
 		return result;
 	});
