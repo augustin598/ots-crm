@@ -422,10 +422,8 @@ export const updateBudget = command(
 				budgetCents
 			);
 
-			// Clear campaigns cache
-			for (const [key] of cache) {
-				if (key.startsWith('campaigns:')) cache.delete(key);
-			}
+			// Clear all cache so refresh shows updated budget
+			cache.clear();
 
 			return { success: true };
 		} catch (err) {
