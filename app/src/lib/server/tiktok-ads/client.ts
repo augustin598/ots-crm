@@ -435,13 +435,56 @@ export async function listCampaigns(
 		page++;
 	}
 
-	// Log budget info for debugging
+	// For campaigns without budget (BUDGET_MODE_INFINITE), fetch from ad group level
+	const noBudgetCampaigns = allCampaigns.filter(c => !c.dailyBudget && !c.lifetimeBudget);
+	if (noBudgetCampaigns.length > 0) {
+		try {
+			const adgroupParams = new URLSearchParams({
+				advertiser_id: advertiserId,
+				page_size: '1000',
+				fields: JSON.stringify(['adgroup_id', 'campaign_id', 'budget', 'budget_mode'])
+			});
+			const adgroupRes = await fetch(`${TIKTOK_API_URL}/adgroup/get/?${adgroupParams.toString()}`, {
+				headers: { 'Access-Token': accessToken }
+			});
+			const adgroupJson = await adgroupRes.json();
+
+			if (adgroupJson.code === 0 && adgroupJson.data?.list) {
+				// Build map: campaignId → first adgroup budget
+				const adgroupBudgetMap = new Map<string, { budget: string; mode: string }>();
+				for (const ag of adgroupJson.data.list) {
+					const cid = String(ag.campaign_id);
+					if (!adgroupBudgetMap.has(cid) && ag.budget && ag.budget_mode && ag.budget_mode !== 'BUDGET_MODE_INFINITE') {
+						adgroupBudgetMap.set(cid, { budget: String(ag.budget), mode: ag.budget_mode });
+					}
+				}
+
+				// Apply adgroup budget to campaigns missing budget
+				for (const campaign of noBudgetCampaigns) {
+					const agBudget = adgroupBudgetMap.get(campaign.campaignId);
+					if (agBudget) {
+						if (agBudget.mode === 'BUDGET_MODE_DAY') {
+							campaign.dailyBudget = agBudget.budget;
+						} else if (agBudget.mode === 'BUDGET_MODE_TOTAL') {
+							campaign.lifetimeBudget = agBudget.budget;
+						}
+					}
+				}
+
+				const resolved = noBudgetCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget).length;
+				if (resolved > 0) {
+					logInfo('tiktok-ads', `Resolved ${resolved} campaign budgets from ad group level`);
+				}
+			}
+		} catch (e) {
+			logError('tiktok-ads', `Ad group budget fetch failed`, {
+				metadata: { error: e instanceof Error ? e.message : String(e) }
+			});
+		}
+	}
+
 	const withBudget = allCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget);
-	logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. ${withBudget.length} with budget`, {
-		metadata: withBudget.length > 0
-			? { sample: `${withBudget[0].campaignName} daily=${withBudget[0].dailyBudget} lifetime=${withBudget[0].lifetimeBudget}` }
-			: undefined
-	});
+	logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. ${withBudget.length} with budget`);
 	return allCampaigns;
 }
 
