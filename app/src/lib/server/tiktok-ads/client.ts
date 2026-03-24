@@ -274,8 +274,7 @@ export async function listCampaignInsights(
 			metrics: [
 				'spend', 'impressions', 'clicks', 'conversion',
 				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
-				'reach', 'frequency',
-				'likes', 'comments', 'shares', 'follows', 'profile_visits',
+				'likes', 'comments', 'shares', 'follows',
 				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
 			],
 			data_level: 'AUCTION_CAMPAIGN',
