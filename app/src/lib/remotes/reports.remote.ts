@@ -398,7 +398,8 @@ export const getMetaDemographicInsights = query(
 		integrationId: v.pipe(v.string(), v.minLength(1)),
 		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
 		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
-		campaignIds: v.optional(v.array(v.string()))
+		campaignIds: v.optional(v.array(v.string())),
+		resultActionTypes: v.optional(v.array(v.string()))
 	}),
 	async (params) => {
 		const event = getRequestEvent();
@@ -424,8 +425,9 @@ export const getMetaDemographicInsights = query(
 
 		const tenantId = event.locals.tenant.id;
 		const campaignKey = params.campaignIds?.length ? params.campaignIds.sort().join(',') : 'all';
+		const resultKey = params.resultActionTypes?.length ? params.resultActionTypes.sort().join(',') : 'none';
 
-		const cacheKey = `demographics:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}`;
+		const cacheKey = `demographics:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -446,7 +448,8 @@ export const getMetaDemographicInsights = query(
 				appSecret,
 				params.since,
 				params.until,
-				params.campaignIds
+				params.campaignIds,
+				params.resultActionTypes
 			);
 
 			setCache(cacheKey, demographics);

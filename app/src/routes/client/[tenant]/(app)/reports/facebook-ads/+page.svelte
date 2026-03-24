@@ -80,11 +80,11 @@
 	// Merge campaigns with insights to get status
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; previewUrl: string | null }> = [];
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
 			if (insight) {
-				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null });
+				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null });
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES') {
 				result.push({
@@ -94,14 +94,52 @@
 					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
 					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
-					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null
+					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null
 				});
 			}
 		}
 		for (const [, c] of insightMap) {
-			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null });
+			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, previewUrl: null });
 		}
 		return result;
+	});
+
+	// Map optimization goals to action types (for demographics)
+	const GOAL_TO_ACTION: Record<string, string> = {
+		'CALL': 'click_to_call_native_call_placed',
+		'QUALITY_CALL': 'click_to_call_native_call_placed',
+		'OFFSITE_CONVERSIONS': 'offsite_conversion.fb_pixel_purchase',
+		'LINK_CLICKS': 'link_click',
+		'LANDING_PAGE_VIEWS': 'landing_page_view',
+		'POST_ENGAGEMENT': 'post_engagement',
+		'THRUPLAY': 'video_view',
+		'VIDEO_VIEWS': 'video_view',
+		'LEAD_GENERATION': 'lead',
+		'CONVERSATIONS': 'onsite_conversion.messaging_conversation_started_7d',
+		'APP_INSTALLS': 'app_install',
+		'VALUE': 'offsite_conversion.fb_pixel_purchase'
+	};
+
+	const resultActionTypes = $derived.by(() => {
+		const types = new Set<string>();
+		for (const c of campaigns) {
+			if (c.optimizationGoal && GOAL_TO_ACTION[c.optimizationGoal]) {
+				types.add(GOAL_TO_ACTION[c.optimizationGoal]);
+			}
+		}
+		return [...types];
+	});
+
+	const dominantResultLabel = $derived.by(() => {
+		const withResults = campaignData.filter(c => c.conversions > 0 && c.resultType);
+		if (withResults.length === 0) return 'Rezultate';
+		const typeCounts = new Map<string, number>();
+		for (const c of withResults) {
+			typeCounts.set(c.resultType, (typeCounts.get(c.resultType) || 0) + c.conversions);
+		}
+		let dominant = 'Rezultate'; let max = 0;
+		for (const [type, count] of typeCounts) { if (count > max) { max = count; dominant = type; } }
+		return dominant;
 	});
 
 	// Dynamic result KPI
@@ -272,6 +310,8 @@
 					{since}
 					{until}
 					{currency}
+					{resultActionTypes}
+					resultLabel={dominantResultLabel}
 				/>
 			{/if}
 
@@ -328,6 +368,7 @@
 											{/if}
 										</TableHead>
 									{/each}
+									<TableHead class="w-[50px]"></TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -351,6 +392,13 @@
 												{/if}
 											</TableCell>
 										{/each}
+										<TableCell class="w-[50px] text-center">
+											{#if campaign.previewUrl}
+												<a href={campaign.previewUrl} target="_blank" rel="noopener" class="text-muted-foreground hover:text-primary" title="Previzualizare reclamă">
+													<EyeIcon class="h-4 w-4 inline-block" />
+												</a>
+											{/if}
+										</TableCell>
 									</TableRow>
 								{/each}
 								<!-- Total row -->
@@ -362,6 +410,7 @@
 											{col.getTotalValue ? col.getTotalValue(campaignTableData, currency) : '-'}
 										</TableCell>
 									{/each}
+									<TableCell></TableCell>
 								</TableRow>
 							</TableBody>
 						</Table>
@@ -375,3 +424,4 @@
 		{/if}
 	{/if}
 </div>
+

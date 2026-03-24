@@ -17,7 +17,9 @@
 		since,
 		until,
 		currency = 'RON',
-		campaignIds = []
+		campaignIds = [],
+		resultActionTypes = [],
+		resultLabel = 'Rezultate'
 	}: {
 		adAccountId: string;
 		integrationId: string;
@@ -25,23 +27,28 @@
 		until: string;
 		currency?: string;
 		campaignIds?: string[];
+		resultActionTypes?: string[];
+		resultLabel?: string;
 	} = $props();
 
 	let demographicsQuery = $state<ReturnType<typeof getMetaDemographicInsights> | null>(null);
 
-	// Derive a stable key from campaignIds to ensure reactivity on selection changes
+	// Derive stable keys to ensure reactivity on selection/result type changes
 	const campaignKey = $derived(JSON.stringify(campaignIds.slice().sort()));
+	const resultKey = $derived(JSON.stringify(resultActionTypes.slice().sort()));
 
 	$effect(() => {
-		// Read campaignKey to track campaignIds changes
+		// Read derived keys to track changes
 		const _ck = campaignKey;
+		const _rk = resultKey;
 		if (adAccountId && integrationId && since && until) {
 			demographicsQuery = getMetaDemographicInsights({
 				adAccountId,
 				integrationId,
 				since,
 				until,
-				campaignIds: campaignIds.length > 0 ? campaignIds : undefined
+				campaignIds: campaignIds.length > 0 ? campaignIds : undefined,
+				resultActionTypes: resultActionTypes.length > 0 ? resultActionTypes : undefined
 			});
 		}
 	});
@@ -165,6 +172,7 @@
 			{currency}
 			labelMap={dialogLabelMap}
 			colors={dialogColors}
+			{resultLabel}
 		/>
 	{/if}
 </div>

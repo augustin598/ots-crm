@@ -61,6 +61,7 @@ export interface MetaAdsCampaignInfo {
 	adsetId: string | null; // first ad set ID (for budget updates when budget is on ad set)
 	startTime: string | null;
 	stopTime: string | null;
+	previewUrl: string | null; // first ad's shareable preview link
 }
 
 /**
@@ -615,9 +616,10 @@ export async function listActiveCampaigns(
 					dailyBudget: c.daily_budget || null,
 					lifetimeBudget: c.lifetime_budget || null,
 					budgetSource: (c.daily_budget || c.lifetime_budget) ? 'campaign' : 'adset',
-					adsetId: null, // filled below
+					adsetId: null,
 					startTime: c.start_time || null,
-					stopTime: c.stop_time || null
+					stopTime: c.stop_time || null,
+					previewUrl: null
 				});
 			}
 
@@ -668,6 +670,35 @@ export async function listActiveCampaigns(
 			// Non-critical — fallback to objective-based detection
 		}
 
+		// Fetch ad preview links (first ad per campaign)
+		try {
+			let adUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/ads?fields=id,campaign_id,preview_shareable_link&limit=500&access_token=${accessToken}&appsecret_proof=${proof}`;
+			const adPreviewMap = new Map<string, string>();
+			const campaignIds = new Set(campaigns.map(c => c.campaignId));
+
+			while (adUrl) {
+				const adRes = await fetch(adUrl);
+				const adData = await adRes.json();
+				if (adData.error) break;
+
+				for (const ad of adData.data || []) {
+					const cid = ad.campaign_id;
+					if (cid && campaignIds.has(cid) && !adPreviewMap.has(cid) && ad.preview_shareable_link) {
+						adPreviewMap.set(cid, ad.preview_shareable_link);
+					}
+				}
+
+				if (adPreviewMap.size >= campaignIds.size) break;
+				adUrl = adData.paging?.next || null;
+			}
+
+			for (const campaign of campaigns) {
+				campaign.previewUrl = adPreviewMap.get(campaign.campaignId) || null;
+			}
+		} catch {
+			// Non-critical — preview links are optional
+		}
+
 		logInfo('meta-ads', `Found ${campaigns.length} campaigns for ${adAccountId}`);
 		return campaigns;
 	} catch (err) {
@@ -685,7 +716,7 @@ export interface DemographicSegment {
 	spend: number;
 	impressions: number;
 	clicks: number;
-	conversions: number;
+	results: number;
 }
 
 export interface MetaDemographicBreakdown {
@@ -706,13 +737,16 @@ export async function listDemographicInsights(
 	appSecret: string,
 	since: string,
 	until: string,
-	campaignIds?: string[]
+	campaignIds?: string[],
+	resultActionTypes?: string[]
 ): Promise<MetaDemographicBreakdown> {
 	logInfo('meta-ads', `Fetching demographics for ${adAccountId}`, { metadata: { since, until } });
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
 	const timeRange = JSON.stringify({ since, until });
-	const fields = 'spend,impressions,clicks,actions';
+	const hasResultTypes = resultActionTypes && resultActionTypes.length > 0;
+	const fields = hasResultTypes ? 'spend,impressions,clicks,actions' : 'spend,impressions,clicks';
+	const resultSet = hasResultTypes ? new Set(resultActionTypes) : null;
 
 	const breakdownTypes = ['gender', 'age', 'region', 'device_platform'] as const;
 
@@ -722,15 +756,14 @@ export async function listDemographicInsights(
 		const byLabel = new Map<string, DemographicSegment>();
 		for (const row of data.data as any[]) {
 			const label = row[breakdownKey] || 'unknown';
-			const existing = byLabel.get(label) || { label, spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+			const existing = byLabel.get(label) || { label, spend: 0, impressions: 0, clicks: 0, results: 0 };
 			existing.spend += parseFloat(row.spend || '0');
 			existing.impressions += parseInt(row.impressions || '0', 10);
 			existing.clicks += parseInt(row.clicks || '0', 10);
-			if (row.actions) {
+			if (resultSet && row.actions) {
 				for (const action of row.actions) {
-					const t = action.action_type as string;
-					if (ACTION_TYPE_LABELS[t]) {
-						existing.conversions += parseFloat(action.value || '0');
+					if (resultSet.has(action.action_type)) {
+						existing.results += parseFloat(action.value || '0');
 					}
 				}
 			}

@@ -120,6 +120,22 @@
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
 	const totals = $derived(computeTotals(dailyData));
 
+	// Map optimization goals to action types (client-side mirror of OPTIMIZATION_GOAL_MAP)
+	const GOAL_TO_ACTION: Record<string, string> = {
+		'CALL': 'click_to_call_native_call_placed',
+		'QUALITY_CALL': 'click_to_call_native_call_placed',
+		'OFFSITE_CONVERSIONS': 'offsite_conversion.fb_pixel_purchase',
+		'LINK_CLICKS': 'link_click',
+		'LANDING_PAGE_VIEWS': 'landing_page_view',
+		'POST_ENGAGEMENT': 'post_engagement',
+		'THRUPLAY': 'video_view',
+		'VIDEO_VIEWS': 'video_view',
+		'LEAD_GENERATION': 'lead',
+		'CONVERSATIONS': 'onsite_conversion.messaging_conversation_started_7d',
+		'APP_INSTALLS': 'app_install',
+		'VALUE': 'offsite_conversion.fb_pixel_purchase'
+	};
+
 	// Dynamic result KPI — detect dominant result type across campaigns
 	const resultKpi = $derived.by(() => {
 		const withResults = campaignData.filter(c => c.conversions > 0);
@@ -152,7 +168,7 @@
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null; previewUrl: string | null }> = [];
 
 		// Merge campaigns with insights; only show campaigns without data if they're ACTIVE
 		for (const ci of campaigns) {
@@ -164,7 +180,8 @@
 					dailyBudget: ci.dailyBudget || null,
 					lifetimeBudget: ci.lifetimeBudget || null,
 					budgetSource: ci.budgetSource || 'campaign',
-					adsetId: ci.adsetId || null
+					adsetId: ci.adsetId || null,
+					previewUrl: ci.previewUrl || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES' || ci.status === 'IN_PROCESS') {
@@ -184,7 +201,8 @@
 					dailyBudget: ci.dailyBudget || null,
 					lifetimeBudget: ci.lifetimeBudget || null,
 					budgetSource: ci.budgetSource || 'campaign',
-					adsetId: ci.adsetId || null
+					adsetId: ci.adsetId || null,
+					previewUrl: ci.previewUrl || null
 				});
 			}
 		}
@@ -197,7 +215,8 @@
 				dailyBudget: null,
 				lifetimeBudget: null,
 				budgetSource: 'campaign' as const,
-				adsetId: null
+				adsetId: null,
+				previewUrl: null
 			});
 		}
 
@@ -366,6 +385,37 @@
 		else next.add(campaignId);
 		selectedCampaigns = next;
 	}
+
+	// Derive result action types from selected/visible campaigns only
+	const resultActionTypes = $derived.by(() => {
+		const types = new Set<string>();
+		const relevantCampaigns = selectedCampaigns.size > 0
+			? campaigns.filter(c => selectedCampaigns.has(c.campaignId))
+			: campaigns;
+		for (const c of relevantCampaigns) {
+			if (c.optimizationGoal && GOAL_TO_ACTION[c.optimizationGoal]) {
+				types.add(GOAL_TO_ACTION[c.optimizationGoal]);
+			}
+		}
+		return [...types];
+	});
+
+	const dominantResultLabel = $derived.by(() => {
+		const relevantInsights = selectedCampaigns.size > 0
+			? campaignData.filter(c => selectedCampaigns.has(c.campaignId) && c.conversions > 0 && c.resultType)
+			: campaignData.filter(c => c.conversions > 0 && c.resultType);
+		if (relevantInsights.length === 0) return 'Rezultate';
+		const typeCounts = new Map<string, number>();
+		for (const c of relevantInsights) {
+			typeCounts.set(c.resultType, (typeCounts.get(c.resultType) || 0) + c.conversions);
+		}
+		let dominant = 'Rezultate';
+		let max = 0;
+		for (const [type, count] of typeCounts) {
+			if (count > max) { max = count; dominant = type; }
+		}
+		return dominant;
+	});
 
 	let togglingCampaignId = $state<string | null>(null);
 
@@ -545,6 +595,8 @@
 				{until}
 				currency={selectedCurrency}
 				campaignIds={[...selectedCampaigns]}
+				{resultActionTypes}
+				resultLabel={dominantResultLabel}
 			/>
 		{/if}
 
@@ -620,6 +672,7 @@
 											{/if}
 										</TableHead>
 									{/each}
+									<TableHead class="w-[50px]"></TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -673,6 +726,13 @@
 												{/if}
 											</TableCell>
 										{/each}
+										<TableCell class="w-[50px] text-center">
+											{#if campaign.previewUrl}
+												<a href={campaign.previewUrl} target="_blank" rel="noopener" class="text-muted-foreground hover:text-primary" title="Previzualizare reclamă">
+													<EyeIcon class="h-4 w-4 inline-block" />
+												</a>
+											{/if}
+										</TableCell>
 									</TableRow>
 								{/each}
 								<!-- Total row -->
@@ -686,6 +746,7 @@
 											{col.getTotalValue ? col.getTotalValue(filteredCampaigns, selectedCurrency) : '-'}
 										</TableCell>
 									{/each}
+									<TableCell></TableCell>
 								</TableRow>
 							</TableBody>
 						</Table>
@@ -763,3 +824,4 @@
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+

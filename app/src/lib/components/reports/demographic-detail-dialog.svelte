@@ -14,7 +14,8 @@
 		data,
 		currency = 'RON',
 		labelMap,
-		colors
+		colors,
+		resultLabel = 'Rezultate'
 	}: {
 		open: boolean;
 		title: string;
@@ -22,7 +23,10 @@
 		currency?: string;
 		labelMap: (label: string) => string;
 		colors: string[];
+		resultLabel?: string;
 	} = $props();
+
+	const hasResults = $derived(data.some(d => d.results > 0));
 
 	let canvas: HTMLCanvasElement | undefined = $state();
 	let chart: ChartType | undefined = $state();
@@ -74,12 +78,13 @@
 								label: (item) => {
 									const segment = data[item.dataIndex];
 									const pct = totalSpend > 0 ? ((segment.spend / totalSpend) * 100).toFixed(1) : '0';
-									return [
+									const lines = [
 										`Cheltuieli: ${formatCurrency(segment.spend, currency)} (${pct}%)`,
 										`Impresii: ${formatNumber(segment.impressions)}`,
-										`Click-uri: ${formatNumber(segment.clicks)}`,
-										`Conversii: ${formatNumber(segment.conversions)}`
+										`Click-uri: ${formatNumber(segment.clicks)}`
 									];
+									if (hasResults) lines.push(`${resultLabel}: ${formatNumber(segment.results)}`);
+									return lines;
 								}
 							}
 						}
@@ -132,7 +137,7 @@
 							<TableHead class="text-right">Cheltuieli</TableHead>
 							<TableHead class="text-right">Impresii</TableHead>
 							<TableHead class="text-right">Click-uri</TableHead>
-							<TableHead class="text-right">Conversii</TableHead>
+							{#if hasResults}<TableHead class="text-right">{resultLabel}</TableHead>{/if}
 							<TableHead class="text-right">% Total</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -148,7 +153,7 @@
 								<TableCell class="text-right tabular-nums">{formatCurrency(segment.spend, currency)}</TableCell>
 								<TableCell class="text-right tabular-nums">{formatNumber(segment.impressions)}</TableCell>
 								<TableCell class="text-right tabular-nums">{formatNumber(segment.clicks)}</TableCell>
-								<TableCell class="text-right tabular-nums">{formatNumber(segment.conversions)}</TableCell>
+								{#if hasResults}<TableCell class="text-right tabular-nums">{formatNumber(segment.results)}</TableCell>{/if}
 								<TableCell class="text-right tabular-nums">{totalSpend > 0 ? ((segment.spend / totalSpend) * 100).toFixed(1) : '0'}%</TableCell>
 							</TableRow>
 						{/each}
@@ -157,7 +162,7 @@
 							<TableCell class="text-right tabular-nums">{formatCurrency(totalSpend, currency)}</TableCell>
 							<TableCell class="text-right tabular-nums">{formatNumber(data.reduce((s, d) => s + d.impressions, 0))}</TableCell>
 							<TableCell class="text-right tabular-nums">{formatNumber(data.reduce((s, d) => s + d.clicks, 0))}</TableCell>
-							<TableCell class="text-right tabular-nums">{formatNumber(data.reduce((s, d) => s + d.conversions, 0))}</TableCell>
+							{#if hasResults}<TableCell class="text-right tabular-nums">{formatNumber(data.reduce((s, d) => s + d.results, 0))}</TableCell>{/if}
 							<TableCell class="text-right tabular-nums">100%</TableCell>
 						</TableRow>
 					</TableBody>

@@ -35,6 +35,8 @@
 	}
 
 	let calendarValue = $state<{ start: DateValue; end: DateValue } | undefined>(undefined);
+	// Track whether the change came from a preset (to avoid calendar feedback loop)
+	let fromPreset = $state(false);
 
 	$effect(() => {
 		const start = parseDateStr(since);
@@ -45,6 +47,10 @@
 	});
 
 	function handleCalendarChange(val: any) {
+		if (fromPreset) {
+			fromPreset = false;
+			return;
+		}
 		if (val?.start && val?.end) {
 			since = dateValueToStr(val.start);
 			until = dateValueToStr(val.end);
@@ -59,6 +65,7 @@
 	const isCustomRange = $derived(!presets.some((p) => p.since === since && p.until === until));
 
 	function applyPreset(preset: { since: string; until: string }) {
+		fromPreset = true;
 		since = preset.since;
 		until = preset.until;
 		showCustom = false;
