@@ -7,8 +7,7 @@ import { listAdAccountInsights, getSyncDateRange } from './client';
 import { generateSpendingReportPdf } from './spending-report-pdf';
 import type { SpendingPeriod } from './spending-report-pdf';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { uploadBuffer } from '$lib/server/storage';
 
 /**
  * Parse spend amount string to cents.
@@ -223,17 +222,19 @@ async function syncForIntegration(
 					});
 
 					const periodLabel = `${startDate.slice(0, 7)}_${endDate.slice(0, 7)}`;
-					const dir = join(process.cwd(), 'uploads', 'meta-ads-reports', tenantId, account.clientId!);
-					await mkdir(dir, { recursive: true });
-
-					const relativePath = join('uploads', 'meta-ads-reports', tenantId, account.clientId!, `${account.metaAdAccountId}_${periodLabel}.pdf`);
-					await writeFile(join(process.cwd(), relativePath), pdfBuffer);
+					const upload = await uploadBuffer(
+						tenantId,
+						Buffer.from(pdfBuffer),
+						`meta-spending-${account.metaAdAccountId}_${periodLabel}.pdf`,
+						'application/pdf',
+						{ type: 'meta-spending', adAccountId: account.metaAdAccountId, clientId: account.clientId! }
+					);
 
 					// Update PDF path on all spending rows for this account+client
 					for (const insight of insights) {
 						await db
 							.update(table.metaAdsSpending)
-							.set({ pdfPath: relativePath, updatedAt: new Date() })
+							.set({ pdfPath: upload.path, updatedAt: new Date() })
 							.where(
 								and(
 									eq(table.metaAdsSpending.tenantId, tenantId),
@@ -246,7 +247,7 @@ async function syncForIntegration(
 
 					logInfo('meta-ads-sync', `PDF generated for ${account.accountName}`, {
 						tenantId,
-						metadata: { path: relativePath, periods: pdfPeriods.length }
+						metadata: { path: upload.path, periods: pdfPeriods.length }
 					});
 				} catch (pdfErr) {
 					logError('meta-ads-sync', `PDF generation failed for ${account.metaAdAccountId}`, {
