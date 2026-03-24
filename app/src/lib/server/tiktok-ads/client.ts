@@ -425,7 +425,7 @@ export async function listCampaigns(
 				campaignName: c.campaign_name || `Campaign ${c.campaign_id}`,
 				status: STATUS_MAP[rawStatus] || rawStatus,
 				objective: c.objective_type || c.objective || '',
-				dailyBudget: budgetMode === 'BUDGET_MODE_DAY' ? budget : null,
+				dailyBudget: (budgetMode === 'BUDGET_MODE_DAY' || budgetMode === 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET') ? budget : null,
 				lifetimeBudget: budgetMode === 'BUDGET_MODE_TOTAL' ? budget : null
 			});
 		}
@@ -458,6 +458,10 @@ export async function listCampaigns(
 
 				// Group ad groups by campaign_id and sum budgets
 				const campaignAdgroups = new Map<string, Array<{ budget: number; mode: string }>>();
+				// Daily-type budget modes (all treated as daily budget)
+				const DAILY_MODES = new Set(['BUDGET_MODE_DAY', 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET']);
+				const LIFETIME_MODES = new Set(['BUDGET_MODE_TOTAL']);
+
 				for (const ag of adgroups) {
 					const cid = String(ag.campaign_id);
 					const budget = parseFloat(ag.budget || '0');
@@ -474,11 +478,10 @@ export async function listCampaigns(
 					const agList = campaignAdgroups.get(campaign.campaignId);
 					if (!agList || agList.length === 0) continue;
 
-					// Sum budgets by mode (daily vs lifetime)
-					const dailySum = agList.filter(a => a.mode === 'BUDGET_MODE_DAY').reduce((s, a) => s + a.budget, 0);
-					const lifetimeSum = agList.filter(a => a.mode === 'BUDGET_MODE_TOTAL').reduce((s, a) => s + a.budget, 0);
+					// Sum budgets — treat BUDGET_MODE_DYNAMIC_DAILY_BUDGET as daily
+					const dailySum = agList.filter(a => DAILY_MODES.has(a.mode)).reduce((s, a) => s + a.budget, 0);
+					const lifetimeSum = agList.filter(a => LIFETIME_MODES.has(a.mode)).reduce((s, a) => s + a.budget, 0);
 
-					// Prefer daily budget if any ad group has it, otherwise lifetime
 					if (dailySum > 0) {
 						campaign.dailyBudget = String(dailySum);
 					} else if (lifetimeSum > 0) {
