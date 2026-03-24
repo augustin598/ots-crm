@@ -354,8 +354,8 @@ export async function listCampaignInsights(
 			videoViewsP50: parseInt(m.video_views_p50 || '0'),
 			videoViewsP75: parseInt(m.video_views_p75 || '0'),
 			videoViewsP100: parseInt(m.video_views_p100 || '0'),
-			dateStart: d.stat_time_day || startDate,
-			dateStop: d.stat_time_day || endDate
+			dateStart: (d.stat_time_day || startDate).slice(0, 10),
+			dateStop: (d.stat_time_day || endDate).slice(0, 10)
 		};
 	});
 
@@ -448,31 +448,35 @@ export async function listDemographicInsights(
 	logInfo('tiktok-ads', `Fetching demographics for ${advertiserId}`, { metadata: { startDate, endDate } });
 
 	async function fetchBreakdown(dimension: string): Promise<any[]> {
-		const body: any = {
+		const params = new URLSearchParams({
 			advertiser_id: advertiserId,
 			report_type: 'AUDIENCE',
-			dimensions: [dimension],
-			metrics: ['spend', 'impressions', 'clicks', 'conversion'],
+			dimensions: JSON.stringify([dimension]),
+			metrics: JSON.stringify(['spend', 'impressions', 'clicks', 'conversion']),
 			data_level: 'AUCTION_ADVERTISER',
 			start_date: startDate,
 			end_date: endDate,
-			page_size: 1000
-		};
-
-		if (campaignIds && campaignIds.length > 0) {
-			body.filters = [{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify(campaignIds) }];
-		}
-
-		const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
-			method: 'POST',
-			headers: {
-				'Access-Token': accessToken,
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify(body)
+			page_size: '1000'
 		});
 
-		const json = await res.json();
+		if (campaignIds && campaignIds.length > 0) {
+			params.set('filtering', JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify(campaignIds) }]));
+		}
+
+		const url = `${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`;
+		const res = await fetch(url, {
+			headers: { 'Access-Token': accessToken }
+		});
+
+		const text = await res.text();
+		let json: any;
+		try {
+			json = JSON.parse(text);
+		} catch {
+			console.error('[TIKTOK-ADS-DEBUG] Demographics parse error for', dimension, text.slice(0, 300));
+			return [];
+		}
+
 		if (json.code !== 0) {
 			logError('tiktok-ads', `Demographics API error (${dimension})`, {
 				metadata: { errorMessage: json.message, errorCode: json.code }
