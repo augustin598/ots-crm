@@ -318,12 +318,14 @@ export const fetchMetaAdsAccounts = command(
 		const now = new Date();
 
 		for (const account of adAccounts) {
+			// Check if account already exists for THIS integration (same account can exist under multiple BMs)
 			const [existing] = await db
 				.select({ id: table.metaAdsAccount.id })
 				.from(table.metaAdsAccount)
 				.where(
 					and(
 						eq(table.metaAdsAccount.tenantId, tenantId),
+						eq(table.metaAdsAccount.integrationId, integrationId),
 						eq(table.metaAdsAccount.metaAdAccountId, account.adAccountId)
 					)
 				)

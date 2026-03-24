@@ -336,6 +336,9 @@
 										Ultimul sync: {formatDate(conn.lastSyncAt)}
 										{#if conn.lastSyncResults}
 											— {conn.lastSyncResults.imported} noi, {conn.lastSyncResults.updated || 0} actualizate, {conn.lastSyncResults.errors || 0} erori
+											{#if conn.lastSyncResults.accountsTotal != null}
+												<span class="text-xs ml-1">({conn.lastSyncResults.accountsWithClient || 0} conturi cu client din {conn.lastSyncResults.accountsTotal} total)</span>
+											{/if}
 										{/if}
 									</div>
 								{/if}

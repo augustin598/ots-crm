@@ -69,11 +69,21 @@ async function syncForIntegration(
 	tenantId: string,
 	integration: table.MetaAdsIntegration
 ) {
-	logInfo('meta-ads-sync', `Syncing BM ${integration.businessId}`, { tenantId });
+	logInfo('meta-ads-sync', `Syncing BM ${integration.businessId} (${integration.businessName})`, { tenantId });
+
+	/** Helper to persist sync results before returning */
+	async function saveSyncResults(result: { imported: number; updated: number; errors: number; accountsTotal: number; accountsWithClient: number }) {
+		const syncResults = JSON.stringify({ ...result, timestamp: new Date().toISOString() });
+		await db
+			.update(table.metaAdsIntegration)
+			.set({ lastSyncAt: new Date(), lastSyncResults: syncResults, updatedAt: new Date() })
+			.where(eq(table.metaAdsIntegration.id, integration.id));
+	}
 
 	const authResult = await getAuthenticatedToken(integration.id);
 	if (!authResult) {
-		logWarning('meta-ads-sync', 'Could not get authenticated token', { tenantId, metadata: { integrationId: integration.id } });
+		logWarning('meta-ads-sync', `Could not get authenticated token for ${integration.businessName}`, { tenantId, metadata: { integrationId: integration.id } });
+		await saveSyncResults({ imported: 0, updated: 0, errors: 1, accountsTotal: 0, accountsWithClient: 0 });
 		return { imported: 0, updated: 0, errors: 1 };
 	}
 
@@ -81,6 +91,7 @@ async function syncForIntegration(
 	const appSecret = env.META_APP_SECRET;
 	if (!appSecret) {
 		logError('meta-ads-sync', 'META_APP_SECRET not configured', { tenantId });
+		await saveSyncResults({ imported: 0, updated: 0, errors: 1, accountsTotal: 0, accountsWithClient: 0 });
 		return { imported: 0, updated: 0, errors: 1 };
 	}
 
@@ -102,8 +113,14 @@ async function syncForIntegration(
 	// Filter to only accounts with a client assigned
 	const accountsWithClient = mappedAccounts.filter(a => a.clientId);
 
+	logInfo('meta-ads-sync', `BM ${integration.businessName}: ${mappedAccounts.length} conturi total, ${accountsWithClient.length} cu client asignat`, {
+		tenantId,
+		metadata: { accounts: accountsWithClient.map(a => `${a.accountName} (${a.metaAdAccountId})`) }
+	});
+
 	if (accountsWithClient.length === 0) {
-		logInfo('meta-ads-sync', 'No ad accounts mapped to CRM clients', { tenantId });
+		logInfo('meta-ads-sync', `No ad accounts mapped to CRM clients for ${integration.businessName}`, { tenantId });
+		await saveSyncResults({ imported: 0, updated: 0, errors: 0, accountsTotal: mappedAccounts.length, accountsWithClient: 0 });
 		return { imported: 0, updated: 0, errors: 0 };
 	}
 
@@ -266,11 +283,7 @@ async function syncForIntegration(
 	}
 
 	// Update integration status
-	const syncResults = JSON.stringify({ imported, updated, errors, timestamp: new Date().toISOString() });
-	await db
-		.update(table.metaAdsIntegration)
-		.set({ lastSyncAt: new Date(), lastSyncResults: syncResults, updatedAt: new Date() })
-		.where(eq(table.metaAdsIntegration.id, integration.id));
+	await saveSyncResults({ imported, updated, errors, accountsTotal: mappedAccounts.length, accountsWithClient: accountsWithClient.length });
 
 	return { imported, updated, errors };
 }
