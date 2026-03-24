@@ -601,7 +601,7 @@ export async function listDemographicInsights(
 	// Log unknown province IDs for future mapping
 	const unmapped = regionSegments.filter(s => /^\d+$/.test(s.label));
 	if (unmapped.length > 0) {
-		logInfo('tiktok-ads', `Unknown province IDs for ${advertiserId}: ${unmapped.map(s => s.label).join(', ')} — add to ROMANIA_PROVINCES map`);
+		logInfo('tiktok-ads', `Unresolved province IDs for ${advertiserId}: ${unmapped.map(s => s.label).join(', ')} — /tool/targeting/info/ did not return names`);
 	}
 	const deviceSegments = parseSegments(platformRows, 'platform');
 
