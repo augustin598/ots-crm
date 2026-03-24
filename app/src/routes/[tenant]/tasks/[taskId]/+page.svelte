@@ -319,7 +319,7 @@
 									<div class="flex items-start justify-between mb-2">
 										<div class="flex items-center gap-2">
 											<User class="h-4 w-4 text-muted-foreground" />
-											<p class="text-sm font-medium">{userMap.get(comment.userId) || comment.userId}</p>
+											<p class="text-sm font-medium">{comment.authorName || userMap.get(comment.userId) || comment.userId}</p>
 											<p class="text-xs text-muted-foreground">
 												{formatDate(comment.createdAt)}
 												{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}

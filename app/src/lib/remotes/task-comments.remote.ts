@@ -33,12 +33,30 @@ export const getTaskComments = query(
 		}
 
 		const comments = await db
-			.select()
+			.select({
+				id: table.taskComment.id,
+				taskId: table.taskComment.taskId,
+				userId: table.taskComment.userId,
+				content: table.taskComment.content,
+				attachmentPath: table.taskComment.attachmentPath,
+				attachmentMimeType: table.taskComment.attachmentMimeType,
+				attachmentFileName: table.taskComment.attachmentFileName,
+				attachmentFileSize: table.taskComment.attachmentFileSize,
+				createdAt: table.taskComment.createdAt,
+				updatedAt: table.taskComment.updatedAt,
+				authorName: table.user.firstName,
+				authorLastName: table.user.lastName,
+				authorEmail: table.user.email
+			})
 			.from(table.taskComment)
+			.leftJoin(table.user, eq(table.taskComment.userId, table.user.id))
 			.where(eq(table.taskComment.taskId, taskId))
 			.orderBy(table.taskComment.createdAt);
 
-		return comments;
+		return comments.map(c => ({
+			...c,
+			authorName: `${c.authorName || ''} ${c.authorLastName || ''}`.trim() || c.authorEmail || c.userId
+		}));
 	}
 );
 

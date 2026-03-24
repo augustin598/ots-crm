@@ -341,7 +341,7 @@
 							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
 						{:else}
 							{#each comments as comment}
-								{@const authorName = userMap.get(comment.userId) || 'User'}
+								{@const authorName = comment.authorName || userMap.get(comment.userId) || 'User'}
 								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
 								<div class="flex gap-3">
 									<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-semibold mt-0.5">

@@ -43,9 +43,8 @@
 	let editingContent = $state('');
 	let editLoading = $state(false);
 
-	// Image paste/attachment state
-	let pendingAttachment = $state<{ path: string; mimeType: string; fileName: string; size: number } | null>(null);
-	let pendingPreviewUrl = $state<string | null>(null);
+	// Image paste/attachment state (supports multiple)
+	let pendingAttachments = $state<{ path: string; mimeType: string; fileName: string; size: number; previewUrl: string }[]>([]);
 	let uploadingImage = $state(false);
 
 	// Lightbox state
@@ -192,8 +191,8 @@
 			}
 
 			const result = await response.json();
-			pendingAttachment = result;
-			pendingPreviewUrl = URL.createObjectURL(file);
+			const previewUrl = URL.createObjectURL(file);
+			pendingAttachments = [...pendingAttachments, { ...result, previewUrl }];
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to upload image');
 		} finally {
@@ -201,12 +200,14 @@
 		}
 	}
 
-	function removePendingAttachment() {
-		if (pendingPreviewUrl) {
-			URL.revokeObjectURL(pendingPreviewUrl);
-		}
-		pendingAttachment = null;
-		pendingPreviewUrl = null;
+	function removePendingAttachment(index: number) {
+		URL.revokeObjectURL(pendingAttachments[index].previewUrl);
+		pendingAttachments = pendingAttachments.filter((_, i) => i !== index);
+	}
+
+	function removeAllPendingAttachments() {
+		for (const a of pendingAttachments) URL.revokeObjectURL(a.previewUrl);
+		pendingAttachments = [];
 	}
 
 	async function loadAttachmentUrl(commentId: string) {
@@ -227,22 +228,38 @@
 	}
 
 	async function handleAddComment() {
-		if ((!newComment.trim() && !pendingAttachment) || !task) return;
+		if ((!newComment.trim() && pendingAttachments.length === 0) || !task) return;
 
 		commentLoading = true;
 		try {
+			const firstAttachment = pendingAttachments[0] || null;
+			// First comment: text + first image (if any)
 			await createTaskComment({
 				taskId: task.id,
 				content: newComment.trim() || '',
-				...(pendingAttachment ? {
-					attachmentPath: pendingAttachment.path,
-					attachmentMimeType: pendingAttachment.mimeType,
-					attachmentFileName: pendingAttachment.fileName,
-					attachmentFileSize: pendingAttachment.size
+				...(firstAttachment ? {
+					attachmentPath: firstAttachment.path,
+					attachmentMimeType: firstAttachment.mimeType,
+					attachmentFileName: firstAttachment.fileName,
+					attachmentFileSize: firstAttachment.size
 				} : {})
 			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
+
+			// Additional images as separate comments
+			for (let i = 1; i < pendingAttachments.length; i++) {
+				const att = pendingAttachments[i];
+				await createTaskComment({
+					taskId: task.id,
+					content: '',
+					attachmentPath: att.path,
+					attachmentMimeType: att.mimeType,
+					attachmentFileName: att.fileName,
+					attachmentFileSize: att.size
+				}).updates(getTaskComments(task.id), getTaskActivities(task.id));
+			}
+
 			newComment = '';
-			removePendingAttachment();
+			removeAllPendingAttachments();
 			toast.success('Comment added');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to add comment');
@@ -543,7 +560,7 @@
 							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
 						{:else}
 							{#each comments as comment}
-								{@const authorName = userMap.get(comment.userId) || comment.userId}
+								{@const authorName = comment.authorName || userMap.get(comment.userId) || comment.userId}
 								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
 								<div class="border rounded-lg p-4">
 									<div class="flex items-center gap-3 mb-2">
@@ -621,22 +638,26 @@
 								Uploading image...
 							</div>
 						{/if}
-						{#if pendingPreviewUrl}
-							<div class="relative inline-block">
-								<img
-									src={pendingPreviewUrl}
-									alt="Preview"
-									class="max-h-32 rounded-lg border"
-								/>
-								<button
-									class="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground p-0.5 hover:bg-destructive/90"
-									onclick={removePendingAttachment}
-								>
-									<X class="h-4 w-4" />
-								</button>
+						{#if pendingAttachments.length > 0}
+							<div class="flex flex-wrap gap-2">
+								{#each pendingAttachments as attachment, i}
+									<div class="relative inline-block">
+										<img
+											src={attachment.previewUrl}
+											alt="Preview"
+											class="max-h-32 rounded-lg border"
+										/>
+										<button
+											class="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground p-0.5 hover:bg-destructive/90"
+											onclick={() => removePendingAttachment(i)}
+										>
+											<X class="h-4 w-4" />
+										</button>
+									</div>
+								{/each}
 							</div>
 						{/if}
-						<Button size="sm" onclick={handleAddComment} disabled={(!newComment.trim() && !pendingAttachment) || commentLoading || uploadingImage}>
+						<Button size="sm" onclick={handleAddComment} disabled={(!newComment.trim() && pendingAttachments.length === 0) || commentLoading || uploadingImage}>
 							{commentLoading ? 'Posting...' : 'Post Comment'}
 						</Button>
 					</div>
