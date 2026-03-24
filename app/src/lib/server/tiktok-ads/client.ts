@@ -273,9 +273,7 @@ export async function listCampaignInsights(
 			dimensions: ['campaign_id', 'stat_time_day'],
 			metrics: [
 				'spend', 'impressions', 'clicks', 'conversion',
-				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
-				'likes', 'comments', 'shares', 'follows',
-				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
+				'cpc', 'cpm', 'ctr', 'cost_per_conversion'
 			],
 			data_level: 'AUCTION_CAMPAIGN',
 			start_date: startDate,
@@ -295,9 +293,13 @@ export async function listCampaignInsights(
 
 		const json = await res.json();
 
+		logInfo('tiktok-ads', `Campaign insights API response code=${json.code} for ${advertiserId}`, {
+			metadata: { message: json.message, code: json.code, requestId: json.request_id }
+		});
+
 		if (json.code !== 0) {
 			logError('tiktok-ads', `Campaign insights API error for ${advertiserId}`, {
-				metadata: { errorMessage: json.message, errorCode: json.code }
+				metadata: { errorMessage: json.message, errorCode: json.code, requestId: json.request_id, fullResponse: JSON.stringify(json).slice(0, 500) }
 			});
 			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
 		}
