@@ -394,7 +394,11 @@ export async function listCampaigns(
 		const params = new URLSearchParams({
 			advertiser_id: advertiserId,
 			page_size: String(pageSize),
-			page: String(page)
+			page: String(page),
+			fields: JSON.stringify([
+				'campaign_id', 'campaign_name', 'operation_status', 'secondary_status',
+				'objective_type', 'budget_mode', 'budget', 'budget_optimize_on'
+			])
 		});
 
 		const res = await fetch(`${TIKTOK_API_URL}/campaign/get/?${params.toString()}`, {
@@ -433,11 +437,11 @@ export async function listCampaigns(
 
 	// Log budget info for debugging
 	const withBudget = allCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget);
-	if (withBudget.length > 0) {
-		logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. ${withBudget.length} with budget. Sample: ${withBudget[0].campaignName} daily=${withBudget[0].dailyBudget} lifetime=${withBudget[0].lifetimeBudget}`);
-	} else {
-		logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. No budgets found (budget_mode may be missing from API response)`);
-	}
+	logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. ${withBudget.length} with budget`, {
+		metadata: withBudget.length > 0
+			? { sample: `${withBudget[0].campaignName} daily=${withBudget[0].dailyBudget} lifetime=${withBudget[0].lifetimeBudget}` }
+			: undefined
+	});
 	return allCampaigns;
 }
 
