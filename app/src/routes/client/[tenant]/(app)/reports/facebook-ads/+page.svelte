@@ -8,6 +8,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import KpiCard from '$lib/components/reports/kpi-card.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
@@ -72,9 +73,21 @@
 	const insightsError = $derived(insightsQuery?.error);
 	const campaigns = $derived(campaignsQuery?.current || []);
 
-	// Aggregated data
-	const dailyData = $derived(aggregateInsightsByDate(insights));
+	// Selection state (declared early so filteredInsights can use it)
+	let selectedCampaigns = $state<Set<string>>(new Set());
+
+	// Filter insights by selected campaigns
+	const filteredInsights = $derived(
+		selectedCampaigns.size > 0
+			? insights.filter(i => selectedCampaigns.has(i.campaignId))
+			: insights
+	);
+
+	// Campaign data always from ALL insights (table always shows full data)
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
+
+	// KPI cards, charts, demographics use filtered insights when campaigns are selected
+	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
 	const totals = $derived(computeTotals(dailyData));
 
 	// Merge campaigns with insights to get status
@@ -122,7 +135,10 @@
 
 	const resultActionTypes = $derived.by(() => {
 		const types = new Set<string>();
-		for (const c of campaigns) {
+		const relevantCampaigns = selectedCampaigns.size > 0
+			? campaigns.filter(c => selectedCampaigns.has(c.campaignId))
+			: campaigns;
+		for (const c of relevantCampaigns) {
 			if (c.optimizationGoal && GOAL_TO_ACTION[c.optimizationGoal]) {
 				types.add(GOAL_TO_ACTION[c.optimizationGoal]);
 			}
@@ -131,10 +147,12 @@
 	});
 
 	const dominantResultLabel = $derived.by(() => {
-		const withResults = campaignData.filter(c => c.conversions > 0 && c.resultType);
-		if (withResults.length === 0) return 'Rezultate';
+		const relevantInsights = selectedCampaigns.size > 0
+			? campaignData.filter(c => selectedCampaigns.has(c.campaignId) && c.conversions > 0 && c.resultType)
+			: campaignData.filter(c => c.conversions > 0 && c.resultType);
+		if (relevantInsights.length === 0) return 'Rezultate';
 		const typeCounts = new Map<string, number>();
-		for (const c of withResults) {
+		for (const c of relevantInsights) {
 			typeCounts.set(c.resultType, (typeCounts.get(c.resultType) || 0) + c.conversions);
 		}
 		let dominant = 'Rezultate'; let max = 0;
@@ -213,6 +231,24 @@
 			case 'DELETED': return 'destructive';
 			default: return 'outline';
 		}
+	}
+
+	const allSelected = $derived(sortedCampaigns.length > 0 && sortedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
+	const someSelected = $derived(sortedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedCampaigns = new Set();
+		} else {
+			selectedCampaigns = new Set(sortedCampaigns.map(c => c.campaignId));
+		}
+	}
+
+	function toggleSelect(campaignId: string) {
+		const next = new Set(selectedCampaigns);
+		if (next.has(campaignId)) next.delete(campaignId);
+		else next.add(campaignId);
+		selectedCampaigns = next;
 	}
 
 	function handleSort(column: typeof sortColumn) {
@@ -310,6 +346,7 @@
 					{since}
 					{until}
 					{currency}
+					campaignIds={[...selectedCampaigns]}
 					{resultActionTypes}
 					resultLabel={dominantResultLabel}
 				/>
@@ -347,6 +384,13 @@
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead class="w-[40px]">
+										<Checkbox
+											checked={allSelected}
+											indeterminate={someSelected && !allSelected}
+											onCheckedChange={() => toggleSelectAll()}
+										/>
+									</TableHead>
 									<TableHead>
 										<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('campaignName')}>
 											Campanie <ArrowUpDownIcon class="h-4 w-4" />
@@ -374,6 +418,12 @@
 							<TableBody>
 								{#each sortedCampaigns as campaign}
 									<TableRow>
+										<TableCell class="w-[40px]">
+											<Checkbox
+												checked={selectedCampaigns.has(campaign.campaignId)}
+												onCheckedChange={() => toggleSelect(campaign.campaignId)}
+											/>
+										</TableCell>
 										<TableCell class="font-medium max-w-[250px]">
 											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
@@ -403,6 +453,7 @@
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
+									<TableCell></TableCell>
 									<TableCell>Total {campaignTableData.length} campanii</TableCell>
 									<TableCell></TableCell>
 									{#each activePreset.columns as col}

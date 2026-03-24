@@ -302,9 +302,9 @@ export function getDatePresets(): { label: string; since: string; until: string 
 	];
 }
 
-/** Get default date range (last 30 days) */
+/** Get default date range (current month) */
 export function getDefaultDateRange(): { since: string; until: string } {
 	const presets = getDatePresets();
-	const last30 = presets.find(p => p.label === 'Ultimele 30 zile');
-	return last30 ? { since: last30.since, until: last30.until } : { since: presets[7].since, until: presets[7].until };
+	const thisMonth = presets.find(p => p.label === 'Luna aceasta');
+	return thisMonth ? { since: thisMonth.since, until: thisMonth.until } : { since: presets[10].since, until: presets[10].until };
 }

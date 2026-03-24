@@ -115,9 +115,21 @@
 
 	const campaigns = $derived(campaignsQuery?.current || []);
 
-	// Aggregated data
-	const dailyData = $derived(aggregateInsightsByDate(insights));
+	// Selection state (declared early so filteredInsights can use it)
+	let selectedCampaigns = $state<Set<string>>(new Set());
+
+	// Filter insights by selected campaigns
+	const filteredInsights = $derived(
+		selectedCampaigns.size > 0
+			? insights.filter(i => selectedCampaigns.has(i.campaignId))
+			: insights
+	);
+
+	// Campaign data always from ALL insights (table always shows full data)
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
+
+	// KPI cards, charts, demographics use filtered insights when campaigns are selected
+	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
 	const totals = $derived(computeTotals(dailyData));
 
 	// Map optimization goals to action types (client-side mirror of OPTIMIZATION_GOAL_MAP)
@@ -366,8 +378,6 @@
 		}
 	}
 
-	// Selection state
-	let selectedCampaigns = $state<Set<string>>(new Set());
 	const allSelected = $derived(paginatedCampaigns.length > 0 && paginatedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
 	const someSelected = $derived(paginatedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
 
