@@ -267,32 +267,28 @@ export async function listCampaignInsights(
 	const pageSize = 1000;
 
 	while (true) {
-		const body = {
+		const params = new URLSearchParams({
 			advertiser_id: advertiserId,
 			report_type: 'BASIC',
-			dimensions: ['campaign_id', 'stat_time_day'],
-			metrics: [
+			dimensions: JSON.stringify(['campaign_id', 'stat_time_day']),
+			metrics: JSON.stringify([
 				'spend', 'impressions', 'clicks', 'conversion',
 				'cpc', 'cpm', 'ctr', 'cost_per_conversion'
-			],
+			]),
 			data_level: 'AUCTION_CAMPAIGN',
 			start_date: startDate,
 			end_date: endDate,
-			page_size: pageSize,
-			page
-		};
+			page_size: String(pageSize),
+			page: String(page)
+		});
 
-		console.log('[TIKTOK-ADS-DEBUG] Sending report request for', advertiserId, 'body:', JSON.stringify(body).slice(0, 300));
+		const url = `${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`;
+		console.log('[TIKTOK-ADS-DEBUG] Sending GET report request for', advertiserId);
 
 		let res: Response;
 		try {
-			res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
-				method: 'POST',
-				headers: {
-					'Access-Token': accessToken,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(body)
+			res = await fetch(url, {
+				headers: { 'Access-Token': accessToken }
 			});
 		} catch (fetchErr) {
 			console.error('[TIKTOK-ADS-DEBUG] Fetch failed:', fetchErr);
