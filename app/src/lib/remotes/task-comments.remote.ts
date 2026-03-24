@@ -13,6 +13,22 @@ function generateTaskCommentId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+/**
+ * Extract mentioned user IDs from TipTap HTML content.
+ * TipTap Mention extension outputs: <span data-type="mention" data-id="userId">...</span>
+ */
+function extractMentionIds(html: string): string[] {
+	const regex = /data-type="mention"\s+data-id="([^"]+)"/g;
+	const ids: string[] = [];
+	let match;
+	while ((match = regex.exec(html)) !== null) {
+		if (match[1] && !ids.includes(match[1])) {
+			ids.push(match[1]);
+		}
+	}
+	return ids;
+}
+
 export const getTaskComments = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (taskId) => {
@@ -148,6 +164,42 @@ export const createTaskComment = command(
 						await sendTaskUpdateEmail(data.taskId, watcherUser.email, watcherName, 'comment');
 					} catch (error) {
 						console.error('Failed to send comment notification to watcher:', error);
+					}
+				}
+			}
+		}
+
+		// Send mention notifications to mentioned users (who aren't already watchers)
+		const mentionedUserIds = extractMentionIds(data.content);
+		if (mentionedUserIds.length > 0) {
+			const watcherUserIds = new Set(
+				(await db
+					.select({ userId: table.taskWatcher.userId })
+					.from(table.taskWatcher)
+					.where(and(
+						eq(table.taskWatcher.taskId, data.taskId),
+						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
+					))
+				).map(w => w.userId)
+			);
+
+			for (const mentionedId of mentionedUserIds) {
+				// Skip self-mentions and users already notified as watchers
+				if (mentionedId === event.locals.user.id) continue;
+				if (watcherUserIds.has(mentionedId)) continue;
+
+				const [mentionedUser] = await db
+					.select()
+					.from(table.user)
+					.where(eq(table.user.id, mentionedId))
+					.limit(1);
+
+				if (mentionedUser?.email) {
+					try {
+						const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
+						await sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention');
+					} catch (error) {
+						console.error('Failed to send mention notification:', error);
 					}
 				}
 			}
