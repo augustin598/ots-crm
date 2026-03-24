@@ -523,21 +523,9 @@ export async function listDemographicInsights(
 	};
 
 	// Romanian province ID → name mapping (TikTok Ads targeting IDs)
+	// Only confirmed IDs — unknown IDs are logged for future addition
 	const ROMANIA_PROVINCES: Record<string, string> = {
 		'665849': 'Suceava', '672460': 'Neamț', '684039': 'Botoșani',
-		'665850': 'Iași', '665851': 'Bacău', '665852': 'Vaslui',
-		'665853': 'Galați', '665854': 'Vrancea', '665855': 'Buzău',
-		'665856': 'Brăila', '665857': 'Tulcea', '665858': 'Constanța',
-		'665859': 'Călărași', '665860': 'Ialomița', '665861': 'Prahova',
-		'665862': 'Dâmbovița', '665863': 'Argeș', '665864': 'Teleorman',
-		'665865': 'Giurgiu', '665866': 'Ilfov', '665867': 'București',
-		'665868': 'Olt', '665869': 'Dolj', '665870': 'Mehedinți',
-		'665871': 'Gorj', '665872': 'Vâlcea', '665873': 'Sibiu',
-		'665874': 'Brașov', '665875': 'Covasna', '665876': 'Harghita',
-		'665877': 'Mureș', '665878': 'Alba', '665879': 'Hunedoara',
-		'665880': 'Timiș', '665881': 'Caraș-Severin', '665882': 'Arad',
-		'665883': 'Bihor', '665884': 'Sălaj', '665885': 'Satu Mare',
-		'665886': 'Maramureș', '665887': 'Bistrița-Năsăud', '665888': 'Cluj',
 	};
 
 	// Resolve province IDs to names — try TikTok API first, fall back to hardcoded map
