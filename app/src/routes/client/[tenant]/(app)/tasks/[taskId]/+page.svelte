@@ -116,7 +116,6 @@
 		task && task.status !== 'done' && task.status !== 'cancelled' && isTaskOverdue(task.dueDate)
 	);
 
-	let newComment = $state('');
 	let commentLoading = $state(false);
 	let editingCommentId = $state<string | null>(null);
 	let editingContent = $state('');
@@ -247,7 +246,6 @@
 				content: html
 			}).updates(getTaskComments(taskId));
 			newCommentEditor?.clear();
-			newComment = '';
 			toast.success('Comment added');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to add comment');

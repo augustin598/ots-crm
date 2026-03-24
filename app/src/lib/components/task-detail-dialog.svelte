@@ -11,7 +11,6 @@
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import { Input } from '$lib/components/ui/input';
 	import { Separator } from '$lib/components/ui/separator';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
@@ -37,7 +36,6 @@
 	const filterParams = getTaskFilters();
 
 	let isEditOpen = $state(false);
-	let newComment = $state('');
 	let commentLoading = $state(false);
 	let approvalLoading = $state(false);
 	let editingCommentId = $state<string | null>(null);
@@ -175,20 +173,7 @@
 			.slice(0, 2);
 	}
 
-	async function handlePaste(e: ClipboardEvent) {
-		const items = e.clipboardData?.items;
-		if (!items || !task) return;
 
-		for (const item of items) {
-			if (item.type.startsWith('image/')) {
-				e.preventDefault();
-				const file = item.getAsFile();
-				if (!file) return;
-				await uploadImage(file);
-				return;
-			}
-		}
-	}
 
 	async function uploadImage(file: File) {
 		if (!task) return;
@@ -287,7 +272,6 @@
 			}
 
 			newCommentEditor?.clear();
-			newComment = '';
 			removeAllPendingAttachments();
 			toast.success('Comment added');
 		} catch (e) {

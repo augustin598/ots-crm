@@ -4,9 +4,38 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import sanitizeHtml from 'sanitize-html';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import * as storage from '$lib/server/storage';
+
+/** Sanitize TipTap HTML - allow safe tags + mention attributes */
+function sanitizeCommentHtml(html: string): string {
+	return sanitizeHtml(html, {
+		allowedTags: [
+			'p', 'br', 'strong', 'em', 'u', 's', 'del', 'mark',
+			'h1', 'h2', 'h3', 'h4',
+			'ul', 'ol', 'li',
+			'blockquote', 'pre', 'code',
+			'a', 'img', 'span',
+			'table', 'thead', 'tbody', 'tr', 'th', 'td',
+			'hr', 'div', 'label', 'input'
+		],
+		allowedAttributes: {
+			'a': ['href', 'target', 'rel'],
+			'img': ['src', 'alt', 'title'],
+			'span': ['class', 'data-type', 'data-id', 'data-label'],
+			'td': ['colspan', 'rowspan'],
+			'th': ['colspan', 'rowspan'],
+			'input': ['type', 'checked', 'disabled'],
+			'*': ['class', 'style']
+		},
+		allowedStyles: {
+			'*': { 'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/] }
+		},
+		allowedSchemes: ['http', 'https', 'mailto'],
+	});
+}
 
 function generateTaskCommentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -15,15 +44,26 @@ function generateTaskCommentId() {
 
 /**
  * Extract mentioned user IDs from TipTap HTML content.
- * TipTap Mention extension outputs: <span data-type="mention" data-id="userId">...</span>
+ * TipTap outputs attributes in varying order, so we match data-id on any element
+ * that also has data-type="mention" (handles both attribute orderings).
  */
 function extractMentionIds(html: string): string[] {
-	const regex = /data-type="mention"\s+data-id="([^"]+)"/g;
 	const ids: string[] = [];
-	let match;
-	while ((match = regex.exec(html)) !== null) {
-		if (match[1] && !ids.includes(match[1])) {
-			ids.push(match[1]);
+	// Match any tag that contains both data-type="mention" and data-id="..."
+	const tagRegex = /<[^>]*data-type="mention"[^>]*>/g;
+	let tagMatch;
+	while ((tagMatch = tagRegex.exec(html)) !== null) {
+		const idMatch = tagMatch[0].match(/data-id="([^"]+)"/);
+		if (idMatch?.[1] && !ids.includes(idMatch[1])) {
+			ids.push(idMatch[1]);
+		}
+	}
+	// Also match reversed order: data-id before data-type
+	const tagRegex2 = /<[^>]*data-id="([^"]+)"[^>]*data-type="mention"[^>]*>/g;
+	let tagMatch2;
+	while ((tagMatch2 = tagRegex2.exec(html)) !== null) {
+		if (tagMatch2[1] && !ids.includes(tagMatch2[1])) {
+			ids.push(tagMatch2[1]);
 		}
 	}
 	return ids;
@@ -104,18 +144,21 @@ export const createTaskComment = command(
 			throw new Error('Task not found');
 		}
 
-		if (!data.content.trim() && !data.attachmentPath) {
+		// Strip empty TipTap HTML (e.g. "<p></p>", "<p> </p>")
+		const textContent = data.content.replace(/<[^>]*>/g, '').trim();
+		if (!textContent && !data.attachmentPath) {
 			throw new Error('Comment must have text or an image');
 		}
 
 		const commentId = generateTaskCommentId();
+		const sanitizedContent = sanitizeCommentHtml(data.content || '');
 
 		await db.insert(table.taskComment).values({
 			id: commentId,
 			taskId: data.taskId,
 			userId: event.locals.user.id,
 			parentCommentId: data.parentCommentId || null,
-			content: data.content || '',
+			content: sanitizedContent,
 			attachmentPath: data.attachmentPath || null,
 			attachmentMimeType: data.attachmentMimeType || null,
 			attachmentFileName: data.attachmentFileName || null,
@@ -276,7 +319,7 @@ export const updateTaskComment = command(
 		await db
 			.update(table.taskComment)
 			.set({
-				content: data.content,
+				content: sanitizeCommentHtml(data.content),
 				updatedAt: new Date()
 			})
 			.where(eq(table.taskComment.id, data.commentId));
@@ -318,6 +361,8 @@ export const deleteTaskComment = command(
 			throw new Error('Unauthorized to delete this comment');
 		}
 
+		// Delete child replies first, then the comment itself
+		await db.delete(table.taskComment).where(eq(table.taskComment.parentCommentId, commentId));
 		await db.delete(table.taskComment).where(eq(table.taskComment.id, commentId));
 
 		return { success: true };

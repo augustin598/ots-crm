@@ -9,7 +9,6 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply } from '@lucide/svelte';
@@ -52,7 +51,6 @@
 	const activitiesQuery = getTaskActivities(taskId);
 	const activities = $derived(activitiesQuery.current || []);
 
-	let newComment = $state('');
 	let commentLoading = $state(false);
 	let approvalLoading = $state(false);
 	let editingCommentId = $state<string | null>(null);
@@ -124,7 +122,6 @@
 				content: html
 			}).updates(getTaskComments(taskId));
 			newCommentEditor?.clear();
-			newComment = '';
 			toast.success('Comment added');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Failed to add comment');
