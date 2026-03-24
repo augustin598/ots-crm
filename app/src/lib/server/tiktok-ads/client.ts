@@ -515,16 +515,16 @@ export async function listDemographicInsights(
 		ANDROID: 'mobile_app', IOS: 'mobile_app', PC: 'desktop', UNKNOWN: 'unknown'
 	};
 
-	const [genderRows, ageRows, countryRows, platformRows] = await Promise.all([
+	const [genderRows, ageRows, regionRows, platformRows] = await Promise.all([
 		fetchBreakdown('gender'),
 		fetchBreakdown('age'),
-		fetchBreakdown('country_code'),
+		fetchBreakdown('province_id'),
 		fetchBreakdown('platform')
 	]);
 
 	const genderSegments = parseSegments(genderRows, 'gender').map(s => ({ ...s, label: GENDER_MAP[s.label] || s.label.toLowerCase() }));
 	const ageSegments = parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || s.label.replace('AGE_', '').replace('_', '-') }));
-	const regionSegments = parseSegments(countryRows, 'country_code');
+	const regionSegments = parseSegments(regionRows, 'province_id');
 	const deviceSegments = parseSegments(platformRows, 'platform');
 
 	// Merge Android+iOS into mobile_app for device platform
