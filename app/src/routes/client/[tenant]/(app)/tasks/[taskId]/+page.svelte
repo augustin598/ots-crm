@@ -446,6 +446,7 @@
 													placeholder="Edit comment..."
 													minHeight="60px"
 													showFooter={false}
+													{users}
 												/>
 												<div class="flex gap-2">
 													<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading}>
@@ -515,6 +516,7 @@
 													placeholder="Write a reply..."
 													minHeight="60px"
 													showFooter={false}
+													{users}
 												/>
 												<div class="flex gap-2 mt-2">
 													<Button size="sm" onclick={() => handleReply(comment.id)} disabled={replyLoading}>
@@ -544,6 +546,7 @@
 								placeholder="Write a comment..."
 								minHeight="60px"
 								showFooter={false}
+								{users}
 							/>
 							<Button size="sm" onclick={handleAddComment} disabled={commentLoading}>
 								<SendIcon class="mr-2 h-3.5 w-3.5" />

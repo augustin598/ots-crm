@@ -201,3 +201,14 @@
 .rich-editor .ProseMirror .text-center { text-align: center; }
 .rich-editor .ProseMirror .text-right { text-align: right; }
 .rich-editor .ProseMirror .text-justify { text-align: justify; }
+
+/* Mentions */
+.rich-editor .ProseMirror .mention,
+.comment-display .mention {
+	background: hsl(var(--primary) / 0.15);
+	color: hsl(var(--primary));
+	padding: 0.1em 0.35em;
+	border-radius: 0.25em;
+	font-weight: 500;
+	text-decoration: none;
+}

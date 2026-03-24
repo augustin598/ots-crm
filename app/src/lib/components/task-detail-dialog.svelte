@@ -652,6 +652,7 @@
 												placeholder="Edit comment..."
 												minHeight="80px"
 												showFooter={false}
+												users={mentionUsers}
 											/>
 											<div class="flex gap-2">
 												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading}>
@@ -717,6 +718,7 @@
 												placeholder="Write a reply..."
 												minHeight="60px"
 												showFooter={false}
+												users={mentionUsers}
 											/>
 											<div class="flex gap-2 mt-2">
 												<Button size="sm" onclick={() => handleReply(comment.id)} disabled={replyLoading}>
@@ -740,6 +742,7 @@
 							minHeight="80px"
 							showFooter={false}
 							onPasteImage={(file) => uploadImage(file)}
+							users={mentionUsers}
 						/>
 						{#if uploadingImage}
 							<div class="flex items-center gap-2 text-sm text-muted-foreground">

@@ -17,7 +17,9 @@
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import TaskList from '@tiptap/extension-task-list';
 	import TaskItem from '@tiptap/extension-task-item';
+	import Mention from '@tiptap/extension-mention';
 	import Toolbar from './Toolbar.svelte';
+	import { createMentionSuggestion, type MentionUser } from './mention-suggestion';
 	import { cn } from '$lib/utils';
 	import './editor.css';
 
@@ -28,6 +30,7 @@
 		onUpdate?: ((data: { html: string; json: object; text: string }) => void) | null;
 		onImageUpload?: ((file: File) => Promise<string>) | null;
 		onPasteImage?: ((file: File) => void) | null;
+		users?: MentionUser[];
 		maxCharacters?: number | null;
 		minHeight?: string;
 		showFooter?: boolean;
@@ -41,6 +44,7 @@
 		onUpdate = null,
 		onImageUpload = null,
 		onPasteImage = null,
+		users = [],
 		maxCharacters = null,
 		minHeight = '200px',
 		showFooter = true,
@@ -105,6 +109,15 @@
 			TaskList,
 			TaskItem.configure({ nested: true }),
 		];
+
+		if (users.length > 0) {
+			extensions.push(
+				Mention.configure({
+					HTMLAttributes: { class: 'mention' },
+					suggestion: createMentionSuggestion(users),
+				})
+			);
+		}
 
 		if (maxCharacters) {
 			extensions.push(CharacterCount.configure({ limit: maxCharacters }));
