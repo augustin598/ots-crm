@@ -37,6 +37,7 @@ export const getTaskComments = query(
 				id: table.taskComment.id,
 				taskId: table.taskComment.taskId,
 				userId: table.taskComment.userId,
+				parentCommentId: table.taskComment.parentCommentId,
 				content: table.taskComment.content,
 				attachmentPath: table.taskComment.attachmentPath,
 				attachmentMimeType: table.taskComment.attachmentMimeType,
@@ -64,6 +65,7 @@ export const createTaskComment = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
 		content: v.string(),
+		parentCommentId: v.optional(v.string()),
 		attachmentPath: v.optional(v.string()),
 		attachmentMimeType: v.optional(v.string()),
 		attachmentFileName: v.optional(v.string()),
@@ -96,6 +98,7 @@ export const createTaskComment = command(
 			id: commentId,
 			taskId: data.taskId,
 			userId: event.locals.user.id,
+			parentCommentId: data.parentCommentId || null,
 			content: data.content || '',
 			attachmentPath: data.attachmentPath || null,
 			attachmentMimeType: data.attachmentMimeType || null,

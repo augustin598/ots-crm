@@ -3,7 +3,7 @@
 	import { getTaskComments, createTaskComment, deleteTaskComment, updateTaskComment } from '$lib/remotes/task-comments.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getProject } from '$lib/remotes/projects.remote';
-	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -11,7 +11,8 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
-	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, History, Plus, ArrowRight, UserCheck, RefreshCw } from '@lucide/svelte';
+	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
+	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply } from '@lucide/svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { formatStatus, getStatusBadgeVariant, getPriorityColor, getPriorityDotColor, formatPriority, formatDate, getActivityValueColor } from '$lib/components/task-kanban-utils';
 	import { toast } from 'svelte-sonner';
@@ -42,6 +43,9 @@
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
 	const client = $derived(clientQuery?.current);
 
+	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
+	const mentionUsers = $derived(clientUsersQuery?.current || users);
+
 	const projectQuery = $derived(task?.projectId ? getProject(task.projectId) : null);
 	const project = $derived(projectQuery?.current);
 
@@ -54,6 +58,23 @@
 	let editingCommentId = $state<string | null>(null);
 	let editingContent = $state('');
 	let editLoading = $state(false);
+	let newCommentEditor: RichEditor | null = $state(null);
+	let editCommentEditor: RichEditor | null = $state(null);
+	let replyingToId = $state<string | null>(null);
+	let replyEditor: RichEditor | null = $state(null);
+	let replyLoading = $state(false);
+
+	const topLevelComments = $derived(comments.filter((c: any) => !c.parentCommentId));
+	const repliesMap = $derived(
+		comments.reduce((map: Map<string, any[]>, c: any) => {
+			if (c.parentCommentId) {
+				const existing = map.get(c.parentCommentId) || [];
+				existing.push(c);
+				map.set(c.parentCommentId, existing);
+			}
+			return map;
+		}, new Map<string, any[]>())
+	);
 
 	function getActivityVerb(activity: { action: string; field?: string | null }): string {
 		switch (activity.action) {
@@ -92,14 +113,17 @@
 	}
 
 	async function handleAddComment() {
-		if (!newComment.trim()) return;
+		const html = newCommentEditor?.getHTML() ?? '';
+		const editorEmpty = newCommentEditor?.isEmpty() ?? true;
+		if (editorEmpty) return;
 
 		commentLoading = true;
 		try {
 			await createTaskComment({
 				taskId,
-				content: newComment.trim()
+				content: html
 			}).updates(getTaskComments(taskId));
+			newCommentEditor?.clear();
 			newComment = '';
 			toast.success('Comment added');
 		} catch (e) {
@@ -110,12 +134,14 @@
 	}
 
 	async function handleEditComment(commentId: string) {
-		if (!editingContent.trim()) return;
+		const html = editCommentEditor?.getHTML() ?? '';
+		const isEmpty = editCommentEditor?.isEmpty() ?? true;
+		if (isEmpty) return;
 		editLoading = true;
 		try {
 			await updateTaskComment({
 				commentId,
-				content: editingContent.trim()
+				content: html
 			}).updates(getTaskComments(taskId));
 			editingCommentId = null;
 			editingContent = '';
@@ -124,6 +150,28 @@
 			toast.error(e instanceof Error ? e.message : 'Failed to update comment');
 		} finally {
 			editLoading = false;
+		}
+	}
+
+	async function handleReply(parentCommentId: string) {
+		const html = replyEditor?.getHTML() ?? '';
+		const isEmpty = replyEditor?.isEmpty() ?? true;
+		if (isEmpty) return;
+
+		replyLoading = true;
+		try {
+			await createTaskComment({
+				taskId,
+				content: html,
+				parentCommentId
+			}).updates(getTaskComments(taskId));
+			replyEditor?.clear();
+			replyingToId = null;
+			toast.success('Reply added');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to add reply');
+		} finally {
+			replyLoading = false;
 		}
 	}
 
@@ -299,13 +347,13 @@
 				<CardContent class="space-y-4">
 					<div class="space-y-2">
 						<Label for="newComment">Add Comment</Label>
-						<Textarea
-							id="newComment"
-							bind:value={newComment}
+						<RichEditor
+							bind:this={newCommentEditor}
 							placeholder="Write a comment..."
-							rows="3"
+							minHeight="80px"
+							showFooter={false}
 						/>
-						<Button onclick={handleAddComment} disabled={commentLoading || !newComment.trim()}>
+						<Button onclick={handleAddComment} disabled={commentLoading}>
 							{commentLoading ? 'Adding...' : 'Add Comment'}
 						</Button>
 					</div>
@@ -314,36 +362,45 @@
 						{#if comments.length === 0}
 							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
 						{:else}
-							{#each comments as comment}
+							{#each topLevelComments as comment}
+								{@const authorName = comment.authorName || userMap.get(comment.userId) || comment.userId}
+								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
+								{@const replies = repliesMap.get(comment.id) || []}
 								<div class="p-3 border rounded-lg">
-									<div class="flex items-start justify-between mb-2">
-										<div class="flex items-center gap-2">
-											<User class="h-4 w-4 text-muted-foreground" />
-											<p class="text-sm font-medium">{comment.authorName || userMap.get(comment.userId) || comment.userId}</p>
-											<p class="text-xs text-muted-foreground">
-												{formatDate(comment.createdAt)}
-												{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
-													<span class="italic">(edited)</span>
-												{/if}
-											</p>
+									<div class="flex items-center gap-2 mb-1.5">
+										<User class="h-4 w-4 text-muted-foreground" />
+										<p class="text-sm font-medium">{authorName}</p>
+										<p class="text-xs text-muted-foreground">
+											{formatDate(comment.createdAt)}
+											{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
+												<span class="italic">(edited)</span>
+											{/if}
+										</p>
+										<div class="flex items-center gap-1 ml-auto">
+											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => { replyingToId = replyingToId === comment.id ? null : comment.id; }} title="Reply">
+												<Reply class="h-3 w-3" />
+											</Button>
+											{#if isOwnComment && editingCommentId !== comment.id}
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
+													<Pencil class="h-3 w-3" />
+												</Button>
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handleDeleteComment(comment.id)}>
+													<Trash2 class="h-3 w-3" />
+												</Button>
+											{/if}
 										</div>
-										{#if currentUserId && comment.userId === currentUserId && editingCommentId !== comment.id}
-											<div class="flex items-center gap-1">
-												<Button variant="ghost" size="sm" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
-													<Pencil class="h-3 w-3 mr-1" />
-													Edit
-												</Button>
-												<Button variant="ghost" size="sm" onclick={() => handleDeleteComment(comment.id)}>
-													Delete
-												</Button>
-											</div>
-										{/if}
 									</div>
 									{#if editingCommentId === comment.id}
 										<div class="space-y-2">
-											<Textarea bind:value={editingContent} rows={3} />
+											<RichEditor
+												bind:this={editCommentEditor}
+												content={editingContent}
+												placeholder="Edit comment..."
+												minHeight="80px"
+												showFooter={false}
+											/>
 											<div class="flex gap-2">
-												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading || !editingContent.trim()}>
+												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading}>
 													{editLoading ? 'Saving...' : 'Save'}
 												</Button>
 												<Button size="sm" variant="outline" onclick={() => { editingCommentId = null; editingContent = ''; }}>
@@ -352,7 +409,50 @@
 											</div>
 										</div>
 									{:else}
-										<p class="text-sm">{comment.content}</p>
+										<div class="comment-display text-sm">{@html comment.content}</div>
+									{/if}
+
+									<!-- Replies -->
+									{#if replies.length > 0}
+										<div class="mt-3 ml-6 space-y-2 border-l-2 border-muted pl-3">
+											{#each replies as reply}
+												{@const replyAuthor = reply.authorName || userMap.get(reply.userId) || reply.userId}
+												{@const isOwnReply = currentUserId && reply.userId === currentUserId}
+												<div class="py-1.5">
+													<div class="flex items-center gap-2 mb-1">
+														<User class="h-3 w-3 text-muted-foreground" />
+														<p class="font-medium text-xs">{replyAuthor}</p>
+														<p class="text-xs text-muted-foreground">{formatDate(reply.createdAt)}</p>
+														{#if isOwnReply}
+															<Button variant="ghost" size="icon" class="h-5 w-5 ml-auto" onclick={() => handleDeleteComment(reply.id)}>
+																<Trash2 class="h-2.5 w-2.5" />
+															</Button>
+														{/if}
+													</div>
+													<div class="comment-display text-sm ml-5">{@html reply.content}</div>
+												</div>
+											{/each}
+										</div>
+									{/if}
+
+									<!-- Reply editor -->
+									{#if replyingToId === comment.id}
+										<div class="mt-3 ml-6 border-l-2 border-primary/30 pl-3">
+											<RichEditor
+												bind:this={replyEditor}
+												placeholder="Write a reply..."
+												minHeight="60px"
+												showFooter={false}
+											/>
+											<div class="flex gap-2 mt-2">
+												<Button size="sm" onclick={() => handleReply(comment.id)} disabled={replyLoading}>
+													{replyLoading ? 'Replying...' : 'Reply'}
+												</Button>
+												<Button size="sm" variant="outline" onclick={() => { replyingToId = null; }}>
+													Cancel
+												</Button>
+											</div>
+										</div>
 									{/if}
 								</div>
 							{/each}

@@ -364,6 +364,7 @@ export const taskComment = sqliteTable('task_comment', {
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id),
+	parentCommentId: text('parent_comment_id'),
 	content: text('content').notNull(),
 	attachmentPath: text('attachment_path'),
 	attachmentMimeType: text('attachment_mime_type'),

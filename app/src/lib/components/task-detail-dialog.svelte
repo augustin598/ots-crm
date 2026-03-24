@@ -2,7 +2,7 @@
 	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getCommentAttachmentUrl } from '$lib/remotes/task-comments.remote';
 	import { getTaskMaterials, getAvailableMaterialsForTask, linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
-	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { approveTask, rejectTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
@@ -14,11 +14,12 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Input } from '$lib/components/ui/input';
 	import { Separator } from '$lib/components/ui/separator';
+	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import * as Popover from '$lib/components/ui/popover';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import { formatStatus, getStatusBadgeVariant, formatDate, getPriorityColor, getPriorityDotColor, formatPriority, getActivityValueColor } from '$lib/components/task-kanban-utils';
-	import { Calendar, User, Building, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink } from '@lucide/svelte';
+	import { Calendar, User, Building, MessageSquare, Edit, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Link, Unlink, Image, Video, FileText, Type, ExternalLink, Reply } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
 
@@ -42,6 +43,11 @@
 	let editingCommentId = $state<string | null>(null);
 	let editingContent = $state('');
 	let editLoading = $state(false);
+	let newCommentEditor: RichEditor | null = $state(null);
+	let editCommentEditor: RichEditor | null = $state(null);
+	let replyingToId = $state<string | null>(null);
+	let replyEditor: RichEditor | null = $state(null);
+	let replyLoading = $state(false);
 
 	// Image paste/attachment state (supports multiple)
 	let pendingAttachments = $state<{ path: string; mimeType: string; fileName: string; size: number; previewUrl: string }[]>([]);
@@ -96,6 +102,23 @@
 				`${u.firstName} ${u.lastName}`.trim() || u.email
 			])
 		)
+	);
+
+	// Get users associated with the task's client for @mentions
+	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
+	const mentionUsers = $derived(clientUsersQuery?.current || users);
+
+	// Thread comments: top-level + replies grouped by parent
+	const topLevelComments = $derived(comments.filter((c: any) => !c.parentCommentId));
+	const repliesMap = $derived(
+		comments.reduce((map: Map<string, any[]>, c: any) => {
+			if (c.parentCommentId) {
+				const existing = map.get(c.parentCommentId) || [];
+				existing.push(c);
+				map.set(c.parentCommentId, existing);
+			}
+			return map;
+		}, new Map<string, any[]>())
 	);
 
 	const projectsQuery = getProjects(undefined);
@@ -228,15 +251,20 @@
 	}
 
 	async function handleAddComment() {
-		if ((!newComment.trim() && pendingAttachments.length === 0) || !task) return;
+		const html = newCommentEditor?.getHTML() ?? '';
+		const text = newCommentEditor?.getText() ?? '';
+		const editorEmpty = newCommentEditor?.isEmpty() ?? true;
+
+		if ((editorEmpty && pendingAttachments.length === 0) || !task) return;
 
 		commentLoading = true;
 		try {
 			const firstAttachment = pendingAttachments[0] || null;
+			const commentContent = editorEmpty ? '' : html;
 			// First comment: text + first image (if any)
 			await createTaskComment({
 				taskId: task.id,
-				content: newComment.trim() || '',
+				content: commentContent,
 				...(firstAttachment ? {
 					attachmentPath: firstAttachment.path,
 					attachmentMimeType: firstAttachment.mimeType,
@@ -258,6 +286,7 @@
 				}).updates(getTaskComments(task.id), getTaskActivities(task.id));
 			}
 
+			newCommentEditor?.clear();
 			newComment = '';
 			removeAllPendingAttachments();
 			toast.success('Comment added');
@@ -269,12 +298,14 @@
 	}
 
 	async function handleEditComment(commentId: string) {
-		if (!editingContent.trim() || !task) return;
+		const html = editCommentEditor?.getHTML() ?? '';
+		const isEmpty = editCommentEditor?.isEmpty() ?? true;
+		if (isEmpty || !task) return;
 		editLoading = true;
 		try {
 			await updateTaskComment({
 				commentId,
-				content: editingContent.trim()
+				content: html
 			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
 			editingCommentId = null;
 			editingContent = '';
@@ -283,6 +314,28 @@
 			toast.error(e instanceof Error ? e.message : 'Failed to update comment');
 		} finally {
 			editLoading = false;
+		}
+	}
+
+	async function handleReply(parentCommentId: string) {
+		const html = replyEditor?.getHTML() ?? '';
+		const isEmpty = replyEditor?.isEmpty() ?? true;
+		if (isEmpty || !task) return;
+
+		replyLoading = true;
+		try {
+			await createTaskComment({
+				taskId: task.id,
+				content: html,
+				parentCommentId
+			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
+			replyEditor?.clear();
+			replyingToId = null;
+			toast.success('Reply added');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to add reply');
+		} finally {
+			replyLoading = false;
 		}
 	}
 
@@ -555,19 +608,20 @@
 						<h4 class="font-semibold">Comments ({comments.length})</h4>
 					</div>
 
-					<div class="space-y-4 mb-4">
+					<div class="space-y-3 mb-4">
 						{#if comments.length === 0}
 							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
 						{:else}
-							{#each comments as comment}
+							{#each topLevelComments as comment}
 								{@const authorName = comment.authorName || userMap.get(comment.userId) || comment.userId}
 								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
-								<div class="border rounded-lg p-4">
-									<div class="flex items-center gap-3 mb-2">
-										<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-semibold">
+								{@const replies = repliesMap.get(comment.id) || []}
+								<div class="border rounded-lg p-3">
+									<div class="flex items-center gap-2 mb-1.5">
+										<div class="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
 											{getInitials(authorName)}
 										</div>
-										<div class="flex-1">
+										<div class="flex-1 min-w-0">
 											<p class="font-medium text-sm">{authorName}</p>
 											<p class="text-xs text-muted-foreground">
 												{new Date(comment.createdAt).toLocaleString()}
@@ -576,22 +630,31 @@
 												{/if}
 											</p>
 										</div>
-										{#if isOwnComment && editingCommentId !== comment.id}
-											<div class="flex items-center gap-1">
+										<div class="flex items-center gap-1">
+											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => { replyingToId = replyingToId === comment.id ? null : comment.id; }} title="Reply">
+												<Reply class="h-3 w-3" />
+											</Button>
+											{#if isOwnComment && editingCommentId !== comment.id}
 												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
 													<Pencil class="h-3 w-3" />
 												</Button>
 												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handleDeleteComment(comment.id)}>
 													<Trash2 class="h-3 w-3" />
 												</Button>
-											</div>
-										{/if}
+											{/if}
+										</div>
 									</div>
 									{#if editingCommentId === comment.id}
 										<div class="space-y-2">
-											<Textarea bind:value={editingContent} rows={3} />
+											<RichEditor
+												bind:this={editCommentEditor}
+												content={editingContent}
+												placeholder="Edit comment..."
+												minHeight="80px"
+												showFooter={false}
+											/>
 											<div class="flex gap-2">
-												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading || !editingContent.trim()}>
+												<Button size="sm" onclick={() => handleEditComment(comment.id)} disabled={editLoading}>
 													{editLoading ? 'Saving...' : 'Save'}
 												</Button>
 												<Button size="sm" variant="outline" onclick={() => { editingCommentId = null; editingContent = ''; }}>
@@ -600,7 +663,7 @@
 											</div>
 										</div>
 									{:else}
-										<p class="text-sm leading-relaxed">{comment.content}</p>
+										<div class="comment-display text-sm leading-relaxed">{@html comment.content}</div>
 									{/if}
 									{#if comment.attachmentPath}
 										{@const url = attachmentUrls[comment.id]}
@@ -620,17 +683,63 @@
 											</button>
 										{/if}
 									{/if}
+
+									<!-- Replies -->
+									{#if replies.length > 0}
+										<div class="mt-3 ml-6 space-y-2 border-l-2 border-muted pl-3">
+											{#each replies as reply}
+												{@const replyAuthor = reply.authorName || userMap.get(reply.userId) || reply.userId}
+												{@const isOwnReply = currentUserId && reply.userId === currentUserId}
+												<div class="py-1.5">
+													<div class="flex items-center gap-2 mb-1">
+														<div class="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-semibold">
+															{getInitials(replyAuthor)}
+														</div>
+														<p class="font-medium text-xs">{replyAuthor}</p>
+														<p class="text-xs text-muted-foreground">{new Date(reply.createdAt).toLocaleString()}</p>
+														{#if isOwnReply}
+															<Button variant="ghost" size="icon" class="h-5 w-5 ml-auto" onclick={() => handleDeleteComment(reply.id)}>
+																<Trash2 class="h-2.5 w-2.5" />
+															</Button>
+														{/if}
+													</div>
+													<div class="comment-display text-sm ml-8">{@html reply.content}</div>
+												</div>
+											{/each}
+										</div>
+									{/if}
+
+									<!-- Reply editor -->
+									{#if replyingToId === comment.id}
+										<div class="mt-3 ml-6 border-l-2 border-primary/30 pl-3">
+											<RichEditor
+												bind:this={replyEditor}
+												placeholder="Write a reply..."
+												minHeight="60px"
+												showFooter={false}
+											/>
+											<div class="flex gap-2 mt-2">
+												<Button size="sm" onclick={() => handleReply(comment.id)} disabled={replyLoading}>
+													{replyLoading ? 'Replying...' : 'Reply'}
+												</Button>
+												<Button size="sm" variant="outline" onclick={() => { replyingToId = null; }}>
+													Cancel
+												</Button>
+											</div>
+										</div>
+									{/if}
 								</div>
 							{/each}
 						{/if}
 					</div>
 
 					<div class="space-y-2">
-						<Textarea
+						<RichEditor
+							bind:this={newCommentEditor}
 							placeholder="Add a comment... (paste an image with Ctrl+V)"
-							bind:value={newComment}
-							rows={3}
-							onpaste={handlePaste}
+							minHeight="80px"
+							showFooter={false}
+							onPasteImage={(file) => uploadImage(file)}
 						/>
 						{#if uploadingImage}
 							<div class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -657,7 +766,7 @@
 								{/each}
 							</div>
 						{/if}
-						<Button size="sm" onclick={handleAddComment} disabled={(!newComment.trim() && pendingAttachments.length === 0) || commentLoading || uploadingImage}>
+						<Button size="sm" onclick={handleAddComment} disabled={commentLoading || uploadingImage}>
 							{commentLoading ? 'Posting...' : 'Post Comment'}
 						</Button>
 					</div>

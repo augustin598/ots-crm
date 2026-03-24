@@ -1,7 +1,8 @@
 import { query, getRequestEvent } from '$app/server';
+import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export const getTenantUsers = query(async () => {
 	const event = getRequestEvent();
@@ -22,4 +23,29 @@ export const getTenantUsers = query(async () => {
 		.where(eq(table.tenantUser.tenantId, event.locals.tenant.id));
 
 	return tenantUsers;
+});
+
+export const getClientUsers = query(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const clientUsers = await db
+		.select({
+			id: table.user.id,
+			email: table.user.email,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName
+		})
+		.from(table.clientUser)
+		.innerJoin(table.user, eq(table.clientUser.userId, table.user.id))
+		.where(
+			and(
+				eq(table.clientUser.clientId, clientId),
+				eq(table.clientUser.tenantId, event.locals.tenant.id)
+			)
+		);
+
+	return clientUsers;
 });
