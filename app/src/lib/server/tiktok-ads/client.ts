@@ -109,7 +109,10 @@ export async function listAdvertiserAccounts(accessToken: string): Promise<Tikto
 	}
 
 	const accounts: TiktokAdsAdAccount[] = [];
-	const advertiserIds: string[] = json.data?.list || [];
+	const rawList = json.data?.list || [];
+	const advertiserIds: string[] = rawList.map((item: any) =>
+		typeof item === 'string' ? item : String(item.advertiser_id || item)
+	);
 
 	if (advertiserIds.length === 0) {
 		return accounts;
