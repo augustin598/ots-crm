@@ -270,7 +270,7 @@ export async function listCampaignInsights(
 				'spend', 'impressions', 'clicks', 'conversion',
 				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
 				'reach', 'frequency',
-				'complete_payment', 'value_per_complete_payment',
+				'complete_payment', 'onsite_form', 'real_time_conversion',
 				'likes', 'comments', 'shares', 'follows', 'profile_visits',
 				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
 			]),
@@ -314,12 +314,15 @@ export async function listCampaignInsights(
 		const m = row.metrics || {};
 		const d = row.dimensions || {};
 		const spend = parseFloat(m.spend || '0');
-		// Use 'conversion' first, fall back to 'complete_payment' for lead gen campaigns
-		const conversions = parseInt(m.conversion || '0') || parseInt(m.complete_payment || '0');
+		// Fallback chain: conversion → complete_payment → onsite_form → real_time_conversion
+		const conversions = parseInt(m.conversion || '0')
+			|| parseInt(m.complete_payment || '0')
+			|| parseInt(m.onsite_form || '0')
+			|| parseInt(m.real_time_conversion || '0');
 
 		return {
 			campaignId: String(d.campaign_id || ''),
-			campaignName: '', // filled later from listCampaigns
+			campaignName: '',
 			objective: '',
 			spend: m.spend || '0',
 			impressions: m.impressions || '0',
@@ -347,7 +350,13 @@ export async function listCampaignInsights(
 		};
 	});
 
-	logInfo('tiktok-ads', `Got ${insights.length} campaign insight rows for ${advertiserId}`);
+	// Debug: log sample row to help diagnose metric availability
+	if (allRows.length > 0) {
+		const sample = allRows[0].metrics || {};
+		logInfo('tiktok-ads', `Got ${insights.length} rows for ${advertiserId}. Sample metrics: conversion=${sample.conversion}, complete_payment=${sample.complete_payment}, onsite_form=${sample.onsite_form}, reach=${sample.reach}, budget fields available in campaign API`);
+	} else {
+		logInfo('tiktok-ads', `Got 0 rows for ${advertiserId} in period ${startDate}..${endDate}`);
+	}
 	return insights;
 }
 
@@ -418,7 +427,13 @@ export async function listCampaigns(
 		page++;
 	}
 
-	logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}`);
+	// Log budget info for debugging
+	const withBudget = allCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget);
+	if (withBudget.length > 0) {
+		logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. ${withBudget.length} with budget. Sample: ${withBudget[0].campaignName} daily=${withBudget[0].dailyBudget} lifetime=${withBudget[0].lifetimeBudget}`);
+	} else {
+		logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}. No budgets found (budget_mode may be missing from API response)`);
+	}
 	return allCampaigns;
 }
 
@@ -461,6 +476,9 @@ export async function listDemographicInsights(
 		try {
 			json = JSON.parse(text);
 		} catch {
+			logError('tiktok-ads', `Demographics JSON parse error for ${dimension}`, {
+				metadata: { status: res.status, preview: text.slice(0, 200) }
+			});
 			return [];
 		}
 
@@ -496,7 +514,7 @@ export async function listDemographicInsights(
 	const AGE_MAP: Record<string, string> = {
 		AGE_13_17: '13-17', AGE_18_24: '18-24', AGE_25_34: '25-34',
 		AGE_35_44: '35-44', AGE_45_54: '45-54', AGE_55_100: '55+',
-		AGE_UNKNOWN: 'unknown'
+		AGE_UNKNOWN: 'unknown', NONE: 'unknown', '': 'unknown'
 	};
 	const DEVICE_MAP: Record<string, string> = {
 		ANDROID: 'mobile_app', IOS: 'mobile_app', IPHONE: 'mobile_app', IPAD: 'mobile_app',
@@ -573,8 +591,15 @@ export async function listDemographicInsights(
 		fetchBreakdown('platform')
 	]);
 
-	const genderSegments = parseSegments(genderRows, 'gender').map(s => ({ ...s, label: GENDER_MAP[s.label] || s.label.toLowerCase() }));
-	const ageSegments = parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || s.label.replace('AGE_', '').replace('_', '-') }));
+	// Filter out zero-spend "unknown"/"none" segments that add noise
+	const filterNoise = (segments: DemographicSegment[]) => segments.filter(s => !(s.label === 'unknown' && s.spend === 0));
+
+	const genderSegments = filterNoise(
+		parseSegments(genderRows, 'gender').map(s => ({ ...s, label: GENDER_MAP[s.label] || GENDER_MAP[s.label.toUpperCase()] || s.label.toLowerCase() }))
+	);
+	const ageSegments = filterNoise(
+		parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || AGE_MAP[s.label.toUpperCase()] || s.label.replace('AGE_', '').replace('_', '-') }))
+	);
 	const rawRegionSegments = parseSegments(regionRows, 'province_id');
 
 	// Resolve province IDs to human-readable names
@@ -601,12 +626,18 @@ export async function listDemographicInsights(
 		}
 	}
 
-	return {
+	const result = {
 		gender: genderSegments,
 		age: ageSegments,
 		region: regionSegments,
 		devicePlatform: Array.from(deviceMap.values()).sort((a, b) => b.spend - a.spend)
 	};
+
+	logInfo('tiktok-ads', `Demographics loaded for ${advertiserId}`, {
+		metadata: { gender: result.gender.length, age: result.age.length, region: result.region.length, devicePlatform: result.devicePlatform.length }
+	});
+
+	return result;
 }
 
 /**
