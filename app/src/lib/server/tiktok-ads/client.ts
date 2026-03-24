@@ -515,6 +515,32 @@ export async function listDemographicInsights(
 		ANDROID: 'mobile_app', IOS: 'mobile_app', PC: 'desktop', UNKNOWN: 'unknown'
 	};
 
+	// Resolve province IDs to names via TikTok Location API
+	async function resolveProvinceNames(provinceIds: string[]): Promise<Map<string, string>> {
+		const nameMap = new Map<string, string>();
+		if (provinceIds.length === 0) return nameMap;
+
+		try {
+			const params = new URLSearchParams({
+				advertiser_id: advertiserId,
+				location_ids: JSON.stringify(provinceIds)
+			});
+			const res = await fetch(`${TIKTOK_API_URL}/tool/region/?${params.toString()}`, {
+				headers: { 'Access-Token': accessToken }
+			});
+			const text = await res.text();
+			const json = JSON.parse(text);
+			if (json.code === 0 && json.data?.list) {
+				for (const loc of json.data.list) {
+					nameMap.set(String(loc.location_id), loc.name || String(loc.location_id));
+				}
+			}
+		} catch (e) {
+			console.error('[TIKTOK-ADS-DEBUG] Failed to resolve province names:', e);
+		}
+		return nameMap;
+	}
+
 	const [genderRows, ageRows, regionRows, platformRows] = await Promise.all([
 		fetchBreakdown('gender'),
 		fetchBreakdown('age'),
@@ -524,7 +550,15 @@ export async function listDemographicInsights(
 
 	const genderSegments = parseSegments(genderRows, 'gender').map(s => ({ ...s, label: GENDER_MAP[s.label] || s.label.toLowerCase() }));
 	const ageSegments = parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || s.label.replace('AGE_', '').replace('_', '-') }));
-	const regionSegments = parseSegments(regionRows, 'province_id');
+	const rawRegionSegments = parseSegments(regionRows, 'province_id');
+
+	// Resolve province IDs to human-readable names
+	const provinceIds = rawRegionSegments.map(s => s.label);
+	const provinceNames = await resolveProvinceNames(provinceIds);
+	const regionSegments = rawRegionSegments.map(s => ({
+		...s,
+		label: provinceNames.get(s.label) || s.label
+	}));
 	const deviceSegments = parseSegments(platformRows, 'platform');
 
 	// Merge Android+iOS into mobile_app for device platform
