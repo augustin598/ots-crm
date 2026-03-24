@@ -527,48 +527,143 @@ export async function listDemographicInsights(
 	};
 
 	/**
-	 * Resolve province IDs to names via TikTok /tool/targeting/info/ API.
-	 * Docs: https://business-api.tiktok.com/portal/docs?id=1740245588498433
+	 * Resolve province IDs to names.
+	 * Strategy 1: GET /tool/region/ with level_range=TO_PROVINCE (lists all provinces)
+	 * Strategy 2: POST /tool/targeting/info/ with scene=GEO (resolves specific IDs)
+	 * Docs: https://business-api.tiktok.com/portal/docs?id=1761237614418945
 	 */
 	async function resolveProvinceNames(provinceIds: string[]): Promise<Map<string, string>> {
 		const nameMap = new Map<string, string>();
 		if (provinceIds.length === 0) return nameMap;
 
+		// Strategy 1: GET /tool/region/ — lists all provinces with IDs and names
 		try {
-			const res = await fetch(`${TIKTOK_API_URL}/tool/targeting/info/`, {
-				method: 'POST',
-				headers: {
-					'Access-Token': accessToken,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					advertiser_id: advertiserId,
-					targeting_ids: provinceIds,
-					scene: 'GEO',
-					objective_type: 'TRAFFIC',
-					placements: ['PLACEMENT_TIKTOK']
-				})
+			const regionParams = new URLSearchParams({
+				advertiser_id: advertiserId,
+				placements: JSON.stringify(['PLACEMENT_TIKTOK']),
+				objective_type: 'TRAFFIC',
+				level_range: 'TO_PROVINCE'
 			});
+			const regionRes = await fetch(`${TIKTOK_API_URL}/tool/region/?${regionParams.toString()}`, {
+				headers: { 'Access-Token': accessToken }
+			});
+			const regionJson = await regionRes.json();
 
-			const json = await res.json();
-			if (json.code === 0 && json.data?.list) {
-				for (const item of json.data.list) {
-					const id = String(item.id || item.targeting_id || item.location_id || '');
-					const name = item.name || item.display_name || '';
-					if (id && name) {
-						nameMap.set(id, name);
+			if (regionJson.code === 0 && regionJson.data) {
+				// Log first item structure for diagnostic
+				const dataKeys = Object.keys(regionJson.data);
+				logInfo('tiktok-ads', `Region API response keys: [${dataKeys.join(', ')}]`);
+
+				// Try to find the list of locations — could be nested
+				const findLocations = (obj: any, depth = 0): any[] => {
+					if (depth > 3) return [];
+					if (Array.isArray(obj)) return obj;
+					if (obj && typeof obj === 'object') {
+						for (const key of Object.keys(obj)) {
+							const result = findLocations(obj[key], depth + 1);
+							if (result.length > 0) return result;
+						}
 					}
+					return [];
+				};
+
+				// Walk through the response tree to find province entries
+				const walkTree = (node: any, depth = 0) => {
+					if (!node || depth > 5) return;
+					if (Array.isArray(node)) {
+						for (const item of node) walkTree(item, depth);
+						return;
+					}
+					if (typeof node === 'object') {
+						// Try to extract ID and name from this node
+						const id = String(node.location_id || node.id || node.geo_id || '');
+						const name = node.name || node.display_name || node.location_name || '';
+						const level = node.level || node.location_type || '';
+						if (id && name && provinceIds.includes(id)) {
+							nameMap.set(id, name);
+						}
+						// Recurse into children
+						for (const key of Object.keys(node)) {
+							if (Array.isArray(node[key]) || (typeof node[key] === 'object' && node[key] !== null)) {
+								walkTree(node[key], depth + 1);
+							}
+						}
+					}
+				};
+
+				walkTree(regionJson.data);
+
+				// Diagnostic: log sample items to understand structure
+				const allLocations = findLocations(regionJson.data);
+				if (allLocations.length > 0) {
+					const sample = allLocations.slice(0, 2).map((item: any) => JSON.stringify(item).slice(0, 200));
+					logInfo('tiktok-ads', `Region API: ${allLocations.length} locations found. Samples: ${sample.join(' | ')}`);
 				}
-				logInfo('tiktok-ads', `Resolved ${nameMap.size}/${provinceIds.length} province names via API`);
+
+				if (nameMap.size > 0) {
+					logInfo('tiktok-ads', `Resolved ${nameMap.size}/${provinceIds.length} provinces via /tool/region/`);
+				}
 			} else {
-				logError('tiktok-ads', `Province resolution API error`, {
-					metadata: { errorCode: json.code, errorMessage: json.message }
+				logError('tiktok-ads', `Region API error`, {
+					metadata: { errorCode: regionJson.code, errorMessage: regionJson.message }
 				});
 			}
 		} catch (e) {
-			logError('tiktok-ads', `Province resolution failed`, {
+			logError('tiktok-ads', `Region API failed`, {
 				metadata: { error: e instanceof Error ? e.message : String(e) }
 			});
+		}
+
+		// Strategy 2: POST /tool/targeting/info/ for any remaining unresolved IDs
+		const unresolvedIds = provinceIds.filter(id => !nameMap.has(id));
+		if (unresolvedIds.length > 0) {
+			try {
+				const infoRes = await fetch(`${TIKTOK_API_URL}/tool/targeting/info/`, {
+					method: 'POST',
+					headers: {
+						'Access-Token': accessToken,
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						advertiser_id: advertiserId,
+						targeting_ids: unresolvedIds,
+						scene: 'GEO',
+						objective_type: 'TRAFFIC',
+						placements: ['PLACEMENT_TIKTOK']
+					})
+				});
+				const infoJson = await infoRes.json();
+
+				if (infoJson.code === 0 && infoJson.data) {
+					// Log raw structure for diagnostic
+					const dataStr = JSON.stringify(infoJson.data).slice(0, 500);
+					logInfo('tiktok-ads', `Targeting info response: ${dataStr}`);
+
+					// Try all possible response shapes
+					const list = infoJson.data.list || infoJson.data.targeting_list || (Array.isArray(infoJson.data) ? infoJson.data : []);
+					for (const item of list) {
+						const id = String(item.id || item.targeting_id || item.location_id || '');
+						const name = item.name || item.display_name || item.location_name || '';
+						if (id && name && unresolvedIds.includes(id)) {
+							nameMap.set(id, name);
+						}
+					}
+
+					if (nameMap.size > unresolvedIds.length) {
+						logInfo('tiktok-ads', `Resolved additional provinces via /tool/targeting/info/`);
+					}
+				}
+			} catch (e) {
+				logError('tiktok-ads', `Targeting info API failed`, {
+					metadata: { error: e instanceof Error ? e.message : String(e) }
+				});
+			}
+		}
+
+		// Log final status
+		const stillUnresolved = provinceIds.filter(id => !nameMap.has(id));
+		if (stillUnresolved.length > 0) {
+			logInfo('tiktok-ads', `Unresolved province IDs: ${stillUnresolved.join(', ')}`);
 		}
 
 		return nameMap;
