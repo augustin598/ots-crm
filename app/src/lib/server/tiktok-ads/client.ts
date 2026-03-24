@@ -520,21 +520,33 @@ export async function listDemographicInsights(
 		const nameMap = new Map<string, string>();
 		if (provinceIds.length === 0) return nameMap;
 
+		// Try /tool/targeting/list/ which returns location names for given IDs
 		try {
 			const params = new URLSearchParams({
 				advertiser_id: advertiserId,
-				location_ids: JSON.stringify(provinceIds)
+				location_ids: JSON.stringify(provinceIds),
+				scene: 'TARGETING_INFO'
 			});
-			const res = await fetch(`${TIKTOK_API_URL}/tool/region/?${params.toString()}`, {
+			const url = `${TIKTOK_API_URL}/tool/targeting/list/?${params.toString()}`;
+			console.log('[TIKTOK-ADS-DEBUG] Resolving province names, URL:', url.slice(0, 200));
+			const res = await fetch(url, {
 				headers: { 'Access-Token': accessToken }
 			});
 			const text = await res.text();
+			console.log('[TIKTOK-ADS-DEBUG] Province resolve response:', text.slice(0, 500));
 			const json = JSON.parse(text);
-			if (json.code === 0 && json.data?.list) {
-				for (const loc of json.data.list) {
-					nameMap.set(String(loc.location_id), loc.name || String(loc.location_id));
+			if (json.code === 0 && json.data) {
+				// Try various response formats
+				const list = json.data.list || json.data.location_list || json.data;
+				if (Array.isArray(list)) {
+					for (const loc of list) {
+						const id = String(loc.location_id || loc.id || '');
+						const name = loc.name || loc.display_name || '';
+						if (id && name) nameMap.set(id, name);
+					}
 				}
 			}
+			console.log('[TIKTOK-ADS-DEBUG] Resolved province names:', Object.fromEntries(nameMap));
 		} catch (e) {
 			console.error('[TIKTOK-ADS-DEBUG] Failed to resolve province names:', e);
 		}
