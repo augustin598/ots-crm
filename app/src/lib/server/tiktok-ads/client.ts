@@ -600,7 +600,9 @@ export async function listDemographicInsights(
 	const ageSegments = filterNoise(
 		parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || AGE_MAP[s.label.toUpperCase()] || s.label.replace('AGE_', '').replace('_', '-') }))
 	);
-	const rawRegionSegments = parseSegments(regionRows, 'province_id');
+	// Filter out invalid province IDs (-1, empty, etc.)
+	const rawRegionSegments = parseSegments(regionRows, 'province_id')
+		.filter(s => s.label && s.label !== '-1' && s.label !== '0' && s.label !== 'unknown' && s.spend > 0);
 
 	// Resolve province IDs to human-readable names
 	const provinceIds = rawRegionSegments.map(s => s.label);
@@ -609,6 +611,12 @@ export async function listDemographicInsights(
 		...s,
 		label: provinceNames.get(s.label) || s.label
 	}));
+
+	// Log unknown province IDs for future mapping
+	const unmapped = regionSegments.filter(s => /^\d+$/.test(s.label));
+	if (unmapped.length > 0) {
+		logInfo('tiktok-ads', `Unknown province IDs for ${advertiserId}: ${unmapped.map(s => s.label).join(', ')} — add to ROMANIA_PROVINCES map`);
+	}
 	const deviceSegments = parseSegments(platformRows, 'platform');
 
 	// Merge Android+iOS into mobile_app for device platform
