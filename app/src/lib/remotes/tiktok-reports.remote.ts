@@ -219,7 +219,6 @@ export const getTiktokCampaignInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			console.error('[TIKTOK-REPORTS-DEBUG] getTiktokCampaignInsights error:', err);
 			const msg = err instanceof Error ? err.message : String(err);
 			if (msg.includes('Access token') || msg.includes('token')) {
 				throw error(401, 'Token-ul TikTok Ads a expirat sau a fost revocat. Reconectează din Settings → TikTok Ads.');

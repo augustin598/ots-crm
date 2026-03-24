@@ -164,24 +164,19 @@ export async function listAdvertiserInsights(
 ): Promise<TiktokAdsInsightData[]> {
 	logInfo('tiktok-ads', `Fetching insights for ${advertiserId}`, { metadata: { startDate, endDate } });
 
-	const body = {
+	const params = new URLSearchParams({
 		advertiser_id: advertiserId,
 		report_type: 'BASIC',
-		dimensions: ['stat_time_day'],
-		metrics: ['spend', 'impressions', 'clicks', 'conversion'],
+		dimensions: JSON.stringify(['stat_time_day']),
+		metrics: JSON.stringify(['spend', 'impressions', 'clicks', 'conversion']),
 		data_level: 'AUCTION_ADVERTISER',
 		start_date: startDate,
 		end_date: endDate,
-		page_size: 1000
-	};
+		page_size: '1000'
+	});
 
-	const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
-		method: 'POST',
-		headers: {
-			'Access-Token': accessToken,
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify(body)
+	const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`, {
+		headers: { 'Access-Token': accessToken }
 	});
 
 	const json = await res.json();
@@ -273,7 +268,11 @@ export async function listCampaignInsights(
 			dimensions: JSON.stringify(['campaign_id', 'stat_time_day']),
 			metrics: JSON.stringify([
 				'spend', 'impressions', 'clicks', 'conversion',
-				'cpc', 'cpm', 'ctr', 'cost_per_conversion'
+				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
+				'reach', 'frequency',
+				'complete_payment', 'value_per_complete_payment',
+				'likes', 'comments', 'shares', 'follows', 'profile_visits',
+				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
 			]),
 			data_level: 'AUCTION_CAMPAIGN',
 			start_date: startDate,
@@ -283,32 +282,20 @@ export async function listCampaignInsights(
 		});
 
 		const url = `${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`;
-		console.log('[TIKTOK-ADS-DEBUG] Sending GET report request for', advertiserId);
 
-		let res: Response;
-		try {
-			res = await fetch(url, {
-				headers: { 'Access-Token': accessToken }
-			});
-		} catch (fetchErr) {
-			console.error('[TIKTOK-ADS-DEBUG] Fetch failed:', fetchErr);
-			throw fetchErr;
-		}
+		const res = await fetch(url, {
+			headers: { 'Access-Token': accessToken }
+		});
 
 		const responseText = await res.text();
-		console.log('[TIKTOK-ADS-DEBUG] Response status:', res.status, 'body preview:', responseText.slice(0, 500));
-
 		let json: any;
 		try {
 			json = JSON.parse(responseText);
 		} catch {
-			console.error('[TIKTOK-ADS-DEBUG] Failed to parse JSON. Full response:', responseText.slice(0, 2000));
 			throw new Error(`TikTok API returned non-JSON response (HTTP ${res.status}): ${responseText.slice(0, 200)}`);
 		}
-		console.log('[TIKTOK-ADS-DEBUG] API response code:', json.code, 'message:', json.message, 'rows:', json.data?.list?.length ?? 0);
 
 		if (json.code !== 0) {
-			console.error('[TIKTOK-ADS-DEBUG] API ERROR:', JSON.stringify(json).slice(0, 1000));
 			logError('tiktok-ads', `Campaign insights API error for ${advertiserId}`, {
 				metadata: { errorMessage: json.message, errorCode: json.code, requestId: json.request_id }
 			});
@@ -327,7 +314,8 @@ export async function listCampaignInsights(
 		const m = row.metrics || {};
 		const d = row.dimensions || {};
 		const spend = parseFloat(m.spend || '0');
-		const conversions = parseInt(m.conversion || '0');
+		// Use 'conversion' first, fall back to 'complete_payment' for lead gen campaigns
+		const conversions = parseInt(m.conversion || '0') || parseInt(m.complete_payment || '0');
 
 		return {
 			campaignId: String(d.campaign_id || ''),
@@ -473,7 +461,6 @@ export async function listDemographicInsights(
 		try {
 			json = JSON.parse(text);
 		} catch {
-			console.error('[TIKTOK-ADS-DEBUG] Demographics parse error for', dimension, text.slice(0, 300));
 			return [];
 		}
 
@@ -505,14 +492,16 @@ export async function listDemographicInsights(
 	}
 
 	// Normalize labels
-	const GENDER_MAP: Record<string, string> = { MALE: 'male', FEMALE: 'female', UNKNOWN: 'unknown' };
+	const GENDER_MAP: Record<string, string> = { MALE: 'male', FEMALE: 'female', UNKNOWN: 'unknown', NONE: 'unknown', '': 'unknown' };
 	const AGE_MAP: Record<string, string> = {
 		AGE_13_17: '13-17', AGE_18_24: '18-24', AGE_25_34: '25-34',
 		AGE_35_44: '35-44', AGE_45_54: '45-54', AGE_55_100: '55+',
 		AGE_UNKNOWN: 'unknown'
 	};
 	const DEVICE_MAP: Record<string, string> = {
-		ANDROID: 'mobile_app', IOS: 'mobile_app', PC: 'desktop', UNKNOWN: 'unknown'
+		ANDROID: 'mobile_app', IOS: 'mobile_app', IPHONE: 'mobile_app', IPAD: 'mobile_app',
+		PC: 'desktop', DESKTOP: 'desktop', UNKNOWN: 'unknown',
+		MOBILE_APP: 'mobile_app', MOBILE_WEB: 'mobile_web'
 	};
 
 	// Romanian province ID → name mapping (TikTok Ads targeting IDs)
@@ -600,7 +589,7 @@ export async function listDemographicInsights(
 	// Merge Android+iOS into mobile_app for device platform
 	const deviceMap = new Map<string, DemographicSegment>();
 	for (const s of deviceSegments) {
-		const label = DEVICE_MAP[s.label] || s.label.toLowerCase();
+		const label = DEVICE_MAP[s.label.toUpperCase()] || DEVICE_MAP[s.label] || s.label.toLowerCase();
 		const existing = deviceMap.get(label);
 		if (existing) {
 			existing.spend += s.spend;

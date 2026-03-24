@@ -155,7 +155,7 @@
 		<canvas bind:this={canvas}></canvas>
 	{:else if !hasConversions}
 		<div class="flex h-full items-center justify-center">
-			<p class="text-muted-foreground">Nu sunt date de conversii disponibile (verifică configurarea Pixel-ului Facebook)</p>
+			<p class="text-muted-foreground">Nu sunt date de conversii disponibile</p>
 		</div>
 	{:else}
 		<div class="flex h-full items-center justify-center">
