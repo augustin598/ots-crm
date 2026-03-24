@@ -52,6 +52,7 @@ export interface TiktokAdsCampaignInfo {
 	campaignName: string;
 	status: string;
 	objective: string;
+	optimizationGoal: string;
 	dailyBudget: string | null;
 	lifetimeBudget: string | null;
 }
@@ -72,6 +73,7 @@ export interface TiktokDemographicBreakdown {
 }
 
 /** Map TikTok objective types to result labels */
+/** Fallback: campaign objective → result label (used when optimization_goal is unknown) */
 export const TIKTOK_OBJECTIVE_MAP: Record<string, { label: string; cpaLabel: string }> = {
 	TRAFFIC: { label: 'Click-uri', cpaLabel: 'Cost/click' },
 	CONVERSIONS: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
@@ -84,6 +86,26 @@ export const TIKTOK_OBJECTIVE_MAP: Record<string, { label: string; cpaLabel: str
 	ENGAGEMENT: { label: 'Interacțiuni', cpaLabel: 'Cost/interacțiune' },
 	WEB_CONVERSIONS: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
 	CATALOG_SALES: { label: 'Vânzări catalog', cpaLabel: 'Cost/vânzare' },
+};
+
+/** Ad group optimization_goal → precise result label (more accurate than objective) */
+export const OPTIMIZATION_GOAL_MAP: Record<string, { label: string; cpaLabel: string }> = {
+	CLICK: { label: 'Click-uri', cpaLabel: 'Cost/click' },
+	CONVERT: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
+	INSTALL: { label: 'Instalări app', cpaLabel: 'Cost/instalare' },
+	SHOW: { label: 'Impresii', cpaLabel: 'Cost/1000 impresii' },
+	REACH: { label: 'Reach', cpaLabel: 'Cost/1000 persoane' },
+	VIDEO_VIEW: { label: 'Vizualizări video', cpaLabel: 'Cost/vizualizare' },
+	LANDING_PAGE_VIEW: { label: 'Vizite pagină', cpaLabel: 'Cost/vizită' },
+	ENGAGED_VIEW: { label: 'Vizualizări 6s+', cpaLabel: 'Cost/vizualizare' },
+	LEAD_GENERATION: { label: 'Lead-uri', cpaLabel: 'Cost/lead' },
+	VALUE: { label: 'Conversii (valoare)', cpaLabel: 'Cost/conversie' },
+	IN_APP_EVENT: { label: 'Evenimente app', cpaLabel: 'Cost/eveniment' },
+	COMPLETE_PAYMENT: { label: 'Achiziții', cpaLabel: 'Cost/achiziție' },
+	SUBSCRIBE: { label: 'Abonamente', cpaLabel: 'Cost/abonament' },
+	ADD_TO_CART: { label: 'Adăugări coș', cpaLabel: 'Cost/adăugare' },
+	MT_LIVE_STREAMING_ROOM: { label: 'Vizite live', cpaLabel: 'Cost/vizită live' },
+	PRODUCT_CATALOG_SALES: { label: 'Vânzări catalog', cpaLabel: 'Cost/vânzare' },
 };
 
 /**
@@ -425,6 +447,7 @@ export async function listCampaigns(
 				campaignName: c.campaign_name || `Campaign ${c.campaign_id}`,
 				status: STATUS_MAP[rawStatus] || rawStatus,
 				objective: c.objective_type || c.objective || '',
+				optimizationGoal: '', // filled from ad group level
 				dailyBudget: (budgetMode === 'BUDGET_MODE_DAY' || budgetMode === 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET') ? budget : null,
 				lifetimeBudget: budgetMode === 'BUDGET_MODE_TOTAL' ? budget : null
 			});
@@ -442,7 +465,7 @@ export async function listCampaigns(
 			const adgroupParams = new URLSearchParams({
 				advertiser_id: advertiserId,
 				page_size: '1000',
-				fields: JSON.stringify(['adgroup_id', 'campaign_id', 'budget', 'budget_mode'])
+				fields: JSON.stringify(['adgroup_id', 'campaign_id', 'budget', 'budget_mode', 'optimization_goal'])
 			});
 			const adgroupRes = await fetch(`${TIKTOK_API_URL}/adgroup/get/?${adgroupParams.toString()}`, {
 				headers: { 'Access-Token': accessToken }
@@ -453,7 +476,20 @@ export async function listCampaigns(
 				const adgroups = adgroupJson.data.list;
 				if (adgroups.length > 0) {
 					const sample = adgroups[0];
-					logInfo('tiktok-ads', `Ad groups: ${adgroups.length} found. Sample: budget=${sample.budget}, budget_mode=${sample.budget_mode}, campaign_id=${sample.campaign_id}`);
+					logInfo('tiktok-ads', `Ad groups: ${adgroups.length} found. Sample: budget=${sample.budget}, budget_mode=${sample.budget_mode}, optimization_goal=${sample.optimization_goal}, campaign_id=${sample.campaign_id}`);
+				}
+
+				// Apply optimization_goal from first ad group to ALL campaigns
+				const campaignGoalMap = new Map<string, string>();
+				for (const ag of adgroups) {
+					const cid = String(ag.campaign_id);
+					if (!campaignGoalMap.has(cid) && ag.optimization_goal) {
+						campaignGoalMap.set(cid, ag.optimization_goal);
+					}
+				}
+				for (const campaign of allCampaigns) {
+					const goal = campaignGoalMap.get(campaign.campaignId);
+					if (goal) campaign.optimizationGoal = goal;
 				}
 
 				// Group ad groups by campaign_id and sum budgets

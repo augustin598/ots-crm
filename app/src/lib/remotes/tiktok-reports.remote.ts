@@ -5,7 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/tiktok-ads/auth';
-import { listCampaignInsights, listCampaigns, listDemographicInsights, TIKTOK_OBJECTIVE_MAP } from '$lib/server/tiktok-ads/client';
+import { listCampaignInsights, listCampaigns, listDemographicInsights, TIKTOK_OBJECTIVE_MAP, OPTIMIZATION_GOAL_MAP } from '$lib/server/tiktok-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
 
@@ -196,19 +196,20 @@ export const getTiktokCampaignInsights = query(
 				)
 			]);
 
-			// Build campaign name + objective map
-			const campaignInfoMap = new Map<string, { name: string; objective: string }>();
+			// Build campaign name + objective + optimization goal map
+			const campaignInfoMap = new Map<string, { name: string; objective: string; optimizationGoal: string }>();
 			for (const c of campaigns) {
-				campaignInfoMap.set(c.campaignId, { name: c.campaignName, objective: c.objective });
+				campaignInfoMap.set(c.campaignId, { name: c.campaignName, objective: c.objective, optimizationGoal: c.optimizationGoal });
 			}
 
-			// Enrich insights with campaign names and objective-based result types
+			// Enrich insights — optimization_goal (ad group level) takes priority over objective (campaign level)
 			for (const insight of insights) {
 				const info = campaignInfoMap.get(insight.campaignId);
 				if (info) {
 					insight.campaignName = info.name;
 					insight.objective = info.objective;
-					const goalDef = TIKTOK_OBJECTIVE_MAP[info.objective];
+					// Prefer ad group optimization_goal for precise label, fallback to campaign objective
+					const goalDef = OPTIMIZATION_GOAL_MAP[info.optimizationGoal] || TIKTOK_OBJECTIVE_MAP[info.objective];
 					if (goalDef) {
 						insight.resultType = goalDef.label;
 						insight.cpaLabel = goalDef.cpaLabel;
