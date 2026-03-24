@@ -18,6 +18,74 @@ export interface TiktokAdsInsightData {
 	dateStop: string; // "2026-02-28"
 }
 
+export interface TiktokAdsCampaignInsight {
+	campaignId: string;
+	campaignName: string;
+	objective: string;
+	spend: string;
+	impressions: string;
+	reach: string;
+	frequency: string;
+	clicks: string;
+	cpc: string;
+	cpm: string;
+	ctr: string;
+	conversions: number;
+	costPerConversion: number;
+	resultType: string;
+	cpaLabel: string;
+	likes: number;
+	comments: number;
+	shares: number;
+	follows: number;
+	profileVisits: number;
+	videoViewsP25: number;
+	videoViewsP50: number;
+	videoViewsP75: number;
+	videoViewsP100: number;
+	dateStart: string;
+	dateStop: string;
+}
+
+export interface TiktokAdsCampaignInfo {
+	campaignId: string;
+	campaignName: string;
+	status: string;
+	objective: string;
+	dailyBudget: string | null;
+	lifetimeBudget: string | null;
+}
+
+export interface DemographicSegment {
+	label: string;
+	spend: number;
+	impressions: number;
+	clicks: number;
+	results: number;
+}
+
+export interface TiktokDemographicBreakdown {
+	gender: DemographicSegment[];
+	age: DemographicSegment[];
+	region: DemographicSegment[];
+	devicePlatform: DemographicSegment[];
+}
+
+/** Map TikTok objective types to result labels */
+export const TIKTOK_OBJECTIVE_MAP: Record<string, { label: string; cpaLabel: string }> = {
+	TRAFFIC: { label: 'Click-uri', cpaLabel: 'Cost/click' },
+	CONVERSIONS: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
+	APP_INSTALL: { label: 'Instalări app', cpaLabel: 'Cost/instalare' },
+	APP_PROMOTION: { label: 'Instalări app', cpaLabel: 'Cost/instalare' },
+	LEAD_GENERATION: { label: 'Lead-uri', cpaLabel: 'Cost/lead' },
+	VIDEO_VIEWS: { label: 'Vizualizări video', cpaLabel: 'Cost/vizualizare' },
+	REACH: { label: 'Reach', cpaLabel: 'Cost/1000 persoane' },
+	PRODUCT_SALES: { label: 'Vânzări', cpaLabel: 'Cost/vânzare' },
+	ENGAGEMENT: { label: 'Interacțiuni', cpaLabel: 'Cost/interacțiune' },
+	WEB_CONVERSIONS: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
+	CATALOG_SALES: { label: 'Vânzări catalog', cpaLabel: 'Cost/vânzare' },
+};
+
 /**
  * List all advertiser accounts authorized via OAuth.
  * GET /open_api/v1.3/oauth2/advertiser/get/
@@ -177,6 +245,290 @@ export async function listAdvertiserInsights(
 		metadata: { startDate, endDate }
 	});
 	return insights;
+}
+
+/**
+ * Fetch campaign-level daily reporting data for an advertiser.
+ * POST /open_api/v1.3/report/integrated/get/
+ */
+export async function listCampaignInsights(
+	advertiserId: string,
+	accessToken: string,
+	startDate: string,
+	endDate: string
+): Promise<TiktokAdsCampaignInsight[]> {
+	logInfo('tiktok-ads', `Fetching campaign insights for ${advertiserId}`, { metadata: { startDate, endDate } });
+
+	const allRows: any[] = [];
+	let page = 1;
+	const pageSize = 1000;
+
+	while (true) {
+		const body = {
+			advertiser_id: advertiserId,
+			report_type: 'BASIC',
+			dimensions: ['campaign_id', 'stat_time_day'],
+			metrics: [
+				'spend', 'impressions', 'clicks', 'conversion',
+				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
+				'reach', 'frequency',
+				'likes', 'comments', 'shares', 'follows', 'profile_visits',
+				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
+			],
+			data_level: 'AUCTION_CAMPAIGN',
+			start_date: startDate,
+			end_date: endDate,
+			page_size: pageSize,
+			page
+		};
+
+		const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
+			method: 'POST',
+			headers: {
+				'Access-Token': accessToken,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(body)
+		});
+
+		const json = await res.json();
+
+		if (json.code !== 0) {
+			logError('tiktok-ads', `Campaign insights API error for ${advertiserId}`, {
+				metadata: { errorMessage: json.message, errorCode: json.code }
+			});
+			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
+		}
+
+		const rows = json.data?.list || [];
+		allRows.push(...rows);
+
+		const totalNumber = json.data?.page_info?.total_number || 0;
+		if (allRows.length >= totalNumber || rows.length < pageSize) break;
+		page++;
+	}
+
+	const insights: TiktokAdsCampaignInsight[] = allRows.map(row => {
+		const m = row.metrics || {};
+		const d = row.dimensions || {};
+		const spend = parseFloat(m.spend || '0');
+		const conversions = parseInt(m.conversion || '0');
+
+		return {
+			campaignId: String(d.campaign_id || ''),
+			campaignName: '', // filled later from listCampaigns
+			objective: '',
+			spend: m.spend || '0',
+			impressions: m.impressions || '0',
+			reach: m.reach || '0',
+			frequency: m.frequency || '0',
+			clicks: m.clicks || '0',
+			cpc: m.cpc || '0',
+			cpm: m.cpm || '0',
+			ctr: m.ctr || '0',
+			conversions,
+			costPerConversion: conversions > 0 ? spend / conversions : 0,
+			resultType: '',
+			cpaLabel: 'CPA',
+			likes: parseInt(m.likes || '0'),
+			comments: parseInt(m.comments || '0'),
+			shares: parseInt(m.shares || '0'),
+			follows: parseInt(m.follows || '0'),
+			profileVisits: parseInt(m.profile_visits || '0'),
+			videoViewsP25: parseInt(m.video_views_p25 || '0'),
+			videoViewsP50: parseInt(m.video_views_p50 || '0'),
+			videoViewsP75: parseInt(m.video_views_p75 || '0'),
+			videoViewsP100: parseInt(m.video_views_p100 || '0'),
+			dateStart: d.stat_time_day || startDate,
+			dateStop: d.stat_time_day || endDate
+		};
+	});
+
+	logInfo('tiktok-ads', `Got ${insights.length} campaign insight rows for ${advertiserId}`);
+	return insights;
+}
+
+/**
+ * List campaigns for an advertiser with status, budget, and objective info.
+ * GET /open_api/v1.3/campaign/get/
+ */
+export async function listCampaigns(
+	advertiserId: string,
+	accessToken: string
+): Promise<TiktokAdsCampaignInfo[]> {
+	logInfo('tiktok-ads', `Listing campaigns for ${advertiserId}`);
+
+	const allCampaigns: TiktokAdsCampaignInfo[] = [];
+	let page = 1;
+	const pageSize = 1000;
+
+	// Normalize TikTok status to ACTIVE/PAUSED/DELETED
+	const STATUS_MAP: Record<string, string> = {
+		CAMPAIGN_STATUS_ENABLE: 'ACTIVE',
+		CAMPAIGN_STATUS_DISABLE: 'PAUSED',
+		CAMPAIGN_STATUS_DELETE: 'DELETED',
+		CAMPAIGN_STATUS_ADVERTISER_AUDIT_DENY: 'REJECTED',
+		CAMPAIGN_STATUS_ADVERTISER_AUDIT: 'IN_REVIEW',
+		ENABLE: 'ACTIVE',
+		DISABLE: 'PAUSED',
+		DELETE: 'DELETED'
+	};
+
+	while (true) {
+		const params = new URLSearchParams({
+			advertiser_id: advertiserId,
+			page_size: String(pageSize),
+			page: String(page)
+		});
+
+		const res = await fetch(`${TIKTOK_API_URL}/campaign/get/?${params.toString()}`, {
+			headers: { 'Access-Token': accessToken }
+		});
+
+		const json = await res.json();
+
+		if (json.code !== 0) {
+			logError('tiktok-ads', `Campaigns API error for ${advertiserId}`, {
+				metadata: { errorMessage: json.message, errorCode: json.code }
+			});
+			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
+		}
+
+		const list = json.data?.list || [];
+		for (const c of list) {
+			const rawStatus = c.operation_status || c.secondary_status || c.status || '';
+			const budgetMode = c.budget_mode || '';
+			const budget = c.budget ? String(c.budget) : null;
+
+			allCampaigns.push({
+				campaignId: String(c.campaign_id),
+				campaignName: c.campaign_name || `Campaign ${c.campaign_id}`,
+				status: STATUS_MAP[rawStatus] || rawStatus,
+				objective: c.objective_type || c.objective || '',
+				dailyBudget: budgetMode === 'BUDGET_MODE_DAY' ? budget : null,
+				lifetimeBudget: budgetMode === 'BUDGET_MODE_TOTAL' ? budget : null
+			});
+		}
+
+		const totalNumber = json.data?.page_info?.total_number || 0;
+		if (allCampaigns.length >= totalNumber || list.length < pageSize) break;
+		page++;
+	}
+
+	logInfo('tiktok-ads', `Found ${allCampaigns.length} campaigns for ${advertiserId}`);
+	return allCampaigns;
+}
+
+/**
+ * Fetch demographic breakdowns (gender, age, country, platform) for an advertiser.
+ * Makes 4 parallel API calls, one per breakdown type.
+ */
+export async function listDemographicInsights(
+	advertiserId: string,
+	accessToken: string,
+	startDate: string,
+	endDate: string,
+	campaignIds?: string[]
+): Promise<TiktokDemographicBreakdown> {
+	logInfo('tiktok-ads', `Fetching demographics for ${advertiserId}`, { metadata: { startDate, endDate } });
+
+	async function fetchBreakdown(dimension: string): Promise<any[]> {
+		const body: any = {
+			advertiser_id: advertiserId,
+			report_type: 'AUDIENCE',
+			dimensions: [dimension],
+			metrics: ['spend', 'impressions', 'clicks', 'conversion'],
+			data_level: 'AUCTION_ADVERTISER',
+			start_date: startDate,
+			end_date: endDate,
+			page_size: 1000
+		};
+
+		if (campaignIds && campaignIds.length > 0) {
+			body.filters = [{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify(campaignIds) }];
+		}
+
+		const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
+			method: 'POST',
+			headers: {
+				'Access-Token': accessToken,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(body)
+		});
+
+		const json = await res.json();
+		if (json.code !== 0) {
+			logError('tiktok-ads', `Demographics API error (${dimension})`, {
+				metadata: { errorMessage: json.message, errorCode: json.code }
+			});
+			return [];
+		}
+
+		return json.data?.list || [];
+	}
+
+	function parseSegments(rows: any[], dimensionKey: string): DemographicSegment[] {
+		const byLabel = new Map<string, DemographicSegment>();
+
+		for (const row of rows) {
+			const label = row.dimensions?.[dimensionKey] || 'unknown';
+			const m = row.metrics || {};
+			const existing = byLabel.get(label) || { label, spend: 0, impressions: 0, clicks: 0, results: 0 };
+			existing.spend += parseFloat(m.spend || '0');
+			existing.impressions += parseInt(m.impressions || '0');
+			existing.clicks += parseInt(m.clicks || '0');
+			existing.results += parseInt(m.conversion || '0');
+			byLabel.set(label, existing);
+		}
+
+		return Array.from(byLabel.values()).sort((a, b) => b.spend - a.spend);
+	}
+
+	// Normalize labels
+	const GENDER_MAP: Record<string, string> = { MALE: 'male', FEMALE: 'female', UNKNOWN: 'unknown' };
+	const AGE_MAP: Record<string, string> = {
+		AGE_13_17: '13-17', AGE_18_24: '18-24', AGE_25_34: '25-34',
+		AGE_35_44: '35-44', AGE_45_54: '45-54', AGE_55_100: '55+',
+		AGE_UNKNOWN: 'unknown'
+	};
+	const DEVICE_MAP: Record<string, string> = {
+		ANDROID: 'mobile_app', IOS: 'mobile_app', PC: 'desktop', UNKNOWN: 'unknown'
+	};
+
+	const [genderRows, ageRows, countryRows, platformRows] = await Promise.all([
+		fetchBreakdown('gender'),
+		fetchBreakdown('age'),
+		fetchBreakdown('country_code'),
+		fetchBreakdown('platform')
+	]);
+
+	const genderSegments = parseSegments(genderRows, 'gender').map(s => ({ ...s, label: GENDER_MAP[s.label] || s.label.toLowerCase() }));
+	const ageSegments = parseSegments(ageRows, 'age').map(s => ({ ...s, label: AGE_MAP[s.label] || s.label.replace('AGE_', '').replace('_', '-') }));
+	const regionSegments = parseSegments(countryRows, 'country_code');
+	const deviceSegments = parseSegments(platformRows, 'platform');
+
+	// Merge Android+iOS into mobile_app for device platform
+	const deviceMap = new Map<string, DemographicSegment>();
+	for (const s of deviceSegments) {
+		const label = DEVICE_MAP[s.label] || s.label.toLowerCase();
+		const existing = deviceMap.get(label);
+		if (existing) {
+			existing.spend += s.spend;
+			existing.impressions += s.impressions;
+			existing.clicks += s.clicks;
+			existing.results += s.results;
+		} else {
+			deviceMap.set(label, { ...s, label });
+		}
+	}
+
+	return {
+		gender: genderSegments,
+		age: ageSegments,
+		region: regionSegments,
+		devicePlatform: Array.from(deviceMap.values()).sort((a, b) => b.spend - a.spend)
+	};
 }
 
 /**
