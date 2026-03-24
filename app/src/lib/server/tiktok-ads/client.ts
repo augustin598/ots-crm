@@ -299,7 +299,16 @@ export async function listCampaignInsights(
 			throw fetchErr;
 		}
 
-		const json = await res.json();
+		const responseText = await res.text();
+		console.log('[TIKTOK-ADS-DEBUG] Response status:', res.status, 'body preview:', responseText.slice(0, 500));
+
+		let json: any;
+		try {
+			json = JSON.parse(responseText);
+		} catch {
+			console.error('[TIKTOK-ADS-DEBUG] Failed to parse JSON. Full response:', responseText.slice(0, 2000));
+			throw new Error(`TikTok API returned non-JSON response (HTTP ${res.status}): ${responseText.slice(0, 200)}`);
+		}
 		console.log('[TIKTOK-ADS-DEBUG] API response code:', json.code, 'message:', json.message, 'rows:', json.data?.list?.length ?? 0);
 
 		if (json.code !== 0) {
