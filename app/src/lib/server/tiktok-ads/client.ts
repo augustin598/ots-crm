@@ -522,51 +522,49 @@ export async function listDemographicInsights(
 		MOBILE_APP: 'mobile_app', MOBILE_WEB: 'mobile_web'
 	};
 
-	// Romanian province ID → name mapping (TikTok Ads targeting IDs)
-	// Only confirmed IDs — unknown IDs are logged for future addition
-	const ROMANIA_PROVINCES: Record<string, string> = {
-		'665849': 'Suceava', '672460': 'Neamț', '684039': 'Botoșani',
-	};
-
-	// Resolve province IDs to names — try TikTok API first, fall back to hardcoded map
+	/**
+	 * Resolve province IDs to names via TikTok /tool/targeting/info/ API.
+	 * Docs: https://business-api.tiktok.com/portal/docs?id=1740245588498433
+	 */
 	async function resolveProvinceNames(provinceIds: string[]): Promise<Map<string, string>> {
 		const nameMap = new Map<string, string>();
 		if (provinceIds.length === 0) return nameMap;
 
-		// Try TikTok targeting search API for each unknown ID
-		const unknownIds = provinceIds.filter(id => !ROMANIA_PROVINCES[id]);
-		if (unknownIds.length > 0) {
-			try {
-				for (const locationId of unknownIds.slice(0, 10)) {
-					const params = new URLSearchParams({
-						advertiser_id: advertiserId,
-						location_types: JSON.stringify(['PROVINCE']),
-						keyword: locationId,
-						language: 'ro'
-					});
-					const res = await fetch(`${TIKTOK_API_URL}/tool/targeting/search/?${params.toString()}`, {
-						headers: { 'Access-Token': accessToken }
-					});
-					const text = await res.text();
-					try {
-						const json = JSON.parse(text);
-						if (json.code === 0 && json.data?.list) {
-							for (const loc of json.data.list) {
-								if (String(loc.id) === locationId || String(loc.location_id) === locationId) {
-									nameMap.set(locationId, loc.name || loc.display_name || locationId);
-								}
-							}
-						}
-					} catch { /* ignore parse errors */ }
-				}
-			} catch { /* ignore API errors */ }
-		}
+		try {
+			const res = await fetch(`${TIKTOK_API_URL}/tool/targeting/info/`, {
+				method: 'POST',
+				headers: {
+					'Access-Token': accessToken,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					advertiser_id: advertiserId,
+					targeting_ids: provinceIds,
+					scene: 'GEO',
+					objective_type: 'TRAFFIC',
+					placements: ['PLACEMENT_TIKTOK']
+				})
+			});
 
-		// Apply hardcoded mapping for known Romanian provinces
-		for (const id of provinceIds) {
-			if (!nameMap.has(id) && ROMANIA_PROVINCES[id]) {
-				nameMap.set(id, ROMANIA_PROVINCES[id]);
+			const json = await res.json();
+			if (json.code === 0 && json.data?.list) {
+				for (const item of json.data.list) {
+					const id = String(item.id || item.targeting_id || item.location_id || '');
+					const name = item.name || item.display_name || '';
+					if (id && name) {
+						nameMap.set(id, name);
+					}
+				}
+				logInfo('tiktok-ads', `Resolved ${nameMap.size}/${provinceIds.length} province names via API`);
+			} else {
+				logError('tiktok-ads', `Province resolution API error`, {
+					metadata: { errorCode: json.code, errorMessage: json.message }
+				});
 			}
+		} catch (e) {
+			logError('tiktok-ads', `Province resolution failed`, {
+				metadata: { error: e instanceof Error ? e.message : String(e) }
+			});
 		}
 
 		return nameMap;
