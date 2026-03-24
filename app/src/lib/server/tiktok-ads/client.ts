@@ -450,12 +450,24 @@ export async function listCampaigns(
 			const adgroupJson = await adgroupRes.json();
 
 			if (adgroupJson.code === 0 && adgroupJson.data?.list) {
+				const adgroups = adgroupJson.data.list;
+				// Log raw ad group data for diagnosis
+				if (adgroups.length > 0) {
+					const sample = adgroups[0];
+					logInfo('tiktok-ads', `Ad groups: ${adgroups.length} found. Sample: budget=${sample.budget}, budget_mode=${sample.budget_mode}, campaign_id=${sample.campaign_id}`);
+				} else {
+					logInfo('tiktok-ads', `Ad groups: 0 found for ${advertiserId}`);
+				}
+
 				// Build map: campaignId → first adgroup budget
 				const adgroupBudgetMap = new Map<string, { budget: string; mode: string }>();
-				for (const ag of adgroupJson.data.list) {
+				for (const ag of adgroups) {
 					const cid = String(ag.campaign_id);
-					if (!adgroupBudgetMap.has(cid) && ag.budget && ag.budget_mode && ag.budget_mode !== 'BUDGET_MODE_INFINITE') {
-						adgroupBudgetMap.set(cid, { budget: String(ag.budget), mode: ag.budget_mode });
+					const budget = ag.budget ? String(ag.budget) : '';
+					const mode = ag.budget_mode || '';
+					// Accept any budget that's set (including INFINITE with a value > 0)
+					if (!adgroupBudgetMap.has(cid) && budget && parseFloat(budget) > 0 && mode && mode !== 'BUDGET_MODE_INFINITE') {
+						adgroupBudgetMap.set(cid, { budget, mode });
 					}
 				}
 
@@ -472,9 +484,11 @@ export async function listCampaigns(
 				}
 
 				const resolved = noBudgetCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget).length;
-				if (resolved > 0) {
-					logInfo('tiktok-ads', `Resolved ${resolved} campaign budgets from ad group level`);
-				}
+				logInfo('tiktok-ads', `Ad group budget resolution: ${resolved}/${noBudgetCampaigns.length} campaigns resolved`);
+			} else {
+				logError('tiktok-ads', `Ad group API error`, {
+					metadata: { errorCode: adgroupJson.code, errorMessage: adgroupJson.message }
+				});
 			}
 		} catch (e) {
 			logError('tiktok-ads', `Ad group budget fetch failed`, {
