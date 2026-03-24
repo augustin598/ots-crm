@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getTask } from '$lib/remotes/tasks.remote';
-	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment } from '$lib/remotes/task-comments.remote';
+	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getCommentAttachmentUrl } from '$lib/remotes/task-comments.remote';
+	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskMaterials } from '$lib/remotes/task-materials.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -121,6 +122,9 @@
 	let editingContent = $state('');
 	let editLoading = $state(false);
 	let descExpanded = $state(false);
+	let attachmentUrls = $state<Record<string, string>>({});
+	let lightboxSrc = $state('');
+	let lightboxOpen = $state(false);
 	let newCommentEditor: RichEditor | null = $state(null);
 	let editCommentEditor: RichEditor | null = $state(null);
 	let replyingToId = $state<string | null>(null);
@@ -182,6 +186,23 @@
 			case 'assigned': return 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400';
 			default: return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
 		}
+	}
+
+	async function loadAttachmentUrl(commentId: string) {
+		if (attachmentUrls[commentId]) return;
+		try {
+			const result = await getCommentAttachmentUrl(commentId).current;
+			if (result?.url) {
+				attachmentUrls = { ...attachmentUrls, [commentId]: result.url };
+			}
+		} catch {
+			// Silently fail
+		}
+	}
+
+	function openLightbox(src: string) {
+		lightboxSrc = src;
+		lightboxOpen = true;
 	}
 
 	async function handleEditComment(commentId: string) {
@@ -440,6 +461,24 @@
 												<div class="comment-display text-sm leading-relaxed">{@html comment.content}</div>
 											</div>
 										{/if}
+										{#if comment.attachmentPath}
+											{@const url = attachmentUrls[comment.id]}
+											{#if !url}
+												{(loadAttachmentUrl(comment.id), '')}
+												<div class="mt-2 h-32 w-48 bg-muted rounded-lg animate-pulse"></div>
+											{:else}
+												<button
+													class="mt-2 block cursor-pointer"
+													onclick={() => openLightbox(url)}
+												>
+													<img
+														src={url}
+														alt={comment.attachmentFileName || 'Attachment'}
+														class="max-h-48 rounded-lg border hover:opacity-90 transition-opacity"
+													/>
+												</button>
+											{/if}
+										{/if}
 
 										<!-- Replies -->
 										{#if replies.length > 0}
@@ -658,3 +697,9 @@
 		</div>
 	{/if}
 </div>
+
+<ImageLightbox
+	src={lightboxSrc}
+	open={lightboxOpen}
+	onClose={() => (lightboxOpen = false)}
+/>
