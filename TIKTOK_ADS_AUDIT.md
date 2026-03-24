@@ -33,16 +33,18 @@ app/src/lib/utils/tiktok-column-presets.ts   ← Column definitions for table
 - **Endpoint:** `GET /open_api/v1.3/report/integrated/get/`
 - **Method:** GET (POST returnează 405 Method Not Allowed)
 - **Params:** advertiser_id, report_type=BASIC, dimensions=["campaign_id","stat_time_day"], data_level=AUCTION_CAMPAIGN
-- **Metrici cerute:** spend, impressions, clicks, results, cost_per_result, result_rate, conversions, cost_per_conversion, cpc, cpm, ctr, reach, frequency, form_submission_onsite, complete_payment, real_time_results, likes, comments, shares, follows, profile_visits, video_views_p25/p50/p75/p100
+- **Metrici cerute:** spend, impressions, clicks, result, cost_per_result, result_rate, conversion, cost_per_conversion, cpc, cpm, ctr, reach, frequency, complete_payment, real_time_result, likes, comments, shares, follows, profile_visits, video_views_p25/p50/p75/p100
+- **ATENȚIE:** TikTok API folosește forme SINGULARE: `result` (nu `results`), `conversion` (nu `conversions`), `real_time_result` (nu `real_time_results`). Formele plurale sunt ignorate silențios.
 - **Date format:** TikTok returnează `stat_time_day` ca `"2026-03-01 00:00:00"` — trebuie `.slice(0, 10)` pentru YYYY-MM-DD
 
 ### Metrici Results vs Conversions (IMPORTANT)
 - **`results`** = primary optimization goal (lead-uri pentru LEAD_GENERATION, achiziții pentru CONVERSIONS, click-uri pentru TRAFFIC)
 - **`conversions`** = secondary goal (diferit de results!)
 - **`cost_per_result`** = cost per primary result
-- **`form_submission_onsite`** = form submissions pe TikTok Instant Forms (specific LEAD_GENERATION)
 - **`complete_payment`** = plăți finalizate (specific CONVERSIONS/PRODUCT_SALES)
-- **Fallback chain:** results → conversions → form_submission_onsite → complete_payment → real_time_results
+- **`real_time_result`** = results măsurate la momentul conversiei
+- **Fallback chain:** result → conversion → complete_payment → real_time_result
+- **IMPORTANT:** Formele SINGULARE: `result`, `conversion`, `real_time_result` (NU plurale!)
 
 ### Campaigns List
 - **Endpoint:** `GET /open_api/v1.3/campaign/get/`
@@ -113,9 +115,9 @@ Erori:
 ### Results / Conversions
 - **REZOLVAT:** Metrica corectă e `results` (primary optimization goal), NU `conversion` (secondary goal)
 - `results` returnează nr de lead-uri pentru LEAD_GENERATION, achiziții pentru CONVERSIONS, etc.
-- Fallback chain: `results → conversions → form_submission_onsite → complete_payment → real_time_results`
-- `cost_per_result` e folosit direct din API (mai precis decât spend/results calculat manual)
-- **Debug:** Verifică log-ul `Sample: results=X, conversions=X, cost_per_result=X, form_submission_onsite=X`
+- Fallback chain: `result → conversion → complete_payment → real_time_result`
+- `cost_per_result` e folosit direct din API (mai precis decât spend/result calculat manual)
+- **Debug:** Verifică log-ul `Sample: result=X, conversion=X, cost_per_result=X, complete_payment=X`
 
 ### Buget = "-"
 - TikTok API returnează `budget` și `budget_mode` pe campaign

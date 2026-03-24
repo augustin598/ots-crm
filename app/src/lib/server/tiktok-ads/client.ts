@@ -268,11 +268,11 @@ export async function listCampaignInsights(
 			dimensions: JSON.stringify(['campaign_id', 'stat_time_day']),
 			metrics: JSON.stringify([
 				'spend', 'impressions', 'clicks',
-				'results', 'cost_per_result', 'result_rate',
-				'conversions', 'cost_per_conversion',
+				'result', 'cost_per_result', 'result_rate',
+				'conversion', 'cost_per_conversion',
 				'cpc', 'cpm', 'ctr',
 				'reach', 'frequency',
-				'form_submission_onsite', 'complete_payment', 'real_time_results',
+				'complete_payment', 'real_time_result',
 				'likes', 'comments', 'shares', 'follows', 'profile_visits',
 				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
 			]),
@@ -316,13 +316,12 @@ export async function listCampaignInsights(
 		const m = row.metrics || {};
 		const d = row.dimensions || {};
 		const spend = parseFloat(m.spend || '0');
-		// `results` = primary optimization goal (leads for LEAD_GENERATION, purchases for CONVERSIONS, etc.)
-		// `conversions` = secondary goal. Fallback chain covers all objective types.
-		const conversions = parseInt(m.results || '0')
-			|| parseInt(m.conversions || '0')
-			|| parseInt(m.form_submission_onsite || '0')
+		// `result` = primary optimization goal (leads for LEAD_GENERATION, purchases for CONVERSIONS, etc.)
+		// `conversion` = secondary goal. Fallback chain covers all objective types.
+		const conversions = parseInt(m.result || '0')
+			|| parseInt(m.conversion || '0')
 			|| parseInt(m.complete_payment || '0')
-			|| parseInt(m.real_time_results || '0');
+			|| parseInt(m.real_time_result || '0');
 		const costPerResult = parseFloat(m.cost_per_result || '0');
 
 		return {
@@ -358,7 +357,7 @@ export async function listCampaignInsights(
 	// Debug: log sample row to help diagnose metric availability
 	if (allRows.length > 0) {
 		const sample = allRows[0].metrics || {};
-		logInfo('tiktok-ads', `Got ${insights.length} rows for ${advertiserId}. Sample: results=${sample.results}, conversions=${sample.conversions}, cost_per_result=${sample.cost_per_result}, form_submission_onsite=${sample.form_submission_onsite}, reach=${sample.reach}`);
+		logInfo('tiktok-ads', `Got ${insights.length} rows for ${advertiserId}. Sample: result=${sample.result}, conversion=${sample.conversion}, cost_per_result=${sample.cost_per_result}, complete_payment=${sample.complete_payment}, reach=${sample.reach}`);
 	} else {
 		logInfo('tiktok-ads', `Got 0 rows for ${advertiserId} in period ${startDate}..${endDate}`);
 	}
