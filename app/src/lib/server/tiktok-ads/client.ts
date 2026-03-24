@@ -451,40 +451,43 @@ export async function listCampaigns(
 
 			if (adgroupJson.code === 0 && adgroupJson.data?.list) {
 				const adgroups = adgroupJson.data.list;
-				// Log raw ad group data for diagnosis
 				if (adgroups.length > 0) {
 					const sample = adgroups[0];
 					logInfo('tiktok-ads', `Ad groups: ${adgroups.length} found. Sample: budget=${sample.budget}, budget_mode=${sample.budget_mode}, campaign_id=${sample.campaign_id}`);
-				} else {
-					logInfo('tiktok-ads', `Ad groups: 0 found for ${advertiserId}`);
 				}
 
-				// Build map: campaignId → first adgroup budget
-				const adgroupBudgetMap = new Map<string, { budget: string; mode: string }>();
+				// Group ad groups by campaign_id and sum budgets
+				const campaignAdgroups = new Map<string, Array<{ budget: number; mode: string }>>();
 				for (const ag of adgroups) {
 					const cid = String(ag.campaign_id);
-					const budget = ag.budget ? String(ag.budget) : '';
+					const budget = parseFloat(ag.budget || '0');
 					const mode = ag.budget_mode || '';
-					// Accept any budget that's set (including INFINITE with a value > 0)
-					if (!adgroupBudgetMap.has(cid) && budget && parseFloat(budget) > 0 && mode && mode !== 'BUDGET_MODE_INFINITE') {
-						adgroupBudgetMap.set(cid, { budget, mode });
+					if (budget > 0 && mode && mode !== 'BUDGET_MODE_INFINITE') {
+						const list = campaignAdgroups.get(cid) || [];
+						list.push({ budget, mode });
+						campaignAdgroups.set(cid, list);
 					}
 				}
 
-				// Apply adgroup budget to campaigns missing budget
+				// Apply summed ad group budgets to campaigns
 				for (const campaign of noBudgetCampaigns) {
-					const agBudget = adgroupBudgetMap.get(campaign.campaignId);
-					if (agBudget) {
-						if (agBudget.mode === 'BUDGET_MODE_DAY') {
-							campaign.dailyBudget = agBudget.budget;
-						} else if (agBudget.mode === 'BUDGET_MODE_TOTAL') {
-							campaign.lifetimeBudget = agBudget.budget;
-						}
+					const agList = campaignAdgroups.get(campaign.campaignId);
+					if (!agList || agList.length === 0) continue;
+
+					// Sum budgets by mode (daily vs lifetime)
+					const dailySum = agList.filter(a => a.mode === 'BUDGET_MODE_DAY').reduce((s, a) => s + a.budget, 0);
+					const lifetimeSum = agList.filter(a => a.mode === 'BUDGET_MODE_TOTAL').reduce((s, a) => s + a.budget, 0);
+
+					// Prefer daily budget if any ad group has it, otherwise lifetime
+					if (dailySum > 0) {
+						campaign.dailyBudget = String(dailySum);
+					} else if (lifetimeSum > 0) {
+						campaign.lifetimeBudget = String(lifetimeSum);
 					}
 				}
 
 				const resolved = noBudgetCampaigns.filter(c => c.dailyBudget || c.lifetimeBudget).length;
-				logInfo('tiktok-ads', `Ad group budget resolution: ${resolved}/${noBudgetCampaigns.length} campaigns resolved`);
+				logInfo('tiktok-ads', `Ad group budget: ${resolved}/${noBudgetCampaigns.length} campaigns resolved from ${adgroups.length} ad groups`);
 			} else {
 				logError('tiktok-ads', `Ad group API error`, {
 					metadata: { errorCode: adgroupJson.code, errorMessage: adgroupJson.message }
