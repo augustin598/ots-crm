@@ -350,7 +350,7 @@
 						<RichEditor
 							bind:this={newCommentEditor}
 							placeholder="Write a comment..."
-							minHeight="80px"
+							minHeight="120px"
 							showFooter={false}
 							users={mentionUsers}
 						/>
@@ -397,7 +397,7 @@
 												bind:this={editCommentEditor}
 												content={editingContent}
 												placeholder="Edit comment..."
-												minHeight="80px"
+												minHeight="120px"
 												showFooter={false}
 												users={mentionUsers}
 											/>
@@ -443,7 +443,7 @@
 											<RichEditor
 												bind:this={replyEditor}
 												placeholder="Write a reply..."
-												minHeight="60px"
+												minHeight="120px"
 												showFooter={false}
 												users={mentionUsers}
 											/>

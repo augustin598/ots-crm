@@ -650,7 +650,7 @@
 												bind:this={editCommentEditor}
 												content={editingContent}
 												placeholder="Edit comment..."
-												minHeight="80px"
+												minHeight="120px"
 												showFooter={false}
 												users={mentionUsers}
 											/>
@@ -716,7 +716,7 @@
 											<RichEditor
 												bind:this={replyEditor}
 												placeholder="Write a reply..."
-												minHeight="60px"
+												minHeight="120px"
 												showFooter={false}
 												users={mentionUsers}
 											/>
@@ -739,7 +739,7 @@
 						<RichEditor
 							bind:this={newCommentEditor}
 							placeholder="Add a comment... (paste an image with Ctrl+V)"
-							minHeight="80px"
+							minHeight="120px"
 							showFooter={false}
 							onPasteImage={(file) => uploadImage(file)}
 							users={mentionUsers}

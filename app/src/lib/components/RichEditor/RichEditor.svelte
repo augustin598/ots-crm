@@ -172,7 +172,7 @@
 	});
 </script>
 
-<div class={cn('rich-editor overflow-hidden rounded-lg border', className)} style="--editor-min-height: {minHeight};">
+<div class={cn('rich-editor overflow-visible rounded-lg border', className)} style="--editor-min-height: {minHeight};">
 	{#if editor && editable}
 		{#key editorRevision}
 			<Toolbar {editor} {onImageUpload} />
