@@ -33,8 +33,16 @@ app/src/lib/utils/tiktok-column-presets.ts   ← Column definitions for table
 - **Endpoint:** `GET /open_api/v1.3/report/integrated/get/`
 - **Method:** GET (POST returnează 405 Method Not Allowed)
 - **Params:** advertiser_id, report_type=BASIC, dimensions=["campaign_id","stat_time_day"], data_level=AUCTION_CAMPAIGN
-- **Metrici cerute:** spend, impressions, clicks, conversion, cpc, cpm, ctr, cost_per_conversion, reach, frequency, complete_payment, onsite_form, real_time_conversion, likes, comments, shares, follows, profile_visits, video_views_p25/p50/p75/p100
+- **Metrici cerute:** spend, impressions, clicks, results, cost_per_result, result_rate, conversions, cost_per_conversion, cpc, cpm, ctr, reach, frequency, form_submission_onsite, complete_payment, real_time_results, likes, comments, shares, follows, profile_visits, video_views_p25/p50/p75/p100
 - **Date format:** TikTok returnează `stat_time_day` ca `"2026-03-01 00:00:00"` — trebuie `.slice(0, 10)` pentru YYYY-MM-DD
+
+### Metrici Results vs Conversions (IMPORTANT)
+- **`results`** = primary optimization goal (lead-uri pentru LEAD_GENERATION, achiziții pentru CONVERSIONS, click-uri pentru TRAFFIC)
+- **`conversions`** = secondary goal (diferit de results!)
+- **`cost_per_result`** = cost per primary result
+- **`form_submission_onsite`** = form submissions pe TikTok Instant Forms (specific LEAD_GENERATION)
+- **`complete_payment`** = plăți finalizate (specific CONVERSIONS/PRODUCT_SALES)
+- **Fallback chain:** results → conversions → form_submission_onsite → complete_payment → real_time_results
 
 ### Campaigns List
 - **Endpoint:** `GET /open_api/v1.3/campaign/get/`
@@ -102,11 +110,12 @@ Erori:
 
 ## Probleme cunoscute / limitări
 
-### Conversions = 0 pentru LEAD_GENERATION
-- TikTok API returnează `conversion=0` pentru campanii LEAD_GENERATION
-- Am adăugat fallback chain: `conversion → complete_payment → onsite_form → real_time_conversion`
-- Dacă tot arată 0, e posibil ca TikTok Pixel/Events să nu fie configurat pe advertiser account
-- **Debug:** Verifică log-ul `Sample metrics:` — dacă toate sunt 0, problema e în TikTok Ads Manager (nu în cod)
+### Results / Conversions
+- **REZOLVAT:** Metrica corectă e `results` (primary optimization goal), NU `conversion` (secondary goal)
+- `results` returnează nr de lead-uri pentru LEAD_GENERATION, achiziții pentru CONVERSIONS, etc.
+- Fallback chain: `results → conversions → form_submission_onsite → complete_payment → real_time_results`
+- `cost_per_result` e folosit direct din API (mai precis decât spend/results calculat manual)
+- **Debug:** Verifică log-ul `Sample: results=X, conversions=X, cost_per_result=X, form_submission_onsite=X`
 
 ### Buget = "-"
 - TikTok API returnează `budget` și `budget_mode` pe campaign
@@ -114,11 +123,11 @@ Erori:
 - **Debug:** Verifică log-ul `Found X campaigns... Y with budget`
 - TikTok poate returna bugetul în micro-units (ex: 5000000 = 50 RON) — verifică valorile reale
 
-### Province mapping incomplet
-- Hardcoded map conține doar ~40 județe românești cu ID-uri estimate
-- ID-urile 665849=Suceava, 672460=Neamț, 684039=Botoșani sunt confirmate
-- Alte ID-uri pot fi greșite — se rezolvă pe măsură ce apar în date reale
-- Fallback: afișează ID-ul numeric dacă nu e în map
+### Province ID resolution
+- **REZOLVAT:** Province IDs se rezolvă dinamic via `POST /tool/targeting/info/` cu `scene: "GEO"`
+- Zero date hardcodate — totul vine din API-ul oficial TikTok
+- Province IDs invalide (-1, 0) sunt filtrate automat
+- IDs nerezolvate sunt logate: `Unresolved province IDs for {advertiserId}: ...`
 
 ### TikTok API Rate Limits
 - Cache server-side 5 minute (MAX_CACHE_SIZE=200 entries)

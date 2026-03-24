@@ -267,10 +267,12 @@ export async function listCampaignInsights(
 			report_type: 'BASIC',
 			dimensions: JSON.stringify(['campaign_id', 'stat_time_day']),
 			metrics: JSON.stringify([
-				'spend', 'impressions', 'clicks', 'conversion',
-				'cpc', 'cpm', 'ctr', 'cost_per_conversion',
+				'spend', 'impressions', 'clicks',
+				'results', 'cost_per_result', 'result_rate',
+				'conversions', 'cost_per_conversion',
+				'cpc', 'cpm', 'ctr',
 				'reach', 'frequency',
-				'complete_payment', 'onsite_form', 'real_time_conversion',
+				'form_submission_onsite', 'complete_payment', 'real_time_results',
 				'likes', 'comments', 'shares', 'follows', 'profile_visits',
 				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
 			]),
@@ -314,11 +316,14 @@ export async function listCampaignInsights(
 		const m = row.metrics || {};
 		const d = row.dimensions || {};
 		const spend = parseFloat(m.spend || '0');
-		// Fallback chain: conversion → complete_payment → onsite_form → real_time_conversion
-		const conversions = parseInt(m.conversion || '0')
+		// `results` = primary optimization goal (leads for LEAD_GENERATION, purchases for CONVERSIONS, etc.)
+		// `conversions` = secondary goal. Fallback chain covers all objective types.
+		const conversions = parseInt(m.results || '0')
+			|| parseInt(m.conversions || '0')
+			|| parseInt(m.form_submission_onsite || '0')
 			|| parseInt(m.complete_payment || '0')
-			|| parseInt(m.onsite_form || '0')
-			|| parseInt(m.real_time_conversion || '0');
+			|| parseInt(m.real_time_results || '0');
+		const costPerResult = parseFloat(m.cost_per_result || '0');
 
 		return {
 			campaignId: String(d.campaign_id || ''),
@@ -333,7 +338,7 @@ export async function listCampaignInsights(
 			cpm: m.cpm || '0',
 			ctr: m.ctr || '0',
 			conversions,
-			costPerConversion: conversions > 0 ? spend / conversions : 0,
+			costPerConversion: costPerResult > 0 ? costPerResult : (conversions > 0 ? spend / conversions : 0),
 			resultType: '',
 			cpaLabel: 'CPA',
 			likes: parseInt(m.likes || '0'),
@@ -353,7 +358,7 @@ export async function listCampaignInsights(
 	// Debug: log sample row to help diagnose metric availability
 	if (allRows.length > 0) {
 		const sample = allRows[0].metrics || {};
-		logInfo('tiktok-ads', `Got ${insights.length} rows for ${advertiserId}. Sample metrics: conversion=${sample.conversion}, complete_payment=${sample.complete_payment}, onsite_form=${sample.onsite_form}, reach=${sample.reach}, budget fields available in campaign API`);
+		logInfo('tiktok-ads', `Got ${insights.length} rows for ${advertiserId}. Sample: results=${sample.results}, conversions=${sample.conversions}, cost_per_result=${sample.cost_per_result}, form_submission_onsite=${sample.form_submission_onsite}, reach=${sample.reach}`);
 	} else {
 		logInfo('tiktok-ads', `Got 0 rows for ${advertiserId} in period ${startDate}..${endDate}`);
 	}
