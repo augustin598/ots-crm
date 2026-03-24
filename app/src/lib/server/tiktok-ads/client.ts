@@ -282,24 +282,30 @@ export async function listCampaignInsights(
 			page
 		};
 
-		const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
-			method: 'POST',
-			headers: {
-				'Access-Token': accessToken,
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify(body)
-		});
+		console.log('[TIKTOK-ADS-DEBUG] Sending report request for', advertiserId, 'body:', JSON.stringify(body).slice(0, 300));
+
+		let res: Response;
+		try {
+			res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/`, {
+				method: 'POST',
+				headers: {
+					'Access-Token': accessToken,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(body)
+			});
+		} catch (fetchErr) {
+			console.error('[TIKTOK-ADS-DEBUG] Fetch failed:', fetchErr);
+			throw fetchErr;
+		}
 
 		const json = await res.json();
-
-		logInfo('tiktok-ads', `Campaign insights API response code=${json.code} for ${advertiserId}`, {
-			metadata: { message: json.message, code: json.code, requestId: json.request_id }
-		});
+		console.log('[TIKTOK-ADS-DEBUG] API response code:', json.code, 'message:', json.message, 'rows:', json.data?.list?.length ?? 0);
 
 		if (json.code !== 0) {
+			console.error('[TIKTOK-ADS-DEBUG] API ERROR:', JSON.stringify(json).slice(0, 1000));
 			logError('tiktok-ads', `Campaign insights API error for ${advertiserId}`, {
-				metadata: { errorMessage: json.message, errorCode: json.code, requestId: json.request_id, fullResponse: JSON.stringify(json).slice(0, 500) }
+				metadata: { errorMessage: json.message, errorCode: json.code, requestId: json.request_id }
 			});
 			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
 		}

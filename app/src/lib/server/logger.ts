@@ -21,7 +21,8 @@ export type LogSource =
 	| 'google-ads-sync'
 	| 'meta-ads'
 	| 'invoice-downloader'
-	| 'fb-cookies';
+	| 'fb-cookies'
+	| 'tiktok-ads';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
