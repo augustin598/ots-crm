@@ -85,6 +85,8 @@
 	let bulkJson = $state('');
 	let bulkCustomerId = $state('');
 	let bulkDownloading = $state(false);
+	let filterMonth = $state(0); // 0 = all
+	let filterYear = $state(new Date().getFullYear());
 	let searchQuery = $state('');
 	let sortColumn = $state<'clientName' | 'invoiceNumber' | 'issueDate' | 'totalAmountMicros'>('issueDate');
 	let sortDirection = $state<'asc' | 'desc'>('desc');
@@ -231,14 +233,36 @@
 		}
 	}
 
+	// Available years from invoices
+	const availableYears = $derived(() => {
+		const years = new Set<number>();
+		invoices.forEach(inv => {
+			if (inv.issueDate) {
+				const d = inv.issueDate instanceof Date ? inv.issueDate : new Date(String(inv.issueDate));
+				if (!isNaN(d.getTime())) years.add(d.getUTCFullYear());
+			}
+		});
+		return [...years].sort((a, b) => b - a);
+	});
+
 	// Filter, sort, paginate
 	const filteredInvoices = $derived(
-		searchQuery.trim() === ''
-			? invoices
-			: invoices.filter((inv) =>
-				(inv.clientName || '').toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
-				(inv.invoiceNumber || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
-			)
+		invoices.filter((inv) => {
+			// Text search
+			if (searchQuery.trim() !== '') {
+				const q = searchQuery.trim().toLowerCase();
+				if (!(inv.clientName || '').toLowerCase().includes(q) && !(inv.invoiceNumber || '').toLowerCase().includes(q)) return false;
+			}
+			// Month/Year filter
+			if (filterMonth > 0 || filterYear > 0) {
+				if (!inv.issueDate) return false;
+				const d = inv.issueDate instanceof Date ? inv.issueDate : new Date(String(inv.issueDate));
+				if (isNaN(d.getTime())) return false;
+				if (filterYear > 0 && d.getUTCFullYear() !== filterYear) return false;
+				if (filterMonth > 0 && (d.getUTCMonth() + 1) !== filterMonth) return false;
+			}
+			return true;
+		})
 	);
 
 	const sortedInvoices = $derived(
@@ -480,9 +504,23 @@
 			<h2 class="text-lg font-semibold">Facturi sincronizate</h2>
 			<div class="flex items-center justify-between gap-4 rounded-md bg-muted/50 px-4 py-3">
 				<p class="text-sm text-muted-foreground whitespace-nowrap">{startIndex + 1} - {endIndex} din {totalEntries}</p>
-				<div class="relative w-64">
-					<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-					<Input type="text" placeholder="Caută..." class="pl-9" bind:value={searchQuery} oninput={() => { currentPage = 1; }} />
+				<div class="flex items-center gap-2">
+					<select bind:value={filterMonth} onchange={() => { currentPage = 1; }} class="rounded-md border px-3 py-2 text-sm bg-background">
+						<option value={0}>Toate lunile</option>
+						{#each Array.from({ length: 12 }, (_, i) => i + 1) as m}
+							<option value={m}>{new Date(2000, m - 1).toLocaleString('ro-RO', { month: 'long' })}</option>
+						{/each}
+					</select>
+					<select bind:value={filterYear} onchange={() => { currentPage = 1; }} class="rounded-md border px-3 py-2 text-sm bg-background">
+						<option value={0}>Toți anii</option>
+						{#each availableYears() as y}
+							<option value={y}>{y}</option>
+						{/each}
+					</select>
+					<div class="relative w-48">
+						<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Input type="text" placeholder="Caută..." class="pl-9" bind:value={searchQuery} oninput={() => { currentPage = 1; }} />
+					</div>
 				</div>
 			</div>
 
