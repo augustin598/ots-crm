@@ -293,20 +293,18 @@
 								<CardTitle>Acces Restricționat</CardTitle>
 								<CardDescription class="mt-2">
 									{#if data.accessRestriction.reason === 'overdue_invoice'}
-										Aveți o factură restantă de <strong>{data.accessRestriction.overdueDays}</strong> zile.
+										Aveți o factură restantă de <strong>{data.accessRestriction.overdueDays ?? 0}</strong> zile.
 										Vă rugăm să efectuați plata pentru a redobândi accesul.
 									{:else}
 										Accesul la această secțiune a fost restricționat de administrator.
 									{/if}
 								</CardDescription>
 							</CardHeader>
-							{#if data.accessRestriction.overdueInvoiceId}
-								<CardContent class="flex justify-center">
-									<Button href="/client/{tenantSlug}/invoices">
-										Vezi Facturile
-									</Button>
-								</CardContent>
-							{/if}
+							<CardContent class="flex justify-center">
+								<Button href="/client/{tenantSlug}/invoices">
+									Vezi Facturile
+								</Button>
+							</CardContent>
 						</Card>
 					</div>
 				</div>

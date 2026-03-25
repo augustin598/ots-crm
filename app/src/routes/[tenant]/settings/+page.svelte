@@ -678,7 +678,7 @@
 										{/if}
 									</div>
 								</div>
-								<Select type="single" value={client.restrictedAccess || 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
+								<Select type="single" value={client.restrictedAccess ?? 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
 									<SelectTrigger class="w-[160px]">
 										{#if client.restrictedAccess === 'forced'}
 											Restricționat

@@ -2,7 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNotNull } from 'drizzle-orm';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (
@@ -91,7 +91,8 @@ export const load: LayoutServerLoad = async (event) => {
 					and(
 						eq(table.invoice.clientId, clientRecord.id),
 						eq(table.invoice.tenantId, tenant.id),
-						eq(table.invoice.status, 'overdue')
+						eq(table.invoice.status, 'overdue'),
+						isNotNull(table.invoice.dueDate)
 					)
 				)
 				.orderBy(table.invoice.dueDate)
