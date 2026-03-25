@@ -482,8 +482,12 @@
 									<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{m.conversions} conv.</span>
 									<div class="flex justify-end">
 										{#if monthInvoice}
-											<Button variant="outline" size="sm" class="whitespace-nowrap" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
+											<Button variant="outline" size="sm" class="whitespace-nowrap w-full" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
 												<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
+											</Button>
+										{:else}
+											<Button size="sm" class="whitespace-nowrap w-full bg-orange-100 text-orange-600 border border-orange-300 hover:bg-orange-100 cursor-default" disabled>
+												<CalendarIcon class="mr-1.5 h-3.5 w-3.5" />În așteptare
 											</Button>
 										{/if}
 									</div>
