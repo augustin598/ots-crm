@@ -17,7 +17,17 @@ export interface TiktokColumnPreset {
 	columns: TiktokColumnDef[];
 }
 
+// Helper to format seconds as mm:ss or just seconds
+function formatDuration(seconds: number): string {
+	if (seconds <= 0) return '-';
+	if (seconds < 60) return `${seconds.toFixed(1)}s`;
+	const mins = Math.floor(seconds / 60);
+	const secs = Math.round(seconds % 60);
+	return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 const COL = {
+	// ---- Core Performance ----
 	results: {
 		key: 'results', label: 'Rezultate', align: 'right' as const, sortKey: 'conversions' as const,
 		getValue: (c: any) => c.conversions > 0 ? formatNumber(c.conversions) : '-',
@@ -56,6 +66,8 @@ const COL = {
 		getValue: (c: any, cur: string) => formatCurrency(c.spend, cur),
 		getTotalValue: (campaigns: any[], cur: string) => formatCurrency(campaigns.reduce((s: number, c: any) => s + c.spend, 0), cur)
 	},
+
+	// ---- Delivery ----
 	impressions: {
 		key: 'impressions', label: 'Impresii', align: 'right' as const, sortKey: 'impressions' as const,
 		getValue: (c: any) => formatNumber(c.impressions),
@@ -87,6 +99,8 @@ const COL = {
 			return totalImp > 0 ? formatCurrency((totalSpend / totalImp) * 1000, cur) : '-';
 		}
 	},
+
+	// ---- Clicks ----
 	clicks: {
 		key: 'clicks', label: 'Click-uri', align: 'right' as const, sortKey: 'clicks' as const,
 		getValue: (c: any) => formatNumber(c.clicks),
@@ -110,6 +124,8 @@ const COL = {
 			return totalImp > 0 ? formatPercent((totalClicks / totalImp) * 100) : '-';
 		}
 	},
+
+	// ---- Engagement (TikTok-specific) ----
 	likes: {
 		key: 'likes', label: 'Likes', align: 'right' as const, sortKey: 'likes' as const,
 		getValue: (c: any) => c.likes > 0 ? formatNumber(c.likes) : '-',
@@ -135,7 +151,7 @@ const COL = {
 		}
 	},
 	follows: {
-		key: 'follows', label: 'Followers', align: 'right' as const, sortKey: 'follows' as const,
+		key: 'follows', label: 'Followers noi', align: 'right' as const, sortKey: 'follows' as const,
 		getValue: (c: any) => c.follows > 0 ? formatNumber(c.follows) : '-',
 		getTotalValue: (campaigns: any[]) => {
 			const total = campaigns.reduce((s: number, c: any) => s + c.follows, 0);
@@ -150,12 +166,64 @@ const COL = {
 			return total > 0 ? formatNumber(total) : '-';
 		}
 	},
-	videoViews: {
-		key: 'videoViews', label: 'Video views (100%)', align: 'right' as const, sortKey: 'videoViewsP100' as const,
+
+	// ---- Video (TikTok-specific) ----
+	videoViews2s: {
+		key: 'videoViews2s', label: 'Video views (2s)', align: 'right' as const, sortKey: 'videoViews2s' as const,
+		getValue: (c: any) => c.videoViews2s > 0 ? formatNumber(c.videoViews2s) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.videoViews2s, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	videoViews6s: {
+		key: 'videoViews6s', label: 'Focused views (6s)', align: 'right' as const, sortKey: 'focusedView6s' as const,
+		getValue: (c: any) => c.focusedView6s > 0 ? formatNumber(c.focusedView6s) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.focusedView6s, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	videoViewsP25: {
+		key: 'videoViewsP25', label: 'Video 25%', align: 'right' as const, sortKey: 'videoViewsP25' as const,
+		getValue: (c: any) => c.videoViewsP25 > 0 ? formatNumber(c.videoViewsP25) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.videoViewsP25, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	videoViewsP50: {
+		key: 'videoViewsP50', label: 'Video 50%', align: 'right' as const, sortKey: 'videoViewsP50' as const,
+		getValue: (c: any) => c.videoViewsP50 > 0 ? formatNumber(c.videoViewsP50) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.videoViewsP50, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	videoViewsP75: {
+		key: 'videoViewsP75', label: 'Video 75%', align: 'right' as const, sortKey: 'videoViewsP75' as const,
+		getValue: (c: any) => c.videoViewsP75 > 0 ? formatNumber(c.videoViewsP75) : '-',
+		getTotalValue: (campaigns: any[]) => {
+			const total = campaigns.reduce((s: number, c: any) => s + c.videoViewsP75, 0);
+			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	videoViewsP100: {
+		key: 'videoViewsP100', label: 'Video 100%', align: 'right' as const, sortKey: 'videoViewsP100' as const,
 		getValue: (c: any) => c.videoViewsP100 > 0 ? formatNumber(c.videoViewsP100) : '-',
 		getTotalValue: (campaigns: any[]) => {
 			const total = campaigns.reduce((s: number, c: any) => s + c.videoViewsP100, 0);
 			return total > 0 ? formatNumber(total) : '-';
+		}
+	},
+	avgWatchTime: {
+		key: 'avgWatchTime', label: 'Durată medie vizionare', align: 'right' as const, sortKey: 'averageVideoPlayPerUser' as const,
+		getValue: (c: any) => formatDuration(c.averageVideoPlayPerUser),
+		getTotalValue: (campaigns: any[]) => {
+			const withData = campaigns.filter((c: any) => c.averageVideoPlayPerUser > 0);
+			if (withData.length === 0) return '-';
+			const avg = withData.reduce((s: number, c: any) => s + c.averageVideoPlayPerUser, 0) / withData.length;
+			return formatDuration(avg);
 		}
 	}
 };
@@ -163,12 +231,12 @@ const COL = {
 export const TIKTOK_COLUMN_PRESETS: TiktokColumnPreset[] = [
 	{
 		key: 'performance_clicks',
-		label: 'Performance and clicks',
+		label: 'Performanță și click-uri',
 		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.reach, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr]
 	},
 	{
 		key: 'performance',
-		label: 'Performance',
+		label: 'Performanță',
 		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.reach]
 	},
 	{
@@ -178,13 +246,13 @@ export const TIKTOK_COLUMN_PRESETS: TiktokColumnPreset[] = [
 	},
 	{
 		key: 'delivery',
-		label: 'Delivery',
+		label: 'Livrare',
 		columns: [COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.spend]
 	},
 	{
 		key: 'video',
-		label: 'Video engagement',
-		columns: [COL.videoViews, COL.spend]
+		label: 'Video',
+		columns: [COL.videoViews2s, COL.videoViews6s, COL.videoViewsP25, COL.videoViewsP50, COL.videoViewsP75, COL.videoViewsP100, COL.avgWatchTime, COL.spend]
 	}
 ];
 

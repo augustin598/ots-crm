@@ -17,12 +17,21 @@ export interface TiktokCampaignAggregate {
 	costPerConversion: number;
 	resultType: string;
 	cpaLabel: string;
+	// Engagement
 	likes: number;
 	comments: number;
 	shares: number;
 	follows: number;
 	profileVisits: number;
+	// Video
+	videoViewsP25: number;
+	videoViewsP50: number;
+	videoViewsP75: number;
 	videoViewsP100: number;
+	videoViews2s: number;
+	videoViews6s: number;
+	focusedView6s: number;
+	averageVideoPlayPerUser: number;
 }
 
 /** Aggregate TikTok campaign insights by date for time-series charts */
@@ -62,7 +71,10 @@ export function aggregateTiktokInsightsByCampaign(insights: TiktokAdsCampaignIns
 		name: string; objective: string;
 		spend: number; impressions: number; reach: number; clicks: number; conversions: number;
 		resultType: string; cpaLabel: string;
-		likes: number; comments: number; shares: number; follows: number; profileVisits: number; videoViewsP100: number;
+		likes: number; comments: number; shares: number; follows: number; profileVisits: number;
+		videoViewsP25: number; videoViewsP50: number; videoViewsP75: number; videoViewsP100: number;
+		videoViews2s: number; videoViews6s: number; focusedView6s: number;
+		totalVideoPlayTime: number; videoPlayCount: number;
 	};
 	const byCampaign = new Map<string, Acc>();
 
@@ -71,7 +83,10 @@ export function aggregateTiktokInsightsByCampaign(insights: TiktokAdsCampaignIns
 			name: row.campaignName, objective: row.objective,
 			spend: 0, impressions: 0, reach: 0, clicks: 0, conversions: 0,
 			resultType: row.resultType || '', cpaLabel: row.cpaLabel || 'CPA',
-			likes: 0, comments: 0, shares: 0, follows: 0, profileVisits: 0, videoViewsP100: 0
+			likes: 0, comments: 0, shares: 0, follows: 0, profileVisits: 0,
+			videoViewsP25: 0, videoViewsP50: 0, videoViewsP75: 0, videoViewsP100: 0,
+			videoViews2s: 0, videoViews6s: 0, focusedView6s: 0,
+			totalVideoPlayTime: 0, videoPlayCount: 0
 		};
 		existing.spend += parseFloat(row.spend);
 		existing.impressions += parseInt(row.impressions);
@@ -83,7 +98,18 @@ export function aggregateTiktokInsightsByCampaign(insights: TiktokAdsCampaignIns
 		existing.shares += row.shares;
 		existing.follows += row.follows;
 		existing.profileVisits += row.profileVisits;
+		existing.videoViewsP25 += row.videoViewsP25;
+		existing.videoViewsP50 += row.videoViewsP50;
+		existing.videoViewsP75 += row.videoViewsP75;
 		existing.videoViewsP100 += row.videoViewsP100;
+		existing.videoViews2s += row.videoViews2s;
+		existing.videoViews6s += row.videoViews6s;
+		existing.focusedView6s += row.focusedView6s;
+		// For average: accumulate total play time and count
+		if (row.averageVideoPlayPerUser > 0) {
+			existing.totalVideoPlayTime += row.averageVideoPlayPerUser;
+			existing.videoPlayCount += 1;
+		}
 		if (row.resultType && !existing.resultType) existing.resultType = row.resultType;
 		if (row.cpaLabel && existing.cpaLabel === 'CPA') existing.cpaLabel = row.cpaLabel;
 		byCampaign.set(row.campaignId, existing);
@@ -110,6 +136,13 @@ export function aggregateTiktokInsightsByCampaign(insights: TiktokAdsCampaignIns
 		shares: d.shares,
 		follows: d.follows,
 		profileVisits: d.profileVisits,
-		videoViewsP100: d.videoViewsP100
+		videoViewsP25: d.videoViewsP25,
+		videoViewsP50: d.videoViewsP50,
+		videoViewsP75: d.videoViewsP75,
+		videoViewsP100: d.videoViewsP100,
+		videoViews2s: d.videoViews2s,
+		videoViews6s: d.videoViews6s,
+		focusedView6s: d.focusedView6s,
+		averageVideoPlayPerUser: d.videoPlayCount > 0 ? d.totalVideoPlayTime / d.videoPlayCount : 0
 	}));
 }

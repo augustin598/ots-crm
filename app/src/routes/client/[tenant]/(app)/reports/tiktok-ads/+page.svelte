@@ -102,7 +102,9 @@
 					spend: 0, impressions: 0, reach: 0, frequency: 0, clicks: 0,
 					conversions: 0, cpc: 0, cpm: 0, ctr: 0,
 					costPerConversion: 0, resultType: '', cpaLabel: 'CPA',
-					likes: 0, comments: 0, shares: 0, follows: 0, profileVisits: 0, videoViewsP100: 0,
+					likes: 0, comments: 0, shares: 0, follows: 0, profileVisits: 0,
+					videoViewsP25: 0, videoViewsP50: 0, videoViewsP75: 0, videoViewsP100: 0,
+					videoViews2s: 0, videoViews6s: 0, focusedView6s: 0, averageVideoPlayPerUser: 0,
 					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null
 				});
 			}

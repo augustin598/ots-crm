@@ -34,15 +34,21 @@ export interface TiktokAdsCampaignInsight {
 	costPerConversion: number;
 	resultType: string;
 	cpaLabel: string;
+	// Engagement
 	likes: number;
 	comments: number;
 	shares: number;
 	follows: number;
 	profileVisits: number;
+	// Video metrics
 	videoViewsP25: number;
 	videoViewsP50: number;
 	videoViewsP75: number;
 	videoViewsP100: number;
+	videoViews2s: number;
+	videoViews6s: number;
+	focusedView6s: number;
+	averageVideoPlayPerUser: number;
 	dateStart: string;
 	dateStop: string;
 }
@@ -296,7 +302,9 @@ export async function listCampaignInsights(
 				'reach', 'frequency',
 				'complete_payment', 'real_time_result',
 				'likes', 'comments', 'shares', 'follows', 'profile_visits',
-				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100'
+				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
+				'video_play_actions', 'engaged_view', 'engaged_view_15s',
+				'average_video_play_per_user'
 			]),
 			data_level: 'AUCTION_CAMPAIGN',
 			start_date: startDate,
@@ -371,6 +379,10 @@ export async function listCampaignInsights(
 			videoViewsP50: parseInt(m.video_views_p50 || '0'),
 			videoViewsP75: parseInt(m.video_views_p75 || '0'),
 			videoViewsP100: parseInt(m.video_views_p100 || '0'),
+			videoViews2s: parseInt(m.video_play_actions || '0'),
+			videoViews6s: parseInt(m.engaged_view || '0'),
+			focusedView6s: parseInt(m.engaged_view || '0'),
+			averageVideoPlayPerUser: parseFloat(m.average_video_play_per_user || '0'),
 			dateStart: (d.stat_time_day || startDate).slice(0, 10),
 			dateStop: (d.stat_time_day || endDate).slice(0, 10)
 		};
