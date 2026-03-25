@@ -5,10 +5,13 @@
 </script>
 
 <div class="space-y-6">
-	<h1 class="text-2xl font-bold flex items-center gap-3">
-		<IconGoogleAds class="h-7 w-7" />
-		Google Ads
-	</h1>
+	<div>
+		<h1 class="text-3xl font-bold flex items-center gap-3">
+			<IconGoogleAds class="h-8 w-8" />
+			Google Ads
+		</h1>
+		<p class="text-muted-foreground">Rapoarte performanță campanii Google Ads</p>
+	</div>
 	<Card class="p-12 text-center">
 		<div class="flex flex-col items-center gap-4">
 			<div class="flex h-16 w-16 items-center justify-center rounded-full bg-muted">

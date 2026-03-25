@@ -14,6 +14,7 @@
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
 	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
 	import DemographicsSection from '$lib/components/reports/demographics-section.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
@@ -375,9 +376,13 @@
 		</Card>
 	{:else}
 		<!-- Header -->
-		<div class="flex items-center justify-between">
+		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 			<div>
-				<p class="text-sm text-muted-foreground">{adAccount.accountName}</p>
+				<h1 class="text-3xl font-bold flex items-center gap-3">
+					<IconFacebook class="h-8 w-8" />
+					Facebook Ads
+				</h1>
+				<p class="text-muted-foreground">Rapoarte performanță campanii Meta/Facebook Ads</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />

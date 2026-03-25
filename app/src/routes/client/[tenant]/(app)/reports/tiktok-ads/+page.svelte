@@ -365,11 +365,13 @@
 		</Card>
 	{:else}
 		<!-- Header -->
-		<div class="flex items-center justify-between">
+		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 			<div>
-				{#if accounts.length === 1}
-					<p class="text-sm text-muted-foreground">{accounts[0].accountName}</p>
-				{/if}
+				<h1 class="text-3xl font-bold flex items-center gap-3">
+					<IconTiktok class="h-8 w-8" />
+					TikTok Ads
+				</h1>
+				<p class="text-muted-foreground">Rapoarte performanță campanii TikTok Ads</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
