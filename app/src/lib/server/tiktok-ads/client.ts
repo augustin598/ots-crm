@@ -762,9 +762,8 @@ export async function listDemographicInsights(
 			page_size: '1000'
 		});
 
-		if (campaignIds && campaignIds.length > 0) {
-			params.set('filtering', JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify(campaignIds) }]));
-		}
+		// Note: TikTok AUDIENCE report_type does NOT support campaign_ids filtering
+		// Demographics are always at advertiser level for the selected date range
 
 		const url = `${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`;
 		const res = await fetch(url, {
