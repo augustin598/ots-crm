@@ -14,6 +14,7 @@
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
 	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
 	import TiktokDemographicsSection from '$lib/components/reports/tiktok-demographics-section.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
@@ -373,17 +374,20 @@
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
 				{#if accounts.length > 1}
-					<select
-						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
-						value={selectedAdvertiserId}
-						onchange={handleAccountChange}
-					>
-						{#each accounts as account}
-							<option value={account.tiktokAdvertiserId}>
-								{account.accountName || account.tiktokAdvertiserId}
-							</option>
-						{/each}
-					</select>
+					<div class="flex items-center gap-1.5">
+						<IconTiktok class="h-4 w-4 text-foreground" />
+						<select
+							class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+							value={selectedAdvertiserId}
+							onchange={handleAccountChange}
+						>
+							{#each accounts as account}
+								<option value={account.tiktokAdvertiserId}>
+									{account.accountName || account.tiktokAdvertiserId}
+								</option>
+							{/each}
+						</select>
+					</div>
 				{/if}
 				<Button variant="outline" size="sm" onclick={handleRefresh}>
 					<RefreshCwIcon class="h-4 w-4" />

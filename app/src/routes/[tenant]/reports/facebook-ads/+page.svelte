@@ -573,18 +573,21 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; }} />
 			{#if accounts.length > 0}
-				<select
-					class="h-9 rounded-md border border-input bg-background px-3 text-sm"
-					value={selectedAccountId}
-					onchange={handleAccountChange}
-				>
-					{#each accounts as account}
-						<option value={account.metaAdAccountId}>
-							{account.accountName || account.metaAdAccountId}
-							{#if account.clientName} — {account.clientName}{/if}
-						</option>
-					{/each}
-				</select>
+				<div class="flex items-center gap-1.5">
+					<IconFacebook class="h-4 w-4" />
+					<select
+						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+						value={selectedAccountId}
+						onchange={handleAccountChange}
+					>
+						{#each accounts as account}
+							<option value={account.metaAdAccountId}>
+								{account.accountName || account.metaAdAccountId}
+								{#if account.clientName} — {account.clientName}{/if}
+							</option>
+						{/each}
+					</select>
+				</div>
 			{/if}
 			<Button variant="outline" size="sm" onclick={handleRefresh}>
 				<RefreshCwIcon class="h-4 w-4" />
