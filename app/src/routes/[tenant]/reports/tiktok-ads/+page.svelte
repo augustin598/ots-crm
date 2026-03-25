@@ -661,16 +661,18 @@
 												{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+											{#if true}
 												{@const objConfig = getObjectiveConfig(campaign.objective)}
-												<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
-													<svelte:component this={objConfig.icon} class="h-3 w-3" />
-													{objConfig.label}
-												</span>
-												{#if campaign.createTime}
-													<span class="text-[10px] text-muted-foreground">{campaign.createTime}</span>
-												{/if}
-											</div>
+												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
+														<svelte:component this={objConfig.icon} class="h-3 w-3" />
+														{objConfig.label}
+													</span>
+													{#if campaign.createTime}
+														<span class="text-[10px] text-muted-foreground">{campaign.createTime}</span>
+													{/if}
+												</div>
+											{/if}
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>
