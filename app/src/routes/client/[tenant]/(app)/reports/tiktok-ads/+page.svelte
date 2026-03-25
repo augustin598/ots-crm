@@ -377,21 +377,18 @@
 				<DateRangePicker bind:since bind:until />
 				<div class="flex items-center gap-1.5">
 					<IconTiktok class="h-4 w-4 text-foreground" />
-					{#if accounts.length > 1}
-						<select
-							class="h-9 rounded-md border border-input bg-background px-3 text-sm"
-							value={selectedAdvertiserId}
-							onchange={handleAccountChange}
-						>
-							{#each accounts as account}
-								<option value={account.tiktokAdvertiserId}>
-									{account.accountName || account.tiktokAdvertiserId}
-								</option>
-							{/each}
-						</select>
-					{:else}
-						<span class="text-sm text-muted-foreground">{accounts[0]?.accountName || ''}</span>
-					{/if}
+					<span class="text-sm font-medium">Selectează cont</span>
+					<select
+						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+						value={selectedAdvertiserId}
+						onchange={handleAccountChange}
+					>
+						{#each accounts as account}
+							<option value={account.tiktokAdvertiserId}>
+								{account.accountName || account.tiktokAdvertiserId}
+							</option>
+						{/each}
+					</select>
 				</div>
 				<Button variant="outline" size="sm" onclick={handleRefresh}>
 					<RefreshCwIcon class="h-4 w-4" />
