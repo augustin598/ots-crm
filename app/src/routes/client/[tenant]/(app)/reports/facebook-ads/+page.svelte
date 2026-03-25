@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMyAdAccount, getMetaCampaignInsights, getMetaActiveCampaigns } from '$lib/remotes/reports.remote';
+	import { getMyAdAccount, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -22,15 +22,31 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import ColumnsIcon from '@lucide/svelte/icons/columns-3';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import MousePointerIcon from '@lucide/svelte/icons/mouse-pointer';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import TargetIcon from '@lucide/svelte/icons/target';
+	import HeartIcon from '@lucide/svelte/icons/heart';
+	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
+	import PhoneIcon from '@lucide/svelte/icons/phone';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import {
 		aggregateInsightsByDate,
 		aggregateInsightsByCampaign,
+		aggregateInsightsByAdset,
 		computeTotals,
 		formatCurrency,
 		formatPercent,
 		formatNumber,
 		getDefaultDateRange,
-		type CampaignAggregate
+		type CampaignAggregate,
+		type AdsetAggregate
 	} from '$lib/utils/report-helpers';
 	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset } from '$lib/utils/column-presets';
 
@@ -93,11 +109,11 @@
 	// Merge campaigns with insights to get status
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; previewUrl: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; previewUrl: string | null; startTime: string | null }> = [];
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
 			if (insight) {
-				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null });
+				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null });
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES') {
 				result.push({
@@ -107,12 +123,12 @@
 					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
 					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
-					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null
+					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null
 				});
 			}
 		}
 		for (const [, c] of insightMap) {
-			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, previewUrl: null });
+			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, previewUrl: null, startTime: null });
 		}
 		return result;
 	});
@@ -223,6 +239,79 @@
 			return 0;
 		})
 	);
+
+	// ---- Objective display config ----
+	const OBJECTIVE_CONFIG: Record<string, { label: string; icon: any; color: string }> = {
+		OUTCOME_LEADS: { label: 'Leads', icon: UsersIcon, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+		LEAD_GENERATION: { label: 'Leads', icon: UsersIcon, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+		OUTCOME_TRAFFIC: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+		LINK_CLICKS: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+		OUTCOME_SALES: { label: 'Vânzări', icon: ShoppingCartIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		CONVERSIONS: { label: 'Conversii', icon: TargetIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		OUTCOME_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+		POST_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+		OUTCOME_AWARENESS: { label: 'Awareness', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+		REACH: { label: 'Reach', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+		OUTCOME_APP_PROMOTION: { label: 'App', icon: DownloadIcon, color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+		MESSAGES: { label: 'Mesaje', icon: MessageCircleIcon, color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' },
+		VIDEO_VIEWS: { label: 'Video', icon: PlayIcon, color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
+		CALLS: { label: 'Apeluri', icon: PhoneIcon, color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+	};
+
+	function getObjectiveConfig(objective: string) {
+		return OBJECTIVE_CONFIG[objective] || { label: objective, icon: TargetIcon, color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
+	}
+
+	// ---- Expandable ad sets ----
+	let expandedCampaigns = $state<Set<string>>(new Set());
+	let adsetData = $state<Map<string, AdsetAggregate[]>>(new Map());
+	let adsetLoading = $state<Set<string>>(new Set());
+
+	async function toggleExpand(campaignId: string) {
+		const next = new Set(expandedCampaigns);
+		if (next.has(campaignId)) {
+			next.delete(campaignId);
+			expandedCampaigns = next;
+			return;
+		}
+		next.add(campaignId);
+		expandedCampaigns = next;
+
+		if (!adsetData.has(campaignId) && adAccount?.metaAdAccountId && adAccount?.integrationId) {
+			const loadingNext = new Set(adsetLoading);
+			loadingNext.add(campaignId);
+			adsetLoading = loadingNext;
+
+			try {
+				const query = getMetaAdsetInsights({
+					adAccountId: adAccount.metaAdAccountId,
+					integrationId: adAccount.integrationId,
+					campaignId,
+					since,
+					until
+				});
+				const checkInterval = setInterval(() => {
+					if (!query.loading) {
+						clearInterval(checkInterval);
+						const loadDone = new Set(adsetLoading);
+						loadDone.delete(campaignId);
+						adsetLoading = loadDone;
+
+						if (query.current) {
+							const aggregated = aggregateInsightsByAdset(query.current);
+							const newMap = new Map(adsetData);
+							newMap.set(campaignId, aggregated);
+							adsetData = newMap;
+						}
+					}
+				}, 100);
+			} catch {
+				const loadDone = new Set(adsetLoading);
+				loadDone.delete(campaignId);
+				adsetLoading = loadDone;
+			}
+		}
+	}
 
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
@@ -417,16 +506,40 @@
 							</TableHeader>
 							<TableBody>
 								{#each sortedCampaigns as campaign}
-									<TableRow>
-										<TableCell class="w-[40px]">
+									<TableRow
+										class="cursor-pointer transition-colors hover:bg-muted/40 {expandedCampaigns.has(campaign.campaignId) ? 'bg-muted/30 font-semibold border-l-3 border-l-primary' : ''}"
+										onclick={() => toggleExpand(campaign.campaignId)}
+									>
+										<TableCell class="w-[40px]" onclick={(e) => e.stopPropagation()}>
 											<Checkbox
 												checked={selectedCampaigns.has(campaign.campaignId)}
 												onCheckedChange={() => toggleSelect(campaign.campaignId)}
 											/>
 										</TableCell>
 										<TableCell class="font-medium max-w-[250px]">
-											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
-											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
+											<div class="flex items-center gap-1.5">
+												{#if expandedCampaigns.has(campaign.campaignId)}
+													<ChevronDownIcon class="h-4 w-4 shrink-0 text-primary" />
+												{:else}
+													<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												{/if}
+												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
+											</div>
+											{#if true}
+												{@const objConfig = getObjectiveConfig(campaign.objective)}
+												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
+														<svelte:component this={objConfig.icon} class="h-3 w-3" />
+														{objConfig.label}
+													</span>
+													{#if campaign.startTime}
+														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+															<CalendarIcon class="h-2.5 w-2.5" />
+															{campaign.startTime}
+														</span>
+													{/if}
+												</div>
+											{/if}
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge>
@@ -442,7 +555,7 @@
 												{/if}
 											</TableCell>
 										{/each}
-										<TableCell class="w-[50px] text-center">
+										<TableCell class="w-[50px] text-center" onclick={(e) => e.stopPropagation()}>
 											{#if campaign.previewUrl}
 												<a href={campaign.previewUrl} target="_blank" rel="noopener" class="text-muted-foreground hover:text-primary" title="Previzualizare reclamă">
 													<EyeIcon class="h-4 w-4 inline-block" />
@@ -450,6 +563,44 @@
 											{/if}
 										</TableCell>
 									</TableRow>
+									{#if expandedCampaigns.has(campaign.campaignId)}
+										{#if adsetLoading.has(campaign.campaignId)}
+											<TableRow class="bg-muted/20">
+												<TableCell></TableCell>
+												<TableCell colspan={activePreset.columns.length + 3}>
+													<div class="flex items-center gap-2 py-2 pl-6 text-sm text-muted-foreground">
+														<LoaderIcon class="h-4 w-4 animate-spin" />
+														Se încarcă ad set-urile...
+													</div>
+												</TableCell>
+											</TableRow>
+										{:else if adsetData.has(campaign.campaignId)}
+											{#each adsetData.get(campaign.campaignId) || [] as adset}
+												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground">
+													<TableCell class="w-[40px]"></TableCell>
+													<TableCell class="max-w-[250px]">
+														<div class="flex items-center gap-1.5 pl-4">
+															<span class="text-muted-foreground/50">└</span>
+															<div class="truncate text-sm text-foreground/80" title={adset.adsetName}>{adset.adsetName}</div>
+														</div>
+													</TableCell>
+													<TableCell></TableCell>
+													{#each activePreset.columns as col}
+														<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-sm text-foreground/80">
+															<div>{col.getValue(adset as any, currency)}</div>
+															{#if col.getSubtext}
+																{@const sub = col.getSubtext(adset as any)}
+																{#if sub}
+																	<div class="text-xs text-muted-foreground">{sub}</div>
+																{/if}
+															{/if}
+														</TableCell>
+													{/each}
+													<TableCell></TableCell>
+												</TableRow>
+											{/each}
+										{/if}
+									{/if}
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
