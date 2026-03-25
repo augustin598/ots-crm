@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-ads/auth';
+import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
 import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
 
 // ---- Queries ----
@@ -123,7 +124,6 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 	if (!authResult) return [];
 
 	const { integration } = authResult;
-	const { listMonthlySpend, formatCustomerId } = await import('$lib/server/google-ads/client');
 
 	// Get mapped accounts
 	const accounts = await db
@@ -180,7 +180,6 @@ export const getMyGoogleAdsMonthlySpend = query(async () => {
 	if (!authResult) return [];
 
 	const { integration } = authResult;
-	const { listMonthlySpend, formatCustomerId } = await import('$lib/server/google-ads/client');
 
 	const accounts = await db
 		.select({
@@ -297,8 +296,6 @@ export const fetchGoogleAdsAccounts = command(async () => {
 	}
 
 	const { integration } = authResult;
-	const { listMccSubAccounts, formatCustomerId } = await import('$lib/server/google-ads/client');
-
 	const subAccounts = await listMccSubAccounts(integration.mccAccountId, integration.developerToken, integration.refreshToken);
 
 	const now = new Date();
