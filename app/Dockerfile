@@ -15,7 +15,8 @@ RUN bun install --frozen-lockfile
 FROM deps AS builder
 ARG GIT_REF
 ENV GIT_REF=$GIT_REF
-ARG CACHE_BUST
+ARG CACHE_BUST=1
+RUN echo "cache-bust: $CACHE_BUST"
 COPY app ./
 RUN bun run build
 
