@@ -434,29 +434,31 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; }} />
 			{#if accounts.length > 0}
-				<div class="flex items-center gap-2">
-					{#if true}
-						{@const selectedAccount = accounts.find((a: any) => a.tiktokAdvertiserId === selectedAdvertiserId)}
-						{@const domain = selectedAccount?.accountName?.replace(/\s/g, '').toLowerCase()}
-						{#if domain && domain.includes('.')}
-							<img src="https://www.google.com/s2/favicons?domain={domain}&sz=32" alt="" class="h-5 w-5 rounded" />
-						{:else}
-							<IconTiktok class="h-4 w-4 text-foreground" />
-						{/if}
-					{/if}
-					<select
-						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
-						value={selectedAdvertiserId}
-						onchange={handleAccountChange}
-					>
-						{#each accounts as account}
-							<option value={account.tiktokAdvertiserId}>
-								{account.accountName || account.tiktokAdvertiserId}
-								{#if account.clientName} — {account.clientName}{/if}
-							</option>
-						{/each}
-					</select>
-				</div>
+				{#if true}
+					{@const selectedAccount = accounts.find((a: any) => a.tiktokAdvertiserId === selectedAdvertiserId)}
+					{@const domain = selectedAccount?.accountName?.replace(/\s/g, '').toLowerCase()}
+					<div class="relative flex items-center">
+						<div class="pointer-events-none absolute left-2.5 z-10">
+							{#if domain && domain.includes('.')}
+								<img src="https://www.google.com/s2/favicons?domain={domain}&sz=32" alt="" class="h-4 w-4 rounded" />
+							{:else}
+								<IconTiktok class="h-4 w-4 text-foreground" />
+							{/if}
+						</div>
+						<select
+							class="h-9 rounded-md border border-input bg-background pl-8 pr-3 text-sm"
+							value={selectedAdvertiserId}
+							onchange={handleAccountChange}
+						>
+							{#each accounts as account}
+								<option value={account.tiktokAdvertiserId}>
+									{account.accountName || account.tiktokAdvertiserId}
+									{#if account.clientName} — {account.clientName}{/if}
+								</option>
+							{/each}
+						</select>
+					</div>
+				{/if}
 			{/if}
 			<Button variant="outline" size="sm" onclick={handleRefresh}>
 				<RefreshCwIcon class="h-4 w-4" />
