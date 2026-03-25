@@ -35,11 +35,10 @@ export async function saveGoogleSessionCookies(
 		throw new Error('Array-ul de cookies este gol');
 	}
 
-	// Check for required Google cookies
-	const hasSID = cookies.some(c => c.name === 'SID');
-	const hasSecurePSID = cookies.some(c => c.name === '__Secure-1PSID');
-	if (!hasSID || !hasSecurePSID) {
-		throw new Error('Cookies-urile trebuie să conțină cel puțin SID și __Secure-1PSID (sesiune Google)');
+	// Validate cookies have at least name+value
+	const validCookies = cookies.filter(c => c.name && c.value);
+	if (validCookies.length === 0) {
+		throw new Error('Cookies-urile trebuie să conțină cel puțin un cookie cu name și value');
 	}
 
 	const encrypted = encrypt(tenantId, JSON.stringify(cookies));
