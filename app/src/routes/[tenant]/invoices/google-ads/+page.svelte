@@ -324,20 +324,8 @@
 	<!-- Bulk Import Panel -->
 	{#if showBulkImport}
 		<Card class="p-4 space-y-3">
-			<p class="text-sm font-medium">Import automat facturi Google Ads</p>
-			<div class="space-y-2 text-xs text-muted-foreground">
-				<p>1. Deschide <a href="https://payments.google.com/gp/p/ui/pay" target="_blank" class="text-primary underline">Google Payments Center</a> → selectează contul Google Ads → Documents</p>
-				<p>2. Apasă F12 (DevTools) → Console și lipește acest script:</p>
-			</div>
-			<div class="relative">
-				<pre class="bg-muted rounded-md p-3 text-xs overflow-x-auto max-h-32 overflow-y-auto">{consoleScript}</pre>
-				<Button variant="ghost" size="sm" class="absolute top-1 right-1" onclick={() => { navigator.clipboard.writeText(consoleScript); toast.success('Script copiat!'); }}>
-					Copiază
-				</Button>
-			</div>
-			<div class="space-y-2 text-xs text-muted-foreground">
-				<p>3. Scriptul copiază automat link-urile în clipboard. Lipește rezultatul aici:</p>
-			</div>
+			<p class="text-sm font-medium">Import facturi Google Ads</p>
+			<p class="text-xs text-muted-foreground">1. Folosește scriptul Tampermonkey pe pagina Google Ads → Billing → Documents pentru a copia link-urile. Lipește JSON-ul aici:</p>
 			<textarea bind:value={bulkJson} placeholder="Lipeste JSON-ul aici..." class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
 			<div class="flex items-center gap-2">
 				<select bind:value={bulkCustomerId} class="rounded-md border px-3 py-2 text-sm bg-background">
