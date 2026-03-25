@@ -117,11 +117,11 @@
 	// Merge campaigns with insights to get status
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
-		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null }> = [];
+		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; createTime: string | null }> = [];
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
 			if (insight) {
-				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null });
+				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, createTime: ci.createTime || null });
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'IN_REVIEW') {
 				result.push({
@@ -132,12 +132,12 @@
 					likes: 0, comments: 0, shares: 0, follows: 0, profileVisits: 0,
 					videoViewsP25: 0, videoViewsP50: 0, videoViewsP75: 0, videoViewsP100: 0,
 					videoViews2s: 0, videoViews6s: 0, focusedView6s: 0, averageVideoPlayPerUser: 0,
-					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null
+					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, createTime: ci.createTime || null
 				});
 			}
 		}
 		for (const [, c] of insightMap) {
-			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null });
+			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, createTime: null });
 		}
 		return result;
 	});
@@ -495,7 +495,7 @@
 												{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}</div>
+											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}{#if campaign.createTime} · {campaign.createTime}{/if}</div>
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge>

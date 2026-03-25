@@ -166,7 +166,7 @@
 	// Build campaign table data by merging insights with ALL campaigns
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null }> = [];
+		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; createTime: string | null }> = [];
 
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
@@ -175,7 +175,8 @@
 					...insight,
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
-					lifetimeBudget: ci.lifetimeBudget || null
+					lifetimeBudget: ci.lifetimeBudget || null,
+					createTime: ci.createTime || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'IN_REVIEW') {
@@ -191,7 +192,8 @@
 					videoViews2s: 0, videoViews6s: 0, focusedView6s: 0, averageVideoPlayPerUser: 0,
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
-					lifetimeBudget: ci.lifetimeBudget || null
+					lifetimeBudget: ci.lifetimeBudget || null,
+					createTime: ci.createTime || null
 				});
 			}
 		}
@@ -201,7 +203,8 @@
 				...c,
 				status: 'UNKNOWN',
 				dailyBudget: null,
-				lifetimeBudget: null
+				lifetimeBudget: null,
+				createTime: null
 			});
 		}
 
@@ -631,7 +634,7 @@
 												{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}</div>
+											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}{#if campaign.createTime} · {campaign.createTime}{/if}</div>
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>
