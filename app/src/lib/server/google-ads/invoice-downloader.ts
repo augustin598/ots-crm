@@ -110,7 +110,7 @@ export async function downloadGoogleInvoicesFromLinks(
 
 	// Find client for this account
 	const [account] = await db
-		.select({ clientId: table.googleAdsAccount.clientId, accountName: table.googleAdsAccount.accountName })
+		.select({ clientId: table.googleAdsAccount.clientId, accountName: table.googleAdsAccount.accountName, currencyCode: table.googleAdsAccount.currencyCode })
 		.from(table.googleAdsAccount)
 		.where(and(
 			eq(table.googleAdsAccount.tenantId, tenantId),
@@ -164,7 +164,7 @@ export async function downloadGoogleInvoicesFromLinks(
 						id: crypto.randomUUID(), tenantId, clientId: account.clientId!,
 						googleAdsCustomerId: customerId,
 						googleInvoiceId: invoiceId, invoiceNumber: invoiceId,
-						issueDate, currencyCode: 'USD', invoiceType: 'INVOICE',
+						issueDate, currencyCode: account.currencyCode || 'USD', invoiceType: 'INVOICE',
 						pdfPath: upload.path, status: 'synced', syncedAt: new Date(),
 						createdAt: new Date(), updatedAt: new Date()
 					});

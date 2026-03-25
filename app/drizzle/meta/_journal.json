@@ -568,6 +568,13 @@
       "when": 1774440500000,
       "tag": "0080_google_ads_cookies",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1774440510000,
+      "tag": "0081_google_ads_account_currency_fix",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS `google_ads_account` (
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`google_ads_customer_id` text NOT NULL,
 	`account_name` text NOT NULL,
+	`currency_code` text NOT NULL DEFAULT 'USD',
 	`client_id` text REFERENCES `client`(`id`),
 	`is_active` number NOT NULL DEFAULT 1,
 	`last_fetched_at` timestamp,

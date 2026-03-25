@@ -13,6 +13,7 @@ export interface GoogleCampaignAggregate {
 	cpc: number;
 	cpm: number;
 	ctr: number;
+	conversionRate: number;
 	costPerConversion: number;
 	roas: number;
 	videoViews: number;
@@ -32,6 +33,7 @@ export interface GoogleAdGroupAggregate {
 	cpc: number;
 	cpm: number;
 	ctr: number;
+	conversionRate: number;
 	costPerConversion: number;
 	roas: number;
 	videoViews: number;
@@ -67,6 +69,7 @@ export function aggregateGoogleInsightsByDate(insights: GoogleAdsCampaignInsight
 			cpc: d.clicks > 0 ? d.spend / d.clicks : 0,
 			cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
 			ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+			conversionRate: d.clicks > 0 ? (d.conversions / d.clicks) * 100 : 0,
 			costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
 			roas: d.spend > 0 ? d.conversionValue / d.spend : 0
 		}));
@@ -110,6 +113,7 @@ export function aggregateGoogleInsightsByCampaign(insights: GoogleAdsCampaignIns
 		cpc: d.clicks > 0 ? d.spend / d.clicks : 0,
 		cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
 		ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+		conversionRate: d.clicks > 0 ? (d.conversions / d.clicks) * 100 : 0,
 		costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
 		roas: d.spend > 0 ? d.conversionValue / d.spend : 0,
 		videoViews: d.videoViews,
@@ -155,6 +159,7 @@ export function aggregateGoogleInsightsByAdGroup(insights: GoogleAdsAdGroupInsig
 		cpc: d.clicks > 0 ? d.spend / d.clicks : 0,
 		cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
 		ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+		conversionRate: d.clicks > 0 ? (d.conversions / d.clicks) * 100 : 0,
 		costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
 		roas: d.spend > 0 ? d.conversionValue / d.spend : 0,
 		videoViews: d.videoViews,

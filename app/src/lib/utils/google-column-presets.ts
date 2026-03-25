@@ -112,6 +112,16 @@ const COL = {
 			const total = campaigns.reduce((s: number, c: any) => s + c.videoViews, 0);
 			return total > 0 ? formatNumber(total) : '-';
 		}
+	},
+	conversionRate: {
+		key: 'conversionRate', label: 'Rată conv.', align: 'right' as const, sortKey: 'conversionRate' as const,
+		getValue: (c: any) => c.conversionRate > 0 ? formatPercent(c.conversionRate) : '-',
+		getSubtext: () => 'Conv. / Click-uri',
+		getTotalValue: (campaigns: any[]) => {
+			const totalClicks = campaigns.reduce((s: number, c: any) => s + c.clicks, 0);
+			const totalConv = campaigns.reduce((s: number, c: any) => s + c.conversions, 0);
+			return totalClicks > 0 ? formatPercent((totalConv / totalClicks) * 100) : '-';
+		}
 	}
 };
 
@@ -119,27 +129,27 @@ export const GOOGLE_COLUMN_PRESETS: GoogleColumnPreset[] = [
 	{
 		key: 'performance_clicks',
 		label: 'Performanță și click-uri',
-		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr]
+		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr, COL.conversionRate]
 	},
 	{
 		key: 'performance',
 		label: 'Performanță',
-		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions]
+		columns: [COL.results, COL.costPerResult, COL.conversionRate, COL.budget, COL.spend, COL.impressions]
 	},
 	{
 		key: 'conversions',
 		label: 'Conversii',
-		columns: [COL.results, COL.costPerResult, COL.conversionValue, COL.roas, COL.spend]
+		columns: [COL.results, COL.conversionRate, COL.costPerResult, COL.conversionValue, COL.roas, COL.spend]
 	},
 	{
 		key: 'delivery',
 		label: 'Livrare',
-		columns: [COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.spend]
+		columns: [COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr, COL.spend]
 	},
 	{
 		key: 'video',
 		label: 'Video',
-		columns: [COL.videoViews, COL.spend]
+		columns: [COL.videoViews, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.spend]
 	}
 ];
 
