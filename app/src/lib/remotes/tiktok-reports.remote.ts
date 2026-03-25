@@ -188,7 +188,7 @@ export const getTiktokCampaignInsights = query(
 			throw error(401, 'Unauthorized');
 		}
 
-		// Client users can only access their own ad account
+		// Client users can only access their own ad accounts
 		if (event.locals.isClientUser) {
 			if (!event.locals.client) throw error(401, 'Unauthorized');
 			const [clientAccount] = await db
@@ -196,10 +196,11 @@ export const getTiktokCampaignInsights = query(
 				.from(table.tiktokAdsAccount)
 				.where(and(
 					eq(table.tiktokAdsAccount.clientId, event.locals.client.id),
-					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id)
+					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.tiktokAdsAccount.tiktokAdvertiserId, params.advertiserId)
 				))
 				.limit(1);
-			if (!clientAccount || clientAccount.tiktokAdvertiserId !== params.advertiserId) {
+			if (!clientAccount) {
 				throw error(401, 'Unauthorized');
 			}
 		}
@@ -298,10 +299,11 @@ export const getTiktokActiveCampaigns = query(
 				.from(table.tiktokAdsAccount)
 				.where(and(
 					eq(table.tiktokAdsAccount.clientId, event.locals.client.id),
-					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id)
+					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.tiktokAdsAccount.tiktokAdvertiserId, params.advertiserId)
 				))
 				.limit(1);
-			if (!clientAccount || clientAccount.tiktokAdvertiserId !== params.advertiserId) {
+			if (!clientAccount) {
 				throw error(401, 'Unauthorized');
 			}
 		}
@@ -353,10 +355,11 @@ export const getTiktokDemographicInsights = query(
 				.from(table.tiktokAdsAccount)
 				.where(and(
 					eq(table.tiktokAdsAccount.clientId, event.locals.client.id),
-					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id)
+					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.tiktokAdsAccount.tiktokAdvertiserId, params.advertiserId)
 				))
 				.limit(1);
-			if (!clientAccount || clientAccount.tiktokAdvertiserId !== params.advertiserId) {
+			if (!clientAccount) {
 				throw error(401, 'Unauthorized');
 			}
 		}
