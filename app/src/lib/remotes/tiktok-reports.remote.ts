@@ -88,7 +88,7 @@ export const getTiktokReportAdAccounts = query(async () => {
 	}));
 });
 
-/** Get the TikTok Ads account for the currently logged-in client user (client portal) */
+/** Get the TikTok Ads account for the currently logged-in client user (client portal) — single account */
 export const getMyTiktokAdAccount = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.isClientUser || !event?.locals.client) {
@@ -122,6 +122,56 @@ export const getMyTiktokAdAccount = query(async () => {
 		.limit(1);
 
 	return { ...account, currency: spending?.currencyCode || 'RON' };
+});
+
+/** Get ALL TikTok Ads accounts for the currently logged-in client user (multi-account support) */
+export const getMyTiktokAdAccounts = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.isClientUser || !event?.locals.client) {
+		return [];
+	}
+
+	const accounts = await db
+		.select({
+			id: table.tiktokAdsAccount.id,
+			tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
+			accountName: table.tiktokAdsAccount.accountName,
+			integrationId: table.tiktokAdsAccount.integrationId,
+			clientId: table.tiktokAdsAccount.clientId
+		})
+		.from(table.tiktokAdsAccount)
+		.where(
+			and(
+				eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
+				eq(table.tiktokAdsAccount.clientId, event.locals.client.id)
+			)
+		)
+		.orderBy(table.tiktokAdsAccount.accountName);
+
+	if (accounts.length === 0) return [];
+
+	// Batch lookup currency
+	const accountIds = accounts.map(a => a.tiktokAdvertiserId);
+	const currencyMap = new Map<string, string>();
+
+	if (accountIds.length > 0) {
+		const spendings = await db
+			.select({ tiktokAdvertiserId: table.tiktokAdsSpending.tiktokAdvertiserId, currencyCode: table.tiktokAdsSpending.currencyCode })
+			.from(table.tiktokAdsSpending)
+			.where(inArray(table.tiktokAdsSpending.tiktokAdvertiserId, accountIds))
+			.orderBy(desc(table.tiktokAdsSpending.periodStart));
+
+		for (const s of spendings) {
+			if (!currencyMap.has(s.tiktokAdvertiserId)) {
+				currencyMap.set(s.tiktokAdvertiserId, s.currencyCode);
+			}
+		}
+	}
+
+	return accounts.map(acc => ({
+		...acc,
+		currency: currencyMap.get(acc.tiktokAdvertiserId) || 'RON'
+	}));
 });
 
 /** Get campaign-level insights from TikTok API (live, cached 5 min) */

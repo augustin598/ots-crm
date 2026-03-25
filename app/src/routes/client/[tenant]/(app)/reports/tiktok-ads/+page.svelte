@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMyTiktokAdAccount, getTiktokCampaignInsights, getTiktokActiveCampaigns } from '$lib/remotes/tiktok-reports.remote';
+	import { getMyTiktokAdAccounts, getTiktokCampaignInsights, getTiktokActiveCampaigns } from '$lib/remotes/tiktok-reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -43,28 +43,50 @@
 	let since = $state(defaults.since);
 	let until = $state(defaults.until);
 
-	// Auto-detect client's ad account
-	const adAccountQuery = getMyTiktokAdAccount();
-	const adAccount = $derived(adAccountQuery.current);
-	const adAccountLoading = $derived(adAccountQuery.loading);
+	// Load all client's ad accounts (supports multi-account)
+	const accountsQuery = getMyTiktokAdAccounts();
+	const accounts = $derived(accountsQuery.current || []);
+	const accountsLoading = $derived(accountsQuery.loading);
 
-	const currency = $derived(adAccount?.currency || 'RON');
+	let selectedAdvertiserId = $state<string>('');
+	let selectedIntegrationId = $state<string>('');
 
-	// Insights (only if ad account exists)
+	// Auto-select first account when data loads
+	$effect(() => {
+		if (accounts.length > 0 && !selectedAdvertiserId) {
+			selectedAdvertiserId = accounts[0].tiktokAdvertiserId;
+			selectedIntegrationId = accounts[0].integrationId;
+		}
+	});
+
+	const currency = $derived.by(() => {
+		const account = accounts.find((a: any) => a.tiktokAdvertiserId === selectedAdvertiserId);
+		return account?.currency || 'RON';
+	});
+
+	function handleAccountChange(e: Event) {
+		const value = (e.target as HTMLSelectElement).value;
+		selectedAdvertiserId = value;
+		const account = accounts.find((a: any) => a.tiktokAdvertiserId === value);
+		selectedIntegrationId = account?.integrationId || '';
+		selectedCampaigns = new Set();
+	}
+
+	// Insights (reactive based on selected account + date range)
 	let insightsQuery = $state<ReturnType<typeof getTiktokCampaignInsights> | null>(null);
 	let campaignsQuery = $state<ReturnType<typeof getTiktokActiveCampaigns> | null>(null);
 
 	$effect(() => {
-		if (adAccount?.tiktokAdvertiserId && adAccount?.integrationId && since && until) {
+		if (selectedAdvertiserId && selectedIntegrationId && since && until) {
 			insightsQuery = getTiktokCampaignInsights({
-				advertiserId: adAccount.tiktokAdvertiserId,
-				integrationId: adAccount.integrationId,
+				advertiserId: selectedAdvertiserId,
+				integrationId: selectedIntegrationId,
 				since,
 				until
 			});
 			campaignsQuery = getTiktokActiveCampaigns({
-				advertiserId: adAccount.tiktokAdvertiserId,
-				integrationId: adAccount.integrationId
+				advertiserId: selectedAdvertiserId,
+				integrationId: selectedIntegrationId
 			});
 		}
 	});
@@ -230,29 +252,29 @@
 	}
 
 	function handleRefresh() {
-		if (adAccount?.tiktokAdvertiserId && adAccount?.integrationId && since && until) {
+		if (selectedAdvertiserId && selectedIntegrationId && since && until) {
 			insightsQuery = getTiktokCampaignInsights({
-				advertiserId: adAccount.tiktokAdvertiserId,
-				integrationId: adAccount.integrationId,
+				advertiserId: selectedAdvertiserId,
+				integrationId: selectedIntegrationId,
 				since,
 				until
 			});
 			campaignsQuery = getTiktokActiveCampaigns({
-				advertiserId: adAccount.tiktokAdvertiserId,
-				integrationId: adAccount.integrationId
+				advertiserId: selectedAdvertiserId,
+				integrationId: selectedIntegrationId
 			});
 		}
 	}
 </script>
 
 <div class="space-y-6">
-	{#if adAccountLoading}
+	{#if accountsLoading}
 		<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 			{#each Array(5) as _}
 				<Card class="p-4"><Skeleton class="h-16 w-full" /></Card>
 			{/each}
 		</div>
-	{:else if !adAccount}
+	{:else if accounts.length === 0}
 		<Card class="p-8 text-center">
 			<p class="text-muted-foreground">Nu există cont TikTok Ads asociat acestui client.</p>
 		</Card>
@@ -260,10 +282,25 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<div>
-				<p class="text-sm text-muted-foreground">{adAccount.accountName}</p>
+				{#if accounts.length === 1}
+					<p class="text-sm text-muted-foreground">{accounts[0].accountName}</p>
+				{/if}
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
+				{#if accounts.length > 1}
+					<select
+						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+						value={selectedAdvertiserId}
+						onchange={handleAccountChange}
+					>
+						{#each accounts as account}
+							<option value={account.tiktokAdvertiserId}>
+								{account.accountName || account.tiktokAdvertiserId}
+							</option>
+						{/each}
+					</select>
+				{/if}
 				<Button variant="outline" size="sm" onclick={handleRefresh}>
 					<RefreshCwIcon class="h-4 w-4" />
 				</Button>
@@ -307,10 +344,10 @@
 			{/if}
 
 			<!-- Demographics -->
-			{#if adAccount}
+			{#if selectedAdvertiserId && selectedIntegrationId}
 				<TiktokDemographicsSection
-					advertiserId={adAccount.tiktokAdvertiserId}
-					integrationId={adAccount.integrationId}
+					advertiserId={selectedAdvertiserId}
+					integrationId={selectedIntegrationId}
 					{since}
 					{until}
 					{currency}
