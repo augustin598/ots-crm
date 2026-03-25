@@ -6,8 +6,30 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { CheckSquare, FileText, Receipt } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
+	import { Badge } from '$lib/components/ui/badge';
+	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	function getInvoiceStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
+		switch (status) {
+			case 'paid':
+				return 'success';
+			case 'sent':
+				return 'default';
+			case 'overdue':
+				return 'destructive';
+			case 'cancelled':
+				return 'destructive';
+			case 'draft':
+			default:
+				return 'outline';
+		}
+	}
+
+	function formatInvoiceStatus(status: string): string {
+		return status.charAt(0).toUpperCase() + status.slice(1);
+	}
 
 	const tasksQuery = getTasks({});
 	const tasks = $derived(tasksQuery.current || []);
@@ -93,10 +115,12 @@
 					<div class="space-y-2">
 						{#each tasks.slice(0, 5) as task}
 							<div class="flex items-center justify-between p-2 rounded-lg hover:bg-accent">
-								<div class="flex-1">
+								<div class="flex-1 min-w-0">
 									<p class="text-sm font-medium">{task.title}</p>
-									<p class="text-xs text-muted-foreground capitalize">{task.status}</p>
 								</div>
+								<Badge variant={getStatusBadgeVariant(task.status)} class="text-xs shrink-0 ml-2">
+									{formatStatus(task.status)}
+								</Badge>
 							</div>
 						{/each}
 					</div>
@@ -128,10 +152,12 @@
 					<div class="space-y-2">
 						{#each invoices.slice(0, 5) as invoice}
 							<div class="flex items-center justify-between p-2 rounded-lg hover:bg-accent">
-								<div class="flex-1">
+								<div class="flex-1 min-w-0">
 									<p class="text-sm font-medium">{invoice.invoiceNumber}</p>
-									<p class="text-xs text-muted-foreground capitalize">{invoice.status}</p>
 								</div>
+								<Badge variant={getInvoiceStatusVariant(invoice.status)} class="text-xs shrink-0 ml-2">
+									{formatInvoiceStatus(invoice.status)}
+								</Badge>
 							</div>
 						{/each}
 					</div>
