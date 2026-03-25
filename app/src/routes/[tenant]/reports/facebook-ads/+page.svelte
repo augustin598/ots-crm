@@ -820,7 +820,7 @@
 													{#if campaign.startTime}
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
-															{campaign.startTime}
+															{campaign.startTime.slice(0, 10)}
 														</span>
 													{/if}
 												</div>
