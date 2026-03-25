@@ -116,6 +116,11 @@ export const actions: Actions = {
 
 		const { signToken, contract } = result;
 
+		// Prevent re-signing if beneficiar already signed
+		if (contract.beneficiarSignedAt) {
+			return fail(400, { error: 'Contractul a fost deja semnat de beneficiar' });
+		}
+
 		// Atomic: mark token as used + save signature in one transaction
 		const now = new Date();
 		const newStatus = contract.prestatorSignedAt ? 'signed' : contract.status;

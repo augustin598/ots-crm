@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lte } from 'drizzle-orm';
+import { eq, and, lte, sql } from 'drizzle-orm';
 import { recordContractActivity } from '../../contract-activity';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
@@ -16,9 +16,18 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 		let expired = 0;
 		const errors: Array<{ id: string; error: string }> = [];
 
+		// Select only needed columns for lifecycle processing
+		const lifecycleColumns = {
+			id: table.contract.id,
+			tenantId: table.contract.tenantId,
+			version: table.contract.version,
+			contractDate: table.contract.contractDate,
+			contractDurationMonths: table.contract.contractDurationMonths
+		};
+
 		// 1. Auto-activate: signed contracts where contractDate has been reached
 		const signedContracts = await db
-			.select()
+			.select(lifecycleColumns)
 			.from(table.contract)
 			.where(
 				and(
@@ -54,39 +63,40 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 		}
 
 		// 2. Auto-expire: active contracts where contractDate + durationMonths has passed
+		// Filter expired contracts in SQL using date arithmetic
 		const activeContracts = await db
-			.select()
+			.select(lifecycleColumns)
 			.from(table.contract)
-			.where(eq(table.contract.status, 'active'));
+			.where(
+				and(
+					eq(table.contract.status, 'active'),
+					sql`date(${table.contract.contractDate}, '+' || ${table.contract.contractDurationMonths} || ' months') <= date('now')`
+				)
+			);
 
 		for (const contract of activeContracts) {
-			const endDate = new Date(contract.contractDate);
-			endDate.setMonth(endDate.getMonth() + contract.contractDurationMonths);
+			try {
+				await db
+					.update(table.contract)
+					.set({
+						status: 'expired',
+						version: contract.version + 1,
+						updatedAt: now
+					})
+					.where(eq(table.contract.id, contract.id));
 
-			if (endDate <= now) {
-				try {
-					await db
-						.update(table.contract)
-						.set({
-							status: 'expired',
-							version: contract.version + 1,
-							updatedAt: now
-						})
-						.where(eq(table.contract.id, contract.id));
-
-					await recordContractActivity({
-						contractId: contract.id,
-						userId: 'system',
-						tenantId: contract.tenantId,
-						action: 'status_changed',
-						field: 'status',
-						oldValue: 'active',
-						newValue: 'expired'
-					});
-					expired++;
-				} catch (err) {
-					errors.push({ id: contract.id, error: String(err) });
-				}
+				await recordContractActivity({
+					contractId: contract.id,
+					userId: 'system',
+					tenantId: contract.tenantId,
+					action: 'status_changed',
+					field: 'status',
+					oldValue: 'active',
+					newValue: 'expired'
+				});
+				expired++;
+			} catch (err) {
+				errors.push({ id: contract.id, error: String(err) });
 			}
 		}
 

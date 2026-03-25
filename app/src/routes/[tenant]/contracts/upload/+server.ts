@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
+import { recordContractActivity } from '$lib/server/contract-activity';
 
 function generateContractId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -110,6 +111,16 @@ export const POST: RequestHandler = async (event) => {
 			uploadedFileMimeType: uploadResult.mimeType,
 			createdByUserId: userId
 		});
+	});
+
+	// Audit trail
+	await recordContractActivity({
+		contractId,
+		userId,
+		tenantId,
+		action: 'created',
+		field: 'uploadedFilePath',
+		newValue: uploadResult.path
 	});
 
 	return json({ success: true, contractId });

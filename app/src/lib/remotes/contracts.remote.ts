@@ -149,9 +149,20 @@ export const getContracts = query(
 		const totalCount = countResult?.count || 0;
 		const totalPages = Math.ceil(totalCount / pageSize);
 
-		// Data query with pagination
+		// Data query with pagination — select only columns needed for list view
 		const contracts = await db
-			.select()
+			.select({
+				id: table.contract.id,
+				tenantId: table.contract.tenantId,
+				clientId: table.contract.clientId,
+				contractNumber: table.contract.contractNumber,
+				contractDate: table.contract.contractDate,
+				contractTitle: table.contract.contractTitle,
+				status: table.contract.status,
+				currency: table.contract.currency,
+				contractDurationMonths: table.contract.contractDurationMonths,
+				uploadedFilePath: table.contract.uploadedFilePath
+			})
 			.from(table.contract)
 			.where(whereClause)
 			.orderBy(desc(table.contract.contractDate))
@@ -211,6 +222,7 @@ const contractLineItemSchema = v.object({
 export const createContract = command(
 	v.object({
 		clientId: v.pipe(v.string(), v.minLength(1)),
+		contractNumber: v.optional(v.string()),
 		templateId: v.optional(v.string()),
 		contractDate: v.optional(v.string()),
 		contractTitle: v.optional(v.string()),
@@ -281,7 +293,7 @@ export const createContract = command(
 
 		// Use transaction for atomic contract number generation + insert
 		await db.transaction(async (tx) => {
-			const contractNumber = await generateContractNumber(tx, tenantId, prefix);
+			const contractNumber = data.contractNumber?.trim() || await generateContractNumber(tx, tenantId, prefix);
 
 			await tx.insert(table.contract).values({
 				id: contractId,
@@ -557,6 +569,11 @@ export const deleteContract = command(
 			throw new Error('Contract not found');
 		}
 
+		// Prevent deletion of signed/active contracts
+		if (existing.status === 'signed' || existing.status === 'active') {
+			throw new Error(`Nu se poate șterge un contract cu statusul "${existing.status}". Doar contractele în starea "draft", "sent", "expired" sau "cancelled" pot fi șterse.`);
+		}
+
 		// Delete uploaded file from storage if exists
 		if (existing.uploadedFilePath) {
 			try {
@@ -577,6 +594,11 @@ export const deleteContract = command(
 				await tx
 					.delete(table.contractLineItem)
 					.where(eq(table.contractLineItem.contractId, contractId));
+
+				// Delete activity records explicitly (SQLite cascade may not be enabled)
+				await tx
+					.delete(table.contractActivity)
+					.where(eq(table.contractActivity.contractId, contractId));
 
 				await tx.delete(table.contract).where(eq(table.contract.id, contractId));
 			});
@@ -770,7 +792,7 @@ export const sendContractForSigning = command(
 		// Update contract status to 'sent'
 		await db
 			.update(table.contract)
-			.set({ status: 'sent', updatedAt: new Date() })
+			.set({ status: 'sent', version: contract.version + 1, updatedAt: new Date() })
 			.where(eq(table.contract.id, contractId));
 
 		// Try to send email — best-effort with 5s timeout, don't fail if SMTP not configured
@@ -853,23 +875,20 @@ export const signContractAsPrestator = command(
 
 		const now = new Date();
 
+		// Auto-transition to 'signed' if both parties have now signed
+		const newStatus = contract.beneficiarSignedAt ? 'signed' : undefined;
+
 		await db
 			.update(table.contract)
 			.set({
 				prestatorSignatureName: signatureName,
 				prestatorSignatureImage: imageToSave,
 				prestatorSignedAt: now,
+				...(newStatus ? { status: newStatus } : {}),
+				version: contract.version + 1,
 				updatedAt: now
 			})
 			.where(eq(table.contract.id, contractId));
-
-		// Auto-transition to 'signed' if both parties have now signed
-		if (contract.beneficiarSignedAt) {
-			await db
-				.update(table.contract)
-				.set({ status: 'signed', updatedAt: now })
-				.where(eq(table.contract.id, contractId));
-		}
 
 		// Audit trail
 		await recordContractActivity({
@@ -949,7 +968,7 @@ export const extractClientFromContract = command(
 
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
-			return emptyResult('Unauthorized - no user or tenant');
+			throw new Error('Unauthorized');
 		}
 		step('auth_ok', { userEmail: event.locals.user.email, tenantName: event.locals.tenant.name });
 
@@ -1058,9 +1077,11 @@ export const extractClientFromContract = command(
 		const skipped = Object.fromEntries(Object.entries(extracted).filter(([k]) => !(k in fieldsToUpdate))) as Record<string, string>;
 
 		step('RESULT: client updated', { updated: fieldsToUpdate, skipped });
-		console.log('\n========== extractClientFromContract DEBUG ==========');
-		console.log(JSON.stringify(debug, null, 2));
-		console.log('=====================================================\n');
+		if (DEBUG_EXTRACTION()) {
+			console.log('\n========== extractClientFromContract DEBUG ==========');
+			console.log(JSON.stringify(debug, null, 2));
+			console.log('=====================================================\n');
+		}
 		return { clientUpdated: true, extracted, updated: fieldsToUpdate, skipped };
 	}
 );

@@ -184,6 +184,7 @@
 		try {
 			const result = await createContract({
 				clientId,
+				contractNumber: contractNumber || undefined,
 				templateId: templateId || undefined,
 				contractDate: contractDate || undefined,
 				contractTitle: contractTitle || undefined,

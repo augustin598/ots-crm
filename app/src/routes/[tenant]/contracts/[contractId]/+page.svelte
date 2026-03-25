@@ -67,7 +67,7 @@
 	let signingInProgress = $state(false);
 	let prestatorPadRef: SignaturePad;
 
-	const contractQuery = getContract(contractId);
+	const contractQuery = $derived(getContract(contractId));
 	const contract = $derived(contractQuery.current);
 	const loading = $derived(contractQuery.loading);
 

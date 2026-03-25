@@ -80,7 +80,7 @@ export function getBillingFrequencyLabel(freq: string | null | undefined): strin
 
 /** Safe cents conversion avoiding floating-point errors */
 export function toCents(value: number): number {
-	return Math.round((value * 100 + Number.EPSILON) * 100) / 100;
+	return Math.round(value * 100);
 }
 
 /** Whether contract status allows editing */
