@@ -313,7 +313,6 @@ export async function listCampaignInsights(
 				metrics.conversions,
 				metrics.conversions_value,
 				metrics.cost_per_conversion,
-				metrics.video_views,
 				segments.date
 			FROM campaign
 			WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
@@ -351,7 +350,7 @@ export async function listCampaignInsights(
 				conversions: Math.round(conversions),
 				conversionValue: Number(row.metrics?.conversions_value || 0),
 				costPerConversion: conversions > 0 ? spend / conversions : 0,
-				videoViews: Number(row.metrics?.video_views || 0),
+				videoViews: 0,
 				resultType: goalDef?.label || 'Conversii',
 				cpaLabel: goalDef?.cpaLabel || 'Cost/conversie',
 				dateStart: row.segments?.date || startDate,
@@ -389,9 +388,7 @@ export async function listCampaigns(
 				campaign.name,
 				campaign.status,
 				campaign.advertising_channel_type,
-				campaign.start_date,
-				campaign.end_date,
-				campaign_budget.amount_micros
+								campaign_budget.amount_micros
 			FROM campaign
 			WHERE campaign.status != 'REMOVED'
 		`);
@@ -418,8 +415,8 @@ export async function listCampaigns(
 				campaignName: row.campaign?.name || '',
 				status: status === 'ENABLED' ? 'ACTIVE' : status,
 				channelType,
-				startDate: row.campaign?.start_date || null,
-				endDate: row.campaign?.end_date || null,
+				startDate: null,
+				endDate: null,
 				dailyBudget: budgetMicros > 0 ? (budgetMicros / 1_000_000).toFixed(2) : null
 			};
 		});
@@ -464,7 +461,6 @@ export async function listAdGroupInsights(
 				metrics.average_cpm,
 				metrics.conversions,
 				metrics.conversions_value,
-				metrics.video_views,
 				segments.date
 			FROM ad_group
 			WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
@@ -491,7 +487,7 @@ export async function listAdGroupInsights(
 				conversions,
 				conversionValue: Number(row.metrics?.conversions_value || 0),
 				costPerConversion: conversions > 0 ? spend / conversions : 0,
-				videoViews: Number(row.metrics?.video_views || 0),
+				videoViews: 0,
 				resultType: '',
 				cpaLabel: 'CPA',
 				dailyBudget: null,
