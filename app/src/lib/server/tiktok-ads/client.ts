@@ -62,6 +62,7 @@ export interface TiktokAdsCampaignInfo {
 	dailyBudget: string | null;
 	lifetimeBudget: string | null;
 	createTime: string | null;
+	modifyTime: string | null;
 }
 
 export interface TiktokAdsAdGroupInsight {
@@ -613,7 +614,7 @@ export async function listCampaigns(
 			page: String(page),
 			fields: JSON.stringify([
 				'campaign_id', 'campaign_name', 'operation_status', 'secondary_status',
-				'objective_type', 'budget_mode', 'budget', 'budget_optimize_on', 'create_time'
+				'objective_type', 'budget_mode', 'budget', 'budget_optimize_on', 'create_time', 'modify_time'
 			])
 		});
 
@@ -644,7 +645,8 @@ export async function listCampaigns(
 				optimizationGoal: '', // filled from ad group level
 				dailyBudget: (budgetMode === 'BUDGET_MODE_DAY' || budgetMode === 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET') ? budget : null,
 				lifetimeBudget: budgetMode === 'BUDGET_MODE_TOTAL' ? budget : null,
-				createTime: c.create_time ? String(c.create_time).slice(0, 10) : null
+				createTime: c.create_time ? String(c.create_time).slice(0, 10) : null,
+				modifyTime: c.modify_time ? String(c.modify_time).slice(0, 10) : null
 			});
 		}
 

@@ -175,7 +175,7 @@
 	// Build campaign table data by merging insights with ALL campaigns
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; createTime: string | null }> = [];
+		const result: Array<TiktokCampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; createTime: string | null; modifyTime: string | null }> = [];
 
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
@@ -185,7 +185,8 @@
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
 					lifetimeBudget: ci.lifetimeBudget || null,
-					createTime: ci.createTime || null
+					createTime: ci.createTime || null,
+					modifyTime: ci.modifyTime || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'IN_REVIEW') {
@@ -202,7 +203,8 @@
 					status: ci.status,
 					dailyBudget: ci.dailyBudget || null,
 					lifetimeBudget: ci.lifetimeBudget || null,
-					createTime: ci.createTime || null
+					createTime: ci.createTime || null,
+					modifyTime: ci.modifyTime || null
 				});
 			}
 		}
@@ -213,7 +215,7 @@
 				status: 'UNKNOWN',
 				dailyBudget: null,
 				lifetimeBudget: null,
-				createTime: null
+				createTime: null, modifyTime: null
 			});
 		}
 
@@ -673,6 +675,7 @@
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
 															Start: {campaign.createTime}
+															{#if campaign.modifyTime && campaign.status !== 'ACTIVE'}· End: {campaign.modifyTime}{/if}
 														</span>
 													{/if}
 												</div>
