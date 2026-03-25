@@ -26,6 +26,14 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import MousePointerIcon from '@lucide/svelte/icons/mouse-pointer';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import TargetIcon from '@lucide/svelte/icons/target';
+	import HeartIcon from '@lucide/svelte/icons/heart';
 	import { toast } from 'svelte-sonner';
 	import {
 		formatCurrency,
@@ -326,6 +334,25 @@
 		}
 		return dominant;
 	});
+
+	// ---- Objective display config ----
+	const OBJECTIVE_CONFIG: Record<string, { label: string; icon: any; color: string }> = {
+		LEAD_GENERATION: { label: 'Lead Gen', icon: UsersIcon, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+		TRAFFIC: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+		CONVERSIONS: { label: 'Conversii', icon: TargetIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		WEB_CONVERSIONS: { label: 'Conversii', icon: TargetIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		VIDEO_VIEWS: { label: 'Video', icon: PlayIcon, color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
+		REACH: { label: 'Reach', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+		ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+		APP_INSTALL: { label: 'App Install', icon: DownloadIcon, color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+		APP_PROMOTION: { label: 'App Promo', icon: DownloadIcon, color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+		PRODUCT_SALES: { label: 'Vânzări', icon: ShoppingCartIcon, color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+		CATALOG_SALES: { label: 'Catalog', icon: ShoppingCartIcon, color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+	};
+
+	function getObjectiveConfig(objective: string) {
+		return OBJECTIVE_CONFIG[objective] || { label: objective, icon: TargetIcon, color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
+	}
 
 	// ---- Expandable ad groups ----
 	let expandedCampaigns = $state<Set<string>>(new Set());
@@ -634,7 +661,16 @@
 												{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}{#if campaign.createTime} · {campaign.createTime}{/if}</div>
+											<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+												{@const objConfig = getObjectiveConfig(campaign.objective)}
+												<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
+													<svelte:component this={objConfig.icon} class="h-3 w-3" />
+													{objConfig.label}
+												</span>
+												{#if campaign.createTime}
+													<span class="text-[10px] text-muted-foreground">{campaign.createTime}</span>
+												{/if}
+											</div>
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>
