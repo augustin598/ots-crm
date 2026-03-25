@@ -257,7 +257,7 @@
 									<span class="text-sm text-muted-foreground">{formatNumber(row.impressions)} imp.</span>
 									<span class="text-sm">{formatNumber(row.clicks)} clicks</span>
 								</div>
-								<div class="ml-4 border-l pl-4 w-36 flex justify-end">
+								<div class="ml-2 border-l pl-2 w-36 flex justify-end">
 									{#if invoice?.status === 'downloaded' && invoice.pdfPath}
 										<Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs" onclick={() => handleDownloadInvoicePDF(invoice.id, row.periodStart)}>
 											<Download class="h-3.5 w-3.5" />Descarcă factura
