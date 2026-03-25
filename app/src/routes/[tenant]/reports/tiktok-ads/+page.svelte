@@ -612,7 +612,10 @@
 							</TableHeader>
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
-									<TableRow class="cursor-pointer hover:bg-muted/30" onclick={() => toggleExpand(campaign.campaignId)}>
+									<TableRow
+										class="cursor-pointer transition-colors hover:bg-muted/40 {expandedCampaigns.has(campaign.campaignId) ? 'bg-muted/30 font-semibold border-l-3 border-l-primary' : ''}"
+										onclick={() => toggleExpand(campaign.campaignId)}
+									>
 										<TableCell class="w-[40px]" onclick={(e) => e.stopPropagation()}>
 											<Checkbox
 												checked={selectedCampaigns.has(campaign.campaignId)}
@@ -622,7 +625,7 @@
 										<TableCell class="font-medium max-w-[250px]">
 											<div class="flex items-center gap-1.5">
 												{#if expandedCampaigns.has(campaign.campaignId)}
-													<ChevronDownIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+													<ChevronDownIcon class="h-4 w-4 shrink-0 text-primary" />
 												{:else}
 													<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
 												{/if}
@@ -661,14 +664,17 @@
 											</TableRow>
 										{:else if adGroupData.has(campaign.campaignId)}
 											{#each adGroupData.get(campaign.campaignId) || [] as adgroup}
-												<TableRow class="bg-muted/20 border-l-2 border-l-primary/20">
+												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground">
 													<TableCell class="w-[40px]"></TableCell>
 													<TableCell class="max-w-[250px]">
-														<div class="truncate pl-6 text-sm" title={adgroup.adgroupName}>{adgroup.adgroupName}</div>
+														<div class="flex items-center gap-1.5 pl-4">
+															<span class="text-muted-foreground/50">└</span>
+															<div class="truncate text-sm text-foreground/80" title={adgroup.adgroupName}>{adgroup.adgroupName}</div>
+														</div>
 													</TableCell>
 													<TableCell></TableCell>
 													{#each activePreset.columns as col}
-														<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-sm">
+														<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-sm text-foreground/80">
 															<div>{col.getValue(adgroup as any, selectedCurrency)}</div>
 															{#if col.getSubtext}
 																{@const sub = col.getSubtext(adgroup as any)}
