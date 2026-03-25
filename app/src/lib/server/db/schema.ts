@@ -1394,6 +1394,8 @@ export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
 	syncEnabled: boolean('sync_enabled').notNull().default(true),
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
+	googleSessionCookies: text('google_session_cookies'), // AES-256-GCM encrypted Google session cookies
+	googleSessionStatus: text('google_session_status').notNull().default('none'), // 'none' | 'active'
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

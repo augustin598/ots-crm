@@ -6,7 +6,9 @@
 		saveGoogleAdsConfig,
 		fetchGoogleAdsAccounts,
 		assignGoogleAdsAccountToClient,
-		triggerGoogleAdsSync
+		triggerGoogleAdsSync,
+		setGoogleAdsCookies,
+		clearGoogleAdsCookies
 	} from '$lib/remotes/google-ads-invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -15,7 +17,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
-	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Save, RefreshCw, Download } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Save, RefreshCw, Download, Trash2, Cookie } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 
@@ -38,6 +40,10 @@
 	let syncing = $state(false);
 	let disconnecting = $state(false);
 	let fetchingAccounts = $state(false);
+
+	// Cookie management
+	let cookieJsonInput = $state('');
+	let savingCookies = $state(false);
 
 	// Initialize from status
 	$effect(() => {
@@ -131,6 +137,35 @@
 			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
 		} finally {
 			syncing = false;
+		}
+	}
+
+	async function handleSaveCookies() {
+		const json = cookieJsonInput.trim();
+		if (!json) {
+			toast.error('Inserează JSON-ul cookies din Cookie-Editor');
+			return;
+		}
+		savingCookies = true;
+		try {
+			await setGoogleAdsCookies({ cookiesJson: json }).updates(statusQuery);
+			toast.success('Cookies Google salvate');
+			cookieJsonInput = '';
+		} catch (e: any) {
+			const msg = e?.body?.message || e?.message || 'Eroare la salvare cookies';
+			toast.error(msg);
+		} finally {
+			savingCookies = false;
+		}
+	}
+
+	async function handleClearCookies() {
+		if (!confirm('Ștergi sesiunea Google? Download-ul facturilor via cookies nu va mai funcționa.')) return;
+		try {
+			await clearGoogleAdsCookies().updates(statusQuery);
+			toast.success('Sesiune Google ștearsă');
+		} catch (e: any) {
+			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere sesiune'));
 		}
 	}
 
@@ -269,6 +304,54 @@
 						{#if status.lastSyncResults}
 							— {status.lastSyncResults.imported} importate, {status.lastSyncResults.skipped || 0} existente, {status.lastSyncResults.errors || 0} erori
 						{/if}
+					</div>
+				{/if}
+			</CardContent>
+		</Card>
+
+		<!-- Google Session Cookies Card -->
+		<Card>
+			<CardHeader>
+				<CardTitle class="flex items-center gap-2">
+					<Cookie class="h-5 w-5" />
+					Sesiune Google (Cookies)
+					{#if status?.googleSessionStatus === 'active'}
+						<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
+							Active
+						</span>
+					{:else}
+						<span class="inline-flex items-center rounded-full border border-gray-400 px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-50">
+							Inactive
+						</span>
+					{/if}
+				</CardTitle>
+				<CardDescription>
+					Cookies-urile Google sunt folosite ca fallback pentru descărcarea facturilor PDF de pe payments.google.com.
+					Exportă cookies-urile de pe ads.google.com cu extensia Cookie-Editor (format JSON).
+				</CardDescription>
+			</CardHeader>
+			<CardContent class="space-y-3">
+				{#if status?.googleSessionStatus === 'active'}
+					<p class="text-sm text-green-700">Sesiunea Google este activă. Cookies-urile vor fi folosite pentru descărcarea facturilor PDF.</p>
+					<Button variant="outline" size="sm" onclick={handleClearCookies}>
+						<Trash2 class="mr-2 h-4 w-4" />
+						Șterge Sesiune
+					</Button>
+				{:else}
+					<div class="space-y-2">
+						<textarea
+							class="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+							placeholder={'[{"name":"SID","value":"...","domain":".google.com"}, ...]'}
+							bind:value={cookieJsonInput}
+						></textarea>
+						<Button size="sm" onclick={handleSaveCookies} disabled={savingCookies}>
+							{#if savingCookies}
+								<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+								Salvare...
+							{:else}
+								Salvează Cookies Google
+							{/if}
+						</Button>
 					</div>
 				{/if}
 			</CardContent>

@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-ads/auth';
+import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
 
 // ---- Queries ----
 
@@ -468,3 +469,61 @@ export const deleteGoogleAdsInvoice = command(
 		return { success: true };
 	}
 );
+
+/** Save Google session cookies for cookie-based PDF downloading */
+export const setGoogleAdsCookies = command(
+	v.object({
+		cookiesJson: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Find the integration for this tenant
+		const [integration] = await db
+			.select({ id: table.googleAdsIntegration.id })
+			.from(table.googleAdsIntegration)
+			.where(eq(table.googleAdsIntegration.tenantId, tenantId))
+			.limit(1);
+
+		if (!integration) {
+			throw new Error('Integrarea Google Ads nu este configurată');
+		}
+
+		await saveGoogleSessionCookies(integration.id, tenantId, data.cookiesJson);
+		return { success: true };
+	}
+);
+
+/** Clear Google session cookies */
+export const clearGoogleAdsCookies = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.isClientUser) {
+		throw new Error('Unauthorized');
+	}
+
+	const tenantId = event.locals.tenant.id;
+
+	const [integration] = await db
+		.select({ id: table.googleAdsIntegration.id })
+		.from(table.googleAdsIntegration)
+		.where(eq(table.googleAdsIntegration.tenantId, tenantId))
+		.limit(1);
+
+	if (!integration) {
+		throw new Error('Integrarea Google Ads nu este configurată');
+	}
+
+	await clearGoogleSession(integration.id, tenantId);
+	return { success: true };
+});

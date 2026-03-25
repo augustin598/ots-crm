@@ -164,7 +164,9 @@ export async function getGoogleAdsStatus(tenantId: string) {
 			lastSyncAt: null,
 			isActive: false,
 			syncEnabled: false,
-			lastSyncResults: null
+			lastSyncResults: null,
+			integrationId: null,
+			googleSessionStatus: 'none' as const
 		};
 	}
 
@@ -176,7 +178,9 @@ export async function getGoogleAdsStatus(tenantId: string) {
 		lastSyncAt: integration.lastSyncAt,
 		isActive: integration.isActive,
 		syncEnabled: integration.syncEnabled,
-		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null
+		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null,
+		integrationId: integration.id,
+		googleSessionStatus: integration.googleSessionStatus
 	};
 }
 

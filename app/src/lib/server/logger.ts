@@ -22,6 +22,7 @@ export type LogSource =
 	| 'meta-ads'
 	| 'invoice-downloader'
 	| 'fb-cookies'
+	| 'google-cookies'
 	| 'tiktok-ads';
 
 function generateId() {
