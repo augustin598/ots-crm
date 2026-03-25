@@ -1,6 +1,6 @@
 -- Facebook session cookies storage on integration
-ALTER TABLE meta_ads_integration ADD COLUMN fb_session_cookies TEXT;
-ALTER TABLE meta_ads_integration ADD COLUMN fb_session_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE meta_ads_integration ADD COLUMN fb_session_cookies TEXT;--> statement-breakpoint
+ALTER TABLE meta_ads_integration ADD COLUMN fb_session_status TEXT NOT NULL DEFAULT 'none';--> statement-breakpoint
 
 -- Invoice downloads table (real Facebook billing PDF receipts)
 CREATE TABLE IF NOT EXISTS meta_invoice_download (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS meta_invoice_download (
   error_message TEXT,
   created_at INTEGER DEFAULT (unixepoch()) NOT NULL,
   updated_at INTEGER DEFAULT (unixepoch()) NOT NULL
-);
+);--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS meta_invoice_dl_dedup
   ON meta_invoice_download(tenant_id, meta_ad_account_id, period_start);

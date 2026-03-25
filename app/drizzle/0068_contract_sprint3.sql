@@ -1,7 +1,7 @@
 -- Sprint 3: Optimistic locking, Audit trail, contractId FK
 
 -- 1. Optimistic locking: version column on contract
-ALTER TABLE contract ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE contract ADD COLUMN version INTEGER NOT NULL DEFAULT 1;--> statement-breakpoint
 
 -- 2. Audit trail: contract_activity table
 CREATE TABLE IF NOT EXISTS contract_activity (
@@ -14,12 +14,12 @@ CREATE TABLE IF NOT EXISTS contract_activity (
     old_value TEXT,
     new_value TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-);
-CREATE INDEX IF NOT EXISTS idx_contract_activity_contract ON contract_activity(contract_id);
-CREATE INDEX IF NOT EXISTS idx_contract_activity_tenant ON contract_activity(tenant_id);
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_contract_activity_contract ON contract_activity(contract_id);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_contract_activity_tenant ON contract_activity(tenant_id);--> statement-breakpoint
 
 -- 3. contractId FK on invoice and recurring_invoice
-ALTER TABLE invoice ADD COLUMN contract_id TEXT REFERENCES contract(id);
-ALTER TABLE recurring_invoice ADD COLUMN contract_id TEXT REFERENCES contract(id);
-CREATE INDEX IF NOT EXISTS idx_invoice_contract ON invoice(contract_id);
+ALTER TABLE invoice ADD COLUMN contract_id TEXT REFERENCES contract(id);--> statement-breakpoint
+ALTER TABLE recurring_invoice ADD COLUMN contract_id TEXT REFERENCES contract(id);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_invoice_contract ON invoice(contract_id);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_recurring_invoice_contract ON recurring_invoice(contract_id);

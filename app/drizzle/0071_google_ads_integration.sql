@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `google_ads_integration` (
 	`last_sync_results` text,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
 -- Google Ads Invoice table
 CREATE TABLE IF NOT EXISTS `google_ads_invoice` (
@@ -35,10 +35,10 @@ CREATE TABLE IF NOT EXISTS `google_ads_invoice` (
 	`synced_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
 -- Unique index for deduplication
-CREATE UNIQUE INDEX IF NOT EXISTS `google_ads_invoice_dedup` ON `google_ads_invoice` (`tenant_id`, `google_invoice_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `google_ads_invoice_dedup` ON `google_ads_invoice` (`tenant_id`, `google_invoice_id`);--> statement-breakpoint
 
 -- Add Google Ads customer ID column to client table
 ALTER TABLE `client` ADD COLUMN `google_ads_customer_id` text;

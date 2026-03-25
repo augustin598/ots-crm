@@ -421,6 +421,153 @@
       "when": 1774440290883,
       "tag": "0059_google_ads_currency_code",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1774440300000,
+      "tag": "0060_client_user_unique_constraint",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1774440310000,
+      "tag": "0061_client_access_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1774440320000,
+      "tag": "0062_secondary_email_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1774440330000,
+      "tag": "0063_client_email_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1774440340000,
+      "tag": "0064_seo_link_article_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1774440350000,
+      "tag": "0065_marketing_material_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1774440360000,
+      "tag": "0066_task_comment_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1774440370000,
+      "tag": "0067_contract_audit_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1774440380000,
+      "tag": "0068_contract_sprint3",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1774440390000,
+      "tag": "0069_invoice_view_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1774440400000,
+      "tag": "0070_email_log_html_body",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1774440410000,
+      "tag": "0071_google_ads_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1774440420000,
+      "tag": "0072_google_ads_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1774440430000,
+      "tag": "0073_meta_ads_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1774440440000,
+      "tag": "0074_meta_ads_invoice_dedup_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1774440450000,
+      "tag": "0075_meta_ads_spending",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1774440460000,
+      "tag": "0076_meta_invoice_downloads",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1774440470000,
+      "tag": "0077_tiktok_ads_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1774440480000,
+      "tag": "0078_task_comment_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1774440490000,
+      "tag": "0079_client_restricted_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1774440500000,
+      "tag": "0080_google_ads_cookies",
+      "breakpoints": true
     }
   ]
 }

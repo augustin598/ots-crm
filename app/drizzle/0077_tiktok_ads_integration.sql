@@ -18,9 +18,9 @@ CREATE TABLE IF NOT EXISTS `tiktok_ads_integration` (
 	`tt_session_status` text NOT NULL DEFAULT 'none',
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
-CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_integration_tenant` ON `tiktok_ads_integration` (`tenant_id`, `org_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_integration_tenant` ON `tiktok_ads_integration` (`tenant_id`, `org_id`);--> statement-breakpoint
 
 -- TikTok Ads advertiser accounts cached, with CRM client mapping
 CREATE TABLE IF NOT EXISTS `tiktok_ads_account` (
@@ -34,9 +34,9 @@ CREATE TABLE IF NOT EXISTS `tiktok_ads_account` (
 	`last_fetched_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
-CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_account_tenant_adv` ON `tiktok_ads_account` (`tenant_id`, `tiktok_advertiser_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_account_tenant_adv` ON `tiktok_ads_account` (`tenant_id`, `tiktok_advertiser_id`);--> statement-breakpoint
 
 -- TikTok Ads spending data synced from Reporting API per advertiser
 CREATE TABLE IF NOT EXISTS `tiktok_ads_spending` (
@@ -57,9 +57,9 @@ CREATE TABLE IF NOT EXISTS `tiktok_ads_spending` (
 	`synced_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
-CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_spending_dedup` ON `tiktok_ads_spending` (`tenant_id`, `tiktok_advertiser_id`, `period_start`, `client_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_ads_spending_dedup` ON `tiktok_ads_spending` (`tenant_id`, `tiktok_advertiser_id`, `period_start`, `client_id`);--> statement-breakpoint
 
 -- TikTok invoice downloads (billing PDF receipts via cookie-based download)
 CREATE TABLE IF NOT EXISTS `tiktok_invoice_download` (
@@ -81,16 +81,16 @@ CREATE TABLE IF NOT EXISTS `tiktok_invoice_download` (
 	`error_message` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL
-);
+);--> statement-breakpoint
 
-CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_invoice_dl_dedup` ON `tiktok_invoice_download` (`tenant_id`, `tiktok_invoice_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `tiktok_invoice_dl_dedup` ON `tiktok_invoice_download` (`tenant_id`, `tiktok_invoice_id`);--> statement-breakpoint
 
 -- Additional indexes for performance
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_integration_tenant` ON `tiktok_ads_integration`(`tenant_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_account_integration` ON `tiktok_ads_account`(`integration_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_account_client` ON `tiktok_ads_account`(`client_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_tenant` ON `tiktok_ads_spending`(`tenant_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_client` ON `tiktok_ads_spending`(`client_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_integration` ON `tiktok_ads_spending`(`integration_id`);
-CREATE INDEX IF NOT EXISTS `idx_tiktok_invoice_dl_tenant` ON `tiktok_invoice_download`(`tenant_id`);
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_integration_tenant` ON `tiktok_ads_integration`(`tenant_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_account_integration` ON `tiktok_ads_account`(`integration_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_account_client` ON `tiktok_ads_account`(`client_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_tenant` ON `tiktok_ads_spending`(`tenant_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_client` ON `tiktok_ads_spending`(`client_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_ads_spending_integration` ON `tiktok_ads_spending`(`integration_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_tiktok_invoice_dl_tenant` ON `tiktok_invoice_download`(`tenant_id`);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_tiktok_invoice_dl_integration` ON `tiktok_invoice_download`(`integration_id`);

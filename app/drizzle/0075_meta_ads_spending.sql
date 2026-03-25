@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS `meta_ads_spending` (
 	`synced_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
 -- Dedup: one row per tenant + ad account + period start + client
 CREATE UNIQUE INDEX IF NOT EXISTS `meta_ads_spending_dedup` ON `meta_ads_spending` (`tenant_id`, `meta_ad_account_id`, `period_start`, `client_id`);

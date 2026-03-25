@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `google_ads_account` (
 	`last_fetched_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
 	`updated_at` timestamp NOT NULL DEFAULT current_date
-);
+);--> statement-breakpoint
 
 -- Unique: one row per tenant + Google Ads customer ID
 CREATE UNIQUE INDEX IF NOT EXISTS `google_ads_account_tenant_customer` ON `google_ads_account` (`tenant_id`, `google_ads_customer_id`);
