@@ -375,9 +375,16 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
-				<div class="flex items-center gap-1.5">
-					<IconTiktok class="h-4 w-4 text-foreground" />
-					<span class="text-sm font-medium">Selectează cont</span>
+				<div class="flex items-center gap-2">
+					{#if true}
+						{@const selectedAccount = accounts.find((a: any) => a.tiktokAdvertiserId === selectedAdvertiserId)}
+						{@const domain = selectedAccount?.accountName?.replace(/\s/g, '').toLowerCase()}
+						{#if domain && domain.includes('.')}
+							<img src="https://www.google.com/s2/favicons?domain={domain}&sz=32" alt="" class="h-5 w-5 rounded" />
+						{:else}
+							<IconTiktok class="h-4 w-4 text-foreground" />
+						{/if}
+					{/if}
 					<select
 						class="h-9 rounded-md border border-input bg-background px-3 text-sm"
 						value={selectedAdvertiserId}
