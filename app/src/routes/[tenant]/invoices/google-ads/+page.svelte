@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getGoogleAdsInvoices, getGoogleAdsMonthlySpend, deleteGoogleAdsInvoice, triggerGoogleAdsSync } from '$lib/remotes/google-ads-invoices.remote';
+	import { getGoogleAdsInvoices, getGoogleAdsMonthlySpend, deleteGoogleAdsInvoice, triggerGoogleAdsSync, downloadGoogleInvoiceFromUrl, bulkDownloadGoogleInvoices } from '$lib/remotes/google-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -25,6 +25,42 @@
 		} catch { return month; }
 	}
 
+	// Match invoices to months: find invoice for a given YYYY-MM
+	function getInvoiceMonth(issueDate: any): string | null {
+		if (!issueDate) return null;
+		// Date object
+		if (issueDate instanceof Date && !isNaN(issueDate.getTime())) {
+			return `${issueDate.getUTCFullYear()}-${String(issueDate.getUTCMonth() + 1).padStart(2, '0')}`;
+		}
+		const s = String(issueDate);
+		// ISO string "2026-02-28T00:00:00.000Z" or "2026-02-28"
+		if (s.match(/^\d{4}-\d{2}/)) return s.substring(0, 7);
+		// Unix timestamp (number as string)
+		if (s.match(/^\d{10,13}$/)) {
+			const d = new Date(Number(s) * (s.length <= 10 ? 1000 : 1));
+			return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+		}
+		// Try parsing
+		const d = new Date(s);
+		if (!isNaN(d.getTime())) return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+		return null;
+	}
+
+	function findInvoiceForMonth(monthStr: string, customerId?: string) {
+		// Normalize to YYYY-MM (monthStr can be "2026-02" or "2026-02-01")
+		const targetMonth = monthStr.substring(0, 7);
+		const found = invoices.find(inv => {
+			const invMonth = getInvoiceMonth(inv.issueDate);
+			if (!invMonth || invMonth !== targetMonth) return false;
+			if (customerId && inv.googleAdsCustomerId) {
+				return inv.googleAdsCustomerId.replace(/-/g, '') === customerId.replace(/-/g, '');
+			}
+			return true;
+		});
+		return found;
+	}
+
+
 	function formatCurr(value: number, currency: string): string {
 		return new Intl.NumberFormat('ro-RO', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
 	}
@@ -40,11 +76,94 @@
 	const monthlyLoading = $derived(monthlySpendQuery.loading);
 
 	let syncing = $state(false);
+	let showUrlDownload = $state(false);
+	let urlPdfLink = $state('');
+	let urlCustomerId = $state('');
+	let urlInvoiceId = $state('');
+	let urlDownloading = $state(false);
+	let showBulkImport = $state(false);
+	let bulkJson = $state('');
+	let bulkCustomerId = $state('');
+	let bulkDownloading = $state(false);
 	let searchQuery = $state('');
 	let sortColumn = $state<'clientName' | 'invoiceNumber' | 'issueDate' | 'totalAmountMicros'>('issueDate');
 	let sortDirection = $state<'asc' | 'desc'>('desc');
 	let pageSize = $state(25);
 	let currentPage = $state(1);
+
+	async function handleUrlDownload() {
+		if (!urlPdfLink || !urlCustomerId) {
+			toast.error('Completează URL-ul PDF și Customer ID');
+			return;
+		}
+		urlDownloading = true;
+		try {
+			const result = await downloadGoogleInvoiceFromUrl({
+				pdfUrl: urlPdfLink,
+				customerId: urlCustomerId,
+				invoiceId: urlInvoiceId || undefined
+			}).updates(invoicesQuery);
+			toast.success(`Factură descărcată: ${result.invoiceId}`);
+			urlPdfLink = '';
+			urlInvoiceId = '';
+			showUrlDownload = false;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+		} finally {
+			urlDownloading = false;
+		}
+	}
+
+	const consoleScript = `// Rulează pe pagina Google Payments (billing documents)
+// Copiază rezultatul și lipește-l în CRM
+(function(){
+  const links = [];
+  document.querySelectorAll('[data-url]').forEach(el => {
+    const url = el.getAttribute('data-url');
+    if (url && url.includes('/payments/apis-secure/doc')) {
+      const row = el.closest('.b3id-row, .b3-row, tr, [role="row"]');
+      const rowEl = row || el.parentElement?.parentElement?.parentElement;
+      const text = rowEl ? rowEl.innerText : '';
+      const idMatch = text.match(/(\\d{8,12})/);
+      const dateMatch = text.match(/(\\d{1,2})\\s+(ian|feb|mar|apr|mai|iun|iul|aug|sep|oct|nov|dec)\\.?\\s+(\\d{4})/i);
+      links.push({
+        url: url,
+        invoiceId: idMatch ? idMatch[1] : undefined,
+        date: dateMatch ? dateMatch[3]+'-'+dateMatch[2]+'-'+dateMatch[1] : undefined
+      });
+    }
+  });
+  const json = JSON.stringify(links, null, 2);
+  copy(json);
+  console.log('Copiat ' + links.length + ' link-uri în clipboard!');
+  alert('Copiat ' + links.length + ' link-uri de facturi în clipboard!\\nLipește în CRM.');
+})();`;
+
+	async function handleBulkImport() {
+		if (!bulkJson.trim() || !bulkCustomerId) {
+			toast.error('Lipește JSON-ul cu link-urile și selectează contul');
+			return;
+		}
+		let links;
+		try {
+			links = JSON.parse(bulkJson);
+			if (!Array.isArray(links) || links.length === 0) throw new Error('Array gol');
+		} catch {
+			toast.error('JSON invalid. Rulează scriptul din consolă și lipește rezultatul.');
+			return;
+		}
+		bulkDownloading = true;
+		try {
+			const result = await bulkDownloadGoogleInvoices({ customerId: bulkCustomerId, links }).updates(invoicesQuery);
+			toast.success(`Download complet: ${result.downloaded} descărcate, ${result.skipped} existente, ${result.errors} erori`);
+			bulkJson = '';
+			showBulkImport = false;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+		} finally {
+			bulkDownloading = false;
+		}
+	}
 
 	async function handleSync() {
 		syncing = true;
@@ -185,14 +304,91 @@
 			</h1>
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
-		<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
-			{#if syncing}
-				<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...
-			{:else}
-				<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum
-			{/if}
-		</Button>
+		<div class="flex items-center gap-2">
+			<Button variant="outline" size="sm" onclick={() => showBulkImport = !showBulkImport}>
+				<Download class="mr-2 h-4 w-4" />Import Facturi
+			</Button>
+			<Button variant="outline" size="sm" onclick={() => showUrlDownload = !showUrlDownload}>
+				<ExternalLink class="mr-2 h-4 w-4" />Link Singular
+			</Button>
+			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
+				{#if syncing}
+					<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...
+				{:else}
+					<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum
+				{/if}
+			</Button>
+		</div>
 	</div>
+
+	<!-- Bulk Import Panel -->
+	{#if showBulkImport}
+		<Card class="p-4 space-y-3">
+			<p class="text-sm font-medium">Import automat facturi Google Ads</p>
+			<div class="space-y-2 text-xs text-muted-foreground">
+				<p>1. Deschide <a href="https://payments.google.com/gp/p/ui/pay" target="_blank" class="text-primary underline">Google Payments Center</a> → selectează contul Google Ads → Documents</p>
+				<p>2. Apasă F12 (DevTools) → Console și lipește acest script:</p>
+			</div>
+			<div class="relative">
+				<pre class="bg-muted rounded-md p-3 text-xs overflow-x-auto max-h-32 overflow-y-auto">{consoleScript}</pre>
+				<Button variant="ghost" size="sm" class="absolute top-1 right-1" onclick={() => { navigator.clipboard.writeText(consoleScript); toast.success('Script copiat!'); }}>
+					Copiază
+				</Button>
+			</div>
+			<div class="space-y-2 text-xs text-muted-foreground">
+				<p>3. Scriptul copiază automat link-urile în clipboard. Lipește rezultatul aici:</p>
+			</div>
+			<textarea bind:value={bulkJson} placeholder="Lipeste JSON-ul aici..." class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
+			<div class="flex items-center gap-2">
+				<select bind:value={bulkCustomerId} class="rounded-md border px-3 py-2 text-sm bg-background">
+					<option value="">Selectează contul</option>
+					{#each monthlySpend as account}
+						<option value={account.googleAdsCustomerId}>{account.accountName}</option>
+					{/each}
+				</select>
+				<Button size="sm" onclick={handleBulkImport} disabled={bulkDownloading}>
+					{#if bulkDownloading}
+						<Download class="mr-2 h-4 w-4 animate-spin" />Import...
+					{:else}
+						<Download class="mr-2 h-4 w-4" />Importă Toate
+					{/if}
+				</Button>
+			</div>
+		</Card>
+	{/if}
+
+	<!-- Download from URL Panel -->
+	{#if showUrlDownload}
+		<Card class="p-4 space-y-3">
+			<p class="text-sm font-medium">Download factură din link Google Payments</p>
+			<p class="text-xs text-muted-foreground">
+				Deschide Google Ads → Billing → Documents, click dreapta pe "Download" și copiază link-ul.
+			</p>
+			<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+				<div class="sm:col-span-2">
+					<Input bind:value={urlPdfLink} placeholder="URL-ul PDF (payments.google.com/...)" />
+				</div>
+				<div>
+					<select bind:value={urlCustomerId} class="w-full rounded-md border px-3 py-2 text-sm bg-background">
+						<option value="">Selectează contul</option>
+						{#each monthlySpend as account}
+							<option value={account.googleAdsCustomerId}>{account.accountName}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<Input bind:value={urlInvoiceId} placeholder="Nr. factură (opțional)" class="max-w-[200px]" />
+				<Button size="sm" onclick={handleUrlDownload} disabled={urlDownloading}>
+					{#if urlDownloading}
+						<Download class="mr-2 h-4 w-4 animate-spin" />Descărcare...
+					{:else}
+						<Download class="mr-2 h-4 w-4" />Descarcă
+					{/if}
+				</Button>
+			</div>
+		</Card>
+	{/if}
 
 	<!-- Monthly Spend Cards -->
 	{#if monthlyLoading}
@@ -257,26 +453,27 @@
 							{#each account.months as m, i}
 								{@const prevSpend = account.months[i + 1]?.spend}
 								{@const trend = prevSpend ? ((m.spend - prevSpend) / prevSpend) * 100 : null}
-								<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
-									<div class="flex items-center gap-3 w-48">
-										<CalendarIcon class="h-4 w-4 text-muted-foreground" />
-										<span class="font-medium capitalize">{formatMonth(m.month)}</span>
+								{@const monthInvoice = findInvoiceForMonth(m.month, account.googleAdsCustomerId)}
+								<div class="grid grid-cols-6 gap-2 px-6 py-4 hover:bg-muted/30 transition-colors items-center">
+									<div class="flex items-center gap-2">
+										<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+										<span class="font-medium capitalize whitespace-nowrap">{formatMonth(m.month)}</span>
 									</div>
-									<div class="flex-1 grid grid-cols-4 gap-4 text-right">
-										<div>
-											<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
-											{#if trend !== null}
-												<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">
-													{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%
-												</span>
-											{/if}
-										</div>
-										<span class="text-sm text-muted-foreground">{m.impressions.toLocaleString('ro-RO')} imp.</span>
-										<span class="text-sm">{m.clicks.toLocaleString('ro-RO')} clicks</span>
-										<div class="flex items-center justify-end gap-1.5">
-											<TrendingUpIcon class="h-3.5 w-3.5 text-primary" />
-											<span class="text-sm font-medium">{m.conversions} conv.</span>
-										</div>
+									<div class="text-right whitespace-nowrap">
+										<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
+										{#if trend !== null}
+											<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+										{/if}
+									</div>
+									<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{m.impressions.toLocaleString('ro-RO')} imp.</span>
+									<span class="text-sm text-right whitespace-nowrap">{m.clicks.toLocaleString('ro-RO')} clicks</span>
+									<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{m.conversions} conv.</span>
+									<div class="flex justify-end">
+										{#if monthInvoice}
+											<Button variant="outline" size="sm" class="whitespace-nowrap" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
+												<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
+											</Button>
+										{/if}
 									</div>
 								</div>
 							{/each}

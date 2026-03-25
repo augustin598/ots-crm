@@ -467,6 +467,147 @@ export const deleteGoogleAdsInvoice = command(
 	}
 );
 
+/** Download a Google Ads invoice PDF from a direct URL (pasted by user) */
+export const downloadGoogleInvoiceFromUrl = command(
+	v.object({
+		pdfUrl: v.pipe(v.string(), v.minLength(1)),
+		customerId: v.pipe(v.string(), v.minLength(1)),
+		invoiceId: v.optional(v.string())
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Get integration and cookies
+		const [integration] = await db
+			.select()
+			.from(table.googleAdsIntegration)
+			.where(and(eq(table.googleAdsIntegration.tenantId, tenantId), eq(table.googleAdsIntegration.isActive, true)))
+			.limit(1);
+
+		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
+
+		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
+		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
+		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
+
+		const { downloadInvoicePdfViaCookies } = await import('$lib/server/google-ads/invoice-downloader');
+		const { uploadBuffer } = await import('$lib/server/storage');
+
+		const result = await downloadInvoicePdfViaCookies(data.pdfUrl, cookies);
+
+		if (!result.success || !result.pdfBuffer) {
+			throw new Error(`Download eșuat: ${result.error}`);
+		}
+
+		// Extract invoice ID from URL or use provided one
+		const invoiceId = data.invoiceId || data.pdfUrl.match(/(\d{8,})/)?.[1] || crypto.randomUUID();
+		const cleanCustomerId = formatCustomerId(data.customerId);
+
+		// Upload to MinIO
+		const upload = await uploadBuffer(
+			tenantId,
+			result.pdfBuffer,
+			`google-ads-invoice-${cleanCustomerId}_${invoiceId}.pdf`,
+			'application/pdf',
+			{ type: 'google-ads-invoice', customerId: cleanCustomerId, invoiceId }
+		);
+
+		// Find the client for this Google Ads account
+		const [account] = await db
+			.select({ clientId: table.googleAdsAccount.clientId })
+			.from(table.googleAdsAccount)
+			.where(and(
+				eq(table.googleAdsAccount.tenantId, tenantId),
+				eq(table.googleAdsAccount.googleAdsCustomerId, data.customerId)
+			))
+			.limit(1);
+
+		if (!account?.clientId) throw new Error('Contul Google Ads nu este mapat la un client');
+
+		// Check dedup
+		const [existing] = await db
+			.select({ id: table.googleAdsInvoice.id })
+			.from(table.googleAdsInvoice)
+			.where(and(
+				eq(table.googleAdsInvoice.tenantId, tenantId),
+				eq(table.googleAdsInvoice.googleInvoiceId, invoiceId)
+			))
+			.limit(1);
+
+		if (existing) {
+			await db.update(table.googleAdsInvoice)
+				.set({ pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date() })
+				.where(eq(table.googleAdsInvoice.id, existing.id));
+		} else {
+			await db.insert(table.googleAdsInvoice).values({
+				id: crypto.randomUUID(),
+				tenantId,
+				clientId: account.clientId,
+				googleAdsCustomerId: data.customerId,
+				googleInvoiceId: invoiceId,
+				invoiceNumber: invoiceId,
+				issueDate: new Date(),
+				currencyCode: 'USD',
+				invoiceType: 'INVOICE',
+				pdfPath: upload.path,
+				status: 'synced',
+				syncedAt: new Date(),
+				createdAt: new Date(),
+				updatedAt: new Date()
+			});
+		}
+
+		return { success: true, invoiceId };
+	}
+);
+
+/** Bulk download Google Ads invoices from links extracted via browser console script */
+export const bulkDownloadGoogleInvoices = command(
+	v.object({
+		customerId: v.pipe(v.string(), v.minLength(1)),
+		links: v.array(v.object({
+			url: v.pipe(v.string(), v.minLength(1)),
+			invoiceId: v.optional(v.string()),
+			date: v.optional(v.string()),
+			amount: v.optional(v.string())
+		}))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const [integration] = await db
+			.select()
+			.from(table.googleAdsIntegration)
+			.where(and(eq(table.googleAdsIntegration.tenantId, tenantId), eq(table.googleAdsIntegration.isActive, true)))
+			.limit(1);
+
+		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
+
+		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
+		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
+		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
+
+		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
+		return await downloadGoogleInvoicesFromLinks(tenantId, data.customerId, data.links, cookies);
+	}
+);
+
 /** Save Google session cookies for cookie-based PDF downloading */
 export const setGoogleAdsCookies = command(
 	v.object({

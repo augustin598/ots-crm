@@ -48,6 +48,30 @@
 		} catch { return '-'; }
 	}
 
+	function getInvoiceMonth(issueDate: any): string | null {
+		if (!issueDate) return null;
+		if (issueDate instanceof Date && !isNaN(issueDate.getTime())) {
+			return `${issueDate.getUTCFullYear()}-${String(issueDate.getUTCMonth() + 1).padStart(2, '0')}`;
+		}
+		const s = String(issueDate);
+		if (s.match(/^\d{4}-\d{2}/)) return s.substring(0, 7);
+		if (s.match(/^\d{10,13}$/)) {
+			const d = new Date(Number(s) * (s.length <= 10 ? 1000 : 1));
+			return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+		}
+		const d = new Date(s);
+		if (!isNaN(d.getTime())) return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+		return null;
+	}
+
+	function findInvoiceForMonth(monthStr: string) {
+		const targetMonth = monthStr.substring(0, 7);
+		return invoices.find(inv => {
+			const invMonth = getInvoiceMonth(inv.issueDate);
+			return invMonth === targetMonth;
+		});
+	}
+
 	async function handleDownloadPDF(invoiceId: string, invoiceNumber: string | null) {
 		try {
 			const response = await fetch(`/client/${tenantSlug}/invoices/google-ads/${invoiceId}/pdf`);
@@ -139,26 +163,27 @@
 							{#each account.months as m, i}
 								{@const prevSpend = account.months[i + 1]?.spend}
 								{@const trend = prevSpend ? ((m.spend - prevSpend) / prevSpend) * 100 : null}
-								<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
-									<div class="flex items-center gap-3 w-48">
-										<CalendarIcon class="h-4 w-4 text-muted-foreground" />
-										<span class="font-medium capitalize">{formatMonth(m.month)}</span>
+								{@const monthInvoice = findInvoiceForMonth(m.month)}
+								<div class="grid grid-cols-6 gap-2 px-6 py-4 hover:bg-muted/30 transition-colors items-center">
+									<div class="flex items-center gap-2">
+										<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+										<span class="font-medium capitalize whitespace-nowrap">{formatMonth(m.month)}</span>
 									</div>
-									<div class="flex-1 grid grid-cols-4 gap-4 text-right">
-										<div>
-											<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
-											{#if trend !== null}
-												<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">
-													{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%
-												</span>
-											{/if}
-										</div>
-										<span class="text-sm text-muted-foreground">{m.impressions.toLocaleString('ro-RO')} imp.</span>
-										<span class="text-sm">{m.clicks.toLocaleString('ro-RO')} clicks</span>
-										<div class="flex items-center justify-end gap-1.5">
-											<TrendingUpIcon class="h-3.5 w-3.5 text-primary" />
-											<span class="text-sm font-medium">{m.conversions} conv.</span>
-										</div>
+									<div class="text-right whitespace-nowrap">
+										<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
+										{#if trend !== null}
+											<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+										{/if}
+									</div>
+									<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{m.impressions.toLocaleString('ro-RO')} imp.</span>
+									<span class="text-sm text-right whitespace-nowrap">{m.clicks.toLocaleString('ro-RO')} clicks</span>
+									<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{m.conversions} conv.</span>
+									<div class="flex justify-end">
+										{#if monthInvoice}
+											<Button variant="outline" size="sm" class="whitespace-nowrap" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
+												<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
+											</Button>
+										{/if}
 									</div>
 								</div>
 							{/each}
@@ -169,45 +194,6 @@
 		</div>
 	{/if}
 
-	<!-- Synced Invoices -->
-	{#if loading}
-		<Card class="p-6"><Skeleton class="h-32 w-full" /></Card>
-	{:else if invoices.length > 0}
-		<div class="space-y-4">
-			<h2 class="text-lg font-semibold">Facturi sincronizate</h2>
-			<div class="rounded-md border overflow-x-auto">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead>Invoice #</TableHead>
-							<TableHead>Data emiterii</TableHead>
-							<TableHead>Scadență</TableHead>
-							<TableHead class="text-right">Total</TableHead>
-							<TableHead class="w-[80px]"></TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{#each invoices as invoice}
-							<TableRow>
-								<TableCell class="font-medium">{invoice.invoiceNumber || '-'}</TableCell>
-								<TableCell>{formatDate(invoice.issueDate)}</TableCell>
-								<TableCell>{formatDate(invoice.dueDate)}</TableCell>
-								<TableCell class="text-right font-semibold">{formatAmount(invoice.totalAmountMicros, invoice.currencyCode)}</TableCell>
-								<TableCell>
-									<div class="flex items-center gap-1">
-										{#if invoice.pdfPath}
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(invoice.id)} title="Preview"><Eye class="h-4 w-4" /></Button>
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)} title="Download"><Download class="h-4 w-4" /></Button>
-										{/if}
-									</div>
-								</TableCell>
-							</TableRow>
-						{/each}
-					</TableBody>
-				</Table>
-			</div>
-		</div>
-	{/if}
 
 	{#if !monthlyLoading && !loading && monthlySpend.length === 0 && invoices.length === 0}
 		<Card class="p-12 text-center">
