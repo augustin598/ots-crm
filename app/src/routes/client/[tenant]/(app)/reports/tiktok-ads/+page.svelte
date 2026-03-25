@@ -533,7 +533,7 @@
 													{#if campaign.createTime}
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
-															{campaign.createTime}
+															Start: {campaign.createTime}
 														</span>
 													{/if}
 												</div>

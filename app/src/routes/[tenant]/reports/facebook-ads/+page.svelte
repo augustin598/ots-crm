@@ -197,7 +197,7 @@
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null; previewUrl: string | null; startTime: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null; previewUrl: string | null; startTime: string | null; stopTime: string | null }> = [];
 
 		// Merge campaigns with insights; only show campaigns without data if they're ACTIVE
 		for (const ci of campaigns) {
@@ -211,7 +211,8 @@
 					budgetSource: ci.budgetSource || 'campaign',
 					adsetId: ci.adsetId || null,
 					previewUrl: ci.previewUrl || null,
-					startTime: ci.startTime || null
+					startTime: ci.startTime || null,
+					stopTime: ci.stopTime || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES' || ci.status === 'IN_PROCESS') {
@@ -233,7 +234,8 @@
 					budgetSource: ci.budgetSource || 'campaign',
 					adsetId: ci.adsetId || null,
 					previewUrl: ci.previewUrl || null,
-					startTime: ci.startTime || null
+					startTime: ci.startTime || null,
+					stopTime: ci.stopTime || null
 				});
 			}
 		}
@@ -248,7 +250,8 @@
 				budgetSource: 'campaign' as const,
 				adsetId: null,
 				previewUrl: null,
-				startTime: null
+				startTime: null,
+				stopTime: null
 			});
 		}
 
@@ -820,7 +823,8 @@
 													{#if campaign.startTime}
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
-															{campaign.startTime.slice(0, 10)}
+															Start: {campaign.startTime.slice(0, 10)}
+															{#if campaign.stopTime}· End: {campaign.stopTime.slice(0, 10)}{/if}
 														</span>
 													{/if}
 												</div>

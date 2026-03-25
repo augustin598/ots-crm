@@ -109,11 +109,11 @@
 	// Merge campaigns with insights to get status
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map(c => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; previewUrl: string | null; startTime: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; previewUrl: string | null; startTime: string | null; stopTime: string | null }> = [];
 		for (const ci of campaigns) {
 			const insight = insightMap.get(ci.campaignId);
 			if (insight) {
-				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null });
+				result.push({ ...insight, status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null, stopTime: ci.stopTime || null });
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES') {
 				result.push({
@@ -123,12 +123,12 @@
 					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
 					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
-					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null
+					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null, stopTime: ci.stopTime || null
 				});
 			}
 		}
 		for (const [, c] of insightMap) {
-			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, previewUrl: null, startTime: null });
+			result.push({ ...c, status: 'UNKNOWN', dailyBudget: null, lifetimeBudget: null, previewUrl: null, startTime: null, stopTime: null });
 		}
 		return result;
 	});
@@ -535,7 +535,8 @@
 													{#if campaign.startTime}
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
-															{campaign.startTime.slice(0, 10)}
+															Start: {campaign.startTime.slice(0, 10)}
+															{#if campaign.stopTime}· End: {campaign.stopTime.slice(0, 10)}{/if}
 														</span>
 													{/if}
 												</div>
