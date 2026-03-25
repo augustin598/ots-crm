@@ -375,9 +375,9 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
-				{#if accounts.length > 1}
-					<div class="flex items-center gap-1.5">
-						<IconTiktok class="h-4 w-4 text-foreground" />
+				<div class="flex items-center gap-1.5">
+					<IconTiktok class="h-4 w-4 text-foreground" />
+					{#if accounts.length > 1}
 						<select
 							class="h-9 rounded-md border border-input bg-background px-3 text-sm"
 							value={selectedAdvertiserId}
@@ -389,8 +389,10 @@
 								</option>
 							{/each}
 						</select>
-					</div>
-				{/if}
+					{:else}
+						<span class="text-sm text-muted-foreground">{accounts[0]?.accountName || ''}</span>
+					{/if}
+				</div>
 				<Button variant="outline" size="sm" onclick={handleRefresh}>
 					<RefreshCwIcon class="h-4 w-4" />
 				</Button>
