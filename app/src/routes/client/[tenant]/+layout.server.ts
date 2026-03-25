@@ -62,6 +62,55 @@ export const load: LayoutServerLoad = async (event) => {
 		.where(eq(table.invoiceSettings.tenantId, tenant.id))
 		.limit(1);
 
+	// Compute client access restriction status
+	let accessRestriction: {
+		isRestricted: boolean;
+		overdueDays: number | null;
+		overdueInvoiceId: string | null;
+		reason: 'overdue_invoice' | 'admin_forced' | null;
+	} = { isRestricted: false, overdueDays: null, overdueInvoiceId: null, reason: null };
+
+	if (event.locals.client) {
+		const clientRecord = event.locals.client;
+
+		if (clientRecord.restrictedAccess === 'unrestricted') {
+			// Admin override: never restricted
+			accessRestriction = { isRestricted: false, overdueDays: null, overdueInvoiceId: null, reason: null };
+		} else if (clientRecord.restrictedAccess === 'forced') {
+			// Admin override: always restricted
+			accessRestriction = { isRestricted: true, overdueDays: null, overdueInvoiceId: null, reason: 'admin_forced' };
+		} else {
+			// Auto mode: check for overdue invoices
+			const [overdueInvoice] = await db
+				.select({
+					id: table.invoice.id,
+					dueDate: table.invoice.dueDate
+				})
+				.from(table.invoice)
+				.where(
+					and(
+						eq(table.invoice.clientId, clientRecord.id),
+						eq(table.invoice.tenantId, tenant.id),
+						eq(table.invoice.status, 'overdue')
+					)
+				)
+				.orderBy(table.invoice.dueDate)
+				.limit(1);
+
+			if (overdueInvoice?.dueDate) {
+				const now = new Date();
+				const dueDate = new Date(overdueInvoice.dueDate);
+				const overdueDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+				accessRestriction = {
+					isRestricted: true,
+					overdueDays,
+					overdueInvoiceId: overdueInvoice.id,
+					reason: 'overdue_invoice'
+				};
+			}
+		}
+	}
+
 	return {
 		tenant,
 		client: event.locals.client,
@@ -76,6 +125,7 @@ export const load: LayoutServerLoad = async (event) => {
 				}
 			: null,
 		defaultWebsiteUrl,
-		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null
+		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null,
+		accessRestriction
 	};
 };

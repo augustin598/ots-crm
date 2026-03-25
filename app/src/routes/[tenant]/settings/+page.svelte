@@ -32,6 +32,9 @@
 	import { THEME_PRESETS, DEFAULT_THEME_COLOR, hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
+	import { getClientsRestrictionStatus, setClientRestriction } from '$lib/remotes/client-restrictions.remote';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -111,6 +114,20 @@
 			bnrError = e instanceof Error ? e.message : 'Eroare la actualizarea cursului';
 		} finally {
 			refreshingBnr = false;
+		}
+	}
+
+	// Client restrictions
+	const clientRestrictionsQuery = getClientsRestrictionStatus();
+	const clientsRestriction = $derived(clientRestrictionsQuery.current || []);
+
+	async function handleSetRestriction(clientId: string, value: string) {
+		try {
+			const restrictedAccess = value as 'auto' | 'forced' | 'unrestricted';
+			await setClientRestriction({ clientId, restrictedAccess }).updates(clientRestrictionsQuery);
+			toast.success('Restricția a fost actualizată');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizarea restricției');
 		}
 	}
 
@@ -629,6 +646,61 @@
 	</div>
 
 	{#if data.tenantUser?.role === 'owner' || data.tenantUser?.role === 'admin'}
+		<Card>
+			<CardHeader>
+				<div class="flex items-center gap-3">
+					<ShieldAlertIcon class="h-5 w-5 text-muted-foreground" />
+					<div>
+						<CardTitle>Restricții Acces Client Portal</CardTitle>
+						<CardDescription>Gestionați accesul clienților la portalul client. Clienții cu facturi restante sunt restricționați automat.</CardDescription>
+					</div>
+				</div>
+			</CardHeader>
+			<CardContent>
+				{#if clientsRestriction.length === 0}
+					<p class="text-sm text-muted-foreground">Nu există clienți.</p>
+				{:else}
+					<div class="space-y-2">
+						{#each clientsRestriction as client}
+							<div class="flex items-center justify-between p-3 border rounded-lg">
+								<div class="flex-1 min-w-0">
+									<p class="font-medium truncate">{client.name}</p>
+									<div class="flex items-center gap-2 mt-1">
+										{#if client.hasOverdueInvoice}
+											<Badge variant="destructive">Factură restantă</Badge>
+										{/if}
+										{#if client.restrictedAccess === 'forced'}
+											<Badge variant="destructive">Restricționat manual</Badge>
+										{:else if client.restrictedAccess === 'unrestricted'}
+											<Badge variant="secondary">Deblocat manual</Badge>
+										{:else}
+											<Badge variant="outline">Automat</Badge>
+										{/if}
+									</div>
+								</div>
+								<Select type="single" value={client.restrictedAccess || 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
+									<SelectTrigger class="w-[160px]">
+										{#if client.restrictedAccess === 'forced'}
+											Restricționat
+										{:else if client.restrictedAccess === 'unrestricted'}
+											Deblocat
+										{:else}
+											Automat
+										{/if}
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="auto">Automat</SelectItem>
+										<SelectItem value="forced">Restricționat</SelectItem>
+										<SelectItem value="unrestricted">Deblocat</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</CardContent>
+		</Card>
+
 		<Card>
 			<CardHeader>
 				<CardTitle>Team Invitations</CardTitle>

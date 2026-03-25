@@ -127,6 +127,7 @@ export const client = sqliteTable('client', {
 	keezPartnerId: text('keez_partner_id'),
 	notes: text('notes'),
 	googleAdsCustomerId: text('google_ads_customer_id'), // Google Ads customer ID (e.g., "1234567890")
+	restrictedAccess: text('restricted_access'), // null=auto (based on invoices), 'forced'=admin ban, 'unrestricted'=admin unban
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

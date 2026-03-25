@@ -25,6 +25,8 @@
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -45,6 +47,11 @@
 
 	const currentPath = $derived(page.url.pathname);
 	const tenantSlug = $derived(page.params.tenant);
+	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data'];
+	const isRestrictedRoute = $derived(
+		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
+	);
+
 	const toggleTheme = () => {
 		document.documentElement.classList.toggle('dark');
 	}
@@ -272,7 +279,40 @@
 	</Sidebar>
 	<SidebarInset>
 		<main class="flex-1 p-6">
-			{@render children()}
+			{#if data.accessRestriction?.isRestricted && isRestrictedRoute}
+				<div class="relative min-h-[60vh]">
+					<div class="blur-sm pointer-events-none select-none" aria-hidden="true">
+						{@render children()}
+					</div>
+					<div class="absolute inset-0 flex items-center justify-center bg-background/40">
+						<Card class="max-w-md w-full shadow-lg">
+							<CardHeader class="text-center">
+								<div class="flex justify-center mb-3">
+									<TriangleAlertIcon class="h-12 w-12 text-destructive" />
+								</div>
+								<CardTitle>Acces Restricționat</CardTitle>
+								<CardDescription class="mt-2">
+									{#if data.accessRestriction.reason === 'overdue_invoice'}
+										Aveți o factură restantă de <strong>{data.accessRestriction.overdueDays}</strong> zile.
+										Vă rugăm să efectuați plata pentru a redobândi accesul.
+									{:else}
+										Accesul la această secțiune a fost restricționat de administrator.
+									{/if}
+								</CardDescription>
+							</CardHeader>
+							{#if data.accessRestriction.overdueInvoiceId}
+								<CardContent class="flex justify-center">
+									<Button href="/client/{tenantSlug}/invoices">
+										Vezi Facturile
+									</Button>
+								</CardContent>
+							{/if}
+						</Card>
+					</div>
+				</div>
+			{:else}
+				{@render children()}
+			{/if}
 		</main>
 	</SidebarInset>
 </SidebarProvider>
