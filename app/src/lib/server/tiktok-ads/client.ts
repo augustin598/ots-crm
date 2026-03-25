@@ -63,6 +63,42 @@ export interface TiktokAdsCampaignInfo {
 	lifetimeBudget: string | null;
 }
 
+export interface TiktokAdsAdGroupInsight {
+	adgroupId: string;
+	adgroupName: string;
+	campaignId: string;
+	spend: string;
+	impressions: string;
+	reach: string;
+	frequency: string;
+	clicks: string;
+	cpc: string;
+	cpm: string;
+	ctr: string;
+	conversions: number;
+	costPerConversion: number;
+	resultType: string;
+	cpaLabel: string;
+	likes: number;
+	comments: number;
+	shares: number;
+	follows: number;
+	profileVisits: number;
+	videoViewsP25: number;
+	videoViewsP50: number;
+	videoViewsP75: number;
+	videoViewsP100: number;
+	videoViews2s: number;
+	videoViews6s: number;
+	focusedView6s: number;
+	averageVideoPlayPerUser: number;
+	dailyBudget: string | null;
+	lifetimeBudget: string | null;
+	optimizationGoal: string;
+	dateStart: string;
+	dateStop: string;
+}
+
 export interface DemographicSegment {
 	label: string;
 	spend: number;
@@ -402,6 +438,151 @@ export async function listCampaignInsights(
  * List campaigns for an advertiser with status, budget, and objective info.
  * GET /open_api/v1.3/campaign/get/
  */
+/**
+ * Fetch ad group-level daily reporting data for a specific campaign.
+ * GET /open_api/v1.3/report/integrated/get/ with data_level=AUCTION_ADGROUP
+ */
+export async function listAdGroupInsights(
+	advertiserId: string,
+	accessToken: string,
+	campaignId: string,
+	startDate: string,
+	endDate: string
+): Promise<TiktokAdsAdGroupInsight[]> {
+	logInfo('tiktok-ads', `Fetching ad group insights for campaign ${campaignId}`, { metadata: { advertiserId, startDate, endDate } });
+
+	const allRows: any[] = [];
+	let page = 1;
+	const pageSize = 1000;
+
+	while (true) {
+		const params = new URLSearchParams({
+			advertiser_id: advertiserId,
+			report_type: 'BASIC',
+			dimensions: JSON.stringify(['adgroup_id', 'stat_time_day']),
+			metrics: JSON.stringify([
+				'spend', 'impressions', 'clicks',
+				'result', 'cost_per_result',
+				'conversion', 'cost_per_conversion',
+				'cpc', 'cpm', 'ctr',
+				'reach', 'frequency',
+				'complete_payment', 'real_time_result',
+				'likes', 'comments', 'shares', 'follows', 'profile_visits',
+				'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
+				'video_play_actions', 'engaged_view', 'average_video_play_per_user'
+			]),
+			data_level: 'AUCTION_ADGROUP',
+			start_date: startDate,
+			end_date: endDate,
+			page_size: String(pageSize),
+			page: String(page),
+			filtering: JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify([campaignId]) }])
+		});
+
+		const url = `${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`;
+		const res = await fetch(url, { headers: { 'Access-Token': accessToken } });
+		const responseText = await res.text();
+		let json: any;
+		try {
+			json = JSON.parse(responseText);
+		} catch {
+			throw new Error(`TikTok API returned non-JSON response (HTTP ${res.status})`);
+		}
+
+		if (json.code !== 0) {
+			logError('tiktok-ads', `Ad group insights API error`, {
+				metadata: { errorMessage: json.message, errorCode: json.code, campaignId }
+			});
+			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
+		}
+
+		const rows = json.data?.list || [];
+		allRows.push(...rows);
+
+		const totalNumber = json.data?.page_info?.total_number || 0;
+		if (allRows.length >= totalNumber || rows.length < pageSize) break;
+		page++;
+	}
+
+	// Get ad group names from /adgroup/get/
+	const adgroupNames = new Map<string, { name: string; budget: string | null; budgetMode: string; optimizationGoal: string }>();
+	try {
+		const agParams = new URLSearchParams({
+			advertiser_id: advertiserId,
+			page_size: '1000',
+			fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'campaign_id', 'budget', 'budget_mode', 'optimization_goal']),
+			filtering: JSON.stringify({ campaign_ids: [campaignId] })
+		});
+		const agRes = await fetch(`${TIKTOK_API_URL}/adgroup/get/?${agParams.toString()}`, {
+			headers: { 'Access-Token': accessToken }
+		});
+		const agJson = await agRes.json();
+		if (agJson.code === 0 && agJson.data?.list) {
+			const DAILY_MODES = new Set(['BUDGET_MODE_DAY', 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET']);
+			for (const ag of agJson.data.list) {
+				const budget = parseFloat(ag.budget || '0');
+				const mode = ag.budget_mode || '';
+				adgroupNames.set(String(ag.adgroup_id), {
+					name: ag.adgroup_name || `Ad Group ${ag.adgroup_id}`,
+					budget: budget > 0 && mode !== 'BUDGET_MODE_INFINITE' ? String(budget) : null,
+					budgetMode: mode,
+					optimizationGoal: ag.optimization_goal || ''
+				});
+			}
+		}
+	} catch { /* ad group names are optional */ }
+
+	const insights: TiktokAdsAdGroupInsight[] = allRows.map(row => {
+		const m = row.metrics || {};
+		const d = row.dimensions || {};
+		const spend = parseFloat(m.spend || '0');
+		const conversions = parseInt(m.result || '0') || parseInt(m.conversion || '0') || parseInt(m.complete_payment || '0') || parseInt(m.real_time_result || '0');
+		const costPerResult = parseFloat(m.cost_per_result || '0');
+		const adgroupId = String(d.adgroup_id || '');
+		const agInfo = adgroupNames.get(adgroupId);
+		const DAILY_MODES = new Set(['BUDGET_MODE_DAY', 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET']);
+
+		return {
+			adgroupId,
+			adgroupName: agInfo?.name || `Ad Group ${adgroupId}`,
+			campaignId,
+			spend: m.spend || '0',
+			impressions: m.impressions || '0',
+			reach: m.reach || '0',
+			frequency: m.frequency || '0',
+			clicks: m.clicks || '0',
+			cpc: m.cpc || '0',
+			cpm: m.cpm || '0',
+			ctr: m.ctr || '0',
+			conversions,
+			costPerConversion: costPerResult > 0 ? costPerResult : (conversions > 0 ? spend / conversions : 0),
+			resultType: '',
+			cpaLabel: 'CPA',
+			likes: parseInt(m.likes || '0'),
+			comments: parseInt(m.comments || '0'),
+			shares: parseInt(m.shares || '0'),
+			follows: parseInt(m.follows || '0'),
+			profileVisits: parseInt(m.profile_visits || '0'),
+			videoViewsP25: parseInt(m.video_views_p25 || '0'),
+			videoViewsP50: parseInt(m.video_views_p50 || '0'),
+			videoViewsP75: parseInt(m.video_views_p75 || '0'),
+			videoViewsP100: parseInt(m.video_views_p100 || '0'),
+			videoViews2s: parseInt(m.video_play_actions || '0'),
+			videoViews6s: parseInt(m.engaged_view || '0'),
+			focusedView6s: parseInt(m.engaged_view || '0'),
+			averageVideoPlayPerUser: parseFloat(m.average_video_play_per_user || '0'),
+			dailyBudget: agInfo?.budget && DAILY_MODES.has(agInfo.budgetMode) ? agInfo.budget : null,
+			lifetimeBudget: agInfo?.budget && agInfo.budgetMode === 'BUDGET_MODE_TOTAL' ? agInfo.budget : null,
+			optimizationGoal: agInfo?.optimizationGoal || '',
+			dateStart: (d.stat_time_day || startDate).slice(0, 10),
+			dateStop: (d.stat_time_day || endDate).slice(0, 10)
+		};
+	});
+
+	logInfo('tiktok-ads', `Got ${insights.length} ad group insight rows for campaign ${campaignId}`);
+	return insights;
+}
+
 export async function listCampaigns(
 	advertiserId: string,
 	accessToken: string

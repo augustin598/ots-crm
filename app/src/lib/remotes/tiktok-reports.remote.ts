@@ -5,7 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/tiktok-ads/auth';
-import { listCampaignInsights, listCampaigns, listDemographicInsights, TIKTOK_OBJECTIVE_MAP, OPTIMIZATION_GOAL_MAP } from '$lib/server/tiktok-ads/client';
+import { listCampaignInsights, listCampaigns, listAdGroupInsights, listDemographicInsights, TIKTOK_OBJECTIVE_MAP, OPTIMIZATION_GOAL_MAP } from '$lib/server/tiktok-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
 
@@ -387,6 +387,74 @@ export const getTiktokDemographicInsights = query(
 
 			setCache(cacheKey, demographics);
 			return demographics;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw error(500, msg);
+		}
+	}
+);
+
+/** Get ad group-level insights for a specific campaign (on-demand, cached 5 min) */
+export const getTiktokAdGroupInsights = query(
+	v.object({
+		advertiserId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		campaignId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId })
+				.from(table.tiktokAdsAccount)
+				.where(and(
+					eq(table.tiktokAdsAccount.clientId, event.locals.client.id),
+					eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.tiktokAdsAccount.tiktokAdvertiserId, params.advertiserId)
+				))
+				.limit(1);
+			if (!clientAccount) {
+				throw error(401, 'Unauthorized');
+			}
+		}
+
+		const tenantId = event.locals.tenant.id;
+		const cacheKey = `tt-adgroups:${tenantId}:${params.advertiserId}:${params.campaignId}:${params.since}:${params.until}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedToken(params.integrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul TikTok Ads.');
+		}
+
+		try {
+			const insights = await listAdGroupInsights(
+				params.advertiserId,
+				authResult.accessToken,
+				params.campaignId,
+				params.since,
+				params.until
+			);
+
+			// Enrich with optimization goal labels
+			for (const insight of insights) {
+				const goalDef = OPTIMIZATION_GOAL_MAP[insight.optimizationGoal];
+				if (goalDef) {
+					insight.resultType = goalDef.label;
+					insight.cpaLabel = goalDef.cpaLabel;
+				}
+			}
+
+			setCache(cacheKey, insights);
+			return insights;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			throw error(500, msg);

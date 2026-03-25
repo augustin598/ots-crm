@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokReportAdAccounts, getTiktokCampaignInsights, getTiktokActiveCampaigns } from '$lib/remotes/tiktok-reports.remote';
+	import { getTiktokReportAdAccounts, getTiktokCampaignInsights, getTiktokActiveCampaigns, getTiktokAdGroupInsights } from '$lib/remotes/tiktok-reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -23,6 +23,9 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import ColumnsIcon from '@lucide/svelte/icons/columns-3';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import { toast } from 'svelte-sonner';
 	import {
 		formatCurrency,
@@ -34,7 +37,9 @@
 	import {
 		aggregateTiktokInsightsByDate,
 		aggregateTiktokInsightsByCampaign,
-		type TiktokCampaignAggregate
+		aggregateTiktokInsightsByAdGroup,
+		type TiktokCampaignAggregate,
+		type TiktokAdGroupAggregate
 	} from '$lib/utils/tiktok-report-helpers';
 	import { TIKTOK_COLUMN_PRESETS, TIKTOK_DEFAULT_PRESET, getTiktokPreset } from '$lib/utils/tiktok-column-presets';
 
@@ -319,6 +324,59 @@
 		return dominant;
 	});
 
+	// ---- Expandable ad groups ----
+	let expandedCampaigns = $state<Set<string>>(new Set());
+	let adGroupData = $state<Map<string, TiktokAdGroupAggregate[]>>(new Map());
+	let adGroupLoading = $state<Set<string>>(new Set());
+
+	async function toggleExpand(campaignId: string) {
+		const next = new Set(expandedCampaigns);
+		if (next.has(campaignId)) {
+			next.delete(campaignId);
+			expandedCampaigns = next;
+			return;
+		}
+		next.add(campaignId);
+		expandedCampaigns = next;
+
+		// Fetch ad group data if not cached
+		if (!adGroupData.has(campaignId) && selectedAdvertiserId && selectedIntegrationId) {
+			const loadingNext = new Set(adGroupLoading);
+			loadingNext.add(campaignId);
+			adGroupLoading = loadingNext;
+
+			try {
+				const query = getTiktokAdGroupInsights({
+					advertiserId: selectedAdvertiserId,
+					integrationId: selectedIntegrationId,
+					campaignId,
+					since,
+					until
+				});
+				// Wait for the query to resolve
+				const checkInterval = setInterval(() => {
+					if (!query.loading) {
+						clearInterval(checkInterval);
+						const loadDone = new Set(adGroupLoading);
+						loadDone.delete(campaignId);
+						adGroupLoading = loadDone;
+
+						if (query.current) {
+							const aggregated = aggregateTiktokInsightsByAdGroup(query.current);
+							const newMap = new Map(adGroupData);
+							newMap.set(campaignId, aggregated);
+							adGroupData = newMap;
+						}
+					}
+				}, 100);
+			} catch {
+				const loadDone = new Set(adGroupLoading);
+				loadDone.delete(campaignId);
+				adGroupLoading = loadDone;
+			}
+		}
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
 			case 'ACTIVE': return 'success';
@@ -554,16 +612,23 @@
 							</TableHeader>
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
-									<TableRow>
-										<TableCell class="w-[40px]">
+									<TableRow class="cursor-pointer hover:bg-muted/30" onclick={() => toggleExpand(campaign.campaignId)}>
+										<TableCell class="w-[40px]" onclick={(e) => e.stopPropagation()}>
 											<Checkbox
 												checked={selectedCampaigns.has(campaign.campaignId)}
 												onCheckedChange={() => toggleSelect(campaign.campaignId)}
 											/>
 										</TableCell>
 										<TableCell class="font-medium max-w-[250px]">
-											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
-											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
+											<div class="flex items-center gap-1.5">
+												{#if expandedCampaigns.has(campaign.campaignId)}
+													<ChevronDownIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												{:else}
+													<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												{/if}
+												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
+											</div>
+											<div class="text-xs text-muted-foreground ml-5.5">{campaign.objective}</div>
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>
@@ -582,6 +647,41 @@
 											</TableCell>
 										{/each}
 									</TableRow>
+									<!-- Expanded ad group rows -->
+									{#if expandedCampaigns.has(campaign.campaignId)}
+										{#if adGroupLoading.has(campaign.campaignId)}
+											<TableRow class="bg-muted/20">
+												<TableCell></TableCell>
+												<TableCell colspan={activePreset.columns.length + 2}>
+													<div class="flex items-center gap-2 py-2 pl-6 text-sm text-muted-foreground">
+														<LoaderIcon class="h-4 w-4 animate-spin" />
+														Se încarcă ad group-urile...
+													</div>
+												</TableCell>
+											</TableRow>
+										{:else if adGroupData.has(campaign.campaignId)}
+											{#each adGroupData.get(campaign.campaignId) || [] as adgroup}
+												<TableRow class="bg-muted/20 border-l-2 border-l-primary/20">
+													<TableCell class="w-[40px]"></TableCell>
+													<TableCell class="max-w-[250px]">
+														<div class="truncate pl-6 text-sm" title={adgroup.adgroupName}>{adgroup.adgroupName}</div>
+													</TableCell>
+													<TableCell></TableCell>
+													{#each activePreset.columns as col}
+														<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-sm">
+															<div>{col.getValue(adgroup as any, selectedCurrency)}</div>
+															{#if col.getSubtext}
+																{@const sub = col.getSubtext(adgroup as any)}
+																{#if sub}
+																	<div class="text-xs text-muted-foreground">{sub}</div>
+																{/if}
+															{/if}
+														</TableCell>
+													{/each}
+												</TableRow>
+											{/each}
+										{/if}
+									{/if}
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
