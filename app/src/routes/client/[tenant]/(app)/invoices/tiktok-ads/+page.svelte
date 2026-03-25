@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { getTiktokAdsSpendingList, getTiktokInvoiceDownloads } from '$lib/remotes/tiktok-ads.remote';
 	import { page } from '$app/state';
-	import {
-		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
-	} from '$lib/components/ui/table';
+	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Download, Search, Eye } from '@lucide/svelte';
-	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { Download, Eye } from '@lucide/svelte';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -19,11 +19,14 @@
 	const invoiceDownloadsQuery = getTiktokInvoiceDownloads();
 	const invoiceDownloads = $derived((invoiceDownloadsQuery.current || []).filter((d: any) => d.status === 'downloaded'));
 
-	let searchQuery = $state('');
-	let sortColumn = $state<'periodStart' | 'spendCents'>('periodStart');
-	let sortDirection = $state<'asc' | 'desc'>('desc');
-	let pageSize = $state(10);
-	let currentPage = $state(1);
+	const sortedSpending = $derived(
+		[...spending].sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''))
+	);
+
+	const totalSpend = $derived(spending.reduce((s: number, r: any) => s + (r.spendCents || 0), 0));
+	const totalClicks = $derived(spending.reduce((s: number, r: any) => s + (r.clicks || 0), 0));
+	const totalConversions = $derived(spending.reduce((s: number, r: any) => s + (r.conversions || 0), 0));
+	const curr = $derived(spending[0]?.currencyCode || 'RON');
 
 	async function handleDownloadPDF(id: string, period: string) {
 		try {
@@ -36,9 +39,7 @@
 			a.download = `TikTokAds-Cheltuieli-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
-		}
+		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la descărcare'); }
 	}
 
 	async function handlePreviewPDF(id: string) {
@@ -48,9 +49,7 @@
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
-		}
+		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare'); }
 	}
 
 	async function handlePreviewInvoicePDF(downloadId: string) {
@@ -60,9 +59,7 @@
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
-		}
+		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare'); }
 	}
 
 	async function handleDownloadInvoicePDF(downloadId: string, period: string) {
@@ -76,249 +73,137 @@
 			a.download = `TikTokAds-Factura-${period}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
-		}
+		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la descărcare'); }
 	}
 
 	function formatAmount(cents: number | null, currency: string): string {
 		if (cents == null) return '-';
-		const amount = cents / 100;
-		return new Intl.NumberFormat('ro-RO', { style: 'currency', currency }).format(amount);
+		return new Intl.NumberFormat('ro-RO', { style: 'currency', currency, maximumFractionDigits: 2 }).format(cents / 100);
 	}
 
 	function formatPeriod(start: string): string {
 		try {
 			const d = new Date(start + 'T00:00:00');
 			return d.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
-		} catch {
-			return start;
-		}
+		} catch { return start; }
 	}
 
 	function formatNumber(n: number | null): string {
 		if (n == null) return '-';
 		return n.toLocaleString('ro-RO');
 	}
-
-	const filteredSpending = $derived(
-		searchQuery.trim() === ''
-			? spending
-			: spending.filter((s: any) =>
-				(s.periodStart || '').includes(searchQuery.trim()) ||
-				(s.tiktokAdvertiserId || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
-			)
-	);
-
-	const sortedSpending = $derived(
-		[...filteredSpending].sort((a: any, b: any) => {
-			const dir = sortDirection === 'asc' ? 1 : -1;
-			switch (sortColumn) {
-				case 'periodStart':
-					return dir * (a.periodStart || '').localeCompare(b.periodStart || '');
-				case 'spendCents':
-					return dir * ((a.spendCents || 0) - (b.spendCents || 0));
-				default:
-					return 0;
-			}
-		})
-	);
-
-	const totalEntries = $derived(filteredSpending.length);
-	const totalPages = $derived(Math.max(1, Math.ceil(totalEntries / pageSize)));
-	const safePage = $derived(Math.min(Math.max(1, currentPage), totalPages));
-	const startIndex = $derived((safePage - 1) * pageSize);
-	const endIndex = $derived(Math.min(startIndex + pageSize, totalEntries));
-	const paginatedSpending = $derived(sortedSpending.slice(startIndex, endIndex));
-	const showingFrom = $derived(totalEntries === 0 ? 0 : startIndex + 1);
-	const showingTo = $derived(endIndex);
-
-	const pageNumbers = $derived.by(() => {
-		const pages: number[] = [];
-		const maxVisible = 5;
-		let start = Math.max(1, safePage - Math.floor(maxVisible / 2));
-		const end = Math.min(totalPages, start + maxVisible - 1);
-		if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
-		for (let i = start; i <= end; i++) pages.push(i);
-		return pages;
-	});
-
-	$effect(() => {
-		if (currentPage > totalPages) currentPage = totalPages;
-	});
-
-	function handleSort(column: typeof sortColumn) {
-		if (sortColumn === column) {
-			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-		} else {
-			sortColumn = column;
-			sortDirection = 'asc';
-		}
-		currentPage = 1;
-	}
 </script>
 
 <div class="space-y-6">
 	<div>
-		<h1 class="text-3xl font-bold">Cheltuieli TikTok Ads</h1>
-		<p class="text-muted-foreground">Rapoartele tale de cheltuieli TikTok Ads</p>
+		<h1 class="text-3xl font-bold flex items-center gap-3">
+			<svg class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.75a8.16 8.16 0 004.76 1.52V6.84a4.84 4.84 0 01-1-.15z"/></svg>
+			Facturi TikTok Ads
+		</h1>
+		<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 	</div>
 
 	{#if loading}
-		<p class="text-muted-foreground">Se încarcă rapoartele...</p>
+		<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>
 	{:else if spending.length === 0}
-		<div class="rounded-md border p-8 text-center">
-			<p class="text-muted-foreground">Nu sunt rapoarte de cheltuieli TikTok Ads disponibile.</p>
-		</div>
+		<Card class="p-12 text-center">
+			<div class="flex flex-col items-center gap-3">
+				<div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+					<DollarSignIcon class="h-7 w-7 text-muted-foreground" />
+				</div>
+				<p class="text-lg font-medium">Nu există date de facturare</p>
+				<p class="text-sm text-muted-foreground">Nu sunt cheltuieli TikTok Ads înregistrate.</p>
+			</div>
+		</Card>
 	{:else}
-		<div class="flex items-center justify-between gap-4 rounded-md bg-muted/50 px-4 py-3">
-			<p class="text-sm text-muted-foreground whitespace-nowrap">
-				{showingFrom} - {showingTo} din {totalEntries}
-			</p>
-			<div class="relative w-64">
-				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-				<Input type="text" placeholder="Caută..." class="pl-9" bind:value={searchQuery} oninput={() => { currentPage = 1; }} />
-			</div>
-		</div>
-
-		<div class="rounded-md border overflow-x-auto">
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('periodStart')}>
-								Perioadă <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead class="text-right">
-							<button class="ml-auto flex items-center gap-2 hover:text-primary" onclick={() => handleSort('spendCents')}>
-								Cheltuieli <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead class="text-right">Afișări</TableHead>
-						<TableHead class="text-right">Click-uri</TableHead>
-						<TableHead class="text-right">Conversii</TableHead>
-						<TableHead>Status</TableHead>
-						<TableHead class="w-[80px]"></TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{#if paginatedSpending.length === 0}
-						<TableRow>
-							<TableCell colspan={7} class="text-center text-muted-foreground py-8">
-								Niciun raport găsit.
-							</TableCell>
-						</TableRow>
-					{:else}
-						{#each paginatedSpending as row}
-							<TableRow>
-								<TableCell class="font-medium">{formatPeriod(row.periodStart)}</TableCell>
-								<TableCell class="text-right font-semibold">
-									{formatAmount(row.spendCents, row.currencyCode)}
-								</TableCell>
-								<TableCell class="text-right">{formatNumber(row.impressions)}</TableCell>
-								<TableCell class="text-right">{formatNumber(row.clicks)}</TableCell>
-								<TableCell class="text-right">{formatNumber(row.conversions)}</TableCell>
-								<TableCell>
-									{#if row.pdfPath}
-										<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
-											OK
-										</span>
-									{:else}
-										<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
-											Pending
-										</span>
-									{/if}
-								</TableCell>
-								<TableCell>
-									<div class="flex items-center gap-1">
-										{#if row.pdfPath}
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
-												<Eye class="h-4 w-4" />
-											</Button>
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
-												<Download class="h-4 w-4" />
-											</Button>
-										{/if}
-									</div>
-								</TableCell>
-							</TableRow>
-						{/each}
-					{/if}
-				</TableBody>
-			</Table>
-		</div>
-
-		{#if totalEntries > 0}
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-2 text-sm">
-					<span class="text-muted-foreground">Arată</span>
-					<select
-						class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm"
-						value={pageSize.toString()}
-						onchange={(e) => { pageSize = parseInt(e.currentTarget.value); currentPage = 1; }}
-					>
-						<option value="10">10</option>
-						<option value="25">25</option>
-						<option value="50">50</option>
-					</select>
-				</div>
-				<div class="flex items-center gap-1">
-					<Button variant="outline" size="sm" disabled={safePage <= 1} onclick={() => { currentPage = safePage - 1; }}>Anterior</Button>
-					{#each pageNumbers as pn}
-						<Button variant={pn === safePage ? 'default' : 'outline'} size="sm" class="w-8 h-8 p-0" onclick={() => { currentPage = pn; }}>{pn}</Button>
-					{/each}
-					<Button variant="outline" size="sm" disabled={safePage >= totalPages} onclick={() => { currentPage = safePage + 1; }}>Următor</Button>
+		<Card class="overflow-hidden">
+			<div class="border-b bg-muted/30 px-6 py-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+						<DollarSignIcon class="h-5 w-5 text-primary" />
+					</div>
+					<div>
+						<h3 class="text-lg font-semibold">Cheltuieli TikTok Ads</h3>
+						<p class="text-sm text-muted-foreground">Ultimele {sortedSpending.length} luni</p>
+					</div>
 				</div>
 			</div>
-		{/if}
+
+			<div class="grid grid-cols-3 divide-x border-b">
+				<div class="px-6 py-4 text-center">
+					<p class="text-xs text-muted-foreground uppercase tracking-wider">Total cheltuieli</p>
+					<p class="text-xl font-bold mt-1">{formatAmount(totalSpend, curr)}</p>
+				</div>
+				<div class="px-6 py-4 text-center">
+					<p class="text-xs text-muted-foreground uppercase tracking-wider">Total click-uri</p>
+					<p class="text-xl font-bold mt-1">{formatNumber(totalClicks)}</p>
+				</div>
+				<div class="px-6 py-4 text-center">
+					<p class="text-xs text-muted-foreground uppercase tracking-wider">Total conversii</p>
+					<p class="text-xl font-bold mt-1">{formatNumber(totalConversions)}</p>
+				</div>
+			</div>
+
+			<div class="divide-y">
+				{#each sortedSpending as row, i}
+					{@const prevSpend = sortedSpending[i + 1]?.spendCents}
+					{@const trend = prevSpend ? ((row.spendCents - prevSpend) / prevSpend) * 100 : null}
+					<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
+						<div class="flex items-center gap-3 w-48">
+							<CalendarIcon class="h-4 w-4 text-muted-foreground" />
+							<span class="font-medium capitalize">{formatPeriod(row.periodStart)}</span>
+						</div>
+						<div class="flex-1 grid grid-cols-4 gap-4 text-right">
+							<div>
+								<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+								{#if trend !== null}
+									<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+								{/if}
+							</div>
+							<span class="text-sm text-muted-foreground">{formatNumber(row.impressions)} imp.</span>
+							<span class="text-sm">{formatNumber(row.clicks)} clicks</span>
+							<div class="flex items-center justify-end gap-1.5">
+								<TrendingUpIcon class="h-3.5 w-3.5 text-primary" />
+								<span class="text-sm font-medium">{formatNumber(row.conversions)} conv.</span>
+							</div>
+						</div>
+						<div class="flex items-center gap-1 ml-4">
+							{#if row.pdfPath}
+								<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview"><Eye class="h-4 w-4" /></Button>
+								<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download"><Download class="h-4 w-4" /></Button>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+		</Card>
 	{/if}
 
-	<!-- Facturi PDF TikTok -->
 	{#if invoiceDownloads.length > 0}
-		<div class="pt-4">
-			<div class="mb-4">
-				<h2 class="text-xl font-semibold">Facturi PDF TikTok</h2>
-				<p class="text-sm text-muted-foreground">Facturile oficiale descărcate din TikTok Business Center</p>
+		<Card class="overflow-hidden">
+			<div class="border-b bg-muted/30 px-6 py-4">
+				<h2 class="text-lg font-semibold">Facturi PDF TikTok</h2>
+				<p class="text-sm text-muted-foreground">Facturi oficiale din TikTok Business Center</p>
 			</div>
-
-			<div class="rounded-md border overflow-x-auto">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead>Ad Account</TableHead>
-							<TableHead>Nr. Factură</TableHead>
-							<TableHead>Perioadă</TableHead>
-							<TableHead class="text-right">Sumă</TableHead>
-							<TableHead class="w-[100px]"></TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{#each invoiceDownloads as dl}
-							<TableRow>
-								<TableCell>
-									<div class="font-medium">{dl.adAccountName || dl.tiktokAdvertiserId}</div>
-								</TableCell>
-								<TableCell class="text-sm">{dl.invoiceNumber || '-'}</TableCell>
-								<TableCell>{formatPeriod(dl.periodStart)}</TableCell>
-								<TableCell class="text-right font-semibold">
-									{dl.amountCents ? formatAmount(dl.amountCents, dl.currencyCode || 'USD') : '-'}
-								</TableCell>
-								<TableCell>
-									<div class="flex items-center gap-1">
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview PDF">
-											<Eye class="h-4 w-4" />
-										</Button>
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download PDF">
-											<Download class="h-4 w-4" />
-										</Button>
-									</div>
-								</TableCell>
-							</TableRow>
-						{/each}
-					</TableBody>
-				</Table>
+			<div class="divide-y">
+				{#each invoiceDownloads as dl}
+					<div class="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
+						<div class="flex items-center gap-3">
+							<CalendarIcon class="h-4 w-4 text-muted-foreground" />
+							<div>
+								<span class="font-medium">{dl.adAccountName || dl.tiktokAdvertiserId}</span>
+								{#if dl.invoiceNumber}<span class="text-sm text-muted-foreground ml-2">#{dl.invoiceNumber}</span>{/if}
+							</div>
+							<span class="text-sm text-muted-foreground">{formatPeriod(dl.periodStart)}</span>
+							{#if dl.amountCents}<span class="text-sm font-semibold">{formatAmount(dl.amountCents, dl.currencyCode || 'RON')}</span>{/if}
+						</div>
+						<div class="flex items-center gap-1">
+							<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview"><Eye class="h-4 w-4" /></Button>
+							<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download"><Download class="h-4 w-4" /></Button>
+						</div>
+					</div>
+				{/each}
 			</div>
-		</div>
+		</Card>
 	{/if}
 </div>

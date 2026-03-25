@@ -9,6 +9,11 @@
 	import { Download, Search, Eye, Trash2 } from '@lucide/svelte';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import { Card } from '$lib/components/ui/card';
+	import { Skeleton } from '$lib/components/ui/skeleton';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -192,30 +197,17 @@
 	let downloadingMonth = $state(false);
 	let redownloadingId = $state<string | null>(null);
 
-	function getPreviousMonth(): { year: number; month: number; label: string } {
-		const now = new Date();
-		const month = now.getMonth() === 0 ? 12 : now.getMonth();
-		const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-		const label = new Date(year, month - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
-		return { year, month, label };
-	}
-
-	const prevMonth = $derived(getPreviousMonth());
-
-	const missingInvoiceAccounts = $derived(() => {
-		const downloaded = new Set(
-			downloads
-				.filter((d: any) => d.status === 'downloaded' && d.periodStart === `${prevMonth.year}-${String(prevMonth.month).padStart(2, '0')}-01`)
-				.map((d: any) => d.tiktokAdvertiserId)
-		);
-		const allAccounts = new Set(spending.map((s: any) => s.tiktokAdvertiserId));
-		return [...allAccounts].filter(id => !downloaded.has(id));
-	});
+	const MONTHS = ['Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie', 'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'];
+	const now = new Date();
+	const defaultMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+	const defaultYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+	let selectedMonth = $state(defaultMonth);
+	let selectedYear = $state(defaultYear);
 
 	async function handleDownloadMonth() {
 		downloadingMonth = true;
 		try {
-			const result = await triggerTiktokInvoiceDownload({ year: prevMonth.year, month: prevMonth.month }).updates(downloadsQuery);
+			const result = await triggerTiktokInvoiceDownload({ year: selectedYear, month: selectedMonth }).updates(downloadsQuery);
 			toast.success(`Download complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare facturi');
@@ -282,264 +274,261 @@
 			return start;
 		}
 	}
+
+	const groupedByClient = $derived.by(() => {
+		const groups = new Map<string, { clientName: string; rows: typeof spending }>();
+		for (const row of spending) {
+			const key = row.clientName || 'Neatribuit';
+			const existing = groups.get(key) || { clientName: key, rows: [] };
+			existing.rows.push(row);
+			groups.set(key, existing);
+		}
+		for (const group of groups.values()) {
+			group.rows.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''));
+		}
+		return Array.from(groups.values());
+	});
 </script>
 
 <div class="space-y-6">
-	<div class="flex items-center justify-between">
+	<!-- Header -->
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 		<div>
-			<h1 class="text-3xl font-bold">Cheltuieli TikTok Ads</h1>
-			<p class="text-muted-foreground">Rapoarte cheltuieli TikTok Ads pentru toți clienții</p>
+			<h1 class="text-3xl font-bold flex items-center gap-3">
+				<svg class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.75a8.16 8.16 0 004.76 1.52V6.84a4.84 4.84 0 01-1-.15z"/></svg>
+				Facturi TikTok Ads
+			</h1>
+			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
 		<div class="flex items-center gap-2">
 			<Button variant="outline" size="sm" onclick={handleRegenerateAll} disabled={regeneratingAll || spending.length === 0}>
 				{#if regeneratingAll}
-					<Download class="mr-2 h-4 w-4 animate-bounce" />
-					Regenerare...
+					<Download class="mr-2 h-4 w-4 animate-bounce" />Regenerare...
 				{:else}
-					<Download class="mr-2 h-4 w-4" />
-					Regenerează PDF-uri
+					<Download class="mr-2 h-4 w-4" />Regenerează PDF-uri
 				{/if}
 			</Button>
 			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
 				{#if syncing}
-					<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
-					Sincronizare...
+					<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...
 				{:else}
-					<RefreshCwIcon class="mr-2 h-4 w-4" />
-					Sync Acum
+					<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum
 				{/if}
 			</Button>
 		</div>
 	</div>
 
+	<!-- Spending Cards by Client -->
 	{#if loading}
-		<p class="text-muted-foreground">Se încarcă rapoartele...</p>
+		<div class="space-y-4">
+			{#each Array(2) as _}
+				<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>
+			{/each}
+		</div>
 	{:else if spending.length === 0}
 		<div class="rounded-md border p-8 text-center">
 			<p class="text-muted-foreground">Nu sunt date de cheltuieli TikTok Ads sincronizate.</p>
 		</div>
 	{:else}
-		<div class="flex items-center justify-between gap-4 rounded-md bg-muted/50 px-4 py-3">
-			<p class="text-sm text-muted-foreground whitespace-nowrap">
-				{startIndex + 1} - {endIndex} din {totalEntries}
-			</p>
-			<div class="relative w-64">
-				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-				<Input type="text" placeholder="Caută..." class="pl-9" bind:value={searchQuery} oninput={() => { currentPage = 1; }} />
-			</div>
-		</div>
-
-		<div class="rounded-md border overflow-x-auto">
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('clientName')}>
-								Client <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead>
-							<button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('periodStart')}>
-								Perioadă <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead class="text-right">
-							<button class="ml-auto flex items-center gap-2 hover:text-primary" onclick={() => handleSort('spendCents')}>
-								Cheltuieli <ArrowUpDownIcon class="h-4 w-4" />
-							</button>
-						</TableHead>
-						<TableHead class="text-right">Afișări</TableHead>
-						<TableHead class="text-right">Click-uri</TableHead>
-						<TableHead class="text-right">Conversii</TableHead>
-						<TableHead>Status</TableHead>
-						<TableHead class="w-[150px]"></TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{#each paginatedSpending as row}
-						<TableRow>
-							<TableCell class="font-medium">{row.clientName || '-'}</TableCell>
-							<TableCell>{formatPeriod(row.periodStart)}</TableCell>
-							<TableCell class="text-right font-semibold">
-								{formatAmount(row.spendCents, row.currencyCode)}
-							</TableCell>
-							<TableCell class="text-right">{formatNumber(row.impressions)}</TableCell>
-							<TableCell class="text-right">{formatNumber(row.clicks)}</TableCell>
-							<TableCell class="text-right">{formatNumber(row.conversions)}</TableCell>
-							<TableCell>
-								{#if row.pdfPath}
-									<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
-										OK
-									</span>
-								{:else}
-									<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
-										Pending
-									</span>
-								{/if}
-							</TableCell>
-							<TableCell>
-								<div class="flex items-center gap-1">
-									{#if row.pdfPath}
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
-											<Eye class="h-4 w-4" />
-										</Button>
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
-											<Download class="h-4 w-4" />
-										</Button>
-									{/if}
-										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRegenerate(row.id)} disabled={regeneratingId === row.id} title="Regenerează PDF">
-										{#if regeneratingId === row.id}
-											<RefreshCwIcon class="h-4 w-4 animate-spin" />
-										{:else}
-											<RefreshCwIcon class="h-4 w-4" />
-										{/if}
-									</Button>
-									<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDelete(row.id)} title="Șterge">
-										<Trash2 class="h-4 w-4" />
-									</Button>
+		<div class="space-y-6">
+			{#each groupedByClient as group}
+				{#if group.rows.length > 0}
+					{@const totalSpend = group.rows.reduce((s, r) => s + (r.spendCents || 0), 0)}
+					{@const totalClicks = group.rows.reduce((s, r) => s + (r.clicks || 0), 0)}
+					{@const totalConv = group.rows.reduce((s, r) => s + (r.conversions || 0), 0)}
+					{@const curr = group.rows[0]?.currencyCode || 'USD'}
+					<Card class="overflow-hidden">
+						<!-- Client Header -->
+						<div class="border-b bg-muted/30 px-6 py-4">
+							<div class="flex items-center justify-between">
+								<div class="flex items-center gap-3">
+									<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+										<DollarSignIcon class="h-5 w-5 text-primary" />
+									</div>
+									<div>
+										<h3 class="text-lg font-semibold">{group.clientName}</h3>
+										<p class="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'lună' : 'luni'} de date</p>
+									</div>
 								</div>
-							</TableCell>
-						</TableRow>
-					{/each}
-				</TableBody>
-			</Table>
-		</div>
+							</div>
+						</div>
 
-		{#if totalEntries > 0}
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-2 text-sm">
-					<span class="text-muted-foreground">Arată</span>
-					<select
-						class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm"
-						value={pageSize.toString()}
-						onchange={(e) => { pageSize = parseInt(e.currentTarget.value); currentPage = 1; }}
-					>
-						<option value="10">10</option>
-						<option value="25">25</option>
-						<option value="50">50</option>
-					</select>
-				</div>
-				<div class="flex items-center gap-1">
-					<Button variant="outline" size="sm" disabled={safePage <= 1} onclick={() => { currentPage = safePage - 1; }}>Anterior</Button>
-					{#each pageNumbers as pn}
-						<Button variant={pn === safePage ? 'default' : 'outline'} size="sm" class="w-8 h-8 p-0" onclick={() => { currentPage = pn; }}>{pn}</Button>
-					{/each}
-					<Button variant="outline" size="sm" disabled={safePage >= totalPages} onclick={() => { currentPage = safePage + 1; }}>Următor</Button>
-				</div>
-			</div>
-		{/if}
+						<!-- Summary KPIs -->
+						<div class="grid grid-cols-3 divide-x border-b">
+							<div class="px-6 py-4 text-center">
+								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total cheltuieli</p>
+								<p class="text-xl font-bold mt-1">{formatAmount(totalSpend, curr)}</p>
+							</div>
+							<div class="px-6 py-4 text-center">
+								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total click-uri</p>
+								<p class="text-xl font-bold mt-1">{totalClicks.toLocaleString('ro-RO')}</p>
+							</div>
+							<div class="px-6 py-4 text-center">
+								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total conversii</p>
+								<p class="text-xl font-bold mt-1">{totalConv.toLocaleString('ro-RO')}</p>
+							</div>
+						</div>
+
+						<!-- Monthly Rows -->
+						<div class="divide-y">
+							{#each group.rows as row, i}
+								{@const prevSpend = group.rows[i + 1]?.spendCents}
+								{@const trend = prevSpend ? (((row.spendCents || 0) - prevSpend) / prevSpend) * 100 : null}
+								<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
+									<div class="flex items-center gap-3 w-48">
+										<CalendarIcon class="h-4 w-4 text-muted-foreground" />
+										<span class="font-medium capitalize">{formatPeriod(row.periodStart)}</span>
+									</div>
+									<div class="flex-1 grid grid-cols-4 gap-4 text-right">
+										<div>
+											<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+											{#if trend !== null}
+												<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">
+													{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%
+												</span>
+											{/if}
+										</div>
+										<span class="text-sm text-muted-foreground">{formatNumber(row.impressions)} imp.</span>
+										<span class="text-sm">{formatNumber(row.clicks)} clicks</span>
+										<div class="flex items-center justify-end gap-1.5">
+											<TrendingUpIcon class="h-3.5 w-3.5 text-primary" />
+											<span class="text-sm font-medium">{formatNumber(row.conversions)} conv.</span>
+										</div>
+									</div>
+									<div class="flex items-center gap-1 ml-4">
+										{#if row.pdfPath}
+											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
+												<Eye class="h-4 w-4" />
+											</Button>
+											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
+												<Download class="h-4 w-4" />
+											</Button>
+										{/if}
+										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRegenerate(row.id)} disabled={regeneratingId === row.id} title="Regenerează PDF">
+											{#if regeneratingId === row.id}
+												<RefreshCwIcon class="h-4 w-4 animate-spin" />
+											{:else}
+												<RefreshCwIcon class="h-4 w-4" />
+											{/if}
+										</Button>
+										<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDelete(row.id)} title="Șterge">
+											<Trash2 class="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							{/each}
+						</div>
+					</Card>
+				{/if}
+			{/each}
+		</div>
 	{/if}
 
 	<!-- Facturi PDF TikTok -->
-	<div class="flex items-center justify-between pt-4 border-t">
-		<div>
-			<h2 class="text-2xl font-bold">Facturi PDF TikTok</h2>
-			<p class="text-muted-foreground text-sm">Facturi oficiale descărcate din TikTok Business Center</p>
-		</div>
-		<div class="flex items-center gap-2">
-			{#if missingInvoiceAccounts().length > 0}
-				<span class="inline-flex items-center rounded-full border border-red-500 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50">
-					{missingInvoiceAccounts().length} conturi fără factură {prevMonth.label}
-				</span>
-			{/if}
-			<Button variant="outline" size="sm" onclick={handleDownloadMonth} disabled={downloadingMonth}>
-				{#if downloadingMonth}
-					<Download class="mr-2 h-4 w-4 animate-bounce" />
-					Descărcare...
-				{:else}
-					<Download class="mr-2 h-4 w-4" />
-					Download {prevMonth.label}
-				{/if}
-			</Button>
-		</div>
-	</div>
-
 	{#if downloadsLoading}
-		<p class="text-muted-foreground">Se încarcă facturile...</p>
-	{:else if downloads.length === 0}
-		<div class="rounded-md border p-8 text-center">
-			<p class="text-muted-foreground">Nu sunt facturi PDF descărcate. Apasă "Download {prevMonth.label}" pentru a descărca facturile lunii trecute.</p>
-		</div>
+		<Card class="p-6"><Skeleton class="h-32 w-full" /></Card>
 	{:else}
-		<div class="rounded-md border overflow-x-auto">
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Ad Account</TableHead>
-						<TableHead>Nr. Factură</TableHead>
-						<TableHead>Perioadă</TableHead>
-						<TableHead class="text-right">Sumă</TableHead>
-						<TableHead>Status</TableHead>
-						<TableHead class="w-[180px]">Acțiuni</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
+		<Card class="overflow-hidden">
+			<div class="border-b bg-muted/30 px-6 py-4">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+							<svg class="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.75a8.16 8.16 0 004.76 1.52V6.84a4.84 4.84 0 01-1-.15z"/></svg>
+						</div>
+						<div>
+							<h3 class="text-lg font-semibold">Facturi PDF TikTok</h3>
+							<p class="text-sm text-muted-foreground">Facturi oficiale descărcate din TikTok Business Center</p>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" value={selectedMonth.toString()} onchange={(e) => { selectedMonth = parseInt(e.currentTarget.value); }}>
+							{#each MONTHS as m, i}<option value={(i + 1).toString()}>{m}</option>{/each}
+						</select>
+						<select class="h-8 w-20 rounded-md border border-input bg-background px-2 text-sm" value={selectedYear.toString()} onchange={(e) => { selectedYear = parseInt(e.currentTarget.value); }}>
+							{#each [2024, 2025, 2026] as y}<option value={y.toString()}>{y}</option>{/each}
+						</select>
+						<Button variant="outline" size="sm" onclick={handleDownloadMonth} disabled={downloadingMonth}>
+							{#if downloadingMonth}<Download class="mr-2 h-4 w-4 animate-bounce" />Descărcare...{:else}<Download class="mr-2 h-4 w-4" />Download{/if}
+						</Button>
+					</div>
+				</div>
+			</div>
+
+			{#if downloads.length === 0}
+				<div class="p-8 text-center">
+					<p class="text-muted-foreground">Nu sunt facturi PDF descărcate. Selectează luna și apasă "Download".</p>
+				</div>
+			{:else}
+				<div class="divide-y">
 					{#each downloads as dl}
-						<TableRow>
-							<TableCell>
+						<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
+							<div class="flex items-center gap-3 w-56">
+								<CalendarIcon class="h-4 w-4 text-muted-foreground" />
 								<div>
 									<span class="font-medium">{dl.adAccountName || dl.tiktokAdvertiserId}</span>
 									{#if dl.clientName}
 										<span class="block text-xs text-muted-foreground">{dl.clientName}</span>
 									{/if}
 								</div>
-							</TableCell>
-							<TableCell class="text-sm">{dl.invoiceNumber || '-'}</TableCell>
-							<TableCell>{formatDownloadPeriod(dl.periodStart)}</TableCell>
-							<TableCell class="text-right font-semibold">
-								{dl.amountCents ? formatAmount(dl.amountCents, dl.currencyCode || 'USD') : '-'}
-							</TableCell>
-							<TableCell>
-								{#if dl.status === 'downloaded'}
-									<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
-										Descărcat
-									</span>
-								{:else if dl.status === 'pending'}
-									<span class="inline-flex items-center rounded-full border border-yellow-500 px-2 py-0.5 text-xs font-medium text-yellow-700 bg-yellow-50">
-										Pending
-									</span>
-								{:else if dl.status === 'error'}
-									<span class="inline-flex items-center rounded-full border border-red-500 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={dl.errorMessage || ''}>
-										Eroare
-									</span>
-								{:else if dl.status === 'session_expired'}
-									<span class="inline-flex items-center rounded-full border border-orange-500 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">
-										Sesiune expirată
-									</span>
-								{:else}
-									<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-										{dl.status}
-									</span>
-								{/if}
-							</TableCell>
-							<TableCell>
-								<div class="flex items-center gap-1">
-									{#if dl.status === 'downloaded' && dl.pdfPath}
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview PDF">
-											<Eye class="h-4 w-4" />
-										</Button>
-										<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download PDF">
-											<Download class="h-4 w-4" />
-										</Button>
+							</div>
+							<div class="flex-1 grid grid-cols-3 gap-4 items-center">
+								<span class="text-sm text-muted-foreground capitalize">{formatDownloadPeriod(dl.periodStart)}</span>
+								<div class="text-right">
+									<span class="text-base font-semibold">{dl.amountCents ? formatAmount(dl.amountCents, dl.currencyCode || 'USD') : '-'}</span>
+									{#if dl.invoiceNumber}
+										<span class="ml-2 text-xs text-muted-foreground">#{dl.invoiceNumber}</span>
 									{/if}
-									{#if dl.status === 'error' || dl.status === 'session_expired'}
-										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRedownloadInvoice(dl.id)} disabled={redownloadingId === dl.id} title="Re-download">
-											{#if redownloadingId === dl.id}
-												<RefreshCwIcon class="h-4 w-4 animate-spin" />
-											{:else}
-												<RefreshCwIcon class="h-4 w-4" />
-											{/if}
-										</Button>
-									{/if}
-									<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDeleteDownload(dl.id)} title="Șterge">
-										<Trash2 class="h-4 w-4" />
-									</Button>
 								</div>
-							</TableCell>
-						</TableRow>
+								<div class="text-right">
+									{#if dl.status === 'downloaded'}
+										<span class="inline-flex items-center rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 dark:border-green-800 dark:text-green-400 dark:bg-green-950">
+											Descărcat
+										</span>
+									{:else if dl.status === 'pending'}
+										<span class="inline-flex items-center rounded-full border border-yellow-200 px-2.5 py-1 text-xs font-medium text-yellow-700 bg-yellow-50 dark:border-yellow-800 dark:text-yellow-400 dark:bg-yellow-950">
+											Pending
+										</span>
+									{:else if dl.status === 'error'}
+										<span class="inline-flex items-center rounded-full border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 bg-red-50 dark:border-red-800 dark:text-red-400 dark:bg-red-950" title={dl.errorMessage || ''}>
+											Eroare
+										</span>
+									{:else if dl.status === 'session_expired'}
+										<span class="inline-flex items-center rounded-full border border-orange-200 px-2.5 py-1 text-xs font-medium text-orange-700 bg-orange-50 dark:border-orange-800 dark:text-orange-400 dark:bg-orange-950">
+											Sesiune expirată
+										</span>
+									{:else}
+										<span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+											{dl.status}
+										</span>
+									{/if}
+								</div>
+							</div>
+							<div class="flex items-center gap-1 ml-4">
+								{#if dl.status === 'downloaded' && dl.pdfPath}
+									<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(dl.id)} title="Preview PDF">
+										<Eye class="h-4 w-4" />
+									</Button>
+									<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadInvoicePDF(dl.id, dl.periodStart)} title="Download PDF">
+										<Download class="h-4 w-4" />
+									</Button>
+								{/if}
+								{#if dl.status === 'error' || dl.status === 'session_expired'}
+									<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRedownloadInvoice(dl.id)} disabled={redownloadingId === dl.id} title="Re-download">
+										{#if redownloadingId === dl.id}
+											<RefreshCwIcon class="h-4 w-4 animate-spin" />
+										{:else}
+											<RefreshCwIcon class="h-4 w-4" />
+										{/if}
+									</Button>
+								{/if}
+								<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDeleteDownload(dl.id)} title="Șterge">
+									<Trash2 class="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
 					{/each}
-				</TableBody>
-			</Table>
-		</div>
+				</div>
+			{/if}
+		</Card>
 	{/if}
 </div>
