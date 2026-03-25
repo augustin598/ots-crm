@@ -168,7 +168,7 @@ export const getGoogleCampaignInsights = query(
 			setCache(`google-campaigns:${tenantId}:${params.customerId}`, campaigns);
 			return insights;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300);
 			throw error(500, msg);
 		}
 	}
@@ -201,7 +201,7 @@ export const getGoogleActiveCampaigns = query(
 			setCache(cacheKey, campaigns);
 			return campaigns;
 		} catch (err) {
-			throw error(500, err instanceof Error ? err.message : String(err));
+			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}
 	}
 );
@@ -237,7 +237,7 @@ export const getGoogleAdGroupInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			throw error(500, err instanceof Error ? err.message : String(err));
+			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}
 	}
 );
@@ -272,7 +272,7 @@ export const getGoogleDemographicInsights = query(
 			setCache(cacheKey, demographics);
 			return demographics;
 		} catch (err) {
-			throw error(500, err instanceof Error ? err.message : String(err));
+			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}
 	}
 );

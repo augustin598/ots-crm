@@ -99,7 +99,7 @@ export async function listMccSubAccounts(
 		return accounts;
 	} catch (err) {
 		logError('google-ads', `Failed to list MCC sub-accounts`, {
-			metadata: { mcc: cleanMcc, error: err instanceof Error ? err.message : String(err) }
+			metadata: { mcc: cleanMcc, error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
 	}
@@ -166,7 +166,7 @@ export async function listInvoices(
 		return result;
 	} catch (err) {
 		logError('google-ads', `Failed to list MCC invoices`, {
-			metadata: { mcc: cleanMcc, error: err instanceof Error ? err.message : String(err) }
+			metadata: { mcc: cleanMcc, error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
 	}
@@ -363,7 +363,7 @@ export async function listCampaignInsights(
 		return insights;
 	} catch (err) {
 		logError('google-ads', `Failed to fetch campaign insights for ${customerId}`, {
-			metadata: { error: err instanceof Error ? err.message : String(err) }
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
 	}
@@ -428,7 +428,7 @@ export async function listCampaigns(
 		return campaigns;
 	} catch (err) {
 		logError('google-ads', `Failed to list campaigns for ${customerId}`, {
-			metadata: { error: err instanceof Error ? err.message : String(err) }
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
 	}
@@ -504,7 +504,7 @@ export async function listAdGroupInsights(
 		return insights;
 	} catch (err) {
 		logError('google-ads', `Failed to fetch ad group insights`, {
-			metadata: { campaignId, error: err instanceof Error ? err.message : String(err) }
+			metadata: { campaignId, error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
 	}
@@ -582,7 +582,7 @@ export async function listDemographicInsights(
 		return result;
 	} catch (err) {
 		logError('google-ads', `Failed to fetch demographics for ${customerId}`, {
-			metadata: { error: err instanceof Error ? err.message : String(err) }
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		return { gender: [], age: [], devicePlatform: [] };
 	}
