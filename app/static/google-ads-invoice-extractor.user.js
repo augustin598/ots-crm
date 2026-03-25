@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Ads Invoice Extractor - OTS CRM
 // @namespace    https://onetopsolution.ro
-// @version      2.1
+// @version      2.2
 // @description  Extrage link-urile de download facturi Google Ads
 // @author       OTS CRM
 // @match        https://ads.google.com/*
@@ -13,47 +13,79 @@
 (function() {
     'use strict';
 
-    // Only run on billing/documents pages
     var loc = window.location.href;
-    var isBillingPage = loc.includes('/billing/documents') || loc.includes('/documentcenter');
     var isInIframe = (window.self !== window.top);
 
-    // If we're in the payments.google.com iframe - extract and send to parent
     if (isInIframe && loc.includes('payments.google.com')) {
         runInIframe();
         return;
     }
 
-    // If we're on ads.google.com billing page - show button
     if (loc.includes('ads.google.com') && loc.includes('billing')) {
         runOnAdsPage();
         return;
     }
 
-    // If we're directly on payments.google.com (not iframe)
     if (!isInIframe && loc.includes('payments.google.com')) {
         runOnAdsPage();
         return;
     }
 
-    // === IFRAME CODE (runs inside payments.google.com iframe) ===
-    function runInIframe() {
-        var monthMap = {
-            'ian':'01','feb':'02','mar':'03','apr':'04','mai':'05','iun':'06',
-            'iul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12',
-            'ianuarie':'01','februarie':'02','martie':'03','aprilie':'04',
-            'iunie':'06','iulie':'07','august':'08',
-            'septembrie':'09','octombrie':'10','noiembrie':'11','decembrie':'12'
+    function parseDate(text) {
+        if (!text) return undefined;
+        // Month names in Romanian (short and long)
+        var months = {
+            'ian':'01','ianuarie':'01',
+            'feb':'02','februarie':'02',
+            'mar':'03','martie':'03',
+            'apr':'04','aprilie':'04',
+            'mai':'05',
+            'iun':'06','iunie':'06',
+            'iul':'07','iulie':'07',
+            'aug':'08','august':'08',
+            'sep':'09','septembrie':'09',
+            'oct':'10','octombrie':'10',
+            'noi':'11','noiembrie':'11','noiembre':'11',
+            'dec':'12','decembrie':'12'
         };
 
-        function parseDate(text) {
-            var m = text.match(/(\d{1,2})\s+(ian(?:uarie)?|feb(?:ruarie)?|mar(?:tie)?|apr(?:ilie)?|mai|iun(?:ie)?|iul(?:ie)?|aug(?:ust)?|sep(?:tembrie)?|oct(?:ombrie)?|nov(?:embrie)?|dec(?:embrie)?)\.?\s+(\d{4})/i);
-            if (!m) return undefined;
-            var key = m[2].toLowerCase().replace('.','');
-            var mm = monthMap[key] || monthMap[key.substring(0,3)] || '01';
-            return m[3] + '-' + mm + '-' + m[1].padStart(2,'0');
+        // Try: "30 noiembrie 2025" or "10 decembrie 2025" or "31 oct. 2025"
+        var m = text.match(/(\d{1,2})\s+([a-zăâîșț]+)\.?\s+(\d{4})/i);
+        if (m) {
+            var monthKey = m[2].toLowerCase().replace('.', '');
+            var mm = months[monthKey];
+            if (!mm) {
+                // Try first 3 chars
+                mm = months[monthKey.substring(0, 3)];
+            }
+            if (mm) {
+                return m[3] + '-' + mm + '-' + m[1].padStart(2, '0');
+            }
         }
 
+        // Try English: "November 30, 2025" or "Dec 10, 2025"
+        var enMonths = {
+            'jan':'01','january':'01','feb':'02','february':'02',
+            'mar':'03','march':'03','apr':'04','april':'04',
+            'may':'05','jun':'06','june':'06','jul':'07','july':'07',
+            'aug':'08','august':'08','sep':'09','september':'09',
+            'oct':'10','october':'10','nov':'11','november':'11',
+            'dec':'12','december':'12'
+        };
+        var m2 = text.match(/([a-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/i);
+        if (m2) {
+            var enKey = m2[1].toLowerCase();
+            var enMm = enMonths[enKey] || enMonths[enKey.substring(0, 3)];
+            if (enMm) {
+                return m2[3] + '-' + enMm + '-' + m2[2].padStart(2, '0');
+            }
+        }
+
+        return undefined;
+    }
+
+    // === IFRAME CODE ===
+    function runInIframe() {
         function extract() {
             var links = [];
             document.querySelectorAll('[data-url]').forEach(function(el) {
@@ -77,7 +109,6 @@
             });
         }
 
-        // Listen for extraction requests from parent
         window.addEventListener('message', function(e) {
             if (e.data && e.data.type === 'OTS_EXTRACT_REQUEST') {
                 var links = extract();
@@ -85,7 +116,6 @@
             }
         });
 
-        // Also auto-send when data-url elements appear
         function checkAndNotify() {
             var count = document.querySelectorAll('[data-url*="apis-secure"]').length;
             if (count > 0) {
@@ -96,11 +126,10 @@
         setTimeout(checkAndNotify, 3000);
     }
 
-    // === PARENT PAGE CODE (runs on ads.google.com) ===
+    // === PARENT PAGE CODE ===
     function runOnAdsPage() {
         var invoiceData = null;
 
-        // Listen for messages from iframe
         window.addEventListener('message', function(e) {
             if (e.data && e.data.type === 'OTS_INVOICES_READY') {
                 updateLabel(e.data.count);
@@ -134,7 +163,6 @@
                 btn.style.background = color;
                 setTimeout(function() {
                     btn.style.background = '#009AFF';
-                    // Re-request count
                     requestExtractFromIframes();
                 }, 4000);
             }
@@ -158,10 +186,8 @@
             btn.onclick = function() {
                 btn.textContent = 'Se extrag...';
                 requestExtractFromIframes();
-                // Also try direct extraction (if not in iframe)
                 setTimeout(function() {
                     if (!invoiceData || invoiceData.length === 0) {
-                        // Try direct search in main doc too
                         var directLinks = [];
                         document.querySelectorAll('[data-url*="apis-secure"]').forEach(function(el) {
                             directLinks.push({ url: el.getAttribute('data-url').replace(/&amp;/g, '&') });
@@ -180,7 +206,6 @@
             document.body.appendChild(btn);
         }
 
-        // Create button after a delay
         setTimeout(function() { createButton(0); }, 3000);
     }
 })();
