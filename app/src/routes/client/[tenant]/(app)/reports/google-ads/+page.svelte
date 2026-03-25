@@ -1,10 +1,14 @@
 <script lang="ts">
 	import { Card } from '$lib/components/ui/card';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 </script>
 
 <div class="space-y-6">
-	<h1 class="text-2xl font-bold">Google Ads</h1>
+	<h1 class="text-2xl font-bold flex items-center gap-3">
+		<IconGoogleAds class="h-7 w-7" />
+		Google Ads
+	</h1>
 	<Card class="p-12 text-center">
 		<div class="flex flex-col items-center gap-4">
 			<div class="flex h-16 w-16 items-center justify-center rounded-full bg-muted">

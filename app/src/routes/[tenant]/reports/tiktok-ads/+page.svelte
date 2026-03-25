@@ -14,6 +14,7 @@
 	import SpendChart from '$lib/components/reports/spend-chart.svelte';
 	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
 	import TiktokDemographicsSection from '$lib/components/reports/tiktok-demographics-section.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
@@ -333,7 +334,10 @@
 	<!-- Header -->
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 		<div>
-			<h1 class="text-3xl font-bold">TikTok Ads</h1>
+			<h1 class="text-3xl font-bold flex items-center gap-3">
+				<IconTiktok class="h-8 w-8" />
+				TikTok Ads
+			</h1>
 			<p class="text-muted-foreground">Rapoarte performanță campanii TikTok Ads</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
