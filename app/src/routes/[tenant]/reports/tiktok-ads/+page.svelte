@@ -34,6 +34,7 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import TargetIcon from '@lucide/svelte/icons/target';
 	import HeartIcon from '@lucide/svelte/icons/heart';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import { toast } from 'svelte-sonner';
 	import {
 		formatCurrency,
@@ -669,7 +670,10 @@
 														{objConfig.label}
 													</span>
 													{#if campaign.createTime}
-														<span class="text-[10px] text-muted-foreground">{campaign.createTime}</span>
+														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+															<CalendarIcon class="h-2.5 w-2.5" />
+															{campaign.createTime}
+														</span>
 													{/if}
 												</div>
 											{/if}
