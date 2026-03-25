@@ -24,6 +24,7 @@ export interface GoogleAdsSubAccount {
 	descriptiveName: string;
 	status: string; // ENABLED, CANCELLED, SUSPENDED, CLOSED
 	isManager: boolean;
+	currencyCode: string;
 }
 
 /**
@@ -80,7 +81,8 @@ export async function listMccSubAccounts(
 				customer_client.id,
 				customer_client.descriptive_name,
 				customer_client.status,
-				customer_client.manager
+				customer_client.manager,
+				customer_client.currency_code
 			FROM customer_client
 			WHERE customer_client.manager = false
 		`);
@@ -92,7 +94,8 @@ export async function listMccSubAccounts(
 				row.customer_client?.status === 3 ? 'CANCELLED' :
 				row.customer_client?.status === 4 ? 'SUSPENDED' :
 				row.customer_client?.status === 5 ? 'CLOSED' : 'UNKNOWN',
-			isManager: row.customer_client?.manager === true
+			isManager: row.customer_client?.manager === true,
+			currencyCode: row.customer_client?.currency_code || 'USD'
 		}));
 
 		logInfo('google-ads', `Found ${accounts.length} sub-accounts under MCC`, { metadata: { mcc: cleanMcc } });
@@ -106,69 +109,169 @@ export async function listMccSubAccounts(
 }
 
 /**
- * List invoices at MCC (manager/billing account) level.
- * Uses the InvoiceService via google-ads-api.
+ * List invoices for a specific sub-account (not MCC).
+ * Each sub-account has its own billing setup and invoices.
  */
 export async function listInvoices(
 	mccAccountId: string,
+	customerId: string,
 	developerToken: string,
 	refreshToken: string,
 	billingYear: string,
 	billingMonth: string
 ): Promise<GoogleAdsInvoiceData[]> {
+	const cleanCustomer = formatCustomerId(customerId);
 	const cleanMcc = formatCustomerId(mccAccountId);
 
-	logInfo('google-ads', `Listing MCC invoices`, {
-		metadata: { mcc: cleanMcc, year: billingYear, month: billingMonth }
+	logInfo('google-ads', `Listing invoices for sub-account`, {
+		metadata: { mcc: cleanMcc, customerId: cleanCustomer, year: billingYear, month: billingMonth }
 	});
 
 	try {
-		const customer = getCustomerClient(mccAccountId, developerToken, refreshToken);
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
 
-		// InvoiceService.ListInvoices via the client
-		const invoices = await customer.invoices.listInvoices({
-			customer_id: cleanMcc,
-			billing_setup: `customers/${cleanMcc}/billingSetups/-`,
-			issue_year: billingYear,
-			issue_month: billingMonth as any
+		// First, find the billing setup ID for this account via GAQL
+		const billingSetups = await customer.query(`
+			SELECT billing_setup.id, billing_setup.status
+			FROM billing_setup
+			WHERE billing_setup.status = 'APPROVED'
+		`);
+
+		if (!billingSetups || billingSetups.length === 0) {
+			logInfo('google-ads', `No approved billing setup for ${cleanCustomer} - skipping`);
+			return [];
+		}
+
+		const allInvoices: GoogleAdsInvoiceData[] = [];
+
+		// Query invoices for each billing setup
+		for (const bs of billingSetups as any[]) {
+			const billingSetupId = bs.billing_setup?.id;
+			if (!billingSetupId) continue;
+
+			const billingSetupResource = `customers/${cleanCustomer}/billingSetups/${billingSetupId}`;
+
+			let invoices;
+			try {
+				invoices = await customer.invoices.listInvoices({
+					customer_id: cleanCustomer,
+					billing_setup: billingSetupResource,
+					issue_year: billingYear,
+					issue_month: billingMonth as any
+				});
+			} catch (bsErr) {
+				const msg = bsErr instanceof Error ? bsErr.message : JSON.stringify(bsErr);
+				if (msg.includes('BILLING_SETUP_NOT_ON_MONTHLY_INVOICING')) {
+					logInfo('google-ads', `Billing setup ${billingSetupId} for ${cleanCustomer} is not on monthly invoicing - skipping`);
+					continue;
+				}
+				throw bsErr;
+			}
+
+			for (const inv of (invoices || []) as any[]) {
+				const accountCustomerIds: string[] = (inv.account_budget_summaries || [])
+					.map((abs: any) => {
+						const match = (abs.customer || '').match(/customers\/(\d+)/);
+						return match ? match[1] : null;
+					})
+					.filter(Boolean) as string[];
+
+				allInvoices.push({
+					invoiceId: inv.id || '',
+					invoiceType: inv.type === 2 ? 'INVOICE' : inv.type === 3 ? 'CREDIT_MEMO' : 'INVOICE',
+					issueDate: inv.issue_date || null,
+					dueDate: inv.due_date || null,
+					currencyCode: inv.currency_code || 'USD',
+					subtotalAmountMicros: Number(inv.subtotal_amount_micros || 0),
+					totalAmountMicros: Number(inv.total_amount_micros || 0),
+					pdfUrl: inv.pdf_url || null,
+					serviceDateRange: inv.service_date_range ? {
+						startDate: inv.service_date_range.start_date || null,
+						endDate: inv.service_date_range.end_date || null
+					} : null,
+					accountCustomerIds: accountCustomerIds.length > 0 ? accountCustomerIds : [cleanCustomer]
+				});
+			}
+		}
+
+		logInfo('google-ads', `Found ${allInvoices.length} invoices for ${cleanCustomer}`, {
+			metadata: { customerId: cleanCustomer, month: billingMonth, year: billingYear }
 		});
 
-		const result: GoogleAdsInvoiceData[] = (invoices || []).map((inv: any) => {
-			// Extract sub-account customer IDs from accountBudgetSummaries
-			const accountCustomerIds: string[] = (inv.account_budget_summaries || [])
-				.map((abs: any) => {
-					const match = (abs.customer || '').match(/customers\/(\d+)/);
-					return match ? match[1] : null;
-				})
-				.filter(Boolean) as string[];
-
-			return {
-				invoiceId: inv.id || '',
-				invoiceType: inv.type === 2 ? 'INVOICE' : inv.type === 3 ? 'CREDIT_MEMO' : 'INVOICE',
-				issueDate: inv.issue_date || null,
-				dueDate: inv.due_date || null,
-				currencyCode: inv.currency_code || 'EUR',
-				subtotalAmountMicros: Number(inv.subtotal_amount_micros || 0),
-				totalAmountMicros: Number(inv.total_amount_micros || 0),
-				pdfUrl: inv.pdf_url || null,
-				serviceDateRange: inv.service_date_range ? {
-					startDate: inv.service_date_range.start_date || null,
-					endDate: inv.service_date_range.end_date || null
-				} : null,
-				accountCustomerIds
-			};
-		});
-
-		logInfo('google-ads', `Found ${result.length} MCC invoices`, {
-			metadata: { mcc: cleanMcc, month: billingMonth, year: billingYear }
-		});
-
-		return result;
+		return allInvoices;
 	} catch (err) {
-		logError('google-ads', `Failed to list MCC invoices`, {
-			metadata: { mcc: cleanMcc, error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
+		logError('google-ads', `Failed to list invoices for ${cleanCustomer}`, {
+			metadata: { customerId: cleanCustomer, error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		throw err;
+	}
+}
+
+export interface GoogleAdsMonthlySpend {
+	month: string; // YYYY-MM
+	spend: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+	currencyCode: string;
+}
+
+/**
+ * Fetch monthly spend aggregates for a sub-account (last 6 months).
+ */
+export async function listMonthlySpend(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string
+): Promise<GoogleAdsMonthlySpend[]> {
+	logInfo('google-ads', `Fetching monthly spend for ${customerId}`);
+
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+
+		// Query last 6 months of spend aggregated by month
+		// segments.month requires dates to be 1st of month (YYYY-MM-01)
+		const now = new Date();
+		const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+		const startDate = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
+		const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+		const endDate = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-01`;
+
+		const results = await customer.query(`
+			SELECT
+				segments.month,
+				metrics.cost_micros,
+				metrics.impressions,
+				metrics.clicks,
+				metrics.conversions
+			FROM customer
+			WHERE segments.month BETWEEN '${startDate}' AND '${endDate}'
+		`);
+
+		// Also get currency from customer
+		const customerInfo = await customer.query(`
+			SELECT customer.currency_code FROM customer LIMIT 1
+		`);
+		const currencyCode = (customerInfo as any[])?.[0]?.customer?.currency_code || 'USD';
+
+		const monthlyData: GoogleAdsMonthlySpend[] = (results as any[]).map((row) => ({
+			month: row.segments?.month || '',
+			spend: Number(row.metrics?.cost_micros || 0) / 1_000_000,
+			impressions: Number(row.metrics?.impressions || 0),
+			clicks: Number(row.metrics?.clicks || 0),
+			conversions: Math.round(Number(row.metrics?.conversions || 0)),
+			currencyCode
+		})).filter(r => r.month && r.spend > 0)
+		.sort((a, b) => b.month.localeCompare(a.month));
+
+		logInfo('google-ads', `Got ${monthlyData.length} months of spend for ${customerId}`);
+		return monthlyData;
+	} catch (err) {
+		logError('google-ads', `Failed to fetch monthly spend for ${customerId}`, {
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
+		});
+		return [];
 	}
 }
 
@@ -191,6 +294,66 @@ export async function downloadInvoicePdf(
 
 	const arrayBuffer = await response.arrayBuffer();
 	return Buffer.from(arrayBuffer);
+}
+
+export interface GoogleAdsConversionAction {
+	name: string;
+	conversions: number;
+	conversionValue: number;
+}
+
+/**
+ * Fetch conversion actions breakdown for a sub-account.
+ */
+export async function listConversionActions(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string,
+	startDate: string,
+	endDate: string
+): Promise<GoogleAdsConversionAction[]> {
+	logInfo('google-ads', `Fetching conversion actions for ${customerId}`, { metadata: { startDate, endDate } });
+
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+
+		const results = await customer.query(`
+			SELECT
+				segments.conversion_action_name,
+				metrics.conversions,
+				metrics.conversions_value
+			FROM campaign
+			WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+				AND campaign.status != 'REMOVED'
+				AND metrics.conversions > 0
+		`);
+
+		const actionMap = new Map<string, { conversions: number; conversionValue: number }>();
+		for (const row of results as any[]) {
+			const name = row.segments?.conversion_action_name || 'Unknown';
+			const existing = actionMap.get(name) || { conversions: 0, conversionValue: 0 };
+			existing.conversions += Number(row.metrics?.conversions || 0);
+			existing.conversionValue += Number(row.metrics?.conversions_value || 0);
+			actionMap.set(name, existing);
+		}
+
+		const actions: GoogleAdsConversionAction[] = Array.from(actionMap.entries())
+			.map(([name, data]) => ({
+				name,
+				conversions: Math.round(data.conversions),
+				conversionValue: data.conversionValue
+			}))
+			.sort((a, b) => b.conversions - a.conversions);
+
+		logInfo('google-ads', `Got ${actions.length} conversion actions for ${customerId}`);
+		return actions;
+	} catch (err) {
+		logError('google-ads', `Failed to fetch conversion actions for ${customerId}`, {
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
+		});
+		return [];
+	}
 }
 
 // ---- Campaign reporting types ----

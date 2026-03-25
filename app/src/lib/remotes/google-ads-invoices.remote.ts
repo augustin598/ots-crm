@@ -109,6 +109,117 @@ export const getClientsForMapping = query(async () => {
 	return clients;
 });
 
+/** Get monthly spend aggregates for all mapped accounts */
+export const getGoogleAdsMonthlySpend = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+	const tenantId = event.locals.tenant.id;
+	const authResult = await getAuthenticatedClient(tenantId);
+	if (!authResult) return [];
+
+	const { integration } = authResult;
+	const { listMonthlySpend, formatCustomerId } = await import('$lib/server/google-ads/client');
+
+	// Get mapped accounts
+	const accounts = await db
+		.select({
+			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
+			accountName: table.googleAdsAccount.accountName,
+			clientId: table.googleAdsAccount.clientId,
+			clientName: table.client.name,
+			clientEmail: table.client.email
+		})
+		.from(table.googleAdsAccount)
+		.leftJoin(table.client, eq(table.googleAdsAccount.clientId, table.client.id))
+		.where(and(
+			eq(table.googleAdsAccount.tenantId, tenantId),
+			eq(table.googleAdsAccount.isActive, true)
+		));
+
+	const mapped = accounts.filter(a => a.clientId);
+	const results: Array<{
+		googleAdsCustomerId: string;
+		accountName: string;
+		clientName: string | null;
+		clientEmail: string | null;
+		months: Awaited<ReturnType<typeof listMonthlySpend>>;
+	}> = [];
+
+	for (const acc of mapped) {
+		const cleanId = formatCustomerId(acc.googleAdsCustomerId);
+		const months = await listMonthlySpend(
+			integration.mccAccountId, cleanId,
+			integration.developerToken, integration.refreshToken
+		);
+		results.push({
+			googleAdsCustomerId: acc.googleAdsCustomerId,
+			accountName: acc.accountName,
+			clientName: acc.clientName,
+			clientEmail: acc.clientEmail,
+			months
+		});
+	}
+
+	return results;
+});
+
+/** Get monthly spend for client user's own accounts */
+export const getMyGoogleAdsMonthlySpend = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.isClientUser || !event?.locals.client) {
+		return [];
+	}
+
+	const tenantId = event.locals.tenant.id;
+	const authResult = await getAuthenticatedClient(tenantId);
+	if (!authResult) return [];
+
+	const { integration } = authResult;
+	const { listMonthlySpend, formatCustomerId } = await import('$lib/server/google-ads/client');
+
+	const accounts = await db
+		.select({
+			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
+			accountName: table.googleAdsAccount.accountName
+		})
+		.from(table.googleAdsAccount)
+		.where(and(
+			eq(table.googleAdsAccount.tenantId, tenantId),
+			eq(table.googleAdsAccount.clientId, event.locals.client.id),
+			eq(table.googleAdsAccount.isActive, true)
+		));
+
+	// Get client's email
+	const [clientInfo] = await db
+		.select({ email: table.client.email })
+		.from(table.client)
+		.where(eq(table.client.id, event.locals.client.id))
+		.limit(1);
+	const clientEmail = clientInfo?.email || '';
+
+	const results: Array<{
+		accountName: string;
+		clientEmail: string;
+		customerId: string;
+		months: Awaited<ReturnType<typeof listMonthlySpend>>;
+	}> = [];
+
+	for (const acc of accounts) {
+		const cleanId = formatCustomerId(acc.googleAdsCustomerId);
+		const months = await listMonthlySpend(
+			integration.mccAccountId, cleanId,
+			integration.developerToken, integration.refreshToken
+		);
+		results.push({ accountName: acc.accountName, clientEmail, customerId: cleanId, months });
+	}
+
+	return results;
+});
+
 // ---- Commands ----
 
 export const saveGoogleAdsConfig = command(
@@ -211,6 +322,7 @@ export const fetchGoogleAdsAccounts = command(async () => {
 				.update(table.googleAdsAccount)
 				.set({
 					accountName: account.descriptiveName,
+					currencyCode: account.currencyCode,
 					isActive: account.status === 'ENABLED',
 					lastFetchedAt: now,
 					updatedAt: now
@@ -222,6 +334,7 @@ export const fetchGoogleAdsAccounts = command(async () => {
 				tenantId,
 				googleAdsCustomerId: cleanId,
 				accountName: account.descriptiveName,
+				currencyCode: account.currencyCode,
 				clientId: null,
 				isActive: account.status === 'ENABLED',
 				lastFetchedAt: now,

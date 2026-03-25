@@ -1410,6 +1410,7 @@ export const googleAdsAccount = sqliteTable('google_ads_account', {
 		.references(() => tenant.id),
 	googleAdsCustomerId: text('google_ads_customer_id').notNull(), // Sub-account ID (no dashes)
 	accountName: text('account_name').notNull(), // Descriptive name from Google Ads
+	currencyCode: text('currency_code').notNull().default('USD'), // Account currency from Google Ads API
 	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
 	isActive: boolean('is_active').notNull().default(true),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),

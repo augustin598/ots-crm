@@ -3,11 +3,11 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import {
 	listCampaignInsights, listCampaigns, listAdGroupInsights, listDemographicInsights,
-	GOOGLE_CHANNEL_MAP
+	listConversionActions, GOOGLE_CHANNEL_MAP
 } from '$lib/server/google-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -49,6 +49,7 @@ export const getGoogleReportAdAccounts = query(async () => {
 			id: table.googleAdsAccount.id,
 			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
 			accountName: table.googleAdsAccount.accountName,
+			currencyCode: table.googleAdsAccount.currencyCode,
 			clientId: table.googleAdsAccount.clientId,
 			clientName: table.client.name,
 			isActive: table.googleAdsAccount.isActive
@@ -63,25 +64,9 @@ export const getGoogleReportAdAccounts = query(async () => {
 		)
 		.orderBy(table.googleAdsAccount.accountName);
 
-	// Get currency from invoices
-	const accountIds = accounts.map(a => a.googleAdsCustomerId);
-	const currencyMap = new Map<string, string>();
-	if (accountIds.length > 0) {
-		const invoices = await db
-			.select({ googleAdsCustomerId: table.googleAdsInvoice.googleAdsCustomerId, currencyCode: table.googleAdsInvoice.currencyCode })
-			.from(table.googleAdsInvoice)
-			.where(inArray(table.googleAdsInvoice.googleAdsCustomerId, accountIds))
-			.orderBy(desc(table.googleAdsInvoice.issueDate));
-		for (const inv of invoices) {
-			if (!currencyMap.has(inv.googleAdsCustomerId)) {
-				currencyMap.set(inv.googleAdsCustomerId, inv.currencyCode);
-			}
-		}
-	}
-
 	return accounts.map(acc => ({
 		...acc,
-		currency: currencyMap.get(acc.googleAdsCustomerId) || 'RON'
+		currency: acc.currencyCode || 'USD'
 	}));
 });
 
@@ -97,6 +82,7 @@ export const getMyGoogleAdAccount = query(async () => {
 			id: table.googleAdsAccount.id,
 			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
 			accountName: table.googleAdsAccount.accountName,
+			currencyCode: table.googleAdsAccount.currencyCode,
 			clientId: table.googleAdsAccount.clientId
 		})
 		.from(table.googleAdsAccount)
@@ -110,7 +96,7 @@ export const getMyGoogleAdAccount = query(async () => {
 
 	if (accounts.length === 0) return [];
 
-	return accounts.map(acc => ({ ...acc, currency: 'RON' }));
+	return accounts.map(acc => ({ ...acc, currency: acc.currencyCode || 'USD' }));
 });
 
 /** Get campaign-level insights from Google Ads API (live, cached 5 min) */
@@ -271,6 +257,41 @@ export const getGoogleDemographicInsights = query(
 			);
 			setCache(cacheKey, demographics);
 			return demographics;
+		} catch (err) {
+			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
+		}
+	}
+);
+
+/** Get conversion actions breakdown for a sub-account */
+export const getGoogleConversionActions = query(
+	v.object({
+		customerId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const cacheKey = `google-conv-actions:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedClient(tenantId);
+		if (!authResult) throw error(500, 'Nu s-a putut obține token-ul Google Ads.');
+
+		const { integration } = authResult;
+
+		try {
+			const actions = await listConversionActions(
+				integration.mccAccountId, params.customerId,
+				integration.developerToken, integration.refreshToken!,
+				params.since, params.until
+			);
+			setCache(cacheKey, actions);
+			return actions;
 		} catch (err) {
 			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}

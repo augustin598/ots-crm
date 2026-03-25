@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMyGoogleAdAccount, getGoogleCampaignInsights, getGoogleActiveCampaigns, getGoogleAdGroupInsights } from '$lib/remotes/google-reports.remote';
+	import { getMyGoogleAdAccount, getGoogleCampaignInsights, getGoogleActiveCampaigns, getGoogleAdGroupInsights, getGoogleConversionActions } from '$lib/remotes/google-reports.remote';
 	import { page } from '$app/state';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import { Card } from '$lib/components/ui/card';
@@ -45,17 +45,22 @@
 
 	let selectedCustomerId = $state<string>('');
 	$effect(() => { if (accounts.length > 0 && !selectedCustomerId) selectedCustomerId = accounts[0].googleAdsCustomerId; });
-	const currency = $derived('RON');
+	const currency = $derived.by(() => {
+		const account = accounts.find((a: any) => a.googleAdsCustomerId === selectedCustomerId);
+		return account?.currency || 'USD';
+	});
 
 	function handleAccountChange(e: Event) { selectedCustomerId = (e.target as HTMLSelectElement).value; selectedCampaigns = new Set(); }
 
 	let insightsQuery = $state<ReturnType<typeof getGoogleCampaignInsights> | null>(null);
 	let campaignsQuery = $state<ReturnType<typeof getGoogleActiveCampaigns> | null>(null);
+	let convActionsQuery = $state<ReturnType<typeof getGoogleConversionActions> | null>(null);
 
 	$effect(() => {
 		if (selectedCustomerId && since && until) {
 			insightsQuery = getGoogleCampaignInsights({ customerId: selectedCustomerId, since, until });
 			campaignsQuery = getGoogleActiveCampaigns({ customerId: selectedCustomerId });
+			convActionsQuery = getGoogleConversionActions({ customerId: selectedCustomerId, since, until });
 		}
 	});
 
@@ -63,6 +68,7 @@
 	const insightsLoading = $derived(insightsQuery?.loading ?? false);
 	const insightsError = $derived(insightsQuery?.error);
 	const campaigns = $derived(campaignsQuery?.current || []);
+	const conversionActions = $derived(convActionsQuery?.current || []);
 
 	let selectedCampaigns = $state<Set<string>>(new Set());
 	const filteredInsights = $derived(selectedCampaigns.size > 0 ? insights.filter((i: any) => selectedCampaigns.has(i.campaignId)) : insights);
@@ -139,7 +145,7 @@
 
 	function getStatusVariant(s: string): 'success' | 'warning' | 'outline' { return s === 'ACTIVE' ? 'success' : s === 'PAUSED' ? 'warning' : 'outline'; }
 	function handleSort(col: typeof sortColumn) { if (sortColumn === col) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; else { sortColumn = col; sortDirection = 'desc'; } }
-	function handleRefresh() { if (selectedCustomerId && since && until) { insightsQuery = getGoogleCampaignInsights({ customerId: selectedCustomerId, since, until }); campaignsQuery = getGoogleActiveCampaigns({ customerId: selectedCustomerId }); } }
+	function handleRefresh() { if (selectedCustomerId && since && until) { insightsQuery = getGoogleCampaignInsights({ customerId: selectedCustomerId, since, until }); campaignsQuery = getGoogleActiveCampaigns({ customerId: selectedCustomerId }); convActionsQuery = getGoogleConversionActions({ customerId: selectedCustomerId, since, until }); } }
 	const allSelected = $derived(sortedCampaigns.length > 0 && sortedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
 	const someSelected = $derived(sortedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
 	function toggleSelectAll() { selectedCampaigns = allSelected ? new Set() : new Set(sortedCampaigns.map(c => c.campaignId)); }
@@ -173,13 +179,54 @@
 		{:else if insightsLoading}
 			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">{#each Array(5) as _}<Card class="p-4"><Skeleton class="h-16 w-full" /></Card>{/each}</div>
 		{:else}
-			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+			<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 				<KpiCard label="Cheltuieli totale" value={formatCurrency(totals.totalSpend, currency)} icon={DollarSignIcon} subtext="{formatNumber(totals.totalImpressions)} impresii" />
 				<KpiCard label="CPM" value={formatCurrency(totals.avgCpm, currency)} icon={EyeIcon} subtext="Cost per 1000 impresii" />
 				<KpiCard label="CPC" value={formatCurrency(totals.avgCpc, currency)} icon={MousePointerClickIcon} subtext="{formatNumber(totals.totalClicks)} click-uri" />
 				<KpiCard label="CTR" value={formatPercent(totals.avgCtr)} icon={PercentIcon} subtext="Click-through rate" />
-				<KpiCard label={resultKpi.label} value={resultKpi.value} icon={TrendingUpIcon} subtext={resultKpi.subtext} />
 			</div>
+
+			{@const COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-rose-500', 'bg-cyan-500', 'bg-orange-500', 'bg-indigo-500']}
+			<Card class="p-6">
+				<div class="flex items-center justify-between mb-5">
+					<div class="flex items-center gap-4">
+						<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+							<TrendingUpIcon class="h-6 w-6 text-primary" />
+						</div>
+						<div>
+							<p class="text-base text-muted-foreground">Conversii</p>
+							<p class="text-3xl font-bold">{resultKpi.value}</p>
+						</div>
+					</div>
+					{#if resultKpi.subtext && resultKpi.subtext !== 'Fără date'}
+						<span class="text-xl font-semibold">{resultKpi.subtext}</span>
+					{/if}
+				</div>
+				{#if conversionActions.length > 0}
+					{@const convTotal = conversionActions.reduce((s, a) => s + a.conversions, 0)}
+					<div class="flex h-3 w-full rounded-full overflow-hidden mb-5 bg-muted">
+						{#each conversionActions as action, i}
+							{@const pct = convTotal > 0 ? (action.conversions / convTotal) * 100 : 0}
+							<div class="{COLORS[i % COLORS.length]} transition-all" style="width: {pct}%" title="{action.name}: {action.conversions}"></div>
+						{/each}
+					</div>
+					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+						{#each conversionActions as action, i}
+							{@const pct = convTotal > 0 ? (action.conversions / convTotal) * 100 : 0}
+							<div class="flex items-center gap-3 rounded-lg border p-4">
+								<div class="h-4 w-4 rounded-full shrink-0 {COLORS[i % COLORS.length]}"></div>
+								<div class="min-w-0 flex-1">
+									<p class="text-base font-medium truncate" title={action.name}>{action.name}</p>
+									<div class="flex items-baseline gap-2">
+										<span class="text-2xl font-bold">{action.conversions}</span>
+										<span class="text-sm text-muted-foreground">{pct.toFixed(1)}%</span>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</Card>
 
 			{#if dailyData.length > 0}
 				<div class="grid gap-6 xl:grid-cols-2">

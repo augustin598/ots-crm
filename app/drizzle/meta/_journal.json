@@ -414,6 +414,13 @@
       "when": 1772732619029,
       "tag": "0058_watery_hammerhead",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1774440290883,
+      "tag": "0059_google_ads_currency_code",
+      "breakpoints": true
     }
   ]
 }
