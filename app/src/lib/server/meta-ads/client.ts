@@ -572,6 +572,134 @@ export async function updateCampaignBudget(
 	}
 }
 
+export interface MetaAdsAdsetInsight {
+	adsetId: string;
+	adsetName: string;
+	campaignId: string;
+	spend: string;
+	impressions: string;
+	reach: string;
+	frequency: string;
+	clicks: string;
+	cpc: string;
+	cpm: string;
+	ctr: string;
+	conversions: number;
+	conversionValue: number;
+	costPerConversion: number;
+	resultType: string;
+	cpaLabel: string;
+	linkClicks: number;
+	landingPageViews: number;
+	pageEngagement: number;
+	postReactions: number;
+	postComments: number;
+	postSaves: number;
+	postShares: number;
+	videoViews: number;
+	callsPlaced: number;
+	dailyBudget: string | null;
+	lifetimeBudget: string | null;
+	optimizationGoal: string;
+	dateStart: string;
+	dateStop: string;
+}
+
+/**
+ * Fetch ad set-level insights for a specific campaign.
+ */
+export async function listAdsetInsights(
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	campaignId: string,
+	since: string,
+	until: string
+): Promise<MetaAdsAdsetInsight[]> {
+	logInfo('meta-ads', `Fetching ad set insights for campaign ${campaignId}`);
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const timeRange = JSON.stringify({ since, until });
+	const fields = 'adset_id,adset_name,campaign_id,objective,spend,impressions,reach,frequency,clicks,cpc,cpm,ctr,actions,action_values,cost_per_action_type';
+	const filtering = JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: [campaignId] }]);
+
+	const insights: MetaAdsAdsetInsight[] = [];
+	let url: string | null = `${META_GRAPH_URL}/${adAccountId}/insights?${new URLSearchParams({
+		fields,
+		level: 'adset',
+		time_range: timeRange,
+		time_increment: '1',
+		filtering,
+		access_token: accessToken,
+		appsecret_proof: proof,
+		limit: '500'
+	}).toString()}`;
+
+	try {
+		while (url) {
+			const res = await fetch(url);
+			const data = await res.json();
+
+			if (data.error) {
+				logError('meta-ads', `Ad set insights API error`, {
+					metadata: { errorMessage: data.error.message, campaignId }
+				});
+				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			for (const row of data.data || []) {
+				const objective = row.objective || '';
+				const { count: conversions, resultType, cpaLabel } = parseConversions(row.actions, objective, '');
+				const conversionValue = parseConversionValue(row.action_values);
+				const spend = parseFloat(row.spend || '0');
+
+				insights.push({
+					adsetId: row.adset_id || '',
+					adsetName: row.adset_name || '',
+					campaignId: row.campaign_id || campaignId,
+					spend: row.spend || '0',
+					impressions: row.impressions || '0',
+					reach: row.reach || '0',
+					frequency: row.frequency || '0',
+					clicks: row.clicks || '0',
+					cpc: row.cpc || '0',
+					cpm: row.cpm || '0',
+					ctr: row.ctr || '0',
+					conversions,
+					conversionValue,
+					costPerConversion: conversions > 0 ? spend / conversions : 0,
+					resultType,
+					cpaLabel,
+					linkClicks: getActionCount(row.actions, 'link_click'),
+					landingPageViews: getActionCount(row.actions, 'landing_page_view'),
+					pageEngagement: getActionCount(row.actions, 'page_engagement'),
+					postReactions: getActionCount(row.actions, 'post_reaction'),
+					postComments: getActionCount(row.actions, 'comment'),
+					postSaves: getActionCount(row.actions, 'onsite_conversion.post_save'),
+					postShares: getActionCount(row.actions, 'post_share'),
+					videoViews: getActionCount(row.actions, 'video_view'),
+					callsPlaced: getActionCount(row.actions, 'click_to_call_native_call_placed'),
+					dailyBudget: null, // filled from campaign info
+					lifetimeBudget: null,
+					optimizationGoal: '',
+					dateStart: row.date_start,
+					dateStop: row.date_stop
+				});
+			}
+
+			url = data.paging?.next || null;
+		}
+
+		logInfo('meta-ads', `Got ${insights.length} ad set insight rows for campaign ${campaignId}`);
+		return insights;
+	} catch (err) {
+		logError('meta-ads', `Failed to fetch ad set insights for campaign ${campaignId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
 /**
  * List active/paused campaigns for an ad account.
  */

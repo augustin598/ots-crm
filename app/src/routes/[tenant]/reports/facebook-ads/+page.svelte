@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
+	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -27,16 +27,32 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import ColumnsIcon from '@lucide/svelte/icons/columns-3';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import MousePointerIcon from '@lucide/svelte/icons/mouse-pointer';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import TargetIcon from '@lucide/svelte/icons/target';
+	import HeartIcon from '@lucide/svelte/icons/heart';
+	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
+	import PhoneIcon from '@lucide/svelte/icons/phone';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import { toast } from 'svelte-sonner';
 	import {
 		aggregateInsightsByDate,
 		aggregateInsightsByCampaign,
+		aggregateInsightsByAdset,
 		computeTotals,
 		formatCurrency,
 		formatPercent,
 		formatNumber,
 		getDefaultDateRange,
-		type CampaignAggregate
+		type CampaignAggregate,
+		type AdsetAggregate
 	} from '$lib/utils/report-helpers';
 	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset } from '$lib/utils/column-presets';
 
@@ -181,7 +197,7 @@
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
 	const campaignTableData = $derived.by(() => {
 		const insightMap = new Map(campaignData.map((c) => [c.campaignId, c]));
-		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null; previewUrl: string | null }> = [];
+		const result: Array<CampaignAggregate & { status: string; dailyBudget: string | null; lifetimeBudget: string | null; budgetSource: string; adsetId: string | null; previewUrl: string | null; startTime: string | null }> = [];
 
 		// Merge campaigns with insights; only show campaigns without data if they're ACTIVE
 		for (const ci of campaigns) {
@@ -194,7 +210,8 @@
 					lifetimeBudget: ci.lifetimeBudget || null,
 					budgetSource: ci.budgetSource || 'campaign',
 					adsetId: ci.adsetId || null,
-					previewUrl: ci.previewUrl || null
+					previewUrl: ci.previewUrl || null,
+					startTime: ci.startTime || null
 				});
 				insightMap.delete(ci.campaignId);
 			} else if (ci.status === 'ACTIVE' || ci.status === 'WITH_ISSUES' || ci.status === 'IN_PROCESS') {
@@ -215,7 +232,8 @@
 					lifetimeBudget: ci.lifetimeBudget || null,
 					budgetSource: ci.budgetSource || 'campaign',
 					adsetId: ci.adsetId || null,
-					previewUrl: ci.previewUrl || null
+					previewUrl: ci.previewUrl || null,
+					startTime: ci.startTime || null
 				});
 			}
 		}
@@ -229,7 +247,8 @@
 				lifetimeBudget: null,
 				budgetSource: 'campaign' as const,
 				adsetId: null,
-				previewUrl: null
+				previewUrl: null,
+				startTime: null
 			});
 		}
 
@@ -450,6 +469,80 @@
 			});
 		} finally {
 			togglingCampaignId = null;
+		}
+	}
+
+	// ---- Objective display config ----
+	const OBJECTIVE_CONFIG: Record<string, { label: string; icon: any; color: string }> = {
+		OUTCOME_LEADS: { label: 'Leads', icon: UsersIcon, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+		LEAD_GENERATION: { label: 'Leads', icon: UsersIcon, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+		OUTCOME_TRAFFIC: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+		LINK_CLICKS: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+		OUTCOME_SALES: { label: 'Vânzări', icon: ShoppingCartIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		CONVERSIONS: { label: 'Conversii', icon: TargetIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		OUTCOME_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+		POST_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
+		OUTCOME_AWARENESS: { label: 'Awareness', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+		REACH: { label: 'Reach', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+		OUTCOME_APP_PROMOTION: { label: 'App', icon: DownloadIcon, color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+		APP_INSTALLS: { label: 'App', icon: DownloadIcon, color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
+		MESSAGES: { label: 'Mesaje', icon: MessageCircleIcon, color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' },
+		VIDEO_VIEWS: { label: 'Video', icon: PlayIcon, color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
+		CALLS: { label: 'Apeluri', icon: PhoneIcon, color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+	};
+
+	function getObjectiveConfig(objective: string) {
+		return OBJECTIVE_CONFIG[objective] || { label: objective, icon: TargetIcon, color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' };
+	}
+
+	// ---- Expandable ad sets ----
+	let expandedCampaigns = $state<Set<string>>(new Set());
+	let adsetData = $state<Map<string, AdsetAggregate[]>>(new Map());
+	let adsetLoading = $state<Set<string>>(new Set());
+
+	async function toggleExpand(campaignId: string) {
+		const next = new Set(expandedCampaigns);
+		if (next.has(campaignId)) {
+			next.delete(campaignId);
+			expandedCampaigns = next;
+			return;
+		}
+		next.add(campaignId);
+		expandedCampaigns = next;
+
+		if (!adsetData.has(campaignId) && selectedAccountId && selectedIntegrationId) {
+			const loadingNext = new Set(adsetLoading);
+			loadingNext.add(campaignId);
+			adsetLoading = loadingNext;
+
+			try {
+				const query = getMetaAdsetInsights({
+					adAccountId: selectedAccountId,
+					integrationId: selectedIntegrationId,
+					campaignId,
+					since,
+					until
+				});
+				const checkInterval = setInterval(() => {
+					if (!query.loading) {
+						clearInterval(checkInterval);
+						const loadDone = new Set(adsetLoading);
+						loadDone.delete(campaignId);
+						adsetLoading = loadDone;
+
+						if (query.current) {
+							const aggregated = aggregateInsightsByAdset(query.current);
+							const newMap = new Map(adsetData);
+							newMap.set(campaignId, aggregated);
+							adsetData = newMap;
+						}
+					}
+				}, 100);
+			} catch {
+				const loadDone = new Set(adsetLoading);
+				loadDone.delete(campaignId);
+				adsetLoading = loadDone;
+			}
 		}
 	}
 
@@ -691,14 +784,17 @@
 							</TableHeader>
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
-									<TableRow>
-										<TableCell class="w-[40px]">
+									<TableRow
+										class="cursor-pointer transition-colors hover:bg-muted/40 {expandedCampaigns.has(campaign.campaignId) ? 'bg-muted/30 font-semibold border-l-3 border-l-primary' : ''}"
+										onclick={() => toggleExpand(campaign.campaignId)}
+									>
+										<TableCell class="w-[40px]" onclick={(e) => e.stopPropagation()}>
 											<Checkbox
 												checked={selectedCampaigns.has(campaign.campaignId)}
 												onCheckedChange={() => toggleSelect(campaign.campaignId)}
 											/>
 										</TableCell>
-										<TableCell class="w-[50px]">
+										<TableCell class="w-[50px]" onclick={(e) => e.stopPropagation()}>
 											<Switch
 												checked={campaign.status === 'ACTIVE'}
 												disabled={togglingCampaignId === campaign.campaignId || (campaign.status !== 'ACTIVE' && campaign.status !== 'PAUSED')}
@@ -706,8 +802,29 @@
 											/>
 										</TableCell>
 										<TableCell class="font-medium max-w-[250px]">
-											<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
-											<div class="text-xs text-muted-foreground">{campaign.objective}</div>
+											<div class="flex items-center gap-1.5">
+												{#if expandedCampaigns.has(campaign.campaignId)}
+													<ChevronDownIcon class="h-4 w-4 shrink-0 text-primary" />
+												{:else}
+													<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												{/if}
+												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
+											</div>
+											{#if true}
+												{@const objConfig = getObjectiveConfig(campaign.objective)}
+												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
+														<svelte:component this={objConfig.icon} class="h-3 w-3" />
+														{objConfig.label}
+													</span>
+													{#if campaign.startTime}
+														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+															<CalendarIcon class="h-2.5 w-2.5" />
+															{campaign.startTime}
+														</span>
+													{/if}
+												</div>
+											{/if}
 										</TableCell>
 										<TableCell>
 											<Badge variant={getStatusVariant(campaign.status)}>
@@ -715,7 +832,7 @@
 											</Badge>
 										</TableCell>
 										{#each activePreset.columns as col}
-											<TableCell class={col.align === 'right' ? 'text-right' : ''}>
+											<TableCell class={col.align === 'right' ? 'text-right' : ''} onclick={(e) => col.key === 'budget' ? e.stopPropagation() : null}>
 												{#if col.key === 'budget'}
 													<div class="flex items-center justify-end gap-1">
 														<span>{col.getValue(campaign, selectedCurrency)}</span>
@@ -740,7 +857,7 @@
 												{/if}
 											</TableCell>
 										{/each}
-										<TableCell class="w-[50px] text-center">
+										<TableCell class="w-[50px] text-center" onclick={(e) => e.stopPropagation()}>
 											{#if campaign.previewUrl}
 												<a href={campaign.previewUrl} target="_blank" rel="noopener" class="text-muted-foreground hover:text-primary" title="Previzualizare reclamă">
 													<EyeIcon class="h-4 w-4 inline-block" />
@@ -748,6 +865,46 @@
 											{/if}
 										</TableCell>
 									</TableRow>
+									<!-- Expanded ad set rows -->
+									{#if expandedCampaigns.has(campaign.campaignId)}
+										{#if adsetLoading.has(campaign.campaignId)}
+											<TableRow class="bg-muted/20">
+												<TableCell></TableCell>
+												<TableCell colspan={activePreset.columns.length + 4}>
+													<div class="flex items-center gap-2 py-2 pl-6 text-sm text-muted-foreground">
+														<LoaderIcon class="h-4 w-4 animate-spin" />
+														Se încarcă ad set-urile...
+													</div>
+												</TableCell>
+											</TableRow>
+										{:else if adsetData.has(campaign.campaignId)}
+											{#each adsetData.get(campaign.campaignId) || [] as adset}
+												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground">
+													<TableCell class="w-[40px]"></TableCell>
+													<TableCell class="w-[50px]"></TableCell>
+													<TableCell class="max-w-[250px]">
+														<div class="flex items-center gap-1.5 pl-4">
+															<span class="text-muted-foreground/50">└</span>
+															<div class="truncate text-sm text-foreground/80" title={adset.adsetName}>{adset.adsetName}</div>
+														</div>
+													</TableCell>
+													<TableCell></TableCell>
+													{#each activePreset.columns as col}
+														<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-sm text-foreground/80">
+															<div>{col.getValue(adset as any, selectedCurrency)}</div>
+															{#if col.getSubtext}
+																{@const sub = col.getSubtext(adset as any)}
+																{#if sub}
+																	<div class="text-xs text-muted-foreground">{sub}</div>
+																{/if}
+															{/if}
+														</TableCell>
+													{/each}
+													<TableCell></TableCell>
+												</TableRow>
+											{/each}
+										{/if}
+									{/if}
 								{/each}
 								<!-- Total row -->
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
