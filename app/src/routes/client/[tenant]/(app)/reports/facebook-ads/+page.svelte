@@ -536,7 +536,7 @@
 														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
 															<CalendarIcon class="h-2.5 w-2.5" />
 															Start: {campaign.startTime.slice(0, 10)}
-															{#if campaign.stopTime}· End: {campaign.stopTime.slice(0, 10)}{/if}
+															{#if campaign.stopTime && campaign.status !== 'ACTIVE'}· End: {campaign.stopTime.slice(0, 10)}{/if}
 														</span>
 													{/if}
 												</div>
