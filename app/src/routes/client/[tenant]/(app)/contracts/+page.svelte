@@ -15,7 +15,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import { toast } from 'svelte-sonner';
-	import { formatContractDate } from '$lib/utils/contract-utils';
+	import { formatContractDate, getContractStatusLabel, getContractStatusVariant } from '$lib/utils/contract-utils';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -129,22 +129,6 @@
 		currentPage = 1;
 	}
 
-	function getStatusColor(status: string): string {
-		switch (status) {
-			case 'active':
-			case 'signed':
-				return 'border-green-500 text-green-700 bg-green-50';
-			case 'sent':
-				return 'border-blue-500 text-blue-700 bg-blue-50';
-			case 'expired':
-			case 'cancelled':
-				return 'border-red-500 text-red-700 bg-red-50';
-			case 'draft':
-				return 'border-gray-400 text-gray-600 bg-gray-50';
-			default:
-				return 'border-gray-400 text-gray-600 bg-gray-50';
-		}
-	}
 
 	// Using shared formatContractDate from contract-utils
 
@@ -262,11 +246,9 @@
 								<TableCell>{contract.contractTitle}</TableCell>
 								<TableCell>{formatContractDate(contract.contractDate)}</TableCell>
 								<TableCell>
-									<span
-										class="inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-medium capitalize {getStatusColor(contract.status)}"
-									>
-										{contract.status}
-									</span>
+									<Badge variant={getContractStatusVariant(contract.status)}>
+										{getContractStatusLabel(contract.status)}
+									</Badge>
 								</TableCell>
 								<TableCell>
 									<div class="flex items-center gap-1">
