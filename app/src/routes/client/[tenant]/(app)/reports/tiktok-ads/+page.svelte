@@ -375,6 +375,7 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<DateRangePicker bind:since bind:until />
+				<span class="text-sm font-medium">Selectează cont</span>
 				{#if true}
 					{@const selectedAccount = accounts.find((a: any) => a.tiktokAdvertiserId === selectedAdvertiserId)}
 					{@const domain = selectedAccount?.accountName?.replace(/\s/g, '').toLowerCase()}
