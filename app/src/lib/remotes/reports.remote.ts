@@ -136,14 +136,14 @@ export const getClientAdAccount = query(
 	}
 );
 
-/** Get the ad account for the currently logged-in client user (client portal) */
-export const getMyAdAccount = query(async () => {
+/** Get all ad accounts for the currently logged-in client user (client portal) */
+export const getMyAdAccounts = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.isClientUser || !event?.locals.client) {
-		return null;
+		return [];
 	}
 
-	const [account] = await db
+	const accounts = await db
 		.select({
 			id: table.metaAdsAccount.id,
 			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
@@ -158,18 +158,22 @@ export const getMyAdAccount = query(async () => {
 				eq(table.metaAdsAccount.clientId, event.locals.client.id)
 			)
 		)
-		.limit(1);
+		.orderBy(table.metaAdsAccount.accountName);
 
-	if (!account) return null;
+	if (accounts.length === 0) return [];
 
-	const [spending] = await db
-		.select({ currencyCode: table.metaAdsSpending.currencyCode })
-		.from(table.metaAdsSpending)
-		.where(eq(table.metaAdsSpending.metaAdAccountId, account.metaAdAccountId))
-		.orderBy(desc(table.metaAdsSpending.periodStart))
-		.limit(1);
+	const result = [];
+	for (const account of accounts) {
+		const [spending] = await db
+			.select({ currencyCode: table.metaAdsSpending.currencyCode })
+			.from(table.metaAdsSpending)
+			.where(eq(table.metaAdsSpending.metaAdAccountId, account.metaAdAccountId))
+			.orderBy(desc(table.metaAdsSpending.periodStart))
+			.limit(1);
+		result.push({ ...account, currency: spending?.currencyCode || 'RON' });
+	}
 
-	return { ...account, currency: spending?.currencyCode || 'RON' };
+	return result;
 });
 
 /** Get campaign-level insights from Meta API (live, cached 5 min) */

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMyAdAccount, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights } from '$lib/remotes/reports.remote';
+	import { getMyAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -58,12 +58,27 @@
 	let since = $state(defaults.since);
 	let until = $state(defaults.until);
 
-	// Auto-detect client's ad account
-	const adAccountQuery = getMyAdAccount();
-	const adAccount = $derived(adAccountQuery.current);
-	const adAccountLoading = $derived(adAccountQuery.loading);
+	// Load all client's ad accounts
+	const accountsQuery = getMyAdAccounts();
+	const accounts = $derived(accountsQuery.current || []);
+	const accountsLoading = $derived(accountsQuery.loading);
 
+	let selectedAccountId = $state<string>('');
+	$effect(() => {
+		if (accounts.length > 0 && !selectedAccountId) {
+			selectedAccountId = accounts[0].metaAdAccountId;
+		}
+	});
+
+	const adAccount = $derived(accounts.find(a => a.metaAdAccountId === selectedAccountId) || null);
 	const currency = $derived(adAccount?.currency || 'RON');
+
+	function handleAccountChange(e: Event) {
+		selectedAccountId = (e.target as HTMLSelectElement).value;
+		selectedCampaigns = new Set();
+		expandedCampaigns = new Set();
+		adsetData = new Map();
+	}
 
 	// Insights (only if ad account exists)
 	let insightsQuery = $state<ReturnType<typeof getMetaCampaignInsights> | null>(null);
@@ -96,7 +111,7 @@
 	// Filter insights by selected campaigns
 	const filteredInsights = $derived(
 		selectedCampaigns.size > 0
-			? insights.filter(i => selectedCampaigns.has(i.campaignId))
+			? insights.filter((i: any) => selectedCampaigns.has(i.campaignId))
 			: insights
 	);
 
@@ -153,7 +168,7 @@
 	const resultActionTypes = $derived.by(() => {
 		const types = new Set<string>();
 		const relevantCampaigns = selectedCampaigns.size > 0
-			? campaigns.filter(c => selectedCampaigns.has(c.campaignId))
+			? campaigns.filter((c: any) => selectedCampaigns.has(c.campaignId))
 			: campaigns;
 		for (const c of relevantCampaigns) {
 			if (c.optimizationGoal && GOAL_TO_ACTION[c.optimizationGoal]) {
@@ -364,13 +379,13 @@
 </script>
 
 <div class="space-y-6">
-	{#if adAccountLoading}
+	{#if accountsLoading}
 		<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 			{#each Array(5) as _}
 				<Card class="p-4"><Skeleton class="h-16 w-full" /></Card>
 			{/each}
 		</div>
-	{:else if !adAccount}
+	{:else if accounts.length === 0}
 		<Card class="p-8 text-center">
 			<p class="text-muted-foreground">Nu există cont Meta Ads asociat acestui client. Asociază un cont din <a href="/{tenantSlug}/settings/meta-ads" class="text-primary underline">Settings → Meta Ads</a>.</p>
 		</Card>
@@ -384,8 +399,17 @@
 				</h1>
 				<p class="text-muted-foreground">Rapoarte performanță campanii Meta/Facebook Ads</p>
 			</div>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-2">
 				<DateRangePicker bind:since bind:until />
+				{#if accounts.length > 0}
+					<select class="h-9 rounded-md border border-input bg-background px-3 text-sm" value={selectedAccountId} onchange={handleAccountChange}>
+						{#each accounts as account}
+							<option value={account.metaAdAccountId}>
+								{account.accountName || account.metaAdAccountId}
+							</option>
+						{/each}
+					</select>
+				{/if}
 				<Button variant="outline" size="sm" onclick={handleRefresh}>
 					<RefreshCwIcon class="h-4 w-4" />
 				</Button>
