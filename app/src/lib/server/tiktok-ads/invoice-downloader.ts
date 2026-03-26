@@ -355,7 +355,7 @@ export async function downloadAllInvoicesForMonth(
 				if (result.error === 'session_expired') {
 					await db
 						.update(table.tiktokAdsIntegration)
-						.set({ ttSessionStatus: 'none', updatedAt: new Date() })
+						.set({ ttSessionStatus: 'expired', updatedAt: new Date() })
 						.where(eq(table.tiktokAdsIntegration.id, integration.id));
 
 					logWarning('tiktok-invoice-downloader', 'TikTok session expired', { tenantId });

@@ -65,7 +65,7 @@ export async function saveTtSessionCookies(
 
 /**
  * Get decrypted TikTok session cookies for an integration.
- * Returns null if no cookies are stored or status is 'none'.
+ * Returns null if no cookies are stored.
  */
 export async function getDecryptedTtCookies(
 	integrationId: string,
@@ -85,7 +85,7 @@ export async function getDecryptedTtCookies(
 		)
 		.limit(1);
 
-	if (!integration || !integration.ttSessionCookies || integration.ttSessionStatus === 'none') {
+	if (!integration || !integration.ttSessionCookies) {
 		return null;
 	}
 

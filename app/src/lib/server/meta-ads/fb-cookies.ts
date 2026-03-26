@@ -67,7 +67,7 @@ export async function saveFbSessionCookies(
 
 /**
  * Get decrypted Facebook session cookies for an integration.
- * Returns null if no cookies are stored or status is 'none'.
+ * Returns null if no cookies are stored.
  */
 export async function getDecryptedFbCookies(
 	integrationId: string,
@@ -87,7 +87,7 @@ export async function getDecryptedFbCookies(
 		)
 		.limit(1);
 
-	if (!integration || !integration.fbSessionCookies || integration.fbSessionStatus === 'none') {
+	if (!integration || !integration.fbSessionCookies) {
 		return null;
 	}
 

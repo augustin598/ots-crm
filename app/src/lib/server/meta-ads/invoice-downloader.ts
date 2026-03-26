@@ -280,7 +280,7 @@ export async function downloadAllReceiptsForMonth(
 					// Mark session as expired
 					await db
 						.update(table.metaAdsIntegration)
-						.set({ fbSessionStatus: 'none', updatedAt: new Date() })
+						.set({ fbSessionStatus: 'expired', updatedAt: new Date() })
 						.where(eq(table.metaAdsIntegration.id, integration.id));
 
 					logWarning('invoice-downloader', `FB session expired for BM ${integration.businessName}`, { tenantId });

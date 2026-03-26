@@ -65,7 +65,7 @@ export async function saveGoogleSessionCookies(
 
 /**
  * Get decrypted Google session cookies for an integration.
- * Returns null if no cookies are stored or status is 'none'.
+ * Returns null if no cookies are stored.
  */
 export async function getDecryptedGoogleCookies(
 	integrationId: string,
@@ -85,7 +85,7 @@ export async function getDecryptedGoogleCookies(
 		)
 		.limit(1);
 
-	if (!integration || !integration.googleSessionCookies || integration.googleSessionStatus === 'none') {
+	if (!integration || !integration.googleSessionCookies) {
 		return null;
 	}
 

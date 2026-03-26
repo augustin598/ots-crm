@@ -152,7 +152,7 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 										// Mark session as expired
 										await db
 											.update(table.googleAdsIntegration)
-											.set({ googleSessionStatus: 'none', updatedAt: new Date() })
+											.set({ googleSessionStatus: 'expired', updatedAt: new Date() })
 											.where(eq(table.googleAdsIntegration.id, integration.id));
 										logWarning('google-ads-sync', 'Google session cookies expired', { tenantId });
 									}
