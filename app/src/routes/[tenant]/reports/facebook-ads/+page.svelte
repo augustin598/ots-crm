@@ -138,7 +138,7 @@
 	// Filter insights by selected campaigns
 	const filteredInsights = $derived(
 		selectedCampaigns.size > 0
-			? insights.filter(i => selectedCampaigns.has(i.campaignId))
+			? insights.filter((i: any) => selectedCampaigns.has(i.campaignId))
 			: insights
 	);
 
@@ -423,7 +423,7 @@
 	const resultActionTypes = $derived.by(() => {
 		const types = new Set<string>();
 		const relevantCampaigns = selectedCampaigns.size > 0
-			? campaigns.filter(c => selectedCampaigns.has(c.campaignId))
+			? campaigns.filter((c: any) => selectedCampaigns.has(c.campaignId))
 			: campaigns;
 		for (const c of relevantCampaigns) {
 			if (c.optimizationGoal && GOAL_TO_ACTION[c.optimizationGoal]) {

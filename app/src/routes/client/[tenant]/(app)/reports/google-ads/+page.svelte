@@ -121,7 +121,7 @@
 				result.push({
 					campaignId: ci.campaignId, campaignName: ci.campaignName, channelType: ci.channelType,
 					spend: 0, impressions: 0, clicks: 0, conversions: 0, conversionValue: 0,
-					cpc: 0, cpm: 0, ctr: 0, costPerConversion: 0, roas: 0, videoViews: 0,
+					cpc: 0, cpm: 0, ctr: 0, costPerConversion: 0, conversionRate: 0, roas: 0, videoViews: 0,
 					resultType: '', cpaLabel: 'CPA',
 					status: ci.status, dailyBudget: ci.dailyBudget || null, startDate: ci.startDate, endDate: ci.endDate
 				});

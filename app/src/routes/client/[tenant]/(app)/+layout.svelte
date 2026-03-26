@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PageData } from '../$types';
+	import type { LayoutData } from '../$types';
 	import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, SidebarFooter } from '$lib/components/ui/sidebar';
 	import { logout } from '$lib/remotes/auth.remote';
 	import { goto } from '$app/navigation';
@@ -28,7 +28,7 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 
-	let { data, children }: { data: PageData; children: any } = $props();
+	let { data, children }: { data: LayoutData; children: any } = $props();
 
 	const themeHue = $derived(
 		data.tenant?.themeColor && isValidHex(data.tenant.themeColor)

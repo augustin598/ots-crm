@@ -51,7 +51,7 @@
 	import UserIcon from '@lucide/svelte/icons/user';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const taskId = $derived(page.params.taskId);
+	const taskId = $derived(page.params.taskId!);
 	const currentUserId = $derived((page.data as any)?.clientUser?.userId as string | undefined);
 
 	const taskQuery = getTask(taskId);

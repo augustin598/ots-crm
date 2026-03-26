@@ -42,8 +42,8 @@
 	const contractsQuery = getContracts({});
 	const contracts = $derived(contractsQuery.current?.contracts || []);
 
-	const pendingTasks = $derived(tasks.filter((t) => t.status === 'pending-approval').length);
-	const activeTasks = $derived(tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length);
+	const pendingTasks = $derived(tasks.filter((t: any) => t.status === 'pending-approval').length);
+	const activeTasks = $derived(tasks.filter((t: any) => t.status !== 'done' && t.status !== 'cancelled').length);
 	const totalContracts = $derived(contracts.length);
 	const pendingInvoices = $derived(invoices.filter((i) => i.status === 'sent' || i.status === 'overdue').length);
 </script>

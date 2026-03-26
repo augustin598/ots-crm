@@ -76,7 +76,7 @@
 							type="password"
 							bind:value={newPassword}
 							required
-							minlength="6"
+							minlength={6}
 							autocomplete="new-password"
 							placeholder="Enter new password (min. 6 characters)"
 							disabled={loading}
@@ -89,7 +89,7 @@
 							type="password"
 							bind:value={confirmPassword}
 							required
-							minlength="6"
+							minlength={6}
 							autocomplete="new-password"
 							placeholder="Confirm new password"
 							disabled={loading}

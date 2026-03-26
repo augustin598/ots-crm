@@ -264,15 +264,15 @@
 
 	async function refreshEmailLogs() {
 		refreshingEmail = true;
-		emailLogsQuery.revalidate();
-		emailStatsQuery.revalidate();
+		emailLogsQuery.refresh();
+		emailStatsQuery.refresh();
 		setTimeout(() => (refreshingEmail = false), 800);
 	}
 
 	async function refreshDebugLogs() {
 		refreshingDebug = true;
-		debugLogsQuery.revalidate();
-		debugStatsQuery.revalidate();
+		debugLogsQuery.refresh();
+		debugStatsQuery.refresh();
 		setTimeout(() => (refreshingDebug = false), 800);
 	}
 
@@ -325,7 +325,7 @@
 		}
 	}
 
-	async function handleDeleteDebugByLevel(level: string) {
+	async function handleDeleteDebugByLevel(level: 'info' | 'warning' | 'error') {
 		const label = debugLevelLabel(level);
 		if (!confirm(`Sigur doriti sa stergeti toate log-urile de tip "${label}"?`)) return;
 		try {

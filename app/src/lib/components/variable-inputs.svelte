@@ -119,7 +119,7 @@
 								id="var-{variable.key}"
 								value={customValues[variable.key] || variable.defaultValue || ''}
 								placeholder="Enter {variable.label.toLowerCase()}"
-								rows="3"
+								rows={3}
 								oninput={(e) => {
 									const value = (e.target as HTMLTextAreaElement).value;
 									customValues = { ...customValues, [variable.key]: value };

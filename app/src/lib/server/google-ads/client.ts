@@ -158,7 +158,7 @@ export async function listInvoices(
 					billing_setup: billingSetupResource,
 					issue_year: billingYear,
 					issue_month: billingMonth as any
-				});
+				} as any);
 			} catch (bsErr) {
 				const msg = bsErr instanceof Error ? bsErr.message : JSON.stringify(bsErr);
 				if (msg.includes('BILLING_SETUP_NOT_ON_MONTHLY_INVOICING')) {
@@ -168,7 +168,7 @@ export async function listInvoices(
 				throw bsErr;
 			}
 
-			for (const inv of (invoices || []) as any[]) {
+			for (const inv of ((invoices as unknown as any[]) || []) as any[]) {
 				const accountCustomerIds: string[] = (inv.account_budget_summaries || [])
 					.map((abs: any) => {
 						const match = (abs.customer || '').match(/customers\/(\d+)/);

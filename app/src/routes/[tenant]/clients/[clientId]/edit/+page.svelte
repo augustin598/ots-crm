@@ -45,15 +45,15 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
 
-	const clientQuery = getClient(clientId);
+	const clientQuery = getClient(clientId as string);
 	const client = $derived(clientQuery.current);
 	const loading = $derived(clientQuery.loading);
 
-	const partnerInfoQuery = $derived(getClientPartnerInfo(clientId));
+	const partnerInfoQuery = $derived(getClientPartnerInfo(clientId as string));
 	const partnerInfo = $derived(partnerInfoQuery.current);
 
 	// Websites
-	const websitesQuery = $derived(getClientWebsites(clientId));
+	const websitesQuery = $derived(getClientWebsites(clientId as string));
 	const websites = $derived(websitesQuery?.current || []);
 
 	// Website add form
@@ -77,7 +77,7 @@
 	}
 
 	// Secondary emails
-	const secondaryEmailsQuery = $derived(getClientSecondaryEmails(clientId));
+	const secondaryEmailsQuery = $derived(getClientSecondaryEmails(clientId as string));
 	const secondaryEmails = $derived(secondaryEmailsQuery?.current || []);
 	let newSecondaryEmail = $state('');
 	let newSecondaryLabel = $state('');
@@ -94,7 +94,7 @@
 		addSecondaryEmailError = null;
 		try {
 			await createClientSecondaryEmail({
-				clientId,
+				clientId: clientId as string,
 				email: newSecondaryEmail.trim(),
 				label: newSecondaryLabel.trim() || undefined
 			}).updates(secondaryEmailsQuery);
@@ -211,7 +211,7 @@
 		addWebsiteError = null;
 		try {
 			await createClientWebsite({
-				clientId,
+				clientId: clientId as string,
 				name: newWebsiteName.trim() || undefined,
 				url: normalizeUrl(newWebsiteUrl)
 			}).updates(websitesQuery, clientQuery, getClients());
@@ -258,7 +258,7 @@
 
 	async function handleSetDefault(id: string) {
 		try {
-			await setDefaultClientWebsite({ websiteId: id })
+			await setDefaultClientWebsite(id)
 				.updates(websitesQuery, clientQuery, getClients());
 			toast.success('Website implicit setat');
 		} catch (e) {
@@ -269,7 +269,7 @@
 	async function handleDeleteWebsite(id: string) {
 		if (!confirm('Sigur vrei să ștergi acest website?')) return;
 		try {
-			await deleteClientWebsite({ websiteId: id })
+			await deleteClientWebsite(id)
 				.updates(websitesQuery, clientQuery, getClients());
 			toast.success('Website șters');
 		} catch (e) {
@@ -585,7 +585,7 @@
 														alt=""
 														class="h-5 w-5 shrink-0 rounded-sm object-contain bg-muted/40"
 														loading="lazy"
-														onerror={(e) => (e.currentTarget.style.display = 'none')}
+														onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
 													/>
 												{/key}
 

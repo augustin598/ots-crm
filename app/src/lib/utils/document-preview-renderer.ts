@@ -7,7 +7,7 @@ import { marked } from 'marked';
  */
 function markdownToHtml(markdown: string): string {
 	try {
-		return marked(markdown);
+		return marked(markdown) as string;
 	} catch (e) {
 		return `<p class="text-red-500">Error parsing markdown: ${e instanceof Error ? e.message : 'Unknown error'}</p>`;
 	}

@@ -154,7 +154,7 @@ export const getTasks = query(
 		let conditions: any =
 			sharedProjectIds.length > 0
 				? or(
-						eq(table.task.tenantId, event.locals.tenant.id),
+						eq(table.task.tenantId, event.locals.tenant!.id),
 						inArray(table.task.projectId, sharedProjectIds)
 					)
 				: eq(table.task.tenantId, event.locals.tenant.id);
@@ -716,7 +716,7 @@ export const updateTaskPosition = command(
 					})
 					.where(
 						and(
-							eq(table.task.tenantId, event.locals.tenant.id),
+							eq(table.task.tenantId, event.locals.tenant!.id),
 							eq(table.task.status, oldStatus),
 							sql`${table.task.position} > ${oldPosition}`
 						)
@@ -732,7 +732,7 @@ export const updateTaskPosition = command(
 					})
 					.where(
 						and(
-							eq(table.task.tenantId, event.locals.tenant.id),
+							eq(table.task.tenantId, event.locals.tenant!.id),
 							eq(table.task.status, newStatus),
 							sql`${table.task.position} >= ${newPosition}`
 						)
@@ -803,7 +803,7 @@ export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 				})
 				.where(
 					and(
-						eq(table.task.tenantId, event.locals.tenant.id),
+						eq(table.task.tenantId, event.locals.tenant!.id),
 						eq(table.task.status, task.status),
 						sql`${table.task.position} > ${task.position}`
 					)

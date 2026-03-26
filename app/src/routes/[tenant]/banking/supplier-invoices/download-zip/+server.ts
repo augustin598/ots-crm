@@ -64,7 +64,7 @@ export const POST: RequestHandler = async (event) => {
 	const zipBuffer = await zip.generateAsync({ type: 'uint8array' });
 	const date = new Date().toISOString().slice(0, 10);
 
-	return new Response(zipBuffer, {
+	return new Response(zipBuffer as unknown as BodyInit, {
 		status: 200,
 		headers: {
 			'Content-Type': 'application/zip',

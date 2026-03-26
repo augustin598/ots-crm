@@ -74,16 +74,16 @@
 		if (filterSearch.trim()) {
 			const q = filterSearch.trim().toLowerCase();
 			result = result.filter(
-				(t) =>
+				(t: any) =>
 					t.title.toLowerCase().includes(q) ||
 					(t.description && t.description.toLowerCase().includes(q))
 			);
 		}
 		if (filterStatus) {
-			result = result.filter((t) => t.status === filterStatus);
+			result = result.filter((t: any) => t.status === filterStatus);
 		}
 		if (filterPriority) {
-			result = result.filter((t) => t.priority === filterPriority);
+			result = result.filter((t: any) => t.priority === filterPriority);
 		}
 		// Sort
 		const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
@@ -105,11 +105,11 @@
 
 	const stats = $derived({
 		total: tasks.length,
-		inProgress: tasks.filter((t) => t.status === 'in-progress').length,
+		inProgress: tasks.filter((t: any) => t.status === 'in-progress').length,
 		overdue: tasks.filter(
-			(t) => t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+			(t: any) => t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
 		).length,
-		completed: tasks.filter((t) => t.status === 'done').length
+		completed: tasks.filter((t: any) => t.status === 'done').length
 	});
 
 	const totalActiveFilters = $derived(

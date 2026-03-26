@@ -11,7 +11,7 @@
 	let { data, children }: { data: PageData; children: any } = $props();
 
 	const tenantSlug = $derived(page.params.tenant);
-	const projectId = $derived(page.params.projectId);
+	const projectId = $derived(page.params.projectId ?? '');
 	const currentPath = $derived(page.url.pathname);
 
 	const projectQuery = getProject(projectId);

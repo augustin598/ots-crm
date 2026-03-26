@@ -102,7 +102,7 @@
 			const result = await importClientsFromKeez({}).updates(getClients());
 
 			if (result.success) {
-				importResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
+				importResult = { imported: result.imported, updated: (result as any).updated || 0, skipped: result.skipped };
 				success = true;
 				setTimeout(() => {
 					success = false;

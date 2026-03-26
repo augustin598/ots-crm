@@ -16,7 +16,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const serviceId = $derived(page.params.serviceId);
+	const serviceId = $derived(page.params.serviceId ?? '');
 
 	const serviceQuery = getService(serviceId);
 	const service = $derived(serviceQuery.current);

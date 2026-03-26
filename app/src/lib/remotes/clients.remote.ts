@@ -111,7 +111,7 @@ export const getClientFirstInvoiceDates = query(async () => {
 		return rows
 			.filter((r) => r.clientId && r.firstDate != null)
 			.map((r) => {
-				const fd = r.firstDate;
+				const fd = r.firstDate as unknown;
 				const iso = typeof fd === 'string' ? fd : fd instanceof Date ? fd.toISOString() : null;
 				return iso ? { clientId: r.clientId!, firstDate: iso } : null;
 			})

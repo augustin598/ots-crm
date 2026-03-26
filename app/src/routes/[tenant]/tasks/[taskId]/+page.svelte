@@ -17,7 +17,7 @@
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const taskId = $derived(page.params.taskId);
+	const taskId = $derived(page.params.taskId!);
 	const currentUserId = $derived((page.data as any)?.tenantUser?.userId as string | undefined);
 
 	const taskQuery = getTask(taskId);

@@ -49,7 +49,7 @@
 >
 	{#if visible}
 		<span
-			transition:fade={{ duration, delay, start: opacity }}
+			transition:fade={{ duration, delay }}
 		>
 			<slot />
 		</span>

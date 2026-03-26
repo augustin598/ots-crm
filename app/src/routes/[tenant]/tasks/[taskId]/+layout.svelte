@@ -11,7 +11,7 @@
 	let { data, children }: { data: PageData; children: any } = $props();
 
 	const tenantSlug = $derived(page.params.tenant);
-	const taskId = $derived(page.params.taskId);
+	const taskId = $derived(page.params.taskId!);
 	const currentPath = $derived(page.url.pathname);
 
 	const taskQuery = getTask(taskId);

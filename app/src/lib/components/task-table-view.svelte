@@ -145,7 +145,7 @@
 		<TableBody>
 			{#if tasks.length === 0}
 				<TableRow>
-					<TableCell colspan="9" class="text-center text-muted-foreground py-8">
+					<TableCell colspan={9} class="text-center text-muted-foreground py-8">
 						No tasks found
 					</TableCell>
 				</TableRow>

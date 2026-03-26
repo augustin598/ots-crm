@@ -69,7 +69,7 @@
 	const clientMap = $derived(new Map(clients.map((c) => [c.id, c.name])));
 
 	// Build IBAN to user map
-	const ibanToUserMap = $derived(() => {
+	const ibanToUserMap = $derived.by(() => {
 		const map = new Map<string, string>();
 		for (const account of bankAccounts) {
 			if (account.iban && account.isActive) {
@@ -94,6 +94,14 @@
 
 	function handleViewExpense() {
 		// Navigate to expenses
+	}
+
+	function handleCreateExpense() {
+		// Navigate to transactions to create expense
+	}
+
+	function handleLinkToExpense() {
+		// Navigate to transactions to link expense
 	}
 
 	function handleMatchInvoice() {
@@ -322,6 +330,8 @@
 					onSortChange={handleSort}
 					onTransactionClick={handleTransactionClick}
 					onViewExpense={handleViewExpense}
+					onCreateExpense={handleCreateExpense}
+					onLinkToExpense={handleLinkToExpense}
 					onMatchInvoice={handleMatchInvoice}
 					onUnmatchInvoice={handleUnmatchInvoice}
 				/>

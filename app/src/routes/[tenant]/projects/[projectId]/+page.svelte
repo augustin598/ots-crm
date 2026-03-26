@@ -83,13 +83,13 @@
 	// Calculate progress from tasks
 	const projectProgress = $derived.by(() => {
 		if (tasks.length === 0) return 0;
-		const done = tasks.filter((t) => t.status === 'done').length;
+		const done = tasks.filter((t: { status: string }) => t.status === 'done').length;
 		return Math.round((done / tasks.length) * 100);
 	});
 
 	// Get tasks for each milestone
 	const getTasksForMilestone = (milestoneId: string) => {
-		return tasks.filter((t) => t.milestoneId === milestoneId);
+		return tasks.filter((t: { milestoneId?: string | null }) => t.milestoneId === milestoneId);
 	};
 
 	const completedMilestones = $derived.by(() =>

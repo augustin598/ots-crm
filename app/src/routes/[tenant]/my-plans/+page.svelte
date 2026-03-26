@@ -284,6 +284,7 @@
 						</div>
 					{:else}
 						<CalendarPrimitive.Root
+							type="single"
 							bind:value={calendarValue}
 							bind:placeholder={calendarPlaceholder}
 							locale="en-US"
@@ -300,6 +301,10 @@
 											<CalendarComponents.Header>
 												<CalendarComponents.Caption
 													captionLayout="label"
+													months={undefined}
+													monthFormat="long"
+													years={undefined}
+													yearFormat="numeric"
 													month={month.value}
 													bind:placeholder={calendarPlaceholder}
 													{monthIndex}
@@ -345,7 +350,7 @@
 																						tabindex="0"
 																						class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 rounded-md hover:bg-accent/80 {isSelected ? 'opacity-100' : ''}"
 																						onclick={(e) => handleDayIconClick(date, e)}
-																						onkeydown={(e) => e.key === 'Enter' || e.key === ' ' && handleDayIconClick(date, e)}
+																						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleDayIconClick(date, e as unknown as MouseEvent); }}
 																						title="View day details"
 																					>
 																						<CalendarIcon class="h-4 w-4 text-muted-foreground" aria-hidden="true" />

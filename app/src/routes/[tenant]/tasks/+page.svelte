@@ -147,7 +147,7 @@
 		// Data will be refreshed automatically via .updates() in the dialog
 		if (selectedTask) {
 			// Refresh selected task from updated tasks list
-			const updatedTask = tasks.find((t) => t.id === selectedTask?.id);
+			const updatedTask = tasks.find((t: any) => t.id === selectedTask?.id);
 			if (updatedTask) {
 				selectedTask = updatedTask;
 				isTaskDetailOpen = true;

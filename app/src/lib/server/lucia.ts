@@ -3,7 +3,7 @@ import { DrizzlePostgreSQLAdapter } from '@lucia-auth/adapter-drizzle';
 import { db } from './db';
 import { session, user } from './db/schema';
 
-export const adapter = new DrizzlePostgreSQLAdapter(db, session, user);
+export const adapter = new DrizzlePostgreSQLAdapter(db as any, session as any, user as any);
 
 export const lucia = new Lucia(adapter, {
 	sessionCookie: {

@@ -1,4 +1,4 @@
-import { redirect } from '@sveltejs/kit';
+import { redirect, type RequestEvent } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { verifyMagicLinkToken } from '$lib/server/client-auth';
 

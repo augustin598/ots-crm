@@ -20,7 +20,7 @@
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const projectId = $derived(page.params.projectId);
+	const projectId = $derived(page.params.projectId ?? '');
 
 	const projectQuery = getProject(projectId);
 	const project = $derived(projectQuery.current);

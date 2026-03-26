@@ -192,9 +192,9 @@
 		try {
 			await updateTaskPosition({
 				taskId: savedTask.id,
-				newStatus,
+				newStatus: newStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				newPosition,
-				oldStatus,
+				oldStatus: oldStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				oldPosition: oldIndex
 			}).updates(getTasks(filterParams || {}));
 			onTasksUpdate?.();
@@ -231,9 +231,9 @@
 		try {
 			await updateTaskPosition({
 				taskId: task.id,
-				newStatus,
+				newStatus: newStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				newPosition,
-				oldStatus,
+				oldStatus: oldStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				oldPosition: oldIndex
 			}).updates(getTasks(filterParams || {}));
 			onTasksUpdate?.();

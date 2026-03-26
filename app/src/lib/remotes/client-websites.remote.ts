@@ -221,7 +221,7 @@ export const updateClientWebsite = command(updateClientWebsiteSchema, async (dat
 			.where(
 				and(
 					eq(table.clientWebsite.clientId, website.clientId),
-					eq(table.clientWebsite.tenantId, event.locals.tenant.id)
+					eq(table.clientWebsite.tenantId, event.locals.tenant!.id)
 				)
 			);
 	}
@@ -321,7 +321,7 @@ export const setDefaultClientWebsite = command(
 				.where(
 					and(
 						eq(table.clientWebsite.clientId, website.clientId),
-						eq(table.clientWebsite.tenantId, event.locals.tenant.id)
+						eq(table.clientWebsite.tenantId, event.locals.tenant!.id)
 					)
 				);
 

@@ -46,7 +46,7 @@
 	let extractionReport = $state<{ extracted: Record<string, string>; updated: Record<string, string>; skipped: Record<string, string> } | null>(null);
 	let updatingSkipped = $state(false);
 
-	const clientQuery = getClient(clientId);
+	const clientQuery = getClient(clientId as string);
 
 	async function handleUpdateSkippedFields() {
 		if (!extractionReport || Object.keys(extractionReport.skipped).length === 0) return;
@@ -178,7 +178,7 @@
 		try {
 			const formData = new FormData();
 			formData.append('file', uploadFile);
-			formData.append('clientId', clientId);
+			formData.append('clientId', clientId as string);
 			if (uploadTitle) formData.append('contractTitle', uploadTitle);
 			if (uploadDate) formData.append('contractDate', uploadDate);
 			if (uploadNumber) formData.append('contractNumber', uploadNumber);

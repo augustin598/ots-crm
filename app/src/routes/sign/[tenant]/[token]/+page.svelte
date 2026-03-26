@@ -87,7 +87,7 @@
 				<div class="text-4xl mb-3">✓</div>
 				<h2 class="text-xl font-bold text-green-800 mb-2">Contract semnat cu succes!</h2>
 				<p class="text-green-700">
-					Semnătura <strong>{justSigned && 'signatureName' in form ? form.signatureName : data.contract.beneficiarSignatureName}</strong> a fost înregistrată.
+					Semnătura <strong>{justSigned && form && 'signatureName' in form ? form.signatureName : data.contract.beneficiarSignatureName}</strong> a fost înregistrată.
 				</p>
 				<p class="text-sm text-green-600 mt-2">Veți primi o confirmare prin email de la {data.tenant.name}.</p>
 				<p class="text-xs text-gray-500 mt-3">Redirectare automată în {redirectCountdown} secunde...</p>
@@ -121,9 +121,9 @@
 				>
 					<!-- Signature canvas -->
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-2">
+						<span class="block text-sm font-medium text-gray-700 mb-2">
 							Semnătură <span class="text-red-500">*</span>
-						</label>
+						</span>
 						<SignaturePad
 							onchange={(url) => { signatureDataUrl = url; }}
 						/>

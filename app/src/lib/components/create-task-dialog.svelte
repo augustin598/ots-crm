@@ -154,8 +154,8 @@
 				clientId: clientId || undefined,
 				projectId: projectId || undefined,
 				milestoneId: milestoneId || undefined,
-				status: status || undefined,
-				priority: priority || undefined,
+				status: (status || undefined) as 'done' | 'todo' | 'in-progress' | 'review' | 'cancelled' | 'pending-approval' | undefined,
+				priority: (priority || undefined) as 'medium' | 'low' | 'high' | 'urgent' | undefined,
 				dueDate: dueDate || undefined,
 				assignedToUserId: assignedToUserId || undefined
 			}).updates(getTasks(filterParams || {}), ...additionalQueriesToUpdate);

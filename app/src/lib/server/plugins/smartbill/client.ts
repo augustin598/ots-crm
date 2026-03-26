@@ -160,7 +160,7 @@ export class SmartBillClient {
 			// Look for sbcResponse child
 			const sbcResponseElements = doc.getElementsByTagName('sbcResponse');
 			if (sbcResponseElements.length > 0) {
-				responseElement = sbcResponseElements[0] as Element;
+				responseElement = sbcResponseElements[0] as HTMLElement;
 			}
 		}
 

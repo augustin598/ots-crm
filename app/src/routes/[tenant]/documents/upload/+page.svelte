@@ -16,7 +16,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
-	const projectsQuery = getProjects();
+	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 
 	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));

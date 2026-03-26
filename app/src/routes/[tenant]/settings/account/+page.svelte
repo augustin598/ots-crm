@@ -91,7 +91,7 @@
 						bind:value={newPassword}
 						placeholder="Introdu parola nouă (min. 6 caractere)"
 						required
-						minlength="6"
+						minlength={6}
 						autocomplete="new-password"
 					/>
 				</div>
@@ -104,7 +104,7 @@
 						bind:value={confirmPassword}
 						placeholder="Introdu din nou parola nouă"
 						required
-						minlength="6"
+						minlength={6}
 						autocomplete="new-password"
 					/>
 				</div>

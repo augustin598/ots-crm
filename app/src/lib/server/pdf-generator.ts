@@ -1,5 +1,4 @@
 import PDFDocument from 'pdfkit';
-import type { BlobBuffer } from 'pdfkit';
 
 export interface StylingConfig {
 	primaryColor?: string;
@@ -134,7 +133,7 @@ export async function generatePDFFromHTML(
 				const headerHeight = styling.header?.height || 30;
 				doc
 					.fontSize(10)
-					.fillColor(secondaryRgb[0] / 255, secondaryRgb[1] / 255, secondaryRgb[2] / 255)
+					.fillColor(secondaryRgb as any)
 					.text(header, 50, 20, { align: 'center', width: doc.page.width - 100 });
 			}
 
@@ -158,7 +157,7 @@ export async function generatePDFFromHTML(
 
 				doc
 					.fontSize(fontSize)
-					.fillColor(color[0] / 255, color[1] / 255, color[2] / 255)
+					.fillColor(color as any)
 					.font(item.bold ? `${fontFamily}-Bold` : fontFamily)
 					.text(item.text, 50, yPosition, {
 						width: doc.page.width - 100,
@@ -185,7 +184,7 @@ export async function generatePDFFromHTML(
 					const footerY = doc.page.height - 40;
 					doc
 						.fontSize(8)
-						.fillColor(secondaryRgb[0] / 255, secondaryRgb[1] / 255, secondaryRgb[2] / 255)
+						.fillColor(secondaryRgb as any)
 						.text(footer, 50, footerY, {
 							align: 'center',
 							width: doc.page.width - 100
@@ -196,7 +195,7 @@ export async function generatePDFFromHTML(
 				const footerY = doc.page.height - 40;
 				doc
 					.fontSize(8)
-					.fillColor(secondaryRgb[0] / 255, secondaryRgb[1] / 255, secondaryRgb[2] / 255)
+					.fillColor(secondaryRgb as any)
 					.text(footer, 50, footerY, {
 						align: 'center',
 						width: doc.page.width - 100

@@ -132,7 +132,7 @@
 	$effect(() => {
 		if (tenant?.legalRepresentative) {
 			untrack(() => {
-				prestatorSignatureName = tenant.legalRepresentative;
+				prestatorSignatureName = tenant.legalRepresentative ?? '';
 			});
 		}
 	});
@@ -140,7 +140,7 @@
 	$effect(() => {
 		if (clientData?.legalRepresentative) {
 			untrack(() => {
-				beneficiarSignatureName = clientData.legalRepresentative;
+				beneficiarSignatureName = clientData.legalRepresentative ?? '';
 			});
 		}
 	});
@@ -149,7 +149,7 @@
 	$effect(() => {
 		if (tenant?.email && !prestatorEmail) {
 			untrack(() => {
-				prestatorEmail = tenant.email;
+				prestatorEmail = tenant.email ?? '';
 			});
 		}
 	});
@@ -157,7 +157,7 @@
 	$effect(() => {
 		if (clientData?.email) {
 			untrack(() => {
-				beneficiarEmail = clientData.email;
+				beneficiarEmail = clientData.email ?? '';
 			});
 		}
 	});

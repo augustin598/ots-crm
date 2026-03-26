@@ -317,15 +317,15 @@
 						<SelectItem value="unknown">Altele</SelectItem>
 					</SelectContent>
 				</Select>
-				<Select type="single" bind:value={pageSize} onValueChange={() => (currentPage = 1)}>
+				<Select type="single" value={pageSize.toString()} onValueChange={(v) => { pageSize = parseInt(v); currentPage = 1; }}>
 					<SelectTrigger class="w-[120px]">
 						{pageSize} / pagină
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value={10}>10</SelectItem>
-						<SelectItem value={25}>25</SelectItem>
-						<SelectItem value={50}>50</SelectItem>
-						<SelectItem value={100}>100</SelectItem>
+						<SelectItem value="10">10</SelectItem>
+						<SelectItem value="25">25</SelectItem>
+						<SelectItem value="50">50</SelectItem>
+						<SelectItem value="100">100</SelectItem>
 					</SelectContent>
 				</Select>
 			</div>

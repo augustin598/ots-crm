@@ -352,7 +352,7 @@
 				{userMap}
 				{ibanToUserMap}
 				{clientMap}
-				{tenantSlug}
+				tenantSlug={tenantSlug ?? ''}
 				{sortBy}
 				{sortDir}
 				onSortChange={handleSort}

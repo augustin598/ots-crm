@@ -22,9 +22,9 @@
 	const tasks = $derived(tasksQuery.current || []);
 
 	function getProjectProgress(projectId: string) {
-		const projectTasks = tasks.filter((t) => t.projectId === projectId);
+		const projectTasks = tasks.filter((t: any) => t.projectId === projectId);
 		if (projectTasks.length === 0) return 0;
-		const done = projectTasks.filter((t) => t.status === 'done').length;
+		const done = projectTasks.filter((t: any) => t.status === 'done').length;
 		return Math.round((done / projectTasks.length) * 100);
 	}
 </script>

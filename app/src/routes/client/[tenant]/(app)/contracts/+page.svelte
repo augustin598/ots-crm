@@ -252,12 +252,12 @@
 								</TableCell>
 								<TableCell>
 									<div class="flex items-center gap-1">
-										{#if contract.signingUrl && (contract.status === 'draft' || contract.status === 'sent')}
+										{#if (contract as any).signingUrl && (contract.status === 'draft' || contract.status === 'sent')}
 											<Button
 												variant="default"
 												size="sm"
 												class="h-8"
-												onclick={() => window.open(contract.signingUrl, '_blank')}
+												onclick={() => window.open((contract as any).signingUrl, '_blank')}
 												title="Semneaza contractul"
 											>
 												<PenLine class="mr-1.5 h-3.5 w-3.5" />

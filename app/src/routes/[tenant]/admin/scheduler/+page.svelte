@@ -44,10 +44,10 @@
 
 	// Per-job last run stats from history
 	const jobStats = $derived.by(() => {
-		const map: Record<string, { time: string | null; status: 'success' | 'error' | null; successCount: number; failCount: number }> = {};
+		const map: Record<string, { time: string | Date | null; status: 'success' | 'error' | null; successCount: number; failCount: number }> = {};
 		for (const job of jobs) {
 			const ht = job.handlerType;
-			let lastTime: string | null = null;
+			let lastTime: string | Date | null = null;
 			let lastStatus: 'success' | 'error' | null = null;
 			let successCount = 0;
 			let failCount = 0;
@@ -98,8 +98,8 @@
 
 	async function refresh() {
 		refreshing = true;
-		jobsQuery.updates();
-		historyQuery.updates();
+		jobsQuery.refresh();
+		historyQuery.refresh();
 		setTimeout(() => (refreshing = false), 500);
 	}
 
@@ -118,7 +118,7 @@
 			await updateJobSchedule({ jobId: job.key, name: job.name, pattern: editPattern });
 			toast.success(`Schedule actualizat: ${job.label}`);
 			editingJobKey = null;
-			jobsQuery.updates();
+			jobsQuery.refresh();
 		} catch (e: any) {
 			toast.error(`Eroare: ${e.message}`);
 		}
@@ -129,7 +129,7 @@
 		try {
 			await removeSchedulerJob(job.key);
 			toast.success(`Job sters: ${job.label}`);
-			jobsQuery.updates();
+			jobsQuery.refresh();
 		} catch (e: any) {
 			toast.error(`Eroare: ${e.message}`);
 		}
@@ -139,7 +139,7 @@
 		try {
 			await triggerJobNow({ name: job.name, typeKey: job.typeKey, params: job.params });
 			toast.success(`Job lansat manual: ${job.label}`);
-			setTimeout(() => historyQuery.updates(), 2000);
+			setTimeout(() => historyQuery.refresh(), 2000);
 		} catch (e: any) {
 			toast.error(`Eroare: ${e.message}`);
 		}

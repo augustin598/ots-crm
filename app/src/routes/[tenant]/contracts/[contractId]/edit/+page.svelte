@@ -174,7 +174,7 @@
 	$effect(() => {
 		if (clientData?.legalRepresentative && !beneficiarSignatureName && initialized) {
 			untrack(() => {
-				beneficiarSignatureName = clientData.legalRepresentative;
+				beneficiarSignatureName = clientData.legalRepresentative ?? '';
 			});
 		}
 	});

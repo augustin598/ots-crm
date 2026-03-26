@@ -22,7 +22,7 @@
 	import { untrack } from 'svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const templateId = $derived(page.params.templateId);
+	const templateId = $derived(page.params.templateId ?? '');
 
 	const templateQuery = getContractTemplate(templateId);
 	const template = $derived(templateQuery.current);

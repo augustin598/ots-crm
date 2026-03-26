@@ -52,7 +52,7 @@
 
 	async function handleChangeStatus(taskId: string) {
 		selectedTaskId = taskId;
-		const task = tasks.find((t) => t.id === taskId);
+		const task = tasks.find((t: { id: string }) => t.id === taskId);
 		if (task) {
 			newStatus = task.status;
 		}
@@ -62,10 +62,14 @@
 	async function handleSaveStatus() {
 		if (!selectedTaskId) return;
 
+		const task = tasks.find((t: { id: string }) => t.id === selectedTaskId);
+		if (!task) return;
+
 		try {
 			await updateTask({
 				taskId: selectedTaskId,
-				status: newStatus
+				title: task.title,
+				status: newStatus as 'done' | 'todo' | 'in-progress' | 'review' | 'cancelled' | 'pending-approval'
 			}).updates(getTasks({ projectId }));
 			statusDialogOpen = false;
 			selectedTaskId = null;

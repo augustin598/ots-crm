@@ -122,7 +122,7 @@
 				result.push({
 					campaignId: ci.campaignId, campaignName: ci.campaignName, channelType: ci.channelType,
 					spend: 0, impressions: 0, clicks: 0, conversions: 0, conversionValue: 0,
-					cpc: 0, cpm: 0, ctr: 0, costPerConversion: 0, roas: 0, videoViews: 0,
+					cpc: 0, cpm: 0, ctr: 0, costPerConversion: 0, conversionRate: 0, roas: 0, videoViews: 0,
 					resultType: '', cpaLabel: 'CPA',
 					status: ci.status, dailyBudget: ci.dailyBudget || null, startDate: ci.startDate, endDate: ci.endDate
 				});
@@ -303,7 +303,7 @@
 		{/if}
 
 		{#if !insightsLoading}
-			{@const totalConv = conversionActions.reduce((s, a) => s + a.conversions, 0) || resultKpi.value !== '-' ? Number(resultKpi.value.replace(/\./g, '').replace(',', '.')) || 0 : 0}
+			{@const totalConv = conversionActions.reduce((s: number, a: any) => s + a.conversions, 0) || resultKpi.value !== '-' ? Number(resultKpi.value.replace(/\./g, '').replace(',', '.')) || 0 : 0}
 			{@const COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-rose-500', 'bg-cyan-500', 'bg-orange-500', 'bg-indigo-500']}
 			<Card class="p-6">
 				<div class="flex items-center justify-between mb-5">
@@ -321,7 +321,7 @@
 					{/if}
 				</div>
 				{#if conversionActions.length > 0}
-					{@const convTotal = conversionActions.reduce((s, a) => s + a.conversions, 0)}
+					{@const convTotal = conversionActions.reduce((s: number, a: any) => s + a.conversions, 0)}
 					<div class="flex h-3 w-full rounded-full overflow-hidden mb-5 bg-muted">
 						{#each conversionActions as action, i}
 							{@const pct = convTotal > 0 ? (action.conversions / convTotal) * 100 : 0}

@@ -738,7 +738,7 @@
 							{@const selW = websites.find(w => w.id === filterWebsiteId)}
 							{#if selW}
 								<span class="flex items-center gap-1.5 min-w-0">
-									<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+									<img src={getFaviconUrl(selW.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
 									<span class="truncate">{websiteMap.get(filterWebsiteId) || 'Website'}</span>
 								</span>
 							{:else}
@@ -753,7 +753,7 @@
 						{#each websites as w}
 							<SelectItem value={w.id}>
 								<span class="flex items-center gap-2">
-									<img src={getFaviconUrl(w.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => (e.currentTarget.style.display = 'none')} />
+									<img src={getFaviconUrl(w.url)} alt="" class="h-4 w-4 shrink-0 rounded-sm object-contain" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
 									{w.name || w.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}
 								</span>
 							</SelectItem>
@@ -1138,7 +1138,7 @@
 												alt={getPressTrustDisplay(link)}
 												class="h-5 w-5 shrink-0 rounded-md object-contain bg-muted/40"
 												loading="lazy"
-												onerror={(e) => (e.currentTarget.style.display = 'none')}
+												onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
 											/>
 										{/if}
 										<span class="text-[13px] font-medium text-foreground/90">{getPressTrustDisplay(link)}</span>
