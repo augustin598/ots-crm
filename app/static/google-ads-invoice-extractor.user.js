@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Google Ads Invoice Extractor - OTS CRM
+// @name         Google Ads Invoice Extractor - OTS CRM v2.3
 // @namespace    https://onetopsolution.ro
-// @version      2.2
+// @version      2.3
 // @description  Extrage link-urile de download facturi Google Ads
 // @author       OTS CRM
 // @match        https://ads.google.com/*
@@ -129,43 +129,82 @@
     // === PARENT PAGE CODE ===
     function runOnAdsPage() {
         var invoiceData = null;
+        var detectedCount = 0;
+        var state = 'idle'; // idle -> extracting -> ready
 
         window.addEventListener('message', function(e) {
             if (e.data && e.data.type === 'OTS_INVOICES_READY') {
-                updateLabel(e.data.count);
+                detectedCount = e.data.count;
+                var btn = document.getElementById('ots-btn');
+                if (!btn) {
+                    createButton();
+                } else if (state === 'idle') {
+                    btn.textContent = '▶ Start - ' + detectedCount + ' facturi detectate';
+                }
             }
             if (e.data && e.data.type === 'OTS_EXTRACT_RESULT') {
+                if (state !== 'extracting') return;
                 invoiceData = e.data.links;
-                if (invoiceData.length > 0) {
-                    var json = JSON.stringify(invoiceData, null, 2);
-                    GM_setClipboard(json, 'text');
-                    showStatus(invoiceData.length + ' facturi copiate in clipboard! Mergi in CRM > Import Facturi.', '#00a854');
+                if (invoiceData && invoiceData.length > 0) {
+                    setReady(invoiceData.length);
                 } else {
-                    showStatus('Nu s-au gasit facturi in iframe.', '#c00');
+                    setError('Nu s-au gasit facturi in iframe.');
                 }
             }
         });
 
-        function updateLabel(count) {
+        function setReady(count) {
+            state = 'ready';
             var btn = document.getElementById('ots-btn');
             if (btn) {
-                btn.textContent = 'OTS CRM - Copiaza ' + count + ' facturi';
-                btn.style.display = 'flex';
-            } else {
-                createButton(count);
+                btn.textContent = '📋 Copiaza ' + count + ' facturi';
+                btn.style.background = '#00a854';
             }
         }
 
-        function showStatus(msg, color) {
+        function setIdle() {
+            state = 'idle';
+            invoiceData = null;
+            var btn = document.getElementById('ots-btn');
+            if (btn) {
+                btn.style.background = '#009AFF';
+                btn.textContent = '▶ Start' + (detectedCount ? ' - ' + detectedCount + ' facturi detectate' : '');
+            }
+        }
+
+        function setError(msg) {
+            state = 'idle';
+            invoiceData = null;
             var btn = document.getElementById('ots-btn');
             if (btn) {
                 btn.textContent = msg;
-                btn.style.background = color;
-                setTimeout(function() {
-                    btn.style.background = '#009AFF';
-                    requestExtractFromIframes();
-                }, 4000);
+                btn.style.background = '#c00';
+                setTimeout(setIdle, 4000);
             }
+        }
+
+        function copyToClipboard(text) {
+            // Try GM_setClipboard first, then fallback to navigator.clipboard
+            try {
+                GM_setClipboard(text, 'text');
+                return true;
+            } catch(e) {}
+            try {
+                navigator.clipboard.writeText(text);
+                return true;
+            } catch(e) {}
+            // Last resort: textarea trick
+            try {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;left:-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                return true;
+            } catch(e) {}
+            return false;
         }
 
         function requestExtractFromIframes() {
@@ -175,37 +214,55 @@
             });
         }
 
-        function createButton(count) {
+        function createButton() {
             if (document.getElementById('ots-btn')) return;
 
             var btn = document.createElement('button');
             btn.id = 'ots-btn';
-            btn.textContent = 'OTS CRM - Copiaza ' + (count || '?') + ' facturi';
+            btn.textContent = '▶ Start' + (detectedCount ? ' - ' + detectedCount + ' facturi detectate' : '');
             btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:999999;background:#009AFF;color:#fff;border:none;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,154,255,0.4);display:flex;align-items:center;gap:8px;';
 
             btn.onclick = function() {
-                btn.textContent = 'Se extrag...';
-                requestExtractFromIframes();
-                setTimeout(function() {
-                    if (!invoiceData || invoiceData.length === 0) {
+                if (state === 'idle') {
+                    // Step 1: Start extraction
+                    state = 'extracting';
+                    btn.textContent = '⏳ Se extrag...';
+                    btn.style.background = '#f59e0b';
+                    invoiceData = null;
+                    requestExtractFromIframes();
+
+                    // Fallback after 3s if iframe didn't respond
+                    setTimeout(function() {
+                        if (state !== 'extracting') return;
                         var directLinks = [];
                         document.querySelectorAll('[data-url*="apis-secure"]').forEach(function(el) {
                             directLinks.push({ url: el.getAttribute('data-url').replace(/&amp;/g, '&') });
                         });
                         if (directLinks.length > 0) {
-                            var json = JSON.stringify(directLinks, null, 2);
-                            GM_setClipboard(json, 'text');
-                            showStatus(directLinks.length + ' facturi copiate!', '#00a854');
+                            invoiceData = directLinks;
+                            setReady(directLinks.length);
                         } else {
-                            showStatus('Asteapta, se incarca...', '#f59e0b');
+                            setError('Nu s-au gasit facturi. Asteapta sa se incarce pagina.');
                         }
+                    }, 3000);
+
+                } else if (state === 'ready' && invoiceData && invoiceData.length > 0) {
+                    // Step 2: Copy to clipboard
+                    var json = JSON.stringify(invoiceData, null, 2);
+                    var ok = copyToClipboard(json);
+                    if (ok) {
+                        btn.textContent = '✅ ' + invoiceData.length + ' facturi copiate! Mergi in CRM.';
+                        btn.style.background = '#00a854';
+                        setTimeout(setIdle, 5000);
+                    } else {
+                        setError('Eroare la copiere. Incearca din nou.');
                     }
-                }, 2000);
+                }
             };
 
             document.body.appendChild(btn);
         }
 
-        setTimeout(function() { createButton(0); }, 3000);
+        setTimeout(createButton, 3000);
     }
 })();

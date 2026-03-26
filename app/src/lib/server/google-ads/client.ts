@@ -223,20 +223,33 @@ export async function listMonthlySpend(
 	mccAccountId: string,
 	customerId: string,
 	developerToken: string,
-	refreshToken: string
+	refreshToken: string,
+	since?: string,
+	until?: string
 ): Promise<GoogleAdsMonthlySpend[]> {
 	logInfo('google-ads', `Fetching monthly spend for ${customerId}`);
 
 	try {
 		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
 
-		// Query last 6 months of spend aggregated by month
 		// segments.month requires dates to be 1st of month (YYYY-MM-01)
 		const now = new Date();
-		const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-		const startDate = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
-		const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-		const endDate = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-01`;
+		let startDate: string;
+		let endDate: string;
+
+		if (since && until) {
+			// Convert YYYY-MM-DD to month boundaries
+			const sinceDate = new Date(since);
+			const untilDate = new Date(until);
+			startDate = `${sinceDate.getFullYear()}-${String(sinceDate.getMonth() + 1).padStart(2, '0')}-01`;
+			endDate = `${untilDate.getFullYear()}-${String(untilDate.getMonth() + 1).padStart(2, '0')}-01`;
+		} else {
+			// Default: last 6 months
+			const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+			startDate = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
+			const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+			endDate = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-01`;
+		}
 
 		const results = await customer.query(`
 			SELECT

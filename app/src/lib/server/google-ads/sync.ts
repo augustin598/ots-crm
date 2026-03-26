@@ -23,10 +23,7 @@ async function downloadPdfWithCookies(pdfUrl: string, cookies: GoogleAdsCookie[]
 			'User-Agent': USER_AGENT,
 			'Accept': '*/*',
 			'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
-			'Sec-Fetch-Dest': 'document',
-			'Sec-Fetch-Mode': 'navigate',
-			'Sec-Fetch-Site': 'same-origin',
-			'Referer': 'https://ads.google.com/'
+			'Referer': 'https://payments.google.com/'
 		},
 		redirect: 'manual'
 	});

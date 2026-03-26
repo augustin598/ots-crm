@@ -12,16 +12,29 @@
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
+	import { getDefaultDateRange } from '$lib/utils/report-helpers';
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	// Date range
+	const defaults = getDefaultDateRange();
+	let since = $state(defaults.since);
+	let until = $state(defaults.until);
 
 	const invoicesQuery = getGoogleAdsInvoices();
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
 
-	const monthlySpendQuery = getMyGoogleAdsMonthlySpend();
-	const monthlySpend = $derived(monthlySpendQuery.current || []);
-	const monthlyLoading = $derived(monthlySpendQuery.loading);
+	let monthlySpendQuery = $state<ReturnType<typeof getMyGoogleAdsMonthlySpend> | null>(null);
+	const monthlySpend = $derived(monthlySpendQuery?.current || []);
+	const monthlyLoading = $derived(monthlySpendQuery?.loading ?? true);
+
+	$effect(() => {
+		if (since && until) {
+			monthlySpendQuery = getMyGoogleAdsMonthlySpend({ since, until });
+		}
+	});
 
 	function formatMonth(month: string): string {
 		try {
@@ -103,12 +116,15 @@
 
 <div class="space-y-6">
 	<!-- Header -->
-	<div>
-		<h1 class="text-3xl font-bold flex items-center gap-3">
-			<IconGoogleAds class="h-8 w-8" />
-			Facturi Google Ads
-		</h1>
-		<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+	<div class="flex items-start justify-between">
+		<div>
+			<h1 class="text-3xl font-bold flex items-center gap-3">
+				<IconGoogleAds class="h-8 w-8" />
+				Facturi Google Ads
+			</h1>
+			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+		</div>
+		<DateRangePicker bind:since bind:until />
 	</div>
 
 	<!-- Monthly Spend -->
@@ -131,7 +147,7 @@
 									</div>
 									<div>
 										<h3 class="text-lg font-semibold">{account.accountName}</h3>
-										<p class="text-sm text-muted-foreground">Cheltuieli din ultimele {account.months.length} luni</p>
+										<p class="text-sm text-muted-foreground">Cheltuieli din {account.months.length} {account.months.length === 1 ? 'lună' : 'luni'}</p>
 									</div>
 								</div>
 								<div class="flex items-center gap-3">

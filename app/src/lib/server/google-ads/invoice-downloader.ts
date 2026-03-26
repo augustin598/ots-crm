@@ -13,6 +13,7 @@ interface DownloadResult {
 	success: boolean;
 	pdfBuffer?: Buffer;
 	error?: string;
+	responseBody?: string;
 }
 
 export interface InvoiceLinkData {
@@ -26,14 +27,68 @@ function buildCookieHeader(cookies: GoogleAdsCookie[]): string {
 	return cookies.map(c => `${c.name}=${c.value}`).join('; ');
 }
 
+function hasExpiredCriticalCookies(cookies: GoogleAdsCookie[]): boolean {
+	const now = Date.now() / 1000;
+	const critical = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID'];
+	return cookies.some(c =>
+		critical.includes(c.name) && c.expires && c.expires < now
+	);
+}
+
 function isPdf(buf: Buffer): boolean {
 	return buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+}
+
+/**
+ * Download a single PDF from a URL using Bearer token (OAuth).
+ */
+async function downloadInvoicePdfViaBearer(pdfUrl: string, accessToken: string): Promise<DownloadResult> {
+	let cleanUrl = pdfUrl
+		.replace(/&amp;/g, '&')
+		.replace(/\\u003d/g, '=')
+		.replace(/\\u0026/g, '&')
+		.trim();
+
+	if (cleanUrl.startsWith('/payments/')) {
+		cleanUrl = `https://payments.google.com${cleanUrl}`;
+	}
+
+	try {
+		const response = await fetch(cleanUrl, {
+			headers: {
+				'Authorization': `Bearer ${accessToken}`
+			}
+		});
+
+		if (!response.ok) {
+			return { success: false, error: `Bearer HTTP ${response.status}: ${response.statusText}` };
+		}
+
+		const buffer = Buffer.from(await response.arrayBuffer());
+
+		if (isPdf(buffer) && buffer.length >= 100) {
+			return { success: true, pdfBuffer: buffer };
+		}
+
+		if (buffer.length > 100) {
+			return { success: true, pdfBuffer: buffer };
+		}
+
+		return { success: false, error: `Bearer unexpected_content (size: ${buffer.length})` };
+	} catch (err) {
+		return { success: false, error: `Bearer error: ${err instanceof Error ? err.message : String(err)}` };
+	}
 }
 
 /**
  * Download a single PDF from a URL using Google session cookies.
  */
 export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: GoogleAdsCookie[]): Promise<DownloadResult> {
+	if (hasExpiredCriticalCookies(cookies)) {
+		logWarning('google-ads-dl', 'Critical cookies are expired', {});
+		return { success: false, error: 'cookies_expired' };
+	}
+
 	const cookieHeader = buildCookieHeader(cookies);
 
 	let cleanUrl = pdfUrl
@@ -48,30 +103,59 @@ export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: Goog
 
 	logInfo('google-ads-dl', `Downloading PDF`, { metadata: { url: cleanUrl.substring(0, 200) } });
 
+	const MAX_RETRIES = 2;
+
 	try {
-		const response = await fetch(cleanUrl, {
-			headers: {
-				'Cookie': cookieHeader,
-				'User-Agent': USER_AGENT,
-				'Accept': 'application/pdf,*/*',
-				'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
-				'Sec-Fetch-Dest': 'document',
-				'Sec-Fetch-Mode': 'navigate',
-				'Sec-Fetch-Site': 'same-origin',
-				'Referer': 'https://payments.google.com/'
-			},
-			redirect: 'follow'
-		});
+		let response!: Response;
 
-		const finalUrl = response.url;
-		const contentType = response.headers.get('content-type') || '';
+		for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+			response = await fetch(cleanUrl, {
+				headers: {
+					'Cookie': cookieHeader,
+					'User-Agent': USER_AGENT,
+					'Accept': 'application/pdf,*/*',
+					'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
+					'Referer': 'https://payments.google.com/'
+				},
+				redirect: 'manual'
+			});
 
-		if (finalUrl.includes('accounts.google.com') || finalUrl.includes('signin')) {
+			// Only retry on server errors (500/502/503)
+			if (response.status >= 500 && response.status <= 503 && attempt < MAX_RETRIES) {
+				const delay = 1000 * Math.pow(2, attempt); // 1s, 2s
+				logWarning('google-ads-dl', `Retry ${attempt + 1}/${MAX_RETRIES} after HTTP ${response.status}`, {
+					metadata: { url: cleanUrl.substring(0, 200), delay }
+				});
+				await new Promise(r => setTimeout(r, delay));
+				continue;
+			}
+			break;
+		}
+
+		// Redirect means session expired (login redirect)
+		if (response.status >= 300 && response.status < 400) {
+			const location = response.headers.get('location') || '';
+			logWarning('google-ads-dl', `Redirect detected (session expired)`, { metadata: { status: response.status, location: location.substring(0, 200) } });
 			return { success: false, error: 'session_expired' };
 		}
 
+		const contentType = response.headers.get('content-type') || '';
+
 		if (!response.ok) {
-			return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+			let body = '';
+			try {
+				body = await response.text();
+				if (body.length > 500) body = body.substring(0, 500);
+			} catch { /* ignore */ }
+			logError('google-ads-dl', `HTTP ${response.status} downloading PDF`, {
+				metadata: {
+					url: cleanUrl.substring(0, 200),
+					status: response.status,
+					contentType,
+					responseBody: body
+				}
+			});
+			return { success: false, error: `HTTP ${response.status}: ${response.statusText}`, responseBody: body };
 		}
 
 		const buffer = Buffer.from(await response.arrayBuffer());
@@ -102,7 +186,8 @@ export async function downloadGoogleInvoicesFromLinks(
 	tenantId: string,
 	customerId: string,
 	links: InvoiceLinkData[],
-	cookies: GoogleAdsCookie[]
+	cookies: GoogleAdsCookie[],
+	accessToken?: string | null
 ): Promise<{ downloaded: number; skipped: number; errors: number }> {
 	const cleanCustomerId = formatCustomerId(customerId);
 
@@ -142,7 +227,20 @@ export async function downloadGoogleInvoicesFromLinks(
 
 		if (existing?.pdfPath) { skipped++; continue; }
 
-		const result = await downloadInvoicePdfViaCookies(link.url, cookies);
+		// Try Bearer token first, fall back to cookies
+		let result: DownloadResult | null = null;
+		if (accessToken) {
+			result = await downloadInvoicePdfViaBearer(link.url, accessToken);
+			if (!result.success) {
+				logWarning('google-ads-dl', `Bearer download failed for ${invoiceId}, trying cookies`, {
+					tenantId, metadata: { error: result.error }
+				});
+				result = null;
+			}
+		}
+		if (!result) {
+			result = await downloadInvoicePdfViaCookies(link.url, cookies);
+		}
 
 		if (result.success && result.pdfBuffer) {
 			try {

@@ -169,7 +169,12 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 });
 
 /** Get monthly spend for client user's own accounts */
-export const getMyGoogleAdsMonthlySpend = query(async () => {
+export const getMyGoogleAdsMonthlySpend = query(
+	v.object({
+		since: v.optional(v.string()),
+		until: v.optional(v.string())
+	}),
+	async (data) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.isClientUser || !event?.locals.client) {
 		return [];
@@ -212,7 +217,8 @@ export const getMyGoogleAdsMonthlySpend = query(async () => {
 		const cleanId = formatCustomerId(acc.googleAdsCustomerId);
 		const months = await listMonthlySpend(
 			integration.mccAccountId, cleanId,
-			integration.developerToken, integration.refreshToken
+			integration.developerToken, integration.refreshToken,
+			data.since, data.until
 		);
 		results.push({ accountName: acc.accountName, clientEmail, customerId: cleanId, months });
 	}
@@ -603,8 +609,18 @@ export const bulkDownloadGoogleInvoices = command(
 		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
 		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
 
+		// Try to get OAuth access token for Bearer auth (primary method)
+		let accessToken: string | null = null;
+		try {
+			const { getAuthenticatedClient } = await import('$lib/server/google-ads/auth');
+			const authResult = await getAuthenticatedClient(tenantId);
+			if (authResult) {
+				accessToken = (await authResult.oauth2Client.getAccessToken()).token || null;
+			}
+		} catch { /* proceed without Bearer token */ }
+
 		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
-		return await downloadGoogleInvoicesFromLinks(tenantId, data.customerId, data.links, cookies);
+		return await downloadGoogleInvoicesFromLinks(tenantId, data.customerId, data.links, cookies, accessToken);
 	}
 );
 
