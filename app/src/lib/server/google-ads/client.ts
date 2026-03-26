@@ -415,6 +415,16 @@ export interface GoogleAdsDemographicBreakdown {
 	devicePlatform: Array<{ label: string; spend: number; impressions: number; clicks: number; results: number }>;
 }
 
+export interface GoogleAdsGeographicInsight {
+	locationId: number;
+	locationName: string;
+	locationType: string;
+	spend: number;
+	impressions: number;
+	clicks: number;
+	results: number;
+}
+
 /** Channel type → result label mapping */
 export const GOOGLE_CHANNEL_MAP: Record<string, { label: string; cpaLabel: string }> = {
 	SEARCH: { label: 'Conversii', cpaLabel: 'Cost/conversie' },
@@ -744,6 +754,116 @@ export async function listDemographicInsights(
 			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
 		});
 		return { gender: [], age: [], devicePlatform: [] };
+	}
+}
+
+/**
+ * Fetch geographic performance breakdown (regions/counties where ads appeared) for a sub-account.
+ * Uses geographic_view with segments.geo_target_most_specific_location for granular location data.
+ */
+export async function listGeographicInsights(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string,
+	startDate: string,
+	endDate: string
+): Promise<GoogleAdsGeographicInsight[]> {
+	logInfo('google-ads', `Fetching geographic insights for ${customerId}`, { metadata: { startDate, endDate } });
+
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+
+		// geographic_view with geo_target_most_specific_location gives the most granular
+		// location where ads appeared (city/region level)
+		const geoResults = await customer.query(`
+			SELECT segments.geo_target_most_specific_location,
+				metrics.cost_micros,
+				metrics.impressions,
+				metrics.clicks,
+				metrics.conversions
+			FROM geographic_view
+			WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+		`);
+
+		logInfo('google-ads', `Geographic query returned ${geoResults.length} rows for ${customerId}`);
+
+		// Aggregate by geo_target resource name (e.g. "geoTargetConstants/1014044")
+		const locationMap = new Map<string, { spend: number; impressions: number; clicks: number; results: number }>();
+		for (const row of geoResults) {
+			const geoConstant = String(row.segments?.geo_target_most_specific_location || '');
+			if (!geoConstant || geoConstant === 'undefined') continue;
+			const existing = locationMap.get(geoConstant) || { spend: 0, impressions: 0, clicks: 0, results: 0 };
+			existing.spend += Number(row.metrics?.cost_micros || 0) / 1_000_000;
+			existing.impressions += Number(row.metrics?.impressions || 0);
+			existing.clicks += Number(row.metrics?.clicks || 0);
+			existing.results += Math.round(Number(row.metrics?.conversions || 0));
+			locationMap.set(geoConstant, existing);
+		}
+
+		if (locationMap.size === 0) return [];
+
+		// Sort by spend and take top 50 locations to avoid excessive API calls
+		const topLocations = Array.from(locationMap.entries())
+			.sort((a, b) => b[1].spend - a[1].spend)
+			.slice(0, 50);
+
+		// Resolve location names — query individually (GAQL doesn't support OR/IN on resource_name)
+		const nameMap = new Map<string, { name: string; targetType: string }>();
+		// Run lookups in parallel batches of 10 for speed
+		for (let i = 0; i < topLocations.length; i += 10) {
+			const batch = topLocations.slice(i, i + 10);
+			await Promise.all(batch.map(async ([resourceName]) => {
+				try {
+					const constants = await customer.query(`
+						SELECT geo_target_constant.id,
+							geo_target_constant.name,
+							geo_target_constant.canonical_name,
+							geo_target_constant.target_type
+						FROM geo_target_constant
+						WHERE geo_target_constant.resource_name = '${resourceName}'
+					`);
+					if (constants.length > 0) {
+						const gc = constants[0];
+						nameMap.set(resourceName, {
+							name: gc.geo_target_constant?.name || gc.geo_target_constant?.canonical_name || resourceName,
+							targetType: String(gc.geo_target_constant?.target_type || '')
+						});
+					}
+				} catch {
+					const match = resourceName.match(/(\d+)$/);
+					nameMap.set(resourceName, { name: match ? `Location ${match[1]}` : resourceName, targetType: '' });
+				}
+			}));
+		}
+
+		// Build results, filtering out countries and postal codes
+		const results: GoogleAdsGeographicInsight[] = [];
+		for (const [resourceName, data] of topLocations) {
+			const info = nameMap.get(resourceName);
+			if (info?.targetType === 'Country' || info?.targetType === 'Postal Code') continue;
+			if (info?.name && /^\d+$/.test(info.name)) continue;
+			const match = resourceName.match(/(\d+)$/);
+			results.push({
+				locationId: match ? Number(match[1]) : 0,
+				locationName: info?.name || resourceName,
+				locationType: info?.targetType || 'REGION',
+				spend: data.spend,
+				impressions: data.impressions,
+				clicks: data.clicks,
+				results: data.results
+			});
+		}
+
+		logInfo('google-ads', `Geographic insights loaded for ${customerId}`, {
+			metadata: { locations: results.length }
+		});
+		return results;
+	} catch (err) {
+		logError('google-ads', `Failed to fetch geographic insights for ${customerId}`, {
+			metadata: { error: err instanceof Error ? err.message : JSON.stringify(err).slice(0, 500) }
+		});
+		return [];
 	}
 }
 

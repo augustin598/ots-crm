@@ -7,7 +7,7 @@ import { eq, and, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import {
 	listCampaignInsights, listCampaigns, listAdGroupInsights, listDemographicInsights,
-	listConversionActions, GOOGLE_CHANNEL_MAP
+	listConversionActions, listGeographicInsights, GOOGLE_CHANNEL_MAP
 } from '$lib/server/google-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -257,6 +257,41 @@ export const getGoogleDemographicInsights = query(
 			);
 			setCache(cacheKey, demographics);
 			return demographics;
+		} catch (err) {
+			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
+		}
+	}
+);
+
+/** Get geographic performance breakdown for a sub-account */
+export const getGoogleGeographicInsights = query(
+	v.object({
+		customerId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const cacheKey = `google-geographic:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedClient(tenantId);
+		if (!authResult) throw error(500, 'Nu s-a putut obține token-ul Google Ads.');
+
+		const { integration } = authResult;
+
+		try {
+			const geographic = await listGeographicInsights(
+				integration.mccAccountId, params.customerId,
+				integration.developerToken, integration.refreshToken!,
+				params.since, params.until
+			);
+			setCache(cacheKey, geographic);
+			return geographic;
 		} catch (err) {
 			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}
