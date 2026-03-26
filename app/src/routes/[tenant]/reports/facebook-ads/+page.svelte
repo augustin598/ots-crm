@@ -560,6 +560,23 @@
 	}
 </script>
 
+<style>
+	.table-scroll {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	}
+	.table-scroll::-webkit-scrollbar {
+		height: 8px;
+	}
+	.table-scroll::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	.table-scroll::-webkit-scrollbar-thumb {
+		background-color: hsl(var(--muted-foreground) / 0.3);
+		border-radius: 4px;
+	}
+</style>
+
 <div class="space-y-6">
 	<!-- Header -->
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -715,7 +732,7 @@
 
 		<!-- Campaign Performance Table -->
 		{#if !insightsLoading}
-			<div class="space-y-4">
+			<div class="min-w-0 space-y-4">
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
 						<h3 class="text-lg font-semibold">Performanță campanii</h3>
@@ -752,8 +769,9 @@
 						<p class="text-muted-foreground">Nu sunt date de campanii pentru perioada selectată.</p>
 					</Card>
 				{:else}
-					<div class="rounded-md border overflow-x-auto">
-						<Table>
+					<div class="relative">
+						<div class="rounded-md border overflow-x-auto pb-2 table-scroll">
+							<Table>
 							<TableHeader>
 								<TableRow>
 									<TableHead class="w-[40px]">
@@ -928,6 +946,8 @@
 								</TableRow>
 							</TableBody>
 						</Table>
+						</div>
+						<div class="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent rounded-r-md"></div>
 					</div>
 
 					{#if totalPages > 1}

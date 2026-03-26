@@ -412,7 +412,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 		</SidebarFooter>
 	</Sidebar>
 	<SidebarInset>
-		<main class="flex-1 p-6">
+		<main class="min-w-0 flex-1 overflow-x-hidden p-6">
 			{@render children()}
 		</main>
 	</SidebarInset>

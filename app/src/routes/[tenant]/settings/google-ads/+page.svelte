@@ -59,6 +59,10 @@
 	const urlError = $derived(page.url.searchParams.get('error'));
 
 	async function handleSaveConfig() {
+		if (!mccAccountId || !developerToken) {
+			toast.error('Completează MCC Account ID și Developer Token');
+			return;
+		}
 		savingConfig = true;
 		try {
 			await saveGoogleAdsConfig({
