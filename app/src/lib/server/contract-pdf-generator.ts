@@ -21,6 +21,7 @@ interface ContractTenantData {
 	country?: string | null;
 	email?: string | null;
 	phone?: string | null;
+	themeColor?: string | null;
 }
 
 interface ContractClientData {

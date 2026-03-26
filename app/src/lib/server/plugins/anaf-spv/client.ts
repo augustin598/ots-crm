@@ -488,6 +488,7 @@ Original error: ${errorMessage}`;
 		// return {
 		// 	index_incarcare: indexElement.getAttribute('index_incarcare') || ''
 		// };
+		throw new Error('uploadInvoiceToSpv is not yet implemented');
 	}
 
 	/**

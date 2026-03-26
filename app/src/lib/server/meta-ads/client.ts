@@ -72,7 +72,7 @@ function generateAppSecretProof(accessToken: string, appSecret: string): string 
 }
 
 /**
- * List all ad accounts owned by a Business Manager
+ * List all ad accounts accessible by a Business Manager (owned + client/shared)
  */
 export async function listBusinessAdAccounts(
 	businessId: string,
@@ -81,12 +81,12 @@ export async function listBusinessAdAccounts(
 	logInfo('meta-ads', `Listing ad accounts for BM`, { metadata: { businessId } });
 
 	const accounts: MetaAdsAdAccount[] = [];
-	let url: string | null = `${META_GRAPH_URL}/${businessId}/owned_ad_accounts?fields=id,name,account_status&limit=100&access_token=${accessToken}`;
+	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status&limit=100&access_token=${accessToken}`;
 
 	try {
 		while (url) {
-			const res = await fetch(url);
-			const data = await res.json();
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
 
 			if (data.error) {
 				throw new Error(`Meta API error: ${data.error.message}`);
@@ -142,8 +142,8 @@ export async function listAdAccountInsights(
 	const url = `${META_GRAPH_URL}/${adAccountId}/insights?${params.toString()}`;
 
 	try {
-		const res = await fetch(url);
-		const data = await res.json();
+		const res: Response = await fetch(url);
+		const data: any = await res.json();
 
 		if (data.error) {
 			logError('meta-ads', `Insights API error for ${adAccountId}`, {
@@ -379,8 +379,8 @@ export async function listCampaignInsights(
 
 	try {
 		while (url) {
-			const res = await fetch(url);
-			const data = await res.json();
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
 
 			if (data.error) {
 				logError('meta-ads', `Campaign insights API error for ${adAccountId}`, {
@@ -469,8 +469,8 @@ export async function listCampaignReachFrequency(
 
 	try {
 		while (url) {
-			const res = await fetch(url);
-			const data = await res.json();
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
 			if (data.error) break;
 
 			for (const row of data.data || []) {
@@ -509,8 +509,8 @@ export async function toggleCampaignStatus(
 	});
 
 	try {
-		const res = await fetch(`${META_GRAPH_URL}/${campaignId}`, { method: 'POST', body: params });
-		const data = await res.json();
+		const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}`, { method: 'POST', body: params });
+		const data: any = await res.json();
 		if (data.error) {
 			logError('meta-ads', `Failed to toggle campaign ${campaignId}`, {
 				metadata: { errorMessage: data.error.message, errorCode: data.error.code }
@@ -549,11 +549,11 @@ export async function updateCampaignBudget(
 	});
 
 	try {
-		const res = await fetch(`${META_GRAPH_URL}/${campaignId}`, {
+		const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}`, {
 			method: 'POST',
 			body: params
 		});
-		const data = await res.json();
+		const data: any = await res.json();
 
 		if (data.error) {
 			logError('meta-ads', `Failed to update budget for ${campaignId}`, {
@@ -637,8 +637,8 @@ export async function listAdsetInsights(
 
 	try {
 		while (url) {
-			const res = await fetch(url);
-			const data = await res.json();
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
 
 			if (data.error) {
 				logError('meta-ads', `Ad set insights API error`, {
@@ -724,8 +724,8 @@ export async function listActiveCampaigns(
 
 	try {
 		while (url) {
-			const res = await fetch(url);
-			const data = await res.json();
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
 
 			if (data.error) {
 				logError('meta-ads', `Campaigns API error for ${adAccountId}`, {
@@ -761,8 +761,8 @@ export async function listActiveCampaigns(
 			const adsetByCampaign = new Map<string, { adsetId: string; goal: string; dailyBudget: string | null; lifetimeBudget: string | null }>();
 
 			while (adsetUrl) {
-				const adsetRes = await fetch(adsetUrl);
-				const adsetData = await adsetRes.json();
+				const adsetRes: Response = await fetch(adsetUrl);
+				const adsetData: any = await adsetRes.json();
 				if (adsetData.error) break;
 
 				for (const adset of adsetData.data || []) {
@@ -805,8 +805,8 @@ export async function listActiveCampaigns(
 			const campaignIds = new Set(campaigns.map(c => c.campaignId));
 
 			while (adUrl) {
-				const adRes = await fetch(adUrl);
-				const adData = await adRes.json();
+				const adRes: Response = await fetch(adUrl);
+				const adData: any = await adRes.json();
 				if (adData.error) break;
 
 				for (const ad of adData.data || []) {
@@ -913,8 +913,8 @@ export async function listDemographicInsights(
 			if (campaignIds && campaignIds.length > 0) {
 				params.set('filtering', JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: campaignIds }]));
 			}
-			const res = await fetch(`${META_GRAPH_URL}/${adAccountId}/insights?${params.toString()}`);
-			const data = await res.json();
+			const res: Response = await fetch(`${META_GRAPH_URL}/${adAccountId}/insights?${params.toString()}`);
+			const data: any = await res.json();
 			if (data.error) {
 				logError('meta-ads', `Demographics ${breakdown} error for ${adAccountId}`, {
 					metadata: { errorMessage: data.error.message }

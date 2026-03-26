@@ -27,7 +27,7 @@
 	interface Props {
 		name: string;
 		description: string;
-		type: 'offer' | 'generic';
+		type: 'offer' | 'contract' | 'generic';
 		content: string;
 		variables: Variable[];
 		styling: Styling | null;
@@ -407,7 +407,7 @@ Write your content here using **Markdown** formatting.
 							<Textarea
 								value={styling?.header?.content || ''}
 								placeholder="Header content (supports variables)"
-								rows="3"
+								rows={3}
 								oninput={(e) => updateHeaderContent((e.target as HTMLTextAreaElement).value)}
 							/>
 							<div class="flex items-center gap-2">
@@ -431,7 +431,7 @@ Write your content here using **Markdown** formatting.
 							<Textarea
 								value={styling?.footer?.content || ''}
 								placeholder="Footer content (supports variables)"
-								rows="3"
+								rows={3}
 								oninput={(e) => updateFooterContent((e.target as HTMLTextAreaElement).value)}
 							/>
 							<div class="flex items-center gap-2">

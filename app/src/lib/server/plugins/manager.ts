@@ -1,4 +1,4 @@
-import type { Plugin, PluginConfig } from './types';
+import type { Plugin, PluginConfig, HooksManager } from './types';
 import { getPluginRegistry } from './registry';
 import { getHooksManager } from './hooks';
 import { logError, serializeError } from '$lib/server/logger';

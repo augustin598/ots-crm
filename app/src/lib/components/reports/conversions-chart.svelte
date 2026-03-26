@@ -110,8 +110,8 @@
 									return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' });
 								},
 								label: (item) => {
-									if (item.datasetIndex === 0) return ` Conversii: ${formatNumber(item.parsed.y)}`;
-									return ` Cost/conversie: ${formatCurrency(item.parsed.y, currency)}`;
+									if (item.datasetIndex === 0) return ` Conversii: ${formatNumber(item.parsed.y ?? 0)}`;
+									return ` Cost/conversie: ${formatCurrency(item.parsed.y ?? 0, currency)}`;
 								}
 							}
 						}

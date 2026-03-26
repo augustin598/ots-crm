@@ -81,7 +81,7 @@
 									const d = new Date(data[idx].date + 'T00:00:00');
 									return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' });
 								},
-								label: (item) => `Cheltuieli: ${formatCurrency(item.parsed.y, currency)}`
+								label: (item) => `Cheltuieli: ${formatCurrency(item.parsed.y ?? 0, currency)}`
 							}
 						}
 					},

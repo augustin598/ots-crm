@@ -39,11 +39,18 @@ export function mapUblInvoiceToCrm(
 	const lineItems = ublData.lineItems.map((item, index) => {
 		const lineItemData = {
 			invoiceId: '', // Will be set after invoice is created
+			serviceId: null,
 			description: item.description,
 			quantity: item.quantity,
 			rate: Math.round(item.unitPrice * 100), // Convert to cents
 			amount: Math.round(item.amount * 100), // Convert to cents
-			taxRate: item.taxRate !== undefined && item.taxRate !== null ? Math.round(item.taxRate * 100) : null // Convert percentage to basis points (21% = 2100)
+			taxRate: item.taxRate !== undefined && item.taxRate !== null ? Math.round(item.taxRate * 100) : null, // Convert percentage to basis points (21% = 2100)
+			discountType: null,
+			discount: null,
+			note: null,
+			currency: null,
+			unitOfMeasure: null,
+			keezItemExternalId: null
 		};
 
 		return lineItemData;
@@ -58,6 +65,7 @@ export function mapUblInvoiceToCrm(
 	return {
 		tenantId,
 		clientId,
+		contractId: null,
 		projectId: null,
 		serviceId: null,
 		invoiceNumber: ublData.invoiceNumber,
@@ -71,12 +79,25 @@ export function mapUblInvoiceToCrm(
 		paidDate: null,
 		lastEmailSentAt: null,
 		lastEmailStatus: null,
+		overdueReminderCount: 0,
+		lastOverdueReminderAt: null,
 		currency: ublData.currency || 'RON',
 		notes: null,
+		invoiceSeries: null,
+		invoiceCurrency: null,
+		paymentTerms: null,
+		paymentMethod: null,
+		exchangeRate: null,
+		vatOnCollection: false,
+		isCreditNote: false,
+		taxApplicationType: null,
+		discountType: null,
+		discountValue: null,
 		smartbillSeries: null,
 		smartbillNumber: null,
 		keezInvoiceId: null,
 		keezExternalId: null,
+		keezStatus: null,
 		spvId: null, // Will be set when synced
 		createdByUserId: userId,
 		lineItems
@@ -140,7 +161,7 @@ export function mapCrmInvoiceToUbl(
 	const supplierTaxId = tenant.vatNumber || undefined;
 
 	// Map customer (client)
-	const customerVatId = client.vatCode || client.cui || '';
+	const customerVatId = client.vatNumber || client.cui || '';
 
 	return {
 		invoice: {
@@ -211,7 +232,11 @@ export function mapAnafCompanyToClient(
 		postalCode: anafData.postal_code || null,
 		country: anafData.country || 'România',
 		keezPartnerId: null,
-		notes: null
+		notes: null,
+		website: null,
+		businessName: null,
+		googleAdsCustomerId: null,
+		restrictedAccess: null
 	};
 }
 
@@ -264,6 +289,8 @@ export function mapUblInvoiceToExpense(
 		vatAmount,
 		receiptPath: null,
 		invoicePath: null, // Will be set when PDF is uploaded
+		isPaid: false,
+		supplierInvoiceId: null,
 		createdByUserId: userId
 	};
 }

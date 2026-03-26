@@ -18,6 +18,7 @@ interface TenantData {
 	country?: string | null;
 	email?: string | null;
 	website?: string | null;
+	themeColor?: string | null;
 }
 
 interface ClientData {

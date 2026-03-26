@@ -24,7 +24,11 @@ export type LogSource =
 	| 'invoice-downloader'
 	| 'fb-cookies'
 	| 'google-cookies'
-	| 'tiktok-ads';
+	| 'tiktok-ads'
+	| 'meta-ads-sync'
+	| 'tiktok-ads-sync'
+	| 'tiktok-invoice-downloader'
+	| 'tt-cookies';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

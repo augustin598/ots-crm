@@ -7,6 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
 import { resolveStandardVariables, replaceVariables } from '$lib/utils/document-variables';
 import { generatePDFFromHTML } from '$lib/server/pdf-generator';
+import { marked } from 'marked';
 
 function generateDocumentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -213,7 +214,7 @@ export const generateDocumentFromTemplate = command(
 		// Convert markdown to HTML
 		let renderedContent: string;
 		try {
-			renderedContent = marked(contentWithVariables);
+			renderedContent = marked(contentWithVariables) as string;
 		} catch (e) {
 			// If markdown parsing fails, treat as HTML
 			renderedContent = contentWithVariables;
@@ -316,7 +317,7 @@ export const generateDocumentPDF = command(
 
 		// Upload PDF to storage
 		const pdfFileName = document.filePath.replace(/\.html?$/, '.pdf');
-		const pdfFile = new File([pdfBuffer], pdfFileName, { type: 'application/pdf' });
+		const pdfFile = new File([new Uint8Array(pdfBuffer)], pdfFileName, { type: 'application/pdf' });
 		const pdfUploadResult = await storage.uploadFile(event.locals.tenant.id, pdfFile);
 
 		// Update document record

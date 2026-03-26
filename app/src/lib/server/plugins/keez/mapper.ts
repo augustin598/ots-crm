@@ -851,7 +851,9 @@ export function mapKeezPartnerToClient(
 		bankName: keezPartner.bankName || null,
 		keezPartnerId: keezPartner.partnerName || null,
 		website: null,
-		notes: null
+		notes: null,
+		googleAdsCustomerId: null,
+		restrictedAccess: null
 	};
 }
 
