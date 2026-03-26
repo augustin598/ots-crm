@@ -19,6 +19,8 @@
 		searchPlaceholder = 'Search...',
 		onValueChange,
 		disabled = false,
+		clearable = false,
+		clearLabel = '— None —',
 		class: className,
 		optionSnippet,
 		selectedSnippet
@@ -29,6 +31,8 @@
 		searchPlaceholder?: string;
 		onValueChange?: (value: number | string | undefined) => void;
 		disabled?: boolean;
+		clearable?: boolean;
+		clearLabel?: string;
 		class?: string;
 		optionSnippet?: Snippet<[{ option: Option; selected: boolean }]>;
 		selectedSnippet?: Snippet<[{ option: Option }]>;
@@ -61,6 +65,13 @@
 		open = false;
 		searchQuery = '';
 		onValueChange?.(option.value);
+	}
+
+	function clearSelection() {
+		value = undefined;
+		open = false;
+		searchQuery = '';
+		onValueChange?.(undefined);
 	}
 </script>
 
@@ -102,6 +113,24 @@
 				/>
 			</div>
 			<div class="max-h-[300px] overflow-y-auto p-1">
+				{#if clearable && !searchQuery.trim()}
+					<button
+						type="button"
+						class={cn(
+							'relative flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground',
+							value === undefined && 'bg-accent text-accent-foreground'
+						)}
+						onclick={() => clearSelection()}
+					>
+						<Check
+							class={cn(
+								'mr-2 h-4 w-4 shrink-0',
+								value === undefined ? 'opacity-100' : 'opacity-0'
+							)}
+						/>
+						<span class="text-muted-foreground">{clearLabel}</span>
+					</button>
+				{/if}
 				{#if filteredOptions.length === 0}
 					<div class="py-6 text-center text-sm text-muted-foreground">
 						No options found.

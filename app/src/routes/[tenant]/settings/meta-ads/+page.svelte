@@ -17,6 +17,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2 } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -29,6 +30,9 @@
 
 	const clientsQuery = getClientsForMetaMapping();
 	const clients = $derived(clientsQuery.current || []);
+	const clientOptions = $derived(
+		clients.map((c) => ({ value: c.id, label: c.name }))
+	);
 
 	// New BM form
 	let newBusinessId = $state('');
@@ -148,7 +152,7 @@
 			}
 			toast.success('Business Manager deconectat');
 			// Refresh connections query instead of page reload
-			connectionsQuery.revalidate();
+			connectionsQuery.refresh();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la deconectare');
 		} finally {
@@ -399,16 +403,16 @@
 																	{account.metaAdAccountId}
 																</TableCell>
 																<TableCell>
-																	<select
-																		class="h-9 w-full max-w-[250px] rounded-md border border-input bg-background px-3 text-sm"
-																		value={account.clientId || ''}
-																		onchange={(e) => handleAssignClient(account.id, e.currentTarget.value, conn.id)}
-																	>
-																		<option value="">— Neatribuit —</option>
-																		{#each clients as client}
-																			<option value={client.id}>{client.name}</option>
-																		{/each}
-																	</select>
+																	<Combobox
+																		options={clientOptions}
+																		value={account.clientId || undefined}
+																		placeholder="— Neatribuit —"
+																		searchPlaceholder="Caută client..."
+																		clearable={true}
+																		clearLabel="— Neatribuit —"
+																		class="max-w-[250px]"
+																		onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''), conn.id)}
+																	/>
 																</TableCell>
 															</TableRow>
 														{/each}
@@ -429,6 +433,10 @@
 												<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
 													Active
 												</span>
+											{:else if conn.fbSessionStatus === 'expired'}
+												<span class="inline-flex items-center rounded-full border border-amber-500 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">
+													Expirat
+												</span>
 											{:else}
 												<span class="inline-flex items-center rounded-full border border-gray-400 px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-50">
 													Lipsă
@@ -439,13 +447,17 @@
 											Exportă cookies-urile de pe facebook.com cu extensia „Cookie-Editor" (format JSON) și inserează-le aici.
 											Sunt necesare pentru descărcarea automată a facturilor PDF.
 										</p>
-										{#if conn.fbSessionStatus === 'active'}
+										{#if conn.fbSessionStatus === 'active' || conn.fbSessionStatus === 'expired'}
 											<Button variant="outline" size="sm" onclick={() => handleClearCookies(conn.id)}>
 												<Trash2 class="mr-2 h-4 w-4" />
 												Șterge Sesiune
 											</Button>
-										{:else}
+										{/if}
+										{#if conn.fbSessionStatus !== 'active'}
 											<div class="space-y-2">
+												{#if conn.fbSessionStatus === 'expired'}
+													<p class="text-xs text-amber-600">Sesiunea a expirat. Re-salvează cookies-urile pentru a reactiva descărcarea.</p>
+												{/if}
 												<textarea
 													class="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
 													placeholder={'[{"name":"c_user","value":"...","domain":".facebook.com"}, ...]'}

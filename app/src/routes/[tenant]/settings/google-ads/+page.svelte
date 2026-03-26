@@ -17,6 +17,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Save, RefreshCw, Download, Trash2, Cookie } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -32,6 +33,9 @@
 
 	const clientsQuery = getClientsForMapping();
 	const clients = $derived(clientsQuery.current || []);
+	const clientOptions = $derived(
+		clients.map((c) => ({ value: c.id, label: c.name }))
+	);
 
 	let mccAccountId = $state('');
 	let developerToken = $state('');
@@ -323,6 +327,10 @@
 						<span class="inline-flex items-center rounded-full border border-green-500 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">
 							Active
 						</span>
+					{:else if status?.googleSessionStatus === 'expired'}
+						<span class="inline-flex items-center rounded-full border border-amber-500 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">
+							Expirat
+						</span>
 					{:else}
 						<span class="inline-flex items-center rounded-full border border-gray-400 px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-50">
 							Inactive
@@ -337,11 +345,16 @@
 			<CardContent class="space-y-3">
 				{#if status?.googleSessionStatus === 'active'}
 					<p class="text-sm text-green-700">Sesiunea Google este activă. Cookies-urile vor fi folosite pentru descărcarea facturilor PDF.</p>
+				{:else if status?.googleSessionStatus === 'expired'}
+					<p class="text-xs text-amber-600">Sesiunea a expirat. Re-salvează cookies-urile pentru a reactiva descărcarea.</p>
+				{/if}
+				{#if status?.googleSessionStatus === 'active' || status?.googleSessionStatus === 'expired'}
 					<Button variant="outline" size="sm" onclick={handleClearCookies}>
 						<Trash2 class="mr-2 h-4 w-4" />
 						Șterge Sesiune
 					</Button>
-				{:else}
+				{/if}
+				{#if status?.googleSessionStatus !== 'active'}
 					<div class="space-y-2">
 						<textarea
 							class="w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
@@ -402,16 +415,16 @@
 												{formatCustomerIdDisplay(account.googleAdsCustomerId)}
 											</TableCell>
 											<TableCell>
-												<select
-													class="h-9 w-full max-w-[250px] rounded-md border border-input bg-background px-3 text-sm"
-													value={account.clientId || ''}
-													onchange={(e) => handleAssignClient(account.id, e.currentTarget.value)}
-												>
-													<option value="">— Neatribuit —</option>
-													{#each clients as client}
-														<option value={client.id}>{client.name}</option>
-													{/each}
-												</select>
+												<Combobox
+													options={clientOptions}
+													value={account.clientId || undefined}
+													placeholder="— Neatribuit —"
+													searchPlaceholder="Caută client..."
+													clearable={true}
+													clearLabel="— Neatribuit —"
+													class="max-w-[250px]"
+													onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''))}
+												/>
 											</TableCell>
 										</TableRow>
 									{/each}
