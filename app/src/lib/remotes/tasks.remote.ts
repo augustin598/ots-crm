@@ -6,6 +6,8 @@ import { eq, and, or, inArray, like, sql, asc, desc, lt, gte, lte } from 'drizzl
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import { recordTaskActivity } from '$lib/server/task-activity';
+import { getHooksManager } from '$lib/server/plugins/hooks';
+import { logError } from '$lib/server/logger';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -596,6 +598,23 @@ export const updateTask = command(
 					console.error('Failed to send task assignment email:', error);
 					// Don't throw - task update should succeed even if email fails
 				}
+			}
+
+			// Emit in-app notification for the new assignee
+			try {
+				const hooks = getHooksManager();
+				await hooks.emit({
+					type: 'task.assigned',
+					taskId,
+					taskTitle: existing.title,
+					assignedToUserId: newAssigneeId,
+					assignedByUserId: event.locals.user.id,
+					tenantId: existing.tenantId,
+					tenantSlug: event.locals.tenant.slug
+				});
+			} catch (error) {
+				logError('server', 'Failed to emit task.assigned hook', { error });
+				// Don't throw - task update should succeed even if notification fails
 			}
 		}
 

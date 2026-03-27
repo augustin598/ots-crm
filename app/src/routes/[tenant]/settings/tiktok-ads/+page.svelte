@@ -19,7 +19,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
-	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2 } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2, BarChart3 } from '@lucide/svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -420,6 +420,7 @@
 																<TableHead>Cont TikTok Ads</TableHead>
 																<TableHead>Advertiser ID</TableHead>
 																<TableHead>Client CRM</TableHead>
+																<TableHead class="w-[100px]">Raport</TableHead>
 															</TableRow>
 														</TableHeader>
 														<TableBody>
@@ -440,6 +441,15 @@
 																			class="max-w-[250px]"
 																			onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''), conn.id)}
 																		/>
+																	</TableCell>
+																	<TableCell>
+																		<a
+																			href="/{tenantSlug}/reports/tiktok-ads"
+																			class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+																		>
+																			<BarChart3 class="h-4 w-4" />
+																			Raport
+																		</a>
 																	</TableCell>
 																</TableRow>
 															{/each}

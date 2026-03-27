@@ -1452,6 +1452,33 @@ export const googleAdsInvoice = sqliteTable('google_ads_invoice', {
 		.default(sql`current_date`)
 });
 
+// Google Ads spending — periodic spend data per account/client (mirrors meta_ads_spending pattern)
+export const googleAdsSpending = sqliteTable('google_ads_spending', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	googleAdsCustomerId: text('google_ads_customer_id').notNull(),
+	periodStart: text('period_start').notNull(), // "2026-02-01"
+	periodEnd: text('period_end').notNull(), // "2026-02-28"
+	spendAmount: text('spend_amount').notNull().default('0'), // raw from API e.g. "2207.59"
+	spendCents: integer('spend_cents').notNull().default(0),
+	currencyCode: text('currency_code').notNull().default('EUR'),
+	impressions: integer('impressions').default(0),
+	clicks: integer('clicks').default(0),
+	conversions: integer('conversions').default(0),
+	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // Meta Ads integration — multiple per tenant (one per Business Manager)
 export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	id: text('id').primaryKey(),
@@ -1712,6 +1739,30 @@ export const passwordResetToken = sqliteTable('password_reset_token', {
 		.default(sql`current_date`)
 });
 
+// In-app notifications — delivered via SSE stream to connected users
+export const notification = sqliteTable('notification', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	// 'task.assigned' | 'invoice.paid' | 'contract.signed' | 'sync.error' | 'system'
+	type: text('type').notNull(),
+	title: text('title').notNull(),
+	message: text('message').notNull(),
+	link: text('link'),
+	isRead: boolean('is_read').notNull().default(false),
+	metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
+export type Notification = typeof notification.$inferSelect;
+export type NewNotification = typeof notification.$inferInsert;
+
 // Relations
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
@@ -1730,7 +1781,8 @@ export const userRelations = relations(user, ({ many }) => ({
 	}),
 	workHours: many(userWorkHours),
 	bankAccounts: many(userBankAccount),
-	clientUsers: many(clientUser)
+	clientUsers: many(clientUser),
+	notifications: many(notification)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -1775,6 +1827,7 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	supplierInvoices: many(supplierInvoice),
 	googleAdsAccounts: many(googleAdsAccount),
 	googleAdsInvoices: many(googleAdsInvoice),
+	googleAdsSpending: many(googleAdsSpending),
 	metaAdsIntegrations: many(metaAdsIntegration),
 	metaAdsAccounts: many(metaAdsAccount),
 	metaAdsInvoices: many(metaAdsInvoice),
@@ -1784,7 +1837,8 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	tiktokAdsSpending: many(tiktokAdsSpending),
 	tiktokInvoiceDownloads: many(tiktokInvoiceDownload),
 	emailLogs: many(emailLog),
-	debugLogs: many(debugLog)
+	debugLogs: many(debugLog),
+	notifications: many(notification)
 }));
 
 export const tenantUserRelations = relations(tenantUser, ({ one }) => ({
@@ -1820,6 +1874,7 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	accessData: many(clientAccessData),
 	googleAdsAccounts: many(googleAdsAccount),
 	googleAdsInvoices: many(googleAdsInvoice),
+	googleAdsSpending: many(googleAdsSpending),
 	metaAdsAccounts: many(metaAdsAccount),
 	metaAdsInvoices: many(metaAdsInvoice),
 	metaAdsSpending: many(metaAdsSpending),
@@ -2336,6 +2391,17 @@ export const googleAdsInvoiceRelations = relations(googleAdsInvoice, ({ one }) =
 	})
 }));
 
+export const googleAdsSpendingRelations = relations(googleAdsSpending, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleAdsSpending.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [googleAdsSpending.clientId],
+		references: [client.id]
+	})
+}));
+
 export const metaAdsIntegrationRelations = relations(metaAdsIntegration, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [metaAdsIntegration.tenantId],
@@ -2825,6 +2891,17 @@ export const clientAccessDataRelations = relations(clientAccessData, ({ one }) =
 	})
 }));
 
+export const notificationRelations = relations(notification, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [notification.tenantId],
+		references: [tenant.id]
+	}),
+	user: one(user, {
+		fields: [notification.userId],
+		references: [user.id]
+	})
+}));
+
 // Types
 export type Session = typeof session.$inferSelect;
 export type User = typeof user.$inferSelect;
@@ -2939,6 +3016,8 @@ export type GoogleAdsAccount = typeof googleAdsAccount.$inferSelect;
 export type NewGoogleAdsAccount = typeof googleAdsAccount.$inferInsert;
 export type GoogleAdsInvoice = typeof googleAdsInvoice.$inferSelect;
 export type NewGoogleAdsInvoice = typeof googleAdsInvoice.$inferInsert;
+export type GoogleAdsSpending = typeof googleAdsSpending.$inferSelect;
+export type NewGoogleAdsSpending = typeof googleAdsSpending.$inferInsert;
 export type MetaAdsIntegration = typeof metaAdsIntegration.$inferSelect;
 export type NewMetaAdsIntegration = typeof metaAdsIntegration.$inferInsert;
 export type MetaAdsAccount = typeof metaAdsAccount.$inferSelect;

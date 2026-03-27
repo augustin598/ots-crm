@@ -5,6 +5,8 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
+import { getHooksManager } from '$lib/server/plugins/hooks';
+import { logError } from '$lib/server/logger';
 
 function hashToken(token: string): string {
 	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
@@ -142,6 +144,31 @@ export const actions: Actions = {
 				})
 				.where(eq(table.contract.id, contract.id));
 		});
+
+		// Emit in-app notification for contract signing
+		try {
+			const { signToken, contract } = result;
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, contract.tenantId))
+				.limit(1);
+
+			if (tenant) {
+				const hooks = getHooksManager();
+				await hooks.emit({
+					type: 'contract.signed',
+					contractId: contract.id,
+					contractTitle: contract.title || `Contract #${contract.contractNumber}`,
+					signerEmail: signatureName, // using signer name as identifier
+					tenantId: contract.tenantId,
+					tenantSlug: tenant.slug
+				});
+			}
+		} catch (hookError) {
+			logError('server', 'Failed to emit contract.signed hook', { hookError });
+			// Don't throw - signing should succeed even if notification fails
+		}
 
 		return { success: true, signatureName };
 	}

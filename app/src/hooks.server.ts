@@ -6,6 +6,7 @@ import { initializePlugins } from '$lib/server/plugins';
 import { startScheduler } from '$lib/server/scheduler';
 import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
+import { registerNotificationHooks } from '$lib/server/hooks/notification-hooks';
 import { runMigrations } from '$lib/server/db/migrate';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
 import { db } from '$lib/server/db';
@@ -133,6 +134,7 @@ export const init = async () => {
 	await runMigrations();
 	await ensurePluginsInitialized();
 	registerEmailNotificationHooks();
+	registerNotificationHooks();
 	await ensureSchedulerInitialized();
 	// Sync BNR rates if not already synced today (works even without Redis scheduler)
 	await ensureBnrRatesSynced();

@@ -689,6 +689,11 @@
 					</select>
 				</div>
 			{/if}
+			<a href="/api/export/spending?format=excel&platform=meta" download>
+				<Button variant="outline" size="sm">
+					<DownloadIcon class="h-4 w-4" />
+				</Button>
+			</a>
 			<Button variant="outline" size="sm" onclick={handleRefresh}>
 				<RefreshCwIcon class="h-4 w-4" />
 			</Button>

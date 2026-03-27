@@ -3,6 +3,7 @@ import { error, json } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
+import { getFileBuffer } from '$lib/server/storage';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import JSZip from 'jszip';
@@ -46,14 +47,20 @@ export const POST: RequestHandler = async (event) => {
 	for (const invoice of invoices) {
 		if (!invoice.pdfPath) continue;
 
-		const absolutePath = join(process.cwd(), invoice.pdfPath);
 		try {
-			const buffer = await readFile(absolutePath);
+			let buffer: Buffer;
+			try {
+				buffer = await getFileBuffer(invoice.pdfPath);
+			} catch {
+				// Fallback: try filesystem (legacy)
+				const absolutePath = join(process.cwd(), invoice.pdfPath);
+				buffer = await readFile(absolutePath);
+			}
 			const filename = `${invoice.supplierType || 'invoice'}_${invoice.invoiceNumber || invoice.id}.pdf`.replace(/[^a-zA-Z0-9-_.]/g, '_');
 			zip.file(filename, buffer);
 			addedFiles++;
 		} catch {
-			console.warn(`[Download ZIP] Could not read PDF: ${absolutePath}`);
+			console.warn(`[Download ZIP] Could not read PDF: ${invoice.pdfPath}`);
 		}
 	}
 

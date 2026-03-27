@@ -2,13 +2,10 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import BarChart2Icon from '@lucide/svelte/icons/bar-chart-2';
-	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import DownloadIcon from '@lucide/svelte/icons/download';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 
 	let { data }: { data: any } = $props();
@@ -35,33 +32,23 @@
 		}) + ' ' + currency;
 	}
 
-	function formatTimeAgo(date: Date | string | null): string {
-		if (!date) return '';
-		const d = date instanceof Date ? date : new Date(date);
-		const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-		if (diff < 60) return 'acum câteva secunde';
-		if (diff < 3600) return `acum ${Math.floor(diff / 60)} min`;
-		if (diff < 86400) return `acum ${Math.floor(diff / 3600)} ore`;
-		return `acum ${Math.floor(diff / 86400)} zile`;
-	}
-
 	const platforms = $derived([
 		{
 			label: 'Meta Ads',
 			description: 'Facebook & Instagram Ads',
-			href: `/${tenantSlug}/reports/facebook-ads`,
+			href: `/client/${tenantSlug}/reports/facebook-ads`,
 			color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
 		},
 		{
 			label: 'Google Ads',
 			description: 'Search, Display & YouTube',
-			href: `/${tenantSlug}/reports/google-ads`,
+			href: `/client/${tenantSlug}/reports/google-ads`,
 			color: 'bg-green-500/10 text-green-600 dark:text-green-400'
 		},
 		{
 			label: 'TikTok Ads',
 			description: 'TikTok For Business',
-			href: `/${tenantSlug}/reports/tiktok-ads`,
+			href: `/client/${tenantSlug}/reports/tiktok-ads`,
 			color: 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
 		}
 	]);
@@ -77,17 +64,7 @@
 			</h1>
 			<p class="text-muted-foreground">Performanță advertising</p>
 		</div>
-		<div class="flex items-center gap-2 flex-wrap">
-			<DateRangePicker bind:since bind:until onchange={onDateChange} />
-			<a
-				href="/api/export/spending?format=excel&platform=all&since={since}&until={until}"
-				download
-				class="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-			>
-				<DownloadIcon class="h-4 w-4" />
-				Export
-			</a>
-		</div>
+		<DateRangePicker bind:since bind:until onchange={onDateChange} />
 	</div>
 
 	<!-- Spend cards -->
@@ -180,40 +157,4 @@
 			{/each}
 		</div>
 	</div>
-
-	<!-- Sync errors -->
-	{#if data.syncErrors.length > 0}
-		<div>
-			<h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
-				<AlertTriangleIcon class="h-5 w-5 text-destructive" />
-				Erori sincronizare recente
-			</h2>
-			<Card.Root>
-				<Card.Content class="p-0">
-					<ul class="divide-y">
-						{#each data.syncErrors as error}
-							<li class="flex items-start gap-3 px-4 py-3">
-								<AlertTriangleIcon class="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-								<div class="min-w-0 flex-1">
-									<div class="flex items-center gap-2 flex-wrap">
-										<Badge variant="outline" class="text-xs">{error.source}</Badge>
-										<span class="text-xs text-muted-foreground">{formatTimeAgo(error.createdAt)}</span>
-									</div>
-									<p class="text-sm mt-0.5 text-foreground/80 truncate" title={error.message}>{error.message}</p>
-								</div>
-							</li>
-						{/each}
-					</ul>
-				</Card.Content>
-				<Card.Footer class="pt-2 pb-3">
-					<a
-						href="/{tenantSlug}/settings/logs"
-						class="text-xs text-primary hover:underline"
-					>
-						Vezi toate log-urile →
-					</a>
-				</Card.Footer>
-			</Card.Root>
-		</div>
-	{/if}
 </div>

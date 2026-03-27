@@ -24,6 +24,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import FileDownIcon from '@lucide/svelte/icons/file-down';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import NotificationBell from '$lib/components/app/notification-bell/NotificationBell.svelte';
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import CheckIcon from '@lucide/svelte/icons/check';
@@ -305,7 +306,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/reports`)}>
 						{#snippet child({ props })}
-							<a href="/{tenantSlug}/reports/facebook-ads" {...props}>
+							<a href="/{tenantSlug}/reports" {...props}>
 								<BarChart3Icon />
 								<span>Reports</span>
 							</a>
@@ -393,6 +394,9 @@ import LinkIcon from '@lucide/svelte/icons/link';
 		</SidebarContent>
 		<SidebarFooter>
 			<SidebarMenu>
+				<SidebarMenuItem>
+					<NotificationBell />
+				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton onclick={toggleTheme} variant="outline">
 						<div class="relative size-4">

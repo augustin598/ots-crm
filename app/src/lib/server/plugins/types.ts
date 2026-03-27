@@ -46,12 +46,41 @@ export type InvoicePaidEvent = {
 	userId: string;
 };
 
+export type TaskAssignedEvent = {
+	type: 'task.assigned';
+	taskId: string;
+	taskTitle: string;
+	assignedToUserId: string;
+	assignedByUserId: string;
+	tenantId: string;
+	tenantSlug: string;
+};
+
+export type ContractSignedEvent = {
+	type: 'contract.signed';
+	contractId: string;
+	contractTitle: string;
+	signerEmail: string;
+	tenantId: string;
+	tenantSlug: string;
+};
+
+export type SyncErrorEvent = {
+	type: 'sync.error';
+	source: string; // 'meta-ads' | 'tiktok-ads' | 'google-ads' | 'keez' | 'gmail' | etc.
+	message: string;
+	tenantId: string;
+};
+
 export type HookEvent =
 	| InvoiceCreatedEvent
 	| InvoiceUpdatedEvent
 	| InvoiceDeletedEvent
 	| InvoiceStatusChangedEvent
-	| InvoicePaidEvent;
+	| InvoicePaidEvent
+	| TaskAssignedEvent
+	| ContractSignedEvent
+	| SyncErrorEvent;
 
 /**
  * Hook handler function type

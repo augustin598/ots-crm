@@ -184,7 +184,7 @@
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/reports`)}>
 						{#snippet child({ props })}
-							<a href="/client/{tenantSlug}/reports/facebook-ads" {...props}>
+							<a href="/client/{tenantSlug}/reports" {...props}>
 								<BarChart3Icon />
 								<span>Reports</span>
 							</a>

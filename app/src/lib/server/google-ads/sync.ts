@@ -2,11 +2,10 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getAuthenticatedClient, updateLastSyncAt } from './auth';
-import { listInvoices, downloadInvoicePdf, getSyncMonths, formatCustomerId } from './client';
+import { listInvoices, downloadInvoicePdf, getSyncMonths, formatCustomerId, listMonthlySpend } from './client';
 import { getDecryptedGoogleCookies, type GoogleAdsCookie } from './google-cookies';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { uploadBuffer } from '$lib/server/storage';
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
@@ -163,17 +162,21 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 								}
 							}
 
-							// Save PDF to disk
+							// Upload PDF to MinIO
 							if (pdfBuffer) {
 								try {
-									const dir = join('uploads', 'google-ads-invoices', tenantId, `${year}-${month}`);
-									await mkdir(dir, { recursive: true });
-									pdfPath = join(dir, `${inv.invoiceId}.pdf`);
-									await writeFile(pdfPath, pdfBuffer);
-								} catch (writeErr) {
-									logError('google-ads-sync', `Failed to write PDF for ${inv.invoiceId}`, {
+									const upload = await uploadBuffer(
 										tenantId,
-										metadata: { error: writeErr instanceof Error ? writeErr.message : String(writeErr) }
+										pdfBuffer,
+										`google-ads-invoice-${cleanCustomerId}_${inv.invoiceId}.pdf`,
+										'application/pdf',
+										{ type: 'google-ads-invoice', customerId: cleanCustomerId, invoiceId: inv.invoiceId }
+									);
+									pdfPath = upload.path;
+								} catch (uploadErr) {
+									logError('google-ads-sync', `Failed to upload PDF for ${inv.invoiceId}`, {
+										tenantId,
+										metadata: { error: uploadErr instanceof Error ? uploadErr.message : String(uploadErr) }
 									});
 								}
 							}
@@ -243,6 +246,81 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 					errors++;
 				}
 			}
+		}
+	}
+
+	// Sync monthly spending data into google_ads_spending table
+	for (const mapping of mappedAccounts) {
+		const cleanCustomerId = formatCustomerId(mapping.googleAdsCustomerId);
+		try {
+			const monthlySpend = await listMonthlySpend(
+				integration.mccAccountId,
+				cleanCustomerId,
+				integration.developerToken,
+				integration.refreshToken
+			);
+
+			for (const ms of monthlySpend) {
+				// month is "YYYY-MM", derive periodStart/periodEnd
+				const periodStart = `${ms.month}-01`;
+				const [y, m] = ms.month.split('-').map(Number);
+				const lastDay = new Date(y, m, 0).getDate();
+				const periodEnd = `${ms.month}-${String(lastDay).padStart(2, '0')}`;
+				const spendCents = Math.round(ms.spend * 100);
+
+				// Upsert: check if exists
+				const [existing] = await db
+					.select({ id: table.googleAdsSpending.id })
+					.from(table.googleAdsSpending)
+					.where(
+						and(
+							eq(table.googleAdsSpending.tenantId, tenantId),
+							eq(table.googleAdsSpending.googleAdsCustomerId, mapping.googleAdsCustomerId),
+							eq(table.googleAdsSpending.periodStart, periodStart)
+						)
+					)
+					.limit(1);
+
+				if (existing) {
+					await db
+						.update(table.googleAdsSpending)
+						.set({
+							spendAmount: ms.spend.toString(),
+							spendCents,
+							currencyCode: ms.currencyCode,
+							impressions: ms.impressions,
+							clicks: ms.clicks,
+							conversions: ms.conversions,
+							syncedAt: new Date(),
+							updatedAt: new Date()
+						})
+						.where(eq(table.googleAdsSpending.id, existing.id));
+				} else {
+					await db.insert(table.googleAdsSpending).values({
+						id: crypto.randomUUID(),
+						tenantId,
+						clientId: mapping.clientId!,
+						googleAdsCustomerId: mapping.googleAdsCustomerId,
+						periodStart,
+						periodEnd,
+						spendAmount: ms.spend.toString(),
+						spendCents,
+						currencyCode: ms.currencyCode,
+						impressions: ms.impressions,
+						clicks: ms.clicks,
+						conversions: ms.conversions,
+						syncedAt: new Date(),
+						createdAt: new Date(),
+						updatedAt: new Date()
+					});
+				}
+			}
+		} catch (spendErr) {
+			// Non-fatal: spending sync failure shouldn't block invoice sync
+			logWarning('google-ads-sync', `Failed to sync spending for ${mapping.accountName}`, {
+				tenantId,
+				metadata: { error: spendErr instanceof Error ? spendErr.message : String(spendErr) }
+			});
 		}
 	}
 

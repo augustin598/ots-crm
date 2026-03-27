@@ -483,13 +483,19 @@ export const deleteGoogleAdsInvoice = command(
 			throw new Error('Invoice not found');
 		}
 
-		// Delete PDF file if exists
+		// Delete PDF file if exists (try MinIO first, then filesystem)
 		if (invoice.pdfPath) {
 			try {
-				const { unlink } = await import('fs/promises');
-				await unlink(invoice.pdfPath);
+				const { deleteFile } = await import('$lib/server/storage');
+				await deleteFile(invoice.pdfPath);
 			} catch {
-				// File might not exist, that's ok
+				// Fallback: try filesystem
+				try {
+					const { unlink } = await import('fs/promises');
+					await unlink(invoice.pdfPath);
+				} catch {
+					// File might not exist, that's ok
+				}
 			}
 		}
 

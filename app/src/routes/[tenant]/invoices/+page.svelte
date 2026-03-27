@@ -613,6 +613,12 @@ import { goto } from '$app/navigation';
 			{/if}
 		
 
+			<a href="/api/export/invoices?format=excel{statuses.current && (statuses.current as string[]).length > 0 ? '&status=' + (statuses.current as string[]).join(',') : ''}" download>
+				<Button variant="outline">
+					<DownloadIcon class="mr-2 h-4 w-4" />
+					Export Excel
+				</Button>
+			</a>
 			<Button onclick={() => goto(`/${tenantSlug}/invoices/new`)}>
 				<PlusIcon class="mr-2 h-4 w-4" />
 				New Invoice

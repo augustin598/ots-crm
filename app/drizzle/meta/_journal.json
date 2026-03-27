@@ -575,6 +575,20 @@
       "when": 1774440510000,
       "tag": "0081_google_ads_account_currency_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1774440520000,
+      "tag": "0082_notification_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1774440530000,
+      "tag": "0083_google_ads_spending",
+      "breakpoints": true
     }
   ]
 }

@@ -5,8 +5,7 @@ import { searchEmails, getEmail, getAttachment } from '../../gmail/client';
 import { findParserWithFallback, buildSearchQuery, shouldExcludeEmail, isFromCustomSource } from '../../gmail/parsers';
 import { updateLastSyncAt } from '../../gmail/auth';
 import { extractInvoiceDataFromPdf } from '../../gmail/pdf-parser';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { uploadBuffer } from '$lib/server/storage';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
@@ -242,18 +241,19 @@ async function savePdf(
 	parsed: { supplierType: string; invoiceNumber?: string },
 	date: Date
 ): Promise<string> {
-	const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-	const dir = join(process.cwd(), 'uploads', 'supplier-invoices', tenantId, yearMonth);
-	await mkdir(dir, { recursive: true });
-
 	const invoiceNum = (parsed.invoiceNumber || generateId()).replace(/[^a-zA-Z0-9-_]/g, '_');
 	const dateStr = date.toISOString().slice(0, 10);
 	const filename = `${parsed.supplierType}_${invoiceNum}_${dateStr}.pdf`;
-	const filePath = join(dir, filename);
 
-	await writeFile(filePath, buffer);
+	const upload = await uploadBuffer(
+		tenantId,
+		buffer,
+		filename,
+		'application/pdf',
+		{ type: 'supplier-invoice', supplierType: parsed.supplierType }
+	);
 
-	return join('uploads', 'supplier-invoices', tenantId, yearMonth, filename);
+	return upload.path;
 }
 
 async function findOrCreateSupplier(

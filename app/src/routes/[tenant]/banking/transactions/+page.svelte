@@ -27,7 +27,7 @@
 		DialogTitle
 	} from '$lib/components/ui/dialog';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
-	import { ArrowLeft, Filter, Link2, Unlink } from '@lucide/svelte';
+	import { ArrowLeft, Filter, Link2, Unlink, Download as DownloadIcon } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import BankingTransactionTableView from '$lib/components/banking-transaction-table-view.svelte';
@@ -262,6 +262,12 @@
 				<p class="text-muted-foreground">View and manage bank transactions</p>
 			</div>
 		</div>
+		<a href="/api/export/banking?format=excel" download>
+			<Button variant="outline">
+				<DownloadIcon class="mr-2 h-4 w-4" />
+				Export Excel
+			</Button>
+		</a>
 	</div>
 
 	<Card>
