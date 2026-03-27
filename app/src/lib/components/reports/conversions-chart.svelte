@@ -26,7 +26,7 @@
 			chart.destroy();
 			chart = undefined;
 		}
-		if (!browser || !canvas || data.length < 2 || !hasConversions) return;
+		if (!browser || !canvas || data.length < 1 || !hasConversions) return;
 
 		(async () => {
 			const { Chart, registerables } = await import('chart.js');
@@ -151,7 +151,7 @@
 </script>
 
 <div class="h-[300px] w-full">
-	{#if data.length > 1 && hasConversions}
+	{#if data.length > 0 && hasConversions}
 		<canvas bind:this={canvas}></canvas>
 	{:else if !hasConversions}
 		<div class="flex h-full items-center justify-center">

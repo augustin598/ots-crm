@@ -24,7 +24,7 @@
 			chart.destroy();
 			chart = undefined;
 		}
-		if (!browser || !canvas || data.length < 2) return;
+		if (!browser || !canvas || data.length < 1) return;
 
 		(async () => {
 			const { Chart, registerables } = await import('chart.js');
@@ -114,9 +114,9 @@
 </script>
 
 <div class="h-[300px] w-full">
-	{#if data.length > 1}
+	{#if data.length > 0}
 		<canvas bind:this={canvas}></canvas>
-	{:else if data.length === 1}
+	{:else if data.length === 0}
 		<div class="flex h-full items-center justify-center">
 			<p class="text-muted-foreground">O singură zi de date: <strong>{formatCurrency(data[0].spend, currency)}</strong></p>
 		</div>

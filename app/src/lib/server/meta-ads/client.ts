@@ -36,6 +36,8 @@ export interface MetaAdsCampaignInsight {
 	resultType: string;
 	cpaLabel: string;
 	// Individual action metrics
+	purchases: number;
+	leads: number;
 	linkClicks: number;
 	landingPageViews: number;
 	pageEngagement: number;
@@ -254,7 +256,7 @@ export function getActionCount(actions: any[] | undefined, actionType: string): 
 export const OPTIMIZATION_GOAL_MAP: Record<string, { actionType: string; label: string; cpaLabel: string }> = {
 	'CALL': { actionType: 'click_to_call_native_call_placed', label: 'Calls placed', cpaLabel: 'Per call placed' },
 	'QUALITY_CALL': { actionType: 'click_to_call_native_call_placed', label: 'Calls placed', cpaLabel: 'Per call placed' },
-	'OFFSITE_CONVERSIONS': { actionType: 'offsite_conversion.fb_pixel_purchase', label: 'Conversions', cpaLabel: 'Per conversion' },
+	'OFFSITE_CONVERSIONS': { actionType: 'offsite_conversion.fb_pixel_purchase', label: 'Purchases', cpaLabel: 'Cost per purchase' },
 	'LINK_CLICKS': { actionType: 'link_click', label: 'Link clicks', cpaLabel: 'Per link click' },
 	'LANDING_PAGE_VIEWS': { actionType: 'landing_page_view', label: 'Landing page views', cpaLabel: 'Per landing page view' },
 	'REACH': { actionType: '', label: 'Reach', cpaLabel: 'Per 1,000 people reached' },
@@ -294,18 +296,15 @@ function parseConversions(
 		return { count: 0, resultType: map?.label || '', cpaLabel: map?.cpaLabel || 'CPA' };
 	}
 
-	// Strategy 2: Objective-based mapping
+	// Strategy 2: Objective-based mapping — use first matching action type (priority order)
+	// to avoid double-counting when Meta API returns both 'purchase' and 'offsite_conversion.fb_pixel_purchase'
 	const map = OBJECTIVE_ACTION_MAP[objective];
 	if (map && map.actionTypes.length > 0) {
-		const targetSet = new Set(map.actionTypes);
-		let total = 0;
-		for (const action of actions) {
-			if (targetSet.has(action.action_type)) {
-				total += parseFloat(action.value || '0');
+		for (const actionType of map.actionTypes) {
+			const count = getActionCount(actions, actionType);
+			if (count > 0) {
+				return { count, resultType: map.label, cpaLabel: map.cpaLabel };
 			}
-		}
-		if (total > 0) {
-			return { count: total, resultType: map.label, cpaLabel: map.cpaLabel };
 		}
 	}
 
@@ -313,21 +312,20 @@ function parseConversions(
 		return { count: 0, resultType: 'Reach', cpaLabel: 'Per 1,000 people reached' };
 	}
 
-	// Strategy 3: Fallback to highest-value known action
+	// Strategy 3: Fallback to highest-value known action (use its count, not sum of all)
 	let bestAction = '';
 	let bestValue = 0;
-	let totalRelevant = 0;
 	for (const action of actions) {
 		const type = action.action_type as string;
 		const value = parseFloat(action.value || '0');
-		if (ACTION_TYPE_LABELS[type]) {
-			totalRelevant += value;
-			if (value > bestValue) { bestValue = value; bestAction = type; }
+		if (ACTION_TYPE_LABELS[type] && value > bestValue) {
+			bestValue = value;
+			bestAction = type;
 		}
 	}
 
 	const resultType = bestAction ? (ACTION_TYPE_LABELS[bestAction] || bestAction) : (map?.label || '');
-	return { count: totalRelevant, resultType, cpaLabel: map?.cpaLabel || 'CPA' };
+	return { count: bestValue, resultType, cpaLabel: map?.cpaLabel || 'CPA' };
 }
 
 /**
@@ -414,6 +412,8 @@ export async function listCampaignInsights(
 					costPerConversion: finalConversions > 0 ? spend / finalConversions : 0,
 					resultType,
 					cpaLabel,
+					purchases: getActionCount(row.actions, 'offsite_conversion.fb_pixel_purchase') || getActionCount(row.actions, 'purchase'),
+					leads: getActionCount(row.actions, 'offsite_conversion.fb_pixel_lead') || getActionCount(row.actions, 'lead'),
 					linkClicks: getActionCount(row.actions, 'link_click'),
 					landingPageViews: getActionCount(row.actions, 'landing_page_view'),
 					pageEngagement: getActionCount(row.actions, 'page_engagement'),
@@ -589,6 +589,8 @@ export interface MetaAdsAdsetInsight {
 	costPerConversion: number;
 	resultType: string;
 	cpaLabel: string;
+	purchases: number;
+	leads: number;
 	linkClicks: number;
 	landingPageViews: number;
 	pageEngagement: number;
@@ -601,6 +603,40 @@ export interface MetaAdsAdsetInsight {
 	dailyBudget: string | null;
 	lifetimeBudget: string | null;
 	optimizationGoal: string;
+	dateStart: string;
+	dateStop: string;
+}
+
+export interface MetaAdsAdInsight {
+	adId: string;
+	adName: string;
+	adsetId: string;
+	campaignId: string;
+	spend: string;
+	impressions: string;
+	reach: string;
+	frequency: string;
+	clicks: string;
+	cpc: string;
+	cpm: string;
+	ctr: string;
+	conversions: number;
+	conversionValue: number;
+	costPerConversion: number;
+	resultType: string;
+	cpaLabel: string;
+	purchases: number;
+	leads: number;
+	linkClicks: number;
+	landingPageViews: number;
+	pageEngagement: number;
+	postReactions: number;
+	postComments: number;
+	postSaves: number;
+	postShares: number;
+	videoViews: number;
+	callsPlaced: number;
+	previewUrl: string | null;
 	dateStart: string;
 	dateStop: string;
 }
@@ -670,6 +706,8 @@ export async function listAdsetInsights(
 					costPerConversion: conversions > 0 ? spend / conversions : 0,
 					resultType,
 					cpaLabel,
+					purchases: getActionCount(row.actions, 'offsite_conversion.fb_pixel_purchase') || getActionCount(row.actions, 'purchase'),
+					leads: getActionCount(row.actions, 'offsite_conversion.fb_pixel_lead') || getActionCount(row.actions, 'lead'),
 					linkClicks: getActionCount(row.actions, 'link_click'),
 					landingPageViews: getActionCount(row.actions, 'landing_page_view'),
 					pageEngagement: getActionCount(row.actions, 'page_engagement'),
@@ -694,6 +732,133 @@ export async function listAdsetInsights(
 		return insights;
 	} catch (err) {
 		logError('meta-ads', `Failed to fetch ad set insights for campaign ${campaignId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
+ * Fetch ad-level insights for a specific ad set.
+ */
+export async function listAdInsights(
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	adsetId: string,
+	since: string,
+	until: string
+): Promise<MetaAdsAdInsight[]> {
+	logInfo('meta-ads', `Fetching ad insights for ad set ${adsetId}`);
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const timeRange = JSON.stringify({ since, until });
+	const fields = 'ad_id,ad_name,adset_id,campaign_id,objective,spend,impressions,reach,frequency,clicks,cpc,cpm,ctr,actions,action_values,cost_per_action_type';
+	const filtering = JSON.stringify([{ field: 'adset.id', operator: 'IN', value: [adsetId] }]);
+
+	const insights: MetaAdsAdInsight[] = [];
+	let url: string | null = `${META_GRAPH_URL}/${adAccountId}/insights?${new URLSearchParams({
+		fields,
+		level: 'ad',
+		time_range: timeRange,
+		time_increment: '1',
+		filtering,
+		access_token: accessToken,
+		appsecret_proof: proof,
+		limit: '500'
+	}).toString()}`;
+
+	try {
+		while (url) {
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
+
+			if (data.error) {
+				logError('meta-ads', `Ad insights API error`, {
+					metadata: { errorMessage: data.error.message, adsetId }
+				});
+				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			for (const row of data.data || []) {
+				const objective = row.objective || '';
+				const { count: conversions, resultType, cpaLabel } = parseConversions(row.actions, objective, '');
+				const conversionValue = parseConversionValue(row.action_values);
+				const spend = parseFloat(row.spend || '0');
+
+				insights.push({
+					adId: row.ad_id || '',
+					adName: row.ad_name || '',
+					adsetId: row.adset_id || adsetId,
+					campaignId: row.campaign_id || '',
+					spend: row.spend || '0',
+					impressions: row.impressions || '0',
+					reach: row.reach || '0',
+					frequency: row.frequency || '0',
+					clicks: row.clicks || '0',
+					cpc: row.cpc || '0',
+					cpm: row.cpm || '0',
+					ctr: row.ctr || '0',
+					conversions,
+					conversionValue,
+					costPerConversion: conversions > 0 ? spend / conversions : 0,
+					resultType,
+					cpaLabel,
+					purchases: getActionCount(row.actions, 'offsite_conversion.fb_pixel_purchase') || getActionCount(row.actions, 'purchase'),
+					leads: getActionCount(row.actions, 'offsite_conversion.fb_pixel_lead') || getActionCount(row.actions, 'lead'),
+					linkClicks: getActionCount(row.actions, 'link_click'),
+					landingPageViews: getActionCount(row.actions, 'landing_page_view'),
+					pageEngagement: getActionCount(row.actions, 'page_engagement'),
+					postReactions: getActionCount(row.actions, 'post_reaction'),
+					postComments: getActionCount(row.actions, 'comment'),
+					postSaves: getActionCount(row.actions, 'onsite_conversion.post_save'),
+					postShares: getActionCount(row.actions, 'post_share'),
+					videoViews: getActionCount(row.actions, 'video_view'),
+					callsPlaced: getActionCount(row.actions, 'click_to_call_native_call_placed'),
+					previewUrl: null,
+					dateStart: row.date_start,
+					dateStop: row.date_stop
+				});
+			}
+
+			url = data.paging?.next || null;
+		}
+
+		// Fetch preview URLs for each unique ad
+		const adIds = [...new Set(insights.map(i => i.adId).filter(Boolean))];
+		if (adIds.length > 0) {
+			try {
+				const previewMap = new Map<string, string>();
+				let previewUrl: string | null = `${META_GRAPH_URL}/${adAccountId}/ads?${new URLSearchParams({
+					fields: 'id,preview_shareable_link',
+					filtering: JSON.stringify([{ field: 'id', operator: 'IN', value: adIds }]),
+					limit: '500',
+					access_token: accessToken,
+					appsecret_proof: proof
+				}).toString()}`;
+				while (previewUrl) {
+					const res: Response = await fetch(previewUrl);
+					const data: any = await res.json();
+					if (data.error) break;
+					for (const ad of data.data || []) {
+						if (ad.id && ad.preview_shareable_link) {
+							previewMap.set(ad.id, ad.preview_shareable_link);
+						}
+					}
+					previewUrl = data.paging?.next || null;
+				}
+				for (const insight of insights) {
+					insight.previewUrl = previewMap.get(insight.adId) || null;
+				}
+			} catch {
+				// Preview fetch is non-critical, ignore errors
+			}
+		}
+
+		logInfo('meta-ads', `Got ${insights.length} ad insight rows for ad set ${adsetId}`);
+		return insights;
+	} catch (err) {
+		logError('meta-ads', `Failed to fetch ad insights for ad set ${adsetId}`, {
 			metadata: { error: err instanceof Error ? err.message : String(err) }
 		});
 		throw err;

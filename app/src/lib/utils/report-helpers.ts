@@ -1,4 +1,4 @@
-import type { MetaAdsCampaignInsight, MetaAdsAdsetInsight } from '$lib/server/meta-ads/client';
+import type { MetaAdsCampaignInsight, MetaAdsAdsetInsight, MetaAdsAdInsight } from '$lib/server/meta-ads/client';
 
 export interface DailyAggregate {
 	date: string;
@@ -32,6 +32,8 @@ export interface CampaignAggregate {
 	roas: number;
 	resultType: string;
 	cpaLabel: string;
+	purchases: number;
+	leads: number;
 	linkClicks: number;
 	landingPageViews: number;
 	pageEngagement: number;
@@ -82,7 +84,7 @@ export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): Dai
 
 /** Aggregate campaign insights by campaign for the table */
 export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]): CampaignAggregate[] {
-	type Acc = { name: string; objective: string; spend: number; impressions: number; reach: number; frequency: number; clicks: number; conversions: number; conversionValue: number; resultType: string; cpaLabel: string; linkClicks: number; landingPageViews: number; pageEngagement: number; postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number };
+	type Acc = { name: string; objective: string; spend: number; impressions: number; reach: number; frequency: number; clicks: number; conversions: number; conversionValue: number; resultType: string; cpaLabel: string; purchases: number; leads: number; linkClicks: number; landingPageViews: number; pageEngagement: number; postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number };
 	const byCampaign = new Map<string, Acc>();
 
 	for (const row of insights) {
@@ -90,7 +92,7 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 			name: row.campaignName, objective: row.objective,
 			spend: 0, impressions: 0, reach: 0, frequency: 0, clicks: 0, conversions: 0, conversionValue: 0,
 			resultType: row.resultType || '', cpaLabel: row.cpaLabel || 'CPA',
-			linkClicks: 0, landingPageViews: 0, pageEngagement: 0, postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0
+			purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0, postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0
 		};
 		existing.spend += parseFloat(row.spend);
 		existing.impressions += parseInt(row.impressions);
@@ -98,6 +100,8 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 		existing.clicks += parseInt(row.clicks);
 		existing.conversions += row.conversions;
 		existing.conversionValue += row.conversionValue;
+		existing.purchases += row.purchases;
+		existing.leads += row.leads;
 		existing.linkClicks += row.linkClicks;
 		existing.landingPageViews += row.landingPageViews;
 		existing.pageEngagement += row.pageEngagement;
@@ -130,6 +134,8 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 		roas: calculateROAS(d.conversionValue, d.spend),
 		resultType: d.resultType,
 		cpaLabel: d.cpaLabel,
+		purchases: d.purchases,
+		leads: d.leads,
 		linkClicks: d.linkClicks,
 		landingPageViews: d.landingPageViews,
 		pageEngagement: d.pageEngagement,
@@ -320,6 +326,8 @@ export interface AdsetAggregate {
 	roas: number;
 	resultType: string;
 	cpaLabel: string;
+	purchases: number;
+	leads: number;
 	linkClicks: number;
 	landingPageViews: number;
 	pageEngagement: number;
@@ -340,7 +348,7 @@ export function aggregateInsightsByAdset(insights: MetaAdsAdsetInsight[]): Adset
 		name: string; campaignId: string;
 		spend: number; impressions: number; reach: number; clicks: number; conversions: number; conversionValue: number;
 		resultType: string; cpaLabel: string;
-		linkClicks: number; landingPageViews: number; pageEngagement: number;
+		purchases: number; leads: number; linkClicks: number; landingPageViews: number; pageEngagement: number;
 		postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number;
 		dailyBudget: string | null; lifetimeBudget: string | null; optimizationGoal: string;
 	};
@@ -351,7 +359,7 @@ export function aggregateInsightsByAdset(insights: MetaAdsAdsetInsight[]): Adset
 			name: row.adsetName, campaignId: row.campaignId,
 			spend: 0, impressions: 0, reach: 0, clicks: 0, conversions: 0, conversionValue: 0,
 			resultType: row.resultType || '', cpaLabel: row.cpaLabel || 'CPA',
-			linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
+			purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 			postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
 			dailyBudget: row.dailyBudget, lifetimeBudget: row.lifetimeBudget, optimizationGoal: row.optimizationGoal
 		};
@@ -361,6 +369,8 @@ export function aggregateInsightsByAdset(insights: MetaAdsAdsetInsight[]): Adset
 		existing.clicks += parseInt(row.clicks);
 		existing.conversions += row.conversions;
 		existing.conversionValue += row.conversionValue;
+		existing.purchases += row.purchases;
+		existing.leads += row.leads;
 		existing.linkClicks += row.linkClicks;
 		existing.landingPageViews += row.landingPageViews;
 		existing.pageEngagement += row.pageEngagement;
@@ -393,6 +403,8 @@ export function aggregateInsightsByAdset(insights: MetaAdsAdsetInsight[]): Adset
 		roas: calculateROAS(d.conversionValue, d.spend),
 		resultType: d.resultType,
 		cpaLabel: d.cpaLabel,
+		purchases: d.purchases,
+		leads: d.leads,
 		linkClicks: d.linkClicks,
 		landingPageViews: d.landingPageViews,
 		pageEngagement: d.pageEngagement,
@@ -413,4 +425,114 @@ export function getDefaultDateRange(): { since: string; until: string } {
 	const presets = getDatePresets();
 	const thisMonth = presets.find(p => p.label === 'Luna aceasta');
 	return thisMonth ? { since: thisMonth.since, until: thisMonth.until } : { since: presets[10].since, until: presets[10].until };
+}
+
+export interface AdAggregate {
+	adId: string;
+	adName: string;
+	adsetId: string;
+	campaignId: string;
+	spend: number;
+	impressions: number;
+	reach: number;
+	frequency: number;
+	clicks: number;
+	conversions: number;
+	conversionValue: number;
+	cpc: number;
+	cpm: number;
+	ctr: number;
+	costPerConversion: number;
+	roas: number;
+	resultType: string;
+	cpaLabel: string;
+	purchases: number;
+	leads: number;
+	linkClicks: number;
+	landingPageViews: number;
+	pageEngagement: number;
+	postReactions: number;
+	postComments: number;
+	postSaves: number;
+	postShares: number;
+	videoViews: number;
+	callsPlaced: number;
+	previewUrl: string | null;
+}
+
+/** Aggregate Meta ad insights by ad for expandable table rows */
+export function aggregateInsightsByAd(insights: MetaAdsAdInsight[]): AdAggregate[] {
+	type Acc = {
+		name: string; adsetId: string; campaignId: string;
+		spend: number; impressions: number; reach: number; clicks: number; conversions: number; conversionValue: number;
+		resultType: string; cpaLabel: string;
+		purchases: number; leads: number; linkClicks: number; landingPageViews: number; pageEngagement: number;
+		postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number;
+		previewUrl: string | null;
+	};
+	const byAd = new Map<string, Acc>();
+
+	for (const row of insights) {
+		const existing = byAd.get(row.adId) || {
+			name: row.adName, adsetId: row.adsetId, campaignId: row.campaignId,
+			spend: 0, impressions: 0, reach: 0, clicks: 0, conversions: 0, conversionValue: 0,
+			resultType: row.resultType || '', cpaLabel: row.cpaLabel || 'CPA',
+			purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
+			postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
+			previewUrl: row.previewUrl || null
+		};
+		existing.spend += parseFloat(row.spend);
+		existing.impressions += parseInt(row.impressions);
+		existing.reach += parseInt(row.reach || '0');
+		existing.clicks += parseInt(row.clicks);
+		existing.conversions += row.conversions;
+		existing.conversionValue += row.conversionValue;
+		existing.purchases += row.purchases;
+		existing.leads += row.leads;
+		existing.linkClicks += row.linkClicks;
+		existing.landingPageViews += row.landingPageViews;
+		existing.pageEngagement += row.pageEngagement;
+		existing.postReactions += row.postReactions;
+		existing.postComments += row.postComments;
+		existing.postSaves += row.postSaves;
+		existing.postShares += row.postShares;
+		existing.videoViews += row.videoViews;
+		existing.callsPlaced += row.callsPlaced;
+		if (row.resultType && !existing.resultType) existing.resultType = row.resultType;
+		if (row.cpaLabel && existing.cpaLabel === 'CPA') existing.cpaLabel = row.cpaLabel;
+		byAd.set(row.adId, existing);
+	}
+
+	return Array.from(byAd.entries()).map(([adId, d]) => ({
+		adId,
+		adName: d.name,
+		adsetId: d.adsetId,
+		campaignId: d.campaignId,
+		spend: d.spend,
+		impressions: d.impressions,
+		reach: d.reach,
+		frequency: d.reach > 0 ? d.impressions / d.reach : 0,
+		clicks: d.clicks,
+		conversions: d.conversions,
+		conversionValue: d.conversionValue,
+		cpc: d.clicks > 0 ? d.spend / d.clicks : 0,
+		cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
+		ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+		costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
+		roas: calculateROAS(d.conversionValue, d.spend),
+		resultType: d.resultType,
+		cpaLabel: d.cpaLabel,
+		purchases: d.purchases,
+		leads: d.leads,
+		linkClicks: d.linkClicks,
+		landingPageViews: d.landingPageViews,
+		pageEngagement: d.pageEngagement,
+		postReactions: d.postReactions,
+		postComments: d.postComments,
+		postSaves: d.postSaves,
+		postShares: d.postShares,
+		videoViews: d.videoViews,
+		callsPlaced: d.callsPlaced,
+		previewUrl: d.previewUrl
+	}));
 }

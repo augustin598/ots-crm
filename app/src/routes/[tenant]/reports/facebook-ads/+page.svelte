@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
+	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights, getMetaAdInsights, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -46,13 +46,15 @@
 		aggregateInsightsByDate,
 		aggregateInsightsByCampaign,
 		aggregateInsightsByAdset,
+		aggregateInsightsByAd,
 		computeTotals,
 		formatCurrency,
 		formatPercent,
 		formatNumber,
 		getDefaultDateRange,
 		type CampaignAggregate,
-		type AdsetAggregate
+		type AdsetAggregate,
+		type AdAggregate
 	} from '$lib/utils/report-helpers';
 	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset } from '$lib/utils/column-presets';
 
@@ -103,6 +105,7 @@
 		const account = accounts.find((a: any) => a.metaAdAccountId === value);
 		selectedIntegrationId = account?.integrationId || '';
 		selectedCampaigns = new Set();
+		objectiveFilter = 'all';
 		currentPage = 1;
 	}
 
@@ -134,13 +137,19 @@
 
 	// Selection state (declared early so filteredInsights can use it)
 	let selectedCampaigns = $state<Set<string>>(new Set());
+	let objectiveFilter = $state<string>('all');
 
-	// Filter insights by selected campaigns
-	const filteredInsights = $derived(
-		selectedCampaigns.size > 0
-			? insights.filter((i: any) => selectedCampaigns.has(i.campaignId))
-			: insights
-	);
+	// Filter insights by selected campaigns AND objective filter
+	const filteredInsights = $derived.by(() => {
+		let result = insights;
+		if (selectedCampaigns.size > 0) {
+			result = result.filter((i: any) => selectedCampaigns.has(i.campaignId));
+		}
+		if (objectiveFilter !== 'all') {
+			result = result.filter((i: any) => getObjectiveConfig(i.objective || '').label === objectiveFilter);
+		}
+		return result;
+	});
 
 	// Campaign data always from ALL insights (table always shows full data)
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
@@ -148,6 +157,13 @@
 	// KPI cards, charts, demographics use filtered insights when campaigns are selected
 	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
 	const totals = $derived(computeTotals(dailyData));
+
+	// Campaign IDs for demographics — respects both selectedCampaigns and objectiveFilter
+	const demographicCampaignIds = $derived.by(() => {
+		if (selectedCampaigns.size > 0) return [...selectedCampaigns];
+		if (objectiveFilter !== 'all') return filteredCampaigns.map(c => c.campaignId);
+		return [];
+	});
 
 	// Map optimization goals to action types (client-side mirror of OPTIMIZATION_GOAL_MAP)
 	const GOAL_TO_ACTION: Record<string, string> = {
@@ -165,9 +181,10 @@
 		'VALUE': 'offsite_conversion.fb_pixel_purchase'
 	};
 
-	// Dynamic result KPI — detect dominant result type across campaigns
+	// Dynamic result KPI — detect dominant result type across filtered campaigns
 	const resultKpi = $derived.by(() => {
-		const withResults = campaignData.filter(c => c.conversions > 0);
+		const filteredCampaignData = aggregateInsightsByCampaign(filteredInsights);
+		const withResults = filteredCampaignData.filter(c => c.conversions > 0);
 		if (withResults.length === 0) return { label: 'Rezultate', value: '-', subtext: 'Fără date' };
 
 		const totalResults = withResults.reduce((s, c) => s + c.conversions, 0);
@@ -265,12 +282,28 @@
 		{ key: 'active', label: 'Active', activeClass: 'bg-green-600 text-white' },
 		{ key: 'paused', label: 'Paused', activeClass: 'bg-amber-500 text-white' },
 	];
-	const filteredCampaigns = $derived.by(() => {
+
+	// Objective type filter (declared at line 139, before filteredInsights)
+	const statusFilteredCampaigns = $derived.by(() => {
 		if (statusFilter === 'all') return campaignTableData;
 		if (statusFilter === 'active') return campaignTableData.filter(c => c.status === 'ACTIVE' || c.status === 'WITH_ISSUES' || c.status === 'IN_PROCESS');
 		if (statusFilter === 'paused') return campaignTableData.filter(c => c.status === 'PAUSED' || c.status === 'CAMPAIGN_PAUSED');
 		if (statusFilter === 'deleted') return campaignTableData.filter(c => c.status === 'DELETED' || c.status === 'ARCHIVED');
 		return campaignTableData;
+	});
+	const availableObjectives = $derived.by(() => {
+		const types = new Map<string, { label: string; color: string; icon: any }>();
+		for (const c of campaignTableData) {
+			const config = getObjectiveConfig(c.objective);
+			if (!types.has(config.label)) {
+				types.set(config.label, { label: config.label, color: config.color, icon: config.icon });
+			}
+		}
+		return Array.from(types.values()).sort((a, b) => a.label.localeCompare(b.label));
+	});
+	const filteredCampaigns = $derived.by(() => {
+		if (objectiveFilter === 'all') return statusFilteredCampaigns;
+		return statusFilteredCampaigns.filter(c => getObjectiveConfig(c.objective).label === objectiveFilter);
 	});
 
 	// Sorting
@@ -434,9 +467,8 @@
 	});
 
 	const dominantResultLabel = $derived.by(() => {
-		const relevantInsights = selectedCampaigns.size > 0
-			? campaignData.filter(c => selectedCampaigns.has(c.campaignId) && c.conversions > 0 && c.resultType)
-			: campaignData.filter(c => c.conversions > 0 && c.resultType);
+		const filteredCampaignData = aggregateInsightsByCampaign(filteredInsights);
+		const relevantInsights = filteredCampaignData.filter(c => c.conversions > 0 && c.resultType);
 		if (relevantInsights.length === 0) return 'Rezultate';
 		const typeCounts = new Map<string, number>();
 		for (const c of relevantInsights) {
@@ -503,6 +535,11 @@
 	let adsetData = $state<Map<string, AdsetAggregate[]>>(new Map());
 	let adsetLoading = $state<Set<string>>(new Set());
 
+	// ---- Expandable ads (under ad sets) ----
+	let expandedAdsets = $state<Set<string>>(new Set());
+	let adsData = $state<Map<string, AdAggregate[]>>(new Map());
+	let adsLoading = $state<Set<string>>(new Set());
+
 	async function toggleExpand(campaignId: string) {
 		const next = new Set(expandedCampaigns);
 		if (next.has(campaignId)) {
@@ -549,6 +586,52 @@
 		}
 	}
 
+	async function toggleExpandAdset(adsetId: string) {
+		const next = new Set(expandedAdsets);
+		if (next.has(adsetId)) {
+			next.delete(adsetId);
+			expandedAdsets = next;
+			return;
+		}
+		next.add(adsetId);
+		expandedAdsets = next;
+
+		if (!adsData.has(adsetId) && selectedAccountId && selectedIntegrationId) {
+			const loadingNext = new Set(adsLoading);
+			loadingNext.add(adsetId);
+			adsLoading = loadingNext;
+
+			try {
+				const query = getMetaAdInsights({
+					adAccountId: selectedAccountId,
+					integrationId: selectedIntegrationId,
+					adsetId,
+					since,
+					until
+				});
+				const checkInterval = setInterval(() => {
+					if (!query.loading) {
+						clearInterval(checkInterval);
+						const loadDone = new Set(adsLoading);
+						loadDone.delete(adsetId);
+						adsLoading = loadDone;
+
+						if (query.current) {
+							const aggregated = aggregateInsightsByAd(query.current);
+							const newMap = new Map(adsData);
+							newMap.set(adsetId, aggregated);
+							adsData = newMap;
+						}
+					}
+				}, 100);
+			} catch {
+				const loadDone = new Set(adsLoading);
+				loadDone.delete(adsetId);
+				adsLoading = loadDone;
+			}
+		}
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
 			case 'ACTIVE': return 'success';
@@ -588,7 +671,7 @@
 			<p class="text-muted-foreground">Rapoarte performanță campanii Meta/Facebook Ads</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; }} />
+			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; objectiveFilter = 'all'; selectedCampaigns = new Set(); }} />
 			{#if accounts.length > 0}
 				<div class="flex items-center gap-2">
 					<IconFacebook class="h-4 w-4" />
@@ -706,13 +789,13 @@
 		{#if !insightsLoading && dailyData.length > 0}
 			<div class="grid gap-6 xl:grid-cols-2">
 				<Card class="p-4">
-					<h3 class="mb-4 text-lg font-semibold">Cheltuieli în timp</h3>
-					<SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency} />
+					{#key objectiveFilter + String(selectedCampaigns.size)}<h3 class="mb-4 text-lg font-semibold">Cheltuieli în timp</h3>
+					<SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency} />{/key}
 				</Card>
 				<Card class="p-4">
-					<h3 class="mb-4 text-lg font-semibold">Conversii & Cost per conversie</h3>
+					{#key objectiveFilter + String(selectedCampaigns.size)}<h3 class="mb-4 text-lg font-semibold">{resultKpi.label} & Cost per {resultKpi.label.toLowerCase()}</h3>
 					<ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} currency={selectedCurrency} />
-				</Card>
+				{/key}</Card>
 			</div>
 		{/if}
 
@@ -724,7 +807,7 @@
 				{since}
 				{until}
 				currency={selectedCurrency}
-				campaignIds={[...selectedCampaigns]}
+				campaignIds={demographicCampaignIds}
 				{resultActionTypes}
 				resultLabel={dominantResultLabel}
 			/>
@@ -744,6 +827,20 @@
 								>{sf.label}</button>
 							{/each}
 						</div>
+						{#if availableObjectives.length > 1}
+							<div class="flex items-center gap-1.5"><span class="text-xs text-muted-foreground">Tip:</span><div class="flex items-center gap-1 rounded-lg border p-0.5">
+								<button
+									class="px-3 py-1 text-xs rounded-md transition-colors {objectiveFilter === 'all' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => { objectiveFilter = 'all'; currentPage = 1; }}
+								>Toate</button>
+								{#each availableObjectives as obj}
+									<button
+										class="flex items-center gap-1 px-3 py-1 text-xs rounded-md transition-colors {objectiveFilter === obj.label ? obj.color : 'text-muted-foreground hover:text-foreground'}"
+										onclick={() => { objectiveFilter = obj.label; currentPage = 1; }}
+									><obj.icon class="h-3 w-3" />{obj.label}</button>
+								{/each}
+							</div></div>
+						{/if}
 					</div>
 					<div class="flex items-center gap-3">
 						{#if totalEntries > 0}
@@ -904,12 +1001,16 @@
 											</TableRow>
 										{:else if adsetData.has(campaign.campaignId)}
 											{#each adsetData.get(campaign.campaignId) || [] as adset}
-												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground">
+												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground cursor-pointer hover:bg-muted/25" onclick={() => toggleExpandAdset(adset.adsetId)}>
 													<TableCell class="w-[40px]"></TableCell>
 													<TableCell class="w-[50px]"></TableCell>
 													<TableCell class="max-w-[250px]">
 														<div class="flex items-center gap-1.5 pl-4">
-															<span class="text-muted-foreground/50">└</span>
+															{#if expandedAdsets.has(adset.adsetId)}
+																<ChevronDownIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+															{:else}
+																<ChevronRightIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+															{/if}
 															<div class="truncate text-sm text-foreground/80" title={adset.adsetName}>{adset.adsetName}</div>
 														</div>
 													</TableCell>
@@ -927,6 +1028,46 @@
 													{/each}
 													<TableCell></TableCell>
 												</TableRow>
+												<!-- Expanded ad rows -->
+												{#if expandedAdsets.has(adset.adsetId)}
+													{#if adsLoading.has(adset.adsetId)}
+														<TableRow class="bg-muted/10">
+															<TableCell></TableCell>
+															<TableCell colspan={activePreset.columns.length + 4}>
+																<div class="flex items-center gap-2 py-2 pl-12 text-sm text-muted-foreground">
+																	<LoaderIcon class="h-4 w-4 animate-spin" />
+																	Se încarcă reclamele...
+																</div>
+															</TableCell>
+														</TableRow>
+													{:else if adsData.has(adset.adsetId)}
+														{#each adsData.get(adset.adsetId) || [] as ad}
+															<TableRow class="bg-muted/8 border-l-3 border-l-primary/15 text-muted-foreground/80">
+																<TableCell class="w-[40px]"></TableCell>
+																<TableCell class="w-[50px]"></TableCell>
+																<TableCell class="max-w-[250px]">
+																	<div class="flex items-center gap-1.5 pl-10">
+																		<span class="text-muted-foreground/30">└</span>
+																		<div class="truncate text-xs text-foreground/70" title={ad.adName}>{ad.adName}</div>
+																	</div>
+																</TableCell>
+																<TableCell></TableCell>
+																{#each activePreset.columns as col}
+																	<TableCell class="{col.align === 'right' ? 'text-right' : ''} text-xs text-foreground/70">
+																		<div>{col.getValue(ad as any, selectedCurrency)}</div>
+																		{#if col.getSubtext}
+																			{@const sub = col.getSubtext(ad as any)}
+																			{#if sub}
+																				<div class="text-xs text-muted-foreground">{sub}</div>
+																			{/if}
+																		{/if}
+																	</TableCell>
+																{/each}
+																<TableCell class="w-[50px] text-center">{#if ad.previewUrl}<a href={ad.previewUrl} target="_blank" rel="noopener" class="text-muted-foreground hover:text-primary" title="Previzualizare reclamă" onclick={(e) => e.stopPropagation()}><EyeIcon class="h-3.5 w-3.5 inline-block" /></a>{/if}</TableCell>
+															</TableRow>
+														{/each}
+													{/if}
+												{/if}
 											{/each}
 										{/if}
 									{/if}
@@ -935,7 +1076,7 @@
 								<TableRow class="bg-muted/50 font-semibold border-t-2">
 									<TableCell></TableCell>
 									<TableCell></TableCell>
-									<TableCell>Rezultate din {filteredCampaigns.length} campanii</TableCell>
+									<TableCell>Rezultate din {filteredCampaigns.length} campanii{objectiveFilter !== 'all' ? ` (${objectiveFilter})` : ''}</TableCell>
 									<TableCell></TableCell>
 									{#each activePreset.columns as col}
 										<TableCell class={col.align === 'right' ? 'text-right' : ''}>

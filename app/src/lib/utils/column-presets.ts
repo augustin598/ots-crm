@@ -24,6 +24,8 @@ const COL = {
 		getValue: (c: any) => c.conversions > 0 ? formatNumber(c.conversions) : '-',
 		getSubtext: (c: any) => c.resultType || '',
 		getTotalValue: (campaigns: any[]) => {
+			const types = new Set(campaigns.filter(c => c.conversions > 0 && c.resultType).map(c => c.resultType));
+			if (types.size > 1) return '-';
 			const total = campaigns.reduce((s: number, c: any) => s + c.conversions, 0);
 			return total > 0 ? formatNumber(total) : '-';
 		}
@@ -33,6 +35,8 @@ const COL = {
 		getValue: (c: any, cur: string) => c.conversions > 0 ? formatCurrency(c.costPerConversion, cur) : '-',
 		getSubtext: (c: any) => c.conversions > 0 ? c.cpaLabel : '',
 		getTotalValue: (campaigns: any[], cur: string) => {
+			const types = new Set(campaigns.filter(c => c.conversions > 0 && c.resultType).map(c => c.resultType));
+			if (types.size > 1) return '-';
 			const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
 			const totalConv = campaigns.reduce((s: number, c: any) => s + c.conversions, 0);
 			return totalConv > 0 ? formatCurrency(totalSpend / totalConv, cur) : '-';
@@ -50,7 +54,11 @@ const COL = {
 			if (c.lifetimeBudget) return 'Total';
 			return '';
 		},
-		getTotalValue: () => '-'
+		getTotalValue: (campaigns: any[], cur: string) => {
+			const totalDaily = campaigns.reduce((s: number, c: any) => s + (c.dailyBudget ? parseFloat(c.dailyBudget) / 100 : 0), 0);
+			if (totalDaily > 0) return `${formatCurrency(totalDaily, cur)}/zi`;
+			return '-';
+		}
 	},
 	spend: {
 		key: 'spend', label: 'Cheltuieli', align: 'right' as const, sortKey: 'spend' as const,
@@ -189,6 +197,24 @@ const COL = {
 			const total = campaigns.reduce((s: number, c: any) => s + c.videoViews, 0);
 			return total > 0 ? formatNumber(total) : '-';
 		}
+	},
+	cpcAll: {
+		key: 'cpcAll', label: 'CPC (toate)', align: 'right' as const,
+		getValue: (c: any, cur: string) => c.clicks > 0 ? formatCurrency(c.spend / c.clicks, cur) : '-',
+		getTotalValue: (campaigns: any[], cur: string) => {
+			const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
+			const totalClicks = campaigns.reduce((s: number, c: any) => s + c.clicks, 0);
+			return totalClicks > 0 ? formatCurrency(totalSpend / totalClicks, cur) : '-';
+		}
+	},
+	costPerLPV: {
+		key: 'costPerLPV', label: 'Cost/landing page view', align: 'right' as const,
+		getValue: (c: any, cur: string) => c.landingPageViews > 0 ? formatCurrency(c.spend / c.landingPageViews, cur) : '-',
+		getTotalValue: (campaigns: any[], cur: string) => {
+			const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
+			const totalLPV = campaigns.reduce((s: number, c: any) => s + c.landingPageViews, 0);
+			return totalLPV > 0 ? formatCurrency(totalSpend / totalLPV, cur) : '-';
+		}
 	}
 };
 
@@ -196,7 +222,7 @@ export const COLUMN_PRESETS: ColumnPreset[] = [
 	{
 		key: 'performance_clicks',
 		label: 'Performance and clicks',
-		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.linkClicks, COL.cpc, COL.ctrLink, COL.clicks, COL.ctr]
+		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.linkClicks, COL.cpc, COL.ctrLink, COL.clicks, COL.ctr, COL.cpcAll, COL.landingPageViews, COL.costPerLPV]
 	},
 	{
 		key: 'performance',
