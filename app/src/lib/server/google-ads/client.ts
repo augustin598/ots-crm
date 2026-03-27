@@ -225,7 +225,8 @@ export async function listMonthlySpend(
 	developerToken: string,
 	refreshToken: string,
 	since?: string,
-	until?: string
+	until?: string,
+	cachedCurrencyCode?: string
 ): Promise<GoogleAdsMonthlySpend[]> {
 	logInfo('google-ads', `Fetching monthly spend for ${customerId}`);
 
@@ -262,11 +263,14 @@ export async function listMonthlySpend(
 			WHERE segments.month BETWEEN '${startDate}' AND '${endDate}'
 		`);
 
-		// Also get currency from customer
-		const customerInfo = await customer.query(`
-			SELECT customer.currency_code FROM customer LIMIT 1
-		`);
-		const currencyCode = (customerInfo as any[])?.[0]?.customer?.currency_code || 'USD';
+		// Use cached currency from DB if available, otherwise query Google Ads API
+		let currencyCode = cachedCurrencyCode || '';
+		if (!currencyCode) {
+			const customerInfo = await customer.query(`
+				SELECT customer.currency_code FROM customer LIMIT 1
+			`);
+			currencyCode = (customerInfo as any[])?.[0]?.customer?.currency_code || 'USD';
+		}
 
 		const monthlyData: GoogleAdsMonthlySpend[] = (results as any[]).map((row) => ({
 			month: row.segments?.month || '',

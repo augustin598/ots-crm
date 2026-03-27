@@ -12,6 +12,7 @@
 		clearMetaAdsCookies
 	} from '$lib/remotes/meta-ads-invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Input } from '$lib/components/ui/input';
@@ -19,6 +20,7 @@
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2 } from '@lucide/svelte';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 
@@ -46,6 +48,10 @@
 	// Accounts cache per integration
 	let accountsCache = $state<Record<string, any[]>>({});
 	let fetchingAccountsFor = $state<string | null>(null);
+
+	// Collapsible states
+	let addFormOpen = $state(true);
+	let accountSearches = $state<Record<string, string>>({});
 
 	// Cookie management
 	let cookieJsonInputs = $state<Record<string, string>>({});
@@ -251,45 +257,56 @@
 		<p class="text-muted-foreground">Se încarcă...</p>
 	{:else}
 		<!-- Add New Business Manager -->
-		<Card>
-			<CardHeader>
-				<CardTitle>Adaugă Business Manager</CardTitle>
-				<CardDescription>
-					Conectează un Business Manager Meta pentru a sincroniza cheltuielile. Poți adăuga mai multe BM-uri.
-				</CardDescription>
-			</CardHeader>
-			<CardContent class="space-y-4">
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div class="space-y-2">
-						<Label for="bm-id">Business Manager ID</Label>
-						<Input
-							id="bm-id"
-							type="text"
-							placeholder="123456789012345"
-							bind:value={newBusinessId}
-						/>
-						<p class="text-xs text-muted-foreground">ID-ul din Meta Business Suite</p>
-					</div>
-					<div class="space-y-2">
-						<Label for="bm-name">Nume Business Manager</Label>
-						<Input
-							id="bm-name"
-							type="text"
-							placeholder="Numele companiei / BM"
-							bind:value={newBusinessName}
-						/>
-					</div>
-				</div>
-				<Button onclick={handleAddConnection} disabled={addingConnection}>
-					{#if addingConnection}
-						<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
-					{:else}
-						<Plus class="mr-2 h-4 w-4" />
-					{/if}
-					Adaugă
-				</Button>
-			</CardContent>
-		</Card>
+		<Collapsible bind:open={addFormOpen}>
+			<Card>
+				<CollapsibleTrigger class="w-full text-left cursor-pointer">
+					<CardHeader>
+						<div class="flex items-center justify-between">
+							<div>
+								<CardTitle>Adaugă Business Manager</CardTitle>
+								<CardDescription>
+									Conectează un Business Manager Meta pentru a sincroniza cheltuielile. Poți adăuga mai multe BM-uri.
+								</CardDescription>
+							</div>
+							<ChevronDown class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {addFormOpen ? 'rotate-180' : ''}" />
+						</div>
+					</CardHeader>
+				</CollapsibleTrigger>
+				<CollapsibleContent>
+					<CardContent class="space-y-4">
+						<div class="grid gap-4 sm:grid-cols-2">
+							<div class="space-y-2">
+								<Label for="bm-id">Business Manager ID</Label>
+								<Input
+									id="bm-id"
+									type="text"
+									placeholder="123456789012345"
+									bind:value={newBusinessId}
+								/>
+								<p class="text-xs text-muted-foreground">ID-ul din Meta Business Suite</p>
+							</div>
+							<div class="space-y-2">
+								<Label for="bm-name">Nume Business Manager</Label>
+								<Input
+									id="bm-name"
+									type="text"
+									placeholder="Numele companiei / BM"
+									bind:value={newBusinessName}
+								/>
+							</div>
+						</div>
+						<Button onclick={handleAddConnection} disabled={addingConnection}>
+							{#if addingConnection}
+								<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+							{:else}
+								<Plus class="mr-2 h-4 w-4" />
+							{/if}
+							Adaugă
+						</Button>
+					</CardContent>
+				</CollapsibleContent>
+			</Card>
+		</Collapsible>
 
 		<!-- Existing Connections -->
 		{#if connections.length > 0}
@@ -386,39 +403,60 @@
 										{#if accountsCache[conn.id].length === 0}
 											<p class="text-sm text-muted-foreground">Nu sunt conturi extrase. Apasă „Extrage Conturi".</p>
 										{:else}
-											<div class="rounded-md border">
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Cont Meta Ads</TableHead>
-															<TableHead>Ad Account ID</TableHead>
-															<TableHead>Client CRM</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{#each accountsCache[conn.id] as account}
-															<TableRow>
-																<TableCell class="font-medium">{account.accountName || '-'}</TableCell>
-																<TableCell class="text-muted-foreground font-mono text-sm">
-																	{account.metaAdAccountId}
-																</TableCell>
-																<TableCell>
-																	<Combobox
-																		options={clientOptions}
-																		value={account.clientId || undefined}
-																		placeholder="— Neatribuit —"
-																		searchPlaceholder="Caută client..."
-																		clearable={true}
-																		clearLabel="— Neatribuit —"
-																		class="max-w-[250px]"
-																		onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''), conn.id)}
-																	/>
-																</TableCell>
-															</TableRow>
-														{/each}
-													</TableBody>
-												</Table>
+											{@const searchTerm = (accountSearches[conn.id] || '').trim().toLowerCase()}
+											{@const filteredAccs = searchTerm
+												? accountsCache[conn.id].filter((a: any) =>
+													(a.accountName || '').toLowerCase().includes(searchTerm) ||
+													a.metaAdAccountId.includes(searchTerm)
+												)
+												: accountsCache[conn.id]}
+											<div class="relative mb-3">
+												<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+												<Input
+													value={accountSearches[conn.id] || ''}
+													oninput={(e) => { accountSearches = { ...accountSearches, [conn.id]: e.currentTarget.value }; }}
+													type="text"
+													placeholder="Caută cont sau Ad Account ID..."
+													class="pl-9"
+												/>
 											</div>
+											{#if filteredAccs.length === 0}
+												<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{accountSearches[conn.id]}"</p>
+											{:else}
+												<div class="rounded-md border">
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Cont Meta Ads</TableHead>
+																<TableHead>Ad Account ID</TableHead>
+																<TableHead>Client CRM</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{#each filteredAccs as account (account.id)}
+																<TableRow>
+																	<TableCell class="font-medium">{account.accountName || '-'}</TableCell>
+																	<TableCell class="text-muted-foreground font-mono text-sm">
+																		{account.metaAdAccountId}
+																	</TableCell>
+																	<TableCell>
+																		<Combobox
+																			options={clientOptions}
+																			value={account.clientId || undefined}
+																			placeholder="— Neatribuit —"
+																			searchPlaceholder="Caută client..."
+																			clearable={true}
+																			clearLabel="— Neatribuit —"
+																			class="max-w-[250px]"
+																			onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''), conn.id)}
+																		/>
+																	</TableCell>
+																</TableRow>
+															{/each}
+														</TableBody>
+													</Table>
+												</div>
+											{/if}
 										{/if}
 									</div>
 								{/if}

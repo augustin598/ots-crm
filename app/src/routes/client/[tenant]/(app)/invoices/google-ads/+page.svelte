@@ -13,14 +13,13 @@
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
-	import { getDefaultDateRange } from '$lib/utils/report-helpers';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	// Date range
-	const defaults = getDefaultDateRange();
-	let since = $state(defaults.since);
-	let until = $state(defaults.until);
+	// Date range — implicit: tot anul curent
+	const currentYear = new Date().getFullYear();
+	let since = $state(`${currentYear}-01-01`);
+	let until = $state(`${currentYear}-12-31`);
 
 	const invoicesQuery = getGoogleAdsInvoices();
 	const invoices = $derived(invoicesQuery.current || []);

@@ -5,6 +5,7 @@
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 	} from '$lib/components/ui/table';
 	import { Card } from '$lib/components/ui/card';
+	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Download, Search, Eye, Trash2, ExternalLink } from '@lucide/svelte';
@@ -13,8 +14,10 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
 
 	function formatMonth(month: string): string {
@@ -71,9 +74,33 @@
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
 
-	const monthlySpendQuery = getGoogleAdsMonthlySpend();
-	const monthlySpend = $derived(monthlySpendQuery.current || []);
-	const monthlyLoading = $derived(monthlySpendQuery.loading);
+	// Defer to client-side to avoid hydration mismatch from date formatting
+	let monthlySpendQuery = $state<ReturnType<typeof getGoogleAdsMonthlySpend> | null>(null);
+	const monthlySpend = $derived(monthlySpendQuery?.current || []);
+	const monthlyLoading = $derived(monthlySpendQuery?.loading ?? true);
+
+	$effect(() => {
+		monthlySpendQuery = getGoogleAdsMonthlySpend();
+	});
+
+	// Collapsible + search state for monthly spend cards
+	let spendSearchQuery = $state('');
+	let expandedAccounts = new SvelteSet<string>();
+
+	function toggleAccount(customerId: string) {
+		if (expandedAccounts.has(customerId)) expandedAccounts.delete(customerId);
+		else expandedAccounts.add(customerId);
+	}
+
+	const filteredMonthlySpend = $derived(
+		spendSearchQuery.trim()
+			? monthlySpend.filter((account: any) =>
+				account.accountName.toLowerCase().includes(spendSearchQuery.trim().toLowerCase()) ||
+				account.googleAdsCustomerId.includes(spendSearchQuery.trim().replace(/-/g, '')) ||
+				(account.clientName || '').toLowerCase().includes(spendSearchQuery.trim().toLowerCase())
+			)
+			: monthlySpend
+	);
 
 	let syncing = $state(false);
 	let showUrlDownload = $state(false);
@@ -405,99 +432,118 @@
 	<!-- Monthly Spend Cards -->
 	{#if monthlyLoading}
 		<div class="space-y-4">
-			{#each Array(2) as _}
+			{#each Array(2) as _, idx (idx)}
 				<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>
 			{/each}
 		</div>
 	{:else if monthlySpend.length > 0}
-		<div class="space-y-6">
-			{#each monthlySpend as account}
-				{#if account.months.length > 0}
-					{@const totalSpend = account.months.reduce((s, m) => s + m.spend, 0)}
-					{@const totalClicks = account.months.reduce((s, m) => s + m.clicks, 0)}
-					{@const totalConv = account.months.reduce((s, m) => s + m.conversions, 0)}
-					{@const curr = account.months[0]?.currencyCode || 'USD'}
-					<Card class="overflow-hidden">
-						<!-- Account Header -->
-						<div class="border-b bg-muted/30 px-6 py-4">
-							<div class="flex items-center justify-between">
-								<div class="flex items-center gap-3">
-									<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-										<DollarSignIcon class="h-5 w-5 text-primary" />
-									</div>
-									<div>
-										<h3 class="text-lg font-semibold">{account.accountName}</h3>
-										{#if account.clientName}
-											<p class="text-sm text-muted-foreground">{account.clientName}</p>
-										{/if}
-									</div>
-								</div>
-								<div class="flex items-center gap-3">
-									{#if account.clientEmail}
-										<p class="text-sm text-muted-foreground">Facturi disponibile pe contul <strong>{account.clientEmail}</strong></p>
-									{/if}
-									<a href="https://ads.google.com/aw/billing/documents" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium hover:bg-muted transition-colors shrink-0">
-										<ExternalLink class="h-4 w-4" />
-										Descarcă facturi
-									</a>
-								</div>
-							</div>
-						</div>
-
-						<!-- Summary KPIs -->
-						<div class="grid grid-cols-3 divide-x border-b">
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total cheltuieli</p>
-								<p class="text-xl font-bold mt-1">{formatCurr(totalSpend, curr)}</p>
-							</div>
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total click-uri</p>
-								<p class="text-xl font-bold mt-1">{totalClicks.toLocaleString('ro-RO')}</p>
-							</div>
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total conversii</p>
-								<p class="text-xl font-bold mt-1">{totalConv.toLocaleString('ro-RO')}</p>
-							</div>
-						</div>
-
-						<!-- Monthly Rows -->
-						<div class="divide-y">
-							{#each account.months as m, i}
-								{@const prevSpend = account.months[i + 1]?.spend}
-								{@const trend = prevSpend ? ((m.spend - prevSpend) / prevSpend) * 100 : null}
-								{@const monthInvoice = findInvoiceForMonth(m.month, account.googleAdsCustomerId)}
-								<div class="grid grid-cols-6 gap-2 px-6 py-4 hover:bg-muted/30 transition-colors items-center">
-									<div class="flex items-center gap-2">
-										<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span class="font-medium capitalize whitespace-nowrap">{formatMonth(m.month)}</span>
-									</div>
-									<div class="text-right whitespace-nowrap">
-										<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
-										{#if trend !== null}
-											<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-										{/if}
-									</div>
-									<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{m.impressions.toLocaleString('ro-RO')} imp.</span>
-									<span class="text-sm text-right whitespace-nowrap">{m.clicks.toLocaleString('ro-RO')} clicks</span>
-									<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{m.conversions} conv.</span>
-									<div class="flex justify-end">
-										{#if monthInvoice}
-											<Button variant="outline" size="sm" class="whitespace-nowrap w-full" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
-												<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
-											</Button>
-										{:else}
-											<Button size="sm" class="whitespace-nowrap w-full bg-orange-100 text-orange-600 border border-orange-300 hover:bg-orange-100 cursor-default" disabled>
-												<CalendarIcon class="mr-1.5 h-3.5 w-3.5" />În așteptare
-											</Button>
-										{/if}
-									</div>
-								</div>
-							{/each}
-						</div>
-					</Card>
-				{/if}
-			{/each}
+		<!-- Search -->
+		<div class="relative">
+			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+			<Input
+				bind:value={spendSearchQuery}
+				type="text"
+				placeholder="Caută cont sau client..."
+				class="pl-9"
+			/>
 		</div>
+
+		{#if filteredMonthlySpend.length === 0}
+			<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{spendSearchQuery}"</p>
+		{:else}
+			<div class="space-y-4">
+				{#each filteredMonthlySpend as account (account.googleAdsCustomerId)}
+					{#if account.months.length > 0}
+						{@const totalSpend = account.months.reduce((s: number, m: any) => s + m.spend, 0)}
+						{@const totalClicks = account.months.reduce((s: number, m: any) => s + m.clicks, 0)}
+						{@const totalConv = account.months.reduce((s: number, m: any) => s + m.conversions, 0)}
+						{@const curr = account.months[0]?.currencyCode || 'USD'}
+						{@const isExpanded = expandedAccounts.has(account.googleAdsCustomerId)}
+						<Collapsible open={isExpanded} onOpenChange={() => toggleAccount(account.googleAdsCustomerId)}>
+							<Card class="overflow-hidden">
+								<!-- Account Header + KPIs (always visible) -->
+								<CollapsibleTrigger class="w-full text-left cursor-pointer">
+									<div class="px-6 py-4">
+										<div class="flex items-center justify-between">
+											<div class="flex items-center gap-3">
+												<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+													<DollarSignIcon class="h-5 w-5 text-primary" />
+												</div>
+												<div>
+													<h3 class="text-lg font-semibold">{account.accountName}</h3>
+													<p class="text-sm text-muted-foreground">{account.months.length} luni</p>
+												</div>
+											</div>
+											<div class="flex items-center gap-4">
+												<div class="text-right">
+													<p class="text-xs text-muted-foreground">Total cheltuieli</p>
+													<p class="text-lg font-bold">{formatCurr(totalSpend, curr)}</p>
+												</div>
+												<div class="text-right hidden sm:block">
+													<p class="text-xs text-muted-foreground">Click-uri</p>
+													<p class="text-base font-semibold">{totalClicks.toLocaleString('ro-RO')}</p>
+												</div>
+												<div class="text-right hidden sm:block">
+													<p class="text-xs text-muted-foreground">Conversii</p>
+													<p class="text-base font-semibold">{totalConv.toLocaleString('ro-RO')}</p>
+												</div>
+												<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
+											</div>
+										</div>
+									</div>
+								</CollapsibleTrigger>
+
+								<!-- Expanded: Monthly Rows -->
+								<CollapsibleContent>
+									<div class="border-t divide-y">
+										{#each account.months as m, i (m.month)}
+											{@const prevSpend = account.months[i + 1]?.spend}
+											{@const trend = prevSpend ? ((m.spend - prevSpend) / prevSpend) * 100 : null}
+											{@const monthInvoice = findInvoiceForMonth(m.month, account.googleAdsCustomerId)}
+											<div class="grid grid-cols-6 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
+												<div class="flex items-center gap-2">
+													<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+													<span class="font-medium capitalize whitespace-nowrap">{formatMonth(m.month)}</span>
+												</div>
+												<div class="text-right whitespace-nowrap">
+													<span class="text-base font-semibold">{formatCurr(m.spend, m.currencyCode)}</span>
+													{#if trend !== null}
+														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+													{/if}
+												</div>
+												<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{m.impressions.toLocaleString('ro-RO')} imp.</span>
+												<span class="text-sm text-right whitespace-nowrap">{m.clicks.toLocaleString('ro-RO')} clicks</span>
+												<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{m.conversions} conv.</span>
+												<div class="flex justify-end">
+													{#if monthInvoice}
+														<Button variant="outline" size="sm" class="whitespace-nowrap w-full" onclick={() => handleDownloadPDF(monthInvoice.id, monthInvoice.invoiceNumber)}>
+															<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
+														</Button>
+													{:else}
+														<Button size="sm" class="whitespace-nowrap w-full bg-orange-100 text-orange-600 border border-orange-300 hover:bg-orange-100 cursor-default" disabled>
+															<CalendarIcon class="mr-1.5 h-3.5 w-3.5" />În așteptare
+														</Button>
+													{/if}
+												</div>
+											</div>
+										{/each}
+									</div>
+									{#if account.clientEmail}
+										<div class="border-t px-6 py-3 bg-muted/20 flex items-center justify-between">
+											<p class="text-sm text-muted-foreground">Facturi pe contul <strong>{account.clientEmail}</strong></p>
+											<a href="https://ads.google.com/aw/billing/documents" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-lg border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors shrink-0">
+												<ExternalLink class="h-3.5 w-3.5" />
+												Google Billing
+											</a>
+										</div>
+									{/if}
+								</CollapsibleContent>
+							</Card>
+						</Collapsible>
+					{/if}
+				{/each}
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Synced Invoices (for monthly invoicing accounts) -->

@@ -130,6 +130,7 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 		.select({
 			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
 			accountName: table.googleAdsAccount.accountName,
+			currencyCode: table.googleAdsAccount.currencyCode,
 			clientId: table.googleAdsAccount.clientId,
 			clientName: table.client.name,
 			clientEmail: table.client.email
@@ -142,6 +143,20 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 		));
 
 	const mapped = accounts.filter(a => a.clientId);
+
+	// Fetch monthly spend for all accounts in parallel
+	const spendResults = await Promise.allSettled(
+		mapped.map(acc => {
+			const cleanId = formatCustomerId(acc.googleAdsCustomerId);
+			return listMonthlySpend(
+				integration.mccAccountId, cleanId,
+				integration.developerToken, integration.refreshToken,
+				undefined, undefined,
+				acc.currencyCode
+			);
+		})
+	);
+
 	const results: Array<{
 		googleAdsCustomerId: string;
 		accountName: string;
@@ -150,18 +165,15 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 		months: Awaited<ReturnType<typeof listMonthlySpend>>;
 	}> = [];
 
-	for (const acc of mapped) {
-		const cleanId = formatCustomerId(acc.googleAdsCustomerId);
-		const months = await listMonthlySpend(
-			integration.mccAccountId, cleanId,
-			integration.developerToken, integration.refreshToken
-		);
+	for (let i = 0; i < mapped.length; i++) {
+		const acc = mapped[i];
+		const result = spendResults[i];
 		results.push({
 			googleAdsCustomerId: acc.googleAdsCustomerId,
 			accountName: acc.accountName,
 			clientName: acc.clientName,
 			clientEmail: acc.clientEmail,
-			months
+			months: result.status === 'fulfilled' ? result.value : []
 		});
 	}
 
@@ -189,7 +201,8 @@ export const getMyGoogleAdsMonthlySpend = query(
 	const accounts = await db
 		.select({
 			googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId,
-			accountName: table.googleAdsAccount.accountName
+			accountName: table.googleAdsAccount.accountName,
+			currencyCode: table.googleAdsAccount.currencyCode
 		})
 		.from(table.googleAdsAccount)
 		.where(and(
@@ -206,6 +219,19 @@ export const getMyGoogleAdsMonthlySpend = query(
 		.limit(1);
 	const clientEmail = clientInfo?.email || '';
 
+	// Fetch monthly spend for all accounts in parallel
+	const spendResults = await Promise.allSettled(
+		accounts.map(acc => {
+			const cleanId = formatCustomerId(acc.googleAdsCustomerId);
+			return listMonthlySpend(
+				integration.mccAccountId, cleanId,
+				integration.developerToken, integration.refreshToken,
+				data.since, data.until,
+				acc.currencyCode
+			);
+		})
+	);
+
 	const results: Array<{
 		accountName: string;
 		clientEmail: string;
@@ -213,14 +239,16 @@ export const getMyGoogleAdsMonthlySpend = query(
 		months: Awaited<ReturnType<typeof listMonthlySpend>>;
 	}> = [];
 
-	for (const acc of accounts) {
+	for (let i = 0; i < accounts.length; i++) {
+		const acc = accounts[i];
+		const result = spendResults[i];
 		const cleanId = formatCustomerId(acc.googleAdsCustomerId);
-		const months = await listMonthlySpend(
-			integration.mccAccountId, cleanId,
-			integration.developerToken, integration.refreshToken,
-			data.since, data.until
-		);
-		results.push({ accountName: acc.accountName, clientEmail, customerId: cleanId, months });
+		results.push({
+			accountName: acc.accountName,
+			clientEmail,
+			customerId: cleanId,
+			months: result.status === 'fulfilled' ? result.value : []
+		});
 	}
 
 	return results;

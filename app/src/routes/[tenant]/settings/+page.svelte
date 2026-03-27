@@ -4,6 +4,7 @@
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { sendInvitation, getInvitations, cancelInvitation } from '$lib/remotes/invitations.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -11,6 +12,8 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { X } from '@lucide/svelte';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { getFaviconUrl } from '$lib/utils';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
@@ -33,6 +36,7 @@
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
+	import UsersIcon from '@lucide/svelte/icons/users';
 	import { getClientsRestrictionStatus, setClientRestriction } from '$lib/remotes/client-restrictions.remote';
 	import { toast } from 'svelte-sonner';
 
@@ -120,6 +124,15 @@
 	// Client restrictions
 	const clientRestrictionsQuery = getClientsRestrictionStatus();
 	const clientsRestriction = $derived(clientRestrictionsQuery.current || []);
+	let restrictionsOpen = $state(true);
+	let clientSearch = $state('');
+	const filteredClients = $derived(
+		clientSearch.trim()
+			? clientsRestriction.filter((c: any) =>
+				c.name.toLowerCase().includes(clientSearch.trim().toLowerCase())
+			)
+			: clientsRestriction
+	);
 
 	async function handleSetRestriction(clientId: string, value: string) {
 		try {
@@ -132,6 +145,8 @@
 	}
 
 	// Invitation state
+	let invitationsOpen = $state(true);
+	let invitationSearch = $state('');
 	let invitationEmail = $state('');
 	let invitationRole = $state<'member' | 'admin'>('member');
 	let sendingInvitation = $state(false);
@@ -141,6 +156,13 @@
 	const invitationsQuery = getInvitations();
 	const invitations = $derived(invitationsQuery.current || []);
 	const loadingInvitations = $derived(invitationsQuery.loading);
+	const filteredInvitations = $derived(
+		invitationSearch.trim()
+			? invitations.filter((inv: any) =>
+				inv.email.toLowerCase().includes(invitationSearch.trim().toLowerCase())
+			)
+			: invitations
+	);
 
 	async function handleAnafLookup() {
 		if (!cui) {
@@ -646,174 +668,233 @@
 	</div>
 
 	{#if data.tenantUser?.role === 'owner' || data.tenantUser?.role === 'admin'}
-		<Card>
-			<CardHeader>
-				<div class="flex items-center gap-3">
-					<ShieldAlertIcon class="h-5 w-5 text-muted-foreground" />
-					<div>
-						<CardTitle>Restricții Acces Client Portal</CardTitle>
-						<CardDescription>Gestionați accesul clienților la portalul client. Clienții cu facturi restante sunt restricționați automat.</CardDescription>
-					</div>
-				</div>
-			</CardHeader>
-			<CardContent>
-				{#if clientsRestriction.length === 0}
-					<p class="text-sm text-muted-foreground">Nu există clienți.</p>
-				{:else}
-					<div class="space-y-2">
-						{#each clientsRestriction as client}
-							<div class="flex items-center justify-between p-3 border rounded-lg">
-								<div class="flex-1 min-w-0">
-									<p class="font-medium truncate">{client.name}</p>
-									<div class="flex items-center gap-2 mt-1">
-										{#if client.hasOverdueInvoice}
-											<Badge variant="destructive">Factură restantă</Badge>
-										{/if}
-										{#if client.restrictedAccess === 'forced'}
-											<Badge variant="destructive">Restricționat manual</Badge>
-										{:else if client.restrictedAccess === 'unrestricted'}
-											<Badge variant="secondary">Deblocat manual</Badge>
-										{:else}
-											<Badge variant="outline">Automat</Badge>
-										{/if}
-									</div>
+		<Collapsible bind:open={restrictionsOpen}>
+			<Card>
+				<CollapsibleTrigger class="w-full text-left cursor-pointer">
+					<CardHeader>
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-3">
+								<ShieldAlertIcon class="h-5 w-5 text-muted-foreground" />
+								<div>
+									<CardTitle>Restricții Acces Client Portal</CardTitle>
+									<CardDescription>Gestionați accesul clienților la portalul client. Clienții cu facturi restante sunt restricționați automat.</CardDescription>
 								</div>
-								<Select type="single" value={client.restrictedAccess ?? 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
-									<SelectTrigger class="w-[160px]">
-										{#if client.restrictedAccess === 'forced'}
-											Restricționat
-										{:else if client.restrictedAccess === 'unrestricted'}
-											Deblocat
-										{:else}
-											Automat
-										{/if}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="auto">Automat</SelectItem>
-										<SelectItem value="forced">Restricționat</SelectItem>
-										<SelectItem value="unrestricted">Deblocat</SelectItem>
-									</SelectContent>
-								</Select>
 							</div>
-						{/each}
-					</div>
-				{/if}
-			</CardContent>
-		</Card>
-
-		<Card>
-			<CardHeader>
-				<CardTitle>Team Invitations</CardTitle>
-				<CardDescription>Invite users to join your organization</CardDescription>
-			</CardHeader>
-			<CardContent class="space-y-6">
-				<!-- Send Invitation Form -->
-				<div class="space-y-4">
-					<h3 class="text-lg font-semibold">Send Invitation</h3>
-					<form
-						onsubmit={(e) => {
-							e.preventDefault();
-							handleSendInvitation();
-						}}
-						class="space-y-4"
-					>
-						<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-							<div class="md:col-span-2 space-y-2">
-								<Label for="invitationEmail">Email Address</Label>
+							<div class="flex items-center gap-2">
+								{#if clientsRestriction.length > 0}
+									<Badge variant="outline">{clientsRestriction.length} clienți</Badge>
+								{/if}
+								<ChevronDownIcon class="h-5 w-5 text-muted-foreground transition-transform duration-200 {restrictionsOpen ? 'rotate-180' : ''}" />
+							</div>
+						</div>
+					</CardHeader>
+				</CollapsibleTrigger>
+				<CollapsibleContent>
+					<CardContent>
+						{#if clientsRestriction.length === 0}
+							<p class="text-sm text-muted-foreground">Nu există clienți.</p>
+						{:else}
+							<div class="relative mb-4">
+								<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 								<Input
-									id="invitationEmail"
-									type="email"
-									bind:value={invitationEmail}
-									placeholder="user@example.com"
-									required
+									bind:value={clientSearch}
+									type="text"
+									placeholder="Caută client..."
+									class="pl-9"
 								/>
 							</div>
-							<div class="space-y-2">
-								<Label for="invitationRole">Role</Label>
-								<Select type="single" bind:value={invitationRole}>
-									<SelectTrigger id="invitationRole">
-										{invitationRole === 'admin' ? 'Admin' : 'Member'}
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="member">Member</SelectItem>
-										<SelectItem value="admin">Admin</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-
-						{#if invitationError}
-							<div class="rounded-md bg-red-50 p-3">
-								<p class="text-sm text-red-800">{invitationError}</p>
-							</div>
-						{/if}
-
-						{#if invitationSuccess}
-							<div class="rounded-md bg-green-50 p-3">
-								<p class="text-sm text-green-800">Invitation sent successfully!</p>
-							</div>
-						{/if}
-
-						<Button type="submit" disabled={sendingInvitation}>
-							{sendingInvitation ? 'Sending...' : 'Send Invitation'}
-						</Button>
-					</form>
-				</div>
-
-				<Separator />
-
-				<!-- Invitations List -->
-				<div class="space-y-4">
-					<h3 class="text-lg font-semibold">Pending Invitations</h3>
-					{#if loadingInvitations}
-						<p class="text-sm text-muted-foreground">Loading invitations...</p>
-					{:else if invitations.length === 0}
-						<p class="text-sm text-muted-foreground">No invitations sent yet.</p>
-					{:else}
-						<div class="space-y-2">
-							{#each invitations as invitation}
-								<div
-									class="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900"
-								>
-									<div class="flex-1">
-										<div class="flex items-center gap-2">
-											<p class="font-medium">{invitation.email}</p>
-											<Badge variant={getStatusBadgeVariant(invitation.status)}>
-												{invitation.status}
-											</Badge>
+							{#if filteredClients.length === 0}
+								<p class="text-sm text-muted-foreground text-center py-4">Niciun client găsit pentru „{clientSearch}"</p>
+							{:else}
+								<div class="space-y-2">
+									{#each filteredClients as client (client.id)}
+										<div class="flex items-center justify-between p-3 border rounded-lg">
+											<div class="flex-1 min-w-0">
+												<p class="font-medium truncate">{client.name}</p>
+												<div class="flex items-center gap-2 mt-1">
+													{#if client.hasOverdueInvoice}
+														<Badge variant="destructive">Factură restantă</Badge>
+													{/if}
+													{#if client.restrictedAccess === 'forced'}
+														<Badge variant="destructive">Restricționat manual</Badge>
+													{:else if client.restrictedAccess === 'unrestricted'}
+														<Badge variant="secondary">Deblocat manual</Badge>
+													{:else}
+														<Badge variant="outline">Automat</Badge>
+													{/if}
+												</div>
+											</div>
+											<Select type="single" value={client.restrictedAccess ?? 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
+												<SelectTrigger class="w-[160px]">
+													{#if client.restrictedAccess === 'forced'}
+														Restricționat
+													{:else if client.restrictedAccess === 'unrestricted'}
+														Deblocat
+													{:else}
+														Automat
+													{/if}
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="auto">Automat</SelectItem>
+													<SelectItem value="forced">Restricționat</SelectItem>
+													<SelectItem value="unrestricted">Deblocat</SelectItem>
+												</SelectContent>
+											</Select>
 										</div>
-										<div class="mt-1 text-sm text-muted-foreground">
-											<p>
-												Role: <span class="capitalize">{invitation.role}</span> • Invited by{' '}
-												{invitation.invitedBy
-													? `${invitation.invitedBy.firstName} ${invitation.invitedBy.lastName}`.trim() ||
-													  invitation.invitedBy.email
-													: 'Unknown'}{' '}
-												•{' '}
-												{formatDate(invitation.createdAt)}
-											</p>
-											{#if invitation.status === 'pending'}
-												<p class="text-xs">
-													Expires: {formatDate(invitation.expiresAt)}
-												</p>
-											{/if}
-										</div>
-									</div>
-									{#if invitation.status === 'pending'}
-										<Button
-											variant="ghost"
-											size="sm"
-											onclick={() => handleCancelInvitation(invitation.id)}
-										>
-											<X class="h-4 w-4" />
-										</Button>
-									{/if}
+									{/each}
 								</div>
-							{/each}
+							{/if}
+						{/if}
+					</CardContent>
+				</CollapsibleContent>
+			</Card>
+		</Collapsible>
+
+		<Collapsible bind:open={invitationsOpen}>
+			<Card>
+				<CollapsibleTrigger class="w-full text-left cursor-pointer">
+					<CardHeader>
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-3">
+								<UsersIcon class="h-5 w-5 text-muted-foreground" />
+								<div>
+									<CardTitle>Team Invitations</CardTitle>
+									<CardDescription>Invite users to join your organization</CardDescription>
+								</div>
+							</div>
+							<div class="flex items-center gap-2">
+								{#if invitations.length > 0}
+									<Badge variant="outline">{invitations.length} invitații</Badge>
+								{/if}
+								<ChevronDownIcon class="h-5 w-5 text-muted-foreground transition-transform duration-200 {invitationsOpen ? 'rotate-180' : ''}" />
+							</div>
 						</div>
-					{/if}
-				</div>
-			</CardContent>
-		</Card>
+					</CardHeader>
+				</CollapsibleTrigger>
+				<CollapsibleContent>
+					<CardContent class="space-y-6">
+						<!-- Send Invitation Form -->
+						<div class="space-y-4">
+							<h3 class="text-lg font-semibold">Send Invitation</h3>
+							<form
+								onsubmit={(e) => {
+									e.preventDefault();
+									handleSendInvitation();
+								}}
+								class="space-y-4"
+							>
+								<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+									<div class="md:col-span-2 space-y-2">
+										<Label for="invitationEmail">Email Address</Label>
+										<Input
+											id="invitationEmail"
+											type="email"
+											bind:value={invitationEmail}
+											placeholder="user@example.com"
+											required
+										/>
+									</div>
+									<div class="space-y-2">
+										<Label for="invitationRole">Role</Label>
+										<Select type="single" bind:value={invitationRole}>
+											<SelectTrigger id="invitationRole">
+												{invitationRole === 'admin' ? 'Admin' : 'Member'}
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="member">Member</SelectItem>
+												<SelectItem value="admin">Admin</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+								</div>
+
+								{#if invitationError}
+									<div class="rounded-md bg-red-50 p-3">
+										<p class="text-sm text-red-800">{invitationError}</p>
+									</div>
+								{/if}
+
+								{#if invitationSuccess}
+									<div class="rounded-md bg-green-50 p-3">
+										<p class="text-sm text-green-800">Invitation sent successfully!</p>
+									</div>
+								{/if}
+
+								<Button type="submit" disabled={sendingInvitation}>
+									{sendingInvitation ? 'Sending...' : 'Send Invitation'}
+								</Button>
+							</form>
+						</div>
+
+						<Separator />
+
+						<!-- Invitations List -->
+						<div class="space-y-4">
+							<h3 class="text-lg font-semibold">Pending Invitations</h3>
+							{#if loadingInvitations}
+								<p class="text-sm text-muted-foreground">Loading invitations...</p>
+							{:else if invitations.length === 0}
+								<p class="text-sm text-muted-foreground">No invitations sent yet.</p>
+							{:else}
+								<div class="relative mb-4">
+									<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+									<Input
+										bind:value={invitationSearch}
+										type="text"
+										placeholder="Caută invitație după email..."
+										class="pl-9"
+									/>
+								</div>
+								{#if filteredInvitations.length === 0}
+									<p class="text-sm text-muted-foreground text-center py-4">Nicio invitație găsită pentru „{invitationSearch}"</p>
+								{:else}
+									<div class="space-y-2">
+										{#each filteredInvitations as invitation (invitation.id)}
+											<div
+												class="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900"
+											>
+												<div class="flex-1">
+													<div class="flex items-center gap-2">
+														<p class="font-medium">{invitation.email}</p>
+														<Badge variant={getStatusBadgeVariant(invitation.status)}>
+															{invitation.status}
+														</Badge>
+													</div>
+													<div class="mt-1 text-sm text-muted-foreground">
+														<p>
+															Role: <span class="capitalize">{invitation.role}</span> • Invited by{' '}
+															{invitation.invitedBy
+																? `${invitation.invitedBy.firstName} ${invitation.invitedBy.lastName}`.trim() ||
+																  invitation.invitedBy.email
+																: 'Unknown'}{' '}
+															•{' '}
+															{formatDate(invitation.createdAt)}
+														</p>
+														{#if invitation.status === 'pending'}
+															<p class="text-xs">
+																Expires: {formatDate(invitation.expiresAt)}
+															</p>
+														{/if}
+													</div>
+												</div>
+												{#if invitation.status === 'pending'}
+													<Button
+														variant="ghost"
+														size="sm"
+														onclick={() => handleCancelInvitation(invitation.id)}
+													>
+														<X class="h-4 w-4" />
+													</Button>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								{/if}
+							{/if}
+						</div>
+					</CardContent>
+				</CollapsibleContent>
+			</Card>
+		</Collapsible>
 	{/if}
 </div>
