@@ -208,9 +208,35 @@
 </script>
 
 <div class="space-y-6">
-	<div>
-		<h1 class="text-3xl font-bold">Google Ads</h1>
-		<p class="text-muted-foreground">Configurare integrare Google Ads pentru descărcare automată facturi</p>
+	<div class="flex items-center justify-between">
+		<div>
+			<h1 class="text-3xl font-bold">Google Ads</h1>
+			<p class="text-muted-foreground">Configurare integrare Google Ads pentru descărcare automată facturi</p>
+		</div>
+		{#if status?.connected}
+			<div class="flex flex-col items-end gap-1">
+				<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
+					{#if syncing}
+						<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+						Sincronizare...
+					{:else}
+						<RefreshCw class="mr-2 h-4 w-4" />
+						Sync Facturi
+					{/if}
+				</Button>
+				{#if status.lastSyncAt}
+					<p class="text-xs text-muted-foreground">
+						Sync: {formatDate(status.lastSyncAt)}
+						{#if status.lastSyncResults}
+							— {status.lastSyncResults.imported ?? 0} importate, {status.lastSyncResults.errors ?? 0} erori
+							{#if status.lastSyncResults.spendingInserted != null}
+								| spend: {status.lastSyncResults.spendingInserted} noi, {status.lastSyncResults.spendingUpdated ?? 0} actualizate
+							{/if}
+						{/if}
+					</p>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
 	{#if urlSuccess}

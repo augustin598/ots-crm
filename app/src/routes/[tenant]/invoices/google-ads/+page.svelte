@@ -194,10 +194,13 @@
 		}
 	}
 
+	let lastSyncResult = $state<{ imported: number; skipped: number; errors: number; spendingInserted?: number; spendingUpdated?: number; at: Date } | null>(null);
+
 	async function handleSync() {
 		syncing = true;
 		try {
 			const result = await triggerGoogleAdsSync().updates(invoicesQuery);
+			lastSyncResult = { ...result, at: new Date() };
 			toast.success(`Sync complet: ${result.imported} importate, ${result.skipped} existente, ${result.errors} erori`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
@@ -370,6 +373,14 @@
 				{/if}
 			</Button>
 		</div>
+		{#if lastSyncResult}
+			<p class="text-xs text-muted-foreground text-right">
+				{lastSyncResult.at.toLocaleString('ro-RO')} — {lastSyncResult.imported} importate, {lastSyncResult.errors} erori
+				{#if lastSyncResult.spendingInserted != null}
+					| spend: {lastSyncResult.spendingInserted} noi, {lastSyncResult.spendingUpdated ?? 0} actualizate
+				{/if}
+			</p>
+		{/if}
 	</div>
 
 	<!-- Bulk Import Panel -->

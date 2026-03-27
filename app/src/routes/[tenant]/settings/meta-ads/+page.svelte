@@ -229,15 +229,26 @@
 			<p class="text-muted-foreground">Configurare integrare Meta/Facebook Ads pentru rapoarte cheltuieli automate</p>
 		</div>
 		{#if connections.some((c: any) => c.connected)}
-			<Button variant="outline" size="sm" onclick={handleSyncAll} disabled={syncing}>
-				{#if syncing}
-					<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
-					Sincronizare...
-				{:else}
-					<RefreshCw class="mr-2 h-4 w-4" />
-					Sync Toate
+			<div class="flex flex-col items-end gap-1">
+				<Button variant="outline" size="sm" onclick={handleSyncAll} disabled={syncing}>
+					{#if syncing}
+						<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+						Sincronizare...
+					{:else}
+						<RefreshCw class="mr-2 h-4 w-4" />
+						Sync Toate
+					{/if}
+				</Button>
+				{#if connections.find((c: any) => c.lastSyncAt)}
+					{@const lastSync = connections.find((c: any) => c.lastSyncAt)}
+					<p class="text-xs text-muted-foreground">
+						Sync: {formatDate(lastSync.lastSyncAt)}
+						{#if lastSync.lastSyncResults}
+							— {lastSync.lastSyncResults.imported ?? 0} noi, {lastSync.lastSyncResults.updated ?? 0} actualizate, {lastSync.lastSyncResults.errors ?? 0} erori
+						{/if}
+					</p>
 				{/if}
-			</Button>
+			</div>
 		{/if}
 	</div>
 

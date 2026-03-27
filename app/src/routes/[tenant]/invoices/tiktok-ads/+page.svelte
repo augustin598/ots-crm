@@ -31,10 +31,13 @@
 	let pageSize = $state(25);
 	let currentPage = $state(1);
 
+	let lastSyncResult = $state<{ imported: number; updated: number; errors: number; at: Date } | null>(null);
+
 	async function handleSync() {
 		syncing = true;
 		try {
 			const result = await triggerTiktokAdsSync().updates(spendingQuery);
+			lastSyncResult = { imported: result.imported, updated: result.updated, errors: result.errors, at: new Date() };
 			toast.success(`Sync complet: ${result.imported} noi, ${result.updated} actualizate, ${result.errors} erori`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
@@ -316,6 +319,11 @@
 				{/if}
 			</Button>
 		</div>
+		{#if lastSyncResult}
+			<p class="text-xs text-muted-foreground text-right">
+				{lastSyncResult.at.toLocaleString('ro-RO')} — {lastSyncResult.imported} noi, {lastSyncResult.updated} actualizate, {lastSyncResult.errors} erori
+			</p>
+		{/if}
 	</div>
 
 	<!-- Spending Cards by Client -->

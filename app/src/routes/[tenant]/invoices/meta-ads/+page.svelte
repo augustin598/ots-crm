@@ -32,11 +32,13 @@
 	const loading = $derived(spendingQuery.loading);
 
 	let syncing = $state(false);
+	let lastSyncResult = $state<{ imported: number; updated: number; errors: number; at: Date } | null>(null);
 
 	async function handleSync() {
 		syncing = true;
 		try {
 			const result = await triggerMetaAdsSync().updates(spendingQuery);
+			lastSyncResult = { imported: result.imported, updated: result.updated, errors: result.errors, at: new Date() };
 			toast.success(`Sync complet: ${result.imported} noi, ${result.updated} actualizate, ${result.errors} erori`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
@@ -172,9 +174,16 @@
 			</h1>
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
-		<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
-			{#if syncing}<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...{:else}<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum{/if}
-		</Button>
+		<div class="flex flex-col items-end gap-1">
+			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
+				{#if syncing}<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...{:else}<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum{/if}
+			</Button>
+			{#if lastSyncResult}
+				<p class="text-xs text-muted-foreground">
+					{lastSyncResult.at.toLocaleString('ro-RO')} — {lastSyncResult.imported} noi, {lastSyncResult.updated} actualizate, {lastSyncResult.errors} erori
+				</p>
+			{/if}
+		</div>
 	</div>
 
 	<!-- Token warning -->
