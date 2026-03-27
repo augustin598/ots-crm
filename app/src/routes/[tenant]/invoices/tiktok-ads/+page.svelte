@@ -10,10 +10,13 @@
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { Card } from '$lib/components/ui/card';
+	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -291,6 +294,33 @@
 		}
 		return Array.from(groups.values());
 	});
+
+	// Collapsible + search state
+	let spendSearchQuery = $state('');
+	let expandedAccounts = new SvelteSet<string>();
+
+	function toggleAccount(key: string) {
+		if (expandedAccounts.has(key)) expandedAccounts.delete(key);
+		else expandedAccounts.add(key);
+	}
+
+	const filteredGroupedByClient = $derived(
+		spendSearchQuery.trim()
+			? groupedByClient.filter((g) =>
+				g.clientName.toLowerCase().includes(spendSearchQuery.trim().toLowerCase())
+			)
+			: groupedByClient
+	);
+
+	// Map downloads by advertiser+period for inline display
+	const downloadsByKey = $derived.by(() => {
+		const map = new Map<string, typeof downloads[0]>();
+		for (const dl of downloads) {
+			const key = `${dl.tiktokAdvertiserId}:${dl.periodStart}`;
+			if (!map.has(key) || dl.status === 'downloaded') map.set(key, dl);
+		}
+		return map;
+	});
 </script>
 
 <div class="space-y-6">
@@ -329,7 +359,7 @@
 	<!-- Spending Cards by Client -->
 	{#if loading}
 		<div class="space-y-4">
-			{#each Array(2) as _}
+			{#each Array(2) as _, idx (idx)}
 				<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>
 			{/each}
 		</div>
@@ -338,98 +368,97 @@
 			<p class="text-muted-foreground">Nu sunt date de cheltuieli TikTok Ads sincronizate.</p>
 		</div>
 	{:else}
-		<div class="space-y-6">
-			{#each groupedByClient as group}
-				{#if group.rows.length > 0}
-					{@const totalSpend = group.rows.reduce((s, r) => s + (r.spendCents || 0), 0)}
-					{@const totalClicks = group.rows.reduce((s, r) => s + (r.clicks || 0), 0)}
-					{@const totalConv = group.rows.reduce((s, r) => s + (r.conversions || 0), 0)}
-					{@const curr = group.rows[0]?.currencyCode || 'USD'}
-					<Card class="overflow-hidden">
-						<!-- Client Header -->
-						<div class="border-b bg-muted/30 px-6 py-4">
-							<div class="flex items-center justify-between">
-								<div class="flex items-center gap-3">
-									<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-										<DollarSignIcon class="h-5 w-5 text-primary" />
-									</div>
-									<div>
-										<h3 class="text-lg font-semibold">{group.clientName}</h3>
-										<p class="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'lună' : 'luni'} de date</p>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<!-- Summary KPIs -->
-						<div class="grid grid-cols-3 divide-x border-b">
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total cheltuieli</p>
-								<p class="text-xl font-bold mt-1">{formatAmount(totalSpend, curr)}</p>
-							</div>
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total click-uri</p>
-								<p class="text-xl font-bold mt-1">{totalClicks.toLocaleString('ro-RO')}</p>
-							</div>
-							<div class="px-6 py-4 text-center">
-								<p class="text-xs text-muted-foreground uppercase tracking-wider">Total conversii</p>
-								<p class="text-xl font-bold mt-1">{totalConv.toLocaleString('ro-RO')}</p>
-							</div>
-						</div>
-
-						<!-- Monthly Rows -->
-						<div class="divide-y">
-							{#each group.rows as row, i}
-								{@const prevSpend = group.rows[i + 1]?.spendCents}
-								{@const trend = prevSpend ? (((row.spendCents || 0) - prevSpend) / prevSpend) * 100 : null}
-								<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
-									<div class="flex items-center gap-3 w-48">
-										<CalendarIcon class="h-4 w-4 text-muted-foreground" />
-										<span class="font-medium capitalize">{formatPeriod(row.periodStart)}</span>
-									</div>
-									<div class="flex-1 grid grid-cols-4 gap-4 text-right">
-										<div>
-											<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
-											{#if trend !== null}
-												<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">
-													{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%
-												</span>
-											{/if}
-										</div>
-										<span class="text-sm text-muted-foreground">{formatNumber(row.impressions)} imp.</span>
-										<span class="text-sm">{formatNumber(row.clicks)} clicks</span>
-										<div class="flex items-center justify-end gap-1.5">
-											<TrendingUpIcon class="h-3.5 w-3.5 text-primary" />
-											<span class="text-sm font-medium">{formatNumber(row.conversions)} conv.</span>
-										</div>
-									</div>
-									<div class="flex items-center gap-1 ml-4">
-										{#if row.pdfPath}
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewPDF(row.id)} title="Preview PDF">
-												<Eye class="h-4 w-4" />
-											</Button>
-											<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownloadPDF(row.id, row.periodStart)} title="Download PDF">
-												<Download class="h-4 w-4" />
-											</Button>
-										{/if}
-										<Button variant="ghost" size="icon" class="h-8 w-8 text-blue-500" onclick={() => handleRegenerate(row.id)} disabled={regeneratingId === row.id} title="Regenerează PDF">
-											{#if regeneratingId === row.id}
-												<RefreshCwIcon class="h-4 w-4 animate-spin" />
-											{:else}
-												<RefreshCwIcon class="h-4 w-4" />
-											{/if}
-										</Button>
-										<Button variant="ghost" size="icon" class="h-8 w-8 text-red-500" onclick={() => handleDelete(row.id)} title="Șterge">
-											<Trash2 class="h-4 w-4" />
-										</Button>
-									</div>
-								</div>
-							{/each}
-						</div>
-					</Card>
-				{/if}
-			{/each}
+		<!-- Search -->
+		<div class="relative">
+			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+			<Input bind:value={spendSearchQuery} type="text" placeholder="Caută cont sau client..." class="pl-9" />
 		</div>
+
+		{#if filteredGroupedByClient.length === 0}
+			<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{spendSearchQuery}"</p>
+		{:else}
+			<div class="space-y-4">
+				{#each filteredGroupedByClient as group (group.clientName)}
+					{#if group.rows.length > 0}
+						{@const totalSpend = group.rows.reduce((s, r) => s + (r.spendCents || 0), 0)}
+						{@const totalClicks = group.rows.reduce((s, r) => s + (r.clicks || 0), 0)}
+						{@const totalConv = group.rows.reduce((s, r) => s + (r.conversions || 0), 0)}
+						{@const curr = group.rows[0]?.currencyCode || 'RON'}
+						{@const isExpanded = expandedAccounts.has(group.clientName)}
+						<Collapsible open={isExpanded} onOpenChange={() => toggleAccount(group.clientName)}>
+							<Card class="overflow-hidden">
+								<CollapsibleTrigger class="w-full text-left cursor-pointer">
+									<div class="px-6 py-4">
+										<div class="flex items-center justify-between">
+											<div class="flex items-center gap-3">
+												<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+													<DollarSignIcon class="h-5 w-5 text-primary" />
+												</div>
+												<div>
+													<h3 class="text-lg font-semibold">{group.clientName}</h3>
+													<p class="text-sm text-muted-foreground">{group.rows.length} luni</p>
+												</div>
+											</div>
+											<div class="flex items-center gap-4">
+												<div class="text-right">
+													<p class="text-xs text-muted-foreground">Total cheltuieli</p>
+													<p class="text-lg font-bold">{formatAmount(totalSpend, curr)}</p>
+												</div>
+												<div class="text-right hidden sm:block">
+													<p class="text-xs text-muted-foreground">Click-uri</p>
+													<p class="text-base font-semibold">{formatNumber(totalClicks)}</p>
+												</div>
+												<div class="text-right hidden sm:block">
+													<p class="text-xs text-muted-foreground">Conversii</p>
+													<p class="text-base font-semibold">{formatNumber(totalConv)}</p>
+												</div>
+												<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
+											</div>
+										</div>
+									</div>
+								</CollapsibleTrigger>
+
+								<CollapsibleContent>
+									<div class="border-t divide-y">
+										{#each group.rows as row, i (row.id)}
+											{@const prevSpend = group.rows[i + 1]?.spendCents}
+											{@const trend = prevSpend ? (((row.spendCents || 0) - prevSpend) / prevSpend) * 100 : null}
+											{@const invoice = downloadsByKey.get(`${row.tiktokAdvertiserId}:${row.periodStart}`)}
+											<div class="grid grid-cols-6 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
+												<div class="flex items-center gap-2">
+													<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+													<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
+												</div>
+												<div class="text-right whitespace-nowrap">
+													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+													{#if trend !== null}
+														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+													{/if}
+												</div>
+												<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)} imp.</span>
+												<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
+												<span class="text-sm text-right whitespace-nowrap flex items-center justify-end gap-1"><TrendingUpIcon class="h-3.5 w-3.5 text-primary" />{formatNumber(row.conversions)} conv.</span>
+												<div class="flex justify-end">
+													{#if invoice?.status === 'downloaded' && invoice.pdfPath}
+														<Button variant="outline" size="sm" class="whitespace-nowrap w-full" onclick={() => handleDownloadInvoicePDF(invoice.id, row.periodStart)}>
+															<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
+														</Button>
+													{:else}
+														<Button size="sm" class="whitespace-nowrap w-full bg-orange-100 text-orange-600 border border-orange-300 hover:bg-orange-100 cursor-default" disabled>
+															<CalendarIcon class="mr-1.5 h-3.5 w-3.5" />În așteptare
+														</Button>
+													{/if}
+												</div>
+											</div>
+										{/each}
+									</div>
+								</CollapsibleContent>
+							</Card>
+						</Collapsible>
+					{/if}
+				{/each}
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Facturi PDF TikTok -->

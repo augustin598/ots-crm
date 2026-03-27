@@ -7,9 +7,15 @@
 	import { Download, Eye } from '@lucide/svelte';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	// Date range — implicit: tot anul curent
+	const currentYear = new Date().getFullYear();
+	let since = $state(`${currentYear}-01-01`);
+	let until = $state(`${currentYear}-12-31`);
 
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
@@ -28,15 +34,23 @@
 		return map;
 	});
 
-	// Sort spending by period descending
+	// Sort spending by period descending, filtered by date range
 	const sortedSpending = $derived(
-		[...spending].sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''))
+		[...spending]
+			.filter((r: any) => {
+				if (!r.periodStart) return true;
+				const period = r.periodStart.substring(0, 7);
+				const sinceMonth = since.substring(0, 7);
+				const untilMonth = until.substring(0, 7);
+				return period >= sinceMonth && period <= untilMonth;
+			})
+			.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''))
 	);
 
-	const totalSpend = $derived(spending.reduce((s: number, r: any) => s + (r.spendCents || 0), 0));
-	const totalClicks = $derived(spending.reduce((s: number, r: any) => s + (r.clicks || 0), 0));
-	const totalImpressions = $derived(spending.reduce((s: number, r: any) => s + (r.impressions || 0), 0));
-	const curr = $derived(spending[0]?.currencyCode || 'RON');
+	const totalSpend = $derived(sortedSpending.reduce((s: number, r: any) => s + (r.spendCents || 0), 0));
+	const totalClicks = $derived(sortedSpending.reduce((s: number, r: any) => s + (r.clicks || 0), 0));
+	const totalImpressions = $derived(sortedSpending.reduce((s: number, r: any) => s + (r.impressions || 0), 0));
+	const curr = $derived(sortedSpending[0]?.currencyCode || spending[0]?.currencyCode || 'RON');
 
 	async function handlePreviewInvoicePDF(downloadId: string) {
 		try {
@@ -81,17 +95,20 @@
 </script>
 
 <div class="space-y-6">
-	<div>
-		<h1 class="text-3xl font-bold flex items-center gap-3">
-			<svg class="h-8 w-8" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-			Facturi Meta Ads
-		</h1>
-		<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+	<div class="flex items-start justify-between">
+		<div>
+			<h1 class="text-3xl font-bold flex items-center gap-3">
+				<svg class="h-8 w-8" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+				Facturi Meta Ads
+			</h1>
+			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+		</div>
+		<DateRangePicker bind:since bind:until />
 	</div>
 
 	{#if loading}
 		<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>
-	{:else if spending.length === 0}
+	{:else if sortedSpending.length === 0}
 		<Card class="p-12 text-center">
 			<div class="flex flex-col items-center gap-3">
 				<div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
@@ -135,28 +152,28 @@
 					{@const prevSpend = sortedSpending[i + 1]?.spendCents}
 					{@const trend = prevSpend ? ((row.spendCents - prevSpend) / prevSpend) * 100 : null}
 					{@const invoice = downloadsByKey.get(`${row.metaAdAccountId}:${row.periodStart}`)}
-					<div class="flex items-center px-6 py-4 hover:bg-muted/30 transition-colors">
-						<div class="flex items-center gap-3 w-44">
-							<CalendarIcon class="h-4 w-4 text-muted-foreground" />
-							<span class="font-medium capitalize">{formatPeriod(row.periodStart)}</span>
+					<div class="grid grid-cols-5 gap-2 px-6 py-4 hover:bg-muted/30 transition-colors items-center">
+						<div class="flex items-center gap-2">
+							<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+							<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 						</div>
-						<div class="flex-1 grid grid-cols-3 gap-4 text-right">
-							<div>
-								<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
-								{#if trend !== null}
-									<span class="ml-2 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-								{/if}
-							</div>
-							<span class="text-sm text-muted-foreground">{formatNumber(row.impressions)} imp.</span>
-							<span class="text-sm">{formatNumber(row.clicks)} clicks</span>
+						<div class="text-right whitespace-nowrap">
+							<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+							{#if trend !== null}
+								<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+							{/if}
 						</div>
-						<div class="ml-2 border-l pl-2 w-36 flex justify-end">
+						<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)} imp.</span>
+						<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
+						<div class="flex justify-end">
 							{#if invoice?.pdfPath}
-								<Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs" onclick={() => handleDownloadInvoicePDF(invoice.id, row.periodStart)}>
-									<Download class="h-3.5 w-3.5" />Descarcă factura
+								<Button variant="outline" size="sm" class="whitespace-nowrap w-full" onclick={() => handleDownloadInvoicePDF(invoice.id, row.periodStart)}>
+									<Download class="mr-1.5 h-3.5 w-3.5" />Descarcă factura
 								</Button>
 							{:else}
-								<span class="text-xs text-muted-foreground">-</span>
+								<Button size="sm" class="whitespace-nowrap w-full bg-orange-100 text-orange-600 border border-orange-300 hover:bg-orange-100 cursor-default" disabled>
+									<CalendarIcon class="mr-1.5 h-3.5 w-3.5" />În așteptare
+								</Button>
 							{/if}
 						</div>
 					</div>
