@@ -250,6 +250,10 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 	}
 
 	// Sync monthly spending data into google_ads_spending table
+	let spendingInserted = 0;
+	let spendingUpdated = 0;
+	let spendingErrors = 0;
+
 	for (const mapping of mappedAccounts) {
 		const cleanCustomerId = formatCustomerId(mapping.googleAdsCustomerId);
 		try {
@@ -261,11 +265,12 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 			);
 
 			for (const ms of monthlySpend) {
-				// month is "YYYY-MM", derive periodStart/periodEnd
-				const periodStart = `${ms.month}-01`;
-				const [y, m] = ms.month.split('-').map(Number);
+				// month can be "YYYY-MM" or "YYYY-MM-DD" (Google Ads API returns full date)
+				const monthKey = ms.month.slice(0, 7); // "YYYY-MM"
+				const periodStart = `${monthKey}-01`;
+				const [y, m] = monthKey.split('-').map(Number);
 				const lastDay = new Date(y, m, 0).getDate();
-				const periodEnd = `${ms.month}-${String(lastDay).padStart(2, '0')}`;
+				const periodEnd = `${monthKey}-${String(lastDay).padStart(2, '0')}`;
 				const spendCents = Math.round(ms.spend * 100);
 
 				// Upsert: check if exists
@@ -295,6 +300,7 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 							updatedAt: new Date()
 						})
 						.where(eq(table.googleAdsSpending.id, existing.id));
+					spendingUpdated++;
 				} else {
 					await db.insert(table.googleAdsSpending).values({
 						id: crypto.randomUUID(),
@@ -313,10 +319,11 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 						createdAt: new Date(),
 						updatedAt: new Date()
 					});
+					spendingInserted++;
 				}
 			}
 		} catch (spendErr) {
-			// Non-fatal: spending sync failure shouldn't block invoice sync
+			spendingErrors++;
 			logWarning('google-ads-sync', `Failed to sync spending for ${mapping.accountName}`, {
 				tenantId,
 				metadata: { error: spendErr instanceof Error ? spendErr.message : String(spendErr) }
@@ -324,9 +331,13 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 		}
 	}
 
+	if (spendingInserted > 0 || spendingUpdated > 0 || spendingErrors > 0) {
+		logInfo('google-ads-sync', `Spending sync: ${spendingInserted} inserted, ${spendingUpdated} updated, ${spendingErrors} errors`, { tenantId });
+	}
+
 	// Update integration status
 	await updateLastSyncAt(tenantId);
-	const syncResults = JSON.stringify({ imported, errors, skipped, timestamp: new Date().toISOString() });
+	const syncResults = JSON.stringify({ imported, errors, skipped, spendingInserted, spendingUpdated, spendingErrors, timestamp: new Date().toISOString() });
 	await db
 		.update(table.googleAdsIntegration)
 		.set({ lastSyncResults: syncResults, updatedAt: new Date() })
@@ -334,8 +345,8 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 
 	logInfo('google-ads-sync', `Sync completed for tenant`, {
 		tenantId,
-		metadata: { imported, errors, skipped }
+		metadata: { imported, errors, skipped, spendingInserted, spendingUpdated, spendingErrors }
 	});
 
-	return { imported, errors, skipped };
+	return { imported, errors, skipped, spendingInserted, spendingUpdated, spendingErrors };
 }

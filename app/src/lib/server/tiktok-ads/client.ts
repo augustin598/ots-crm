@@ -230,63 +230,65 @@ export async function listAdvertiserInsights(
 ): Promise<TiktokAdsInsightData[]> {
 	logInfo('tiktok-ads', `Fetching insights for ${advertiserId}`, { metadata: { startDate, endDate } });
 
-	const params = new URLSearchParams({
-		advertiser_id: advertiserId,
-		report_type: 'BASIC',
-		dimensions: JSON.stringify(['stat_time_day']),
-		metrics: JSON.stringify(['spend', 'impressions', 'clicks', 'conversion']),
-		data_level: 'AUCTION_ADVERTISER',
-		start_date: startDate,
-		end_date: endDate,
-		page_size: '1000'
-	});
-
-	const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`, {
-		headers: { 'Access-Token': accessToken }
-	});
-
-	const json = await res.json();
-
-	if (json.code !== 0) {
-		logError('tiktok-ads', `Insights API error for ${advertiserId}`, {
-			metadata: { errorMessage: json.message, errorCode: json.code }
-		});
-		throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
-	}
-
-	// Aggregate daily data into monthly buckets
+	// TikTok API limits stat_time_day to max 30 days per request — split into monthly chunks
+	const chunks = splitIntoMonthlyChunks(startDate, endDate);
 	const monthlyMap = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; start: string; end: string }>();
 
-	for (const row of json.data?.list || []) {
-		const dayStr = row.dimensions?.stat_time_day; // "2026-02-15"
-		if (!dayStr) continue;
+	for (const chunk of chunks) {
+		const params = new URLSearchParams({
+			advertiser_id: advertiserId,
+			report_type: 'BASIC',
+			dimensions: JSON.stringify(['stat_time_day']),
+			metrics: JSON.stringify(['spend', 'impressions', 'clicks', 'conversion']),
+			data_level: 'AUCTION_ADVERTISER',
+			start_date: chunk.start,
+			end_date: chunk.end,
+			page_size: '1000'
+		});
 
-		const monthKey = dayStr.slice(0, 7); // "2026-02"
-		const existing = monthlyMap.get(monthKey);
-		const spend = parseFloat(row.metrics?.spend || '0');
-		const impressions = parseInt(row.metrics?.impressions || '0');
-		const clicks = parseInt(row.metrics?.clicks || '0');
-		const conversions = parseInt(row.metrics?.conversion || '0');
+		const res = await fetch(`${TIKTOK_API_URL}/report/integrated/get/?${params.toString()}`, {
+			headers: { 'Access-Token': accessToken }
+		});
 
-		if (existing) {
-			existing.spend += spend;
-			existing.impressions += impressions;
-			existing.clicks += clicks;
-			existing.conversions += conversions;
-			if (dayStr > existing.end) existing.end = dayStr;
-		} else {
-			// Calculate month boundaries
-			const [y, m] = monthKey.split('-').map(Number);
-			const lastDay = new Date(y, m, 0).getDate();
-			const pad = (n: number) => String(n).padStart(2, '0');
-			monthlyMap.set(monthKey, {
-				spend,
-				impressions,
-				clicks,
-				conversions,
-				start: `${y}-${pad(m)}-01`,
-				end: `${y}-${pad(m)}-${pad(lastDay)}`
+		const json = await res.json();
+
+		if (json.code !== 0) {
+			logError('tiktok-ads', `Insights API error for ${advertiserId}`, {
+				metadata: { errorMessage: json.message, errorCode: json.code, chunk }
 			});
+			throw new Error(`TikTok API error: ${json.message || 'Unknown error'}`);
+		}
+
+		for (const row of json.data?.list || []) {
+			const dayStr = row.dimensions?.stat_time_day; // "2026-02-15"
+			if (!dayStr) continue;
+
+			const monthKey = dayStr.slice(0, 7); // "2026-02"
+			const existing = monthlyMap.get(monthKey);
+			const spend = parseFloat(row.metrics?.spend || '0');
+			const impressions = parseInt(row.metrics?.impressions || '0');
+			const clicks = parseInt(row.metrics?.clicks || '0');
+			const conversions = parseInt(row.metrics?.conversion || '0');
+
+			if (existing) {
+				existing.spend += spend;
+				existing.impressions += impressions;
+				existing.clicks += clicks;
+				existing.conversions += conversions;
+				if (dayStr > existing.end) existing.end = dayStr;
+			} else {
+				const [y, m] = monthKey.split('-').map(Number);
+				const lastDay = new Date(y, m, 0).getDate();
+				const pad = (n: number) => String(n).padStart(2, '0');
+				monthlyMap.set(monthKey, {
+					spend,
+					impressions,
+					clicks,
+					conversions,
+					start: `${y}-${pad(m)}-01`,
+					end: `${y}-${pad(m)}-${pad(lastDay)}`
+				});
+			}
 		}
 	}
 
@@ -306,9 +308,35 @@ export async function listAdvertiserInsights(
 	insights.sort((a, b) => a.dateStart.localeCompare(b.dateStart));
 
 	logInfo('tiktok-ads', `Got ${insights.length} monthly periods for ${advertiserId}`, {
-		metadata: { startDate, endDate }
+		metadata: { startDate, endDate, chunks: chunks.length }
 	});
 	return insights;
+}
+
+/** Split a date range into monthly chunks of max 30 days for TikTok API */
+function splitIntoMonthlyChunks(startDate: string, endDate: string): { start: string; end: string }[] {
+	const chunks: { start: string; end: string }[] = [];
+	const end = new Date(endDate);
+	let cursor = new Date(startDate);
+
+	while (cursor <= end) {
+		const y = cursor.getFullYear();
+		const m = cursor.getMonth();
+		const lastDay = new Date(y, m + 1, 0).getDate();
+		const monthEnd = new Date(y, m, lastDay);
+		const chunkEnd = monthEnd < end ? monthEnd : end;
+
+		const pad = (n: number) => String(n).padStart(2, '0');
+		chunks.push({
+			start: `${y}-${pad(m + 1)}-${pad(cursor.getDate())}`,
+			end: `${chunkEnd.getFullYear()}-${pad(chunkEnd.getMonth() + 1)}-${pad(chunkEnd.getDate())}`
+		});
+
+		// Move to 1st of next month
+		cursor = new Date(y, m + 1, 1);
+	}
+
+	return chunks;
 }
 
 /**
