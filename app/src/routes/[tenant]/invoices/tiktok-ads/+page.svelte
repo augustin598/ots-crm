@@ -16,8 +16,14 @@
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
+
+	// Date range — implicit: tot anul curent
+	const currentYear = new Date().getFullYear();
+	let since = $state(`${currentYear}-01-01`);
+	let until = $state(`${currentYear}-12-31`);
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -281,9 +287,18 @@
 		}
 	}
 
+	// Filter by date range then group by client
+	const dateFilteredSpending = $derived(
+		spending.filter((r: any) => {
+			if (!r.periodStart) return true;
+			const period = r.periodStart.substring(0, 7);
+			return period >= since.substring(0, 7) && period <= until.substring(0, 7);
+		})
+	);
+
 	const groupedByClient = $derived.by(() => {
 		const groups = new Map<string, { clientName: string; rows: typeof spending }>();
-		for (const row of spending) {
+		for (const row of dateFilteredSpending) {
 			const key = row.clientName || 'Neatribuit';
 			const existing = groups.get(key) || { clientName: key, rows: [] };
 			existing.rows.push(row);
@@ -334,6 +349,7 @@
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<DateRangePicker bind:since bind:until />
 			<Button variant="outline" size="sm" onclick={handleRegenerateAll} disabled={regeneratingAll || spending.length === 0}>
 				{#if regeneratingAll}
 					<Download class="mr-2 h-4 w-4 animate-bounce" />Regenerare...

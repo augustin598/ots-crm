@@ -17,8 +17,14 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
+
+	// Date range — implicit: tot anul curent
+	const currentYear = new Date().getFullYear();
+	let since = $state(`${currentYear}-01-01`);
+	let until = $state(`${currentYear}-12-31`);
 
 	function formatMonth(month: string): string {
 		try {
@@ -92,14 +98,27 @@
 		else expandedAccounts.add(customerId);
 	}
 
+	// Filter months by date range, then filter by search
+	const dateFilteredMonthlySpend = $derived(
+		monthlySpend.map((account: any) => ({
+			...account,
+			months: account.months.filter((m: any) => {
+				const month = m.month.substring(0, 7);
+				const sinceMonth = since.substring(0, 7);
+				const untilMonth = until.substring(0, 7);
+				return month >= sinceMonth && month <= untilMonth;
+			})
+		})).filter((account: any) => account.months.length > 0)
+	);
+
 	const filteredMonthlySpend = $derived(
 		spendSearchQuery.trim()
-			? monthlySpend.filter((account: any) =>
+			? dateFilteredMonthlySpend.filter((account: any) =>
 				account.accountName.toLowerCase().includes(spendSearchQuery.trim().toLowerCase()) ||
 				account.googleAdsCustomerId.includes(spendSearchQuery.trim().replace(/-/g, '')) ||
 				(account.clientName || '').toLowerCase().includes(spendSearchQuery.trim().toLowerCase())
 			)
-			: monthlySpend
+			: dateFilteredMonthlySpend
 	);
 
 	let syncing = $state(false);
@@ -359,6 +378,7 @@
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<DateRangePicker bind:since bind:until />
 			<Button variant="outline" size="sm" onclick={() => showBulkImport = !showBulkImport}>
 				<Download class="mr-2 h-4 w-4" />Import Facturi
 			</Button>
