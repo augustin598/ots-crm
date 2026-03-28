@@ -824,7 +824,7 @@
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 												{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
-													<span class="text-xs text-muted-foreground truncate">({row.adAccountName || row.metaAdAccountId})</span>
+													<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{row.adAccountName || row.metaAdAccountId}</span>
 												{/if}
 											</div>
 											{#if isDownloadOnly}
