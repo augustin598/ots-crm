@@ -365,8 +365,16 @@
 	let bulkJson = $state('');
 	let bulkAdAccountId = $state('');
 	let bulkImporting = $state(false);
+	let bulkCurrent = $state(0);
 	let bulkTotal = $state(0);
-	let bulkResult = $state<{ downloaded: number; skipped: number; errors: number; errorDetails?: string[] } | null>(null);
+	let bulkCurrentLabel = $state('');
+	type BulkResult = { label: string; status: string; error: string | null };
+	let bulkResults = $state<BulkResult[]>([]);
+	let bulkDone = $state(false);
+	const bulkProgressPct = $derived(bulkTotal > 0 ? Math.round((bulkCurrent / bulkTotal) * 100) : 0);
+	const bulkDownloaded = $derived(bulkResults.filter(r => r.status === 'downloaded').length);
+	const bulkSkipped = $derived(bulkResults.filter(r => r.status === 'skipped').length);
+	const bulkErrors = $derived(bulkResults.filter(r => r.status === 'error').length);
 
 	// Unique ad accounts from spending + downloads + downloadable accounts for dropdown
 	const adAccountOptions = $derived.by(() => {
@@ -428,25 +436,43 @@
 			return;
 		}
 		bulkImporting = true;
+		bulkDone = false;
+		bulkCurrent = 0;
 		bulkTotal = links.length;
-		bulkResult = null;
-		try {
-			const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links }).updates(downloadsQuery);
-			bulkResult = result;
-			if (result.downloaded > 0 && links.length > 0) {
-				const dates = links.map(l => l.date).filter(Boolean).sort();
-				if (dates.length > 0) {
-					const oldest = new Date(dates[0]!);
-					const oldestStr = `${oldest.getFullYear()}-${String(oldest.getMonth() + 1).padStart(2, '0')}-01`;
-					if (oldestStr < since) since = oldestStr;
+		bulkResults = [];
+		bulkCurrentLabel = '';
+
+		for (const link of links) {
+			const label = link.invoiceId || (link.url.match(/txid=([^&]{0,16})/) || [])[1] || `#${bulkCurrent + 1}`;
+			bulkCurrentLabel = label;
+			try {
+				const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links: [link] }).updates(downloadsQuery);
+				if (result.skipped > 0) {
+					bulkResults = [...bulkResults, { label, status: 'skipped', error: null }];
+				} else if (result.downloaded > 0) {
+					bulkResults = [...bulkResults, { label, status: 'downloaded', error: null }];
+				} else {
+					const err = result.errorDetails?.[0] || 'unknown';
+					bulkResults = [...bulkResults, { label, status: 'error', error: err }];
 				}
+			} catch (e) {
+				bulkResults = [...bulkResults, { label, status: 'error', error: e instanceof Error ? e.message : 'Eroare' }];
 			}
-			bulkJson = '';
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la import');
-		} finally {
-			bulkImporting = false;
+			bulkCurrent++;
 		}
+
+		// Auto-expand date range
+		const dates = links.map(l => l.date).filter(Boolean).sort();
+		if (dates.length > 0 && bulkDownloaded > 0) {
+			const oldest = new Date(dates[0]!);
+			const oldestStr = `${oldest.getFullYear()}-${String(oldest.getMonth() + 1).padStart(2, '0')}-01`;
+			if (oldestStr < since) since = oldestStr;
+		}
+
+		bulkImporting = false;
+		bulkDone = true;
+		bulkCurrentLabel = '';
+		if (bulkDownloaded > 0) bulkJson = '';
 	}
 
 	const fbBillingScript = `// Facebook Billing → Payment Activity — extrage link-uri facturi
@@ -537,45 +563,74 @@
 				<Button variant="outline" size="sm" onclick={copyScript}>Copiază Script Console</Button>
 			</div>
 
-			<!-- Bulk import progress -->
-			{#if bulkImporting}
-				<div class="space-y-2 pt-2 border-t">
-					<div class="flex items-center justify-between text-sm">
-						<span class="font-medium">Se importă {bulkTotal} facturi...</span>
-					</div>
-					<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
-						<div class="h-2 rounded-full bg-primary animate-pulse w-full"></div>
-					</div>
-					<p class="text-xs text-muted-foreground">Se descarcă PDF-urile de pe Facebook și se încarcă în storage. Poate dura câteva minute.</p>
-				</div>
-			{/if}
-
-			<!-- Bulk import results -->
-			{#if bulkResult && !bulkImporting}
-				<div class="space-y-3 pt-2 border-t">
-					<div class="grid grid-cols-3 gap-3">
-						<div class="rounded-lg border bg-green-50 p-3 text-center">
-							<p class="text-2xl font-bold text-green-700">{bulkResult.downloaded}</p>
-							<p class="text-xs text-green-600">Descărcate</p>
-						</div>
-						<div class="rounded-lg border bg-muted/40 p-3 text-center">
-							<p class="text-2xl font-bold text-muted-foreground">{bulkResult.skipped}</p>
-							<p class="text-xs text-muted-foreground">Sărite (duplicate)</p>
-						</div>
-						<div class="rounded-lg border bg-red-50 p-3 text-center">
-							<p class="text-2xl font-bold text-red-700">{bulkResult.errors}</p>
-							<p class="text-xs text-red-600">Erori</p>
-						</div>
-					</div>
-					{#if bulkResult.errorDetails && bulkResult.errorDetails.length > 0}
-						<div class="rounded-md border bg-red-50 p-3 max-h-40 overflow-y-auto">
-							<p class="text-xs font-medium text-red-800 mb-1">Detalii erori:</p>
-							{#each bulkResult.errorDetails as err}
-								<p class="text-xs text-red-700 font-mono">{err}</p>
-							{/each}
+			<!-- Bulk import progress / results -->
+			{#if bulkImporting || bulkDone}
+				<div class="space-y-3 pt-3 border-t">
+					<!-- Progress bar -->
+					{#if bulkImporting}
+						<div class="space-y-2">
+							<div class="flex items-center justify-between text-sm">
+								<span class="font-medium">Progres import</span>
+								<span class="text-muted-foreground">{bulkCurrent} / {bulkTotal}</span>
+							</div>
+							<div class="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+								<div class="h-2.5 rounded-full bg-primary transition-all duration-300" style="width: {bulkProgressPct}%"></div>
+							</div>
+							<p class="text-xs text-muted-foreground truncate">Se descarcă: {bulkCurrentLabel}...</p>
 						</div>
 					{/if}
-					<Button variant="outline" size="sm" onclick={() => bulkResult = null}>Închide</Button>
+
+					<!-- Summary cards -->
+					{#if bulkDone}
+						<div class="grid grid-cols-3 gap-3">
+							<div class="rounded-lg border bg-green-50 p-3 text-center">
+								<p class="text-2xl font-bold text-green-700">{bulkDownloaded}</p>
+								<p class="text-xs text-green-600">Descărcate</p>
+							</div>
+							<div class="rounded-lg border bg-muted/40 p-3 text-center">
+								<p class="text-2xl font-bold text-muted-foreground">{bulkSkipped}</p>
+								<p class="text-xs text-muted-foreground">Sărite</p>
+							</div>
+							<div class="rounded-lg border bg-red-50 p-3 text-center">
+								<p class="text-2xl font-bold text-red-700">{bulkErrors}</p>
+								<p class="text-xs text-red-600">Erori</p>
+							</div>
+						</div>
+					{/if}
+
+					<!-- Results table -->
+					{#if bulkResults.length > 0}
+						<div class="max-h-60 overflow-y-auto rounded-md border">
+							<table class="w-full text-sm">
+								<thead class="sticky top-0 bg-muted/80 backdrop-blur">
+									<tr>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Factură</th>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y">
+									{#each [...bulkResults].reverse() as r}
+										<tr class="hover:bg-muted/30">
+											<td class="px-3 py-2 font-mono text-xs truncate max-w-[250px]">{r.label}</td>
+											<td class="px-3 py-2">
+												{#if r.status === 'downloaded'}
+													<span class="text-green-600">Descărcat</span>
+												{:else if r.status === 'skipped'}
+													<span class="text-muted-foreground">Sărit (duplicat)</span>
+												{:else}
+													<span class="text-red-600">{r.error || 'Eroare'}</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+
+					{#if bulkDone}
+						<Button variant="outline" size="sm" onclick={() => { bulkDone = false; bulkResults = []; }}>Închide</Button>
+					{/if}
 				</div>
 			{/if}
 		</Card>
