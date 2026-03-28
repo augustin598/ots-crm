@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, triggerInvoiceDownload, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Download, Search, Eye, Trash2, XCircle } from '@lucide/svelte';
+	import { Download, Search, Eye, Trash2 } from '@lucide/svelte';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -92,8 +92,6 @@
 	// ---- Invoice Downloads ----
 	const downloadsQuery = getMetaInvoiceDownloads();
 	const downloads = $derived(downloadsQuery.current || []);
-	const downloadsLoading = $derived(downloadsQuery.loading);
-
 	// Filter by date range then group by client
 	const dateFilteredSpending = $derived(
 		spending.filter((r: any) => {
@@ -762,7 +760,7 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
+										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} onkeydown={(e) => e.key === 'Enter' && downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
 											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
@@ -789,7 +787,7 @@
 												{#if downloadedInvoices.length > 0}
 													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={() => togglePeriod(periodKey)}>
 														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-														{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}{#if creditCount > 0 && !showCredits} <span class="text-amber-500">+{creditCount} cr.</span>{/if}
+														{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
 													</button>
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
