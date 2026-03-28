@@ -172,11 +172,6 @@
 
 	let debugPage = $state(1);
 	let debugPageSize = $state(20);
-	const debugTotalPages = $derived(Math.ceil(filteredDebugLogs.length / debugPageSize));
-	const paginatedDebugLogs = $derived(
-		filteredDebugLogs.slice((debugPage - 1) * debugPageSize, debugPage * debugPageSize)
-	);
-
 	let debugResolvedFilter = $state<string>(''); // '', 'resolved', 'unresolved'
 	let selectedDebugLogIds = $state<Set<string>>(new Set());
 	let expandedDebugLogId = $state<string | null>(null);

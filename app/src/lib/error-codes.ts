@@ -59,6 +59,13 @@ export const ERROR_CODES = {
 		internalMessage: 'Export attempted with empty dataset',
 		retryable: false
 	},
+	VALIDATION_INVALID_EXPORT_FORMAT: {
+		code: 'VALIDATION_INVALID_EXPORT_FORMAT',
+		severity: 'warning',
+		userMessage: 'Formatul de export selectat nu este valid.',
+		internalMessage: 'Invalid export format specified (valid: csv, pdf, xlsx)',
+		retryable: false
+	},
 	VALIDATION_FILTER_EMPTY: {
 		code: 'VALIDATION_FILTER_EMPTY',
 		severity: 'warning',
@@ -71,6 +78,13 @@ export const ERROR_CODES = {
 		severity: 'info',
 		userMessage: 'Introdu cel putin 2 caractere pentru cautare.',
 		internalMessage: 'Search query too short (min 2 chars)',
+		retryable: false
+	},
+	VALIDATION_SEARCH_TOO_LONG: {
+		code: 'VALIDATION_SEARCH_TOO_LONG',
+		severity: 'warning',
+		userMessage: 'Textul de cautare este prea lung (maxim 200 caractere).',
+		internalMessage: 'Search query exceeds 200 characters limit',
 		retryable: false
 	},
 	VALIDATION_REQUIRED_FIELD: {
