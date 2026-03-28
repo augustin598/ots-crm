@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { getTiktokAdsSpendingList, deleteTiktokAdsSpending, triggerTiktokAdsSync, regenerateTiktokSpendingPdf, getTiktokInvoiceDownloads, triggerTiktokInvoiceDownload, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokAdsSpendingList, deleteTiktokAdsSpending, triggerTiktokAdsSync, regenerateTiktokSpendingPdf, getTiktokInvoiceDownloads, triggerTiktokInvoiceDownload, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
+	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -30,6 +31,7 @@
 
 	// Session status check
 	const connectionStatusQuery = getTiktokAdsConnectionStatus();
+	const tiktokIntegrationId = $derived((connectionStatusQuery.current || [])[0]?.id || '');
 	const sessionWarning = $derived.by(() => {
 		const connections = connectionStatusQuery.current || [];
 		for (const conn of connections) {
@@ -349,6 +351,126 @@
 		}
 		return map;
 	});
+
+	// ---- Bulk Import (JSON) ----
+	let showBulkImport = $state(false);
+	let bulkJson = $state('');
+	let bulkImporting = $state(false);
+	let bulkCurrent = $state(0);
+	let bulkTotal = $state(0);
+	let bulkCurrentLabel = $state('');
+	type BulkResult = { label: string; status: string; error: string | null };
+	let bulkResults = $state<BulkResult[]>([]);
+	let bulkDone = $state(false);
+	const bulkProgressPct = $derived(bulkTotal > 0 ? Math.round((bulkCurrent / bulkTotal) * 100) : 0);
+	const bulkDownloaded = $derived(bulkResults.filter(r => r.status === 'downloaded').length);
+	const bulkSkipped = $derived(bulkResults.filter(r => r.status === 'skipped').length);
+	const bulkErrors = $derived(bulkResults.filter(r => r.status === 'error').length);
+
+	async function handleBulkImport() {
+		if (!bulkJson.trim()) {
+			toast.error('Inserează JSON-ul cu facturi');
+			return;
+		}
+		let links: { invoiceId: string; invoiceSerial?: string; advId?: string; accountName?: string; amount?: string; currency?: string; period?: string }[];
+		try {
+			const parsed = JSON.parse(bulkJson.trim());
+			if (Array.isArray(parsed)) {
+				links = parsed;
+			} else {
+				toast.error('JSON-ul trebuie să fie un array');
+				return;
+			}
+		} catch {
+			toast.error('JSON invalid');
+			return;
+		}
+
+		if (links.length === 0) {
+			toast.error('Array-ul de facturi este gol');
+			return;
+		}
+		bulkImporting = true;
+		bulkDone = false;
+		bulkCurrent = 0;
+		bulkTotal = links.length;
+		bulkResults = [];
+		bulkCurrentLabel = '';
+
+		for (const link of links) {
+			const label = link.invoiceSerial || link.invoiceId.substring(0, 16);
+			bulkCurrentLabel = label;
+			try {
+				const result = await bulkDownloadTiktokInvoices({ links: [link] }).updates(downloadsQuery);
+				if (result.skipped > 0) {
+					bulkResults = [...bulkResults, { label, status: 'skipped', error: null }];
+				} else if (result.downloaded > 0) {
+					bulkResults = [...bulkResults, { label, status: 'downloaded', error: null }];
+				} else {
+					const err = result.errorDetails?.[0] || 'unknown';
+					bulkResults = [...bulkResults, { label, status: 'error', error: err }];
+				}
+			} catch (e) {
+				bulkResults = [...bulkResults, { label, status: 'error', error: e instanceof Error ? e.message : 'Eroare' }];
+			}
+			bulkCurrent++;
+		}
+
+		bulkImporting = false;
+		bulkDone = true;
+		bulkCurrentLabel = '';
+		if (bulkDownloaded > 0) bulkJson = '';
+	}
+
+	const ttBillingScript = `// TikTok Business Center → Billing → Invoices — extrage facturi
+// Tastează "allow pasting" în Console înainte de paste!
+(function(){
+  var invoices = [];
+  // Găsim rândurile din tabelul de facturi
+  document.querySelectorAll('tr[class*="Row"], div[class*="invoice-item"]').forEach(function(row) {
+    var text = row.innerText;
+    // Caută invoice serial (ex: BDUK20261596169)
+    var serialMatch = text.match(/([A-Z]{2,6}\\d{10,})/);
+    // Caută amount (ex: 1,234.56)
+    var amountMatch = text.match(/(\\d[\\d,]*\\.\\d{2})/);
+    // Caută currency (RON, USD, EUR)
+    var currencyMatch = text.match(/(RON|USD|EUR|GBP)/);
+    // Caută date (ex: 2025-01, Jan 2025)
+    var dateMatch = text.match(/(\\d{4}-\\d{2})/);
+    // Caută invoice ID din atribute sau link-uri
+    var invoiceId = row.getAttribute('data-invoice-id') || '';
+    if (!invoiceId) {
+      var link = row.querySelector('a[href*="invoice"]');
+      if (link) {
+        var idMatch = link.href.match(/invoice_id=([^&]+)/);
+        if (idMatch) invoiceId = idMatch[1];
+      }
+    }
+    if (serialMatch || invoiceId) {
+      invoices.push({
+        invoiceId: invoiceId || serialMatch[1],
+        invoiceSerial: serialMatch ? serialMatch[1] : undefined,
+        amount: amountMatch ? amountMatch[1].replace(/,/g, '') : undefined,
+        currency: currencyMatch ? currencyMatch[1] : 'RON',
+        period: dateMatch ? dateMatch[1] : undefined
+      });
+    }
+  });
+  if (invoices.length === 0) {
+    alert('Nu am gasit facturi pe aceasta pagina. Navigheaza la Billing > Invoices.');
+    return;
+  }
+  var json = JSON.stringify(invoices, null, 2);
+  copy(json);
+  console.log(json);
+  console.log('Copiat ' + invoices.length + ' facturi in clipboard!');
+  alert('Copiat ' + invoices.length + ' facturi TikTok in clipboard!\\nLipeste JSON-ul in CRM → Import Facturi.');
+})();`;
+
+	function copyScript() {
+		navigator.clipboard.writeText(ttBillingScript);
+		toast.success('Script copiat în clipboard! Rulează-l în Console pe pagina TikTok Billing.');
+	}
 </script>
 
 <div class="space-y-6">
@@ -361,8 +483,11 @@
 			</h1>
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
-		<div class="flex items-center gap-2">
+		<div class="flex items-center gap-2 flex-wrap">
 			<DateRangePicker bind:since bind:until />
+			<Button variant="outline" size="sm" onclick={() => showBulkImport = !showBulkImport}>
+				<Download class="mr-2 h-4 w-4" />Import Facturi
+			</Button>
 			<Button variant="outline" size="sm" onclick={handleRegenerateAll} disabled={regeneratingAll || spending.length === 0}>
 				{#if regeneratingAll}
 					<Download class="mr-2 h-4 w-4 animate-bounce" />Regenerare...
@@ -377,6 +502,9 @@
 					<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum
 				{/if}
 			</Button>
+			{#if tiktokIntegrationId}
+				<ScraperPanel platform="tiktok" integrationId={tiktokIntegrationId} />
+			{/if}
 		</div>
 		{#if lastSyncResult}
 			<p class="text-xs text-muted-foreground text-right">
@@ -384,6 +512,96 @@
 			</p>
 		{/if}
 	</div>
+
+	<!-- Bulk Import Panel -->
+	{#if showBulkImport}
+		<Card class="p-4 space-y-3">
+			<p class="text-sm font-medium">Import facturi din TikTok Billing</p>
+			<div class="text-xs text-muted-foreground space-y-1">
+				<p>1. Deschide <a href="https://business.tiktok.com" target="_blank" class="underline text-blue-600">TikTok Business Center</a> → Billing → Invoices</p>
+				<p>2. Rulează scriptul din Console sau copiază manual datele facturilor, apoi lipește JSON-ul aici:</p>
+			</div>
+			<textarea bind:value={bulkJson} placeholder={'[{"invoiceId":"123456","invoiceSerial":"BDUK20261596169","amount":"1234.56","currency":"RON","period":"2026-01"}]'} class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
+			<div class="flex items-center gap-2">
+				<Button size="sm" onclick={handleBulkImport} disabled={bulkImporting}>
+					{#if bulkImporting}
+						<Download class="mr-2 h-4 w-4 animate-spin" />Import...
+					{:else}
+						<Download class="mr-2 h-4 w-4" />Importă Toate
+					{/if}
+				</Button>
+				<Button variant="outline" size="sm" onclick={copyScript}>Copiază Script Console</Button>
+			</div>
+
+			<!-- Bulk import progress / results -->
+			{#if bulkImporting || bulkDone}
+				<div class="space-y-3 pt-3 border-t">
+					{#if bulkImporting}
+						<div class="space-y-2">
+							<div class="flex items-center justify-between text-sm">
+								<span class="font-medium">Progres import</span>
+								<span class="text-muted-foreground">{bulkCurrent} / {bulkTotal}</span>
+							</div>
+							<div class="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+								<div class="h-2.5 rounded-full bg-primary transition-all duration-300" style="width: {bulkProgressPct}%"></div>
+							</div>
+							<p class="text-xs text-muted-foreground truncate">Se descarcă: {bulkCurrentLabel}...</p>
+						</div>
+					{/if}
+
+					{#if bulkDone}
+						<div class="grid grid-cols-3 gap-3">
+							<div class="rounded-lg border bg-green-50 p-3 text-center">
+								<p class="text-2xl font-bold text-green-700">{bulkDownloaded}</p>
+								<p class="text-xs text-green-600">Descărcate</p>
+							</div>
+							<div class="rounded-lg border bg-muted/40 p-3 text-center">
+								<p class="text-2xl font-bold text-muted-foreground">{bulkSkipped}</p>
+								<p class="text-xs text-muted-foreground">Sărite</p>
+							</div>
+							<div class="rounded-lg border bg-red-50 p-3 text-center">
+								<p class="text-2xl font-bold text-red-700">{bulkErrors}</p>
+								<p class="text-xs text-red-600">Erori</p>
+							</div>
+						</div>
+					{/if}
+
+					{#if bulkResults.length > 0}
+						<div class="max-h-60 overflow-y-auto rounded-md border">
+							<table class="w-full text-sm">
+								<thead class="sticky top-0 bg-muted/80 backdrop-blur">
+									<tr>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Factură</th>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y">
+									{#each [...bulkResults].reverse() as r}
+										<tr class="hover:bg-muted/30">
+											<td class="px-3 py-2 font-mono text-xs truncate max-w-[250px]">{r.label}</td>
+											<td class="px-3 py-2">
+												{#if r.status === 'downloaded'}
+													<span class="text-green-600">Descărcat</span>
+												{:else if r.status === 'skipped'}
+													<span class="text-muted-foreground">Sărit</span>
+												{:else}
+													<span class="text-red-600">{r.error || 'Eroare'}</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+
+					{#if bulkDone}
+						<Button variant="outline" size="sm" onclick={() => { bulkDone = false; bulkResults = []; }}>Închide</Button>
+					{/if}
+				</div>
+			{/if}
+		</Card>
+	{/if}
 
 	<!-- Session warning -->
 	{#if sessionWarning}

@@ -800,3 +800,216 @@ export const deleteTiktokInvoiceDownload = command(
 		return { success: true };
 	}
 );
+
+// ---- Bulk Import (JSON) ----
+
+export const bulkDownloadTiktokInvoices = command(
+	v.object({
+		links: v.array(
+			v.object({
+				invoiceId: v.string(),
+				invoiceSerial: v.optional(v.string()),
+				advId: v.optional(v.string()),
+				accountName: v.optional(v.string()),
+				amount: v.optional(v.string()),
+				currency: v.optional(v.string()),
+				period: v.optional(v.string())
+			})
+		)
+	}),
+	async ({ links }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Find active integration with TikTok session
+		const [integration] = await db
+			.select()
+			.from(table.tiktokAdsIntegration)
+			.where(
+				and(
+					eq(table.tiktokAdsIntegration.tenantId, tenantId),
+					eq(table.tiktokAdsIntegration.isActive, true),
+					eq(table.tiktokAdsIntegration.ttSessionStatus, 'active')
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw error(400, 'Nu există integrare TikTok cu sesiune activă');
+		}
+		if (!integration.orgId || !integration.paymentAccountId) {
+			throw error(400, 'Integrarea nu are org_id sau payment_account_id configurate');
+		}
+
+		const cookies = await getDecryptedTtCookies(integration.id, tenantId);
+		if (!cookies) {
+			throw error(400, 'Sesiune TikTok lipsă — setează cookies din Settings');
+		}
+
+		const context = {
+			bc_id: integration.orgId,
+			pa_id: integration.paymentAccountId,
+			platform: 2
+		};
+
+		// Build advertiser → client mapping
+		const accounts = await db
+			.select({
+				tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
+				accountName: table.tiktokAdsAccount.accountName,
+				clientId: table.tiktokAdsAccount.clientId
+			})
+			.from(table.tiktokAdsAccount)
+			.where(
+				and(
+					eq(table.tiktokAdsAccount.integrationId, integration.id),
+					eq(table.tiktokAdsAccount.isActive, true)
+				)
+			);
+
+		const advToClient = new Map<string, { clientId: string | null; accountName: string | null }>();
+		for (const acc of accounts) {
+			advToClient.set(acc.tiktokAdvertiserId, { clientId: acc.clientId, accountName: acc.accountName });
+		}
+
+		let downloaded = 0;
+		let skipped = 0;
+		let errors = 0;
+		const errorDetails: string[] = [];
+
+		for (const link of links) {
+			// Check if already exists
+			const [existing] = await db
+				.select({ id: table.tiktokInvoiceDownload.id, status: table.tiktokInvoiceDownload.status })
+				.from(table.tiktokInvoiceDownload)
+				.where(
+					and(
+						eq(table.tiktokInvoiceDownload.tenantId, tenantId),
+						eq(table.tiktokInvoiceDownload.tiktokInvoiceId, link.invoiceId)
+					)
+				)
+				.limit(1);
+
+			if (existing && existing.status === 'downloaded') {
+				skipped++;
+				continue;
+			}
+
+			// Parse period from link or default to current month
+			let periodStart = '';
+			let periodEnd = '';
+			if (link.period) {
+				const [y, m] = link.period.split('-').map(Number);
+				const monthStr = String(m).padStart(2, '0');
+				periodStart = `${y}-${monthStr}-01`;
+				const lastDay = new Date(y, m, 0).getDate();
+				periodEnd = `${y}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+			} else {
+				const now = new Date();
+				const y = now.getFullYear();
+				const m = now.getMonth() + 1;
+				const monthStr = String(m).padStart(2, '0');
+				periodStart = `${y}-${monthStr}-01`;
+				const lastDay = new Date(y, m, 0).getDate();
+				periodEnd = `${y}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+			}
+
+			// Resolve client mapping
+			let clientId: string | null = null;
+			let accountName = link.accountName || null;
+			const advId = link.advId || '';
+			if (advId && advToClient.has(advId)) {
+				const mapping = advToClient.get(advId)!;
+				clientId = mapping.clientId;
+				if (mapping.accountName) accountName = mapping.accountName;
+			}
+
+			const amountCents = link.amount ? Math.round(parseFloat(link.amount) * 100) : null;
+
+			// Create or reuse DB record
+			let recordId: string;
+			if (existing) {
+				recordId = existing.id;
+				await db
+					.update(table.tiktokInvoiceDownload)
+					.set({ status: 'pending', errorMessage: null, updatedAt: new Date() })
+					.where(eq(table.tiktokInvoiceDownload.id, existing.id));
+			} else {
+				const { encodeBase32LowerCase } = await import('@oslojs/encoding');
+				recordId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+				await db.insert(table.tiktokInvoiceDownload).values({
+					id: recordId,
+					tenantId,
+					integrationId: integration.id,
+					clientId,
+					tiktokAdvertiserId: advId,
+					adAccountName: accountName,
+					tiktokInvoiceId: link.invoiceId,
+					invoiceNumber: link.invoiceSerial || null,
+					amountCents,
+					currencyCode: link.currency || 'RON',
+					periodStart,
+					periodEnd,
+					status: 'pending',
+					createdAt: new Date(),
+					updatedAt: new Date()
+				});
+			}
+
+			// Download via 3-step async
+			try {
+				const result = await downloadInvoice(link.invoiceId, cookies, context);
+				if (result.success && result.pdfBuffer) {
+					const [year, month] = periodStart.split('-').map(Number);
+					const monthStr = String(month).padStart(2, '0');
+					const upload = await uploadBuffer(
+						tenantId,
+						result.pdfBuffer,
+						`tiktok-invoice-${link.invoiceId}_${year}-${monthStr}.pdf`,
+						'application/pdf',
+						{ type: 'tiktok-invoice', invoiceId: link.invoiceId, period: periodStart }
+					);
+
+					await db
+						.update(table.tiktokInvoiceDownload)
+						.set({
+							pdfPath: upload.path,
+							status: 'downloaded',
+							downloadedAt: new Date(),
+							errorMessage: null,
+							updatedAt: new Date()
+						})
+						.where(eq(table.tiktokInvoiceDownload.id, recordId));
+					downloaded++;
+				} else {
+					await db
+						.update(table.tiktokInvoiceDownload)
+						.set({ status: 'error', errorMessage: result.error || 'Download eșuat', updatedAt: new Date() })
+						.where(eq(table.tiktokInvoiceDownload.id, recordId));
+					errors++;
+					errorDetails.push(`${link.invoiceId}: ${result.error}`);
+				}
+			} catch (e) {
+				const errMsg = e instanceof Error ? e.message : String(e);
+				await db
+					.update(table.tiktokInvoiceDownload)
+					.set({ status: 'error', errorMessage: errMsg, updatedAt: new Date() })
+					.where(eq(table.tiktokInvoiceDownload.id, recordId));
+				errors++;
+				errorDetails.push(`${link.invoiceId}: ${errMsg}`);
+			}
+
+			// Rate limiting
+			await new Promise(resolve => setTimeout(resolve, 2000));
+		}
+
+		return { downloaded, skipped, errors, errorDetails };
+	}
+);
