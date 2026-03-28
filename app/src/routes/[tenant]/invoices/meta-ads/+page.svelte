@@ -740,9 +740,10 @@
 
 							<CollapsibleContent>
 								<!-- Column headers -->
-								<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
+								<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
 									<span>Perioadă</span>
 									<span class="text-right">Cheltuieli</span>
+									<span class="text-right"></span>
 									<span class="text-right hidden sm:block">Impresii</span>
 									<span class="text-right hidden sm:block">Click-uri</span>
 									<span class="text-right">Facturi</span>
@@ -761,7 +762,7 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
+										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
 											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
@@ -771,15 +772,16 @@
 											</div>
 											{#if isDownloadOnly}
 												<span></span>
+												<span></span>
 												<span class="hidden sm:block"></span>
 												<span class="hidden sm:block"></span>
 											{:else}
-												<div class="text-right whitespace-nowrap">
-													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+												<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(row.spendCents, row.currencyCode)}</span>
+												<span class="text-right whitespace-nowrap">
 													{#if trend !== null}
-														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+														<span class="text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
 													{/if}
-												</div>
+												</span>
 												<span class="text-sm text-muted-foreground text-right whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
 												<span class="text-sm text-right whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
 											{/if}
