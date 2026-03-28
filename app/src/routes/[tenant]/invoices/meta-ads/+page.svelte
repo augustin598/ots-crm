@@ -787,11 +787,13 @@
 											{/if}
 											<div class="text-right">
 												{#if downloadedInvoices.length > 0}
-													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
-														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-														{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
-													</button>
-													{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500">+{creditCount} cr.</span>{/if}
+													<div class="flex items-center gap-1.5 justify-end flex-wrap">
+														<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
+															<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
+															{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
+														</button>
+														{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500 whitespace-nowrap">+{creditCount} cr.</span>{/if}
+													</div>
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
