@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getGoogleAdsInvoices, getGoogleAdsMonthlySpend, deleteGoogleAdsInvoice, triggerGoogleAdsSync, downloadGoogleInvoiceFromUrl, bulkDownloadGoogleInvoices } from '$lib/remotes/google-ads-invoices.remote';
+	import { getGoogleAdsInvoices, getGoogleAdsMonthlySpend, deleteGoogleAdsInvoice, triggerGoogleAdsSync, downloadGoogleInvoiceFromUrl, bulkDownloadGoogleInvoices, getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -75,6 +75,17 @@
 	}
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	// Session status check
+	const connectionStatusQuery = getGoogleAdsConnectionStatus();
+	const sessionWarning = $derived.by(() => {
+		const status = connectionStatusQuery.current;
+		if (!status || !status.connected) return null;
+		if (status.googleSessionStatus !== 'active') {
+			return 'Sesiunea Google Ads nu este activă — facturile PDF nu pot fi descărcate. Setează cookies din Settings.';
+		}
+		return null;
+	});
 
 	const invoicesQuery = getGoogleAdsInvoices();
 	const invoices = $derived(invoicesQuery.current || []);
@@ -402,6 +413,16 @@
 			</p>
 		{/if}
 	</div>
+
+	<!-- Session warning -->
+	{#if sessionWarning}
+		<div class="rounded-md p-4 bg-red-50 border border-red-200">
+			<p class="text-sm text-red-800">
+				{sessionWarning}
+				<a href="/{tenantSlug}/settings/google-ads" class="underline font-medium ml-1">Settings → Google Ads</a>
+			</p>
+		</div>
+	{/if}
 
 	<!-- Bulk Import Panel -->
 	{#if showBulkImport}

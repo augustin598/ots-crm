@@ -64,10 +64,12 @@
 	{#if availableColors.length > 0}
 		<Popover.Root bind:open>
 			<Popover.Trigger>
-				<Button variant="outline" size="sm" type="button" class="h-6 gap-1 text-muted-foreground px-2">
-					<TagIcon class="h-3 w-3" />
-					<span class="text-[11px]">+</span>
-				</Button>
+				{#snippet child({ props })}
+					<Button {...props} variant="outline" size="sm" type="button" class="h-6 gap-1 text-muted-foreground px-2">
+						<TagIcon class="h-3 w-3" />
+						<span class="text-[11px]">+</span>
+					</Button>
+				{/snippet}
 			</Popover.Trigger>
 			<Popover.Content class="w-40 p-1.5" align="start">
 				<div class="space-y-0.5">

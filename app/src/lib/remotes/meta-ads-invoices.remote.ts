@@ -3,13 +3,13 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { getMetaAdsConnections, disconnectMetaAds, getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listBusinessAdAccounts } from '$lib/server/meta-ads/client';
 import { saveFbSessionCookies, clearFbSession, getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
 import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
 import { generateSpendingReportPdf } from '$lib/server/meta-ads/spending-report-pdf';
-import { downloadAllReceiptsForMonth, downloadReceipt } from '$lib/server/meta-ads/invoice-downloader';
+import { downloadAllReceiptsForMonth, downloadReceipt, downloadReceiptFromUrl, fetchBillingTransactions } from '$lib/server/meta-ads/invoice-downloader';
 import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
 
@@ -651,6 +651,8 @@ export const getMetaInvoiceDownloads = query(async () => {
 			periodStart: table.metaInvoiceDownload.periodStart,
 			periodEnd: table.metaInvoiceDownload.periodEnd,
 			pdfPath: table.metaInvoiceDownload.pdfPath,
+			txid: table.metaInvoiceDownload.txid,
+			invoiceNumber: table.metaInvoiceDownload.invoiceNumber,
 			status: table.metaInvoiceDownload.status,
 			downloadedAt: table.metaInvoiceDownload.downloadedAt,
 			errorMessage: table.metaInvoiceDownload.errorMessage,
@@ -664,6 +666,220 @@ export const getMetaInvoiceDownloads = query(async () => {
 
 	return rows;
 });
+
+/** Get all ad accounts available for invoice download (with client mapping) */
+export const getAccountsForInvoiceDownload = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	if (event.locals.isClientUser) return [];
+
+	const tenantId = event.locals.tenant.id;
+
+	const accounts = await db
+		.select({
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			accountName: table.metaAdsAccount.accountName,
+			clientId: table.metaAdsAccount.clientId,
+			clientName: table.client.name,
+			integrationId: table.metaAdsAccount.integrationId,
+			bmName: table.metaAdsIntegration.businessName,
+			fbSessionStatus: table.metaAdsIntegration.fbSessionStatus
+		})
+		.from(table.metaAdsAccount)
+		.leftJoin(table.client, eq(table.metaAdsAccount.clientId, table.client.id))
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
+		.where(
+			and(
+				eq(table.metaAdsAccount.tenantId, tenantId),
+				eq(table.metaAdsAccount.isActive, true)
+			)
+		);
+
+	// Only return accounts that have a client AND active session
+	return accounts.filter(a => a.clientId && a.fbSessionStatus === 'active');
+});
+
+/** Download invoice for a single ad account + month (used by per-account progress dialog) */
+export const downloadInvoiceForAccount = command(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		year: v.pipe(v.number(), v.minValue(2020), v.maxValue(2030)),
+		month: v.pipe(v.number(), v.minValue(1), v.maxValue(12))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		const monthStr = String(data.month).padStart(2, '0');
+		const periodStart = `${data.year}-${monthStr}-01`;
+		const lastDay = new Date(data.year, data.month, 0).getDate();
+		const periodEnd = `${data.year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+
+		// Find account + integration
+		const [account] = await db
+			.select({
+				id: table.metaAdsAccount.id,
+				integrationId: table.metaAdsAccount.integrationId,
+				accountName: table.metaAdsAccount.accountName,
+				clientId: table.metaAdsAccount.clientId
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					eq(table.metaAdsAccount.metaAdAccountId, data.adAccountId)
+				)
+			)
+			.limit(1);
+
+		if (!account || !account.clientId) {
+			return { status: 'skip', httpCode: null, invoiceId: null, error: 'no_client' };
+		}
+
+		const [integration] = await db
+			.select()
+			.from(table.metaAdsIntegration)
+			.where(eq(table.metaAdsIntegration.id, account.integrationId))
+			.limit(1);
+
+		if (!integration || integration.fbSessionStatus !== 'active') {
+			return { status: 'error', httpCode: null, invoiceId: null, error: 'session_expired' };
+		}
+
+		const cookies = await getDecryptedFbCookies(integration.id, tenantId);
+		if (!cookies) {
+			return { status: 'error', httpCode: null, invoiceId: null, error: 'no_cookies' };
+		}
+
+		// Check dedup
+		const [existing] = await db
+			.select({ id: table.metaInvoiceDownload.id, status: table.metaInvoiceDownload.status })
+			.from(table.metaInvoiceDownload)
+			.where(
+				and(
+					eq(table.metaInvoiceDownload.tenantId, tenantId),
+					eq(table.metaInvoiceDownload.metaAdAccountId, data.adAccountId),
+					eq(table.metaInvoiceDownload.periodStart, periodStart)
+				)
+			)
+			.limit(1);
+
+		if (existing && existing.status === 'downloaded') {
+			return { status: 'skip', httpCode: 200, invoiceId: null, error: null };
+		}
+
+		// Try invoices_generator first
+		const result = await downloadReceipt({ adAccountId: data.adAccountId, year: data.year, month: data.month, cookies });
+
+		if (result.success && result.pdfBuffer) {
+			const upload = await uploadBuffer(
+				tenantId,
+				result.pdfBuffer,
+				`meta-invoice-${data.adAccountId}_${data.year}-${monthStr}.pdf`,
+				'application/pdf',
+				{ type: 'meta-invoice', adAccountId: data.adAccountId, period: periodStart }
+			);
+
+			if (existing) {
+				await db.update(table.metaInvoiceDownload)
+					.set({ pdfPath: upload.path, status: 'downloaded', downloadedAt: new Date(), errorMessage: null, updatedAt: new Date() })
+					.where(eq(table.metaInvoiceDownload.id, existing.id));
+			} else {
+				await db.insert(table.metaInvoiceDownload).values({
+					id: crypto.randomUUID(),
+					tenantId,
+					integrationId: integration.id,
+					clientId: account.clientId,
+					metaAdAccountId: data.adAccountId,
+					adAccountName: account.accountName,
+					bmName: integration.businessName,
+					periodStart,
+					periodEnd,
+					pdfPath: upload.path,
+					status: 'downloaded',
+					downloadedAt: new Date(),
+					createdAt: new Date(),
+					updatedAt: new Date()
+				});
+			}
+			return { status: 'downloaded', httpCode: 200, invoiceId: null, error: null };
+		}
+
+		// No invoice from invoices_generator — try billing_transaction fallback
+		if (result.error === 'no_invoice') {
+			// Clean stale errors
+			if (existing && existing.status === 'error') {
+				await db.delete(table.metaInvoiceDownload).where(eq(table.metaInvoiceDownload.id, existing.id));
+			}
+
+			// Try Graph API to find individual billing transactions
+			const authResult = await getAuthenticatedToken(integration.id);
+			const transactions = await fetchBillingTransactions(
+				data.adAccountId, data.year, data.month, cookies, authResult?.accessToken || null
+			);
+
+			if (transactions.length > 0) {
+				let txDownloaded = 0;
+				for (const tx of transactions) {
+					// Check txid dedup
+					if (tx.txid) {
+						const [existingTx] = await db
+							.select({ id: table.metaInvoiceDownload.id })
+							.from(table.metaInvoiceDownload)
+							.where(and(eq(table.metaInvoiceDownload.tenantId, tenantId), eq(table.metaInvoiceDownload.txid, tx.txid)))
+							.limit(1);
+						if (existingTx) continue;
+					}
+
+					const txResult = await downloadReceiptFromUrl(tx.url, cookies);
+					if (txResult.success && txResult.pdfBuffer) {
+						const upload = await uploadBuffer(
+							tenantId,
+							txResult.pdfBuffer,
+							`meta-invoice-${data.adAccountId}_${tx.txid || periodStart}.pdf`,
+							'application/pdf',
+							{ type: 'meta-invoice', adAccountId: data.adAccountId, txid: tx.txid || '' }
+						);
+						await db.insert(table.metaInvoiceDownload).values({
+							id: crypto.randomUUID(),
+							tenantId,
+							integrationId: integration.id,
+							clientId: account.clientId,
+							metaAdAccountId: data.adAccountId,
+							adAccountName: account.accountName,
+							bmName: integration.businessName,
+							periodStart,
+							periodEnd,
+							txid: tx.txid || null,
+							pdfPath: upload.path,
+							status: 'downloaded',
+							downloadedAt: new Date(),
+							createdAt: new Date(),
+							updatedAt: new Date()
+						});
+						txDownloaded++;
+					}
+					await new Promise(r => setTimeout(r, 1000));
+				}
+				if (txDownloaded > 0) {
+					return { status: 'downloaded', httpCode: 200, invoiceId: null, error: null, txCount: txDownloaded };
+				}
+			}
+
+			return { status: 'no_invoice', httpCode: 204, invoiceId: null, error: null };
+		}
+
+		return { status: 'error', httpCode: null, invoiceId: null, error: result.error || 'unknown' };
+	}
+);
 
 /** Trigger invoice download for a specific month */
 export const triggerInvoiceDownload = command(
@@ -873,5 +1089,280 @@ export const deleteMetaAdsSpending = command(
 			.where(eq(table.metaAdsSpending.id, row.id));
 
 		return { success: true };
+	}
+);
+
+// ---- Bulk Invoice Import (billing_transaction URLs) ----
+
+/** Download a single Meta Ads invoice from a billing_transaction URL */
+export const downloadMetaInvoiceFromUrl = command(
+	v.object({
+		pdfUrl: v.pipe(v.string(), v.minLength(1)),
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		invoiceId: v.optional(v.string()),
+		period: v.optional(v.string())
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Find the ad account and its integration
+		const [account] = await db
+			.select({
+				id: table.metaAdsAccount.id,
+				integrationId: table.metaAdsAccount.integrationId,
+				accountName: table.metaAdsAccount.accountName,
+				clientId: table.metaAdsAccount.clientId
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					eq(table.metaAdsAccount.metaAdAccountId, data.adAccountId)
+				)
+			)
+			.limit(1);
+
+		if (!account) {
+			throw error(404, 'Cont Meta Ads negăsit');
+		}
+		if (!account.clientId) {
+			throw error(400, 'Contul nu este atribuit unui client');
+		}
+
+		// Get integration for BM name
+		const [integration] = await db
+			.select({ businessName: table.metaAdsIntegration.businessName })
+			.from(table.metaAdsIntegration)
+			.where(eq(table.metaAdsIntegration.id, account.integrationId))
+			.limit(1);
+
+		// Get cookies
+		const cookies = await getDecryptedFbCookies(account.integrationId, tenantId);
+		if (!cookies) {
+			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
+		}
+
+		const result = await downloadReceiptFromUrl(data.pdfUrl, cookies);
+		if (!result.success || !result.pdfBuffer) {
+			throw error(500, result.error || 'Download eșuat');
+		}
+
+		// Determine period from date or default to current month
+		let periodStart: string;
+		let periodEnd: string;
+		if (data.period) {
+			// period can be "YYYY-MM-DD" or "YYYY-MM"
+			const parts = data.period.split('-');
+			periodStart = `${parts[0]}-${parts[1]}-01`;
+			const lastDay = new Date(Number(parts[0]), Number(parts[1]), 0).getDate();
+			periodEnd = `${parts[0]}-${parts[1]}-${String(lastDay).padStart(2, '0')}`;
+		} else {
+			const now = new Date();
+			const y = now.getFullYear();
+			const m = String(now.getMonth() + 1).padStart(2, '0');
+			periodStart = `${y}-${m}-01`;
+			const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+			periodEnd = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+		}
+
+		// Extract txid from URL
+		const txidMatch = data.pdfUrl.match(/txid=([^&]+)/);
+		const txid = txidMatch ? txidMatch[1] : undefined;
+
+		// Check dedup by txid
+		if (txid) {
+			const [existing] = await db
+				.select({ id: table.metaInvoiceDownload.id })
+				.from(table.metaInvoiceDownload)
+				.where(and(eq(table.metaInvoiceDownload.tenantId, tenantId), eq(table.metaInvoiceDownload.txid, txid)))
+				.limit(1);
+			if (existing) {
+				return { success: true, invoiceId: data.invoiceId, skipped: true };
+			}
+		}
+
+		// Upload PDF
+		const invoiceLabel = data.invoiceId || txid || 'manual';
+		const upload = await uploadBuffer(
+			tenantId,
+			result.pdfBuffer,
+			`meta-invoice-${data.adAccountId}_${invoiceLabel}.pdf`,
+			'application/pdf',
+			{ type: 'meta-invoice', adAccountId: data.adAccountId, invoiceId: data.invoiceId || '' }
+		);
+
+		// Insert download record
+		await db.insert(table.metaInvoiceDownload).values({
+			id: crypto.randomUUID(),
+			tenantId,
+			integrationId: account.integrationId,
+			clientId: account.clientId,
+			metaAdAccountId: data.adAccountId,
+			adAccountName: account.accountName,
+			bmName: integration?.businessName || '',
+			periodStart,
+			periodEnd,
+			txid: txid || null,
+			invoiceNumber: data.invoiceId || null,
+			pdfPath: upload.path,
+			status: 'downloaded',
+			downloadedAt: new Date(),
+			createdAt: new Date(),
+			updatedAt: new Date()
+		});
+
+		return { success: true, invoiceId: data.invoiceId };
+	}
+);
+
+/** Bulk download Meta Ads invoices from billing_transaction URLs */
+export const bulkDownloadMetaInvoices = command(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		links: v.array(v.object({
+			url: v.pipe(v.string(), v.minLength(1)),
+			txid: v.optional(v.string()),
+			invoiceId: v.optional(v.string()),
+			date: v.optional(v.string()),
+			amount: v.optional(v.string())
+		}))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Find account + integration
+		const [account] = await db
+			.select({
+				id: table.metaAdsAccount.id,
+				integrationId: table.metaAdsAccount.integrationId,
+				accountName: table.metaAdsAccount.accountName,
+				clientId: table.metaAdsAccount.clientId
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					eq(table.metaAdsAccount.metaAdAccountId, data.adAccountId)
+				)
+			)
+			.limit(1);
+
+		if (!account) {
+			throw error(404, 'Cont Meta Ads negăsit');
+		}
+		if (!account.clientId) {
+			throw error(400, 'Contul nu este atribuit unui client');
+		}
+
+		const [integration] = await db
+			.select({ businessName: table.metaAdsIntegration.businessName })
+			.from(table.metaAdsIntegration)
+			.where(eq(table.metaAdsIntegration.id, account.integrationId))
+			.limit(1);
+
+		const cookies = await getDecryptedFbCookies(account.integrationId, tenantId);
+		if (!cookies) {
+			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
+		}
+
+		let downloaded = 0;
+		let skipped = 0;
+		let errors = 0;
+
+		for (const link of data.links) {
+			// Extract txid from URL or from JSON field
+			const txidFromUrl = link.url.match(/txid=([^&]+)/);
+			const txid = link.txid || (txidFromUrl ? txidFromUrl[1] : undefined);
+
+			// Parse period from date string (e.g. "6 Jan 2025" or "2025-01-06")
+			let periodStart: string;
+			let periodEnd: string;
+			if (link.date) {
+				const d = new Date(link.date);
+				if (!isNaN(d.getTime())) {
+					const y = d.getFullYear();
+					const m = String(d.getMonth() + 1).padStart(2, '0');
+					periodStart = `${y}-${m}-01`;
+					const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+					periodEnd = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+				} else {
+					periodStart = '1970-01-01';
+					periodEnd = '1970-01-31';
+				}
+			} else {
+				periodStart = '1970-01-01';
+				periodEnd = '1970-01-31';
+			}
+
+			// Check dedup by txid (primary) or fallback to period
+			if (txid) {
+				const [existing] = await db
+					.select({ id: table.metaInvoiceDownload.id })
+					.from(table.metaInvoiceDownload)
+					.where(and(eq(table.metaInvoiceDownload.tenantId, tenantId), eq(table.metaInvoiceDownload.txid, txid)))
+					.limit(1);
+				if (existing) {
+					skipped++;
+					continue;
+				}
+			}
+
+			const result = await downloadReceiptFromUrl(link.url, cookies);
+
+			if (result.success && result.pdfBuffer) {
+				const invoiceLabel = link.invoiceId || txid || periodStart;
+				const upload = await uploadBuffer(
+					tenantId,
+					result.pdfBuffer,
+					`meta-invoice-${data.adAccountId}_${invoiceLabel}.pdf`,
+					'application/pdf',
+					{ type: 'meta-invoice', adAccountId: data.adAccountId, invoiceId: link.invoiceId || '' }
+				);
+
+				await db.insert(table.metaInvoiceDownload).values({
+					id: crypto.randomUUID(),
+					tenantId,
+					integrationId: account.integrationId,
+					clientId: account.clientId,
+					metaAdAccountId: data.adAccountId,
+					adAccountName: account.accountName,
+					bmName: integration?.businessName || '',
+					periodStart,
+					periodEnd,
+					txid: txid || null,
+					invoiceNumber: link.invoiceId || null,
+					pdfPath: upload.path,
+					status: 'downloaded',
+					downloadedAt: new Date(),
+					createdAt: new Date(),
+					updatedAt: new Date()
+				});
+
+				downloaded++;
+			} else {
+				errors++;
+			}
+
+			// Rate limiting
+			await new Promise(resolve => setTimeout(resolve, 2000));
+		}
+
+		return { downloaded, skipped, errors };
 	}
 );

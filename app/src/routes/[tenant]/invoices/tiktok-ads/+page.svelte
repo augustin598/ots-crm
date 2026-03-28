@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokAdsSpendingList, deleteTiktokAdsSpending, triggerTiktokAdsSync, regenerateTiktokSpendingPdf, getTiktokInvoiceDownloads, triggerTiktokInvoiceDownload, redownloadTiktokInvoice, deleteTiktokInvoiceDownload } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokAdsSpendingList, deleteTiktokAdsSpending, triggerTiktokAdsSync, regenerateTiktokSpendingPdf, getTiktokInvoiceDownloads, triggerTiktokInvoiceDownload, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -26,6 +26,18 @@
 	let until = $state(`${currentYear}-12-31`);
 
 	const tenantSlug = $derived(page.params.tenant as string);
+
+	// Session status check
+	const connectionStatusQuery = getTiktokAdsConnectionStatus();
+	const sessionWarning = $derived.by(() => {
+		const connections = connectionStatusQuery.current || [];
+		for (const conn of connections) {
+			if (conn.ttSessionStatus !== 'active') {
+				return 'Sesiunea TikTok nu este activă — facturile PDF nu pot fi descărcate. Setează cookies din Settings.';
+			}
+		}
+		return null;
+	});
 
 	const spendingQuery = getTiktokAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
@@ -371,6 +383,16 @@
 			</p>
 		{/if}
 	</div>
+
+	<!-- Session warning -->
+	{#if sessionWarning}
+		<div class="rounded-md p-4 bg-red-50 border border-red-200">
+			<p class="text-sm text-red-800">
+				{sessionWarning}
+				<a href="/{tenantSlug}/settings/tiktok-ads" class="underline font-medium ml-1">Settings → TikTok Ads</a>
+			</p>
+		</div>
+	{/if}
 
 	<!-- Spending Cards by Client -->
 	{#if loading}

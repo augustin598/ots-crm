@@ -589,6 +589,34 @@
       "when": 1774440530000,
       "tag": "0083_google_ads_spending",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1774648800000,
+      "tag": "0084_meta_invoice_txid",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1774648810000,
+      "tag": "0085_meta_invoice_number",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1774648820000,
+      "tag": "0086_meta_invoice_txid_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1774648830000,
+      "tag": "0087_drop_meta_invoice_period_dedup",
+      "breakpoints": true
     }
   ]
 }
