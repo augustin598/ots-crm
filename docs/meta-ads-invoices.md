@@ -29,10 +29,12 @@ Pagina `/[tenant]/invoices/meta-ads` gestioneaza facturile si cheltuielile Meta 
 ## Invoice Types
 Facturile descarcate pot fi de doua tipuri (`invoiceType`):
 
-| Type | Descriere | Detectie |
-|------|-----------|----------|
-| `'invoice'` | Factura reala de plata (sume mari) | Are `invoiceId` (FBADS-xxx) in JSON |
-| `'credit'` | Advertising credit (sume mici, gen RON 0.01-0.79) | NU are `invoiceId` in JSON |
+| Type | Descriere | Detectie | Exemplu |
+|------|-----------|----------|---------|
+| `'invoice'` | **Factura fiscala** — document oficial de plata | Are `invoiceId` (FBADS-xxx) | FBADS-108-104380003, RON 3,503.38 |
+| `'credit'` | **Credit publicitar** — advertising credit, nu e factura fiscala | NU are `invoiceId`, doar TX id | TX 8328726..., RON 0.79 |
+
+**Regula de detectie:** `link.invoiceId ? 'invoice' : 'credit'` — FBADS-xxx = fiscal, fara FBADS = credit.
 
 **Comportament UI:**
 - Creditele sunt **ascunse implicit** — checkbox "Credite Ad" le afiseaza
@@ -40,11 +42,11 @@ Facturile descarcate pot fi de doua tipuri (`invoiceType`):
 - Header badge: verde "X facturi" + amber "Y credite" (cand vizibile)
 - "+N credite" indicat pe linia lunii cand creditele sunt ascunse
 
-**Exemplu factura credit (din PDF):**
+**Exemplu credit publicitar (din PDF):**
 - Payment method: "Advertising credit"
 - Transaction ID: `8328726830571648-8359447280832931`
 - Amount: RON 0.79
-- Nu are numar FBADS-xxx
+- Nu are numar FBADS-xxx — nu e factura fiscala
 
 ## UI Architecture
 
