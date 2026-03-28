@@ -761,7 +761,7 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
+										<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
 											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
