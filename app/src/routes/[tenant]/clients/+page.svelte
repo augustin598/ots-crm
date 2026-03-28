@@ -30,6 +30,7 @@
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
@@ -226,7 +227,7 @@
 			await deleteClient(deleteTargetId).updates(clientsQuery);
 			toast.success('Client șters cu succes');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to delete client');
+			clientLogger.apiError('client_delete', e);
 		} finally {
 			deleteConfirmOpen = false;
 			deleteTargetId = null;
@@ -251,7 +252,7 @@
 			await updateClient({ clientId: editingClientId, name: trimmed }).updates(clientsQuery);
 			editingClientId = null;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to update client name');
+			clientLogger.apiError('client_update_name', e);
 		} finally {
 			editingLoading = false;
 		}

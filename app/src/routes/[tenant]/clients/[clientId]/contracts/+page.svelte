@@ -18,6 +18,7 @@
 	} from '$lib/components/ui/dialog';
 	import { FileText, Plus, ExternalLink, Upload, X, Loader2, CheckCircle2, AlertCircle, Info } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { cn } from '$lib/utils';
 
 	const fieldLabels: Record<string, string> = {
@@ -66,7 +67,7 @@
 			toast.success('Datele clientului au fost actualizate');
 		} catch (e) {
 			console.error('[ClientUpload] Update skipped fields error:', e);
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare');
+			clientLogger.apiError('client_contracts_update_skipped', e);
 		} finally {
 			updatingSkipped = false;
 		}

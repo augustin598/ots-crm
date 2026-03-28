@@ -31,6 +31,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { untrack } from 'svelte';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -115,7 +116,7 @@
 			await deleteClientSecondaryEmail({ secondaryEmailId: id }).updates(secondaryEmailsQuery);
 			toast.success('Email secundar șters');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('client_delete_secondary_email', e);
 		}
 	}
 
@@ -134,7 +135,7 @@
 				notifyContracts: field === 'notifyContracts' ? value : (se.notifyContracts ?? false)
 			}).updates(secondaryEmailsQuery);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare notificări');
+			clientLogger.apiError('client_toggle_notification', e);
 		}
 	}
 
@@ -250,7 +251,7 @@
 			cancelEditWebsite();
 			toast.success('Website actualizat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('client_save_website', e);
 		} finally {
 			savingWebsite = false;
 		}
@@ -262,7 +263,7 @@
 				.updates(websitesQuery, clientQuery, getClients());
 			toast.success('Website implicit setat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
+			clientLogger.apiError('client_set_default_website', e);
 		}
 	}
 
@@ -273,7 +274,7 @@
 				.updates(websitesQuery, clientQuery, getClients());
 			toast.success('Website șters');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('client_delete_website', e);
 		}
 	}
 
@@ -350,7 +351,7 @@
 			toast.success('Client actualizat');
 			goto(`/${tenantSlug}/clients/${clientId}`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('client_update', e);
 		} finally {
 			saving = false;
 		}

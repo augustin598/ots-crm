@@ -20,6 +20,7 @@
 	import AccessDataEntryDialog from '$lib/components/access-data/access-data-entry-dialog.svelte';
 	import { getAccessData, deleteAccessData } from '$lib/remotes/client-access-data.remote';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import * as Dialog from '$lib/components/ui/dialog';
 
 	const clientId = $derived(page.params.clientId as string);
@@ -87,7 +88,7 @@
 			deleteTarget = null;
 			refreshKey++;
 		} catch (e: any) {
-			toast.error(e?.message || 'Eroare la ștergere');
+			clientLogger.apiError('access_data_delete', e);
 		} finally {
 			deleting = false;
 		}
