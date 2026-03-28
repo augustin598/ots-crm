@@ -86,6 +86,11 @@
 		return n.toLocaleString('ro-RO');
 	}
 
+	// ---- Invoice Downloads ----
+	const downloadsQuery = getMetaInvoiceDownloads();
+	const downloads = $derived(downloadsQuery.current || []);
+	const downloadsLoading = $derived(downloadsQuery.loading);
+
 	// Filter by date range then group by client
 	const dateFilteredSpending = $derived(
 		spending.filter((r: any) => {
@@ -164,11 +169,6 @@
 			)
 			: groupedByClient
 	);
-
-	// ---- Invoice Downloads ----
-	const downloadsQuery = getMetaInvoiceDownloads();
-	const downloads = $derived(downloadsQuery.current || []);
-	const downloadsLoading = $derived(downloadsQuery.loading);
 
 	// Map downloads by periodStart+accountId — array of all invoices per account+period
 	const downloadsByKey = $derived.by(() => {
