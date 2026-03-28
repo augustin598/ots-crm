@@ -23,6 +23,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -60,7 +61,7 @@
 	async function handleSaveCookies(integrationId: string) {
 		const json = cookieJsonInputs[integrationId]?.trim();
 		if (!json) {
-			toast.error('Inserează JSON-ul cookies din Cookie-Editor');
+			clientLogger.warn({ message: 'Inserează JSON-ul cookies din Cookie-Editor', action: 'tiktok_ads_save_cookies' });
 			return;
 		}
 		savingCookiesFor = integrationId;
@@ -69,8 +70,7 @@
 			toast.success('Cookies TikTok salvate');
 			cookieJsonInputs = { ...cookieJsonInputs, [integrationId]: '' };
 		} catch (e: any) {
-			const msg = e?.body?.message || e?.message || 'Eroare la salvare cookies';
-			toast.error(msg);
+			clientLogger.apiError('tiktok_ads_save_cookies', e);
 		} finally {
 			savingCookiesFor = null;
 		}
@@ -82,7 +82,7 @@
 			await clearTiktokAdsCookies(integrationId).updates(connectionsQuery);
 			toast.success('Sesiune TikTok ștearsă');
 		} catch (e: any) {
-			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere sesiune'));
+			clientLogger.apiError('tiktok_ads_clear_cookies', e);
 		}
 	}
 
@@ -108,7 +108,7 @@
 			const accounts = await getTiktokAdsAccounts(integrationId);
 			accountsCache = { ...accountsCache, [integrationId]: accounts };
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la încărcare conturi');
+			clientLogger.apiError('tiktok_ads_load_accounts', e);
 		}
 	}
 
@@ -123,7 +123,7 @@
 			newOrgId = '';
 			newPaymentAccountId = '';
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la adăugare');
+			clientLogger.apiError('tiktok_ads_add_connection', e);
 		} finally {
 			addingConnection = false;
 		}
@@ -152,7 +152,7 @@
 			toast.success('TikTok Ads deconectat');
 			connectionsQuery.refresh();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la deconectare');
+			clientLogger.apiError('tiktok_ads_disconnect', e);
 		} finally {
 			disconnecting = false;
 		}
@@ -165,7 +165,7 @@
 			await removeTiktokAdsConnection(integrationId).updates(connectionsQuery);
 			toast.success('Conexiune ștearsă');
 		} catch (e: any) {
-			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere'));
+			clientLogger.apiError('tiktok_ads_remove_connection', e);
 		}
 	}
 
@@ -176,7 +176,7 @@
 			toast.success(`${result.fetched} conturi TikTok Ads găsite`);
 			await loadAccounts(integrationId);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la extragere conturi');
+			clientLogger.apiError('tiktok_ads_fetch_accounts', e);
 		} finally {
 			fetchingAccountsFor = null;
 		}
@@ -191,7 +191,7 @@
 			toast.success('Client atribuit');
 			await loadAccounts(integrationId);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la atribuire');
+			clientLogger.apiError('tiktok_ads_assign_client', e);
 		}
 	}
 
@@ -201,7 +201,7 @@
 			const result = await triggerTiktokAdsSync().updates(connectionsQuery);
 			toast.success(`Sync complet: ${result.imported} noi, ${result.updated || 0} actualizate, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+			clientLogger.apiError('tiktok_ads_sync', e);
 		} finally {
 			syncing = false;
 		}

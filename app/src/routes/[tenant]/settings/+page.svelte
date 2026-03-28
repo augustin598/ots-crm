@@ -39,6 +39,7 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { getClientsRestrictionStatus, setClientRestriction } from '$lib/remotes/client-restrictions.remote';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -140,7 +141,7 @@
 			await setClientRestriction({ clientId, restrictedAccess }).updates(clientRestrictionsQuery);
 			toast.success('Restricția a fost actualizată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizarea restricției');
+			clientLogger.apiError('settings_set_restriction', e);
 		}
 	}
 

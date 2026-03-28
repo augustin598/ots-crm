@@ -24,6 +24,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -81,7 +82,7 @@
 
 	async function handleSaveConfig() {
 		if (!mccAccountId || !developerToken) {
-			toast.error('Completează MCC Account ID și Developer Token');
+			clientLogger.warn({ message: 'Completează MCC Account ID și Developer Token', action: 'google_ads_save_config' });
 			return;
 		}
 		savingConfig = true;
@@ -93,7 +94,7 @@
 			}).updates(statusQuery);
 			toast.success('Configurare salvată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('google_ads_save_config', e);
 		} finally {
 			savingConfig = false;
 		}
@@ -101,7 +102,7 @@
 
 	async function handleConnect() {
 		if (!mccAccountId || !developerToken) {
-			toast.error('Completează MCC Account ID și Developer Token înainte de conectare');
+			clientLogger.warn({ message: 'Completează MCC Account ID și Developer Token înainte de conectare', action: 'google_ads_connect' });
 			return;
 		}
 		await handleSaveConfig();
@@ -123,7 +124,7 @@
 			if (!res.ok) throw new Error('Failed to disconnect');
 			window.location.reload();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la deconectare');
+			clientLogger.apiError('google_ads_disconnect', e);
 		} finally {
 			disconnecting = false;
 		}
@@ -135,7 +136,7 @@
 			const result = await fetchGoogleAdsAccounts().updates(accountsQuery);
 			toast.success(`${result.fetched} conturi Google Ads găsite`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la extragere conturi');
+			clientLogger.apiError('google_ads_fetch_accounts', e);
 		} finally {
 			fetchingAccounts = false;
 		}
@@ -149,7 +150,7 @@
 			}).updates(accountsQuery);
 			toast.success('Client atribuit');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la atribuire');
+			clientLogger.apiError('google_ads_assign_client', e);
 		}
 	}
 
@@ -159,7 +160,7 @@
 			const result = await triggerGoogleAdsSync().updates(statusQuery);
 			toast.success(`Sync complet: ${result.imported} importate, ${result.skipped} existente, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+			clientLogger.apiError('google_ads_sync', e);
 		} finally {
 			syncing = false;
 		}
@@ -168,7 +169,7 @@
 	async function handleSaveCookies() {
 		const json = cookieJsonInput.trim();
 		if (!json) {
-			toast.error('Inserează JSON-ul cookies din Cookie-Editor');
+			clientLogger.warn({ message: 'Inserează JSON-ul cookies din Cookie-Editor', action: 'google_ads_save_cookies' });
 			return;
 		}
 		savingCookies = true;
@@ -177,8 +178,7 @@
 			toast.success('Cookies Google salvate');
 			cookieJsonInput = '';
 		} catch (e: any) {
-			const msg = e?.body?.message || e?.message || 'Eroare la salvare cookies';
-			toast.error(msg);
+			clientLogger.apiError('google_ads_save_cookies', e);
 		} finally {
 			savingCookies = false;
 		}
@@ -190,7 +190,7 @@
 			await clearGoogleAdsCookies().updates(statusQuery);
 			toast.success('Sesiune Google ștearsă');
 		} catch (e: any) {
-			toast.error(e?.body?.message || (e instanceof Error ? e.message : 'Eroare la ștergere sesiune'));
+			clientLogger.apiError('google_ads_clear_cookies', e);
 		}
 	}
 

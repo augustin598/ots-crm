@@ -13,6 +13,7 @@
 	import { CheckCircle2, XCircle, Mail, Link as LinkIcon, Unlink, Settings, Save, Plus, X, UserPlus, ShieldBan } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -109,11 +110,11 @@
 		const val = newCustomEmail.trim();
 		if (!val) return;
 		if (!val.includes('@') && !val.includes('.')) {
-			toast.error('Introdu o adresă de email sau un domeniu (ex: @acme.ro, billing@furnizor.com)');
+			clientLogger.warn({ message: 'Introdu o adresă de email sau un domeniu (ex: @acme.ro, billing@furnizor.com)', action: 'gmail_add_email' });
 			return;
 		}
 		if (customMonitoredEmails.some((e) => e.value === val)) {
-			toast.error('Această adresă există deja');
+			clientLogger.warn({ message: 'Această adresă există deja', action: 'gmail_add_email' });
 			return;
 		}
 		const label = val.startsWith('@') ? `Domeniu: ${val}` : val;
@@ -148,7 +149,7 @@
 		const val = newExcludeEmail.trim();
 		if (!val) return;
 		if (excludeEmails.includes(val)) {
-			toast.error('Acest pattern există deja');
+			clientLogger.warn({ message: 'Acest pattern există deja', action: 'gmail_add_exclude' });
 			return;
 		}
 		excludeEmails = [...excludeEmails, val];
@@ -204,7 +205,7 @@
 			}).updates(statusQuery);
 			toast.success('Configurare salvată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('gmail_save_config', e);
 		} finally {
 			savingConfig = false;
 		}
