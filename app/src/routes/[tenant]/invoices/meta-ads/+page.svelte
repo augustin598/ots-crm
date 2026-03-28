@@ -311,7 +311,7 @@
 	let bulkAdAccountId = $state('');
 	let bulkImporting = $state(false);
 
-	// Unique ad accounts from spending data for dropdown
+	// Unique ad accounts from spending + downloads + downloadable accounts for dropdown
 	const adAccountOptions = $derived.by(() => {
 		const map = new Map<string, string>();
 		for (const row of spending) {
@@ -320,12 +320,22 @@
 				map.set(row.metaAdAccountId, `${row.metaAdAccountId} — ${label}`);
 			}
 		}
+		for (const dl of downloads) {
+			if (dl.metaAdAccountId && !map.has(dl.metaAdAccountId)) {
+				map.set(dl.metaAdAccountId, `${dl.metaAdAccountId} — ${dl.adAccountName || dl.metaAdAccountId}`);
+			}
+		}
+		for (const acc of downloadableAccounts) {
+			if (acc.metaAdAccountId && !map.has(acc.metaAdAccountId)) {
+				map.set(acc.metaAdAccountId, `${acc.metaAdAccountId} — ${acc.accountName || acc.metaAdAccountId}`);
+			}
+		}
 		return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
 	});
 
 	async function handleBulkImport() {
-		if (!bulkJson.trim() || !bulkAdAccountId) {
-			toast.error('Selectează contul și inserează JSON-ul cu link-uri');
+		if (!bulkJson.trim()) {
+			toast.error('Inserează JSON-ul cu link-uri');
 			return;
 		}
 		let links: { url: string; invoiceId?: string; date?: string; amount?: string }[];
@@ -341,11 +351,27 @@
 			toast.error('JSON invalid');
 			return;
 		}
+
+		// Auto-detect ad account ID from URLs if not selected
+		let accountId = bulkAdAccountId;
+		if (!accountId && links.length > 0) {
+			const actMatch = links[0].url.match(/act=(\d+)/);
+			if (actMatch) {
+				accountId = `act_${actMatch[1]}`;
+				console.log(`[BULK-IMPORT] Auto-detected ad account: ${accountId}`);
+			}
+		}
+		if (!accountId) {
+			toast.error('Selectează contul sau asigură-te că URL-urile conțin parametrul act=');
+			return;
+		}
+		bulkAdAccountId = accountId;
 		if (links.length === 0) {
 			toast.error('Array-ul de link-uri este gol');
 			return;
 		}
 		bulkImporting = true;
+		console.log(`[BULK-IMPORT] Starting: account=${bulkAdAccountId}, links=${links.length}`);
 		try {
 			const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links }).updates(downloadsQuery);
 			if (result.errors > 0 && result.errorDetails?.length) {
