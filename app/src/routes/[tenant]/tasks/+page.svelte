@@ -22,6 +22,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import type { Task } from '$lib/server/db/schema';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
@@ -134,7 +135,7 @@
 			}
 			toast.success('Task deleted');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to delete task');
+			clientLogger.apiError('task_delete', e);
 		}
 	}
 

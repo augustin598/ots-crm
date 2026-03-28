@@ -15,6 +15,7 @@
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { formatStatus, getStatusBadgeVariant, getPriorityColor, getPriorityDotColor, formatPriority, formatDate, getActivityValueColor } from '$lib/components/task-kanban-utils';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId!);
@@ -124,7 +125,7 @@
 			newCommentEditor?.clear();
 			toast.success('Comment added');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to add comment');
+			clientLogger.apiError('task_add_comment', e);
 		} finally {
 			commentLoading = false;
 		}
@@ -144,7 +145,7 @@
 			editingContent = '';
 			toast.success('Comment updated');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to update comment');
+			clientLogger.apiError('task_update_comment', e);
 		} finally {
 			editLoading = false;
 		}
@@ -166,7 +167,7 @@
 			replyingToId = null;
 			toast.success('Reply added');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to add reply');
+			clientLogger.apiError('task_add_reply', e);
 		} finally {
 			replyLoading = false;
 		}
@@ -181,7 +182,7 @@
 			await deleteTaskComment(commentId).updates(getTaskComments(taskId));
 			toast.success('Comment deleted');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to delete comment');
+			clientLogger.apiError('task_delete_comment', e);
 		}
 	}
 
@@ -195,7 +196,7 @@
 			toast.success('Task deleted');
 			goto(`/${tenantSlug}/tasks`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to delete task');
+			clientLogger.apiError('task_delete', e);
 		}
 	}
 
@@ -206,7 +207,7 @@
 			await approveTask({ taskId: task.id }).updates(getTask(taskId), getTasks({}));
 			toast.success('Task approved');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to approve task');
+			clientLogger.apiError('task_approve', e);
 		} finally {
 			approvalLoading = false;
 		}
@@ -220,7 +221,7 @@
 			await rejectTask(task.id).updates(getTask(taskId), getTasks({}));
 			toast.success('Task rejected');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Failed to reject task');
+			clientLogger.apiError('task_reject', e);
 		} finally {
 			approvalLoading = false;
 		}

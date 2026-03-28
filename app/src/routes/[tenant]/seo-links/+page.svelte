@@ -23,6 +23,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -381,7 +382,7 @@
 	async function handleStartScan() {
 		const linksToScan = [...scanLinks];
 		if (linksToScan.length === 0) {
-			toast.error('Nu există linkuri de verificat cu filtrele selectate');
+			clientLogger.warn({ message: 'Nu există linkuri de verificat cu filtrele selectate', action: 'seo_scan' });
 			return;
 		}
 		scanRunning = true;
@@ -519,7 +520,7 @@
 			const result = await getMaterialDownloadUrl(materialId);
 			window.open(result.url, '_blank');
 		} catch (err) {
-			toast.error('Nu s-a putut descărca documentul');
+			clientLogger.apiError('seo_download_article', err);
 		}
 	}
 
@@ -552,7 +553,7 @@
 			if (row) {
 				if (articleModalOption === 'gdrive') {
 					if (!articleModalGdriveUrl.trim()) {
-						toast.error('Introduceți URL-ul GDrive');
+						clientLogger.warn({ message: 'Introduceți URL-ul GDrive', action: 'seo_save_article_inline' });
 						return;
 					}
 					row.articleType = 'gdrive';
@@ -560,7 +561,7 @@
 					row.articleFile = null;
 				} else if (articleModalOption === 'press-article' || articleModalOption === 'seo-article') {
 					if (!articleModalFile) {
-						toast.error('Selectați un fișier');
+						clientLogger.warn({ message: 'Selectați un fișier', action: 'seo_save_article_inline' });
 						return;
 					}
 					row.articleType = articleModalOption;
@@ -587,7 +588,7 @@
 		try {
 			if (articleModalOption === 'gdrive') {
 				if (!articleModalGdriveUrl.trim()) {
-					toast.error('Introduceți URL-ul GDrive');
+					clientLogger.warn({ message: 'Introduceți URL-ul GDrive', action: 'seo_save_article' });
 					articleModalLoading = false;
 					return;
 				}
@@ -598,7 +599,7 @@
 				}).updates(seoLinksQuery);
 			} else if (articleModalOption === 'press-article' || articleModalOption === 'seo-article') {
 				if (!articleModalFile) {
-					toast.error('Selectați un fișier');
+					clientLogger.warn({ message: 'Selectați un fișier', action: 'seo_save_article' });
 					articleModalLoading = false;
 					return;
 				}
@@ -629,7 +630,7 @@
 			toast.success('Articol salvat');
 			articleModalOpen = false;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('seo_save_article', e);
 		} finally {
 			articleModalLoading = false;
 		}
@@ -647,7 +648,7 @@
 			toast.success('Articol șters');
 			articleModalOpen = false;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
+			clientLogger.apiError('seo_clear_article', e);
 		} finally {
 			articleModalLoading = false;
 		}
@@ -997,9 +998,9 @@
 						.updates(seoLinksQuery)
 						.then((r) => {
 							if (r.extracted > 0) toast.success(`Cuvinte cheie extrase pentru ${r.extracted} din ${urls.length} linkuri`);
-							if (r.failed > 0) toast.error(`${r.failed} linkuri fără cuvânt cheie detectat`);
+							if (r.failed > 0) clientLogger.warn({ message: `${r.failed} linkuri fără cuvânt cheie detectat`, action: 'seo_bulk_extract' });
 						})
-						.catch(() => toast.error('Extragerea automată a eșuat'));
+						.catch((e) => clientLogger.error({ message: 'Extragerea automată a eșuat', action: 'seo_bulk_extract' }));
 				}
 				return;
 			}
@@ -1070,7 +1071,7 @@
 		try {
 			await deleteSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Nu s-a putut șterge linkul');
+			clientLogger.apiError('seo_delete', e);
 		}
 	}
 
@@ -1221,7 +1222,7 @@
 		try {
 			await checkSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Verificare eșuată');
+			clientLogger.apiError('seo_check_link', e);
 		} finally {
 			checkingId = null;
 		}
@@ -1232,7 +1233,7 @@
 		try {
 			await extractTargetUrlForSeoLink(seoLinkId).updates(seoLinksQuery);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Extragere URL țintă eșuată');
+			clientLogger.apiError('seo_extract_target_url', e);
 		} finally {
 			extractingTargetUrlId = null;
 		}
@@ -1252,7 +1253,7 @@
 			}).updates(seoLinksQuery);
 			toast.success(num != null ? 'Preț actualizat' : 'Preț eliminat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('seo_save_price', e);
 		}
 	}
 
@@ -1270,7 +1271,7 @@
 			}).updates(seoLinksQuery);
 			toast.success('Cuvânt cheie actualizat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			clientLogger.apiError('seo_save_keyword', e);
 		}
 	}
 
@@ -1555,7 +1556,7 @@
 			toast.success(`${selectedIdsArray.length} linkuri șterse`);
 			selectedIds = new Set();
 		} catch (e) {
-			toast.error('Eroare la ștergere');
+			clientLogger.apiError('seo_bulk_delete', e);
 		} finally {
 			bulkDeleteLoading = false;
 			bulkDeleteConfirm = false;

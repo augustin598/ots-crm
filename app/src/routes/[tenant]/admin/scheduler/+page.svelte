@@ -16,6 +16,7 @@
 		CollapsibleTrigger
 	} from '$lib/components/ui/collapsible';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
@@ -120,7 +121,7 @@
 			editingJobKey = null;
 			jobsQuery.refresh();
 		} catch (e: any) {
-			toast.error(`Eroare: ${e.message}`);
+			clientLogger.apiError('scheduler_save_schedule', e);
 		}
 	}
 
@@ -131,7 +132,7 @@
 			toast.success(`Job sters: ${job.label}`);
 			jobsQuery.refresh();
 		} catch (e: any) {
-			toast.error(`Eroare: ${e.message}`);
+			clientLogger.apiError('scheduler_remove_job', e);
 		}
 	}
 
@@ -141,7 +142,7 @@
 			toast.success(`Job lansat manual: ${job.label}`);
 			setTimeout(() => historyQuery.refresh(), 2000);
 		} catch (e: any) {
-			toast.error(`Eroare: ${e.message}`);
+			clientLogger.apiError('scheduler_trigger_now', e);
 		}
 	}
 

@@ -42,6 +42,7 @@
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import {
 		aggregateInsightsByDate,
 		aggregateInsightsByCampaign,
@@ -396,11 +397,11 @@
 		if (!budgetEditCampaign || !selectedIntegrationId) return;
 		const amount = parseFloat(budgetNewAmount);
 		if (isNaN(amount) || amount <= 0) {
-			toast.error('Sumă invalidă', { description: 'Introdu o sumă mai mare de 0.' });
+			clientLogger.warn({ message: 'Sumă invalidă - Introdu o sumă mai mare de 0.', action: 'fb_report_budget_save' });
 			return;
 		}
 		if (amount < 1) {
-			toast.error('Buget prea mic', { description: 'Meta Ads necesită un buget minim de 1 RON/zi.' });
+			clientLogger.warn({ message: 'Buget prea mic - Meta Ads necesită un buget minim de 1 RON/zi.', action: 'fb_report_budget_save' });
 			return;
 		}
 
@@ -420,15 +421,7 @@
 			budgetDialogOpen = false;
 			handleRefresh();
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : 'Eroare necunoscută';
-			toast.error(`Nu s-a putut actualiza bugetul`, {
-				description: msg.includes('permissions')
-					? 'Tokenul nu are permisiunea ads_management. Reconectează din Settings.'
-					: msg.includes('validating access token')
-						? 'Tokenul Meta Ads a expirat. Reconectează din Settings.'
-						: msg,
-				duration: 8000
-			});
+			clientLogger.apiError('fb_report_budget_save', e);
 		} finally {
 			budgetSaving = false;
 		}
@@ -498,10 +491,7 @@
 			toast.success(`Campania "${campaign.campaignName}" a fost ${label}`, { duration: 2000 });
 			handleRefresh();
 		} catch (e) {
-			toast.error('Nu s-a putut schimba statusul', {
-				description: e instanceof Error ? e.message : 'Eroare necunoscută',
-				duration: 5000
-			});
+			clientLogger.apiError('fb_report_toggle_status', e);
 		} finally {
 			togglingCampaignId = null;
 		}

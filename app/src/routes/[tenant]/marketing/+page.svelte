@@ -36,6 +36,7 @@
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { DateRange } from 'bits-ui';
 
@@ -230,7 +231,7 @@
 			deleteConfirmOpen = false;
 			deleteTarget = null;
 		} catch (e: any) {
-			toast.error(e?.message || 'Eroare la ștergere');
+			clientLogger.apiError('marketing_delete', e);
 			deleteConfirmOpen = false;
 			deleteTarget = null;
 		} finally {
@@ -262,7 +263,7 @@
 				previewUrl = null;
 				previewOpen = true;
 			} else {
-				toast.error('Materialul nu are conținut de previzualizat');
+				clientLogger.warn({ message: 'Materialul nu are conținut de previzualizat', action: 'marketing_preview' });
 			}
 			return;
 		}
@@ -276,8 +277,8 @@
 					const result = await getMaterialDownloadUrl(material.id);
 					lightboxSrc = result.url;
 					lightboxOpen = true;
-				} catch {
-					toast.error('Eroare la încărcarea imaginii');
+				} catch (e) {
+					clientLogger.apiError('marketing_preview_image', e);
 				}
 			}
 			return;
@@ -289,8 +290,8 @@
 					previewUrl = result.url;
 					previewMaterial = material;
 					previewOpen = true;
-				} catch {
-					toast.error('Eroare la deschiderea documentului');
+				} catch (e) {
+					clientLogger.apiError('marketing_preview_document', e);
 				}
 			}
 			return;
@@ -302,8 +303,8 @@
 					previewUrl = result.url;
 					previewMaterial = material;
 					previewOpen = true;
-				} catch {
-					toast.error('Eroare la încărcarea videoclipului');
+				} catch (e) {
+					clientLogger.apiError('marketing_preview_video', e);
 				}
 			}
 			return;
@@ -330,7 +331,7 @@
 			await linkMaterialToTask({ taskId, materialId }).updates(materialsQuery);
 			toast.success('Task asociat');
 		} catch (e: any) {
-			toast.error(e?.message || 'Eroare la asociere');
+			clientLogger.apiError('marketing_link_task', e);
 		}
 	}
 
@@ -339,7 +340,7 @@
 			await unlinkMaterialFromTask({ taskId, materialId }).updates(materialsQuery);
 			toast.success('Task dezasociat');
 		} catch (e: any) {
-			toast.error(e?.message || 'Eroare la dezasociere');
+			clientLogger.apiError('marketing_unlink_task', e);
 		}
 	}
 
@@ -424,7 +425,7 @@
 
 			{#if !isFileFilterType && activeCategory !== 'all'}
 				<Button onclick={() => {
-					if (selectedClientIds.length !== 1) { toast.error('Selectează un singur client mai întâi'); return; }
+					if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
 					if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
 					else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
 					else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }

@@ -14,6 +14,7 @@
 	} from '$lib/components/ui/table';
 	import { Plus, Download, Trash2 } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId);
@@ -27,7 +28,7 @@
 			const result = await getDownloadUrl(documentId);
 			window.open(result.url, '_blank');
 		} catch (e) {
-			toast.error('Failed to download document');
+			clientLogger.apiError('task_document_download', e);
 		}
 	}
 
@@ -39,7 +40,7 @@
 		try {
 			await deleteDocument(documentId).updates(documentsQuery);
 		} catch (e) {
-			toast.error('Failed to delete document');
+			clientLogger.apiError('task_document_delete', e);
 		}
 	}
 </script>
