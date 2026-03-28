@@ -794,6 +794,7 @@
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
 											</div>
+										</div>
 										<!-- Expandable invoice list -->
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
