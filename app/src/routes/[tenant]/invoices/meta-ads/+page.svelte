@@ -684,7 +684,15 @@
 							</CollapsibleTrigger>
 
 							<CollapsibleContent>
-								<div class="border-t divide-y">
+								<!-- Column headers -->
+								<div class="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
+									<span>Perioadă</span>
+									<span class="text-right w-28">Cheltuieli</span>
+									<span class="text-right w-20 hidden sm:block">Impresii</span>
+									<span class="text-right w-20 hidden sm:block">Click-uri</span>
+									<span class="text-right w-28">Facturi</span>
+								</div>
+								<div class="divide-y">
 									{#each group.rows as row, i (row.id)}
 										{@const isDownloadOnly = (row as any)._downloadOnly === true}
 										{@const prevSpend = !isDownloadOnly ? group.rows[i + 1]?.spendCents : null}
@@ -698,32 +706,39 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="flex items-center gap-3 px-6 py-3 hover:bg-muted/30 transition-colors">
-											<div class="flex items-center gap-2 min-w-0 flex-1">
+										<div class="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
+											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 												{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
 													<span class="text-xs text-muted-foreground truncate">({row.adAccountName || row.metaAdAccountId})</span>
 												{/if}
 											</div>
-											{#if !isDownloadOnly}
-												<span class="text-base font-semibold whitespace-nowrap">{formatAmount(row.spendCents, row.currencyCode)}</span>
-												{#if trend !== null}
-													<span class="text-xs whitespace-nowrap {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+											{#if isDownloadOnly}
+												<span class="w-28"></span>
+												<span class="w-20 hidden sm:block"></span>
+												<span class="w-20 hidden sm:block"></span>
+											{:else}
+												<div class="text-right w-28 whitespace-nowrap">
+													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+													{#if trend !== null}
+														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+													{/if}
+												</div>
+												<span class="text-sm text-muted-foreground text-right w-20 whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
+												<span class="text-sm text-right w-20 whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
+											{/if}
+											<div class="text-right w-28">
+												{#if downloadedInvoices.length > 0}
+													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
+														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
+														{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
+													</button>
+													{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500">+{creditCount} cr.</span>{/if}
+												{:else if !isDownloadOnly}
+													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
-												<span class="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline">{formatNumber(row.impressions)} imp.</span>
-												<span class="text-sm whitespace-nowrap hidden sm:inline">{formatNumber(row.clicks)} clicks</span>
-											{/if}
-											{#if downloadedInvoices.length > 0}
-												<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
-													<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-													{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
-												</button>
-												{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500 whitespace-nowrap">+{creditCount} cr.</span>{/if}
-											{:else if !isDownloadOnly}
-												<span class="text-xs text-orange-500 whitespace-nowrap">În așteptare</span>
-											{/if}
-										</div>
+											</div>
 										<!-- Expandable invoice list -->
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
