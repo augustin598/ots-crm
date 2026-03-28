@@ -740,12 +740,12 @@
 
 							<CollapsibleContent>
 								<!-- Column headers -->
-								<div class="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
+								<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
 									<span>Perioadă</span>
-									<span class="text-right w-28">Cheltuieli</span>
-									<span class="text-right w-20 hidden sm:block">Impresii</span>
-									<span class="text-right w-20 hidden sm:block">Click-uri</span>
-									<span class="text-right w-28">Facturi</span>
+									<span class="text-right">Cheltuieli</span>
+									<span class="text-right hidden sm:block">Impresii</span>
+									<span class="text-right hidden sm:block">Click-uri</span>
+									<span class="text-right">Facturi</span>
 								</div>
 								<div class="divide-y">
 									{#each group.rows as row, i (row.id)}
@@ -761,7 +761,7 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
+										<div class="grid grid-cols-[2.5fr_1fr_1fr_1fr_auto] gap-x-4 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
 											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
@@ -770,20 +770,20 @@
 												{/if}
 											</div>
 											{#if isDownloadOnly}
-												<span class="w-28"></span>
-												<span class="w-20 hidden sm:block"></span>
-												<span class="w-20 hidden sm:block"></span>
+												<span></span>
+												<span class="hidden sm:block"></span>
+												<span class="hidden sm:block"></span>
 											{:else}
-												<div class="text-right w-28 whitespace-nowrap">
+												<div class="text-right whitespace-nowrap">
 													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
 													{#if trend !== null}
 														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
 													{/if}
 												</div>
-												<span class="text-sm text-muted-foreground text-right w-20 whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
-												<span class="text-sm text-right w-20 whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
+												<span class="text-sm text-muted-foreground text-right whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
+												<span class="text-sm text-right whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
 											{/if}
-											<div class="text-right w-28">
+											<div class="text-right">
 												{#if downloadedInvoices.length > 0}
 													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
 														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
