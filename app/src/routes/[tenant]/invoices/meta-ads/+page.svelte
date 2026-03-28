@@ -366,7 +366,7 @@
 	let bulkCurrent = $state(0);
 	let bulkTotal = $state(0);
 	let bulkCurrentLabel = $state('');
-	type BulkResult = { label: string; status: string; error: string | null };
+	type BulkResult = { label: string; adAccount: string; status: string; httpInfo: string; error: string | null };
 	let bulkResults = $state<BulkResult[]>([]);
 	let bulkDone = $state(false);
 	const bulkProgressPct = $derived(bulkTotal > 0 ? Math.round((bulkCurrent / bulkTotal) * 100) : 0);
@@ -440,21 +440,24 @@
 		bulkResults = [];
 		bulkCurrentLabel = '';
 
+		const adAccountLabel = adAccountOptions.find(o => o.id === bulkAdAccountId)?.label || bulkAdAccountId;
+
 		for (const link of links) {
 			const label = link.invoiceId || (link.url.match(/txid=([^&]{0,16})/) || [])[1] || `#${bulkCurrent + 1}`;
 			bulkCurrentLabel = label;
 			try {
 				const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links: [link] }).updates(downloadsQuery);
 				if (result.skipped > 0) {
-					bulkResults = [...bulkResults, { label, status: 'skipped', error: null }];
+					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'skipped', httpInfo: '200', error: null }];
 				} else if (result.downloaded > 0) {
-					bulkResults = [...bulkResults, { label, status: 'downloaded', error: null }];
+					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'downloaded', httpInfo: '200', error: null }];
 				} else {
 					const err = result.errorDetails?.[0] || 'unknown';
-					bulkResults = [...bulkResults, { label, status: 'error', error: err }];
+					const httpMatch = err.match(/HTTP (\d+)/);
+					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: httpMatch?.[1] || '—', error: err }];
 				}
 			} catch (e) {
-				bulkResults = [...bulkResults, { label, status: 'error', error: e instanceof Error ? e.message : 'Eroare' }];
+				bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: '—', error: e instanceof Error ? e.message : 'Eroare' }];
 			}
 			bulkCurrent++;
 		}
@@ -603,22 +606,26 @@
 								<thead class="sticky top-0 bg-muted/80 backdrop-blur">
 									<tr>
 										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Factură</th>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Ad Account</th>
 										<th class="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+										<th class="px-3 py-2 text-left font-medium text-muted-foreground">HTTP</th>
 									</tr>
 								</thead>
 								<tbody class="divide-y">
 									{#each [...bulkResults].reverse() as r}
 										<tr class="hover:bg-muted/30">
-											<td class="px-3 py-2 font-mono text-xs truncate max-w-[250px]">{r.label}</td>
+											<td class="px-3 py-2 font-mono text-xs truncate max-w-[200px]">{r.label}</td>
+											<td class="px-3 py-2 text-xs text-muted-foreground truncate max-w-[180px]" title={r.adAccount}>{r.adAccount}</td>
 											<td class="px-3 py-2">
 												{#if r.status === 'downloaded'}
 													<span class="text-green-600">Descărcat</span>
 												{:else if r.status === 'skipped'}
-													<span class="text-muted-foreground">Sărit (duplicat)</span>
+													<span class="text-muted-foreground">Sărit</span>
 												{:else}
 													<span class="text-red-600">{r.error || 'Eroare'}</span>
 												{/if}
 											</td>
+											<td class="px-3 py-2 text-muted-foreground">{r.httpInfo}</td>
 										</tr>
 									{/each}
 								</tbody>
