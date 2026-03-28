@@ -44,6 +44,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { untrack } from 'svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -522,25 +523,25 @@
 
 		if (!clientId) {
 			error = 'Please select a client';
-			toast.error('Please select a client');
+			clientLogger.warn({ message: 'Please select a client', action: 'invoice_create' });
 			return;
 		}
 
 		if (!clientName.trim()) {
 			error = 'Client name is required';
-			toast.error('Client name is required');
+			clientLogger.warn({ message: 'Client name is required', action: 'invoice_create' });
 			return;
 		}
 
 		if (lineItems.length === 0) {
 			error = 'Please add at least one item';
-			toast.error('Please add at least one item');
+			clientLogger.warn({ message: 'Please add at least one item', action: 'invoice_create' });
 			return;
 		}
 
 		if (lineItems.some((item) => !item.description.trim())) {
 			error = 'All items must have a description';
-			toast.error('All items must have a description');
+			clientLogger.warn({ message: 'All items must have a description', action: 'invoice_create' });
 			return;
 		}
 
@@ -548,12 +549,12 @@
 		if (isRecurringInvoice) {
 			if (!recurringStartDate) {
 				error = 'Start date is required for recurring invoices';
-				toast.error('Start date is required for recurring invoices');
+				clientLogger.warn({ message: 'Start date is required for recurring invoices', action: 'invoice_create' });
 				return;
 			}
 			if (recurringInterval < 1) {
 				error = 'Recurring interval must be at least 1';
-				toast.error('Recurring interval must be at least 1');
+				clientLogger.warn({ message: 'Recurring interval must be at least 1', action: 'invoice_create' });
 				return;
 			}
 		}
@@ -696,7 +697,7 @@
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Error creating invoice';
-			toast.error(error);
+			clientLogger.apiError('invoice_create', e);
 		} finally {
 			loading = false;
 		}
@@ -767,7 +768,7 @@
 				};
 				lineItems = [...lineItems, newItem];
 				if (!keezItem.lastPrice) {
-					toast.warning(`Articolul "${keezItem.name}" nu are preț în Keez. Completează prețul manual.`);
+					clientLogger.warn({ message: `Articolul "${keezItem.name}" nu are preț în Keez. Completează prețul manual.`, action: 'invoice_add_keez_item' });
 				}
 			}
 		} else if (dialogSourceType === 'manual' && dialogItemDescription.trim()) {

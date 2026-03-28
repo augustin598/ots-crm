@@ -35,6 +35,7 @@
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
 	import { Calendar, X, Plus, Save } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { untrack } from 'svelte';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -509,37 +510,37 @@
 	async function handleSubmit() {
 		if (!clientId) {
 			error = 'Please select a client';
-			toast.error('Please select a client');
+			clientLogger.warn({ message: 'Please select a client', action: 'recurring_invoice_update' });
 			return;
 		}
 
 		if (!clientName.trim()) {
 			error = 'Client name is required';
-			toast.error('Client name is required');
+			clientLogger.warn({ message: 'Client name is required', action: 'recurring_invoice_update' });
 			return;
 		}
 
 		if (lineItems.length === 0) {
 			error = 'Please add at least one item';
-			toast.error('Please add at least one item');
+			clientLogger.warn({ message: 'Please add at least one item', action: 'recurring_invoice_update' });
 			return;
 		}
 
 		if (lineItems.some((item) => !item.description.trim())) {
 			error = 'All items must have a description';
-			toast.error('All items must have a description');
+			clientLogger.warn({ message: 'All items must have a description', action: 'recurring_invoice_update' });
 			return;
 		}
 
 		// Validate recurring invoice fields
 		if (!recurringStartDate) {
 			error = 'Start date is required for recurring invoices';
-			toast.error('Start date is required for recurring invoices');
+			clientLogger.warn({ message: 'Start date is required for recurring invoices', action: 'recurring_invoice_update' });
 			return;
 		}
 		if (recurringInterval < 1) {
 			error = 'Recurring interval must be at least 1';
-			toast.error('Recurring interval must be at least 1');
+			clientLogger.warn({ message: 'Recurring interval must be at least 1', action: 'recurring_invoice_update' });
 			return;
 		}
 
@@ -619,7 +620,7 @@
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Error updating recurring invoice';
-			toast.error(error);
+			clientLogger.apiError('recurring_invoice_update', e);
 		} finally {
 			loading = false;
 		}

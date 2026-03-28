@@ -29,6 +29,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -180,7 +181,7 @@
 			toast.success(`${count} facturi șterse`);
 			selectedIds = new Set();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('supplier_invoices_bulk_delete', e);
 		} finally {
 			bulkDeleting = false;
 		}
@@ -208,7 +209,7 @@
 			a.remove();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('supplier_invoices_bulk_download', e);
 		} finally {
 			bulkDownloading = false;
 		}
@@ -235,7 +236,7 @@
 			const result = await createExpenseFromSupplierInvoice(invoiceId).updates(invoicesQuery);
 			toast.success('Cheltuială creată cu succes');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la creare cheltuială');
+			clientLogger.apiError('supplier_invoices_create_expense', e);
 		} finally {
 			creatingExpense = null;
 		}

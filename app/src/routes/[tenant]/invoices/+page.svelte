@@ -7,6 +7,7 @@
 		sendInvoice
 	} from '$lib/remotes/invoices.remote';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import {
 		getRecurringInvoices,
 		createRecurringInvoice,
@@ -297,14 +298,14 @@ import { goto } from '$app/navigation';
 			// Get the invoice to find the client
 			const invoice = invoices.find((inv) => inv.id === invoiceId);
 			if (!invoice) {
-				toast.error('Invoice not found');
+				clientLogger.warn({ message: 'Invoice not found', action: 'invoice_send' });
 				return;
 			}
 
 			// Get the client to check for email
 			const client = clients.find((c) => c.id === invoice.clientId);
 			if (!client || !client.email) {
-				toast.error('Clientul nu are email configurat. Nu se poate trimite factura.');
+				clientLogger.warn({ message: 'Clientul nu are email configurat. Nu se poate trimite factura.', action: 'invoice_send' });
 				return;
 			}
 
@@ -312,12 +313,7 @@ import { goto } from '$app/navigation';
 			await sendInvoice(invoiceId).updates(invoicesQuery);
 			toast.success('Factura a fost trimisă cu succes!');
 		} catch (e) {
-			const errorMessage = e instanceof Error ? e.message : 'Failed to send invoice';
-			if (errorMessage.includes('email not found') || errorMessage.includes('email')) {
-				toast.error('Clientul nu are email configurat. Nu se poate trimite factura.');
-			} else {
-				toast.error(errorMessage);
-			}
+			clientLogger.apiError('invoice_send', e);
 		}
 	}
 
@@ -520,7 +516,7 @@ import { goto } from '$app/navigation';
 			await invoicesQuery.refresh();
 		} catch (e) {
 			console.error('[Keez-Debug] validateInvoiceInKeez ERROR:', e);
-			toast.error(e instanceof Error ? e.message : 'Validarea facturii în Keez a eșuat');
+			clientLogger.apiError('invoice_validate_keez', e);
 		}
 	}
 
@@ -537,7 +533,7 @@ import { goto } from '$app/navigation';
 			await invoicesQuery.refresh();
 		} catch (e) {
 			console.error('[Keez-Debug] createStornoInKeez ERROR:', e);
-			toast.error(e instanceof Error ? e.message : 'Failed to create storno in Keez');
+			clientLogger.apiError('invoice_create_storno', e);
 		}
 	}
 
@@ -553,7 +549,7 @@ import { goto } from '$app/navigation';
 			await invoicesQuery.refresh();
 		} catch (e) {
 			console.error('[Keez-Debug] sendInvoiceToEFactura ERROR:', e);
-			toast.error(e instanceof Error ? e.message : 'Trimiterea în eFactura a eșuat');
+			clientLogger.apiError('invoice_send_efactura', e);
 		}
 	}
 
@@ -569,7 +565,7 @@ import { goto } from '$app/navigation';
 			await invoicesQuery.refresh();
 		} catch (e) {
 			console.error('[Keez-Debug] cancelInvoiceInKeez ERROR:', e);
-			toast.error(e instanceof Error ? e.message : 'Anularea facturii în Keez a eșuat');
+			clientLogger.apiError('invoice_cancel_keez', e);
 		}
 	}
 
@@ -580,7 +576,7 @@ import { goto } from '$app/navigation';
 			toast.success('Factura a fost sincronizată în Keez');
 			await invoicesQuery.refresh();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Sincronizarea în Keez a eșuat');
+			clientLogger.apiError('invoice_sync_keez', e);
 		}
 	}
 </script>
