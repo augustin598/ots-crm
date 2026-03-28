@@ -676,21 +676,16 @@
 												<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
 											{/if}
 											<div class="flex items-center justify-end gap-1">
-												{#if downloadedInvoices.length === 1}
-													<Button variant="outline" size="sm" class="whitespace-nowrap" onclick={() => handleDownloadInvoicePDF(downloadedInvoices[0].id, row.periodStart)}>
-														<Download class="mr-1.5 h-3.5 w-3.5" />{downloadedInvoices[0].invoiceNumber || 'Descarcă factura'}
-													</Button>
-													<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(downloadedInvoices[0].id)} title="Preview"><Eye class="h-4 w-4" /></Button>
-												{:else if downloadedInvoices.length > 1}
-													<span class="text-xs text-green-600 font-medium">{downloadedInvoices.length} facturi</span>
+												{#if downloadedInvoices.length > 0}
+													<span class="text-xs text-green-600 font-medium">{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}</span>
 													{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500">+{creditCount} credite</span>{/if}
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
 											</div>
 										</div>
-										<!-- Individual invoice rows when multiple -->
-										{#if downloadedInvoices.length > 1}
+										<!-- Individual invoice rows -->
+										{#if downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
 												<div class="grid grid-cols-5 gap-2 px-6 py-2 bg-muted/20 items-center">
 													<div class="col-span-4 pl-6">
