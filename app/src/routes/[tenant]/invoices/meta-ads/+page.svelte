@@ -417,6 +417,15 @@
 			} else {
 				toast.success(`Import complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
 			}
+			// Auto-expand date range to include imported invoices
+			if (result.downloaded > 0 && links.length > 0) {
+				const dates = links.map(l => l.date).filter(Boolean).sort();
+				if (dates.length > 0) {
+					const oldest = new Date(dates[0]!);
+					const oldestStr = `${oldest.getFullYear()}-${String(oldest.getMonth() + 1).padStart(2, '0')}-01`;
+					if (oldestStr < since) since = oldestStr;
+				}
+			}
 			bulkJson = '';
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la import');
@@ -598,7 +607,7 @@
 												<p class="text-base font-semibold">{formatNumber(totalClicks)}</p>
 											</div>
 											<div class="text-right hidden sm:block">
-												<p class="text-xs text-muted-foreground">Conversii</p>
+												<p class="text-xs text-muted-foreground">Impresii</p>
 												<p class="text-base font-semibold">{formatNumber(totalImpressions)}</p>
 											</div>
 											<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
@@ -624,7 +633,15 @@
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 											</div>
 											{#if isDownloadOnly}
-												<div class="col-span-3"></div>
+												{@const dlAmount = downloadedInvoices.find(d => d.amountText)?.amountText}
+												{#if dlAmount}
+													<div class="text-right whitespace-nowrap">
+														<span class="text-base font-semibold text-muted-foreground">{dlAmount}</span>
+													</div>
+													<div class="col-span-2"></div>
+												{:else}
+													<div class="col-span-3"></div>
+												{/if}
 											{:else}
 												<div class="text-right whitespace-nowrap">
 													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
@@ -653,13 +670,16 @@
 											{#each downloadedInvoices as inv}
 												<div class="grid grid-cols-5 gap-2 px-6 py-2 bg-muted/20 items-center">
 													<div class="col-span-4 pl-6">
-														<span class="text-xs text-blue-600 font-medium">{inv.invoiceNumber || inv.txid || '—'}</span>
+														<span class="text-xs text-blue-600 font-medium">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : '—')}</span>
+														{#if inv.amountText}<span class="text-xs text-muted-foreground ml-2">{inv.amountText}</span>{/if}
 													</div>
 													<div class="flex items-center justify-end gap-1">
 														<Button variant="outline" size="sm" class="whitespace-nowrap h-7 text-xs" onclick={() => handleDownloadInvoicePDF(inv.id, row.periodStart)}>
-															<Download class="mr-1 h-3 w-3" />{inv.invoiceNumber || 'PDF'}
+															<Download class="mr-1 h-3 w-3" />{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}` : 'PDF')}
 														</Button>
 														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewInvoicePDF(inv.id)} title="Preview"><Eye class="h-3.5 w-3.5" /></Button>
+														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handleRedownloadInvoice(inv.id)} title="Re-descarcă" disabled={redownloadingId === inv.id}><RefreshCwIcon class="h-3.5 w-3.5 {redownloadingId === inv.id ? 'animate-spin' : ''}" /></Button>
+														<Button variant="ghost" size="icon" class="h-7 w-7 text-red-500 hover:text-red-700" onclick={() => handleDeleteDownload(inv.id)} title="Șterge"><Trash2 class="h-3.5 w-3.5" /></Button>
 													</div>
 												</div>
 											{/each}
@@ -697,7 +717,7 @@
 						{#each MONTHS as m, i}<option value={i + 1}>{m}</option>{/each}
 					</select>
 					<select class="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm" bind:value={selectedYear}>
-						{#each [2024, 2025, 2026] as y}<option value={y}>{y}</option>{/each}
+						{#each Array.from({ length: 4 }, (_, i) => now.getFullYear() - 2 + i) as y}<option value={y}>{y}</option>{/each}
 					</select>
 				</div>
 				<div class="rounded-md border bg-muted/40 px-4 py-3">

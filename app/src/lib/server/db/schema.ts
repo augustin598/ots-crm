@@ -1604,6 +1604,7 @@ export const metaInvoiceDownload = sqliteTable('meta_invoice_download', {
 	periodEnd: text('period_end').notNull(), // "2026-02-28"
 	txid: text('txid'), // Facebook Transaction ID (e.g. "9360456000732052-9436742799770032")
 	invoiceNumber: text('invoice_number'), // FBADS-108-104380003
+	amountText: text('amount_text'), // "RON3,503.38" — raw amount from Facebook billing
 	pdfPath: text('pdf_path'),
 	status: text('status').notNull().default('pending'), // 'pending' | 'downloaded' | 'error'
 	downloadedAt: timestamp('downloaded_at', { withTimezone: true, mode: 'date' }),

@@ -617,6 +617,13 @@
       "when": 1774648830000,
       "tag": "0087_drop_meta_invoice_period_dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1774648840000,
+      "tag": "0088_meta_invoice_amount",
+      "breakpoints": true
     }
   ]
 }

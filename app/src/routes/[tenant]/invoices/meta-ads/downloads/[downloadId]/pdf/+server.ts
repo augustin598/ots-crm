@@ -44,7 +44,8 @@ export const GET: RequestHandler = async (event) => {
 				'Content-Length': fileBuffer.length.toString()
 			}
 		});
-	} catch {
+	} catch (err) {
+		console.error(`[META-PDF] Failed to read PDF for download ${downloadId}: ${err instanceof Error ? err.message : String(err)}`);
 		throw error(404, 'PDF file not found');
 	}
 };
