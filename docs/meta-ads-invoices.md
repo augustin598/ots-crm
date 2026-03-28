@@ -54,11 +54,12 @@ Facturile descarcate pot fi de doua tipuri (`invoiceType`):
 - **Header**: DateRangePicker, Import Facturi, Download Facturi, Sync Acum
 - **Filters**: Search + checkbox "Credite Ad"
 - **Bulk Import Panel**: textarea JSON + auto-detect ad account din URL (`act=XXX` → `act_XXX`)
-- **Client Cards**: grupate per `clientName`, collapsible
-  - Spending rows: luna, cheltuieli, impressions, clicks, butoane download
-  - Download-only rows: luna fara spending, afiseaza `amountText` daca exista
-  - Sub-rows: individual invoices (cand >1 per luna) cu badge Credit daca e cazul
-  - Butoane per factura: Download, Preview, Re-download, Delete
+- **Client Cards**: grupate per `clientName`, collapsible (3 nivele)
+  - **Nivel 1 — Card header**: client name, badges, totals (collapsible)
+  - **Nivel 2 — Period row**: luna, cheltuieli, imp, clicks + badge "N facturi" (collapsible toggle)
+  - **Nivel 3 — Invoice row**: FBADS/TX label, amount, butoane PDF/Preview + overflow menu (Re-download, Delete)
+- Sub-rows **collapsed implicit** — click pe badge "N facturi" le expandeaza
+- Butoane per factura: 2 vizibile (PDF, Preview) + dropdown overflow (Re-download, Delete)
 
 ### Grouping Logic
 1. Spending rows filtrate dupa date range → grupate per `clientName`

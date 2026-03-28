@@ -8,10 +8,13 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Download, Search, Eye, Trash2, XCircle } from '@lucide/svelte';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
@@ -163,6 +166,12 @@
 	let spendSearchQuery = $state('');
 	let showCredits = $state(false);
 	let expandedAccounts = new SvelteSet<string>();
+	let expandedPeriods = new SvelteSet<string>();
+
+	function togglePeriod(key: string) {
+		if (expandedPeriods.has(key)) expandedPeriods.delete(key);
+		else expandedPeriods.add(key);
+	}
 
 	function toggleAccount(key: string) {
 		if (expandedAccounts.has(key)) expandedAccounts.delete(key);
@@ -646,60 +655,62 @@
 										{@const creditCount = allDownloaded.filter(d => d.invoiceType === 'credit').length}
 										{@const hasIndividual = filteredDownloaded.some(d => d.txid)}
 										{@const downloadedInvoices = hasIndividual ? filteredDownloaded.filter(d => d.txid) : filteredDownloaded}
-										<!-- Spending / download-only row -->
-										<div class="grid grid-cols-5 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
-											<div class="flex items-center gap-2 min-w-0">
+										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
+										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
+										<!-- Period row -->
+										<div class="flex items-center gap-3 px-6 py-3 hover:bg-muted/30 transition-colors">
+											<div class="flex items-center gap-2 min-w-0 flex-1">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 												{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
 													<span class="text-xs text-muted-foreground truncate">({row.adAccountName || row.metaAdAccountId})</span>
 												{/if}
 											</div>
-											{#if isDownloadOnly}
-												{@const dlAmount = downloadedInvoices.find(d => d.amountText)?.amountText}
-												{#if dlAmount}
-													<div class="text-right whitespace-nowrap">
-														<span class="text-base font-semibold text-muted-foreground">{dlAmount}</span>
-													</div>
-													<div class="col-span-2"></div>
-												{:else}
-													<div class="col-span-3"></div>
+											{#if !isDownloadOnly}
+												<span class="text-base font-semibold whitespace-nowrap">{formatAmount(row.spendCents, row.currencyCode)}</span>
+												{#if trend !== null}
+													<span class="text-xs whitespace-nowrap {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
 												{/if}
-											{:else}
-												<div class="text-right whitespace-nowrap">
-													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
-													{#if trend !== null}
-														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-													{/if}
-												</div>
-												<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)} imp.</span>
-												<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
+												<span class="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline">{formatNumber(row.impressions)} imp.</span>
+												<span class="text-sm whitespace-nowrap hidden sm:inline">{formatNumber(row.clicks)} clicks</span>
 											{/if}
-											<div class="flex items-center justify-end gap-1">
-												{#if downloadedInvoices.length > 0}
-													<span class="text-xs text-green-600 font-medium">{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}</span>
-													{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500">+{creditCount} credite</span>{/if}
-												{:else if !isDownloadOnly}
-													<span class="text-xs text-orange-500">În așteptare</span>
-												{/if}
-											</div>
+											{#if downloadedInvoices.length > 0}
+												<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer" onclick={() => togglePeriod(periodKey)}>
+													<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
+													{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
+												</button>
+												{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500 whitespace-nowrap">+{creditCount} cr.</span>{/if}
+											{:else if !isDownloadOnly}
+												<span class="text-xs text-orange-500 whitespace-nowrap">În așteptare</span>
+											{/if}
 										</div>
-										<!-- Individual invoice rows -->
-										{#if downloadedInvoices.length > 0}
+										<!-- Expandable invoice list -->
+										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
-												<div class="grid grid-cols-5 gap-2 px-6 py-2 bg-muted/20 items-center">
-													<div class="col-span-4 pl-6">
-														<span class="text-xs text-blue-600 font-medium">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : '—')}</span>
-														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50 ml-1.5">Credit</span>{/if}
-														{#if inv.amountText}<span class="text-xs text-muted-foreground ml-2">{inv.amountText}</span>{/if}
+												<div class="flex items-center gap-3 px-6 py-2 pl-12 bg-muted/10 hover:bg-muted/20 transition-colors">
+													<div class="flex items-center gap-2 min-w-0 flex-1">
+														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : 'Factura PDF')}</span>
+														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
+														{#if inv.amountText}<span class="text-xs text-muted-foreground">{inv.amountText}</span>{/if}
 													</div>
-													<div class="flex items-center justify-end gap-1">
-														<Button variant="outline" size="sm" class="whitespace-nowrap h-7 text-xs" onclick={() => handleDownloadInvoicePDF(inv.id, row.periodStart)}>
-															<Download class="mr-1 h-3 w-3" />{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}` : 'PDF')}
+													<div class="flex items-center gap-0.5 shrink-0">
+														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadInvoicePDF(inv.id, row.periodStart)}>
+															<Download class="mr-1 h-3 w-3" />PDF
 														</Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewInvoicePDF(inv.id)} title="Preview"><Eye class="h-3.5 w-3.5" /></Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handleRedownloadInvoice(inv.id)} title="Re-descarcă" disabled={redownloadingId === inv.id}><RefreshCwIcon class="h-3.5 w-3.5 {redownloadingId === inv.id ? 'animate-spin' : ''}" /></Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7 text-red-500 hover:text-red-700" onclick={() => handleDeleteDownload(inv.id)} title="Șterge"><Trash2 class="h-3.5 w-3.5" /></Button>
+														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewInvoicePDF(inv.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+														<DropdownMenu>
+															<DropdownMenuTrigger>
+																<Button variant="ghost" size="icon" class="h-7 w-7"><EllipsisIcon class="h-3.5 w-3.5" /></Button>
+															</DropdownMenuTrigger>
+															<DropdownMenuContent align="end">
+																<DropdownMenuItem onclick={() => handleRedownloadInvoice(inv.id)}>
+																	<RefreshCwIcon class="mr-2 h-3.5 w-3.5" />Re-descarcă
+																</DropdownMenuItem>
+																<DropdownMenuItem class="text-red-600" onclick={() => handleDeleteDownload(inv.id)}>
+																	<Trash2 class="mr-2 h-3.5 w-3.5" />Șterge factura
+																</DropdownMenuItem>
+															</DropdownMenuContent>
+														</DropdownMenu>
 													</div>
 												</div>
 											{/each}
