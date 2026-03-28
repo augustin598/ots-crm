@@ -773,7 +773,7 @@
 														<span class="inline-flex items-center rounded-full border border-amber-200 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">{creditDlCount} credite</span>
 													{/if}
 												</div>
-												<p class="text-sm text-muted-foreground">{group.rows.length} luni</p>
+												<p class="text-sm text-muted-foreground capitalize">{since.substring(0, 7) === until.substring(0, 7) ? formatPeriod(since) : `${formatPeriod(since)} — ${formatPeriod(until)}`}</p>
 											</div>
 										</div>
 										<div class="flex items-center gap-4">
