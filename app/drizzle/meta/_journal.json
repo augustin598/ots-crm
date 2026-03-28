@@ -624,6 +624,13 @@
       "when": 1774648840000,
       "tag": "0088_meta_invoice_amount",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1774648850000,
+      "tag": "0089_meta_invoice_type",
+      "breakpoints": true
     }
   ]
 }

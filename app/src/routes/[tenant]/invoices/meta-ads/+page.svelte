@@ -152,8 +152,9 @@
 		return Array.from(groups.values());
 	});
 
-	// Collapsible + search state
+	// Collapsible + search + filter state
 	let spendSearchQuery = $state('');
+	let showCredits = $state(false);
 	let expandedAccounts = new SvelteSet<string>();
 
 	function toggleAccount(key: string) {
@@ -560,10 +561,16 @@
 			</div>
 		</Card>
 	{:else}
-		<!-- Search -->
-		<div class="relative">
-			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-			<Input bind:value={spendSearchQuery} type="text" placeholder="Caută cont sau client..." class="pl-9" />
+		<!-- Search + Filters -->
+		<div class="flex items-center gap-3">
+			<div class="relative flex-1">
+				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+				<Input bind:value={spendSearchQuery} type="text" placeholder="Caută cont sau client..." class="pl-9" />
+			</div>
+			<label class="flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
+				<input type="checkbox" bind:checked={showCredits} class="rounded border-input" />
+				Credite Ad
+			</label>
 		</div>
 
 		{#if filteredGroupedByClient.length === 0}
@@ -577,7 +584,8 @@
 					{@const curr = group.rows[0]?.currencyCode || 'RON'}
 					{@const isExpanded = expandedAccounts.has(group.clientName)}
 					{@const clientDls = downloadsByClient.get(group.clientName) || []}
-					{@const dlCount = clientDls.filter(d => d.status === 'downloaded').length}
+					{@const dlCount = clientDls.filter(d => d.status === 'downloaded' && d.invoiceType !== 'credit').length}
+					{@const creditDlCount = clientDls.filter(d => d.status === 'downloaded' && d.invoiceType === 'credit').length}
 					<Collapsible open={isExpanded} onOpenChange={() => toggleAccount(group.clientName)}>
 						<Card class="overflow-hidden">
 							<CollapsibleTrigger class="w-full text-left cursor-pointer">
@@ -592,6 +600,9 @@
 													<h3 class="text-lg font-semibold">{group.clientName}</h3>
 													{#if dlCount > 0}
 														<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">{dlCount} facturi</span>
+													{/if}
+													{#if creditDlCount > 0 && showCredits}
+														<span class="inline-flex items-center rounded-full border border-amber-200 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">{creditDlCount} credite</span>
 													{/if}
 												</div>
 												<p class="text-sm text-muted-foreground">{group.rows.length} luni</p>
@@ -624,8 +635,10 @@
 										{@const trend = prevSpend ? ((row.spendCents - prevSpend) / prevSpend) * 100 : null}
 										{@const invoices = downloadsByKey.get(`${row.metaAdAccountId}:${row.periodStart}`) || []}
 										{@const allDownloaded = invoices.filter(d => d.status === 'downloaded' && d.pdfPath)}
-										{@const hasIndividual = allDownloaded.some(d => d.txid)}
-										{@const downloadedInvoices = hasIndividual ? allDownloaded.filter(d => d.txid) : allDownloaded}
+										{@const filteredDownloaded = showCredits ? allDownloaded : allDownloaded.filter(d => d.invoiceType !== 'credit')}
+										{@const creditCount = allDownloaded.filter(d => d.invoiceType === 'credit').length}
+										{@const hasIndividual = filteredDownloaded.some(d => d.txid)}
+										{@const downloadedInvoices = hasIndividual ? filteredDownloaded.filter(d => d.txid) : filteredDownloaded}
 										<!-- Spending / download-only row -->
 										<div class="grid grid-cols-5 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
 											<div class="flex items-center gap-2">
@@ -660,6 +673,7 @@
 													<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(downloadedInvoices[0].id)} title="Preview"><Eye class="h-4 w-4" /></Button>
 												{:else if downloadedInvoices.length > 1}
 													<span class="text-xs text-green-600 font-medium">{downloadedInvoices.length} facturi</span>
+													{#if creditCount > 0 && !showCredits}<span class="text-xs text-amber-500">+{creditCount} credite</span>{/if}
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
@@ -671,6 +685,7 @@
 												<div class="grid grid-cols-5 gap-2 px-6 py-2 bg-muted/20 items-center">
 													<div class="col-span-4 pl-6">
 														<span class="text-xs text-blue-600 font-medium">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : '—')}</span>
+														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50 ml-1.5">Credit</span>{/if}
 														{#if inv.amountText}<span class="text-xs text-muted-foreground ml-2">{inv.amountText}</span>{/if}
 													</div>
 													<div class="flex items-center justify-end gap-1">
