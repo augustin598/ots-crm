@@ -20,12 +20,20 @@
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
-	import { getDefaultDateRange } from '$lib/utils/report-helpers';
+	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 
 	// Date range — implicit: luna curenta (ca in reports)
 	const _defaults = getDefaultDateRange();
 	let since = $state(_defaults.since);
 	let until = $state(_defaults.until);
+	const _presets = getDatePresets();
+	const dateRangeLabel = $derived.by(() => {
+		for (const p of _presets) {
+			if (p.since === since && p.until === until) return p.label;
+		}
+		const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+		return `${fmt(since)} — ${fmt(until)}`;
+	});
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -773,7 +781,7 @@
 														<span class="inline-flex items-center rounded-full border border-amber-200 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">{creditDlCount} credite</span>
 													{/if}
 												</div>
-												<p class="text-sm text-muted-foreground capitalize">{since.substring(0, 7) === until.substring(0, 7) ? formatPeriod(since) : `${formatPeriod(since)} — ${formatPeriod(until)}`}</p>
+												<p class="text-sm text-muted-foreground">{dateRangeLabel}</p>
 											</div>
 										</div>
 										<div class="flex items-center gap-4">
