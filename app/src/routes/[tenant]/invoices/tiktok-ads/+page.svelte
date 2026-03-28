@@ -19,6 +19,7 @@
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	// Date range — implicit: tot anul curent
 	const currentYear = new Date().getFullYear();
@@ -61,7 +62,7 @@
 			lastSyncResult = { imported: result.imported, updated: result.updated, errors: result.errors, at: new Date() };
 			toast.success(`Sync complet: ${result.imported} noi, ${result.updated} actualizate, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+			clientLogger.apiError('tiktok_ads_sync', e, 'TIKTOK_API_FETCH_FAILED');
 		} finally {
 			syncing = false;
 		}
@@ -73,7 +74,7 @@
 			await deleteTiktokAdsSpending(id).updates(spendingQuery);
 			toast.success('Raport șters');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('tiktok_ads_delete', e);
 		}
 	}
 
@@ -83,7 +84,7 @@
 			await regenerateTiktokSpendingPdf(spendingId).updates(spendingQuery);
 			toast.success('PDF regenerat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la regenerare PDF');
+			clientLogger.apiError('tiktok_ads_regenerate_pdf', e);
 		} finally {
 			regeneratingId = null;
 		}
@@ -103,7 +104,7 @@
 			}
 			toast.success(`${regenerated} PDF-uri regenerate`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la regenerare PDF-uri');
+			clientLogger.apiError('tiktok_ads_regenerate_all', e);
 		} finally {
 			regeneratingAll = false;
 		}
@@ -121,7 +122,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('tiktok_ads_download_pdf', e);
 		}
 	}
 
@@ -133,7 +134,7 @@
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+			clientLogger.apiError('tiktok_ads_preview_pdf', e);
 		}
 	}
 
@@ -234,7 +235,7 @@
 			const result = await triggerTiktokInvoiceDownload({ year: selectedYear, month: selectedMonth }).updates(downloadsQuery);
 			toast.success(`Download complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare facturi');
+			clientLogger.apiError('tiktok_ads_download_month', e, 'TIKTOK_API_FETCH_FAILED');
 		} finally {
 			downloadingMonth = false;
 		}
@@ -246,7 +247,7 @@
 			await redownloadTiktokInvoice(downloadId).updates(downloadsQuery);
 			toast.success('Factură re-descărcată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la re-descărcare');
+			clientLogger.apiError('tiktok_ads_redownload', e, 'TIKTOK_API_FETCH_FAILED');
 		} finally {
 			redownloadingId = null;
 		}
@@ -258,7 +259,7 @@
 			await deleteTiktokInvoiceDownload(id).updates(downloadsQuery);
 			toast.success('Factură ștearsă');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('tiktok_ads_delete_download', e);
 		}
 	}
 
@@ -270,7 +271,7 @@
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+			clientLogger.apiError('tiktok_ads_preview_pdf', e);
 		}
 	}
 
@@ -286,7 +287,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('tiktok_ads_download_pdf', e);
 		}
 	}
 

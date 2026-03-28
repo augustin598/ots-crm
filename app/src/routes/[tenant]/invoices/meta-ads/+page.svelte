@@ -20,6 +20,7 @@
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 
 	// Date range — implicit: luna curenta (ca in reports)
@@ -76,7 +77,7 @@
 			const result = await triggerMetaAdsSync().updates(spendingQuery);
 			toast.success(`Sync complet: ${result.imported} noi, ${result.updated} actualizate, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+			clientLogger.apiError('meta_ads_sync', e, 'META_API_FETCH_FAILED');
 		} finally {
 			syncing = false;
 		}
@@ -205,7 +206,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error('Eroare la crearea ZIP-ului');
+			clientLogger.apiError('meta_ads_zip_download', e, 'EXPORT_GENERATION_FAILED');
 		} finally {
 			zipping = false;
 		}
@@ -375,7 +376,7 @@
 			await redownloadInvoice(downloadId).updates(downloadsQuery);
 			toast.success('Factură re-descărcată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la re-descărcare');
+			clientLogger.apiError('meta_ads_redownload', e, 'META_API_FETCH_FAILED');
 		} finally {
 			redownloadingId = null;
 		}
@@ -387,7 +388,7 @@
 			await deleteInvoiceDownload(id).updates(downloadsQuery);
 			toast.success('Factură ștearsă');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('meta_ads_delete_download', e);
 		}
 	}
 
@@ -398,7 +399,7 @@
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
-		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare'); }
+		} catch (e) { clientLogger.apiError('meta_ads_preview_pdf', e); }
 	}
 
 	async function handleDownloadInvoicePDF(id: string, period: string) {
@@ -412,7 +413,7 @@
 			a.download = `MetaAds-Factura-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (e) { toast.error(e instanceof Error ? e.message : 'Eroare la descărcare'); }
+		} catch (e) { clientLogger.apiError('meta_ads_download_pdf', e); }
 	}
 
 	// ---- Bulk Import from URLs ----

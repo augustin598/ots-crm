@@ -150,6 +150,30 @@ process.on('SIGINT', async () => {
 	await shutdownBrowser();
 });
 
-export const handleError = ({ error, event, status }) => {
-	console.error(`[${status}]`, event.url.pathname, error);
+export const handleError: import('@sveltejs/kit').HandleServerError = async ({ error, event, status }) => {
+	const { logError, serializeError } = await import('$lib/server/logger');
+	const serialized = serializeError(error);
+	const requestId = crypto.randomUUID();
+
+	await logError('server', serialized.message, {
+		tenantId: event.locals.tenant?.id,
+		url: event.url.pathname,
+		stackTrace: serialized.stack,
+		metadata: {
+			status,
+			method: event.request.method,
+			searchParams: Object.fromEntries(event.url.searchParams)
+		},
+		userId: event.locals.user?.id,
+		action: 'server_error',
+		errorCode: 'SYSTEM_UNEXPECTED',
+		requestId,
+		ipAddress: event.getClientAddress?.() ?? undefined,
+		userAgent: event.request.headers.get('user-agent') ?? undefined
+	});
+
+	return {
+		message: 'A aparut o eroare interna.',
+		requestId
+	};
 };

@@ -56,10 +56,18 @@ export async function logDebug(params: {
 	stackTrace?: string;
 	metadata?: Record<string, unknown>;
 	userId?: string;
+	action?: string;
+	errorCode?: string;
+	ipAddress?: string;
+	userAgent?: string;
+	requestId?: string;
+	duration?: number;
 }) {
 	// Always write to console for dev visibility and container logs
 	const method = CONSOLE_METHOD[params.level];
-	const prefix = `[${params.source.toUpperCase()}]`;
+	const codeTag = params.errorCode ? `[${params.errorCode}]` : '';
+	const actionTag = params.action ? `[${params.action}]` : '';
+	const prefix = `[${params.source.toUpperCase()}]${codeTag}${actionTag}`;
 	if (params.metadata && Object.keys(params.metadata).length > 0) {
 		console[method](prefix, params.message, params.metadata);
 	} else {
@@ -78,7 +86,13 @@ export async function logDebug(params: {
 			stackTrace: params.stackTrace ?? null,
 			metadata: params.metadata ? JSON.stringify(params.metadata) : null,
 			userId: params.userId ?? null,
-			createdAt: new Date()
+			createdAt: new Date(),
+			action: params.action ?? null,
+			errorCode: params.errorCode ?? null,
+			ipAddress: params.ipAddress ?? null,
+			userAgent: params.userAgent ?? null,
+			requestId: params.requestId ?? null,
+			duration: params.duration ?? null
 		});
 	} catch (err) {
 		// KEEP: raw console — cannot recursively call logger

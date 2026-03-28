@@ -25,7 +25,16 @@ export const getDebugLogs = query(async () => {
 			metadata: table.debugLog.metadata,
 			userId: table.debugLog.userId,
 			createdAt: table.debugLog.createdAt,
-			userName: table.user.firstName
+			userName: table.user.firstName,
+			action: table.debugLog.action,
+			errorCode: table.debugLog.errorCode,
+			ipAddress: table.debugLog.ipAddress,
+			userAgent: table.debugLog.userAgent,
+			requestId: table.debugLog.requestId,
+			duration: table.debugLog.duration,
+			resolved: table.debugLog.resolved,
+			resolvedAt: table.debugLog.resolvedAt,
+			resolutionNote: table.debugLog.resolutionNote
 		})
 		.from(table.debugLog)
 		.leftJoin(table.user, eq(table.debugLog.userId, table.user.id))
@@ -118,3 +127,67 @@ export const deleteAllDebugLogs = command(async () => {
 	await db.delete(table.debugLog).where(eq(table.debugLog.tenantId, event.locals.tenant.id));
 	return { success: true };
 });
+
+export const resolveDebugLog = command(
+	v.object({
+		logId: v.pipe(v.string(), v.minLength(1)),
+		resolved: v.boolean(),
+		resolutionNote: v.optional(v.string())
+	}),
+	async (input) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+			throw new Error('Forbidden: Admin access required');
+		}
+
+		await db
+			.update(table.debugLog)
+			.set({
+				resolved: input.resolved,
+				resolvedAt: input.resolved ? new Date() : null,
+				resolutionNote: input.resolved ? (input.resolutionNote ?? null) : null
+			})
+			.where(
+				and(
+					eq(table.debugLog.id, input.logId),
+					eq(table.debugLog.tenantId, event.locals.tenant.id)
+				)
+			);
+		return { success: true };
+	}
+);
+
+export const bulkResolveDebugLogs = command(
+	v.object({
+		logIds: v.pipe(v.array(v.string()), v.minLength(1), v.maxLength(100)),
+		resolved: v.boolean(),
+		resolutionNote: v.optional(v.string())
+	}),
+	async (input) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+			throw new Error('Forbidden: Admin access required');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		let updated = 0;
+		for (const logId of input.logIds) {
+			await db
+				.update(table.debugLog)
+				.set({
+					resolved: input.resolved,
+					resolvedAt: input.resolved ? new Date() : null,
+					resolutionNote: input.resolved ? (input.resolutionNote ?? null) : null
+				})
+				.where(and(eq(table.debugLog.id, logId), eq(table.debugLog.tenantId, tenantId)));
+			updated++;
+		}
+		return { success: true, updated };
+	}
+);

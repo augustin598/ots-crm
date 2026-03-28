@@ -11,7 +11,9 @@
 		getDebugLogStats,
 		deleteDebugLog,
 		deleteDebugLogsByLevel,
-		deleteAllDebugLogs
+		deleteAllDebugLogs,
+		resolveDebugLog,
+		bulkResolveDebugLogs
 	} from '$lib/remotes/debug-logs.remote';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -50,7 +52,11 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import XIcon from '@lucide/svelte/icons/x';
 	import EyeIcon from '@lucide/svelte/icons/eye';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import UndoIcon from '@lucide/svelte/icons/undo';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import { page } from '$app/state';
+	import { getErrorByCode } from '$lib/error-codes';
 
 	// ---- Email Logs ----
 	const emailLogsQuery = getEmailLogs();
@@ -171,12 +177,46 @@
 		filteredDebugLogs.slice((debugPage - 1) * debugPageSize, debugPage * debugPageSize)
 	);
 
+	let debugResolvedFilter = $state<string>(''); // '', 'resolved', 'unresolved'
+	let selectedDebugLogIds = $state<Set<string>>(new Set());
+	let expandedDebugLogId = $state<string | null>(null);
+
+	const filteredDebugLogsWithResolved = $derived(
+		filteredDebugLogs.filter((log: any) => {
+			if (debugResolvedFilter === 'resolved' && !log.resolved) return false;
+			if (debugResolvedFilter === 'unresolved' && log.resolved) return false;
+			return true;
+		})
+	);
+
+	const debugTotalPagesResolved = $derived(Math.ceil(filteredDebugLogsWithResolved.length / debugPageSize));
+	const paginatedDebugLogsResolved = $derived(
+		filteredDebugLogsWithResolved.slice((debugPage - 1) * debugPageSize, debugPage * debugPageSize)
+	);
+
+	function toggleDebugLogSelection(id: string) {
+		const next = new Set(selectedDebugLogIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedDebugLogIds = next;
+	}
+
+	function toggleAllDebugLogs() {
+		if (selectedDebugLogIds.size === paginatedDebugLogsResolved.length) {
+			selectedDebugLogIds = new Set();
+		} else {
+			selectedDebugLogIds = new Set(paginatedDebugLogsResolved.map((l: any) => l.id));
+		}
+	}
+
 	$effect(() => {
 		debugLevelFilter;
 		debugSourceFilter;
 		debugSearchText;
 		debugDateRange;
+		debugResolvedFilter;
 		debugPage = 1;
+		selectedDebugLogIds = new Set();
 	});
 
 	// ---- Helpers ----
@@ -343,6 +383,29 @@
 			toast.success('Toate log-urile de debug au fost sterse');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la stergere');
+		}
+	}
+
+	async function handleResolveDebugLog(logId: string, resolved: boolean) {
+		try {
+			await resolveDebugLog({ logId, resolved }).updates(debugLogsQuery, debugStatsQuery);
+			toast.success(resolved ? 'Log marcat ca rezolvat' : 'Log marcat ca nerezolvat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare');
+		}
+	}
+
+	async function handleBulkResolve(resolved: boolean) {
+		if (selectedDebugLogIds.size === 0) return;
+		try {
+			await bulkResolveDebugLogs({
+				logIds: [...selectedDebugLogIds],
+				resolved
+			}).updates(debugLogsQuery, debugStatsQuery);
+			toast.success(`${selectedDebugLogIds.size} log-uri ${resolved ? 'rezolvate' : 'deschise'}`);
+			selectedDebugLogIds = new Set();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare');
 		}
 	}
 </script>
@@ -812,10 +875,10 @@
 					</Select>
 					<Select type="single" value={debugSourceFilter} onValueChange={(v) => (debugSourceFilter = v ?? '')}>
 						<SelectTrigger class="w-[160px]">
-							{debugSourceFilter || 'Toate'}
+							{debugSourceFilter || 'Toate sursele'}
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="">Toate</SelectItem>
+							<SelectItem value="">Toate sursele</SelectItem>
 							<SelectItem value="server">Server</SelectItem>
 							<SelectItem value="client">Client</SelectItem>
 							<SelectItem value="scheduler">Scheduler</SelectItem>
@@ -828,9 +891,37 @@
 							<SelectItem value="anaf-spv">ANAF SPV</SelectItem>
 							<SelectItem value="banking">Banking</SelectItem>
 							<SelectItem value="storage">Storage</SelectItem>
+							<SelectItem value="google-ads">Google Ads</SelectItem>
+							<SelectItem value="meta-ads">Meta Ads</SelectItem>
+							<SelectItem value="tiktok-ads">TikTok Ads</SelectItem>
+						</SelectContent>
+					</Select>
+					<Select type="single" value={debugResolvedFilter} onValueChange={(v) => (debugResolvedFilter = v ?? '')}>
+						<SelectTrigger class="w-[160px]">
+							{debugResolvedFilter === 'resolved' ? 'Rezolvate' : debugResolvedFilter === 'unresolved' ? 'Nerezolvate' : 'Toate statusurile'}
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="">Toate statusurile</SelectItem>
+							<SelectItem value="unresolved">Nerezolvate</SelectItem>
+							<SelectItem value="resolved">Rezolvate</SelectItem>
 						</SelectContent>
 					</Select>
 				</div>
+
+				<!-- Bulk Actions -->
+				{#if selectedDebugLogIds.size > 0}
+					<div class="flex items-center gap-3 p-3 bg-muted rounded-lg">
+						<span class="text-sm font-medium">{selectedDebugLogIds.size} selectate</span>
+						<Button variant="outline" size="sm" onclick={() => handleBulkResolve(true)}>
+							<CheckIcon class="h-4 w-4 mr-1" />
+							Rezolva
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => handleBulkResolve(false)}>
+							<UndoIcon class="h-4 w-4 mr-1" />
+							Redeschide
+						</Button>
+					</div>
+				{/if}
 
 				<!-- Debug Log Entries -->
 				{#if allDebugLogs.length === 0}
@@ -841,7 +932,7 @@
 							<p class="text-muted-foreground">Log-urile vor aparea pe masura ce aplicatia inregistreaza evenimente.</p>
 						</CardContent>
 					</Card>
-				{:else if filteredDebugLogs.length === 0}
+				{:else if filteredDebugLogsWithResolved.length === 0}
 					<Card>
 						<CardContent class="py-12 text-center">
 							<SearchIcon class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -851,32 +942,78 @@
 					</Card>
 				{:else}
 					<div class="space-y-3">
-						{#each paginatedDebugLogs as log (log.id)}
+						<!-- Select all checkbox -->
+						<div class="flex items-center gap-2 px-1">
+							<input
+								type="checkbox"
+								class="rounded border-muted-foreground/50"
+								checked={selectedDebugLogIds.size === paginatedDebugLogsResolved.length && paginatedDebugLogsResolved.length > 0}
+								onchange={toggleAllDebugLogs}
+							/>
+							<span class="text-xs text-muted-foreground">Selecteaza toate ({filteredDebugLogsWithResolved.length})</span>
+						</div>
+
+						{#each paginatedDebugLogsResolved as log (log.id)}
 							<Collapsible>
-								<Card>
+								<Card class="{log.resolved ? 'opacity-60' : ''}">
 									<CardContent class="pt-4 pb-4">
 										<div class="flex items-start justify-between gap-4">
-											<div class="flex-1 min-w-0">
-												<div class="flex items-center gap-2 mb-2">
-													{#if log.level === 'error'}
-														<Badge variant="destructive">Eroare</Badge>
-													{:else if log.level === 'warning'}
-														<Badge class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">Avertisment</Badge>
-													{:else}
-														<Badge variant="secondary" class="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Informatie</Badge>
-													{/if}
-													<Badge variant="outline" class="bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">{log.source}</Badge>
-													<span class="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+											<div class="flex items-start gap-3 flex-1 min-w-0">
+												<input
+													type="checkbox"
+													class="rounded border-muted-foreground/50 mt-1 shrink-0"
+													checked={selectedDebugLogIds.has(log.id)}
+													onchange={() => toggleDebugLogSelection(log.id)}
+												/>
+												<div class="flex-1 min-w-0">
+													<div class="flex items-center gap-2 mb-2 flex-wrap">
+														{#if log.level === 'error'}
+															<Badge variant="destructive">Eroare</Badge>
+														{:else if log.level === 'warning'}
+															<Badge class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">Avertisment</Badge>
+														{:else}
+															<Badge variant="secondary" class="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Informatie</Badge>
+														{/if}
+														<Badge variant="outline" class="bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">{log.source}</Badge>
+														{#if log.errorCode}
+															<Badge variant="outline" class="font-mono text-xs">{log.errorCode}</Badge>
+														{/if}
+														{#if log.resolved}
+															<Badge class="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+																<ShieldCheckIcon class="h-3 w-3 mr-1" />
+																Rezolvat
+															</Badge>
+														{/if}
+														{#if log.duration}
+															<Badge variant="outline" class="text-xs {log.duration >= 3000 ? 'text-orange-600' : ''}">
+																{log.duration}ms
+															</Badge>
+														{/if}
+														<span class="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+													</div>
+													<p class="text-sm font-medium">{log.message}</p>
+													<div class="flex items-center gap-3 mt-1 flex-wrap">
+														{#if log.action}
+															<span class="text-xs text-muted-foreground">Actiune: <span class="font-mono">{log.action}</span></span>
+														{/if}
+														{#if log.url}
+															<span class="text-xs text-muted-foreground">URL: {log.url}</span>
+														{/if}
+													</div>
 												</div>
-												<p class="text-sm font-medium">{log.message}</p>
-												{#if log.url}
-													<p class="text-xs text-muted-foreground mt-1">URL: {log.url}</p>
-												{/if}
 											</div>
-											<div class="flex items-center gap-2 shrink-0">
+											<div class="flex items-center gap-1 shrink-0">
+												{#if !log.resolved}
+													<Button variant="ghost" size="sm" title="Marcheaza rezolvat" onclick={() => handleResolveDebugLog(log.id, true)}>
+														<CheckIcon class="h-4 w-4 text-green-500" />
+													</Button>
+												{:else}
+													<Button variant="ghost" size="sm" title="Redeschide" onclick={() => handleResolveDebugLog(log.id, false)}>
+														<UndoIcon class="h-4 w-4 text-orange-500" />
+													</Button>
+												{/if}
 												<CollapsibleTrigger>
 													<Button variant="ghost" size="sm">
-														<span class="text-xs text-muted-foreground mr-1">Expand</span>
 														<ChevronDownIcon class="h-4 w-4" />
 													</Button>
 												</CollapsibleTrigger>
@@ -886,7 +1023,19 @@
 											</div>
 										</div>
 										<CollapsibleContent>
-											<div class="mt-4 pt-4 border-t space-y-2 text-sm text-muted-foreground">
+											<div class="mt-4 pt-4 border-t space-y-3 text-sm text-muted-foreground">
+												{#if log.errorCode}
+													{@const errorDef = getErrorByCode(log.errorCode)}
+													{#if errorDef}
+														<div class="bg-muted/50 p-3 rounded-md space-y-1">
+															<p class="text-xs"><span class="font-medium text-foreground">Mesaj utilizator:</span> {errorDef.userMessage}</p>
+															{#if errorDef.suggestedFix}
+																<p class="text-xs"><span class="font-medium text-foreground">Suggested fix:</span> {errorDef.suggestedFix}</p>
+															{/if}
+															<p class="text-xs"><span class="font-medium text-foreground">Retryable:</span> {errorDef.retryable ? 'Da' : 'Nu'}</p>
+														</div>
+													{/if}
+												{/if}
 												{#if log.stackTrace}
 													<div>
 														<p class="font-medium text-foreground mb-1">Stack Trace:</p>
@@ -899,8 +1048,27 @@
 														<pre class="bg-muted p-3 rounded-md text-xs overflow-x-auto whitespace-pre-wrap">{formatMetadata(log.metadata)}</pre>
 													</div>
 												{/if}
-												{#if log.userName}
-													<p>Utilizator: {log.userName}</p>
+												<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+													{#if log.userName}
+														<div><span class="font-medium text-foreground">Utilizator:</span> {log.userName}</div>
+													{/if}
+													{#if log.requestId}
+														<div><span class="font-medium text-foreground">Request ID:</span> <span class="font-mono">{log.requestId.slice(0, 8)}...</span></div>
+													{/if}
+													{#if log.ipAddress}
+														<div><span class="font-medium text-foreground">IP:</span> {log.ipAddress}</div>
+													{/if}
+													{#if log.userAgent}
+														<div class="col-span-2"><span class="font-medium text-foreground">User Agent:</span> {log.userAgent}</div>
+													{/if}
+												</div>
+												{#if log.resolved && log.resolvedAt}
+													<div class="bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-md space-y-1">
+														<p class="text-xs font-medium text-emerald-700 dark:text-emerald-400">Rezolvat la: {formatDate(log.resolvedAt)}</p>
+														{#if log.resolutionNote}
+															<p class="text-xs">Nota: {log.resolutionNote}</p>
+														{/if}
+													</div>
 												{/if}
 											</div>
 										</CollapsibleContent>
@@ -911,18 +1079,18 @@
 					</div>
 
 					<!-- Pagination -->
-					{#if debugTotalPages > 1}
+					{#if debugTotalPagesResolved > 1}
 						<div class="flex items-center justify-between mt-4">
 							<p class="text-sm text-muted-foreground">
-								Afisare {(debugPage - 1) * debugPageSize + 1}-{Math.min(debugPage * debugPageSize, filteredDebugLogs.length)} din {filteredDebugLogs.length}
+								Afisare {(debugPage - 1) * debugPageSize + 1}-{Math.min(debugPage * debugPageSize, filteredDebugLogsWithResolved.length)} din {filteredDebugLogsWithResolved.length}
 							</p>
 							<div class="flex items-center gap-2">
 								<Button variant="outline" size="sm" disabled={debugPage <= 1} onclick={() => debugPage--}>
 									<ChevronLeftIcon class="h-4 w-4" />
 									Anterior
 								</Button>
-								<span class="text-sm text-muted-foreground">Pagina {debugPage} / {debugTotalPages}</span>
-								<Button variant="outline" size="sm" disabled={debugPage >= debugTotalPages} onclick={() => debugPage++}>
+								<span class="text-sm text-muted-foreground">Pagina {debugPage} / {debugTotalPagesResolved}</span>
+								<Button variant="outline" size="sm" disabled={debugPage >= debugTotalPagesResolved} onclick={() => debugPage++}>
 									Urmator
 									<ChevronRightIcon class="h-4 w-4" />
 								</Button>

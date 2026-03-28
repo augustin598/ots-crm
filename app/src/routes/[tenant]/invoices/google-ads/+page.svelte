@@ -20,6 +20,7 @@
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 
 	// Date range — implicit: tot anul curent
 	const currentYear = new Date().getFullYear();
@@ -167,7 +168,7 @@
 			urlInvoiceId = '';
 			showUrlDownload = false;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('google_ads_url_download', e, 'GOOGLE_API_FETCH_FAILED');
 		} finally {
 			urlDownloading = false;
 		}
@@ -218,7 +219,7 @@
 			bulkJson = '';
 			showBulkImport = false;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('google_ads_bulk_download', e, 'GOOGLE_API_FETCH_FAILED');
 		} finally {
 			bulkDownloading = false;
 		}
@@ -233,7 +234,7 @@
 			lastSyncResult = { ...result, at: new Date() };
 			toast.success(`Sync complet: ${result.imported} importate, ${result.skipped} existente, ${result.errors} erori`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la sincronizare');
+			clientLogger.apiError('google_ads_sync', e, 'GOOGLE_API_FETCH_FAILED');
 		} finally {
 			syncing = false;
 		}
@@ -245,7 +246,7 @@
 			await deleteGoogleAdsInvoice(invoiceId).updates(invoicesQuery);
 			toast.success('Factură ștearsă');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere');
+			clientLogger.apiError('google_ads_delete', e);
 		}
 	}
 
@@ -261,7 +262,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descărcare');
+			clientLogger.apiError('google_ads_download_pdf', e);
 		}
 	}
 
@@ -273,7 +274,7 @@
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la previzualizare');
+			clientLogger.apiError('google_ads_preview_pdf', e);
 		}
 	}
 

@@ -2752,7 +2752,17 @@ export const debugLog = sqliteTable('debug_log', {
 	stackTrace: text('stack_trace'),
 	metadata: text('metadata'), // JSON string
 	userId: text('user_id').references(() => user.id),
-	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`)
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
+	// Error handling extensions
+	action: text('action'),
+	errorCode: text('error_code'),
+	ipAddress: text('ip_address'),
+	userAgent: text('user_agent'),
+	requestId: text('request_id'),
+	duration: integer('duration'), // milliseconds
+	resolved: boolean('resolved').default(false),
+	resolvedAt: timestamp('resolved_at'),
+	resolutionNote: text('resolution_note')
 });
 
 export const emailLogRelations = relations(emailLog, ({ one }) => ({
