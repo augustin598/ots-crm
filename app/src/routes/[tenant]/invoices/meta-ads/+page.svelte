@@ -781,7 +781,7 @@
 														<span class="inline-flex items-center rounded-full border border-amber-200 px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50">{creditDlCount} credite</span>
 													{/if}
 												</div>
-												<p class="text-sm text-muted-foreground">{dateRangeLabel}</p>
+												<span class="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"><CalendarIcon class="h-3 w-3" />{dateRangeLabel}</span>
 											</div>
 										</div>
 										<div class="flex items-center gap-4">
