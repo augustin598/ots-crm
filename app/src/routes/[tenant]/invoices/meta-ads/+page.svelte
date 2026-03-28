@@ -7,6 +7,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Download, Search, Eye, Trash2, FileArchive } from '@lucide/svelte';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import JSZip from 'jszip';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
@@ -861,7 +862,7 @@
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
 												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
-													<input type="checkbox" checked={selectedInvoices.has(inv.id)} onchange={() => toggleSelectInvoice(inv.id)} class="rounded border-input shrink-0" onclick={(e) => e.stopPropagation()} />
+													<Checkbox checked={selectedInvoices.has(inv.id)} onCheckedChange={() => toggleSelectInvoice(inv.id)} />
 													<div class="flex items-center gap-2 min-w-0 flex-1">
 														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : 'Factura PDF')}</span>
 														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
