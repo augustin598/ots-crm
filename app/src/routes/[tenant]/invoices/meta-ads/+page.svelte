@@ -103,11 +103,11 @@
 	const groupedByClient = $derived.by(() => {
 		const sinceMonth = since.substring(0, 7);
 		const untilMonth = until.substring(0, 7);
-		const groups = new Map<string, { clientName: string; businessName: string; rows: typeof spending }>();
+		const groups = new Map<string, { clientName: string; businessName: string; hasMultipleAccounts: boolean; rows: typeof spending }>();
 		// Add spending rows
 		for (const row of dateFilteredSpending) {
 			const key = row.clientName || 'Neatribuit';
-			const existing = groups.get(key) || { clientName: key, businessName: row.businessName || '', rows: [] };
+			const existing = groups.get(key) || { clientName: key, businessName: row.businessName || '', hasMultipleAccounts: false, rows: [] };
 			existing.rows.push(row);
 			groups.set(key, existing);
 		}
@@ -116,10 +116,9 @@
 			const period = dl.periodStart?.substring(0, 7);
 			if (period && (period < sinceMonth || period > untilMonth)) continue;
 			const clientKey = dl.clientName || 'Neatribuit';
-			const group = groups.get(clientKey) || { clientName: clientKey, businessName: dl.bmName || '', rows: [] };
+			const group = groups.get(clientKey) || { clientName: clientKey, businessName: dl.bmName || '', hasMultipleAccounts: false, rows: [] };
 			const hasSpendingRow = group.rows.some(r => r.metaAdAccountId === dl.metaAdAccountId && r.periodStart === dl.periodStart);
 			if (!hasSpendingRow) {
-				// Check if we already added a virtual row for this account+period
 				const alreadyAdded = group.rows.some(r => (r as any)._downloadOnly && r.metaAdAccountId === dl.metaAdAccountId && r.periodStart === dl.periodStart);
 				if (!alreadyAdded) {
 					group.rows.push({
@@ -128,6 +127,7 @@
 						integrationId: dl.integrationId,
 						clientId: dl.clientId,
 						metaAdAccountId: dl.metaAdAccountId,
+						adAccountName: dl.adAccountName || '',
 						periodStart: dl.periodStart,
 						periodEnd: dl.periodEnd,
 						spendAmount: null,
@@ -146,8 +146,15 @@
 			}
 			groups.set(clientKey, group);
 		}
+		// Detect multi-account clients + sort
 		for (const group of groups.values()) {
-			group.rows.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''));
+			const uniqueAccounts = new Set(group.rows.map(r => r.metaAdAccountId));
+			group.hasMultipleAccounts = uniqueAccounts.size > 1;
+			group.rows.sort((a: any, b: any) => {
+				const periodCmp = (b.periodStart || '').localeCompare(a.periodStart || '');
+				if (periodCmp !== 0) return periodCmp;
+				return (a.adAccountName || a.metaAdAccountId || '').localeCompare(b.adAccountName || b.metaAdAccountId || '');
+			});
 		}
 		return Array.from(groups.values());
 	});
@@ -641,9 +648,12 @@
 										{@const downloadedInvoices = hasIndividual ? filteredDownloaded.filter(d => d.txid) : filteredDownloaded}
 										<!-- Spending / download-only row -->
 										<div class="grid grid-cols-5 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
-											<div class="flex items-center gap-2">
+											<div class="flex items-center gap-2 min-w-0">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
+												{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
+													<span class="text-xs text-muted-foreground truncate">({row.adAccountName || row.metaAdAccountId})</span>
+												{/if}
 											</div>
 											{#if isDownloadOnly}
 												{@const dlAmount = downloadedInvoices.find(d => d.amountText)?.amountText}

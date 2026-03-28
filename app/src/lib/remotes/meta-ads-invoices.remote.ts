@@ -100,11 +100,16 @@ export const getMetaAdsSpendingList = query(async () => {
 			syncedAt: table.metaAdsSpending.syncedAt,
 			createdAt: table.metaAdsSpending.createdAt,
 			clientName: table.client.name,
-			businessName: table.metaAdsIntegration.businessName
+			businessName: table.metaAdsIntegration.businessName,
+			adAccountName: table.metaAdsAccount.accountName
 		})
 		.from(table.metaAdsSpending)
 		.leftJoin(table.client, eq(table.metaAdsSpending.clientId, table.client.id))
 		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsSpending.integrationId, table.metaAdsIntegration.id))
+		.leftJoin(table.metaAdsAccount, and(
+			eq(table.metaAdsSpending.metaAdAccountId, table.metaAdsAccount.metaAdAccountId),
+			eq(table.metaAdsSpending.tenantId, table.metaAdsAccount.tenantId)
+		))
 		.where(conditions)
 		.orderBy(desc(table.metaAdsSpending.periodStart))
 		.limit(500);

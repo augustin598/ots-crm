@@ -59,11 +59,19 @@ Facturile descarcate pot fi de doua tipuri (`invoiceType`):
   - Butoane per factura: Download, Preview, Re-download, Delete
 
 ### Grouping Logic
-1. Spending rows filtrate dupa date range → grupate per client
+1. Spending rows filtrate dupa date range → grupate per `clientName`
 2. Downloads fara spending row asociat → adaugate ca "virtual rows" (`_downloadOnly: true`)
 3. Creditele filtrate din display cand checkbox "Credite Ad" e OFF
-4. Sortate descrescator dupa `periodStart`
-5. Dupa bulk import, date range se auto-expandeaza la cea mai veche factura importata
+4. Multi-account detection: daca un client are >1 `metaAdAccountId`, flag `hasMultipleAccounts = true`
+5. Sortare: `periodStart DESC`, apoi `adAccountName ASC` (grupeaza conturile in aceeasi luna)
+6. Dupa bulk import, date range se auto-expandeaza la cea mai veche factura importata
+
+### Multi-Account Clients
+Cand un client are 2+ conturi Facebook Ads (ex: `beonemedical.ro` + `BeautyOneShop.ro`):
+- Fiecare rand afiseaza `Martie 2026 (beonemedical.ro)` — numele contului in paranteza
+- Spending query face join cu `metaAdsAccount` pe `(tenantId, metaAdAccountId)` pt `accountName`
+- Download-only virtual rows preiau `adAccountName` din `metaInvoiceDownload.adAccountName`
+- Cand clientul are 1 singur cont, numele contului NU se afiseaza (economie de spatiu)
 
 ### Ad Account Dropdown (Bulk Import)
 Populeaza din 3 surse (in ordine):
