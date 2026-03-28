@@ -780,37 +780,43 @@ export const downloadInvoiceForAccount = command(
 		const result = await downloadReceipt({ adAccountId: data.adAccountId, year: data.year, month: data.month, cookies });
 
 		if (result.success && result.pdfBuffer) {
-			const upload = await uploadBuffer(
-				tenantId,
-				result.pdfBuffer,
-				`meta-invoice-${data.adAccountId}_${data.year}-${monthStr}.pdf`,
-				'application/pdf',
-				{ type: 'meta-invoice', adAccountId: data.adAccountId, period: periodStart }
-			);
-
-			if (existing) {
-				await db.update(table.metaInvoiceDownload)
-					.set({ pdfPath: upload.path, status: 'downloaded', downloadedAt: new Date(), errorMessage: null, updatedAt: new Date() })
-					.where(eq(table.metaInvoiceDownload.id, existing.id));
-			} else {
-				await db.insert(table.metaInvoiceDownload).values({
-					id: crypto.randomUUID(),
+			try {
+				const upload = await uploadBuffer(
 					tenantId,
-					integrationId: integration.id,
-					clientId: account.clientId,
-					metaAdAccountId: data.adAccountId,
-					adAccountName: account.accountName,
-					bmName: integration.businessName,
-					periodStart,
-					periodEnd,
-					pdfPath: upload.path,
-					status: 'downloaded',
-					downloadedAt: new Date(),
-					createdAt: new Date(),
-					updatedAt: new Date()
-				});
+					result.pdfBuffer,
+					`meta-invoice-${data.adAccountId}_${data.year}-${monthStr}.pdf`,
+					'application/pdf',
+					{ type: 'meta-invoice', adAccountId: data.adAccountId, period: periodStart }
+				);
+
+				if (existing) {
+					await db.update(table.metaInvoiceDownload)
+						.set({ pdfPath: upload.path, status: 'downloaded', downloadedAt: new Date(), errorMessage: null, updatedAt: new Date() })
+						.where(eq(table.metaInvoiceDownload.id, existing.id));
+				} else {
+					await db.insert(table.metaInvoiceDownload).values({
+						id: crypto.randomUUID(),
+						tenantId,
+						integrationId: integration.id,
+						clientId: account.clientId,
+						metaAdAccountId: data.adAccountId,
+						adAccountName: account.accountName,
+						bmName: integration.businessName,
+						periodStart,
+						periodEnd,
+						pdfPath: upload.path,
+						status: 'downloaded',
+						downloadedAt: new Date(),
+						createdAt: new Date(),
+						updatedAt: new Date()
+					});
+				}
+				return { status: 'downloaded', httpCode: 200, invoiceId: null, error: null };
+			} catch (uploadErr) {
+				const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+				console.error(`[META-INVOICE] Upload/DB error for ${data.adAccountId}: ${msg}`);
+				return { status: 'error', httpCode: null, invoiceId: null, error: `storage_error: ${msg}` };
 			}
-			return { status: 'downloaded', httpCode: 200, invoiceId: null, error: null };
 		}
 
 		// No invoice from invoices_generator — try billing_transaction fallback
@@ -841,31 +847,35 @@ export const downloadInvoiceForAccount = command(
 
 					const txResult = await downloadReceiptFromUrl(tx.url, cookies);
 					if (txResult.success && txResult.pdfBuffer) {
-						const upload = await uploadBuffer(
-							tenantId,
-							txResult.pdfBuffer,
-							`meta-invoice-${data.adAccountId}_${tx.txid || periodStart}.pdf`,
-							'application/pdf',
-							{ type: 'meta-invoice', adAccountId: data.adAccountId, txid: tx.txid || '' }
-						);
-						await db.insert(table.metaInvoiceDownload).values({
-							id: crypto.randomUUID(),
-							tenantId,
-							integrationId: integration.id,
-							clientId: account.clientId,
-							metaAdAccountId: data.adAccountId,
-							adAccountName: account.accountName,
-							bmName: integration.businessName,
-							periodStart,
-							periodEnd,
-							txid: tx.txid || null,
-							pdfPath: upload.path,
-							status: 'downloaded',
-							downloadedAt: new Date(),
-							createdAt: new Date(),
-							updatedAt: new Date()
-						});
-						txDownloaded++;
+						try {
+							const upload = await uploadBuffer(
+								tenantId,
+								txResult.pdfBuffer,
+								`meta-invoice-${data.adAccountId}_${tx.txid || periodStart}.pdf`,
+								'application/pdf',
+								{ type: 'meta-invoice', adAccountId: data.adAccountId, txid: tx.txid || '' }
+							);
+							await db.insert(table.metaInvoiceDownload).values({
+								id: crypto.randomUUID(),
+								tenantId,
+								integrationId: integration.id,
+								clientId: account.clientId,
+								metaAdAccountId: data.adAccountId,
+								adAccountName: account.accountName,
+								bmName: integration.businessName,
+								periodStart,
+								periodEnd,
+								txid: tx.txid || null,
+								pdfPath: upload.path,
+								status: 'downloaded',
+								downloadedAt: new Date(),
+								createdAt: new Date(),
+								updatedAt: new Date()
+							});
+							txDownloaded++;
+						} catch (uploadErr) {
+							console.error(`[META-INVOICE] Upload/DB error for tx ${tx.txid}: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`);
+						}
 					}
 					await new Promise(r => setTimeout(r, 1000));
 				}
@@ -1284,6 +1294,7 @@ export const bulkDownloadMetaInvoices = command(
 		let downloaded = 0;
 		let skipped = 0;
 		let errors = 0;
+		const errorDetails: string[] = [];
 
 		for (const link of data.links) {
 			// Extract txid from URL or from JSON field
@@ -1326,43 +1337,51 @@ export const bulkDownloadMetaInvoices = command(
 			const result = await downloadReceiptFromUrl(link.url, cookies);
 
 			if (result.success && result.pdfBuffer) {
-				const invoiceLabel = link.invoiceId || txid || periodStart;
-				const upload = await uploadBuffer(
-					tenantId,
-					result.pdfBuffer,
-					`meta-invoice-${data.adAccountId}_${invoiceLabel}.pdf`,
-					'application/pdf',
-					{ type: 'meta-invoice', adAccountId: data.adAccountId, invoiceId: link.invoiceId || '' }
-				);
+				try {
+					const invoiceLabel = link.invoiceId || txid || periodStart;
+					const upload = await uploadBuffer(
+						tenantId,
+						result.pdfBuffer,
+						`meta-invoice-${data.adAccountId}_${invoiceLabel}.pdf`,
+						'application/pdf',
+						{ type: 'meta-invoice', adAccountId: data.adAccountId, invoiceId: link.invoiceId || '' }
+					);
 
-				await db.insert(table.metaInvoiceDownload).values({
-					id: crypto.randomUUID(),
-					tenantId,
-					integrationId: account.integrationId,
-					clientId: account.clientId,
-					metaAdAccountId: data.adAccountId,
-					adAccountName: account.accountName,
-					bmName: integration?.businessName || '',
-					periodStart,
-					periodEnd,
-					txid: txid || null,
-					invoiceNumber: link.invoiceId || null,
-					pdfPath: upload.path,
-					status: 'downloaded',
-					downloadedAt: new Date(),
-					createdAt: new Date(),
-					updatedAt: new Date()
-				});
+					await db.insert(table.metaInvoiceDownload).values({
+						id: crypto.randomUUID(),
+						tenantId,
+						integrationId: account.integrationId,
+						clientId: account.clientId,
+						metaAdAccountId: data.adAccountId,
+						adAccountName: account.accountName,
+						bmName: integration?.businessName || '',
+						periodStart,
+						periodEnd,
+						txid: txid || null,
+						invoiceNumber: link.invoiceId || null,
+						pdfPath: upload.path,
+						status: 'downloaded',
+						downloadedAt: new Date(),
+						createdAt: new Date(),
+						updatedAt: new Date()
+					});
 
-				downloaded++;
+					downloaded++;
+				} catch (uploadErr) {
+					const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+					console.error(`[META-INVOICE] Bulk upload/DB error for txid=${txid}: ${msg}`);
+					errors++;
+					errorDetails.push(`${txid || link.url.substring(0, 60)}: ${msg}`);
+				}
 			} else {
 				errors++;
+				errorDetails.push(`${txid || link.url.substring(0, 60)}: ${result.error || 'download_failed'}`);
 			}
 
 			// Rate limiting
 			await new Promise(resolve => setTimeout(resolve, 2000));
 		}
 
-		return { downloaded, skipped, errors };
+		return { downloaded, skipped, errors, errorDetails };
 	}
 );

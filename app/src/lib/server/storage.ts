@@ -24,7 +24,9 @@ function getMinioClient(): MinioClient {
 	return minioClient;
 }
 
-const BUCKET_NAME = env.MINIO_BUCKET_NAME || 'crm-documents';
+function getBucketName(): string {
+	return env.MINIO_BUCKET_NAME || 'crm-documents';
+}
 
 /**
  * Ensure bucket exists
@@ -32,9 +34,9 @@ const BUCKET_NAME = env.MINIO_BUCKET_NAME || 'crm-documents';
 export async function ensureBucket() {
 	try {
 		const client = getMinioClient();
-		const exists = await client.bucketExists(BUCKET_NAME);
+		const exists = await client.bucketExists(getBucketName());
 		if (!exists) {
-			await client.makeBucket(BUCKET_NAME);
+			await client.makeBucket(getBucketName());
 		}
 	} catch (error) {
 		const { message, stack } = serializeError(error);
@@ -58,7 +60,7 @@ export async function uploadFile(
 		const fileName = `${tenantId}/${Date.now()}-${file.name}`;
 		const buffer = Buffer.from(await file.arrayBuffer());
 
-		await client.putObject(BUCKET_NAME, fileName, buffer, buffer.length, {
+		await client.putObject(getBucketName(), fileName, buffer, buffer.length, {
 			'Content-Type': file.type,
 			...metadata
 		});
@@ -81,7 +83,7 @@ export async function uploadFile(
 export async function getDownloadUrl(filePath: string, expirySeconds = 3600, respHeaders?: Record<string, string>): Promise<string> {
 	try {
 		const client = getMinioClient();
-		return await client.presignedGetObject(BUCKET_NAME, filePath, expirySeconds, respHeaders);
+		return await client.presignedGetObject(getBucketName(), filePath, expirySeconds, respHeaders);
 	} catch (error) {
 		const { message, stack } = serializeError(error);
 		logError('storage', `Failed to generate download URL: ${message}`, { stackTrace: stack });
@@ -105,7 +107,7 @@ export async function uploadBuffer(
 		const client = getMinioClient();
 		const filePath = `${tenantId}/${Date.now()}-${fileName}`;
 
-		await client.putObject(BUCKET_NAME, filePath, buffer, buffer.length, {
+		await client.putObject(getBucketName(), filePath, buffer, buffer.length, {
 			'Content-Type': mimeType,
 			...metadata
 		});
@@ -128,13 +130,15 @@ export async function uploadBuffer(
 export async function getFileBuffer(filePath: string): Promise<Buffer> {
 	try {
 		const client = getMinioClient();
-		const stream = await client.getObject(BUCKET_NAME, filePath);
+		const stream = await client.getObject(getBucketName(), filePath);
 		const chunks: Buffer[] = [];
 		for await (const chunk of stream) {
 			chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 		}
 		return Buffer.concat(chunks);
 	} catch (error) {
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to read file: ${filePath} — ${message}`, { stackTrace: stack });
 		throw error;
 	}
 }
@@ -145,7 +149,7 @@ export async function getFileBuffer(filePath: string): Promise<Buffer> {
 export async function deleteFile(filePath: string): Promise<void> {
 	try {
 		const client = getMinioClient();
-		await client.removeObject(BUCKET_NAME, filePath);
+		await client.removeObject(getBucketName(), filePath);
 	} catch (error) {
 		const { message, stack } = serializeError(error);
 		logError('storage', `Failed to delete file: ${message}`, { stackTrace: stack });

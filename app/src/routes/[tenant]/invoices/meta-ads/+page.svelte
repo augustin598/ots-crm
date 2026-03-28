@@ -348,7 +348,11 @@
 		bulkImporting = true;
 		try {
 			const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links }).updates(downloadsQuery);
-			toast.success(`Import complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
+			if (result.errors > 0 && result.errorDetails?.length) {
+				toast.error(`Import: ${result.downloaded} OK, ${result.errors} erori:\n${result.errorDetails.join('\n')}`);
+			} else {
+				toast.success(`Import complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
+			}
 			bulkJson = '';
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la import');
