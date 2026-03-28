@@ -9,6 +9,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -64,7 +65,7 @@
 
 	async function handleSave() {
 		if (!name.trim()) {
-			toast.error('Numele este obligatoriu');
+			clientLogger.warn({ message: 'Numele este obligatoriu', action: 'template_save' });
 			return;
 		}
 
@@ -80,7 +81,7 @@
 
 			toast.success('Template salvat cu succes');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvarea template-ului');
+			clientLogger.apiError('template_save', e);
 		} finally {
 			saving = false;
 		}
@@ -96,7 +97,7 @@
 			toast.success('Template sters');
 			goto(`/${tenantSlug}/contract-templates`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la stergerea template-ului');
+			clientLogger.apiError('template_delete', e);
 		}
 	}
 </script>

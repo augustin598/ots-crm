@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	// formatAmount removed — using shared contract-utils
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -116,8 +117,7 @@
 			deleteTargetId = '';
 		} catch (e) {
 			console.error('Delete contract error:', e);
-			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la ștergerea contractului';
-			toast.error(message);
+			clientLogger.apiError('contract_delete', e);
 		} finally {
 			deleting = false;
 		}
@@ -131,7 +131,7 @@
 				goto(`/${tenantSlug}/contracts/${result.contractId}/edit`);
 			}
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la duplicarea contractului');
+			clientLogger.apiError('contract_duplicate', e);
 		}
 	}
 
@@ -159,7 +159,7 @@
 			toast.success('Datele clientului au fost actualizate');
 		} catch (e) {
 			console.error('[Upload] Update skipped fields error:', e);
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare');
+			clientLogger.apiError('contract_update_skipped', e);
 		} finally {
 			updatingSkipped = false;
 		}
@@ -281,7 +281,7 @@
 				}
 			} catch (extractErr) {
 				console.error('[Upload] extractClientFromContract error:', extractErr);
-				toast.warning('Nu s-au putut extrage date din PDF. Poți completa manual datele clientului.');
+				clientLogger.warn({ message: 'Nu s-au putut extrage date din PDF. Poți completa manual datele clientului.', action: 'contract_extract_client' });
 			}
 		} catch (e) {
 			uploadError = e instanceof Error ? e.message : 'Eroare la încărcarea contractului';

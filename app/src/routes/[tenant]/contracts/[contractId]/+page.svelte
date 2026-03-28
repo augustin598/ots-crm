@@ -43,6 +43,7 @@
 		PenLine
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import {
 		getContractStatusLabel,
 		getContractStatusVariant,
@@ -133,7 +134,7 @@
 				toast.warning('Emailul nu a putut fi trimis. Link-ul este disponibil în secțiunea Semnaturi.');
 			}
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la generarea link-ului');
+			clientLogger.apiError('contract_send_for_signing', e);
 		} finally {
 			sendingInProgress = false;
 		}
@@ -156,7 +157,7 @@
 			showSignModal = false;
 			toast.success('Contract semnat cu succes');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la semnare');
+			clientLogger.apiError('contract_sign_prestator', e);
 		} finally {
 			signingInProgress = false;
 		}
@@ -180,7 +181,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la descarcarea PDF');
+			clientLogger.apiError('contract_download_pdf', e);
 		}
 	}
 
@@ -193,7 +194,7 @@
 				goto(`/${tenantSlug}/contracts/${result.contractId}`);
 			}
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la duplicarea contractului');
+			clientLogger.apiError('contract_duplicate', e);
 		}
 	}
 
@@ -209,8 +210,7 @@
 			goto(`/${tenantSlug}/contracts`);
 		} catch (e) {
 			console.error('Delete contract error:', e);
-			const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Eroare la ștergerea contractului';
-			toast.error(message);
+			clientLogger.apiError('contract_delete', e);
 		} finally {
 			deleting = false;
 		}

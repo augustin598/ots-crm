@@ -8,6 +8,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -30,7 +31,7 @@
 
 	async function handleCreate() {
 		if (!newName.trim()) {
-			toast.error('Numele este obligatoriu');
+			clientLogger.warn({ message: 'Numele este obligatoriu', action: 'template_create' });
 			return;
 		}
 
@@ -50,7 +51,7 @@
 				goto(`/${tenantSlug}/contract-templates/${result.templateId}`);
 			}
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la crearea template-ului');
+			clientLogger.apiError('template_create', e);
 		} finally {
 			creating = false;
 		}
@@ -65,7 +66,7 @@
 			await deleteContractTemplate(templateId).updates(templatesQuery);
 			toast.success('Template sters');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la stergerea template-ului');
+			clientLogger.apiError('template_delete', e);
 		}
 	}
 

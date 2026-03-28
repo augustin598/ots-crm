@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -197,12 +198,12 @@
 
 	async function handleSubmit() {
 		if (!clientId) {
-			toast.error('Selecteaza un client');
+			clientLogger.warn({ message: 'Selecteaza un client', action: 'contract_edit' });
 			return;
 		}
 
 		if (lineItems.length === 0 || lineItems.every((item) => !item.description.trim())) {
-			toast.error('Adauga cel putin un serviciu');
+			clientLogger.warn({ message: 'Adauga cel putin un serviciu', action: 'contract_edit' });
 			return;
 		}
 
@@ -246,7 +247,7 @@
 				goto(`/${tenantSlug}/contracts/${contractId}`);
 			}
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la actualizarea contractului');
+			clientLogger.apiError('contract_update', e);
 		} finally {
 			loading = false;
 		}
