@@ -96,12 +96,50 @@
 	);
 
 	const groupedByClient = $derived.by(() => {
+		const sinceMonth = since.substring(0, 7);
+		const untilMonth = until.substring(0, 7);
 		const groups = new Map<string, { clientName: string; businessName: string; rows: typeof spending }>();
+		// Add spending rows
 		for (const row of dateFilteredSpending) {
 			const key = row.clientName || 'Neatribuit';
 			const existing = groups.get(key) || { clientName: key, businessName: row.businessName || '', rows: [] };
 			existing.rows.push(row);
 			groups.set(key, existing);
+		}
+		// Add download-only periods (no matching spending row)
+		for (const dl of downloads) {
+			const period = dl.periodStart?.substring(0, 7);
+			if (period && (period < sinceMonth || period > untilMonth)) continue;
+			const clientKey = dl.clientName || 'Neatribuit';
+			const group = groups.get(clientKey) || { clientName: clientKey, businessName: dl.bmName || '', rows: [] };
+			const hasSpendingRow = group.rows.some(r => r.metaAdAccountId === dl.metaAdAccountId && r.periodStart === dl.periodStart);
+			if (!hasSpendingRow) {
+				// Check if we already added a virtual row for this account+period
+				const alreadyAdded = group.rows.some(r => (r as any)._downloadOnly && r.metaAdAccountId === dl.metaAdAccountId && r.periodStart === dl.periodStart);
+				if (!alreadyAdded) {
+					group.rows.push({
+						id: `dl-${dl.metaAdAccountId}-${dl.periodStart}`,
+						tenantId: dl.tenantId,
+						integrationId: dl.integrationId,
+						clientId: dl.clientId,
+						metaAdAccountId: dl.metaAdAccountId,
+						periodStart: dl.periodStart,
+						periodEnd: dl.periodEnd,
+						spendAmount: null,
+						spendCents: 0,
+						currencyCode: 'RON',
+						impressions: 0,
+						clicks: 0,
+						pdfPath: null,
+						syncedAt: null,
+						createdAt: dl.downloadedAt,
+						clientName: dl.clientName,
+						businessName: dl.bmName || '',
+						_downloadOnly: true
+					} as any);
+				}
+			}
+			groups.set(clientKey, group);
 		}
 		for (const group of groups.values()) {
 			group.rows.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''));
@@ -502,7 +540,7 @@
 		<div class="space-y-4">
 			{#each Array(2) as _, idx (idx)}<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>{/each}
 		</div>
-	{:else if spending.length === 0}
+	{:else if spending.length === 0 && downloads.length === 0}
 		<Card class="p-12 text-center">
 			<div class="flex flex-col items-center gap-3">
 				<div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
@@ -572,26 +610,31 @@
 							<CollapsibleContent>
 								<div class="border-t divide-y">
 									{#each group.rows as row, i (row.id)}
-										{@const prevSpend = group.rows[i + 1]?.spendCents}
+										{@const isDownloadOnly = (row as any)._downloadOnly === true}
+										{@const prevSpend = !isDownloadOnly ? group.rows[i + 1]?.spendCents : null}
 										{@const trend = prevSpend ? ((row.spendCents - prevSpend) / prevSpend) * 100 : null}
 										{@const invoices = downloadsByKey.get(`${row.metaAdAccountId}:${row.periodStart}`) || []}
 										{@const allDownloaded = invoices.filter(d => d.status === 'downloaded' && d.pdfPath)}
 										{@const hasIndividual = allDownloaded.some(d => d.txid)}
 										{@const downloadedInvoices = hasIndividual ? allDownloaded.filter(d => d.txid) : allDownloaded}
-										<!-- Spending row -->
+										<!-- Spending / download-only row -->
 										<div class="grid grid-cols-5 gap-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
 											<div class="flex items-center gap-2">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
 											</div>
-											<div class="text-right whitespace-nowrap">
-												<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
-												{#if trend !== null}
-													<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-												{/if}
-											</div>
-											<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)} imp.</span>
-											<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
+											{#if isDownloadOnly}
+												<div class="col-span-3"></div>
+											{:else}
+												<div class="text-right whitespace-nowrap">
+													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+													{#if trend !== null}
+														<span class="ml-1 text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
+													{/if}
+												</div>
+												<span class="text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)} imp.</span>
+												<span class="text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)} clicks</span>
+											{/if}
 											<div class="flex items-center justify-end gap-1">
 												{#if downloadedInvoices.length === 1}
 													<Button variant="outline" size="sm" class="whitespace-nowrap" onclick={() => handleDownloadInvoicePDF(downloadedInvoices[0].id, row.periodStart)}>
@@ -600,7 +643,7 @@
 													<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handlePreviewInvoicePDF(downloadedInvoices[0].id)} title="Preview"><Eye class="h-4 w-4" /></Button>
 												{:else if downloadedInvoices.length > 1}
 													<span class="text-xs text-green-600 font-medium">{downloadedInvoices.length} facturi</span>
-												{:else}
+												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
 											</div>
