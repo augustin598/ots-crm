@@ -440,7 +440,10 @@
 		bulkResults = [];
 		bulkCurrentLabel = '';
 
-		const adAccountLabel = adAccountOptions.find(o => o.id === bulkAdAccountId)?.label || bulkAdAccountId;
+		const adAccountLabel = downloadableAccounts.find(a => a.metaAdAccountId === bulkAdAccountId)?.accountName
+			|| spending.find(s => s.metaAdAccountId === bulkAdAccountId)?.adAccountName
+			|| downloads.find(d => d.metaAdAccountId === bulkAdAccountId)?.adAccountName
+			|| bulkAdAccountId;
 
 		for (const link of links) {
 			const label = link.invoiceId || (link.url.match(/txid=([^&]{0,16})/) || [])[1] || `#${bulkCurrent + 1}`;
