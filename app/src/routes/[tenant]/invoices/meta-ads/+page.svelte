@@ -6,7 +6,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Download, Search, Eye, Trash2 } from '@lucide/svelte';
+	import { Download, Search, Eye, Trash2, FileArchive } from '@lucide/svelte';
+	import JSZip from 'jszip';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -165,6 +166,53 @@
 	let showCredits = $state(false);
 	let expandedAccounts = new SvelteSet<string>();
 	let expandedPeriods = new SvelteSet<string>();
+	let selectedInvoices = new SvelteSet<string>();
+	let zipping = $state(false);
+
+	function toggleSelectInvoice(id: string) {
+		if (selectedInvoices.has(id)) selectedInvoices.delete(id);
+		else selectedInvoices.add(id);
+	}
+
+	async function downloadAsZip(invoiceIds: string[], zipName: string) {
+		zipping = true;
+		try {
+			const zip = new JSZip();
+			for (const id of invoiceIds) {
+				const res = await fetch(`/${tenantSlug}/invoices/meta-ads/downloads/${id}/pdf`);
+				if (!res.ok) continue;
+				const blob = await res.blob();
+				const dl = downloads.find(d => d.id === id);
+				const fileName = dl?.invoiceNumber
+					? `${dl.invoiceNumber}.pdf`
+					: dl?.txid ? `TX-${dl.txid.substring(0, 16)}.pdf` : `factura-${id.substring(0, 8)}.pdf`;
+				zip.file(fileName, blob);
+			}
+			const content = await zip.generateAsync({ type: 'blob' });
+			const url = URL.createObjectURL(content);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `${zipName}.zip`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			toast.error('Eroare la crearea ZIP-ului');
+		} finally {
+			zipping = false;
+		}
+	}
+
+	async function downloadSelected() {
+		const ids = [...selectedInvoices];
+		if (ids.length === 0) return;
+		await downloadAsZip(ids, `MetaAds-Facturi-selectate-${ids.length}`);
+		selectedInvoices.clear();
+	}
+
+	async function downloadPeriodZip(periodInvoices: typeof downloads, periodLabel: string) {
+		const ids = periodInvoices.map(d => d.id);
+		await downloadAsZip(ids, `MetaAds-${periodLabel}`);
+	}
 
 	function togglePeriod(key: string) {
 		if (expandedPeriods.has(key)) expandedPeriods.delete(key);
@@ -795,10 +843,15 @@
 											{/if}
 											<div class="text-right">
 												{#if downloadedInvoices.length > 0}
-													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={() => togglePeriod(periodKey)}>
-														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-														{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
-													</button>
+													<div class="flex items-center gap-1">
+														<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={(e) => { e.stopPropagation(); togglePeriod(periodKey); }}>
+															<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
+															{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
+														</button>
+														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={(e) => { e.stopPropagation(); downloadPeriodZip(downloadedInvoices, `${row.periodStart}-${row.adAccountName || row.metaAdAccountId}`); }} title="Descarcă toate ca ZIP" disabled={zipping}>
+															<FileArchive class="h-3.5 w-3.5" />
+														</Button>
+													</div>
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
@@ -807,7 +860,8 @@
 										<!-- Expandable invoice list -->
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
-												<div class="flex items-center gap-3 px-6 py-2 pl-12 bg-muted/10 hover:bg-muted/20 transition-colors">
+												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
+													<input type="checkbox" checked={selectedInvoices.has(inv.id)} onchange={() => toggleSelectInvoice(inv.id)} class="rounded border-input shrink-0" onclick={(e) => e.stopPropagation()} />
 													<div class="flex items-center gap-2 min-w-0 flex-1">
 														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : 'Factura PDF')}</span>
 														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
@@ -846,6 +900,17 @@
 	{/if}
 
 </div>
+
+<!-- Floating selection bar -->
+{#if selectedInvoices.size > 0}
+	<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full border bg-background/95 backdrop-blur shadow-lg px-5 py-2.5">
+		<span class="text-sm font-medium">{selectedInvoices.size} {selectedInvoices.size === 1 ? 'factură selectată' : 'facturi selectate'}</span>
+		<Button size="sm" onclick={downloadSelected} disabled={zipping}>
+			<FileArchive class="mr-1.5 h-3.5 w-3.5" />{zipping ? 'Se creează ZIP...' : 'Descarcă ZIP'}
+		</Button>
+		<Button variant="ghost" size="sm" onclick={() => selectedInvoices.clear()}>Anulează</Button>
+	</div>
+{/if}
 
 <!-- Download Dialog -->
 <Dialog bind:open={isDownloadDialogOpen}>
