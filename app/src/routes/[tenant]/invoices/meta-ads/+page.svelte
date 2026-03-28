@@ -365,6 +365,8 @@
 	let bulkJson = $state('');
 	let bulkAdAccountId = $state('');
 	let bulkImporting = $state(false);
+	let bulkTotal = $state(0);
+	let bulkResult = $state<{ downloaded: number; skipped: number; errors: number; errorDetails?: string[] } | null>(null);
 
 	// Unique ad accounts from spending + downloads + downloadable accounts for dropdown
 	const adAccountOptions = $derived.by(() => {
@@ -426,15 +428,11 @@
 			return;
 		}
 		bulkImporting = true;
-		console.log(`[BULK-IMPORT] Starting: account=${bulkAdAccountId}, links=${links.length}`);
+		bulkTotal = links.length;
+		bulkResult = null;
 		try {
 			const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links }).updates(downloadsQuery);
-			if (result.errors > 0 && result.errorDetails?.length) {
-				toast.error(`Import: ${result.downloaded} OK, ${result.errors} erori:\n${result.errorDetails.join('\n')}`);
-			} else {
-				toast.success(`Import complet: ${result.downloaded} descărcate, ${result.skipped} sărite, ${result.errors} erori`);
-			}
-			// Auto-expand date range to include imported invoices
+			bulkResult = result;
 			if (result.downloaded > 0 && links.length > 0) {
 				const dates = links.map(l => l.date).filter(Boolean).sort();
 				if (dates.length > 0) {
@@ -521,7 +519,7 @@
 				<p>1. Instalează <a href="/{tenantSlug}/facebook-ads-invoice-extractor.user.js" class="underline text-blue-600">Tampermonkey Script</a> sau deschide <a href="https://business.facebook.com/billing_hub/payment_activity" target="_blank" class="underline text-blue-600">Facebook Billing → Payment Activity</a></p>
 				<p>2. Apasă butonul "Extrage Facturi Facebook" din pagina Facebook, apoi lipește JSON-ul aici:</p>
 			</div>
-			<textarea bind:value={bulkJson} placeholder='[{{"url":"https://business.facebook.com/ads/manage/billing_transaction/?act=...","txid":"...","invoiceId":"FBADS-...","date":"6 Jan 2025"}}]' class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
+			<textarea bind:value={bulkJson} placeholder={'[{"url":"https://business.facebook.com/ads/manage/billing_transaction/?act=...","invoiceId":"FBADS-...","date":"6 Jan 2025","amount":"RON1,234.56"}]'} class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
 			<div class="flex items-center gap-2">
 				<select bind:value={bulkAdAccountId} class="rounded-md border px-3 py-2 text-sm bg-background">
 					<option value="">Selectează contul</option>
@@ -538,6 +536,48 @@
 				</Button>
 				<Button variant="outline" size="sm" onclick={copyScript}>Copiază Script Console</Button>
 			</div>
+
+			<!-- Bulk import progress -->
+			{#if bulkImporting}
+				<div class="space-y-2 pt-2 border-t">
+					<div class="flex items-center justify-between text-sm">
+						<span class="font-medium">Se importă {bulkTotal} facturi...</span>
+					</div>
+					<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+						<div class="h-2 rounded-full bg-primary animate-pulse w-full"></div>
+					</div>
+					<p class="text-xs text-muted-foreground">Se descarcă PDF-urile de pe Facebook și se încarcă în storage. Poate dura câteva minute.</p>
+				</div>
+			{/if}
+
+			<!-- Bulk import results -->
+			{#if bulkResult && !bulkImporting}
+				<div class="space-y-3 pt-2 border-t">
+					<div class="grid grid-cols-3 gap-3">
+						<div class="rounded-lg border bg-green-50 p-3 text-center">
+							<p class="text-2xl font-bold text-green-700">{bulkResult.downloaded}</p>
+							<p class="text-xs text-green-600">Descărcate</p>
+						</div>
+						<div class="rounded-lg border bg-muted/40 p-3 text-center">
+							<p class="text-2xl font-bold text-muted-foreground">{bulkResult.skipped}</p>
+							<p class="text-xs text-muted-foreground">Sărite (duplicate)</p>
+						</div>
+						<div class="rounded-lg border bg-red-50 p-3 text-center">
+							<p class="text-2xl font-bold text-red-700">{bulkResult.errors}</p>
+							<p class="text-xs text-red-600">Erori</p>
+						</div>
+					</div>
+					{#if bulkResult.errorDetails && bulkResult.errorDetails.length > 0}
+						<div class="rounded-md border bg-red-50 p-3 max-h-40 overflow-y-auto">
+							<p class="text-xs font-medium text-red-800 mb-1">Detalii erori:</p>
+							{#each bulkResult.errorDetails as err}
+								<p class="text-xs text-red-700 font-mono">{err}</p>
+							{/each}
+						</div>
+					{/if}
+					<Button variant="outline" size="sm" onclick={() => bulkResult = null}>Închide</Button>
+				</div>
+			{/if}
 		</Card>
 	{/if}
 
