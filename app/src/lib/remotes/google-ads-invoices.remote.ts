@@ -111,8 +111,60 @@ export const getClientsForMapping = query(async () => {
 	return clients;
 });
 
-/** Get monthly spend aggregates for all mapped accounts */
-export const getGoogleAdsMonthlySpend = query(async () => {
+/** Get spending data from DB (synced via Google Ads API) — same pattern as Meta/TikTok */
+export const getGoogleAdsSpendingList = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	let conditions: any = eq(table.googleAdsSpending.tenantId, event.locals.tenant.id);
+
+	if (event.locals.isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary) return [];
+		conditions = and(conditions, eq(table.googleAdsSpending.clientId, event.locals.client.id));
+	}
+
+	const rows = await db
+		.select({
+			id: table.googleAdsSpending.id,
+			tenantId: table.googleAdsSpending.tenantId,
+			clientId: table.googleAdsSpending.clientId,
+			googleAdsCustomerId: table.googleAdsSpending.googleAdsCustomerId,
+			periodStart: table.googleAdsSpending.periodStart,
+			periodEnd: table.googleAdsSpending.periodEnd,
+			spendAmount: table.googleAdsSpending.spendAmount,
+			spendCents: table.googleAdsSpending.spendCents,
+			currencyCode: table.googleAdsSpending.currencyCode,
+			impressions: table.googleAdsSpending.impressions,
+			clicks: table.googleAdsSpending.clicks,
+			conversions: table.googleAdsSpending.conversions,
+			syncedAt: table.googleAdsSpending.syncedAt,
+			createdAt: table.googleAdsSpending.createdAt,
+			clientName: table.client.name,
+			clientEmail: table.client.email,
+			accountName: table.googleAdsAccount.accountName
+		})
+		.from(table.googleAdsSpending)
+		.leftJoin(table.client, eq(table.googleAdsSpending.clientId, table.client.id))
+		.leftJoin(table.googleAdsAccount, and(
+			eq(table.googleAdsSpending.googleAdsCustomerId, table.googleAdsAccount.googleAdsCustomerId),
+			eq(table.googleAdsSpending.tenantId, table.googleAdsAccount.tenantId)
+		))
+		.where(conditions)
+		.orderBy(desc(table.googleAdsSpending.periodStart))
+		.limit(500);
+
+	return rows;
+});
+
+/** Get monthly spend aggregates for all mapped accounts (live API — legacy) */
+export const getGoogleAdsMonthlySpend = query(
+	v.object({
+		since: v.optional(v.string()),
+		until: v.optional(v.string())
+	}),
+	async (data) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
@@ -151,7 +203,7 @@ export const getGoogleAdsMonthlySpend = query(async () => {
 			return listMonthlySpend(
 				integration.mccAccountId, cleanId,
 				integration.developerToken, integration.refreshToken,
-				undefined, undefined,
+				data.since, data.until,
 				acc.currencyCode
 			);
 		})
@@ -655,6 +707,99 @@ export const bulkDownloadGoogleInvoices = command(
 
 		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
 		return await downloadGoogleInvoicesFromLinks(tenantId, data.customerId, data.links, cookies, accessToken);
+	}
+);
+
+/**
+ * Import scraped Google Ads invoices: groups by account, downloads PDFs, creates DB records.
+ * Called from the ScraperPanel after browser extraction.
+ */
+export const importScrapedGoogleInvoices = command(
+	v.object({
+		invoices: v.array(v.object({
+			invoiceId: v.string(),
+			date: v.optional(v.string()),
+			accountId: v.string(),
+			accountName: v.optional(v.string()),
+			downloadUrl: v.optional(v.string()),
+			amount: v.optional(v.number()),
+			amountText: v.optional(v.string()),
+			platform: v.optional(v.string()),
+			invoiceNumber: v.optional(v.string()),
+			currencyCode: v.optional(v.string()),
+			txid: v.optional(v.string())
+		}))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Get integration and cookies
+		const [integration] = await db
+			.select()
+			.from(table.googleAdsIntegration)
+			.where(and(eq(table.googleAdsIntegration.tenantId, tenantId), eq(table.googleAdsIntegration.isActive, true)))
+			.limit(1);
+
+		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
+
+		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
+		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
+		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
+
+		// Try to get OAuth access token for Bearer auth
+		let accessToken: string | null = null;
+		try {
+			const authResult = await getAuthenticatedClient(tenantId);
+			if (authResult) {
+				accessToken = (await authResult.oauth2Client.getAccessToken()).token || null;
+			}
+		} catch { /* proceed without Bearer token */ }
+
+		// Group invoices by accountId (customerId without dashes)
+		const groups = new Map<string, typeof data.invoices>();
+		for (const inv of data.invoices) {
+			if (!inv.downloadUrl) continue;
+			const key = inv.accountId.replace(/-/g, '');
+			if (!groups.has(key)) groups.set(key, []);
+			groups.get(key)!.push(inv);
+		}
+
+		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
+
+		let totalDownloaded = 0;
+		let totalSkipped = 0;
+		let totalErrors = 0;
+
+		for (const [customerId, invoices] of groups) {
+			const links = invoices.map(inv => {
+				console.log(`[DEBUG-SCRAPER-IMPORT] Invoice ${inv.invoiceId}: amountText="${inv.amountText}", amount=${inv.amount}, accountId=${inv.accountId}`);
+				return {
+					url: inv.downloadUrl!,
+					invoiceId: inv.invoiceId,
+					date: inv.date,
+					amount: inv.amountText
+				};
+			});
+
+			try {
+				const result = await downloadGoogleInvoicesFromLinks(tenantId, customerId, links, cookies, accessToken);
+				totalDownloaded += result.downloaded;
+				totalSkipped += result.skipped;
+				totalErrors += result.errors;
+			} catch (err) {
+				totalErrors += links.length;
+			}
+		}
+
+		return { downloaded: totalDownloaded, skipped: totalSkipped, errors: totalErrors };
 	}
 );
 

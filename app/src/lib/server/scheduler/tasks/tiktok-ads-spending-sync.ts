@@ -1,9 +1,10 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { logInfo, logError } from '$lib/server/logger';
 import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { downloadAllInvoicesForMonth } from '$lib/server/tiktok-ads/invoice-downloader';
+import { createNotification } from '$lib/server/notifications';
 
 /**
  * Process TikTok Ads sync: spending data + invoice PDF downloads.
@@ -68,6 +69,47 @@ export async function processTiktokAdsSpendingSync() {
 				metadata: { error: err instanceof Error ? err.message : String(err) }
 			});
 			totalErrors++;
+		}
+	}
+
+	// Step 3: Notify admins about expired sessions
+	for (const tenantId of tenantIds) {
+		try {
+			const expiredIntegrations = await db
+				.select({ id: table.tiktokAdsIntegration.id })
+				.from(table.tiktokAdsIntegration)
+				.where(
+					and(
+						eq(table.tiktokAdsIntegration.tenantId, tenantId),
+						eq(table.tiktokAdsIntegration.isActive, true),
+						eq(table.tiktokAdsIntegration.ttSessionStatus, 'expired')
+					)
+				);
+
+			if (expiredIntegrations.length > 0) {
+				const admins = await db
+					.select({ userId: table.tenantUser.userId })
+					.from(table.tenantUser)
+					.where(
+						and(
+							eq(table.tenantUser.tenantId, tenantId),
+							or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+						)
+					);
+
+				for (const admin of admins) {
+					await createNotification({
+						tenantId,
+						userId: admin.userId,
+						type: 'sync.error',
+						title: 'Sesiune TikTok expirată',
+						message: 'Sesiunea TikTok a expirat. Deschide pagina TikTok Ads Facturi și apasă "Scan cu Browser" pentru a reîmprospăta cookie-urile.',
+						link: 'invoices/tiktok-ads'
+					});
+				}
+			}
+		} catch {
+			// Don't fail sync for notification errors
 		}
 	}
 

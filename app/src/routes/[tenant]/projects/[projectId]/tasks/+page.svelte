@@ -145,9 +145,11 @@
 						</div>
 						<DropdownMenu>
 							<DropdownMenuTrigger>
-								<Button variant="ghost" size="icon">
-									<MoreVertical class="h-4 w-4" />
-								</Button>
+								{#snippet child({ props })}
+									<Button {...props} variant="ghost" size="icon">
+										<MoreVertical class="h-4 w-4" />
+									</Button>
+								{/snippet}
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
 								<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/tasks/${task.id}`)}>

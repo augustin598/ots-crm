@@ -242,10 +242,12 @@
 	<div class="flex gap-2">
 		<Dialog bind:open={isDialogOpen}>
 			<DialogTrigger>
-				<Button onclick={() => (isDialogOpen = true)}>
-					<PlusIcon class="mr-2 h-4 w-4" />
-					New Project
-				</Button>
+				{#snippet child({ props })}
+					<Button {...props} onclick={() => (isDialogOpen = true)}>
+						<PlusIcon class="mr-2 h-4 w-4" />
+						New Project
+					</Button>
+				{/snippet}
 			</DialogTrigger>
 			<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 				<DialogHeader>
@@ -482,9 +484,11 @@
 					</div>
 					<DropdownMenu>
 						<DropdownMenuTrigger>
-							<Button variant="ghost" size="icon">
-								<MoreVerticalIcon class="h-4 w-4" />
-							</Button>
+							{#snippet child({ props })}
+								<Button {...props} variant="ghost" size="icon">
+									<MoreVerticalIcon class="h-4 w-4" />
+								</Button>
+							{/snippet}
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onclick={() => openEditDialog(project)}>Edit</DropdownMenuItem>

@@ -130,15 +130,17 @@
 	<!-- Status Filter -->
 	<Popover bind:open={statusPopoverOpen}>
 		<PopoverTrigger>
-			<Button variant="outline" size="sm">
-				<FilterIcon class="mr-2 h-4 w-4" />
-				Status
-				{#if (statuses.current as string[] | null) && (statuses.current as string[]).length > 0}
-					<Badge variant="secondary" class="ml-2">
-						{(statuses.current as string[]).length}
-					</Badge>
-				{/if}
-			</Button>
+			{#snippet child({ props })}
+				<Button {...props} variant="outline" size="sm">
+					<FilterIcon class="mr-2 h-4 w-4" />
+					Status
+					{#if (statuses.current as string[] | null) && (statuses.current as string[]).length > 0}
+						<Badge variant="secondary" class="ml-2">
+							{(statuses.current as string[]).length}
+						</Badge>
+					{/if}
+				</Button>
+			{/snippet}
 		</PopoverTrigger>
 		<PopoverContent class="w-56">
 			<div class="space-y-2">
@@ -162,14 +164,16 @@
 	<!-- Priority Filter -->
 	<Popover bind:open={priorityPopoverOpen}>
 		<PopoverTrigger>
-			<Button variant="outline" size="sm">
-				Priority
-				{#if (priorities.current as string[] | null) && (priorities.current as string[]).length > 0}
-					<Badge variant="secondary" class="ml-2">
-						{(priorities.current as string[]).length}
-					</Badge>
-				{/if}
-			</Button>
+			{#snippet child({ props })}
+				<Button {...props} variant="outline" size="sm">
+					Priority
+					{#if (priorities.current as string[] | null) && (priorities.current as string[]).length > 0}
+						<Badge variant="secondary" class="ml-2">
+							{(priorities.current as string[]).length}
+						</Badge>
+					{/if}
+				</Button>
+			{/snippet}
 		</PopoverTrigger>
 		<PopoverContent class="w-56">
 			<div class="space-y-2">
@@ -194,14 +198,16 @@
 	{#if users.length > 0}
 		<Popover bind:open={assigneePopoverOpen}>
 			<PopoverTrigger>
-				<Button variant="outline" size="sm">
-					Assignee
-					{#if (assignees.current as string[] | null) && (assignees.current as string[]).length > 0}
-						<Badge variant="secondary" class="ml-2">
-							{(assignees.current as string[]).length}
-						</Badge>
-					{/if}
-				</Button>
+				{#snippet child({ props })}
+					<Button {...props} variant="outline" size="sm">
+						Assignee
+						{#if (assignees.current as string[] | null) && (assignees.current as string[]).length > 0}
+							<Badge variant="secondary" class="ml-2">
+								{(assignees.current as string[]).length}
+							</Badge>
+						{/if}
+					</Button>
+				{/snippet}
 			</PopoverTrigger>
 			<PopoverContent class="w-64 max-h-[300px] overflow-y-auto">
 				<div class="space-y-2">
@@ -227,14 +233,16 @@
 	{#if projects.length > 0}
 		<Popover bind:open={projectPopoverOpen}>
 			<PopoverTrigger>
-				<Button variant="outline" size="sm">
-					Project
-					{#if (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0}
-						<Badge variant="secondary" class="ml-2">
-							{(projectIds.current as string[]).length}
-						</Badge>
-					{/if}
-				</Button>
+				{#snippet child({ props })}
+					<Button {...props} variant="outline" size="sm">
+						Project
+						{#if (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0}
+							<Badge variant="secondary" class="ml-2">
+								{(projectIds.current as string[]).length}
+							</Badge>
+						{/if}
+					</Button>
+				{/snippet}
 			</PopoverTrigger>
 			<PopoverContent class="w-64 max-h-[300px] overflow-y-auto">
 				<div class="space-y-2">
@@ -260,14 +268,16 @@
 	{#if milestones.length > 0}
 		<Popover bind:open={milestonePopoverOpen}>
 			<PopoverTrigger>
-				<Button variant="outline" size="sm">
-					Milestone
-					{#if (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0}
-						<Badge variant="secondary" class="ml-2">
-							{(milestoneIds.current as string[]).length}
-						</Badge>
-					{/if}
-				</Button>
+				{#snippet child({ props })}
+					<Button {...props} variant="outline" size="sm">
+						Milestone
+						{#if (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0}
+							<Badge variant="secondary" class="ml-2">
+								{(milestoneIds.current as string[]).length}
+							</Badge>
+						{/if}
+					</Button>
+				{/snippet}
 			</PopoverTrigger>
 			<PopoverContent class="w-64 max-h-[300px] overflow-y-auto">
 				<div class="space-y-2">
@@ -292,12 +302,14 @@
 	<!-- Due Date Filter -->
 	<Popover bind:open={dueDatePopoverOpen}>
 		<PopoverTrigger>
-			<Button variant="outline" size="sm">
-				Due Date
-				{#if dueDate.current}
-					<Badge variant="secondary" class="ml-2">1</Badge>
-				{/if}
-			</Button>
+			{#snippet child({ props })}
+				<Button {...props} variant="outline" size="sm">
+					Due Date
+					{#if dueDate.current}
+						<Badge variant="secondary" class="ml-2">1</Badge>
+					{/if}
+				</Button>
+			{/snippet}
 		</PopoverTrigger>
 		<PopoverContent class="w-56">
 			<div class="space-y-2">

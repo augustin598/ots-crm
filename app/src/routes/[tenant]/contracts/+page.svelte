@@ -450,13 +450,16 @@
 								</Button>
 								<DropdownMenu>
 									<DropdownMenuTrigger>
-										<Button
-											variant="ghost"
-											size="icon"
-											class="h-8 w-8 hover:bg-muted transition-all"
-										>
-											<MoreVerticalIcon class="h-3.5 w-3.5" />
-										</Button>
+										{#snippet child({ props })}
+											<Button
+												{...props}
+												variant="ghost"
+												size="icon"
+												class="h-8 w-8 hover:bg-muted transition-all"
+											>
+												<MoreVerticalIcon class="h-3.5 w-3.5" />
+											</Button>
+										{/snippet}
 									</DropdownMenuTrigger>
 									<DropdownMenuContent align="end">
 										<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/contracts/${contract.id}`)}>

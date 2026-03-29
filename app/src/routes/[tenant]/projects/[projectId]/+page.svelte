@@ -367,10 +367,12 @@
 					</div>
 					<Dialog bind:open={isMilestoneDialogOpen}>
 						<DialogTrigger>
-							<Button size="sm" onclick={() => (isMilestoneDialogOpen = true)}>
-								<Plus class="mr-2 h-4 w-4" />
-								New Milestone
-							</Button>
+							{#snippet child({ props })}
+								<Button {...props} size="sm" onclick={() => (isMilestoneDialogOpen = true)}>
+									<Plus class="mr-2 h-4 w-4" />
+									New Milestone
+								</Button>
+							{/snippet}
 						</DialogTrigger>
 						<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 							<DialogHeader>
@@ -485,9 +487,11 @@
 										</Badge>
 										<DropdownMenu>
 											<DropdownMenuTrigger>
-												<Button variant="ghost" size="icon">
-													<MoreVertical class="h-4 w-4" />
-												</Button>
+												{#snippet child({ props })}
+													<Button {...props} variant="ghost" size="icon">
+														<MoreVertical class="h-4 w-4" />
+													</Button>
+												{/snippet}
 											</DropdownMenuTrigger>
 											<DropdownMenuContent align="end">
 												<DropdownMenuItem onclick={() => openEditMilestone(milestone)}>
@@ -594,10 +598,12 @@
 				<h3 class="text-lg font-semibold">Team Members</h3>
 				<Dialog bind:open={isTeamMembersDialogOpen}>
 					<DialogTrigger>
-						<Button variant="outline" size="sm" onclick={() => (isTeamMembersDialogOpen = true)}>
-							<Pencil class="mr-2 h-4 w-4" />
-							Edit Team Members
-						</Button>
+						{#snippet child({ props })}
+							<Button {...props} variant="outline" size="sm" onclick={() => (isTeamMembersDialogOpen = true)}>
+								<Pencil class="mr-2 h-4 w-4" />
+								Edit Team Members
+							</Button>
+						{/snippet}
 					</DialogTrigger>
 					<DialogContent class="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
 						<DialogHeader>

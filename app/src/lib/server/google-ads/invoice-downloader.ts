@@ -23,6 +23,24 @@ export interface InvoiceLinkData {
 	amount?: string;
 }
 
+/** Parse an amount string like "7.536,54 RON" or "7,536.54 USD" into a number */
+function parseAmountString(amountStr?: string): number | null {
+	if (!amountStr) return null;
+	// Remove currency codes and whitespace: "7.536,54 RON" → "7.536,54"
+	const cleaned = amountStr.replace(/[A-Z]{3}/g, '').trim();
+	if (!cleaned) return null;
+	let value: number;
+	// Detect format: if comma appears after last dot → European format
+	if (cleaned.includes(',') && cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+		// European: "7.536,54" → 7536.54
+		value = parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+	} else {
+		// US: "7,536.54" → 7536.54
+		value = parseFloat(cleaned.replace(/,/g, ''));
+	}
+	return isNaN(value) ? null : value;
+}
+
 function buildCookieHeader(cookies: GoogleAdsCookie[]): string {
 	return cookies.map(c => `${c.name}=${c.value}`).join('; ');
 }
@@ -215,9 +233,18 @@ export async function downloadGoogleInvoicesFromLinks(
 	for (const link of links) {
 		const invoiceId = link.invoiceId || link.url.match(/(\d{8,12})/)?.[1] || crypto.randomUUID();
 
+		logInfo('google-ads-dl', `[DEBUG] Processing invoice ${invoiceId}`, {
+			tenantId,
+			metadata: {
+				linkAmount: link.amount || 'NULL',
+				linkDate: link.date || 'NULL',
+				linkUrl: link.url?.substring(0, 80) || 'NULL'
+			}
+		});
+
 		// Dedup
 		const [existing] = await db
-			.select({ id: table.googleAdsInvoice.id, pdfPath: table.googleAdsInvoice.pdfPath })
+			.select({ id: table.googleAdsInvoice.id, pdfPath: table.googleAdsInvoice.pdfPath, totalAmountMicros: table.googleAdsInvoice.totalAmountMicros })
 			.from(table.googleAdsInvoice)
 			.where(and(
 				eq(table.googleAdsInvoice.tenantId, tenantId),
@@ -225,7 +252,27 @@ export async function downloadGoogleInvoicesFromLinks(
 			))
 			.limit(1);
 
-		if (existing?.pdfPath) { skipped++; continue; }
+		if (existing?.pdfPath) {
+			// Backfill amount if missing
+			const parsedBackfill = parseAmountString(link.amount);
+			logInfo('google-ads-dl', `[DEBUG] Invoice ${invoiceId} EXISTS — pdfPath: ${existing.pdfPath ? 'YES' : 'NO'}, totalAmountMicros: ${existing.totalAmountMicros}, link.amount: "${link.amount}", parsedBackfill: ${parsedBackfill}`, { tenantId });
+
+			if (existing.totalAmountMicros == null && link.amount) {
+				if (parsedBackfill != null) {
+					const micros = Math.round(parsedBackfill * 1_000_000);
+					logInfo('google-ads-dl', `[DEBUG] BACKFILLING invoice ${invoiceId} — setting totalAmountMicros=${micros} (from "${link.amount}")`, { tenantId });
+					await db.update(table.googleAdsInvoice)
+						.set({ totalAmountMicros: micros, updatedAt: new Date() })
+						.where(eq(table.googleAdsInvoice.id, existing.id));
+				} else {
+					logWarning('google-ads-dl', `[DEBUG] Invoice ${invoiceId} — parseAmountString("${link.amount}") returned NULL`, { tenantId });
+				}
+			} else {
+				logInfo('google-ads-dl', `[DEBUG] Invoice ${invoiceId} — skipping backfill: totalAmountMicros=${existing.totalAmountMicros}, link.amount="${link.amount}"`, { tenantId });
+			}
+			skipped++;
+			continue;
+		}
 
 		// Try Bearer token first, fall back to cookies
 		let result: DownloadResult | null = null;
@@ -252,10 +299,15 @@ export async function downloadGoogleInvoicesFromLinks(
 				);
 
 				const issueDate = link.date ? new Date(link.date) : new Date();
+				const parsedAmount = parseAmountString(link.amount);
+				const totalAmountMicros = parsedAmount != null ? Math.round(parsedAmount * 1_000_000) : undefined;
 
 				if (existing) {
 					await db.update(table.googleAdsInvoice)
-						.set({ pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date() })
+						.set({
+							pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date(),
+							...(totalAmountMicros != null && { totalAmountMicros })
+						})
 						.where(eq(table.googleAdsInvoice.id, existing.id));
 				} else {
 					await db.insert(table.googleAdsInvoice).values({
@@ -264,7 +316,8 @@ export async function downloadGoogleInvoicesFromLinks(
 						googleInvoiceId: invoiceId, invoiceNumber: invoiceId,
 						issueDate, currencyCode: account.currencyCode || 'USD', invoiceType: 'INVOICE',
 						pdfPath: upload.path, status: 'synced', syncedAt: new Date(),
-						createdAt: new Date(), updatedAt: new Date()
+						createdAt: new Date(), updatedAt: new Date(),
+						...(totalAmountMicros != null && { totalAmountMicros })
 					});
 				}
 

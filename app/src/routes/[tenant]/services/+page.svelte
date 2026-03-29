@@ -190,10 +190,12 @@
 	</div>
 	<Dialog bind:open={isDialogOpen}>
 		<DialogTrigger>
-			<Button>
-				<PlusIcon class="mr-2 h-4 w-4" />
-				Add Service
-			</Button>
+			{#snippet child({ props })}
+				<Button {...props}>
+					<PlusIcon class="mr-2 h-4 w-4" />
+					Add Service
+				</Button>
+			{/snippet}
 		</DialogTrigger>
 		<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
 			<DialogHeader>
@@ -334,9 +336,11 @@
 					</div>
 					<DropdownMenu>
 						<DropdownMenuTrigger>
-							<Button variant="ghost" size="icon">
-								<MoreVerticalIcon class="h-4 w-4" />
-							</Button>
+							{#snippet child({ props })}
+								<Button {...props} variant="ghost" size="icon">
+									<MoreVerticalIcon class="h-4 w-4" />
+								</Button>
+							{/snippet}
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/services/${service.id}/edit`)}>

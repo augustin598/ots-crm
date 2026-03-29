@@ -2,11 +2,13 @@
 	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
+	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Download, Search, Eye, Trash2, FileArchive } from '@lucide/svelte';
+	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import JSZip from 'jszip';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
@@ -40,6 +42,8 @@
 
 	// Session (cookie) status check
 	const connectionStatusQuery = getMetaAdsConnectionStatus();
+	const firstIntegrationId = $derived((connectionStatusQuery.current || [])[0]?.id || '');
+	let scraperPanelRef: ScraperPanel | undefined = $state();
 	const sessionWarning = $derived.by(() => {
 		const connections = connectionStatusQuery.current || [];
 		for (const conn of connections) {
@@ -596,8 +600,17 @@
 			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
 				{#if syncing}<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...{:else}<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum{/if}
 			</Button>
+			{#if firstIntegrationId}
+				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
+					<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser
+				</Button>
+			{/if}
 		</div>
 	</div>
+
+	{#if firstIntegrationId}
+		<ScraperPanel bind:this={scraperPanelRef} platform="meta" integrationId={firstIntegrationId} showTrigger={false} />
+	{/if}
 
 	<!-- Bulk Import Panel -->
 	{#if showBulkImport}

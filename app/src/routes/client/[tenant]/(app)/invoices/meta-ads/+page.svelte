@@ -15,15 +15,17 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
+	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	// Date range — implicit: tot anul curent
-	const currentYear = new Date().getFullYear();
-	let since = $state(`${currentYear}-01-01`);
-	let until = $state(`${currentYear}-12-31`);
+	// Date range — implicit: luna curenta (la fel ca admin Meta)
+	const _defaults = getDefaultDateRange();
+	let since = $state(_defaults.since);
+	let until = $state(_defaults.until);
+	const _presets = getDatePresets();
 
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
@@ -218,6 +220,9 @@
 
 	// Date range label
 	const dateRangeLabel = $derived.by(() => {
+		for (const p of _presets) {
+			if (p.since === since && p.until === until) return p.label;
+		}
 		const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
 		return `${fmt(since)} — ${fmt(until)}`;
 	});

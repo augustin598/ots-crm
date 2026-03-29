@@ -1,9 +1,10 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { logInfo, logError } from '$lib/server/logger';
 import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
 import { downloadAllReceiptsForMonth } from '$lib/server/meta-ads/invoice-downloader';
+import { createNotification } from '$lib/server/notifications';
 
 /**
  * Process Meta Ads sync: spending data + invoice PDF downloads.
@@ -68,6 +69,47 @@ export async function processMetaAdsInvoiceSync() {
 				metadata: { error: err instanceof Error ? err.message : String(err) }
 			});
 			totalErrors++;
+		}
+	}
+
+	// Step 3: Notify admins about expired sessions
+	for (const tenantId of tenantIds) {
+		try {
+			const expiredIntegrations = await db
+				.select({ id: table.metaAdsIntegration.id, businessName: table.metaAdsIntegration.businessName })
+				.from(table.metaAdsIntegration)
+				.where(
+					and(
+						eq(table.metaAdsIntegration.tenantId, tenantId),
+						eq(table.metaAdsIntegration.isActive, true),
+						eq(table.metaAdsIntegration.fbSessionStatus, 'expired')
+					)
+				);
+
+			if (expiredIntegrations.length > 0) {
+				const admins = await db
+					.select({ userId: table.tenantUser.userId })
+					.from(table.tenantUser)
+					.where(
+						and(
+							eq(table.tenantUser.tenantId, tenantId),
+							or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+						)
+					);
+
+				for (const admin of admins) {
+					await createNotification({
+						tenantId,
+						userId: admin.userId,
+						type: 'sync.error',
+						title: 'Sesiune Facebook expirată',
+						message: `Sesiunea Facebook (${expiredIntegrations[0].businessName || 'BM'}) a expirat. Deschide pagina Meta Ads Facturi și apasă "Scan cu Browser" pentru a reîmprospăta cookie-urile.`,
+						link: `invoices/meta-ads`
+					});
+				}
+			}
+		} catch {
+			// Don't fail the whole sync for notification errors
 		}
 	}
 

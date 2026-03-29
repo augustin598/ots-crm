@@ -88,10 +88,12 @@
 
 <Popover bind:open>
 	<PopoverTrigger>
-		<Button variant="outline" size="sm" class="gap-2">
-			<CalendarIcon class="h-4 w-4" />
-			<span>{formatDisplay(since, until)}</span>
-		</Button>
+		{#snippet child({ props })}
+			<Button {...props} variant="outline" size="sm" class="gap-2">
+				<CalendarIcon class="h-4 w-4" />
+				<span>{formatDisplay(since, until)}</span>
+			</Button>
+		{/snippet}
 	</PopoverTrigger>
 	<PopoverContent class="w-auto p-0" align="start">
 		<div class="flex">

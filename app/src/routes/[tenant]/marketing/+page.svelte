@@ -365,19 +365,21 @@
 			{#if activeClients.length > 0}
 				<Popover bind:open={clientFilterPopoverOpen}>
 					<PopoverTrigger>
-						<Button variant="outline" class="h-9 gap-2 text-sm font-normal">
-							<FilterIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
-							{#if selectedClientIds.length === 0 || selectedClientIds.length === activeClients.length}
-								Toți clienții
-							{:else if selectedClientIds.length === 1}
-								{getClientName(selectedClientIds[0])}
-							{:else}
-								{selectedClientIds.length} clienți selectați
-							{/if}
-							{#if selectedClientIds.length > 0 && selectedClientIds.length < activeClients.length}
-								<Badge variant="secondary" class="ml-auto">{selectedClientIds.length}</Badge>
-							{/if}
-						</Button>
+						{#snippet child({ props })}
+							<Button {...props} variant="outline" class="h-9 gap-2 text-sm font-normal">
+								<FilterIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+								{#if selectedClientIds.length === 0 || selectedClientIds.length === activeClients.length}
+									Toți clienții
+								{:else if selectedClientIds.length === 1}
+									{getClientName(selectedClientIds[0])}
+								{:else}
+									{selectedClientIds.length} clienți selectați
+								{/if}
+								{#if selectedClientIds.length > 0 && selectedClientIds.length < activeClients.length}
+									<Badge variant="secondary" class="ml-auto">{selectedClientIds.length}</Badge>
+								{/if}
+							</Button>
+						{/snippet}
 					</PopoverTrigger>
 					<PopoverContent class="w-72 p-2" align="end">
 						<div class="flex items-center justify-between mb-2">

@@ -2749,7 +2749,7 @@ export const debugLog = sqliteTable('debug_log', {
 	source: text('source').notNull().default('server'), // server, client, scheduler, plugin, email, gmail, keez, smartbill, bnr
 	message: text('message').notNull(),
 	url: text('url'),
-	stackTrace: text('stack_trace'),
+	stackTrace: text('stack_trace'), 
 	metadata: text('metadata'), // JSON string
 	userId: text('user_id').references(() => user.id),
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),

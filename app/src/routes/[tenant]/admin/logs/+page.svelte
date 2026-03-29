@@ -666,9 +666,11 @@
 													</Button>
 												{/if}
 												<CollapsibleTrigger>
-													<Button variant="ghost" size="sm">
-														<ChevronDownIcon class="h-4 w-4" />
-													</Button>
+													{#snippet child({ props })}
+														<Button {...props} variant="ghost" size="sm">
+															<ChevronDownIcon class="h-4 w-4" />
+														</Button>
+													{/snippet}
 												</CollapsibleTrigger>
 												{#if log.status === 'failed'}
 													<Button
@@ -1008,9 +1010,11 @@
 													</Button>
 												{/if}
 												<CollapsibleTrigger>
-													<Button variant="ghost" size="sm">
-														<ChevronDownIcon class="h-4 w-4" />
-													</Button>
+													{#snippet child({ props })}
+														<Button {...props} variant="ghost" size="sm">
+															<ChevronDownIcon class="h-4 w-4" />
+														</Button>
+													{/snippet}
 												</CollapsibleTrigger>
 												<Button variant="ghost" size="sm" onclick={() => handleDeleteDebugLog(log.id)}>
 													<Trash2Icon class="h-4 w-4 text-red-500" />

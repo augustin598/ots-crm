@@ -245,9 +245,9 @@ export async function listMonthlySpend(
 			startDate = `${sinceDate.getFullYear()}-${String(sinceDate.getMonth() + 1).padStart(2, '0')}-01`;
 			endDate = `${untilDate.getFullYear()}-${String(untilDate.getMonth() + 1).padStart(2, '0')}-01`;
 		} else {
-			// Default: last 6 months
-			const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-			startDate = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
+			// Default: last 24 months (data accumulates in DB, so we need a wide initial range)
+			const startMonth = new Date(now.getFullYear(), now.getMonth() - 24, 1);
+			startDate = `${startMonth.getFullYear()}-${String(startMonth.getMonth() + 1).padStart(2, '0')}-01`;
 			const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 			endDate = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-01`;
 		}
