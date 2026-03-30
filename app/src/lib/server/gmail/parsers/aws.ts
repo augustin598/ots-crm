@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount } from './index';
+import { parseAmount, detectStatus } from './index';
 
 export const awsParser: SupplierParser = {
 	id: 'aws',
@@ -38,14 +38,7 @@ export const awsParser: SupplierParser = {
 			result.currency = 'USD';
 		}
 
-		const bodyLower = email.body.toLowerCase() + ' ' + email.subject.toLowerCase();
-		if (bodyLower.includes('payment received') || bodyLower.includes('receipt') || bodyLower.includes('paid')) {
-			result.status = 'paid';
-		} else if (bodyLower.includes('payment due') || bodyLower.includes('unpaid') || bodyLower.includes('overdue')) {
-			result.status = 'unpaid';
-		} else {
-			result.status = 'pending';
-		}
+		result.status = detectStatus(email.body + ' ' + email.subject);
 
 		result.issueDate = email.date;
 

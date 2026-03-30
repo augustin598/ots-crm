@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount } from './index';
+import { parseAmount, detectStatus } from './index';
 
 export const hetznerParser: SupplierParser = {
 	id: 'hetzner',
@@ -32,14 +32,7 @@ export const hetznerParser: SupplierParser = {
 			result.currency = 'EUR';
 		}
 
-		const bodyLower = email.body.toLowerCase() + ' ' + email.subject.toLowerCase();
-		if (bodyLower.includes('payment received') || bodyLower.includes('paid') || bodyLower.includes('bezahlt')) {
-			result.status = 'paid';
-		} else if (bodyLower.includes('payment due') || bodyLower.includes('fällig') || bodyLower.includes('unpaid')) {
-			result.status = 'unpaid';
-		} else {
-			result.status = 'pending';
-		}
+		result.status = detectStatus(email.body + ' ' + email.subject);
 
 		result.issueDate = email.date;
 

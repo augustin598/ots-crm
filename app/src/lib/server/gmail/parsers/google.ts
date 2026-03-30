@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount } from './index';
+import { parseAmount, detectStatus } from './index';
 
 export const googleParser: SupplierParser = {
 	id: 'google',
@@ -24,7 +24,9 @@ export const googleParser: SupplierParser = {
 
 		// Google invoice numbers in subject or body
 		const invoiceMatch = email.subject.match(/invoice\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/invoice\s*(?:number|#|no\.?)\s*:?\s*([\w-]+)/i);
+			email.body.match(/(?:invoice|factur[aă])\s*(?:number|num[aă]rul|#|no\.?)\s*:?\s*([\w-]+)/i) ||
+			email.body.match(/num[aă]rul facturii:\s*(\d+)/i);
+		
 		if (invoiceMatch) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
@@ -33,16 +35,17 @@ export const googleParser: SupplierParser = {
 		if (amountResult) {
 			result.amount = amountResult.amount;
 			result.currency = amountResult.currency;
+		} else {
+			// Fallback for Romanian specific format "Total în EUR 16,20"
+			const totalMatch = email.body.match(/Total\s+în\s+(EUR|RON|USD|GBP|LEI)\s+([\d,.]+)/i);
+			if (totalMatch) {
+				result.currency = totalMatch[1] === 'LEI' ? 'RON' : totalMatch[1].toUpperCase();
+				const val = totalMatch[2].replace(',', '.');
+				result.amount = Math.round(parseFloat(val) * 100);
+			}
 		}
 
-		const bodyLower = email.body.toLowerCase() + ' ' + email.subject.toLowerCase();
-		if (bodyLower.includes('payment received') || bodyLower.includes('paid') || bodyLower.includes('receipt') || bodyLower.includes('payment confirmation')) {
-			result.status = 'paid';
-		} else if (bodyLower.includes('payment due') || bodyLower.includes('unpaid') || bodyLower.includes('overdue')) {
-			result.status = 'unpaid';
-		} else {
-			result.status = 'pending';
-		}
+		result.status = detectStatus(email.body + ' ' + email.subject);
 
 		result.issueDate = email.date;
 

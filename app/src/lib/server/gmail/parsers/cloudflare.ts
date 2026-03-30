@@ -2,29 +2,28 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus } from './index';
 
-export const cpanelParser: SupplierParser = {
-	id: 'cpanel',
-	name: 'cPanel/WHM',
+export const cloudflareParser: SupplierParser = {
+	id: 'cloudflare',
+	name: 'Cloudflare',
 
 	matchEmail(from: string, subject: string): boolean {
 		const fromLower = from.toLowerCase();
-		return fromLower.includes('cpanel.net') || fromLower.includes('cpanel.com');
+		return fromLower.includes('cloudflare.com');
 	},
 
 	parseInvoice(email: GmailMessage): ParsedInvoice {
 		const result: ParsedInvoice = {
-			supplierType: 'cpanel',
-			supplierName: 'cPanel'
+			supplierType: 'cloudflare',
+			supplierName: 'Cloudflare, Inc.'
 		};
 
-		// Extract invoice number from subject: "Invoice #12345"
-		const invoiceMatch = email.subject.match(/invoice\s*#?\s*(\d+)/i) ||
-			email.body.match(/invoice\s*#?\s*(\d+)/i);
+		const invoiceMatch = email.subject.match(/#([\w-]+)/) ||
+			email.body.match(/invoice\s*(?:number|#|no\.?)\s*:?\s*([\w-]+)/i);
+		
 		if (invoiceMatch) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
 
-		// Extract amount from body
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
 		if (amountResult) {
 			result.amount = amountResult.amount;
@@ -32,13 +31,12 @@ export const cpanelParser: SupplierParser = {
 		}
 
 		result.status = detectStatus(email.body + ' ' + email.subject);
-
 		result.issueDate = email.date;
 
 		return result;
 	},
 
 	getSearchQuery(): string {
-		return 'from:cpanel.net OR from:cpanel.com has:attachment';
+		return 'from:cloudflare.com subject:invoice has:attachment';
 	}
 };

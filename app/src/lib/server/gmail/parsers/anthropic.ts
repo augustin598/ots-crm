@@ -2,29 +2,33 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus } from './index';
 
-export const cpanelParser: SupplierParser = {
-	id: 'cpanel',
-	name: 'cPanel/WHM',
+export const anthropicParser: SupplierParser = {
+	id: 'anthropic',
+	name: 'Anthropic, PBC',
 
 	matchEmail(from: string, subject: string): boolean {
 		const fromLower = from.toLowerCase();
-		return fromLower.includes('cpanel.net') || fromLower.includes('cpanel.com');
+		const subjectLower = subject.toLowerCase();
+		return (
+			fromLower.includes('anthropic') ||
+			subjectLower.includes('anthropic')
+		);
 	},
 
 	parseInvoice(email: GmailMessage): ParsedInvoice {
 		const result: ParsedInvoice = {
-			supplierType: 'cpanel',
-			supplierName: 'cPanel'
+			supplierType: 'anthropic',
+			supplierName: 'Anthropic, PBC'
 		};
 
-		// Extract invoice number from subject: "Invoice #12345"
-		const invoiceMatch = email.subject.match(/invoice\s*#?\s*(\d+)/i) ||
-			email.body.match(/invoice\s*#?\s*(\d+)/i);
+		// Anthropic receipts: "Your receipt from Anthropic, PBC #2831-6585-6541"
+		const invoiceMatch = email.subject.match(/#([\w-]+)/) ||
+			email.body.match(/(?:receipt|invoice)\s*#?\s*([\w-]+)/i);
+		
 		if (invoiceMatch) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
 
-		// Extract amount from body
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
 		if (amountResult) {
 			result.amount = amountResult.amount;
@@ -39,6 +43,6 @@ export const cpanelParser: SupplierParser = {
 	},
 
 	getSearchQuery(): string {
-		return 'from:cpanel.net OR from:cpanel.com has:attachment';
+		return 'from:anthropic.com OR subject:anthropic has:attachment';
 	}
 };

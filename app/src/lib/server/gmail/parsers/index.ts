@@ -6,6 +6,14 @@ import { googleParser } from './google';
 import { ovhParser } from './ovh';
 import { digitaloceanParser } from './digitalocean';
 import { awsParser } from './aws';
+import { litespeedParser } from './litespeed';
+import { tiktokParser } from './tiktok';
+import { anthropicParser } from './anthropic';
+import { metaParser } from './meta';
+import { linkedinParser } from './linkedin';
+import { openaiParser } from './openai';
+import { cloudflareParser } from './cloudflare';
+import { roSuppliersParser } from './ro-suppliers';
 import { genericParser } from './generic';
 
 export interface ParsedInvoice {
@@ -39,6 +47,14 @@ export const parserRegistry: SupplierParser[] = [
 	ovhParser,
 	digitaloceanParser,
 	awsParser,
+	litespeedParser,
+	tiktokParser,
+	anthropicParser,
+	metaParser,
+	linkedinParser,
+	openaiParser,
+	cloudflareParser,
+	roSuppliersParser,
 	genericParser
 ];
 
@@ -153,6 +169,64 @@ export function parseAmount(text: string): { amount: number; currency: string } 
 		}
 	}
 	return null;
+}
+
+/**
+ * Helper: Detect invoice status from text (body or subject)
+ */
+export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
+	const bodyLower = text.toLowerCase();
+
+	// Check UNPAID first to avoid false positives with "paid" word appearing in "unpaid"
+	if (
+		bodyLower.includes('unpaid') ||
+		bodyLower.includes('neplatit') ||
+		bodyLower.includes('neplătit') ||
+		bodyLower.includes('overdue') ||
+		bodyLower.includes('restant') ||
+		bodyLower.includes('scadenta') ||
+		bodyLower.includes('scadență') ||
+		bodyLower.includes('past due') ||
+		bodyLower.includes('in asteptare') ||
+		bodyLower.includes('în așteptare') ||
+		bodyLower.includes('pending') ||
+		bodyLower.includes('impayée') ||
+		bodyLower.includes('échéance') ||
+		bodyLower.includes('fällig') ||
+		bodyLower.includes('offen') ||
+		bodyLower.includes('payment due') ||
+		bodyLower.includes('payment is due') ||
+		bodyLower.includes('payment required')
+	) {
+		return 'unpaid';
+	}
+
+	if (
+		bodyLower.includes('payment received') ||
+		bodyLower.includes('payment is received') ||
+		bodyLower.includes('payment confirmed') ||
+		bodyLower.includes('payment confirmation') ||
+		bodyLower.includes('paid') ||
+		bodyLower.includes('plata confirmata') ||
+		bodyLower.includes('plată confirmată') ||
+		bodyLower.includes('incasat') ||
+		bodyLower.includes('încasat') ||
+		bodyLower.includes('receipt') ||
+		bodyLower.includes('chitanta') ||
+		bodyLower.includes('chitanță') ||
+		bodyLower.includes('payé') ||
+		bodyLower.includes('réglée') ||
+		bodyLower.includes('bezahlt') ||
+		bodyLower.includes('quittung') ||
+		bodyLower.includes('autopay') ||
+		bodyLower.includes('vei fi taxat(ă) automat') ||
+		bodyLower.includes('taxat automat') ||
+		bodyLower.includes('automatically charged')
+	) {
+		return 'paid';
+	}
+
+	return 'pending';
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount } from './index';
+import { parseAmount, detectStatus } from './index';
 
 export const digitaloceanParser: SupplierParser = {
 	id: 'digitalocean',
@@ -17,10 +17,9 @@ export const digitaloceanParser: SupplierParser = {
 			supplierName: 'DigitalOcean'
 		};
 
-		// DigitalOcean invoice numbers: numeric or alphanumeric
 		const invoiceMatch =
-			email.subject.match(/(?:invoice)\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/(?:invoice)\s*(?:number|#|id)\s*:?\s*([\w-]+)/i);
+			email.subject.match(/invoice\s*#?\s*(\w+)/i) ||
+			email.body.match(/invoice\s*(?:number|#|no\.?)\s*:?\s*(\w+)/i);
 		if (invoiceMatch) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
@@ -33,14 +32,7 @@ export const digitaloceanParser: SupplierParser = {
 			result.currency = 'USD';
 		}
 
-		const bodyLower = email.body.toLowerCase() + ' ' + email.subject.toLowerCase();
-		if (bodyLower.includes('payment received') || bodyLower.includes('receipt') || bodyLower.includes('paid')) {
-			result.status = 'paid';
-		} else if (bodyLower.includes('payment due') || bodyLower.includes('unpaid') || bodyLower.includes('overdue')) {
-			result.status = 'unpaid';
-		} else {
-			result.status = 'pending';
-		}
+		result.status = detectStatus(email.body + ' ' + email.subject);
 
 		result.issueDate = email.date;
 

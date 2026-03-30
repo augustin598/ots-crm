@@ -2,25 +2,29 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus } from './index';
 
-export const whmcsParser: SupplierParser = {
-	id: 'whmcs',
-	name: 'WHMCS',
+export const litespeedParser: SupplierParser = {
+	id: 'litespeed',
+	name: 'LiteSpeed Technologies',
 
 	matchEmail(from: string, subject: string): boolean {
 		const fromLower = from.toLowerCase();
 		const subjectLower = subject.toLowerCase();
-		return fromLower.includes('whmcs.com') || subjectLower.includes('whmcs');
+		return (
+			fromLower.includes('litespeedtech.com') || 
+			subjectLower.includes('litespeed') ||
+			fromLower.includes('litespeed technologies')
+		);
 	},
 
 	parseInvoice(email: GmailMessage): ParsedInvoice {
 		const result: ParsedInvoice = {
-			supplierType: 'whmcs',
-			supplierName: 'WHMCS'
+			supplierType: 'litespeed',
+			supplierName: 'LiteSpeed Technologies'
 		};
 
-		// WHMCS invoices often have "Invoice #XXXX" in subject
-		const invoiceMatch = email.subject.match(/invoice\s*#?\s*(\w+)/i) ||
-			email.body.match(/invoice\s*(?:number|#|no\.?)\s*:?\s*(\w+)/i);
+		// LiteSpeed invoices usually have "Invoice #XXXX"
+		const invoiceMatch = email.subject.match(/(?:invoice|factura|factură)\s*#?\s*(\d+)/i) ||
+			email.body.match(/(?:invoice|factura|factură)\s*(?:number|nr\.?|#|no\.?)\s*:?\s*(\d+)/i);
 		if (invoiceMatch) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
@@ -28,7 +32,9 @@ export const whmcsParser: SupplierParser = {
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
 		if (amountResult) {
 			result.amount = amountResult.amount;
-			result.currency = amountResult.currency;
+			result.currency = amountResult.currency || 'USD';
+		} else {
+			result.currency = 'USD';
 		}
 
 		result.status = detectStatus(email.body + ' ' + email.subject);
@@ -39,6 +45,6 @@ export const whmcsParser: SupplierParser = {
 	},
 
 	getSearchQuery(): string {
-		return 'from:whmcs.com has:attachment';
+		return 'from:litespeedtech.com has:attachment';
 	}
 };
