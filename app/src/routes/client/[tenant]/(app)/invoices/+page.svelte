@@ -11,6 +11,7 @@
 		TableRow
 	} from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Download, Search, Eye } from '@lucide/svelte';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';

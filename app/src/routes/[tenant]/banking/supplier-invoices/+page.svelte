@@ -101,8 +101,10 @@
 	const statusBadgeVariant = (status: string) => {
 		switch (status) {
 			case 'paid':
-				return 'default' as const;
+				return 'success' as const;
 			case 'unpaid':
+				return 'warning' as const;
+			case 'overdue':
 				return 'destructive' as const;
 			default:
 				return 'secondary' as const;
@@ -115,6 +117,8 @@
 				return 'Plătită';
 			case 'unpaid':
 				return 'Neplătită';
+			case 'overdue':
+				return 'Restantă';
 			default:
 				return 'În așteptare';
 		}

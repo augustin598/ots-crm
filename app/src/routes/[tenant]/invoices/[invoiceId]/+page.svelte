@@ -64,12 +64,16 @@
 		switch (status) {
 			case 'paid':
 				return 'success';
+			case 'unpaid':
+				return 'warning';
 			case 'overdue':
 				return 'destructive';
 			case 'sent':
 				return 'secondary';
 			case 'draft':
 				return 'outline';
+			case 'cancelled':
+				return 'destructive';
 			default:
 				return 'secondary';
 		}

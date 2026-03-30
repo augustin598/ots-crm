@@ -50,9 +50,10 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	// --- Invoice Number ---
 	// Patterns: "Invoice #123", "Invoice Number: 123", "Factura nr. 123", "Rechnung Nr. 123"
 	const invoicePatterns = [
-		/(?:invoice|factur[aă]|rechnung)\s*(?:number|nr\.?|no\.?|#|num[aă]r)\s*[:\-–]?\s*([\w\-/.]+)/i,
+		/(?:invoice|factur[aă]|rechnung)\s*(?:number|num[aă]rul|nr\.?|no\.?|#|num[aă]r)\s*[:\-–]?\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă]|rechnung)\s*#\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă])\s*:\s*([\w\-/.]+)/i,
+		/\bnum[aă]rul facturii:\s*(\d+)/i,
 		// Specific vendor patterns
 		/\b([A-Z]{2}-\d{6,})\b/, // OVH: FR-1234567
 		/\bINV-[\w-]+\b/i, // AWS: INV-xxxxx
@@ -81,6 +82,18 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		if (parsed) {
 			result.amount = parsed;
 			result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+		}
+	}
+
+	// 1b. Romanian specific format "Total în EUR 16,20" (explicit fallback)
+	if (!result.amount) {
+		const totalInCurrencyMatchRo = text.match(/Total\s+în\s+(EUR|RON|USD|GBP|LEI)\s+([\d,.]+)/i);
+		if (totalInCurrencyMatchRo) {
+			const parsed = parseBareAmount(totalInCurrencyMatchRo[2]);
+			if (parsed) {
+				result.amount = parsed;
+				result.currency = normalizeCurrency(totalInCurrencyMatchRo[1]);
+			}
 		}
 	}
 

@@ -13,9 +13,9 @@
 					"bg-destructive [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/70 border-transparent text-white",
 				outline: "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
 				success:
-					"bg-green-600 dark:bg-green-700 [a&]:hover:bg-green-700 dark:[a&]:hover:bg-green-800 focus-visible:ring-green-600/20 dark:focus-visible:ring-green-700/40 border-transparent text-white",
+					"bg-success text-success-foreground [a&]:hover:bg-success/90 border-transparent",
 				warning:
-					"bg-amber-500 dark:bg-amber-600 [a&]:hover:bg-amber-600 dark:[a&]:hover:bg-amber-700 focus-visible:ring-amber-500/20 dark:focus-visible:ring-amber-600/40 border-transparent text-white",
+					"bg-warning text-warning-foreground [a&]:hover:bg-warning/90 border-transparent",
 			},
 		},
 		defaultVariants: {

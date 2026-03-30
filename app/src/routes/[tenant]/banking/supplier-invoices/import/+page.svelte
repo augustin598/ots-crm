@@ -150,6 +150,7 @@
 		switch (status) {
 			case 'paid': return 'Plătită';
 			case 'unpaid': return 'Neplătită';
+			case 'overdue': return 'Restantă';
 			default: return 'În așteptare';
 		}
 	};
@@ -320,7 +321,7 @@
 											</Badge>
 											{#if preview.parsed.status}
 												<Badge
-													variant={preview.parsed.status === 'paid' ? 'default' : 'secondary'}
+													variant={preview.parsed.status === 'paid' ? 'success' : 'warning'}
 													class="text-xs"
 												>
 													{statusLabel(preview.parsed.status)}

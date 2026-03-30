@@ -178,12 +178,14 @@ import { goto } from '$app/navigation';
 		switch (status) {
 			case 'paid':
 				return 'success';
+			case 'unpaid':
+				return 'warning';
+			case 'overdue':
+				return 'destructive';
 			case 'sent':
 				return 'secondary';
 			case 'draft':
 				return 'outline';
-			case 'overdue':
-				return 'destructive';
 			case 'cancelled':
 				return 'destructive';
 			default:
