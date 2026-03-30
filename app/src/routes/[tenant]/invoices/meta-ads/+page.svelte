@@ -463,11 +463,15 @@
 			toast.error('Inserează JSON-ul cu link-uri');
 			return;
 		}
-		let links: { url: string; invoiceId?: string; date?: string; amount?: string }[];
+		let links: { url: string; invoiceId?: string; date?: string; amount?: string; txid?: string }[];
 		try {
 			const parsed = JSON.parse(bulkJson.trim());
 			if (Array.isArray(parsed)) {
-				links = parsed;
+				// Normalize: accept both "url" and "downloadUrl" field names
+				links = parsed.map((item: Record<string, unknown>) => ({
+					...item,
+					url: (item.url || item.downloadUrl) as string
+				}));
 			} else {
 				toast.error('JSON-ul trebuie să fie un array');
 				return;

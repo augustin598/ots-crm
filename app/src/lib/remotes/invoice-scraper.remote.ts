@@ -85,9 +85,24 @@ export const runScraper = command(
 
 		let invoices;
 		switch (session.platform) {
-			case 'meta':
-				invoices = await scrapeMetaInvoices(data.sessionId);
+			case 'meta': {
+				// Query DB for active CRM-mapped Meta Ads accounts with businessId
+				const metaAccounts = await db
+					.select({
+						metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+						accountName: table.metaAdsAccount.accountName,
+						businessId: table.metaAdsIntegration.businessId
+					})
+					.from(table.metaAdsAccount)
+					.innerJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
+					.where(and(
+						eq(table.metaAdsAccount.tenantId, session.tenantId),
+						eq(table.metaAdsAccount.isActive, true),
+						isNotNull(table.metaAdsAccount.clientId)
+					));
+				invoices = await scrapeMetaInvoices(data.sessionId, metaAccounts);
 				break;
+			}
 			case 'google': {
 				// Query DB for active CRM-mapped Google Ads customer IDs
 				const activeAccounts = await db
