@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql, gte, lte, desc, inArray } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, desc, inArray, isNotNull } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	// Default to current month
@@ -16,6 +16,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		return {
 			adSpend: { meta: 0, google: 0, tiktok: 0, total: 0, currency: 'RON' },
 			syncErrors: [],
+			metaAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
+			googleAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
+			tiktokAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
 			since,
 			until
 		};
@@ -25,7 +28,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	// Overlap filter: include any month whose period overlaps the selected range
 	// periodStart <= until AND periodEnd >= since
-	const [metaResult, googleResult, tiktokResult, syncErrors] = await Promise.all([
+	const [metaResult, googleResult, tiktokResult, metaAccounts, googleAccounts, tiktokAccounts, syncErrors] = await Promise.all([
 		// Meta Ads spend
 		db
 			.select({
@@ -68,6 +71,54 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				)
 			),
 
+		// Meta accounts (mapped to a client)
+		db
+			.select({
+				accountName: table.metaAdsAccount.accountName,
+				accountId: table.metaAdsAccount.metaAdAccountId,
+				isActive: table.metaAdsAccount.isActive
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					isNotNull(table.metaAdsAccount.clientId)
+				)
+			)
+			.orderBy(table.metaAdsAccount.accountName),
+
+		// Google accounts (mapped to a client)
+		db
+			.select({
+				accountName: table.googleAdsAccount.accountName,
+				accountId: table.googleAdsAccount.googleAdsCustomerId,
+				isActive: table.googleAdsAccount.isActive
+			})
+			.from(table.googleAdsAccount)
+			.where(
+				and(
+					eq(table.googleAdsAccount.tenantId, tenantId),
+					isNotNull(table.googleAdsAccount.clientId)
+				)
+			)
+			.orderBy(table.googleAdsAccount.accountName),
+
+		// TikTok accounts (mapped to a client)
+		db
+			.select({
+				accountName: table.tiktokAdsAccount.accountName,
+				accountId: table.tiktokAdsAccount.tiktokAdvertiserId,
+				isActive: table.tiktokAdsAccount.isActive
+			})
+			.from(table.tiktokAdsAccount)
+			.where(
+				and(
+					eq(table.tiktokAdsAccount.tenantId, tenantId),
+					isNotNull(table.tiktokAdsAccount.clientId)
+				)
+			)
+			.orderBy(table.tiktokAdsAccount.accountName),
+
 		// Recent sync errors (max 5)
 		db
 			.select({
@@ -105,6 +156,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			currency: 'RON'
 		},
 		syncErrors,
+		metaAccounts,
+		googleAccounts,
+		tiktokAccounts,
 		since,
 		until
 	};

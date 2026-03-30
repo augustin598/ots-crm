@@ -1120,6 +1120,196 @@ export async function listDemographicInsights(
 	return breakdown;
 }
 
+// ---- Lead Ads API ----
+
+export interface MetaPage {
+	pageId: string;
+	pageName: string;
+	pageAccessToken: string;
+}
+
+export interface MetaLeadForm {
+	formId: string;
+	formName: string;
+	status: string;
+	createdTime: string;
+}
+
+export interface MetaLeadData {
+	leadId: string;
+	formId: string;
+	adId: string | null;
+	createdTime: string;
+	fieldData: Array<{ name: string; values: string[] }>;
+}
+
+/**
+ * List Facebook Pages the user has admin access to (with page access tokens).
+ */
+export async function listPages(
+	accessToken: string,
+	appSecret: string
+): Promise<MetaPage[]> {
+	logInfo('meta-ads', 'Listing Facebook Pages');
+
+	const pages: MetaPage[] = [];
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	let url: string | null = `${META_GRAPH_URL}/me/accounts?fields=id,name,access_token&limit=100&access_token=${accessToken}&appsecret_proof=${proof}`;
+
+	try {
+		while (url) {
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
+
+			if (data.error) {
+				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			for (const page of data.data || []) {
+				pages.push({
+					pageId: page.id || '',
+					pageName: page.name || '',
+					pageAccessToken: page.access_token || ''
+				});
+			}
+
+			url = data.paging?.next || null;
+		}
+
+		logInfo('meta-ads', `Found ${pages.length} Facebook Pages`);
+		return pages;
+	} catch (err) {
+		logError('meta-ads', 'Failed to list Facebook Pages', {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
+ * List lead generation forms for a Facebook Page.
+ */
+export async function listLeadForms(
+	pageId: string,
+	pageAccessToken: string,
+	appSecret: string
+): Promise<MetaLeadForm[]> {
+	logInfo('meta-ads', `Listing lead forms for page`, { metadata: { pageId } });
+
+	const forms: MetaLeadForm[] = [];
+	const proof = generateAppSecretProof(pageAccessToken, appSecret);
+	let url: string | null = `${META_GRAPH_URL}/${pageId}/leadgen_forms?fields=id,name,status,created_time&limit=100&access_token=${pageAccessToken}&appsecret_proof=${proof}`;
+
+	try {
+		while (url) {
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
+
+			if (data.error) {
+				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			for (const form of data.data || []) {
+				forms.push({
+					formId: form.id || '',
+					formName: form.name || '',
+					status: form.status || '',
+					createdTime: form.created_time || ''
+				});
+			}
+
+			url = data.paging?.next || null;
+		}
+
+		logInfo('meta-ads', `Found ${forms.length} lead forms`, { metadata: { pageId } });
+		return forms;
+	} catch (err) {
+		logError('meta-ads', `Failed to list lead forms`, {
+			metadata: { pageId, error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
+ * Bulk-read leads from a lead form. Optionally filter by time_created > since (Unix timestamp).
+ */
+export async function getLeadsByForm(
+	formId: string,
+	pageAccessToken: string,
+	appSecret: string,
+	since?: number
+): Promise<MetaLeadData[]> {
+	logInfo('meta-ads', `Fetching leads for form`, { metadata: { formId, since } });
+
+	const leads: MetaLeadData[] = [];
+	const proof = generateAppSecretProof(pageAccessToken, appSecret);
+	let url: string | null = `${META_GRAPH_URL}/${formId}/leads?fields=created_time,id,ad_id,form_id,field_data&limit=100&access_token=${pageAccessToken}&appsecret_proof=${proof}`;
+
+	if (since) {
+		const filtering = JSON.stringify([{ field: 'time_created', operator: 'GREATER_THAN', value: since }]);
+		url += `&filtering=${encodeURIComponent(filtering)}`;
+	}
+
+	try {
+		while (url) {
+			const res: Response = await fetch(url);
+			const data: any = await res.json();
+
+			if (data.error) {
+				throw new Error(`Meta API error: ${data.error.message}`);
+			}
+
+			for (const lead of data.data || []) {
+				leads.push({
+					leadId: lead.id || '',
+					formId: lead.form_id || formId,
+					adId: lead.ad_id || null,
+					createdTime: lead.created_time || '',
+					fieldData: lead.field_data || []
+				});
+			}
+
+			url = data.paging?.next || null;
+		}
+
+		logInfo('meta-ads', `Fetched ${leads.length} leads from form`, { metadata: { formId } });
+		return leads;
+	} catch (err) {
+		logError('meta-ads', `Failed to fetch leads`, {
+			metadata: { formId, error: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+}
+
+/**
+ * Get a single lead's details by ID.
+ */
+export async function getLeadDetail(
+	leadId: string,
+	pageAccessToken: string,
+	appSecret: string
+): Promise<MetaLeadData> {
+	const proof = generateAppSecretProof(pageAccessToken, appSecret);
+	const res: Response = await fetch(
+		`${META_GRAPH_URL}/${leadId}?fields=created_time,id,ad_id,form_id,field_data&access_token=${pageAccessToken}&appsecret_proof=${proof}`
+	);
+	const data: any = await res.json();
+
+	if (data.error) {
+		throw new Error(`Meta API error: ${data.error.message}`);
+	}
+
+	return {
+		leadId: data.id || '',
+		formId: data.form_id || '',
+		adId: data.ad_id || null,
+		createdTime: data.created_time || '',
+		fieldData: data.field_data || []
+	};
+}
+
 /**
  * Get the date range for sync (current + previous 2 months).
  * Returns YYYY-MM-DD strings (local timezone).

@@ -18,6 +18,7 @@
 import LinkIcon from '@lucide/svelte/icons/link';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import ContactIcon from '@lucide/svelte/icons/contact';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -338,6 +339,50 @@ import LinkIcon from '@lucide/svelte/icons/link';
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/reports/tiktok-ads`)}>
 									{#snippet child({ props })}
 										<a href="/{tenantSlug}/reports/tiktok-ads" {...props}>
+											<IconTiktok class="h-4 w-4" />
+											<span>TikTok Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+						</SidebarMenuSub>
+					{/if}
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/leads`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/leads" {...props}>
+								<ContactIcon />
+								<span>Leads</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+					{#if currentPath.startsWith(`/${tenantSlug}/leads`)}
+						<SidebarMenuSub>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/leads/facebook-ads`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/leads/facebook-ads" {...props}>
+											<IconFacebook class="h-4 w-4" />
+											<span>Facebook Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/leads/google-ads`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/leads/google-ads" {...props}>
+											<IconGoogleAds class="h-4 w-4" />
+											<span>Google Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/leads/tiktok-ads`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/leads/tiktok-ads" {...props}>
 											<IconTiktok class="h-4 w-4" />
 											<span>TikTok Ads</span>
 										</a>

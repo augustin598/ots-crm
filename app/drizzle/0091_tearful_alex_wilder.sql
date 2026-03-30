@@ -1,0 +1,41 @@
+CREATE TABLE `lead` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`platform` text DEFAULT 'facebook' NOT NULL,
+	`external_lead_id` text NOT NULL,
+	`external_form_id` text,
+	`external_ad_id` text,
+	`external_campaign_id` text,
+	`form_name` text,
+	`full_name` text,
+	`email` text,
+	`phone_number` text,
+	`field_data` text,
+	`status` text DEFAULT 'new' NOT NULL,
+	`client_id` text,
+	`notes` text,
+	`integration_id` text,
+	`page_id` text,
+	`external_created_at` timestamp,
+	`imported_at` timestamp DEFAULT current_date NOT NULL,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`page_id`) REFERENCES `meta_ads_page`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `meta_ads_page` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`integration_id` text NOT NULL,
+	`meta_page_id` text NOT NULL,
+	`page_name` text DEFAULT '' NOT NULL,
+	`page_access_token` text DEFAULT '' NOT NULL,
+	`is_monitored` number DEFAULT true NOT NULL,
+	`last_lead_sync_at` timestamp,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`integration_id`) REFERENCES `meta_ads_integration`(`id`) ON UPDATE no action ON DELETE cascade
+);

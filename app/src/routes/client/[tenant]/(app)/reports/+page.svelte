@@ -48,21 +48,24 @@
 			description: 'Facebook & Instagram Ads',
 			href: `/client/${tenantSlug}/reports/facebook-ads`,
 			color: 'bg-blue-500/10',
-			icon: 'meta' as const
+			icon: 'meta' as const,
+			accounts: data.metaAccounts as { accountName: string; accountId: string; isActive: boolean }[]
 		},
 		{
 			label: 'Google Ads',
 			description: 'Search, Display & YouTube',
 			href: `/client/${tenantSlug}/reports/google-ads`,
 			color: 'bg-green-500/10',
-			icon: 'google' as const
+			icon: 'google' as const,
+			accounts: data.googleAccounts as { accountName: string; accountId: string; isActive: boolean }[]
 		},
 		{
 			label: 'TikTok Ads',
 			description: 'TikTok For Business',
 			href: `/client/${tenantSlug}/reports/tiktok-ads`,
 			color: 'bg-pink-500/10',
-			icon: 'tiktok' as const
+			icon: 'tiktok' as const,
+			accounts: data.tiktokAccounts as { accountName: string; accountId: string; isActive: boolean }[]
 		}
 	]);
 </script>
@@ -200,25 +203,48 @@
 		<h2 class="text-lg font-semibold mb-3">Platforme</h2>
 		<div class="grid gap-4 sm:grid-cols-3">
 			{#each platforms as platform (platform.label)}
-				<a
-					href={platform.href}
-					class="group flex items-center justify-between rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:border-primary/50"
-				>
-					<div class="flex items-center gap-3">
-						{#if platform.icon === 'meta'}
-							<IconFacebook class="h-7 w-7" />
-						{:else if platform.icon === 'google'}
-							<IconGoogleAds class="h-7 w-7" />
-						{:else}
-							<IconTiktok class="h-7 w-7" />
-						{/if}
-						<div>
-							<p class="font-semibold">{platform.label}</p>
-							<p class="text-xs text-muted-foreground">{platform.description}</p>
+				<div class="rounded-lg border bg-card shadow-sm overflow-hidden">
+					<a
+						href={platform.href}
+						class="group flex items-center justify-between p-4 hover:bg-accent/50 transition-colors"
+					>
+						<div class="flex items-center gap-3">
+							{#if platform.icon === 'meta'}
+								<IconFacebook class="h-7 w-7" />
+							{:else if platform.icon === 'google'}
+								<IconGoogleAds class="h-7 w-7" />
+							{:else}
+								<IconTiktok class="h-7 w-7" />
+							{/if}
+							<div>
+								<p class="font-semibold">{platform.label}</p>
+								<p class="text-xs text-muted-foreground">{platform.description}</p>
+							</div>
 						</div>
-					</div>
-					<ChevronRightIcon class="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
-				</a>
+						<ChevronRightIcon class="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+					</a>
+					{#if platform.accounts.length > 0}
+						<div class="border-t px-4 py-3 flex flex-wrap gap-1.5">
+							{#each platform.accounts as account}
+								<a
+									href="{platform.href}?account={account.accountId}"
+									class="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+								>
+									<span class="relative flex h-2 w-2 shrink-0">
+										{#if account.isActive}
+											<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
+											<span class="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+										{:else}
+											<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75"></span>
+											<span class="relative inline-flex h-2 w-2 rounded-full bg-orange-500"></span>
+										{/if}
+									</span>
+									{account.accountName}
+								</a>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{/each}
 		</div>
 	</div>

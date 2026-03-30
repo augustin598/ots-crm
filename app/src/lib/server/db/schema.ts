@@ -1618,6 +1618,61 @@ export const metaInvoiceDownload = sqliteTable('meta_invoice_download', {
 		.default(sql`current_date`)
 });
 
+// Meta Ads Pages — Facebook Pages connected for lead monitoring
+export const metaAdsPage = sqliteTable('meta_ads_page', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	integrationId: text('integration_id')
+		.notNull()
+		.references(() => metaAdsIntegration.id, { onDelete: 'cascade' }),
+	metaPageId: text('meta_page_id').notNull(),
+	pageName: text('page_name').notNull().default(''),
+	pageAccessToken: text('page_access_token').notNull().default(''),
+	isMonitored: boolean('is_monitored').notNull().default(true),
+	lastLeadSyncAt: timestamp('last_lead_sync_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// Leads — cross-platform lead storage (Facebook, TikTok, Google)
+export const lead = sqliteTable('lead', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	platform: text('platform').notNull().default('facebook'), // 'facebook' | 'tiktok' | 'google'
+	externalLeadId: text('external_lead_id').notNull(), // Dedup key (Meta lead ID, TikTok lead ID, etc.)
+	externalFormId: text('external_form_id'),
+	externalAdId: text('external_ad_id'),
+	externalCampaignId: text('external_campaign_id'),
+	formName: text('form_name'),
+	fullName: text('full_name'),
+	email: text('email'),
+	phoneNumber: text('phone_number'),
+	fieldData: jsonb('field_data').$type<Array<{ name: string; values: string[] }>>(),
+	status: text('status').notNull().default('new'), // 'new' | 'contacted' | 'qualified' | 'converted' | 'disqualified'
+	clientId: text('client_id').references(() => client.id),
+	notes: text('notes'),
+	integrationId: text('integration_id'), // Polymorphic: meta/tiktok/google integration ID
+	pageId: text('page_id').references(() => metaAdsPage.id), // FK for Facebook leads
+	externalCreatedAt: timestamp('external_created_at', { withTimezone: true, mode: 'date' }),
+	importedAt: timestamp('imported_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 // TikTok Ads integration — one per tenant connection (OAuth2 + session cookies)
 export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
 	id: text('id').primaryKey(),
@@ -3042,6 +3097,10 @@ export type MetaAdsSpending = typeof metaAdsSpending.$inferSelect;
 export type NewMetaAdsSpending = typeof metaAdsSpending.$inferInsert;
 export type MetaInvoiceDownload = typeof metaInvoiceDownload.$inferSelect;
 export type NewMetaInvoiceDownload = typeof metaInvoiceDownload.$inferInsert;
+export type MetaAdsPage = typeof metaAdsPage.$inferSelect;
+export type NewMetaAdsPage = typeof metaAdsPage.$inferInsert;
+export type Lead = typeof lead.$inferSelect;
+export type NewLead = typeof lead.$inferInsert;
 export type TiktokAdsIntegration = typeof tiktokAdsIntegration.$inferSelect;
 export type NewTiktokAdsIntegration = typeof tiktokAdsIntegration.$inferInsert;
 export type TiktokAdsAccount = typeof tiktokAdsAccount.$inferSelect;

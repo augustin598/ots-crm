@@ -25,6 +25,7 @@
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import ContactIcon from '@lucide/svelte/icons/contact';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 
@@ -47,7 +48,7 @@
 
 	const currentPath = $derived(page.url.pathname);
 	const tenantSlug = $derived(page.params.tenant);
-	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data'];
+	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads'];
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
 	);
@@ -216,6 +217,50 @@
 								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/reports/tiktok-ads`)}>
 									{#snippet child({ props })}
 										<a href="/client/{tenantSlug}/reports/tiktok-ads" {...props}>
+											<IconTiktok class="h-4 w-4" />
+											<span>TikTok Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+						</SidebarMenuSub>
+					{/if}
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/leads`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/leads" {...props}>
+								<ContactIcon />
+								<span>Leads</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+					{#if currentPath.startsWith(`/client/${tenantSlug}/leads`)}
+						<SidebarMenuSub>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/leads/facebook-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/leads/facebook-ads" {...props}>
+											<IconFacebook class="h-4 w-4" />
+											<span>Facebook Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/leads/google-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/leads/google-ads" {...props}>
+											<IconGoogleAds class="h-4 w-4" />
+											<span>Google Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/client/${tenantSlug}/leads/tiktok-ads`)}>
+									{#snippet child({ props })}
+										<a href="/client/{tenantSlug}/leads/tiktok-ads" {...props}>
 											<IconTiktok class="h-4 w-4" />
 											<span>TikTok Ads</span>
 										</a>

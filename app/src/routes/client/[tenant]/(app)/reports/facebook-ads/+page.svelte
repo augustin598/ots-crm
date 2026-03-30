@@ -68,7 +68,9 @@
 	let selectedAccountId = $state<string>('');
 	$effect(() => {
 		if (accounts.length > 0 && !selectedAccountId) {
-			selectedAccountId = accounts[0].metaAdAccountId;
+			const urlAccount = page.url.searchParams.get('account');
+			const match = urlAccount && accounts.find((a: any) => a.metaAdAccountId === urlAccount);
+			selectedAccountId = (match || accounts[0]).metaAdAccountId;
 		}
 	});
 

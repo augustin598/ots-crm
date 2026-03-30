@@ -5,7 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError } from '$lib/server/logger';
 
 const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
-const SCOPES = 'ads_read,ads_management,business_management';
+const SCOPES = 'ads_read,ads_management,business_management,leads_retrieval,pages_read_engagement,pages_show_list';
 
 /**
  * Generate Meta/Facebook OAuth2 authorization URL

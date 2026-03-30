@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql, gte, lte } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, isNotNull } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	// Default to current month
@@ -14,6 +14,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	if (!locals.tenant || !locals.client) {
 		return {
+			metaAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
+			googleAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
+			tiktokAccounts: [] as { accountName: string; accountId: string; isActive: boolean }[],
 			adSpend: {
 				meta: 0, google: 0, tiktok: 0, total: 0,
 				metaCurrency: 'RON', googleCurrency: 'RON', tiktokCurrency: 'RON',
@@ -33,7 +36,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	// Overlap filter: include any month whose period overlaps the selected range
 	// periodStart <= until AND periodEnd >= since
-	const [metaResult, googleResult, tiktokResult, metaByAccount, googleByAccount, tiktokByAccount] = await Promise.all([
+	const [metaResult, googleResult, tiktokResult, metaByAccount, googleByAccount, tiktokByAccount, metaAccounts, googleAccounts, tiktokAccounts] = await Promise.all([
 		// Meta Ads total + currency
 		db
 			.select({
@@ -140,7 +143,55 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 					gte(table.tiktokAdsSpending.periodEnd, dateFilter.since)
 				)
 			)
-			.groupBy(table.tiktokAdsSpending.tiktokAdvertiserId, table.tiktokAdsSpending.currencyCode)
+			.groupBy(table.tiktokAdsSpending.tiktokAdvertiserId, table.tiktokAdsSpending.currencyCode),
+
+		// Meta accounts for this client
+		db
+			.select({
+				accountName: table.metaAdsAccount.accountName,
+				accountId: table.metaAdsAccount.metaAdAccountId,
+				isActive: table.metaAdsAccount.isActive
+			})
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.tenantId, tenantId),
+					eq(table.metaAdsAccount.clientId, clientId)
+				)
+			)
+			.orderBy(table.metaAdsAccount.accountName),
+
+		// Google accounts for this client
+		db
+			.select({
+				accountName: table.googleAdsAccount.accountName,
+				accountId: table.googleAdsAccount.googleAdsCustomerId,
+				isActive: table.googleAdsAccount.isActive
+			})
+			.from(table.googleAdsAccount)
+			.where(
+				and(
+					eq(table.googleAdsAccount.tenantId, tenantId),
+					eq(table.googleAdsAccount.clientId, clientId)
+				)
+			)
+			.orderBy(table.googleAdsAccount.accountName),
+
+		// TikTok accounts for this client
+		db
+			.select({
+				accountName: table.tiktokAdsAccount.accountName,
+				accountId: table.tiktokAdsAccount.tiktokAdvertiserId,
+				isActive: table.tiktokAdsAccount.isActive
+			})
+			.from(table.tiktokAdsAccount)
+			.where(
+				and(
+					eq(table.tiktokAdsAccount.tenantId, tenantId),
+					eq(table.tiktokAdsAccount.clientId, clientId)
+				)
+			)
+			.orderBy(table.tiktokAdsAccount.accountName)
 	]);
 
 	// Sum totals per platform (could have multiple currencies, take first non-empty)
@@ -152,7 +203,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const googleCurrency = googleResult[0]?.currency || 'RON';
 	const tiktokCurrency = tiktokResult[0]?.currency || 'RON';
 
+	const metaAccountsWithSpend = metaByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents);
+	const googleAccountsWithSpend = googleByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents);
+	const tiktokAccountsWithSpend = tiktokByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents);
+
 	return {
+		metaAccounts,
+		googleAccounts,
+		tiktokAccounts,
 		adSpend: {
 			meta: metaTotal,
 			google: googleTotal,
@@ -161,9 +219,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			metaCurrency,
 			googleCurrency,
 			tiktokCurrency,
-			metaAccounts: metaByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents),
-			googleAccounts: googleByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents),
-			tiktokAccounts: tiktokByAccount.filter(a => a.spendCents > 0).sort((a, b) => b.spendCents - a.spendCents)
+			metaAccounts: metaAccountsWithSpend,
+			googleAccounts: googleAccountsWithSpend,
+			tiktokAccounts: tiktokAccountsWithSpend
 		},
 		since,
 		until

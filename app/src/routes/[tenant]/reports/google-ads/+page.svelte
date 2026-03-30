@@ -55,7 +55,9 @@
 	let selectedCustomerId = $state<string>('');
 	$effect(() => {
 		if (accounts.length > 0 && !selectedCustomerId) {
-			selectedCustomerId = accounts[0].googleAdsCustomerId;
+			const urlAccount = page.url.searchParams.get('account');
+			const match = urlAccount && accounts.find((a: any) => a.googleAdsCustomerId === urlAccount);
+			selectedCustomerId = match ? match.googleAdsCustomerId : accounts[0].googleAdsCustomerId;
 		}
 	});
 

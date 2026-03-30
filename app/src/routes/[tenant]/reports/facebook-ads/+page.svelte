@@ -74,11 +74,14 @@
 	let selectedAccountId = $state<string>('');
 	let selectedIntegrationId = $state<string>('');
 
-	// Auto-select first account when data loads
+	// Auto-select account from URL param or first in list
 	$effect(() => {
 		if (accounts.length > 0 && !selectedAccountId) {
-			selectedAccountId = accounts[0].metaAdAccountId;
-			selectedIntegrationId = accounts[0].integrationId;
+			const urlAccount = page.url.searchParams.get('account');
+			const match = urlAccount && accounts.find((a: any) => a.metaAdAccountId === urlAccount);
+			const account = match || accounts[0];
+			selectedAccountId = account.metaAdAccountId;
+			selectedIntegrationId = account.integrationId;
 		}
 	});
 
