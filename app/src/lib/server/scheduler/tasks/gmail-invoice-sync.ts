@@ -1,13 +1,14 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { searchEmails, getEmail, getAttachment } from '../../gmail/client';
 import { findParserWithFallback, buildSearchQuery, shouldExcludeEmail, isFromCustomSource } from '../../gmail/parsers';
-import { updateLastSyncAt } from '../../gmail/auth';
+import { updateLastSyncAt, getAuthenticatedClient } from '../../gmail/auth';
 import { extractInvoiceDataFromPdf } from '../../gmail/pdf-parser';
 import { uploadBuffer } from '$lib/server/storage';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
+import { createNotification } from '$lib/server/notifications';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -88,6 +89,37 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 					: [];
 
 				const query = buildSearchQuery(parserIds, dateFrom, undefined, customEmails.length > 0 ? customEmails : undefined);
+
+				// Pre-check: verify OAuth token is still valid before searching
+				const authClient = await getAuthenticatedClient(integration.tenantId);
+				if (!authClient) {
+					logWarning('scheduler', 'Gmail invoice sync: OAuth token invalid/revoked — notifying admins', { tenantId: integration.tenantId });
+
+					// Notify tenant admins
+					const admins = await db
+						.select({ userId: table.tenantUser.userId })
+						.from(table.tenantUser)
+						.where(
+							and(
+								eq(table.tenantUser.tenantId, integration.tenantId),
+								or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+							)
+						);
+
+					for (const admin of admins) {
+						await createNotification({
+							tenantId: integration.tenantId,
+							userId: admin.userId,
+							type: 'sync.error',
+							title: 'Sesiune Gmail expirată',
+							message: `Sesiunea Gmail (${integration.email}) a expirat. Deschide pagina Facturi Furnizori → Gmail și reconectează contul.`,
+							link: '/facturi-furnizori?tab=gmail'
+						});
+					}
+
+					errors.push({ tenantId: integration.tenantId, error: 'Gmail OAuth token expired/revoked' });
+					continue;
+				}
 
 				const messages = await searchEmails(integration.tenantId, query, 100);
 

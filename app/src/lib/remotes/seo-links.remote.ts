@@ -1494,6 +1494,9 @@ export const checkSeoLink = command(
 			} catch { /* parse error — overwrite is fine */ }
 		}
 
+		// Recalculează pressTrust din URL-ul articolului
+		const extractedPressTrust = extractPressTrustFromUrl(link.articleUrl);
+
 		// Auto-assign websiteId dacă lipsește dar avem targetUrl
 		let extractedWebsiteId: string | null = null;
 		const finalTargetUrl = extractedTargetUrl || link.targetUrl;
@@ -1529,6 +1532,7 @@ export const checkSeoLink = command(
 				...(extractedTargetUrl && { targetUrl: extractedTargetUrl }),
 				...(extractedWebsiteId && { websiteId: extractedWebsiteId }),
 				...(finalExtractedLinks && { extractedLinks: JSON.stringify(finalExtractedLinks) }),
+				...(extractedPressTrust && { pressTrust: extractedPressTrust }),
 				updatedAt: now
 			})
 			.where(eq(table.seoLink.id, seoLinkId));

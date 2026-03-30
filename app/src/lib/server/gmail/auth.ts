@@ -122,15 +122,32 @@ export async function getAuthenticatedClient(tenantId: string) {
 
 	// Auto-refresh if token is expired or about to expire (5 min buffer)
 	if (integration.tokenExpiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
-		const { credentials } = await oauth2Client.refreshAccessToken();
-		await db
-			.update(table.gmailIntegration)
-			.set({
-				accessToken: credentials.access_token!,
-				tokenExpiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
-				updatedAt: new Date()
-			})
-			.where(eq(table.gmailIntegration.id, integration.id));
+		try {
+			const { credentials } = await oauth2Client.refreshAccessToken();
+			await db
+				.update(table.gmailIntegration)
+				.set({
+					accessToken: credentials.access_token!,
+					tokenExpiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
+					updatedAt: new Date()
+				})
+				.where(eq(table.gmailIntegration.id, integration.id));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			const isInvalidGrant = message.includes('invalid_grant') || message.includes('Token has been expired or revoked');
+
+			if (isInvalidGrant) {
+				logWarning('gmail', 'OAuth: Refresh token invalid/revoked — deactivating integration', { tenantId, metadata: { email: integration.email } });
+				await db
+					.update(table.gmailIntegration)
+					.set({ isActive: false, updatedAt: new Date() })
+					.where(eq(table.gmailIntegration.id, integration.id));
+				return null;
+			}
+
+			// Transient error — rethrow so caller can retry
+			throw err;
+		}
 	}
 
 	return oauth2Client;
