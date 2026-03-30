@@ -19,11 +19,20 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2, BarChart3 } from '@lucide/svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
+	import {
+		getMetaAdsPages,
+		fetchAvailablePages,
+		addMetaAdsPage,
+		removeMetaAdsPage,
+		togglePageMonitoring,
+		triggerLeadSync
+	} from '$lib/remotes/leads.remote';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -57,6 +66,15 @@
 	// Cookie management
 	let cookieJsonInputs = $state<Record<string, string>>({});
 	let savingCookiesFor = $state<string | null>(null);
+
+	// Lead Pages
+	const pagesQuery = getMetaAdsPages();
+	const monitoredPages = $derived(pagesQuery.current || []);
+	let availablePages = $state<Array<{ pageId: string; pageName: string; pageAccessToken: string }>>([]);
+	let fetchingPages = $state(false);
+	let fetchingForIntegration = $state<string | null>(null);
+	let syncingLeads = $state(false);
+	let addingPage = $state<string | null>(null);
 
 	async function handleSaveCookies(integrationId: string) {
 		const json = cookieJsonInputs[integrationId]?.trim();
@@ -214,6 +232,74 @@
 		}
 	}
 
+	async function handleFetchPages(integrationId: string) {
+		fetchingPages = true;
+		fetchingForIntegration = integrationId;
+		try {
+			availablePages = await fetchAvailablePages(integrationId);
+			toast.success(`${availablePages.length} pagini găsite`);
+		} catch (e) {
+			toast.error('Eroare la preluarea paginilor. Verificați dacă token-ul include permisiunea leads_retrieval.');
+			availablePages = [];
+		} finally {
+			fetchingPages = false;
+		}
+	}
+
+	async function handleAddPage(integrationId: string, pg: { pageId: string; pageName: string; pageAccessToken: string }) {
+		addingPage = pg.pageId;
+		try {
+			await addMetaAdsPage({
+				integrationId,
+				metaPageId: pg.pageId,
+				pageName: pg.pageName,
+				pageAccessToken: pg.pageAccessToken
+			});
+			toast.success(`Pagina "${pg.pageName}" adăugată`);
+			pagesQuery.refetch();
+		} catch (e) {
+			toast.error('Eroare la adăugarea paginii');
+		} finally {
+			addingPage = null;
+		}
+	}
+
+	async function handleRemovePage(pageId: string) {
+		try {
+			await removeMetaAdsPage(pageId);
+			toast.success('Pagina eliminată');
+			pagesQuery.refetch();
+		} catch (e) {
+			toast.error('Eroare la eliminare');
+		}
+	}
+
+	async function handleToggleMonitoring(pageId: string, isMonitored: boolean) {
+		try {
+			await togglePageMonitoring({ pageId, isMonitored: !isMonitored });
+			toast.success(isMonitored ? 'Monitorizare dezactivată' : 'Monitorizare activată');
+			pagesQuery.refetch();
+		} catch (e) {
+			toast.error('Eroare la actualizare');
+		}
+	}
+
+	async function handleSyncLeads() {
+		syncingLeads = true;
+		try {
+			const result = await triggerLeadSync({ platform: 'facebook' });
+			toast.success(`Sync leaduri: ${result.imported} noi, ${result.skipped} existente`);
+		} catch (e) {
+			toast.error('Sync leaduri eșuat');
+		} finally {
+			syncingLeads = false;
+		}
+	}
+
+	function isPageAlreadyAdded(metaPageId: string): boolean {
+		return monitoredPages.some((p: any) => p.metaPageId === metaPageId);
+	}
+
 	function formatDate(date: Date | string | null): string {
 		if (!date) return '-';
 		const d = date instanceof Date ? date : new Date(date);
@@ -229,15 +315,26 @@
 		</div>
 		{#if connections.some((c: any) => c.connected)}
 			<div class="flex flex-col items-end gap-1">
-				<Button variant="outline" size="sm" onclick={handleSyncAll} disabled={syncing}>
-					{#if syncing}
-						<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
-						Sincronizare...
-					{:else}
-						<RefreshCw class="mr-2 h-4 w-4" />
-						Sync Toate
-					{/if}
-				</Button>
+				<div class="flex items-center gap-2">
+					<Button variant="outline" size="sm" onclick={handleSyncAll} disabled={syncing}>
+						{#if syncing}
+							<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+							Sincronizare...
+						{:else}
+							<RefreshCw class="mr-2 h-4 w-4" />
+							Sync Cheltuieli
+						{/if}
+					</Button>
+					<Button variant="outline" size="sm" onclick={handleSyncLeads} disabled={syncingLeads}>
+						{#if syncingLeads}
+							<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+							Sync Leads...
+						{:else}
+							<RefreshCw class="mr-2 h-4 w-4" />
+							Sync Leads
+						{/if}
+					</Button>
+				</div>
 				{#if connections.find((c: any) => c.lastSyncAt)}
 					{@const lastSync = connections.find((c: any) => c.lastSyncAt)}
 					<p class="text-xs text-muted-foreground">
@@ -538,6 +635,157 @@
 						{/if}
 					</Card>
 				{/each}
+			</div>
+		{/if}
+
+		<!-- Lead Pages Section -->
+		{#if connections.some((c: any) => c.connected)}
+			<Separator />
+			<div class="space-y-4">
+				<h2 class="text-xl font-semibold">Pagini Facebook — Lead Ads</h2>
+				<p class="text-sm text-muted-foreground">
+					Selectează paginile Facebook de pe care se sincronizează leadurile din formularele Lead Ads.
+				</p>
+
+				<!-- Monitored Pages Table -->
+				<Card>
+					<CardHeader>
+						<CardTitle class="text-base">Pagini monitorizate</CardTitle>
+						<CardDescription>Paginile Facebook de pe care se sincronizează leadurile</CardDescription>
+					</CardHeader>
+					<CardContent>
+						{#if monitoredPages.length === 0}
+							<p class="text-sm text-muted-foreground py-4 text-center">
+								Nicio pagină adăugată încă. Folosiți butonul "Preia Pagini" de mai jos.
+							</p>
+						{:else}
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Pagina</TableHead>
+										<TableHead>Business Manager</TableHead>
+										<TableHead>Status</TableHead>
+										<TableHead>Ultimul Sync</TableHead>
+										<TableHead class="w-[120px]">Acțiuni</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{#each monitoredPages as pg (pg.id)}
+										<TableRow>
+											<TableCell class="font-medium">{pg.pageName}</TableCell>
+											<TableCell class="text-sm text-muted-foreground">{pg.businessName || '-'}</TableCell>
+											<TableCell>
+												{#if pg.isMonitored}
+													<Badge variant="default" class="gap-1">
+														<CheckCircle2 class="h-3 w-3" />
+														Activ
+													</Badge>
+												{:else}
+													<Badge variant="secondary" class="gap-1">
+														<XCircle class="h-3 w-3" />
+														Inactiv
+													</Badge>
+												{/if}
+											</TableCell>
+											<TableCell class="text-sm text-muted-foreground">{formatDate(pg.lastLeadSyncAt)}</TableCell>
+											<TableCell>
+												<div class="flex items-center gap-1">
+													<Button
+														variant="ghost"
+														size="sm"
+														onclick={() => handleToggleMonitoring(pg.id, pg.isMonitored)}
+													>
+														{pg.isMonitored ? 'Dezactivează' : 'Activează'}
+													</Button>
+													<Button
+														variant="ghost"
+														size="icon"
+														class="h-8 w-8 text-destructive"
+														onclick={() => handleRemovePage(pg.id)}
+													>
+														<Trash2 class="h-4 w-4" />
+													</Button>
+												</div>
+											</TableCell>
+										</TableRow>
+									{/each}
+								</TableBody>
+							</Table>
+						{/if}
+					</CardContent>
+				</Card>
+
+				<!-- Fetch & Add Pages per connection -->
+				{#each connections.filter((c: any) => c.connected) as conn (conn.id)}
+					<Card>
+						<CardHeader>
+							<CardTitle class="text-base">Adaugă pagini din: {conn.businessName || conn.businessId}</CardTitle>
+							<CardDescription>Preia lista de pagini Facebook din acest Business Manager</CardDescription>
+						</CardHeader>
+						<CardContent class="space-y-4">
+							<Button
+								onclick={() => handleFetchPages(conn.id)}
+								disabled={fetchingPages}
+								variant="outline"
+								size="sm"
+							>
+								{#if fetchingPages && fetchingForIntegration === conn.id}
+									<RefreshCw class="mr-2 h-4 w-4 animate-spin" />
+									Extragere...
+								{:else}
+									<Download class="mr-2 h-4 w-4" />
+									Preia Pagini
+								{/if}
+							</Button>
+
+							{#if fetchingForIntegration === conn.id && availablePages.length > 0}
+								<Separator />
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Pagina</TableHead>
+											<TableHead>Page ID</TableHead>
+											<TableHead class="w-[120px]">Acțiune</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{#each availablePages as pg (pg.pageId)}
+											<TableRow>
+												<TableCell class="font-medium">{pg.pageName}</TableCell>
+												<TableCell class="text-sm text-muted-foreground font-mono">{pg.pageId}</TableCell>
+												<TableCell>
+													{#if isPageAlreadyAdded(pg.pageId)}
+														<Badge variant="secondary">Adăugată</Badge>
+													{:else}
+														<Button
+															size="sm"
+															variant="outline"
+															disabled={addingPage === pg.pageId}
+															onclick={() => handleAddPage(conn.id, pg)}
+														>
+															<Plus class="mr-2 h-4 w-4" />
+															{addingPage === pg.pageId ? 'Se adaugă...' : 'Adaugă'}
+														</Button>
+													{/if}
+												</TableCell>
+											</TableRow>
+										{/each}
+									</TableBody>
+								</Table>
+							{/if}
+						</CardContent>
+					</Card>
+				{/each}
+
+				<!-- Info box -->
+				<div class="rounded-md bg-muted/50 p-4 text-sm text-muted-foreground space-y-1">
+					<p>Dacă nu vedeți paginile, asigurați-vă că:</p>
+					<ul class="list-disc pl-5 space-y-0.5">
+						<li>Contul Meta Ads este reconectat cu permisiunile noi (leads_retrieval, pages_read_engagement)</li>
+						<li>Utilizatorul are acces de administrator pe paginile respective</li>
+						<li>Paginile au formulare Lead Ads active</li>
+					</ul>
+				</div>
 			</div>
 		{/if}
 	{/if}

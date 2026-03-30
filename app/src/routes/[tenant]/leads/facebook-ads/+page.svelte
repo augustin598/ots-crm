@@ -123,7 +123,7 @@
 				<RefreshCwIcon class="h-4 w-4 {syncing ? 'animate-spin' : ''}" />
 				{syncing ? 'Se sincronizează...' : 'Sync Now'}
 			</Button>
-			<Button href="/{tenantSlug}/settings/meta-ads-leads" variant="outline" size="sm">
+			<Button href="/{tenantSlug}/settings/meta-ads" variant="outline" size="sm">
 				Setări
 			</Button>
 		</div>
