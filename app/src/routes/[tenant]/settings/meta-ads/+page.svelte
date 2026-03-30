@@ -34,7 +34,7 @@
 	const clientsQuery = getClientsForMetaMapping();
 	const clients = $derived(clientsQuery.current || []);
 	const clientOptions = $derived(
-		clients.map((c) => ({ value: c.id, label: c.name }))
+		clients.map((c) => ({ value: c.id, label: c.businessName || c.name }))
 	);
 
 	// New BM form

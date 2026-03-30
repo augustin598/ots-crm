@@ -166,7 +166,8 @@ export const getClientsForMetaMapping = query(async () => {
 	const clients = await db
 		.select({
 			id: table.client.id,
-			name: table.client.name
+			name: table.client.name,
+			businessName: table.client.businessName
 		})
 		.from(table.client)
 		.where(eq(table.client.tenantId, event.locals.tenant.id))
