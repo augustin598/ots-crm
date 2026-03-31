@@ -1656,6 +1656,9 @@
 												placeholder={isKeezActive ? 'Descrie serviciul sau produsul' : 'Describe the service or product'}
 												class="h-auto w-full border-0 bg-transparent p-0"
 											/>
+											{#if item.note}
+												<p class="mt-1 text-xs text-muted-foreground italic">{item.note}</p>
+											{/if}
 										</td>
 										<td class="px-4 py-3">
 											<Input
