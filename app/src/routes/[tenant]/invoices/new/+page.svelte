@@ -110,6 +110,13 @@
 	);
 	const keezNextNumber = $derived(keezNextNumberQuery?.current?.nextNumber ?? null);
 
+	// Log Keez items when loaded
+	$effect(() => {
+		if (isKeezActive && keezItems.length > 0) {
+			clientLogger.info({ message: `Keez articole încărcate: ${keezItems.length} articole`, action: 'keez_items_loaded' });
+		}
+	});
+
 	// Form state
 	let clientId = $state('');
 	let contractId = $state('');
@@ -154,6 +161,16 @@
 				clientCounty = currentClient.county || '';
 				clientPostalCode = currentClient.postalCode || '';
 				clientCountry = currentClient.country || 'România';
+
+				// Auto-set tax application based on client country
+				// Romania: apply tax (TVA 19%), EU non-RO: reverse charge (no VAT), non-EU: no VAT
+				const country = (currentClient.country || 'România').toUpperCase().trim();
+				const isRO = country === 'ROMÂNIA' || country === 'ROMANIA' || country === 'RO';
+				if (!isRO) {
+					taxApplicationType = 'reverse';
+				} else {
+					taxApplicationType = 'apply';
+				}
 			});
 		}
 	});
@@ -169,7 +186,11 @@
 		(invoiceSettings?.defaultCurrency as Currency) || CURRENCIES[0]
 	);
 	let issueDate = $state(new Date().toISOString().split('T')[0]);
+	let issueDateValue = $state<DateValue | undefined>((() => { const d = new Date(); return new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate()); })());
+	let issueDateOpen = $state(false);
 	let dueDate = $state('');
+	let dueDateValue = $state<DateValue | undefined>(undefined);
+	let dueDateOpen = $state(false);
 	let paymentTermsDays = $state(5);
 	const paymentTerms = $derived(`Net ${paymentTermsDays}`);
 	// Map keezDefaultPaymentTypeId (integer) to Keez code string
@@ -219,7 +240,6 @@
 	let recurringStartDateOpen = $state(false);
 	let recurringEndDateOpen = $state(false);
 	let recurringIssueDateOffset = $state(0);
-	let recurringDueDateOffset = $state(30);
 	let recurringDurationMonths = $state<number | undefined>(undefined);
 	let addItemDialogOpen = $state(false);
 	let dialogSourceType = $state<string>('manual');
@@ -251,6 +271,10 @@
 		console.log('[invoice/new] invoiceSettings:', invoiceSettings);
 		console.log('[invoice/new] plugins:', { isKeezActive, isSmartbillActive });
 
+		if (isKeezActive) {
+			clientLogger.info({ message: `Keez plugin activ. Setări: serie=${invoiceSettings?.keezSeries}, startNr=${invoiceSettings?.keezStartNumber}, paymentType=${invoiceSettings?.keezDefaultPaymentTypeId}`, action: 'keez_plugin_init' });
+		}
+
 		if (invoiceSettings) {
 			// Set currency from settings
 			if (invoiceSettings.defaultCurrency) {
@@ -260,6 +284,7 @@
 			// Set default payment method from Keez settings
 			if (isKeezActive && invoiceSettings.keezDefaultPaymentTypeId) {
 				paymentMethod = KEEZ_PAYMENT_ID_TO_CODE[invoiceSettings.keezDefaultPaymentTypeId] || 'Bank';
+				clientLogger.info({ message: `Keez metoda plată default: ${paymentMethod} (id=${invoiceSettings.keezDefaultPaymentTypeId})`, action: 'keez_payment_default' });
 			}
 		}
 
@@ -275,6 +300,10 @@
 		const number = isKeezActive ? (keezLiveNumber || defaultInvoiceNumber()) : defaultInvoiceNumber();
 		if (number) {
 			invoiceNumber = number;
+		}
+
+		if (isKeezActive) {
+			clientLogger.info({ message: `Keez serie=${series}, număr=${number} (live=${keezLiveNumber}, fallback=${defaultInvoiceNumber()})`, action: 'keez_number_resolved' });
 		}
 
 		console.log('[invoice/new] resolved series:', series, '| resolved number:', number, '| keezNextNumber:', keezNextNumber);
@@ -336,7 +365,7 @@
 			return dueDate;
 		}
 		const date = new Date(calculatedIssueDate);
-		date.setDate(date.getDate() + (recurringDueDateOffset || 30));
+		date.setDate(date.getDate() + (paymentTermsDays || 30));
 		return date.toISOString().split('T')[0];
 	});
 
@@ -350,6 +379,8 @@
 
 			// Update due date when payment terms or issue date changes
 			dueDate = calculatedDueDate;
+			const dd = new Date(calculatedDueDate);
+			dueDateValue = new CalendarDate(dd.getFullYear(), dd.getMonth() + 1, dd.getDate());
 		}
 	});
 
@@ -358,6 +389,20 @@
 		if (isRecurringInvoice) {
 			issueDate = calculatedIssueDate;
 			dueDate = calculatedDueDate;
+		}
+	});
+
+	// Sync issueDateValue -> issueDate string
+	$effect(() => {
+		if (issueDateValue) {
+			issueDate = `${issueDateValue.year}-${String(issueDateValue.month).padStart(2, '0')}-${String(issueDateValue.day).padStart(2, '0')}`;
+		}
+	});
+
+	// Sync dueDateValue -> dueDate string
+	$effect(() => {
+		if (dueDateValue) {
+			dueDate = `${dueDateValue.year}-${String(dueDateValue.month).padStart(2, '0')}-${String(dueDateValue.day).padStart(2, '0')}`;
 		}
 	});
 
@@ -385,6 +430,7 @@
 			recurringEndDateValue = new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
 		}
 	});
+
 
 	// Filter services and projects by selected client
 	const clientOptions = $derived(
@@ -562,6 +608,14 @@
 		loading = true;
 		error = null;
 
+		if (isKeezActive) {
+			const keezLineItems = lineItems.filter((i) => i.keezItem);
+			clientLogger.info({
+				message: `Keez submit ${isRecurringInvoice ? 'recurent' : 'factură'}: serie=${invoiceSeries}, nr=${invoiceNumber}, articole=${lineItems.length} (keez=${keezLineItems.length}), plată=${paymentMethod}, monedă=${currency}/${invoiceCurrency}`,
+				action: isRecurringInvoice ? 'keez_recurring_submit' : 'keez_invoice_submit'
+			});
+		}
+
 		try {
 			if (isRecurringInvoice) {
 				// Create recurring invoice
@@ -595,7 +649,7 @@
 					startDate: recurringStartDate,
 					endDate: recurringEndDate || undefined,
 					issueDateOffset: recurringIssueDateOffset,
-					dueDateOffset: recurringDueDateOffset,
+					dueDateOffset: paymentTermsDays,
 					notes: notes || undefined,
 					discountType: invoiceDiscountType !== 'none' ? invoiceDiscountType : undefined,
 					discountValue: invoiceDiscountType !== 'none' ? invoiceDiscountValue : undefined,
@@ -767,6 +821,7 @@
 					keezItem: keezItem
 				};
 				lineItems = [...lineItems, newItem];
+				clientLogger.info({ message: `Keez articol adăugat: "${keezItem.name}" (externalId=${keezItem.externalId}, preț=${keezItem.lastPrice}, TVA=${keezItem.vatRate}%, monedă=${keezItem.currencyCode})`, action: 'keez_item_added' });
 				if (!keezItem.lastPrice) {
 					clientLogger.warn({ message: `Articolul "${keezItem.name}" nu are preț în Keez. Completează prețul manual.`, action: 'invoice_add_keez_item' });
 				}
@@ -817,8 +872,8 @@
 	<!-- Header -->
 	<div class="mb-8 flex items-center justify-between">
 		<div>
-			<h1 class="text-3xl font-bold tracking-tight">New Invoice</h1>
-			<p class="mt-1 text-muted-foreground">Create a new invoice</p>
+			<h1 class="text-3xl font-bold tracking-tight">{isKeezActive ? 'Factură nouă' : 'New Invoice'}</h1>
+			<p class="mt-1 text-muted-foreground">{isKeezActive ? 'Creează o factură nouă' : 'Create a new invoice'}</p>
 		</div>
 		<div class="flex items-center gap-2">
 			{#if !isRecurringInvoice}
@@ -829,11 +884,11 @@
 					onclick={() => handleSubmit('draft')}
 				>
 					<FileText class="mr-2 h-4 w-4" />
-					Save as Draft
+					{isKeezActive ? 'Salvează ciornă' : 'Save as Draft'}
 				</Button>
 			{/if}
 			<Button type="button" variant="outline" onclick={() => goto(`/${tenantSlug}/invoices`)}>
-				Cancel
+				{isKeezActive ? 'Anulează' : 'Cancel'}
 			</Button>
 			<Button
 				type="button"
@@ -843,11 +898,11 @@
 				<Send class="mr-2 h-4 w-4" />
 				{loading
 					? isRecurringInvoice
-						? 'Creating...'
-						: 'Sending...'
+						? (isKeezActive ? 'Se creează...' : 'Creating...')
+						: (isKeezActive ? 'Se trimite...' : 'Sending...')
 					: isRecurringInvoice
-						? 'Create Recurring Invoice'
-						: 'Send Invoice'}
+						? (isKeezActive ? 'Creează factură recurentă' : 'Create Recurring Invoice')
+						: (isKeezActive ? 'Trimite factura' : 'Send Invoice')}
 			</Button>
 		</div>
 	</div>
@@ -866,7 +921,7 @@
 					<div class="flex items-center justify-between border-b pb-4">
 						<div class="flex items-center gap-2">
 							<User class="h-4 w-4 text-muted-foreground" />
-							<h2 class="text-sm font-semibold">Client Information</h2>
+							<h2 class="text-sm font-semibold">{isKeezActive ? 'Informații client' : 'Client Information'}</h2>
 						</div>
 						{#if currentClient}
 							<span class="text-xs text-muted-foreground">{currentClient.name}</span>
@@ -878,8 +933,8 @@
 							<Combobox
 								bind:value={clientId}
 								options={clientOptions}
-								placeholder="Select a client"
-								searchPlaceholder="Search clients..."
+								placeholder={isKeezActive ? 'Selectează client' : 'Select a client'}
+								searchPlaceholder={isKeezActive ? 'Caută clienți...' : 'Search clients...'}
 							>
 								{#snippet optionSnippet({ option })}
 									<span class="flex items-center gap-2">
@@ -907,7 +962,7 @@
 							onclick={() => goto(`/${tenantSlug}/clients/new`)}
 						>
 							<Plus class="mr-2 h-4 w-4" />
-							Add New Client
+							{isKeezActive ? 'Adaugă client nou' : 'Add New Client'}
 						</Button>
 					</div>
 
@@ -933,11 +988,11 @@
 								<div class="rounded-md bg-teal-100 p-1.5 dark:bg-teal-900/50">
 									<User class="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
 								</div>
-								<span class="text-xs font-semibold uppercase tracking-widest text-teal-600 dark:text-teal-400">Contact</span>
+								<span class="text-xs font-semibold uppercase tracking-widest text-teal-600 dark:text-teal-400">{isKeezActive ? 'Contact' : 'Contact'}</span>
 							</div>
 							<div class="grid grid-cols-2 gap-3">
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Name</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Nume' : 'Name'}</Label>
 									<Input bind:value={clientName} />
 								</div>
 								<div class="space-y-1.5">
@@ -948,7 +1003,7 @@
 								</div>
 								<div class="col-span-2 space-y-1.5">
 									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
-										<Phone class="h-3 w-3" /> Phone
+										<Phone class="h-3 w-3" /> {isKeezActive ? 'Telefon' : 'Phone'}
 									</Label>
 									<Input bind:value={clientPhone} />
 								</div>
@@ -961,15 +1016,15 @@
 								<div class="rounded-md bg-amber-100 p-1.5 dark:bg-amber-900/50">
 									<Building2 class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
 								</div>
-								<span class="text-xs font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Legal</span>
+								<span class="text-xs font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">{isKeezActive ? 'Juridic' : 'Legal'}</span>
 							</div>
 							<div class="grid grid-cols-2 gap-3">
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">VAT ID</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'CUI' : 'VAT ID'}</Label>
 									<Input bind:value={clientCui} />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Registration Number</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Nr. Reg. Comerț' : 'Registration Number'}</Label>
 									<Input bind:value={clientRegistrationNumber} />
 								</div>
 							</div>
@@ -981,7 +1036,7 @@
 								<div class="rounded-md bg-emerald-100 p-1.5 dark:bg-emerald-900/50">
 									<Landmark class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
 								</div>
-								<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Banking</span>
+								<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">{isKeezActive ? 'Bancar' : 'Banking'}</span>
 							</div>
 							<div class="grid grid-cols-2 gap-3">
 								<div class="space-y-1.5">
@@ -989,7 +1044,7 @@
 									<Input bind:value={clientIban} class="font-mono" />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Bank Name</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Bancă' : 'Bank Name'}</Label>
 									<Input bind:value={clientBankName} />
 								</div>
 							</div>
@@ -1001,27 +1056,27 @@
 								<div class="rounded-md bg-sky-100 p-1.5 dark:bg-sky-900/50">
 									<MapPin class="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
 								</div>
-								<span class="text-xs font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Address</span>
+								<span class="text-xs font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">{isKeezActive ? 'Adresă' : 'Address'}</span>
 							</div>
 							<div class="grid grid-cols-2 gap-3">
 								<div class="col-span-2 space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Street Address</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Stradă' : 'Street Address'}</Label>
 									<Input bind:value={clientAddress} />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">City</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Oraș' : 'City'}</Label>
 									<Input bind:value={clientCity} />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">County</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Județ' : 'County'}</Label>
 									<Input bind:value={clientCounty} />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Postal Code</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Cod poștal' : 'Postal Code'}</Label>
 									<Input bind:value={clientPostalCode} />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Country</Label>
+									<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Țară' : 'Country'}</Label>
 									<Input bind:value={clientCountry} />
 								</div>
 							</div>
@@ -1036,7 +1091,7 @@
 					<div class="flex items-center justify-between border-b pb-4">
 						<div class="flex items-center gap-2">
 							<FileText class="h-4 w-4 text-muted-foreground" />
-							<h2 class="text-sm font-semibold">Invoice Details</h2>
+							<h2 class="text-sm font-semibold">{isKeezActive ? 'Detalii factură' : 'Invoice Details'}</h2>
 						</div>
 						<span class="font-mono text-xs text-muted-foreground">
 							{invoiceSeries || '—'} #{invoiceNumber || '—'}
@@ -1048,16 +1103,16 @@
 							<div class="rounded-md bg-violet-100 p-1.5 dark:bg-violet-900/50">
 								<Hash class="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
 							</div>
-							<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">Invoice Number</span>
+							<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">{isKeezActive ? 'Număr factură' : 'Invoice Number'}</span>
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div class="space-y-1.5">
-								<Label class="text-xs text-muted-foreground">Series</Label>
+								<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Serie' : 'Series'}</Label>
 								<Input bind:value={invoiceSeries} placeholder="OTS" class="font-mono font-semibold" />
 							</div>
 							<div class="space-y-1.5">
 								<Label class="text-xs text-muted-foreground">
-									Number {#if isKeezActive}<span class="ml-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:bg-violet-900/50 dark:text-violet-400">auto</span>{/if}
+									{isKeezActive ? 'Număr' : 'Number'} {#if isKeezActive}<span class="ml-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:bg-violet-900/50 dark:text-violet-400">auto</span>{/if}
 								</Label>
 								<Input
 									bind:value={invoiceNumber}
@@ -1071,25 +1126,56 @@
 					</div>
 
 					<!-- Dates & Terms -->
-					<div class="grid grid-cols-2 gap-4">
+					<div class="grid grid-cols-4 gap-4">
 						<div class="space-y-1.5">
 							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-								<CalendarIcon class="h-3.5 w-3.5 text-indigo-400" /> Date
+								<CalendarIcon class="h-3.5 w-3.5 text-indigo-400" /> {isKeezActive ? 'Dată' : 'Date'}
 							</Label>
-							<Input
-								bind:value={issueDate}
-								type="date"
-								required
-								disabled={isRecurringInvoice}
-								readonly={isRecurringInvoice}
-							/>
+							<Popover.Root bind:open={issueDateOpen}>
+								<Popover.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm" disabled={isRecurringInvoice}>
+											<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+											{issueDateValue
+												? new Date(issueDate + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+												: 'Alege data'}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<Calendar type="single" bind:value={issueDateValue} onValueChange={() => (issueDateOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+								</Popover.Content>
+							</Popover.Root>
 							{#if isRecurringInvoice}
-								<p class="text-xs text-muted-foreground">Calculated: {calculatedIssueDate}</p>
+								<p class="text-xs text-muted-foreground">{isKeezActive ? 'Calculat' : 'Calculated'}: {calculatedIssueDate}</p>
 							{/if}
 						</div>
 						<div class="space-y-1.5">
 							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-								<Clock class="h-3.5 w-3.5 text-indigo-400" /> Payment Terms (days)
+								<CalendarIcon class="h-3.5 w-3.5 text-rose-400" /> {isKeezActive ? 'Scadentă' : 'Due Date'}
+							</Label>
+							<Popover.Root bind:open={dueDateOpen}>
+								<Popover.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="outline" class="h-9 w-full justify-start text-start font-normal text-sm" disabled={isRecurringInvoice}>
+											<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+											{dueDateValue
+												? new Date(dueDate + 'T00:00:00').toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })
+												: 'Alege data'}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<Calendar type="single" bind:value={dueDateValue} onValueChange={() => (dueDateOpen = false)} locale="ro-RO" captionLayout="dropdown" />
+								</Popover.Content>
+							</Popover.Root>
+							{#if isRecurringInvoice}
+								<p class="text-xs text-muted-foreground">{isKeezActive ? 'Calculat' : 'Calculated'}: {calculatedDueDate}</p>
+							{/if}
+						</div>
+						<div class="space-y-1.5">
+							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+								<Clock class="h-3.5 w-3.5 text-indigo-400" /> {isKeezActive ? 'Termen plată (zile)' : 'Payment Terms (days)'}
 							</Label>
 							<Input
 								type="number"
@@ -1100,31 +1186,16 @@
 						</div>
 						<div class="space-y-1.5">
 							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-								<CalendarIcon class="h-3.5 w-3.5 text-rose-400" /> Due Date
-							</Label>
-							<Input
-								bind:value={dueDate}
-								type="date"
-								required
-								disabled={isRecurringInvoice}
-								readonly={isRecurringInvoice}
-							/>
-							{#if isRecurringInvoice}
-								<p class="text-xs text-muted-foreground">Calculated: {calculatedDueDate}</p>
-							{/if}
-						</div>
-						<div class="space-y-1.5">
-							<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-								<FolderOpen class="h-3.5 w-3.5 text-amber-400" /> Project
+								<FolderOpen class="h-3.5 w-3.5 text-amber-400" /> {isKeezActive ? 'Proiect' : 'Project'}
 							</Label>
 							<Combobox
 								bind:value={projectId}
 								options={[
-									{ value: '', label: 'None' },
+									{ value: '', label: isKeezActive ? 'Niciunul' : 'None' },
 									...filteredProjects.map((p) => ({ value: p.id, label: p.name }))
 								]}
-								placeholder="Select a project (optional)"
-								searchPlaceholder="Search projects..."
+								placeholder={isKeezActive ? 'Selectează proiect (opțional)' : 'Select a project (optional)'}
+								searchPlaceholder={isKeezActive ? 'Caută proiecte...' : 'Search projects...'}
 							/>
 						</div>
 					</div>
@@ -1135,17 +1206,17 @@
 							<div class="rounded-md bg-emerald-100 p-1.5 dark:bg-emerald-900/50">
 								<Banknote class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
 							</div>
-							<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Payment & Currency</span>
+							<span class="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">{isKeezActive ? 'Plată & Monedă' : 'Payment & Currency'}</span>
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div class="space-y-1.5">
 								<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<CreditCard class="h-3 w-3" /> Payment
+									<CreditCard class="h-3 w-3" /> {isKeezActive ? 'Plată' : 'Payment'}
 								</Label>
 								<Select type="single" bind:value={paymentMethod}>
 									<SelectTrigger>
 										{isKeezActive
-											? (KEEZ_PAYMENT_LABELS[paymentMethod] || paymentMethod || 'Select method')
+											? (KEEZ_PAYMENT_LABELS[paymentMethod] || paymentMethod || 'Selectează metoda')
 											: (paymentMethod || 'Select method')}
 									</SelectTrigger>
 									<SelectContent>
@@ -1169,7 +1240,7 @@
 								</Select>
 							</div>
 							<div class="space-y-1.5">
-								<Label class="text-xs text-muted-foreground">Calculation Currency</Label>
+								<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Monedă de calcul' : 'Calculation Currency'}</Label>
 								<Select type="single" bind:value={currency}>
 									<SelectTrigger>{currency}</SelectTrigger>
 									<SelectContent>
@@ -1180,7 +1251,7 @@
 								</Select>
 							</div>
 							<div class="space-y-1.5">
-								<Label class="text-xs text-muted-foreground">Invoice Currency</Label>
+								<Label class="text-xs text-muted-foreground">{isKeezActive ? 'Monedă factură' : 'Invoice Currency'}</Label>
 								<Select type="single" bind:value={invoiceCurrency}>
 									<SelectTrigger>{invoiceCurrency}</SelectTrigger>
 									<SelectContent>
@@ -1192,7 +1263,7 @@
 							</div>
 							<div class="space-y-1.5">
 								<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<ArrowLeftRight class="h-3 w-3" /> Exchange Rate
+									<ArrowLeftRight class="h-3 w-3" /> {isKeezActive ? 'Curs valutar' : 'Exchange Rate'}
 								</Label>
 								<Input
 									bind:value={exchangeRate}
@@ -1209,20 +1280,20 @@
 					<!-- Tax Application -->
 					<div class="space-y-1.5">
 						<Label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-							<Percent class="h-3.5 w-3.5 text-orange-400" /> Tax Application
+							<Percent class="h-3.5 w-3.5 text-orange-400" /> {isKeezActive ? 'Aplicare TVA' : 'Tax Application'}
 						</Label>
 						<Select type="single" bind:value={taxApplicationType}>
 							<SelectTrigger>
 								{taxApplicationType === 'apply'
-									? 'Apply Tax (Normala)'
+									? (isKeezActive ? 'Taxare normală' : 'Apply Tax (Normala)')
 									: taxApplicationType === 'none'
-										? 'Do Not Apply Tax'
-										: 'Reverse Tax (Taxare inversa)'}
+										? (isKeezActive ? 'Fără TVA' : 'Do Not Apply Tax')
+										: (isKeezActive ? 'Taxare inversă' : 'Reverse Tax (Taxare inversa)')}
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="apply">Apply Tax (Normala)</SelectItem>
-								<SelectItem value="none">Do Not Apply Tax</SelectItem>
-								<SelectItem value="reverse">Reverse Tax (Taxare inversa)</SelectItem>
+								<SelectItem value="apply">{isKeezActive ? 'Taxare normală' : 'Apply Tax (Normala)'}</SelectItem>
+								<SelectItem value="none">{isKeezActive ? 'Fără TVA' : 'Do Not Apply Tax'}</SelectItem>
+								<SelectItem value="reverse">{isKeezActive ? 'Taxare inversă' : 'Reverse Tax (Taxare inversa)'}</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -1233,19 +1304,19 @@
 							{vatOnCollection ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border bg-background text-muted-foreground hover:border-blue-200 hover:text-blue-600'}">
 							<Checkbox id="vat-on-collection" bind:checked={vatOnCollection} class="sr-only" />
 							<span class="h-1.5 w-1.5 rounded-full {vatOnCollection ? 'bg-blue-500' : 'bg-muted-foreground/40'}"></span>
-							VAT on Collection
+							{isKeezActive ? 'TVA la încasare' : 'VAT on Collection'}
 						</label>
 						<label class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all
 							{isCreditNote ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'border-border bg-background text-muted-foreground hover:border-amber-200 hover:text-amber-600'}">
 							<Checkbox id="credit-note" bind:checked={isCreditNote} class="sr-only" />
 							<span class="h-1.5 w-1.5 rounded-full {isCreditNote ? 'bg-amber-500' : 'bg-muted-foreground/40'}"></span>
-							Credit Note
+							{isKeezActive ? 'Storno' : 'Credit Note'}
 						</label>
 						<label class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all
 							{isRecurringInvoice ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'border-border bg-background text-muted-foreground hover:border-violet-200 hover:text-violet-600'}">
 							<Checkbox id="recurring-invoice" bind:checked={isRecurringInvoice} class="sr-only" />
 							<span class="h-1.5 w-1.5 rounded-full {isRecurringInvoice ? 'bg-violet-500' : 'bg-muted-foreground/40'}"></span>
-							Recurring Invoice
+							{isKeezActive ? 'Factură recurentă' : 'Recurring Invoice'}
 						</label>
 					</div>
 
@@ -1256,48 +1327,32 @@
 								<div class="rounded-md bg-violet-100 p-1.5 dark:bg-violet-900/50">
 									<RefreshCw class="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
 								</div>
-								<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">Recurring Settings</span>
+								<span class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">{isKeezActive ? 'Setări recurență' : 'Recurring Settings'}</span>
 							</div>
-							<div class="grid grid-cols-2 gap-3">
+							<div class="grid grid-cols-4 gap-3">
+								<!-- Row 1: Tip recurență | Dată început | Dată sfârșit | Durată (luni) -->
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Recurring Type</Label>
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<RefreshCw class="h-3 w-3" /> {isKeezActive ? 'Tip recurență' : 'Recurring Type'}
+									</Label>
 									<Select type="single" bind:value={recurringType}>
-										<SelectTrigger>
-											{recurringType.charAt(0).toUpperCase() + recurringType.slice(1)}
+										<SelectTrigger class="w-full">
+											{isKeezActive
+												? (recurringType === 'daily' ? 'Zilnic' : recurringType === 'weekly' ? 'Săptămânal' : recurringType === 'monthly' ? 'Lunar' : 'Anual')
+												: recurringType.charAt(0).toUpperCase() + recurringType.slice(1)}
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="daily">Daily</SelectItem>
-											<SelectItem value="weekly">Weekly</SelectItem>
-											<SelectItem value="monthly">Monthly</SelectItem>
-											<SelectItem value="yearly">Yearly</SelectItem>
+											<SelectItem value="daily">{isKeezActive ? 'Zilnic' : 'Daily'}</SelectItem>
+											<SelectItem value="weekly">{isKeezActive ? 'Săptămânal' : 'Weekly'}</SelectItem>
+											<SelectItem value="monthly">{isKeezActive ? 'Lunar' : 'Monthly'}</SelectItem>
+											<SelectItem value="yearly">{isKeezActive ? 'Anual' : 'Yearly'}</SelectItem>
 										</SelectContent>
 									</Select>
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Durată (luni)</Label>
-									<Input
-										type="number"
-										min="1"
-										bind:value={recurringDurationMonths}
-										placeholder="ex: 6"
-									/>
-									{#if recurringDurationMonths && recurringDurationMonths > 0 && recurringStartDate}
-										<p class="text-xs text-muted-foreground">
-											Până la {new Date(recurringStartDate + 'T00:00:00').toLocaleDateString('ro-RO', { month: 'short', year: 'numeric', day: '2-digit' })} + {recurringDurationMonths} luni
-										</p>
-									{/if}
-								</div>
-								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Interval</Label>
-									<Input type="number" bind:value={recurringInterval} min="1" placeholder="1" />
-									<p class="text-xs text-muted-foreground">
-										Every {recurringInterval} {recurringInterval === 1
-											? recurringType === 'daily' ? 'day' : recurringType === 'weekly' ? 'week' : recurringType === 'monthly' ? 'month' : 'year'
-											: recurringType === 'daily' ? 'days' : recurringType === 'weekly' ? 'weeks' : recurringType === 'monthly' ? 'months' : 'years'}
-									</p>
-								</div>
-								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Start Date</Label>
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<CalendarIcon class="h-3 w-3" /> {isKeezActive ? 'Dată început' : 'Start Date'}
+									</Label>
 									<Popover.Root bind:open={recurringStartDateOpen}>
 										<Popover.Trigger>
 											{#snippet child({ props })}
@@ -1315,7 +1370,9 @@
 									</Popover.Root>
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">End Date (Optional)</Label>
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<CalendarIcon class="h-3 w-3" /> {isKeezActive ? 'Dată sfârșit (opțional)' : 'End Date (Optional)'}
+									</Label>
 									<Popover.Root bind:open={recurringEndDateOpen}>
 										<Popover.Trigger>
 											{#snippet child({ props })}
@@ -1333,12 +1390,49 @@
 									</Popover.Root>
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Issue Date Offset (days)</Label>
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Clock class="h-3 w-3" /> Durată (luni)
+									</Label>
+									<Input
+										type="number"
+										min="1"
+										bind:value={recurringDurationMonths}
+										placeholder="ex: 6"
+									/>
+									{#if recurringDurationMonths && recurringDurationMonths > 0 && recurringStartDate}
+										{@const lastInvoiceD = (() => { const d = new Date(recurringStartDate + 'T00:00:00'); d.setMonth(d.getMonth() + recurringDurationMonths - 1); return d; })()}
+										<p class="text-xs text-muted-foreground">
+											Ultima factură: {lastInvoiceD.toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })}
+										</p>
+									{/if}
+								</div>
+								<!-- Row 2: Interval | Offset emitere | Termen plată -->
+								<div class="space-y-1.5">
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Hash class="h-3 w-3" /> Interval
+									</Label>
+									<Input type="number" bind:value={recurringInterval} min="1" placeholder="1" />
+									<p class="text-xs text-muted-foreground">
+										{isKeezActive
+											? `La fiecare ${recurringInterval} ${recurringInterval === 1
+												? recurringType === 'daily' ? 'zi' : recurringType === 'weekly' ? 'săptămână' : recurringType === 'monthly' ? 'lună' : 'an'
+												: recurringType === 'daily' ? 'zile' : recurringType === 'weekly' ? 'săptămâni' : recurringType === 'monthly' ? 'luni' : 'ani'}`
+											: `Every ${recurringInterval} ${recurringInterval === 1
+												? recurringType === 'daily' ? 'day' : recurringType === 'weekly' ? 'week' : recurringType === 'monthly' ? 'month' : 'year'
+												: recurringType === 'daily' ? 'days' : recurringType === 'weekly' ? 'weeks' : recurringType === 'monthly' ? 'months' : 'years'}`}
+									</p>
+								</div>
+								<div class="space-y-1.5">
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<CalendarIcon class="h-3 w-3" /> {isKeezActive ? 'Offset dată emitere (zile)' : 'Issue Date Offset (days)'}
+									</Label>
 									<Input type="number" bind:value={recurringIssueDateOffset} placeholder="0" />
 								</div>
 								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Due Date Offset (days)</Label>
-									<Input type="number" bind:value={recurringDueDateOffset} placeholder="30" />
+									<Label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Clock class="h-3 w-3" /> {isKeezActive ? 'Termen plată (zile)' : 'Payment Terms (days)'}
+									</Label>
+									<Input type="number" bind:value={paymentTermsDays} placeholder="5" />
 								</div>
 							</div>
 						</div>
@@ -1352,21 +1446,21 @@
 			<CardContent class="p-6">
 				<div class="space-y-4">
 					<div class="mb-4 flex items-center justify-between">
-						<p class="text-sm font-semibold text-gray-900">Items</p>
+						<p class="text-sm font-semibold text-gray-900">{isKeezActive ? 'Articole' : 'Items'}</p>
 						<Dialog bind:open={addItemDialogOpen}>
 							<DialogTrigger>
 								{#snippet child({ props })}
 									<Button type="button" variant="outline" size="sm" {...props}>
 										<Plus class="mr-2 h-4 w-4" />
-										Add Item
+										{isKeezActive ? 'Adaugă articol' : 'Add Item'}
 									</Button>
 								{/snippet}
 							</DialogTrigger>
 							<DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto">
 								<DialogHeader>
-									<DialogTitle>Add Item to Invoice</DialogTitle>
+									<DialogTitle>{isKeezActive ? 'Adaugă articol pe factură' : 'Add Item to Invoice'}</DialogTitle>
 									<DialogDescription>
-										Select an item from a service, project, Keez, or add manually
+										{isKeezActive ? 'Selectează un articol din serviciu, proiect, Keez, sau adaugă manual' : 'Select an item from a service, project, Keez, or add manually'}
 									</DialogDescription>
 								</DialogHeader>
 								<Tabs
@@ -1380,33 +1474,33 @@
 												? 'grid-cols-3'
 												: 'grid-cols-4'}"
 									>
-										<TabsTrigger value="service">From Service</TabsTrigger>
+										<TabsTrigger value="service">{isKeezActive ? 'Din serviciu' : 'From Service'}</TabsTrigger>
 										{#each invoiceProviderPlugins as plugin}
 											<TabsTrigger value="plugin-{plugin.name}"
-												>From {plugin.name.charAt(0).toUpperCase() +
+												>{isKeezActive ? 'Din' : 'From'} {plugin.name.charAt(0).toUpperCase() +
 													plugin.name.slice(1)}</TabsTrigger
 											>
 										{/each}
-										<TabsTrigger value="manual">Manual</TabsTrigger>
+										<TabsTrigger value="manual">{isKeezActive ? 'Manual' : 'Manual'}</TabsTrigger>
 									</TabsList>
 									<TabsContent value="service" class="space-y-4">
 										<div class="space-y-2">
-											<Label>Select Service</Label>
+											<Label>{isKeezActive ? 'Selectează serviciu' : 'Select Service'}</Label>
 											<Combobox
 												bind:value={dialogServiceId}
 												options={[
-													{ value: '', label: 'Select a service' },
+													{ value: '', label: isKeezActive ? 'Selectează serviciu' : 'Select a service' },
 													...filteredServices.map((s) => ({ value: s.id, label: s.name }))
 												]}
-												placeholder="Select a service"
-												searchPlaceholder="Search services..."
+												placeholder={isKeezActive ? 'Selectează serviciu' : 'Select a service'}
+												searchPlaceholder={isKeezActive ? 'Caută servicii...' : 'Search services...'}
 											/>
 										</div>
 										<div class="space-y-2">
-											<Label>Item Note (Optional)</Label>
+											<Label>{isKeezActive ? 'Notă articol (opțional)' : 'Item Note (Optional)'}</Label>
 											<Textarea
 												bind:value={dialogItemNote}
-												placeholder="Add transaction-specific details..."
+												placeholder={isKeezActive ? 'Adaugă detalii specifice tranzacției...' : 'Add transaction-specific details...'}
 												rows={2}
 											/>
 										</div>
@@ -1415,7 +1509,7 @@
 										{#if plugin.name === 'keez'}
 											<TabsContent value="plugin-keez" class="space-y-4">
 												<div class="space-y-2">
-													<Label>Select Keez Item</Label>
+													<Label>{isKeezActive ? 'Selectează articol Keez' : 'Select Keez Item'}</Label>
 													<Combobox
 														options={keezItemOptions}
 														value={dialogPluginItemId['keez'] || ''}
@@ -1429,15 +1523,15 @@
 																dialogItemDescription = keezItem.name;
 															}
 														}}
-														placeholder="Select from Keez items"
-														searchPlaceholder="Search Keez items..."
+														placeholder={isKeezActive ? 'Selectează din articolele Keez' : 'Select from Keez items'}
+														searchPlaceholder={isKeezActive ? 'Caută articole Keez...' : 'Search Keez items...'}
 													/>
 												</div>
 												<div class="space-y-2">
-													<Label>Item Note (Optional)</Label>
+													<Label>{isKeezActive ? 'Notă articol (opțional)' : 'Item Note (Optional)'}</Label>
 													<Textarea
 														bind:value={dialogItemNote}
-														placeholder="Add transaction-specific details..."
+														placeholder={isKeezActive ? 'Adaugă detalii specifice tranzacției...' : 'Add transaction-specific details...'}
 														rows={2}
 													/>
 												</div>
@@ -1446,17 +1540,17 @@
 									{/each}
 									<TabsContent value="manual" class="space-y-4">
 										<div class="space-y-2">
-											<Label>Item Description</Label>
+											<Label>{isKeezActive ? 'Descriere articol' : 'Item Description'}</Label>
 											<Input
 												bind:value={dialogItemDescription}
-												placeholder="Describe the service or product"
+												placeholder={isKeezActive ? 'Descrie serviciul sau produsul' : 'Describe the service or product'}
 											/>
 										</div>
 										<div class="space-y-2">
-											<Label>Item Note (Optional)</Label>
+											<Label>{isKeezActive ? 'Notă articol (opțional)' : 'Item Note (Optional)'}</Label>
 											<Textarea
 												bind:value={dialogItemNote}
-												placeholder="Add transaction-specific details..."
+												placeholder={isKeezActive ? 'Adaugă detalii specifice tranzacției...' : 'Add transaction-specific details...'}
 												rows={2}
 											/>
 										</div>
@@ -1475,9 +1569,9 @@
 											dialogItemNote = '';
 										}}
 									>
-										Cancel
+										{isKeezActive ? 'Anulează' : 'Cancel'}
 									</Button>
-									<Button type="button" onclick={handleAddItemFromDialog}>Add Item</Button>
+									<Button type="button" onclick={handleAddItemFromDialog}>{isKeezActive ? 'Adaugă articol' : 'Add Item'}</Button>
 								</DialogFooter>
 							</DialogContent>
 						</Dialog>
@@ -1490,39 +1584,39 @@
 								<tr class="border-b border-gray-200">
 									<th
 										class="px-4 py-3 text-left text-sm font-semibold text-gray-700"
-										style="min-width: 200px;">Item</th
+										style="min-width: 200px;">{isKeezActive ? 'Articol' : 'Item'}</th
 									>
 									<th
 										class="px-4 py-3 text-left text-sm font-semibold text-gray-700"
-										style="width: 80px;">Unit</th
+										style="width: 80px;">{isKeezActive ? 'U.M.' : 'Unit'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 100px;">Quantity</th
+										style="width: 100px;">{isKeezActive ? 'Cantitate' : 'Quantity'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 120px;">Unit Price</th
+										style="width: 120px;">{isKeezActive ? 'Preț unitar' : 'Unit Price'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 120px;">Discount Type</th
+										style="width: 120px;">{isKeezActive ? 'Tip reducere' : 'Discount Type'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 100px;">Discount</th
+										style="width: 100px;">{isKeezActive ? 'Reducere' : 'Discount'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 100px;">Amount</th
+										style="width: 100px;">{isKeezActive ? 'Valoare' : 'Amount'}</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 80px;">VAT</th
+										style="width: 80px;">TVA</th
 									>
 									<th
 										class="px-4 py-3 text-right text-sm font-semibold text-gray-700"
-										style="width: 120px;">Final Amount</th
+										style="width: 120px;">{isKeezActive ? 'Total' : 'Final Amount'}</th
 									>
 									<th class="w-10 px-4">
 										<Button
@@ -1559,7 +1653,7 @@
 											<Input
 												bind:value={item.description}
 												oninput={(e) => updateItem(item.id, 'description', e.currentTarget.value)}
-												placeholder="Describe the service or product"
+												placeholder={isKeezActive ? 'Descrie serviciul sau produsul' : 'Describe the service or product'}
 												class="h-auto w-full border-0 bg-transparent p-0"
 											/>
 										</td>
@@ -1603,7 +1697,7 @@
 												<SelectContent>
 													<SelectItem value="">-</SelectItem>
 													<SelectItem value="percent">%</SelectItem>
-													<SelectItem value="fixed">Fixed</SelectItem>
+													<SelectItem value="fixed">{isKeezActive ? 'Fix' : 'Fixed'}</SelectItem>
 												</SelectContent>
 											</Select>
 										</td>
@@ -1641,7 +1735,7 @@
 								{:else}
 									<tr>
 										<td colspan="11" class="py-8 text-center text-gray-500">
-											No items yet. Click the + button to add items.
+											{isKeezActive ? 'Niciun articol. Apasă + pentru a adăuga.' : 'No items yet. Click the + button to add items.'}
 										</td>
 									</tr>
 								{/each}
@@ -1656,10 +1750,10 @@
 		<Card class="border border-gray-200">
 			<CardContent class="p-6">
 				<div class="space-y-4">
-					<p class="mb-4 text-sm font-semibold text-gray-900">Notes & Attachments</p>
+					<p class="mb-4 text-sm font-semibold text-gray-900">{isKeezActive ? 'Note & Atașamente' : 'Notes & Attachments'}</p>
 					<Textarea
 						bind:value={notes}
-						placeholder="Add any additional notes or payment instructions."
+						placeholder={isKeezActive ? 'Adaugă note suplimentare sau instrucțiuni de plată.' : 'Add any additional notes or payment instructions.'}
 						rows={3}
 						class="resize-none"
 					/>
@@ -1671,11 +1765,11 @@
 		<Card class="border border-gray-200">
 			<CardContent class="p-6">
 				<div class="space-y-4">
-					<p class="mb-4 text-sm font-semibold text-gray-900">Summary</p>
+					<p class="mb-4 text-sm font-semibold text-gray-900">{isKeezActive ? 'Sumar' : 'Summary'}</p>
 
 					<!-- Discount Controls -->
 					<div class="space-y-2 border-b border-gray-200 pb-4">
-						<Label>Discount</Label>
+						<Label>{isKeezActive ? 'Reducere' : 'Discount'}</Label>
 						<div class="flex gap-2">
 							<Select
 								type="single"
@@ -1687,15 +1781,15 @@
 							>
 								<SelectTrigger class="flex-1">
 									{invoiceDiscountType === 'none'
-										? 'No Discount'
+										? (isKeezActive ? 'Fără reducere' : 'No Discount')
 										: invoiceDiscountType === 'percent'
-											? 'P - Percentage'
-											: 'V - Value'}
+											? (isKeezActive ? 'P - Procentual' : 'P - Percentage')
+											: (isKeezActive ? 'V - Valoare' : 'V - Value')}
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="none">No Discount</SelectItem>
-									<SelectItem value="percent">P - Percentage</SelectItem>
-									<SelectItem value="value">V - Value</SelectItem>
+									<SelectItem value="none">{isKeezActive ? 'Fără reducere' : 'No Discount'}</SelectItem>
+									<SelectItem value="percent">{isKeezActive ? 'P - Procentual' : 'P - Percentage'}</SelectItem>
+									<SelectItem value="value">{isKeezActive ? 'V - Valoare' : 'V - Value'}</SelectItem>
 								</SelectContent>
 							</Select>
 							{#if invoiceDiscountType !== 'none'}
@@ -1721,13 +1815,13 @@
 						</div>
 						{#if taxApplicationType === 'apply'}
 							<div class="flex justify-between">
-								<span class="text-gray-700">Tax Total ({defaultTaxRate}%)</span>
+								<span class="text-gray-700">{isKeezActive ? `Total TVA (${defaultTaxRate}%)` : `Tax Total (${defaultTaxRate}%)`}</span>
 								<span class="font-medium text-gray-900">{formatNumber(currTotals.taxTotal)} {curr}</span>
 							</div>
 						{/if}
 						{#if curr === currency && invoiceDiscountType !== 'none' && invoiceDiscountAmount > 0}
 							<div class="flex justify-between">
-								<span class="text-gray-700">Discount</span>
+								<span class="text-gray-700">{isKeezActive ? 'Reducere' : 'Discount'}</span>
 								<span class="font-medium text-gray-900"
 									>-{formatNumber(invoiceDiscountAmount)} {curr}</span
 								>
@@ -1735,7 +1829,7 @@
 						{/if}
 						<Separator />
 						<div class="flex justify-between">
-							<span class="text-lg font-semibold text-gray-900">Grand Total</span>
+							<span class="text-lg font-semibold text-gray-900">{isKeezActive ? 'Total general' : 'Grand Total'}</span>
 							<span class="text-lg font-bold text-gray-900"
 								>{formatNumber(currTotals.grandTotal)} {curr}</span
 							>
@@ -1749,7 +1843,7 @@
 						</div>
 						<Separator />
 						<div class="flex justify-between">
-							<span class="text-lg font-semibold text-gray-900">Grand Total</span>
+							<span class="text-lg font-semibold text-gray-900">{isKeezActive ? 'Total general' : 'Grand Total'}</span>
 							<span class="text-lg font-bold text-gray-900">0,00 {currency}</span>
 						</div>
 					</div>

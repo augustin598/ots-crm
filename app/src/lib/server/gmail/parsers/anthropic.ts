@@ -11,7 +11,9 @@ export const anthropicParser: SupplierParser = {
 		const subjectLower = subject.toLowerCase();
 		return (
 			fromLower.includes('anthropic') ||
-			subjectLower.includes('anthropic')
+			fromLower.includes('claude') ||
+			subjectLower.includes('anthropic') ||
+			subjectLower.includes('claude')
 		);
 	},
 
@@ -22,7 +24,9 @@ export const anthropicParser: SupplierParser = {
 		};
 
 		// Anthropic receipts: "Your receipt from Anthropic, PBC #2831-6585-6541"
-		const invoiceMatch = email.subject.match(/#([\w-]+)/) ||
+		// or Stripe-style IDs like 7XNUXHOY-0004
+		const invoiceMatch = email.body.match(/\b([A-Z0-9]{8}-\d{4})\b/) ||
+			email.subject.match(/#([\w-]+)/) ||
 			email.body.match(/(?:receipt|invoice)\s*#?\s*([\w-]+)/i);
 		
 		if (invoiceMatch) {

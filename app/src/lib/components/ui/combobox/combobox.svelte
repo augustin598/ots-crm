@@ -97,7 +97,7 @@
 			</Button>
 		{/snippet}
 	</PopoverTrigger>
-	<PopoverContent class="w-(--bits-popover-trigger-width) p-0" align="start">
+	<PopoverContent class="!w-(--bits-popover-trigger-width) p-0" align="start">
 		<div class="flex flex-col">
 			<div class="border-b p-2">
 				<Input

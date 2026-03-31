@@ -8,7 +8,7 @@ import { KeezClient } from './plugins/keez/client';
 import { decrypt } from './plugins/keez/crypto';
 import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './plugins/keez/mapper';
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
-import { logWarning } from '$lib/server/logger';
+import { logInfo, logWarning } from '$lib/server/logger';
 
 function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -67,6 +67,7 @@ export async function generateInvoiceNumber(tenantId: string): Promise<string> {
 
 		const nextNumber = await keezClient.getNextInvoiceNumber(series);
 		if (nextNumber !== null) {
+			logInfo('keez', `Keez next number: serie=${series}, număr=${nextNumber}`, { tenantId, action: 'keez_next_number' });
 			return generateKeezInvoiceNumber(series, nextNumber);
 		}
 	} catch (error) {
@@ -141,6 +142,7 @@ export async function getNextInvoiceNumberFromPlugin(
 
 					const nextNumber = await keezClient.getNextInvoiceNumber(keezSeries);
 					if (nextNumber !== null) {
+						logInfo('keez', `Keez plugin next number: serie=${keezSeries}, număr=${nextNumber}`, { tenantId, action: 'keez_plugin_next_number' });
 						return generateKeezInvoiceNumber(keezSeries, nextNumber);
 					}
 				} catch (error) {
@@ -568,15 +570,17 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 			const itemRate = item.rate;
 			let itemSubtotal = Math.round(itemRate * item.quantity);
 
-			// Apply item-level discount if present
+			// Calculate item discount (match invoices.remote.ts pattern)
+			let itemDiscountCents: number | null = null;
 			if (item.discountType && item.discount !== undefined) {
-				let itemDiscount = 0;
 				if (item.discountType === 'percent') {
-					itemDiscount = Math.round((itemSubtotal * item.discount) / 100);
+					itemDiscountCents = Math.round((itemSubtotal * item.discount) / 100);
 				} else if (item.discountType === 'fixed') {
-					itemDiscount = Math.round(item.discount * 100); // Convert to cents
+					itemDiscountCents = Math.round(item.discount * 100); // Convert to cents
 				}
-				itemSubtotal -= itemDiscount;
+				if (itemDiscountCents) {
+					itemSubtotal -= itemDiscountCents;
+				}
 			}
 
 			return {
@@ -589,7 +593,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 				amount: itemSubtotal,
 				taxRate: item.taxRate ? Math.round(item.taxRate * 100) : null,
 				discountType: item.discountType || null,
-				discount: item.discount !== undefined ? Math.round(item.discount * 100) : null,
+				discount: itemDiscountCents,
 				note: item.note || null,
 				currency: item.currency || null,
 				unitOfMeasure: item.unitOfMeasure || null,
@@ -623,7 +627,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 
 	// Update recurring invoice: set lastRunDate and calculate nextRunDate
 	const nextRunDate = calculateNextRunDate(
-		new Date(issueDate),
+		now,
 		recurringInvoice.recurringType,
 		recurringInvoice.recurringInterval
 	);
@@ -655,7 +659,8 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 			type: 'invoice.created',
 			invoice: savedInvoice as any,
 			tenantId: recurringInvoice.tenantId,
-			userId: recurringInvoice.createdByUserId
+			userId: recurringInvoice.createdByUserId,
+			isRecurring: true
 		});
 	} catch (error) {
 		// Rollback: delete the invoice and revert recurring invoice update

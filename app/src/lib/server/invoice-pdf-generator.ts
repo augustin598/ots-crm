@@ -217,7 +217,11 @@ export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer
 			if (tenant.cui) { doc.text(`CIF: ${tenant.cui}`, col1X, y, { lineBreak: false }); y += 10; }
 			if (tenant.tradeRegister) { doc.text(`Reg.Com: ${tenant.tradeRegister}`, col1X, y, { lineBreak: false }); y += 10; }
 			if (tenant.bankName) { doc.text(`Banca: ${tenant.bankName}`, col1X, y, { lineBreak: false }); y += 10; }
-			if (tenant.iban) { doc.text(`IBAN: ${tenant.iban}`, col1X, y, { width: colW, lineBreak: false }); y += 10; }
+			// Use EUR IBAN for EUR invoices, RON IBAN otherwise
+			const displayIban = (invoice.invoiceCurrency === 'EUR' || invoice.currency === 'EUR') && tenant.ibanEuro
+				? tenant.ibanEuro
+				: tenant.iban;
+			if (displayIban) { doc.text(`IBAN: ${displayIban}`, col1X, y, { width: colW, lineBreak: false }); y += 10; }
 
 			// --- Right: Invoice details ---
 			let yr = sectionStart;

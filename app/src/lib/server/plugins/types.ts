@@ -13,6 +13,7 @@ export type InvoiceCreatedEvent = {
 	invoice: Invoice & { lineItems?: InvoiceLineItem[] };
 	tenantId: string;
 	userId: string;
+	isRecurring?: boolean;
 };
 
 export type InvoiceUpdatedEvent = {

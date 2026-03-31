@@ -4,49 +4,12 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { generateInvoiceFromRecurringTemplate } from '$lib/server/invoice-utils';
+import { generateInvoiceFromRecurringTemplate, calculateNextRunDate } from '$lib/server/invoice-utils';
+import { logInfo } from '$lib/server/logger';
 
 function generateRecurringInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
-}
-
-/**
- * Calculate the next run date based on recurring type and interval
- */
-function calculateNextRunDate(
-	startDate: Date,
-	recurringType: string,
-	recurringInterval: number
-): Date {
-	const nextDate = new Date(startDate);
-
-	switch (recurringType) {
-		case 'daily':
-			nextDate.setDate(nextDate.getDate() + recurringInterval);
-			break;
-		case 'weekly':
-			nextDate.setDate(nextDate.getDate() + recurringInterval * 7);
-			break;
-		case 'monthly':
-			nextDate.setMonth(nextDate.getMonth() + recurringInterval);
-			// Handle month-end edge cases (e.g., Jan 31 + 1 month = Feb 28/29)
-			if (nextDate.getDate() !== startDate.getDate()) {
-				nextDate.setDate(0); // Go to last day of previous month
-			}
-			break;
-		case 'yearly':
-			nextDate.setFullYear(nextDate.getFullYear() + recurringInterval);
-			// Handle leap year edge cases
-			if (nextDate.getMonth() !== startDate.getMonth()) {
-				nextDate.setDate(0); // Go to last day of previous month
-			}
-			break;
-		default:
-			throw new Error(`Unknown recurring type: ${recurringType}`);
-	}
-
-	return nextDate;
 }
 
 // Line item schema (same as in invoices.remote.ts)
@@ -278,7 +241,7 @@ export const createRecurringInvoice = command(recurringInvoiceSchema, async (dat
 
 	const startDate = new Date(data.startDate);
 	const recurringInterval = data.recurringInterval || 1;
-	const nextRunDate = calculateNextRunDate(startDate, data.recurringType, recurringInterval);
+	const nextRunDate = startDate; // First invoice should generate on startDate, not startDate + interval
 
 	const recurringInvoiceId = generateRecurringInvoiceId();
 
@@ -305,6 +268,28 @@ export const createRecurringInvoice = command(recurringInvoiceSchema, async (dat
 		isActive: data.isActive !== undefined ? data.isActive : true,
 		createdByUserId: event.locals.user.id
 	});
+
+	// Log Keez recurring invoice creation
+	if (data.lineItems && data.lineItems.length > 0) {
+		const keezItems = data.lineItems.filter((li) => li.keezItemExternalId);
+		if (keezItems.length > 0) {
+			logInfo('keez', `Factură recurentă creată cu ${keezItems.length}/${data.lineItems.length} articole Keez: ${data.recurringType} interval=${recurringInterval}`, {
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id,
+				action: 'keez_recurring_created',
+				metadata: {
+					recurringInvoiceId,
+					name: data.name,
+					series: data.invoiceSeries,
+					type: data.recurringType,
+					interval: recurringInterval,
+					startDate: data.startDate,
+					endDate: data.endDate,
+					keezItems: keezItems.map((li) => ({ keezExternalId: li.keezItemExternalId, description: li.description }))
+				}
+			});
+		}
+	}
 
 	return { success: true, recurringInvoiceId };
 });
@@ -373,7 +358,7 @@ export const updateRecurringInvoice = command(
 				subtotal += itemSubtotal;
 
 				const taxApplicationType =
-					updateData.taxApplicationType || existing.taxRate > 0 ? 'apply' : 'none';
+					updateData.taxApplicationType || (existing.taxRate > 0 ? 'apply' : 'none');
 				if (taxApplicationType === 'apply') {
 					const itemTaxRate = item.taxRate ? Math.round(item.taxRate * 100) : defaultTaxRateCents;
 					const itemTax = Math.round((itemSubtotal * itemTaxRate) / 10000);

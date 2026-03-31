@@ -255,18 +255,40 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 
 	logInfo('keez', `Mapped invoice to Keez format with ${keezInvoice.invoiceDetails.length} details`, { tenantId, metadata: { invoiceId: invoice.id, detailCount: keezInvoice.invoiceDetails.length } });
 
-	// Create invoice in Keez
-	logInfo('keez', `Creating invoice in Keez with externalId: ${externalId}`, { tenantId, metadata: { externalId, invoiceId: invoice.id } });
+	// Create invoice in Keez with retry on duplicate number
+	logInfo('keez', `Creating invoice in Keez with externalId: ${externalId}, series=${keezInvoice.series}, number=${keezInvoice.number}`, { tenantId, metadata: { externalId, invoiceId: invoice.id } });
 
 	let response;
-	try {
-		response = await keezClient.createInvoice(keezInvoice);
-		logInfo('keez', `Invoice created successfully in Keez with externalId: ${response.externalId}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
-	} catch (createError) {
-		const createErr = serializeError(createError);
-		logError('keez', `Failed to create invoice in Keez: ${createErr.message}`, { tenantId, stackTrace: createErr.stack });
-		// Do NOT re-throw — the CRM invoice must be preserved even if Keez sync fails.
-		// Record the failure so it can be retried manually.
+	const MAX_RETRY_ATTEMPTS = 3;
+	let lastError: unknown = null;
+
+	for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+		try {
+			response = await keezClient.createInvoice(keezInvoice);
+			logInfo('keez', `Invoice created successfully in Keez (attempt ${attempt}): externalId=${response.externalId}, series=${keezInvoice.series}, number=${keezInvoice.number}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId, attempt } });
+			lastError = null;
+			break;
+		} catch (createError) {
+			lastError = createError;
+			const errMsg = createError instanceof Error ? createError.message : String(createError);
+			const isDuplicateNumber = errMsg.toLowerCase().includes('number') || errMsg.toLowerCase().includes('duplicate') || errMsg.toLowerCase().includes('exists') || errMsg.toLowerCase().includes('already');
+
+			if (isDuplicateNumber && attempt < MAX_RETRY_ATTEMPTS && keezInvoice.number) {
+				// Increment number and retry — likely a race condition with concurrent invoice creation
+				const oldNumber = keezInvoice.number;
+				keezInvoice.number = oldNumber + 1;
+				logWarning('keez', `Keez create failed (attempt ${attempt}), possible duplicate number ${oldNumber}. Retrying with ${keezInvoice.number}: ${errMsg}`, { tenantId, action: 'keez_number_retry', metadata: { invoiceId: invoice.id, oldNumber, newNumber: keezInvoice.number, attempt } });
+			} else {
+				// Non-duplicate error or max retries reached
+				const createErr = serializeError(createError);
+				logError('keez', `Failed to create invoice in Keez (attempt ${attempt}/${MAX_RETRY_ATTEMPTS}): ${createErr.message}`, { tenantId, stackTrace: createErr.stack });
+				break;
+			}
+		}
+	}
+
+	if (lastError) {
+		// All attempts failed — record the failure for manual retry
 		const syncId = generateSyncId();
 		try {
 			await db.insert(table.keezInvoiceSync).values({
@@ -278,7 +300,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				syncDirection: 'push',
 				lastSyncedAt: new Date(),
 				syncStatus: 'error',
-				errorMessage: createError instanceof Error ? createError.message : 'Failed to create invoice in Keez'
+				errorMessage: lastError instanceof Error ? lastError.message : 'Failed to create invoice in Keez after retries'
 			});
 		} catch (dbError) {
 			const dbErr = serializeError(dbError);
@@ -315,6 +337,30 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		logWarning('keez', `Could not fetch invoice ${response.externalId} from Keez: ${fetchErr.message}`, { tenantId, stackTrace: fetchErr.stack });
 	}
 
+	// Auto-validate invoice in Keez ONLY for recurring invoices (fully automated flow)
+	// Manual invoices always stay as Proforma (Draft) in Keez — user validates manually
+	const isRecurring = (event as any).isRecurring === true;
+	if (isRecurring) {
+		try {
+			await keezClient.validateInvoice(response.externalId);
+			logInfo('keez', `Invoice validated in Keez (Draft → Valid): ${response.externalId}`, { tenantId, action: 'keez_invoice_validated', metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
+
+			// Re-fetch invoice data after validation to get updated status
+			try {
+				keezInvoiceData = await keezClient.getInvoice(response.externalId);
+				const invoicesList = await keezClient.getInvoices({ count: 10, filter: `externalId eq '${response.externalId}'` });
+				if (invoicesList.data && invoicesList.data.length > 0) {
+					keezInvoiceHeader = invoicesList.data[0];
+				}
+			} catch (refetchErr) {
+				logWarning('keez', `Could not re-fetch invoice after validation: ${refetchErr instanceof Error ? refetchErr.message : refetchErr}`, { tenantId });
+			}
+		} catch (validateErr) {
+			const valErr = serializeError(validateErr);
+			logWarning('keez', `Failed to validate invoice in Keez (will remain as Proforma): ${valErr.message}`, { tenantId, action: 'keez_invoice_validate_failed', stackTrace: valErr.stack, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
+		}
+	}
+
 	// Calculate totals and extract data from Keez response
 	let updateData: any = {
 		keezInvoiceId: response.externalId,
@@ -336,7 +382,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		}
 	} else if (keezNumber) {
 		// If only number is available, use it with series from settings
-		if (settings.keezSeries) {
+		if (settings?.keezSeries) {
 			const keezInvoiceNumber = `${settings.keezSeries} ${keezNumber}`;
 			if (keezInvoiceNumber !== invoice.invoiceNumber) {
 				updateData.invoiceNumber = keezInvoiceNumber;

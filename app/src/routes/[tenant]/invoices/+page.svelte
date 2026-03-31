@@ -4,7 +4,8 @@
 		deleteInvoice,
 		markInvoiceAsPaid,
 		getInvoice,
-		sendInvoice
+		sendInvoice,
+		getInvoiceEmailLogs
 	} from '$lib/remotes/invoices.remote';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
@@ -51,6 +52,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { Switch } from '$lib/components/ui/switch';
+	import * as Popover from '$lib/components/ui/popover';
 	import InvoiceFilters from '$lib/components/invoice-filters.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import DownloadIcon from '@lucide/svelte/icons/download';
@@ -121,6 +123,10 @@ import { goto } from '$app/navigation';
 	const keezStatusQuery = getKeezStatus();
 	const keezStatus = $derived(keezStatusQuery.current);
 	const isKeezActive = $derived(keezStatus?.connected && keezStatus?.isActive);
+
+	// Email notification history per invoice
+	const emailLogsQuery = getInvoiceEmailLogs();
+	const emailLogsByInvoice = $derived(emailLogsQuery.current || {});
 
 	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 	const projectOptions = $derived([
@@ -705,6 +711,63 @@ import { goto } from '$app/navigation';
 														Keez Proformă
 													</Badge>
 												{/if}
+											{/if}
+											{#if emailLogsByInvoice[invoice.id]?.total > 0}
+											{@const emailStats = emailLogsByInvoice[invoice.id]}
+												<Popover.Root>
+													<Popover.Trigger>
+														{#snippet child({ props })}
+															<button {...props} class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors
+																{emailStats.failed > 0
+																	? 'border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-950/40 dark:text-red-400'
+																	: 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-400'}">
+																<MailIcon class="h-3 w-3" />
+																{emailStats.total}
+															</button>
+														{/snippet}
+													</Popover.Trigger>
+													<Popover.Content class="w-64 p-3" align="start">
+														<p class="mb-2 text-xs font-semibold text-muted-foreground">Notificări trimise</p>
+														<div class="space-y-1.5 text-xs">
+															{#if emailStats.types.invoice > 0}
+																<div class="flex items-center justify-between">
+																	<span class="text-muted-foreground">Factură trimisă</span>
+																	<span class="font-medium">{emailStats.types.invoice}x</span>
+																</div>
+															{/if}
+															{#if emailStats.types.reminder > 0}
+																<div class="flex items-center justify-between">
+																	<span class="text-muted-foreground">Reminder restanță</span>
+																	<span class="font-medium text-amber-600">{emailStats.types.reminder}x</span>
+																</div>
+															{/if}
+															{#if emailStats.types.paid > 0}
+																<div class="flex items-center justify-between">
+																	<span class="text-muted-foreground">Confirmare plată</span>
+																	<span class="font-medium text-green-600">{emailStats.types.paid}x</span>
+																</div>
+															{/if}
+															{#if emailStats.failed > 0}
+																<div class="flex items-center justify-between">
+																	<span class="text-red-500">Eșuate</span>
+																	<span class="font-medium text-red-600">{emailStats.failed}x</span>
+																</div>
+															{/if}
+															<div class="border-t pt-1.5 mt-1.5">
+																<div class="flex items-center justify-between text-muted-foreground">
+																	<span>Total</span>
+																	<span class="font-medium">{emailStats.completed} trimise / {emailStats.total} total</span>
+																</div>
+																{#if emailStats.lastSentAt}
+																	<div class="flex items-center justify-between text-muted-foreground mt-1">
+																		<span>Ultimul email</span>
+																		<span>{new Date(emailStats.lastSentAt).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+																	</div>
+																{/if}
+															</div>
+														</div>
+													</Popover.Content>
+												</Popover.Root>
 											{/if}
 										</div>
 

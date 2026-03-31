@@ -170,25 +170,132 @@ export async function mapInvoiceToKeez(
 	// Map partner data according to Keez API format
 	const countyCode = mapRomanianCounty(client.county, client.country);
 
-	// Determine country code and name
+	// Determine country code (ISO 3166-1 alpha-2) and name
 	const clientCountry = client.country || 'România';
 	const isRomania =
 		clientCountry === 'România' ||
 		clientCountry === 'RO' ||
 		clientCountry.toUpperCase() === 'ROMANIA';
-	const countryCode = isRomania ? 'RO' : undefined;
+
+	// Map country name (RO/EN) to ISO 3166-1 alpha-2 code
+	const mapCountryToISO = (country: string): string => {
+		const upper = country.toUpperCase().trim();
+		// Already an ISO code (2 letters)
+		if (/^[A-Z]{2}$/.test(upper)) return upper;
+		const countryISO: Record<string, string> = {
+			// Romanian names
+			'ROMÂNIA': 'RO', 'ROMANIA': 'RO',
+			'AFGANISTAN': 'AF', 'ALBANIA': 'AL', 'ALGERIA': 'DZ', 'ANDORRA': 'AD', 'ANGOLA': 'AO',
+			'ARGENTINA': 'AR', 'ARMENIA': 'AM', 'AUSTRALIA': 'AU', 'AUSTRIA': 'AT', 'AZERBAIDJAN': 'AZ',
+			'BAHRAIN': 'BH', 'BANGLADESH': 'BD', 'BARBADOS': 'BB', 'BELARUS': 'BY',
+			'BELGIA': 'BE', 'BELGIUM': 'BE', 'BELIZE': 'BZ', 'BENIN': 'BJ', 'BHUTAN': 'BT',
+			'BOLIVIA': 'BO', 'BOSNIA ȘI HERȚEGOVINA': 'BA', 'BOSNIA SI HERTEGOVINA': 'BA', 'BOSNIA AND HERZEGOVINA': 'BA',
+			'BOTSWANA': 'BW', 'BRAZILIA': 'BR', 'BRAZIL': 'BR', 'BRUNEI': 'BN',
+			'BULGARIA': 'BG', 'BURKINA FASO': 'BF', 'BURUNDI': 'BI',
+			'CAMBODGIA': 'KH', 'CAMBODIA': 'KH', 'CAMERUN': 'CM', 'CAMEROON': 'CM',
+			'CANADA': 'CA', 'CAPUL VERDE': 'CV', 'CAPE VERDE': 'CV',
+			'CEHIA': 'CZ', 'REPUBLICA CEHĂ': 'CZ', 'REPUBLICA CEHA': 'CZ', 'CZECH REPUBLIC': 'CZ', 'CZECHIA': 'CZ',
+			'CHILE': 'CL', 'CHINA': 'CN', 'CIPRU': 'CY', 'CYPRUS': 'CY',
+			'COLUMBIA': 'CO', 'COLOMBIA': 'CO', 'CONGO': 'CG',
+			'COSTA RICA': 'CR', 'CROAȚIA': 'HR', 'CROATIA': 'HR', 'CUBA': 'CU',
+			'DANEMARCA': 'DK', 'DENMARK': 'DK', 'DJIBOUTI': 'DJ', 'DOMINICA': 'DM',
+			'REPUBLICA DOMINICANĂ': 'DO', 'REPUBLICA DOMINICANA': 'DO', 'DOMINICAN REPUBLIC': 'DO',
+			'ECUADOR': 'EC', 'EGIPT': 'EG', 'EGYPT': 'EG', 'EL SALVADOR': 'SV',
+			'ELVEȚIA': 'CH', 'ELVETIA': 'CH', 'SWITZERLAND': 'CH',
+			'EMIRATELE ARABE UNITE': 'AE', 'UNITED ARAB EMIRATES': 'AE', 'UAE': 'AE',
+			'ERITREEA': 'ER', 'ESTONIA': 'EE', 'ETIOPIA': 'ET', 'ETHIOPIA': 'ET',
+			'FIJI': 'FJ', 'FILIPINE': 'PH', 'PHILIPPINES': 'PH',
+			'FINLANDA': 'FI', 'FINLAND': 'FI',
+			'FRANȚA': 'FR', 'FRANTA': 'FR', 'FRANCE': 'FR',
+			'GABON': 'GA', 'GAMBIA': 'GM', 'GEORGIA': 'GE',
+			'GERMANIA': 'DE', 'GERMANY': 'DE',
+			'GHANA': 'GH', 'GRECIA': 'GR', 'GREECE': 'GR', 'GRENADA': 'GD',
+			'GUATEMALA': 'GT', 'GUINEEA': 'GN', 'GUINEA': 'GN', 'GUYANA': 'GY',
+			'HAITI': 'HT', 'HONDURAS': 'HN', 'HONG KONG': 'HK',
+			'INDIA': 'IN', 'INDONEZIA': 'ID', 'INDONESIA': 'ID',
+			'IRAN': 'IR', 'IRAK': 'IQ', 'IRAQ': 'IQ',
+			'IRLANDA': 'IE', 'IRELAND': 'IE', 'ISLANDA': 'IS', 'ICELAND': 'IS',
+			'ISRAEL': 'IL', 'ITALIA': 'IT', 'ITALY': 'IT',
+			'JAMAICA': 'JM', 'JAPONIA': 'JP', 'JAPAN': 'JP', 'IORDANIA': 'JO', 'JORDAN': 'JO',
+			'KAZAHSTAN': 'KZ', 'KAZAKHSTAN': 'KZ', 'KENYA': 'KE', 'KÎRGÎZSTAN': 'KG', 'KYRGYZSTAN': 'KG',
+			'KOSOVO': 'XK', 'KUWAIT': 'KW',
+			'LAOS': 'LA', 'LETONIA': 'LV', 'LATVIA': 'LV', 'LIBAN': 'LB', 'LEBANON': 'LB',
+			'LIBERIA': 'LR', 'LIBIA': 'LY', 'LIBYA': 'LY',
+			'LIECHTENSTEIN': 'LI', 'LITUANIA': 'LT', 'LITHUANIA': 'LT',
+			'LUXEMBURG': 'LU', 'LUXEMBOURG': 'LU',
+			'MACAO': 'MO', 'MACEDONIA': 'MK', 'MACEDONIA DE NORD': 'MK', 'NORTH MACEDONIA': 'MK',
+			'MADAGASCAR': 'MG', 'MALAEZIA': 'MY', 'MALAYSIA': 'MY', 'MALDIVE': 'MV', 'MALDIVES': 'MV',
+			'MALI': 'ML', 'MALTA': 'MT', 'MAROC': 'MA', 'MOROCCO': 'MA',
+			'MAURITANIA': 'MR', 'MAURITIUS': 'MU',
+			'MEXIC': 'MX', 'MEXICO': 'MX',
+			'REPUBLICA MOLDOVA': 'MD', 'MOLDOVA': 'MD', 'MONACO': 'MC', 'MONGOLIA': 'MN',
+			'MUNTENEGRU': 'ME', 'MONTENEGRO': 'ME', 'MOZAMBIC': 'MZ', 'MOZAMBIQUE': 'MZ', 'MYANMAR': 'MM',
+			'NAMIBIA': 'NA', 'NEPAL': 'NP', 'NEW ZEALAND': 'NZ', 'NOUA ZEELANDĂ': 'NZ', 'NOUA ZEELANDA': 'NZ',
+			'NICARAGUA': 'NI', 'NIGER': 'NE', 'NIGERIA': 'NG',
+			'NORVEGIA': 'NO', 'NORWAY': 'NO',
+			'OLANDA': 'NL', 'NETHERLANDS': 'NL', 'ȚĂRILE DE JOS': 'NL', 'TARILE DE JOS': 'NL',
+			'OMAN': 'OM', 'PAKISTAN': 'PK', 'PANAMA': 'PA', 'PARAGUAY': 'PY', 'PERU': 'PE',
+			'POLONIA': 'PL', 'POLAND': 'PL',
+			'PORTUGALIA': 'PT', 'PORTUGAL': 'PT', 'QATAR': 'QA',
+			'MAREA BRITANIE': 'GB', 'REGATUL UNIT': 'GB', 'UNITED KINGDOM': 'GB', 'UK': 'GB', 'GREAT BRITAIN': 'GB', 'ENGLAND': 'GB',
+			'RUSIA': 'RU', 'RUSSIA': 'RU', 'RUSSIAN FEDERATION': 'RU', 'RWANDA': 'RW',
+			'ARABIA SAUDITĂ': 'SA', 'ARABIA SAUDITA': 'SA', 'SAUDI ARABIA': 'SA',
+			'SENEGAL': 'SN', 'SERBIA': 'RS', 'SINGAPORE': 'SG',
+			'SIRIA': 'SY', 'SYRIA': 'SY',
+			'SLOVACIA': 'SK', 'SLOVAKIA': 'SK', 'SLOVENIA': 'SI',
+			'SOMALIA': 'SO', 'AFRICA DE SUD': 'ZA', 'SOUTH AFRICA': 'ZA',
+			'COREEA DE SUD': 'KR', 'SOUTH KOREA': 'KR', 'KOREA': 'KR',
+			'SPANIA': 'ES', 'SPAIN': 'ES', 'SRI LANKA': 'LK',
+			'STATELE UNITE': 'US', 'STATELE UNITE ALE AMERICII': 'US', 'UNITED STATES': 'US', 'USA': 'US',
+			'SUDAN': 'SD', 'SUEDIA': 'SE', 'SWEDEN': 'SE',
+			'TAIWAN': 'TW', 'TANZANIA': 'TZ', 'THAILANDA': 'TH', 'THAILAND': 'TH',
+			'TUNISIA': 'TN', 'TURCIA': 'TR', 'TURKEY': 'TR', 'TÜRKIYE': 'TR', 'TURKMENISTAN': 'TM',
+			'UCRAINA': 'UA', 'UKRAINE': 'UA', 'UNGARIA': 'HU', 'HUNGARY': 'HU',
+			'URUGUAY': 'UY', 'UZBEKISTAN': 'UZ',
+			'VATICAN': 'VA', 'VENEZUELA': 'VE', 'VIETNAM': 'VN',
+			'ZAMBIA': 'ZM', 'ZIMBABWE': 'ZW',
+		};
+		return countryISO[upper] || 'RO';
+	};
+
+	const countryCode = mapCountryToISO(clientCountry);
 	const countryName = isRomania ? 'România' : clientCountry;
+
+	// EU member state codes (for taxAttribute logic)
+	const EU_COUNTRIES = new Set([
+		'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
+		'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+		'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
+	]);
+
+	// Determine taxAttribute per Keez docs:
+	// - Romania + plătitor TVA (CUI starts with RO): 'RO'
+	// - Romania + neplătitor TVA: undefined (empty)
+	// - Non-Romania: undefined (CUI already contains country prefix like CY10399119V)
+	const determineTaxAttribute = (): string | undefined => {
+		const cui = (client.cui || '').trim().toUpperCase();
+		const vatNum = (client.vatNumber || '').trim().toUpperCase();
+
+		if (isRomania) {
+			// Romanian client: RO prefix means VAT payer
+			if (cui.startsWith('RO') || vatNum.startsWith('RO')) return 'RO';
+			return undefined; // Non-VAT payer
+		}
+
+		// Non-Romanian: leave empty — CUI already has country prefix (e.g., CY10399119V)
+		return undefined;
+	};
 
 	const partner: KeezPartner = {
 		partnerName: client.name || 'Unknown Client', // Required field
 		identificationNumber: client.cui || undefined,
-		taxAttribute: client.vatNumber || undefined,
+		taxAttribute: determineTaxAttribute(),
 		registrationNumber: client.registrationNumber || undefined,
 		isLegalPerson: client.companyType !== null && client.companyType !== undefined, // Required field
-		countryCode: countryCode || 'RO', // Default to RO if not specified
+		countryCode, // ISO 3166-1 alpha-2 (e.g., RO, CY, DE)
 		countryName: countryName,
 		countyCode: countyCode,
-		countyName: countyCode ? getCountyName(countyCode) : client.county || undefined,
+		countyName: isRomania ? (countyCode ? getCountyName(countyCode) : client.county || undefined) : undefined,
 		cityName: client.city || undefined,
 		addressDetails: client.address || undefined,
 		postalCode: client.postalCode || undefined,
@@ -223,8 +330,10 @@ export async function mapInvoiceToKeez(
 	const referenceCurrencyCode = hasNonRONItems ? [...nonRONCurrencies][0] : undefined;
 	// exchangeRate is needed whenever any non-RON currency is involved
 	const needsExchangeRate = hasNonRONItems || !isRON;
+	// If all currencies are the same (e.g., EUR invoice with EUR items), no conversion needed
+	const allSameCurrency = !isRON && nonRONCurrencies.size <= 1 && [...nonRONCurrencies][0] === currency;
 	// Ensure we have a meaningful exchange rate when needed
-	if (needsExchangeRate && exchangeRate <= 1) {
+	if (needsExchangeRate && exchangeRate <= 1 && !allSameCurrency) {
 		// Try BNR rate from DB before using hardcoded fallback
 		const targetCurrency = referenceCurrencyCode || (isRON ? 'EUR' : currency);
 		const bnrRate = await getLatestBnrRate(targetCurrency);
@@ -240,7 +349,9 @@ export async function mapInvoiceToKeez(
 						itemExternalIds?.get(item.id) || item.keezItemExternalId || item.id;
 
 					// Use per-item tax rate if available, otherwise use invoice tax rate
-					const itemTaxRateCents = item.taxRate ?? invoice.taxRate ?? 1900;
+					// If taxApplicationType is 'none', force VAT to 0
+					const taxAppType = invoice.taxApplicationType || 'apply';
+					const itemTaxRateCents = taxAppType === 'none' ? 0 : (item.taxRate ?? invoice.taxRate ?? 1900);
 					const itemVatPercent = itemTaxRateCents / 100;
 
 					// Use item currency if available, otherwise use invoice currency
