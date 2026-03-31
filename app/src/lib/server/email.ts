@@ -459,9 +459,12 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		env.SMTP_USER ||
 		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
-	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
 
-	// Get invoice settings for logo
+	// Generate public view token and URL (accessible without authentication)
+	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
+
+	// Get invoice settings for logo and PDF
 	const [invoiceSettings] = await db
 		.select()
 		.from(table.invoiceSettings)
@@ -470,6 +473,33 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
+	// Generate PDF attachment
+	const lineItems = await db
+		.select()
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
+
+	let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
+	try {
+		const pdfBuffer = await generateInvoicePDF({
+			invoice,
+			lineItems,
+			tenant: tenant!,
+			client: client!,
+			displayInvoiceNumber,
+			invoiceLogo: invoiceSettings?.invoiceLogo || null
+		});
+		const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+		pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
+	} catch (pdfError) {
+		logWarning('email', 'Could not generate PDF attachment for invoice email', {
+			tenantId: invoice.tenantId,
+			metadata: { invoiceId, error: (pdfError as Error).message }
+		});
+	}
+
 	// Format amounts
 	const formatAmount = (cents: number | null | undefined, currency: string) => {
 		if (cents === null || cents === undefined) return 'N/A';
@@ -477,58 +507,79 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		return `${amount} ${currency}`;
 	};
 
+	// IBAN payment details
+	const ibanHtml = tenant?.iban
+		? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
+				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
+				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
+				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
+				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
+			</div>`
+		: '';
+
+	const ibanText = tenant?.iban
+		? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
+		: '';
+
+	const attachments = [
+		...(pdfAttachment ? [pdfAttachment] : []),
+		...(logoAttachment ? [logoAttachment] : [])
+	];
+
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
-		subject: `Invoice ${invoice.invoiceNumber} from ${tenantName}`,
-		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+		subject: `Factura ${invoice.invoiceNumber} de la ${tenantName}`,
+		...(attachments.length > 0 ? { attachments } : {}),
 		html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
 				<meta charset="utf-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Invoice ${invoice.invoiceNumber}</title>
+				<title>Factura ${invoice.invoiceNumber}</title>
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
 					${logoHtml}
-					<h1 style="color: #2563eb; margin-top: 0;">Invoice ${invoice.invoiceNumber}</h1>
-					<p>Dear ${client?.name || 'Valued Customer'},</p>
-					<p>Please find attached your invoice from <strong>${tenantName}</strong>.</p>
+					<h1 style="color: #2563eb; margin-top: 0;">Factura ${invoice.invoiceNumber}</h1>
+					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
+					<p>Va transmitem factura de la <strong>${tenantName}</strong>.</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
-						${invoice.issueDate ? `<p><strong>Issue Date:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
-						${invoice.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(invoice.dueDate)}</p>` : ''}
-						<p><strong>Total Amount:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Paid</p>' : ''}
+						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
+						${invoice.issueDate ? `<p><strong>Data emitere:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
+						${invoice.dueDate ? `<p><strong>Data scadenta:</strong> ${formatDateRo(invoice.dueDate)}</p>` : ''}
+						<p><strong>Total de plata:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
+						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Platita</p>' : ''}
 					</div>
+					${ibanHtml}
+					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
 					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Invoice</a>
+						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura Online</a>
 					</div>
-					${invoice.dueDate && invoice.status !== 'paid' ? `<p style="font-size: 14px; color: #666;">Payment is due by ${formatDateRo(invoice.dueDate)}.</p>` : ''}
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please don't hesitate to contact us.</p>
+					${invoice.dueDate && invoice.status !== 'paid' ? `<p style="font-size: 14px; color: #666;">Plata este scadenta la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
+					<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru intrebari, nu ezitati sa ne contactati.</p>
 				</div>
 			</body>
 			</html>
 		`,
 		text: `
-			Invoice ${invoice.invoiceNumber}
+			Factura ${invoice.invoiceNumber}
 
-			Dear ${client?.name || 'Valued Customer'},
+			Stimate/Stimata ${client?.name || 'Client'},
 
-			Please find your invoice from ${tenantName}.
+			Va transmitem factura de la ${tenantName}.
 
-			Invoice Number: ${invoice.invoiceNumber}
-			${invoice.issueDate ? `Issue Date: ${formatDateRo(invoice.issueDate)}\n` : ''}
-			${invoice.dueDate ? `Due Date: ${formatDateRo(invoice.dueDate)}\n` : ''}
-			Total Amount: ${formatAmount(invoice.totalAmount, invoice.currency)}
+			Numar factura: ${invoice.invoiceNumber}
+			${invoice.issueDate ? `Data emitere: ${formatDateRo(invoice.issueDate)}\n` : ''}
+			${invoice.dueDate ? `Data scadenta: ${formatDateRo(invoice.dueDate)}\n` : ''}
+			Total de plata: ${formatAmount(invoice.totalAmount, invoice.currency)}
+			${ibanText}
+			Vezi factura: ${invoiceUrl}
 
-			View invoice: ${invoiceUrl}
+			${invoice.dueDate && invoice.status !== 'paid' ? `Plata este scadenta la ${formatDateRo(invoice.dueDate)}.\n` : ''}
 
-			${invoice.dueDate && invoice.status !== 'paid' ? `Payment is due by ${formatDateRo(invoice.dueDate)}.\n` : ''}
-
-			If you have any questions, please don't hesitate to contact us.
+			Pentru intrebari, nu ezitati sa ne contactati.
 		`
 	};
 
@@ -543,7 +594,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 	try {
 		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
+		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
 		logInfo('email', 'Invoice email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
 	} catch (error) {
@@ -1349,7 +1400,10 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		env.SMTP_USER ||
 		'noreply@example.com';
 	const tenantName = tenant?.name || 'CRM';
-	const invoiceUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/invoices/${invoiceId}`;
+
+	// Generate public view token and URL (accessible without authentication)
+	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
 
 	// Get invoice settings for logo
 	const [invoiceSettings] = await db
@@ -1370,7 +1424,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 	const mailOptions = {
 		from: `"${tenantName}" <${fromEmail}>`,
 		to: clientEmail,
-		subject: `Payment Received: Invoice ${invoice.invoiceNumber}`,
+		subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
 		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
 		html: `
 			<!DOCTYPE html>
@@ -1378,46 +1432,46 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			<head>
 				<meta charset="utf-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Payment Received: Invoice ${invoice.invoiceNumber}</title>
+				<title>Plata primita: Factura ${invoice.invoiceNumber}</title>
 			</head>
 			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
 					${logoHtml}
-					<h1 style="color: #10b981; margin-top: 0;">Payment Received</h1>
-					<p>Dear ${client?.name || 'Valued Customer'},</p>
-					<p>We've received your payment for the following invoice:</p>
+					<h1 style="color: #10b981; margin-top: 0;">Plata primita</h1>
+					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
+					<p>Am primit plata pentru urmatoarea factura:</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
-						<p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
-						<p><strong>Amount Paid:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.paidDate ? `<p><strong>Payment Date:</strong> ${formatDateRo(invoice.paidDate)}</p>` : ''}
-						${invoice.issueDate ? `<p><strong>Invoice Date:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
+						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
+						<p><strong>Suma platita:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
+						${invoice.paidDate ? `<p><strong>Data plata:</strong> ${formatDateRo(invoice.paidDate)}</p>` : ''}
+						${invoice.issueDate ? `<p><strong>Data emitere:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
 					</div>
-					<p style="color: #10b981; font-weight: bold;">Thank you for your payment!</p>
+					<p style="color: #10b981; font-weight: bold;">Va multumim pentru plata!</p>
 					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Invoice</a>
+						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura</a>
 					</div>
-					<p style="font-size: 12px; color: #999;">If you have any questions, please don't hesitate to contact us.</p>
+					<p style="font-size: 12px; color: #999;">Pentru intrebari, nu ezitati sa ne contactati.</p>
 				</div>
 			</body>
 			</html>
 		`,
 		text: `
-			Payment Received
+			Plata primita
 
-			Dear ${client?.name || 'Valued Customer'},
+			Stimate/Stimata ${client?.name || 'Client'},
 
-			We've received your payment for the following invoice:
+			Am primit plata pentru urmatoarea factura:
 
-			Invoice Number: ${invoice.invoiceNumber}
-			Amount Paid: ${formatAmount(invoice.totalAmount, invoice.currency)}
-			${invoice.paidDate ? `Payment Date: ${formatDateRo(invoice.paidDate)}\n` : ''}
-			${invoice.issueDate ? `Invoice Date: ${formatDateRo(invoice.issueDate)}\n` : ''}
+			Numar factura: ${invoice.invoiceNumber}
+			Suma platita: ${formatAmount(invoice.totalAmount, invoice.currency)}
+			${invoice.paidDate ? `Data plata: ${formatDateRo(invoice.paidDate)}\n` : ''}
+			${invoice.issueDate ? `Data emitere: ${formatDateRo(invoice.issueDate)}\n` : ''}
 
-			Thank you for your payment!
+			Va multumim pentru plata!
 
-			View invoice: ${invoiceUrl}
+			Vezi factura: ${invoiceUrl}
 
-			If you have any questions, please don't hesitate to contact us.
+			Pentru intrebari, nu ezitati sa ne contactati.
 		`
 	};
 
@@ -1432,7 +1486,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 
 	try {
 		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
+		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
 		logInfo('email', 'Invoice paid email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
 	} catch (error) {
@@ -1638,7 +1692,7 @@ export async function sendOverdueReminderEmail(
 
 	try {
 		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
+		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
 		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
 		logInfo('email', 'Overdue reminder email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber } });
 	} catch (error) {
