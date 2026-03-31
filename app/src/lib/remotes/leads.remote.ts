@@ -352,17 +352,22 @@ export const addMetaAdsPage = command(
 			return { success: true, action: 'updated' };
 		}
 
-		await db.insert(table.metaAdsPage).values({
-			id: crypto.randomUUID(),
-			tenantId,
-			integrationId: data.integrationId,
-			metaPageId: data.metaPageId,
-			pageName: data.pageName || '',
-			pageAccessToken: data.pageAccessToken,
-			isMonitored: true,
-			createdAt: new Date(),
-			updatedAt: new Date()
-		});
+		try {
+			await db.insert(table.metaAdsPage).values({
+				id: crypto.randomUUID(),
+				tenantId,
+				integrationId: data.integrationId,
+				metaPageId: data.metaPageId,
+				pageName: data.pageName || '',
+				pageAccessToken: data.pageAccessToken,
+				isMonitored: true,
+				createdAt: new Date(),
+				updatedAt: new Date()
+			});
+		} catch (dbErr) {
+			console.error('[META-ADS] DB insert error for page:', data.metaPageId, dbErr);
+			throw dbErr;
+		}
 
 		return { success: true, action: 'added' };
 	}

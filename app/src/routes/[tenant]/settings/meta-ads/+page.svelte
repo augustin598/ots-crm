@@ -258,6 +258,7 @@
 			toast.success(`Pagina "${pg.pageName}" adăugată`);
 			pagesQuery.refetch();
 		} catch (e) {
+			console.error('[META-ADS] Error adding page:', e);
 			toast.error('Eroare la adăugarea paginii');
 		} finally {
 			addingPage = null;
