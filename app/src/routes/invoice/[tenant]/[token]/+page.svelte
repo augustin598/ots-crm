@@ -124,6 +124,8 @@
 
 			<!-- Line Items -->
 			{#if lineItems.length > 0}
+				{@const hasTax = invoice.taxApplicationType === 'apply' || (!invoice.taxApplicationType && invoice.taxAmount > 0)}
+				{@const itemCurrency = (lineItems[0]?.currency || invoice.invoiceCurrency || invoice.currency) as Currency}
 				<div class="border-b p-6">
 					<h3 class="mb-3 text-sm font-medium uppercase text-gray-500">Detalii</h3>
 					<div class="overflow-x-auto">
@@ -133,25 +135,63 @@
 									<th class="pb-2 pr-4">Descriere</th>
 									<th class="pb-2 pr-4 text-right">Cantitate</th>
 									<th class="pb-2 pr-4 text-right">Pret unitar</th>
+									<th class="pb-2 pr-4 text-right">Valoare</th>
+									{#if hasTax}
+										<th class="pb-2 pr-4 text-right">TVA</th>
+									{/if}
 									<th class="pb-2 text-right">Total</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each lineItems as item}
+									{@const vatRate = item.taxRate ? item.taxRate / 100 : 0}
+									{@const itemNet = item.amount || item.rate * item.quantity}
+									{@const itemVat = hasTax ? Math.round(itemNet * vatRate / 100) : 0}
+									{@const itemTotal = itemNet + itemVat}
+									{@const curr = (item.currency || invoice.invoiceCurrency || invoice.currency) as Currency}
 									<tr class="border-b last:border-0">
-										<td class="py-2 pr-4">{item.description}</td>
+										<td class="py-2 pr-4">
+											{item.description}
+											{#if item.note}
+												<p class="mt-0.5 text-xs text-gray-400 italic">{item.note}</p>
+											{/if}
+										</td>
 										<td class="py-2 pr-4 text-right">
 											{item.quantity}{item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ''}
 										</td>
 										<td class="py-2 pr-4 text-right">
-											{formatAmount(item.rate, (item.currency || invoice.currency) as Currency)}
+											{formatAmount(item.rate, curr)}
 										</td>
+										<td class="py-2 pr-4 text-right">
+											{formatAmount(itemNet, curr)}
+										</td>
+										{#if hasTax}
+											<td class="py-2 pr-4 text-right text-gray-500">
+												{vatRate > 0 ? `${vatRate}%` : '-'}
+											</td>
+										{/if}
 										<td class="py-2 text-right font-medium">
-											{formatAmount(item.amount, (item.currency || invoice.currency) as Currency)}
+											{formatAmount(itemTotal, curr)}
 										</td>
 									</tr>
 								{/each}
 							</tbody>
+							<tfoot>
+								<tr class="border-t">
+									<td colspan={hasTax ? 5 : 4} class="py-2 pr-4 text-right text-xs uppercase text-gray-500">Subtotal</td>
+									<td class="py-2 text-right font-medium">{formatAmount(invoice.amount, itemCurrency)}</td>
+								</tr>
+								{#if hasTax}
+									<tr>
+										<td colspan="5" class="py-1 pr-4 text-right text-xs uppercase text-gray-500">TVA</td>
+										<td class="py-1 text-right font-medium">{formatAmount(invoice.taxAmount, itemCurrency)}</td>
+									</tr>
+								{/if}
+								<tr class="border-t">
+									<td colspan={hasTax ? 5 : 4} class="py-2 pr-4 text-right text-sm font-semibold uppercase text-gray-700">Total de plata</td>
+									<td class="py-2 text-right text-lg font-bold text-gray-900">{formatAmount(invoice.totalAmount, itemCurrency)}</td>
+								</tr>
+							</tfoot>
 						</table>
 					</div>
 				</div>
