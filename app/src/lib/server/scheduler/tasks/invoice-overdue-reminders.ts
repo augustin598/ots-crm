@@ -34,6 +34,18 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 
 		for (const settings of enabledSettings) {
 			try {
+				// Check if SMTP email is configured and enabled for this tenant
+				const [emailConfig] = await db
+					.select()
+					.from(table.emailSettings)
+					.where(eq(table.emailSettings.tenantId, settings.tenantId))
+					.limit(1);
+
+				if (emailConfig && !emailConfig.isEnabled) {
+					logWarning('scheduler', 'Invoice overdue reminders: SMTP email is disabled for tenant, skipping', { tenantId: settings.tenantId });
+					continue;
+				}
+
 				const daysAfterDue = settings.overdueReminderDaysAfterDue ?? 3;
 				const repeatDays = settings.overdueReminderRepeatDays ?? 7;
 				const maxCount = settings.overdueReminderMaxCount ?? 3;
@@ -121,27 +133,39 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 
 						// Send reminder email to primary + secondary with invoices enabled
 						const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
+						let atLeastOneSent = false;
 						for (const recipientEmail of recipients) {
-							await sendOverdueReminderEmail(
-								invoice.id,
-								recipientEmail,
-								daysOverdue,
-								reminderCount + 1
-							);
+							try {
+								await sendOverdueReminderEmail(
+									invoice.id,
+									recipientEmail,
+									daysOverdue,
+									reminderCount + 1
+								);
+								atLeastOneSent = true;
+							} catch (recipientError) {
+								const { message } = serializeError(recipientError);
+								logWarning('scheduler', `Invoice overdue reminders: failed to send to ${recipientEmail} for invoice ${invoice.invoiceNumber}: ${message}`, { tenantId: settings.tenantId });
+							}
 						}
 
-						// Update invoice tracking + ensure status is 'overdue'
-						await db
-							.update(table.invoice)
-							.set({
-								overdueReminderCount: reminderCount + 1,
-								lastOverdueReminderAt: now,
-								...(invoice.status !== 'overdue' ? { status: 'overdue' as const } : {}),
-								updatedAt: now
-							})
-							.where(eq(table.invoice.id, invoice.id));
+						// Update invoice tracking only if at least one email was sent
+						if (atLeastOneSent) {
+							await db
+								.update(table.invoice)
+								.set({
+									overdueReminderCount: reminderCount + 1,
+									lastOverdueReminderAt: now,
+									...(invoice.status !== 'overdue' ? { status: 'overdue' as const } : {}),
+									updatedAt: now
+								})
+								.where(eq(table.invoice.id, invoice.id));
 
-						remindersSent++;
+							remindersSent++;
+						} else {
+							logError('scheduler', `Invoice overdue reminders: all recipients failed for invoice ${invoice.invoiceNumber}`, { tenantId: settings.tenantId, metadata: { invoiceId: invoice.id, recipientCount: recipients.length } });
+							errors.push({ invoiceId: invoice.id, error: 'All recipient emails failed' });
+						}
 						logInfo('scheduler', `Invoice overdue reminders: sent reminder #${reminderCount + 1} for invoice ${invoice.invoiceNumber} (${daysOverdue} days overdue)`, { tenantId: settings.tenantId, metadata: { invoiceId: invoice.id, reminderNumber: reminderCount + 1, daysOverdue } });
 					} catch (error) {
 						const { message, stack } = serializeError(error);

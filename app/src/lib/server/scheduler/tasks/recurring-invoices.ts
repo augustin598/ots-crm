@@ -25,20 +25,22 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			.from(table.recurringInvoice)
 			.where(and(...conditions));
 
-		// Filter out invoices that have ended
+		// Filter out invoices that have ended (endDate is exclusive — invoices stop BEFORE endDate)
 		const activeRecurringInvoices = recurringInvoices.filter((ri) => {
 			if (!ri.endDate) return true;
-			return new Date(ri.endDate) >= now;
+			return new Date(ri.endDate) > now;
 		});
 
 		let invoicesGenerated = 0;
 		const errors: Array<{ id: string; error: string }> = [];
 
-		// Generate invoice for each recurring invoice
+		// Generate invoice for each recurring invoice (sequential to avoid Keez number conflicts)
 		for (const recurringInvoice of activeRecurringInvoices) {
 			try {
+				logInfo('scheduler', `Generating recurring invoice ${invoicesGenerated + 1}/${activeRecurringInvoices.length}: template=${recurringInvoice.id}, client=${recurringInvoice.clientId}`, { tenantId: recurringInvoice.tenantId, action: 'recurring_generate_start' });
 				const result = await generateInvoiceFromRecurringTemplate(recurringInvoice.id);
 				invoicesGenerated++;
+				logInfo('scheduler', `Recurring invoice generated: template=${recurringInvoice.id}, invoiceId=${result?.invoiceId}`, { tenantId: recurringInvoice.tenantId, action: 'recurring_generate_done' });
 
 				// Auto-send email if enabled for this tenant
 				if (result?.invoiceId) {
@@ -95,6 +97,18 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 
 	if (!masterEnabled || !autoSendEnabled) return;
 
+	// Check if SMTP email is configured and enabled for this tenant
+	const [emailConfig] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenantId))
+		.limit(1);
+
+	if (emailConfig && !emailConfig.isEnabled) {
+		logWarning('scheduler', 'Recurring invoices: SMTP email is disabled for tenant, skipping auto-send', { tenantId, metadata: { invoiceId } });
+		return;
+	}
+
 	const [invoice] = await db
 		.select()
 		.from(table.invoice)
@@ -122,6 +136,7 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 	await db
 		.update(table.invoice)
 		.set({
+			status: 'sent',
 			lastEmailSentAt: new Date(),
 			lastEmailStatus: 'sent',
 			updatedAt: new Date()
