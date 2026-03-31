@@ -7,7 +7,8 @@ import type {
 	InvoicePaidEvent,
 	TaskAssignedEvent,
 	ContractSignedEvent,
-	SyncErrorEvent
+	SyncErrorEvent,
+	LeadsImportedEvent
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
 
@@ -143,6 +144,41 @@ export function registerNotificationHooks(): void {
 			);
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create sync.error notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Leads Imported ----
+	hooks.on('leads.imported', async (event: LeadsImportedEvent) => {
+		try {
+			if (event.imported === 0) return;
+
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, event.tenantId))
+				.limit(1);
+
+			const link = tenant ? `/${tenant.slug}/leads/facebook-ads` : undefined;
+			const sourceLabel = event.source === 'scheduled' ? 'automat' : 'manual';
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						type: 'system',
+						title: `${event.imported} leaduri noi importate`,
+						message: `Sync ${sourceLabel}: ${event.imported} noi, ${event.skipped} existente${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
+						link
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create leads.imported notification', {
 				tenantId: event.tenantId
 			});
 		}

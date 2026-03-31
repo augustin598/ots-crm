@@ -73,6 +73,15 @@ export type SyncErrorEvent = {
 	tenantId: string;
 };
 
+export type LeadsImportedEvent = {
+	type: 'leads.imported';
+	tenantId: string;
+	imported: number;
+	skipped: number;
+	errors: number;
+	source: 'manual' | 'scheduled';
+};
+
 export type HookEvent =
 	| InvoiceCreatedEvent
 	| InvoiceUpdatedEvent
@@ -81,7 +90,8 @@ export type HookEvent =
 	| InvoicePaidEvent
 	| TaskAssignedEvent
 	| ContractSignedEvent
-	| SyncErrorEvent;
+	| SyncErrorEvent
+	| LeadsImportedEvent;
 
 /**
  * Hook handler function type

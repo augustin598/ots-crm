@@ -31,7 +31,8 @@
 		addMetaAdsPage,
 		removeMetaAdsPage,
 		togglePageMonitoring,
-		triggerLeadSync
+		triggerLeadSync,
+		assignPageToClient
 	} from '$lib/remotes/leads.remote';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -217,6 +218,18 @@
 			await loadAccounts(integrationId);
 		} catch (e) {
 			clientLogger.apiError('meta_ads_assign_client', e);
+		}
+	}
+
+	async function handleAssignPageToClient(pageId: string, clientId: string) {
+		try {
+			await assignPageToClient({
+				pageId,
+				clientId: clientId || null
+			}).updates(pagesQuery);
+			toast.success('Client atribuit paginii');
+		} catch (e) {
+			clientLogger.apiError('meta_ads_assign_page_client', e);
 		}
 	}
 
@@ -666,6 +679,8 @@
 										<TableHead>Pagina</TableHead>
 										<TableHead>Business Manager</TableHead>
 										<TableHead>Status</TableHead>
+										<TableHead>Client</TableHead>
+										<TableHead>Leaduri</TableHead>
 										<TableHead>Ultimul Sync</TableHead>
 										<TableHead class="w-[120px]">Acțiuni</TableHead>
 									</TableRow>
@@ -687,6 +702,21 @@
 														Inactiv
 													</Badge>
 												{/if}
+											</TableCell>
+											<TableCell>
+												<Combobox
+													options={clientOptions}
+													value={pg.clientId || undefined}
+													placeholder="— Neatribuit —"
+													searchPlaceholder="Caută client..."
+													clearable={true}
+													clearLabel="— Neatribuit —"
+													class="max-w-[220px]"
+													onValueChange={(val) => handleAssignPageToClient(pg.id, String(val ?? ''))}
+												/>
+											</TableCell>
+											<TableCell>
+												<Badge variant="secondary">{pg.leadCount ?? 0}</Badge>
 											</TableCell>
 											<TableCell class="text-sm text-muted-foreground">{formatDate(pg.lastLeadSyncAt)}</TableCell>
 											<TableCell>

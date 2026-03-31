@@ -13,6 +13,7 @@ import { processContractLifecycle } from './tasks/contract-lifecycle';
 import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
+import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
@@ -75,7 +76,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	contract_lifecycle: processContractLifecycle,
 	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
-	tiktok_ads_spending_sync: processTiktokAdsSpendingSync
+	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
+	meta_ads_leads_sync: processMetaAdsLeadsSync
 };
 
 /**
@@ -358,7 +360,23 @@ export const startScheduler = () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 14 jobs registered`);
+	// Schedule Meta Ads lead sync every 4 hours
+	schedulerQueue.add(
+		'meta-ads-leads-sync',
+		{
+			type: 'meta_ads_leads_sync',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 */4 * * *', // Every 4 hours
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'meta-ads-leads-sync'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 15 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -383,7 +401,8 @@ export const JOB_LABELS: Record<string, string> = {
 	contract_lifecycle: 'Lifecycle Contracte',
 	google_ads_invoice_sync: 'Sync Facturi Google Ads',
 	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
-	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads'
+	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
+	meta_ads_leads_sync: 'Sync Leaduri Meta Ads'
 };
 
 /** Default params for jobs that need specific parameters */

@@ -3,13 +3,15 @@
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import BarChart2Icon from '@lucide/svelte/icons/bar-chart-2';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 
 	let { data }: { data: any } = $props();
 
@@ -99,9 +101,7 @@
 		<Card.Root>
 			<Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<Card.Title class="text-sm font-medium">Meta Ads</Card.Title>
-				<div class="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10">
-					<DollarSignIcon class="h-4 w-4 text-blue-500" />
-				</div>
+				<IconFacebook class="h-8 w-8" />
 			</Card.Header>
 			<Card.Content>
 				<div class="text-2xl font-bold">
@@ -115,9 +115,7 @@
 		<Card.Root>
 			<Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<Card.Title class="text-sm font-medium">Google Ads</Card.Title>
-				<div class="flex h-8 w-8 items-center justify-center rounded-md bg-green-500/10">
-					<DollarSignIcon class="h-4 w-4 text-green-500" />
-				</div>
+				<IconGoogleAds class="h-8 w-8" />
 			</Card.Header>
 			<Card.Content>
 				<div class="text-2xl font-bold">
@@ -131,9 +129,7 @@
 		<Card.Root>
 			<Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
 				<Card.Title class="text-sm font-medium">TikTok Ads</Card.Title>
-				<div class="flex h-8 w-8 items-center justify-center rounded-md bg-pink-500/10">
-					<DollarSignIcon class="h-4 w-4 text-pink-500" />
-				</div>
+				<IconTiktok class="h-8 w-8" />
 			</Card.Header>
 			<Card.Content>
 				<div class="text-2xl font-bold">

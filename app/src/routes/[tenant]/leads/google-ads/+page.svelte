@@ -52,11 +52,12 @@
 	async function loadLeads() {
 		loading = true;
 		try {
-			leads = await getLeads({
+			const result = await getLeads({
 				platform: 'google',
 				status: statusFilter || undefined,
 				search: search || undefined
 			});
+			leads = result.rows;
 		} catch (e) {
 			console.error('Failed to load leads:', e);
 		} finally {

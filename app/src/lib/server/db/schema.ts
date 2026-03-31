@@ -1630,6 +1630,7 @@ export const metaAdsPage = sqliteTable('meta_ads_page', {
 	metaPageId: text('meta_page_id').notNull(),
 	pageName: text('page_name').notNull().default(''),
 	pageAccessToken: text('page_access_token').notNull().default(''),
+	clientId: text('client_id').references(() => client.id),
 	isMonitored: boolean('is_monitored').notNull().default(true),
 	lastLeadSyncAt: timestamp('last_lead_sync_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })

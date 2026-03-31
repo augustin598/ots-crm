@@ -5,10 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError } from '$lib/server/logger';
 
 const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
-// Lead Ads scopes (leads_retrieval, pages_read_engagement, pages_show_list, pages_manage_ads)
-// require App Review approval in Meta Developer Console before they can be used.
-// Once approved, add them here: leads_retrieval,pages_read_engagement,pages_show_list,pages_manage_ads
-const SCOPES = 'ads_read,ads_management,business_management';
+const SCOPES = 'ads_read,ads_management,business_management,leads_retrieval,pages_read_engagement,pages_show_list,pages_manage_ads';
 
 /**
  * Generate Meta/Facebook OAuth2 authorization URL

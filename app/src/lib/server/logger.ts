@@ -32,7 +32,8 @@ export type LogSource =
 	| 'invoice-scraper'
 	| 'meta-scraper'
 	| 'google-scraper'
-	| 'tiktok-scraper';
+	| 'tiktok-scraper'
+	| 'meta-ads-leads';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
