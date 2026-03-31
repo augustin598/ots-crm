@@ -7,6 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
+import { logInfo } from '$lib/server/logger';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -553,6 +554,23 @@ export const createInvoice = command(
 			.from(table.invoiceLineItem)
 			.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
 
+		// Log Keez invoice creation
+		const keezLineItems = lineItems.filter((li) => li.keezItemExternalId);
+		if (keezLineItems.length > 0) {
+			logInfo('keez', `Factură creată cu ${keezLineItems.length}/${lineItems.length} articole Keez: ${fullInvoice.invoiceSeries} #${fullInvoice.invoiceNumber}`, {
+				tenantId: event.locals.tenant.id,
+				userId: event.locals.user.id,
+				action: 'keez_invoice_created',
+				metadata: {
+					invoiceId,
+					series: fullInvoice.invoiceSeries,
+					number: fullInvoice.invoiceNumber,
+					totalAmount: fullInvoice.totalAmount,
+					keezItems: keezLineItems.map((li) => ({ id: li.id, keezExternalId: li.keezItemExternalId, description: li.description }))
+				}
+			});
+		}
+
 		// Emit invoice.created hook (after database transaction)
 		// If hook fails, rollback by deleting the invoice
 		const hooks = getHooksManager();
@@ -895,9 +913,9 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 			// The email error is logged for debugging
 		}
 	} else if (!invoiceEmailsEnabled) {
-		console.log('Invoice emails are disabled for this tenant. Skipping email send.');
-		// When emails are disabled, we still mark as sent but don't set email tracking
-		updateData.lastEmailStatus = 'sent';
+		logInfo('email', 'Invoice emails are disabled for this tenant. Skipping email send.', { tenantId: event.locals.tenant.id });
+		// When emails are disabled, mark status as disabled (not sent)
+		updateData.lastEmailStatus = 'disabled';
 	} else if (!client?.email) {
 		// No email configured for client
 		updateData.lastEmailStatus = 'failed';
@@ -907,5 +925,87 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoiceId));
 
 	return { success: true };
+});
+
+/**
+ * Get email notification history for all invoices (grouped by invoiceId)
+ */
+export const getInvoiceEmailLogs = query(async () => {
+	const event = getRequestEvent();
+	const tenantId = event.locals.tenant.id;
+
+	const logs = await db
+		.select({
+			id: table.emailLog.id,
+			emailType: table.emailLog.emailType,
+			status: table.emailLog.status,
+			toEmail: table.emailLog.toEmail,
+			subject: table.emailLog.subject,
+			metadata: table.emailLog.metadata,
+			createdAt: table.emailLog.createdAt,
+			completedAt: table.emailLog.completedAt,
+			errorMessage: table.emailLog.errorMessage,
+		})
+		.from(table.emailLog)
+		.where(
+			and(
+				eq(table.emailLog.tenantId, tenantId),
+				inArray(table.emailLog.emailType, ['invoice', 'invoice-paid', 'invoice-overdue-reminder'])
+			)
+		)
+		.orderBy(desc(table.emailLog.createdAt));
+
+	// Group by invoiceId
+	const byInvoice = new Map<string, {
+		total: number;
+		completed: number;
+		failed: number;
+		types: { invoice: number; reminder: number; paid: number };
+		lastSentAt: Date | null;
+		logs: Array<{ emailType: string; status: string; toEmail: string; createdAt: Date; errorMessage: string | null }>;
+	}>();
+
+	for (const log of logs) {
+		let invoiceId: string | null = null;
+		if (log.metadata) {
+			try {
+				const meta = JSON.parse(log.metadata);
+				invoiceId = meta.invoiceId || null;
+			} catch {}
+		}
+		if (!invoiceId) continue;
+
+		if (!byInvoice.has(invoiceId)) {
+			byInvoice.set(invoiceId, {
+				total: 0, completed: 0, failed: 0,
+				types: { invoice: 0, reminder: 0, paid: 0 },
+				lastSentAt: null,
+				logs: []
+			});
+		}
+
+		const entry = byInvoice.get(invoiceId)!;
+		entry.total++;
+		if (log.status === 'completed') entry.completed++;
+		if (log.status === 'failed') entry.failed++;
+
+		if (log.emailType === 'invoice') entry.types.invoice++;
+		else if (log.emailType === 'invoice-overdue-reminder') entry.types.reminder++;
+		else if (log.emailType === 'invoice-paid') entry.types.paid++;
+
+		if (log.completedAt && (!entry.lastSentAt || new Date(log.completedAt) > new Date(entry.lastSentAt))) {
+			entry.lastSentAt = log.completedAt;
+		}
+
+		entry.logs.push({
+			emailType: log.emailType,
+			status: log.status,
+			toEmail: log.toEmail,
+			createdAt: log.createdAt,
+			errorMessage: log.errorMessage
+		});
+	}
+
+	return Object.fromEntries(byInvoice);
 });
 
