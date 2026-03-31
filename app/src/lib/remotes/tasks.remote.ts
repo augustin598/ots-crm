@@ -57,13 +57,18 @@ async function sendClientNotificationIfEnabled(
 
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
 		for (const recipientEmail of recipients) {
-			await sendTaskClientNotificationEmail(
-				taskId,
-				recipientEmail,
-				client.name || client.email,
-				notificationType,
-				extra
-			);
+			try {
+				await sendTaskClientNotificationEmail(
+					taskId,
+					recipientEmail,
+					client.name || client.email,
+					notificationType,
+					extra
+				);
+			} catch (error) {
+				console.error(`Failed to send client ${notificationType} notification to ${recipientEmail}:`, error);
+				// Continue with other recipients even if one fails
+			}
 		}
 	} catch (error) {
 		console.error(`Failed to send client notification (${notificationType}):`, error);
