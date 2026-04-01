@@ -127,6 +127,8 @@ export const requestMagicLink = command(
 		email: v.pipe(v.string(), v.email('Invalid email address'))
 	}),
 	async ({ tenantSlug, email }) => {
+		const startTime = Date.now();
+		console.log('[MAGIC_LINK_DEBUG] === Request started ===', { tenantSlug, email, timestamp: new Date().toISOString() });
 		try {
 			// Find tenant by slug
 			const [tenant] = await db
@@ -134,6 +136,8 @@ export const requestMagicLink = command(
 				.from(table.tenant)
 				.where(eq(table.tenant.slug, tenantSlug))
 				.limit(1);
+
+			console.log('[MAGIC_LINK_DEBUG] Tenant lookup:', { found: !!tenant, tenantId: tenant?.id, elapsed: Date.now() - startTime + 'ms' });
 
 			if (!tenant) {
 				throw new Error('Tenant not found');
@@ -145,6 +149,8 @@ export const requestMagicLink = command(
 				.from(table.client)
 				.where(and(eq(table.client.tenantId, tenant.id), eq(sql`lower(${table.client.email})`, email.toLowerCase())))
 				.limit(1);
+
+			console.log('[MAGIC_LINK_DEBUG] Primary email lookup:', { found: !!client, clientId: client?.id, elapsed: Date.now() - startTime + 'ms' });
 
 			// If not found by primary email, check secondary emails
 			if (!client) {
@@ -162,10 +168,11 @@ export const requestMagicLink = command(
 				if (secondary) {
 					client = secondary.client;
 				}
+				console.log('[MAGIC_LINK_DEBUG] Secondary email lookup:', { found: !!client, elapsed: Date.now() - startTime + 'ms' });
 			}
 
 			if (!client) {
-				// Don't reveal if client exists or not for security
+				console.log('[MAGIC_LINK_DEBUG] No client found, returning silent success');
 				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
@@ -188,17 +195,27 @@ export const requestMagicLink = command(
 				used: false
 			});
 
+			console.log('[MAGIC_LINK_DEBUG] Token stored in DB:', { tokenId, elapsed: Date.now() - startTime + 'ms' });
+
 			// Send magic link email
 			try {
 				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, client.name);
+				console.log('[MAGIC_LINK_DEBUG] Email sent successfully:', { elapsed: Date.now() - startTime + 'ms' });
 			} catch (emailError) {
-				console.error('Failed to send magic link email:', emailError);
+				console.error('[MAGIC_LINK_DEBUG] Failed to send email:', emailError);
 				throw new Error('Failed to send email. Please try again later.');
 			}
 
+			console.log('[MAGIC_LINK_DEBUG] === Returning success response ===', { elapsed: Date.now() - startTime + 'ms' });
 			return { success: true, message: 'Magic link sent to your email' };
 		} catch (error) {
-			console.error('Request magic link error:', error);
+			console.error('[MAGIC_LINK_DEBUG] === CAUGHT ERROR ===', {
+				type: typeof error,
+				name: error instanceof Error ? error.name : 'unknown',
+				message: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				elapsed: Date.now() - startTime + 'ms'
+			});
 			const message = error instanceof Error ? error.message : 'Request failed';
 			throw new Error(message);
 		}

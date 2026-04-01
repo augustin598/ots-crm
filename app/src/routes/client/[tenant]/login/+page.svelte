@@ -35,14 +35,27 @@
 		error = null;
 		success = false;
 
+		const t0 = performance.now();
+		console.log('[MAGIC_LINK_DEBUG] Client: sending request', { tenantSlug, email: email.trim(), timestamp: new Date().toISOString() });
+
 		try {
-			await requestMagicLink({
+			const result = await requestMagicLink({
 				tenantSlug,
 				email: email.trim()
 			});
+			console.log('[MAGIC_LINK_DEBUG] Client: success', { result, elapsed: Math.round(performance.now() - t0) + 'ms' });
 			success = true;
 			email = '';
 		} catch (e) {
+			console.error('[MAGIC_LINK_DEBUG] Client: ERROR caught', {
+				type: typeof e,
+				isError: e instanceof Error,
+				name: e instanceof Error ? e.name : undefined,
+				message: e instanceof Error ? e.message : String(e),
+				stack: e instanceof Error ? e.stack : undefined,
+				raw: JSON.stringify(e, Object.getOwnPropertyNames(e || {})),
+				elapsed: Math.round(performance.now() - t0) + 'ms'
+			});
 			error = e instanceof Error ? e.message : 'Request failed. Please try again.';
 		} finally {
 			loading = false;
