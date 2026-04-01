@@ -5,11 +5,13 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
-function getOAuth2Client() {
+const CALLBACK_PATH = '/api/google-ads/callback';
+
+function getOAuth2Client(redirectUri?: string) {
 	return new google.auth.OAuth2(
 		env.GOOGLE_CLIENT_ID,
 		env.GOOGLE_CLIENT_SECRET,
-		env.GOOGLE_ADS_REDIRECT_URI
+		redirectUri || env.GOOGLE_ADS_REDIRECT_URI
 	);
 }
 
@@ -21,15 +23,16 @@ const SCOPES = [
 /**
  * Generate Google Ads OAuth2 authorization URL
  */
-export function getOAuthUrl(state: string): string {
-	const oauth2Client = getOAuth2Client();
+export function getOAuthUrl(state: string, origin: string): string {
+	const redirectUri = `${origin}${CALLBACK_PATH}`;
+	const oauth2Client = getOAuth2Client(redirectUri);
 	const url = oauth2Client.generateAuthUrl({
 		access_type: 'offline',
 		scope: SCOPES,
 		prompt: 'consent',
 		state
 	});
-	logInfo('google-ads', 'OAuth: Generated auth URL', { metadata: { redirectUri: env.GOOGLE_ADS_REDIRECT_URI } });
+	logInfo('google-ads', 'OAuth: Generated auth URL', { metadata: { redirectUri } });
 	return url;
 }
 
@@ -40,10 +43,12 @@ export async function handleCallback(
 	code: string,
 	tenantId: string,
 	mccAccountId: string,
-	developerToken: string
+	developerToken: string,
+	origin: string
 ): Promise<{ email: string }> {
 	logInfo('google-ads', 'OAuth: handleCallback started', { tenantId });
-	const oauth2Client = getOAuth2Client();
+	const redirectUri = `${origin}${CALLBACK_PATH}`;
+	const oauth2Client = getOAuth2Client(redirectUri);
 
 	const { tokens } = await oauth2Client.getToken(code);
 	logInfo('google-ads', 'OAuth: Tokens received', { tenantId, metadata: { hasAccessToken: !!tokens.access_token, hasRefreshToken: !!tokens.refresh_token } });

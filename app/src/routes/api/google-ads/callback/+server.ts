@@ -36,7 +36,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			throw redirect(303, `/${tenantSlug}/settings/google-ads?error=${encodeURIComponent('MCC Account ID and Developer Token must be configured before connecting')}`);
 		}
 
-		await handleCallback(code, tenantId, mccAccountId, developerToken);
+		await handleCallback(code, tenantId, mccAccountId, developerToken, url.origin);
 		throw redirect(303, `/${tenantSlug}/settings/google-ads?success=true`);
 	} catch (err) {
 		// Don't catch redirect errors from SvelteKit

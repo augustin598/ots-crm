@@ -24,6 +24,6 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	// State format: "tenantId:tenantSlug" so callback can use both
-	const authUrl = getOAuthUrl(`${tenant.id}:${tenantSlug}`);
+	const authUrl = getOAuthUrl(`${tenant.id}:${tenantSlug}`, url.origin);
 	throw redirect(303, authUrl);
 };
