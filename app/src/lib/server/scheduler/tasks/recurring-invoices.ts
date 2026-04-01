@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lte } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
 import { sendInvoiceEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
@@ -12,12 +12,12 @@ import { logInfo, logWarning, logError, serializeError } from '$lib/server/logge
 export async function processRecurringInvoices(params: Record<string, any> = {}) {
 	try {
 		const now = new Date();
+		logInfo('scheduler', `Recurring invoices: checking at ${now.toISOString()}`, { action: 'recurring_start' });
 
 		// Find all active recurring invoices where nextRunDate <= now
-		// and (endDate is null or endDate >= now)
 		const conditions = [
 			eq(table.recurringInvoice.isActive, true),
-			lte(table.recurringInvoice.nextRunDate, now)
+			sql`${table.recurringInvoice.nextRunDate} <= ${now.toISOString()}`
 		];
 
 		const recurringInvoices = await db
@@ -30,6 +30,35 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			if (!ri.endDate) return true;
 			return new Date(ri.endDate) > now;
 		});
+
+		// Debug logging when no templates match
+		if (recurringInvoices.length === 0) {
+			const allTemplates = await db
+				.select({
+					id: table.recurringInvoice.id,
+					name: table.recurringInvoice.name,
+					isActive: table.recurringInvoice.isActive,
+					nextRunDate: table.recurringInvoice.nextRunDate,
+					endDate: table.recurringInvoice.endDate
+				})
+				.from(table.recurringInvoice);
+
+			logWarning('scheduler', `Recurring invoices: 0 templates matched. Total in DB: ${allTemplates.length}`, {
+				action: 'recurring_zero_debug',
+				metadata: {
+					totalTemplates: allTemplates.length,
+					activeCount: allTemplates.filter((t) => t.isActive).length,
+					samples: allTemplates.slice(0, 5).map((t) => ({
+						name: t.name,
+						isActive: t.isActive,
+						nextRunDate: t.nextRunDate?.toISOString?.() ?? String(t.nextRunDate),
+						endDate: t.endDate?.toISOString?.() ?? 'none'
+					}))
+				}
+			});
+		} else {
+			logInfo('scheduler', `Recurring invoices: ${recurringInvoices.length} matched query, ${activeRecurringInvoices.length} after endDate filter`, { action: 'recurring_query_result' });
+		}
 
 		let invoicesGenerated = 0;
 		const errors: Array<{ id: string; error: string }> = [];
@@ -61,7 +90,8 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			}
 		}
 
-		logInfo('scheduler', `Recurring invoices processed: ${invoicesGenerated} generated`, { metadata: { invoicesGenerated, errorCount: errors.length } });
+		const logFn = invoicesGenerated === 0 ? logWarning : logInfo;
+		logFn('scheduler', `Recurring invoices processed: ${invoicesGenerated} generated`, { metadata: { invoicesGenerated, errorCount: errors.length } });
 		if (errors.length > 0) {
 			logError('scheduler', `Recurring invoices: ${errors.length} errors`, { metadata: { errorCount: errors.length } });
 		}
@@ -129,19 +159,43 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 	}
 
 	const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
-	for (const recipientEmail of recipients) {
-		await sendInvoiceEmail(invoiceId, recipientEmail);
+	if (recipients.length === 0) {
+		logWarning('scheduler', `Recurring invoices: no notification recipients found for client ${client.name}, invoice ${invoice.invoiceNumber} not sent`, { tenantId, metadata: { invoiceId, clientId: invoice.clientId } });
+		return;
 	}
 
-	await db
-		.update(table.invoice)
-		.set({
-			status: 'sent',
-			lastEmailSentAt: new Date(),
-			lastEmailStatus: 'sent',
-			updatedAt: new Date()
-		})
-		.where(eq(table.invoice.id, invoiceId));
+	let sentCount = 0;
+	for (const recipientEmail of recipients) {
+		try {
+			await sendInvoiceEmail(invoiceId, recipientEmail);
+			sentCount++;
+		} catch (emailError) {
+			const { message, stack } = serializeError(emailError);
+			logError('scheduler', `Recurring invoices: failed to send to ${recipientEmail}: ${message}`, { tenantId, stackTrace: stack, metadata: { invoiceId } });
+		}
+	}
 
-	logInfo('scheduler', `Recurring invoices: auto-sent invoice ${invoice.invoiceNumber}`, { tenantId, metadata: { invoiceId, recipientCount: recipients.length } });
+	if (sentCount > 0) {
+		await db
+			.update(table.invoice)
+			.set({
+				status: 'sent',
+				lastEmailSentAt: new Date(),
+				lastEmailStatus: 'sent',
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, invoiceId));
+
+		logInfo('scheduler', `Recurring invoices: auto-sent invoice ${invoice.invoiceNumber} to ${sentCount}/${recipients.length} recipients`, { tenantId, metadata: { invoiceId, sentCount, totalRecipients: recipients.length } });
+	} else {
+		await db
+			.update(table.invoice)
+			.set({
+				lastEmailStatus: 'failed',
+				updatedAt: new Date()
+			})
+			.where(eq(table.invoice.id, invoiceId));
+
+		logError('scheduler', `Recurring invoices: all email sends failed for invoice ${invoice.invoiceNumber}`, { tenantId, metadata: { invoiceId, recipientCount: recipients.length } });
+	}
 }

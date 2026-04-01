@@ -304,9 +304,14 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 	// Try to load line items from lineItemsJson field first
 	if (recurringInvoice.lineItemsJson) {
 		try {
-			lineItems = JSON.parse(recurringInvoice.lineItemsJson);
+			const parsed = JSON.parse(recurringInvoice.lineItemsJson);
+			if (!Array.isArray(parsed) || parsed.length === 0) {
+				logWarning('server', `lineItemsJson is empty or not an array, will use fallback single item`, { tenantId: recurringInvoice.tenantId });
+			} else {
+				lineItems = parsed;
+			}
 		} catch (e) {
-			logWarning('server', `Failed to parse lineItemsJson`, { tenantId: recurringInvoice.tenantId, stackTrace: e instanceof Error ? e.stack : undefined });
+			logWarning('server', `Failed to parse lineItemsJson for template ${recurringInvoiceId}, will use fallback single item`, { tenantId: recurringInvoice.tenantId, stackTrace: e instanceof Error ? e.stack : undefined });
 		}
 	}
 
@@ -534,7 +539,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		projectId: recurringInvoice.projectId || null,
 		serviceId: recurringInvoice.serviceId || null,
 		invoiceNumber,
-		status: 'sent' as const, // Automatically set to 'sent' as per plan
+		status: 'draft' as const, // Created as draft; auto-send sets to 'sent' after email delivery
 		amount,
 		taxRate,
 		taxAmount,
@@ -560,89 +565,86 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		createdByUserId: recurringInvoice.createdByUserId
 	};
 
-	await db.insert(table.invoice).values(newInvoice);
-
-	// Create line items - always create at least one (required by SmartBill)
-	if (lineItems && lineItems.length > 0) {
-		// Create line items with updated prices
-		const lineItemsToInsert = lineItems.map((item) => {
-			// Rate is already in cents (from service/Keez fetch or stored value)
-			const itemRate = item.rate;
-			let itemSubtotal = Math.round(itemRate * item.quantity);
-
-			// Calculate item discount (match invoices.remote.ts pattern)
-			let itemDiscountCents: number | null = null;
-			if (item.discountType && item.discount !== undefined) {
-				if (item.discountType === 'percent') {
-					itemDiscountCents = Math.round((itemSubtotal * item.discount) / 100);
-				} else if (item.discountType === 'fixed') {
-					itemDiscountCents = Math.round(item.discount * 100); // Convert to cents
-				}
-				if (itemDiscountCents) {
-					itemSubtotal -= itemDiscountCents;
-				}
-			}
-
-			return {
-				id: generateInvoiceLineItemId(),
-				invoiceId,
-				serviceId: item.serviceId || null,
-				description: item.description,
-				quantity: item.quantity,
-				rate: itemRate,
-				amount: itemSubtotal,
-				taxRate: item.taxRate ? Math.round(item.taxRate * 100) : null,
-				discountType: item.discountType || null,
-				discount: itemDiscountCents,
-				note: item.note || null,
-				currency: item.currency || null,
-				unitOfMeasure: item.unitOfMeasure || null,
-				keezItemExternalId: item.keezItemExternalId || null
-			};
-		});
-
-		await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
-	} else {
-		// No line items in metadata (legacy recurring invoice) - create a single line item from amount
-		// This ensures SmartBill always receives at least one product
-		const lineItemToInsert = {
-			id: generateInvoiceLineItemId(),
-			invoiceId,
-			serviceId: recurringInvoice.serviceId || null,
-			description: recurringInvoice.name || 'Recurring Invoice Item',
-			quantity: 1,
-			rate: amount, // Already in cents
-			amount: amount,
-			taxRate: taxRate > 0 ? taxRate : null,
-			discountType: null,
-			discount: null,
-			note: null,
-			currency: recurringInvoice.currency || null,
-			unitOfMeasure: null,
-			keezItemExternalId: null
-		};
-
-		await db.insert(table.invoiceLineItem).values([lineItemToInsert]);
-	}
-
-	// Update recurring invoice: set lastRunDate and calculate nextRunDate
+	// Wrap invoice + line items + recurring update in a transaction
+	const previousLastRunDate = recurringInvoice.lastRunDate;
+	const previousNextRunDate = recurringInvoice.nextRunDate;
 	const nextRunDate = calculateNextRunDate(
 		now,
 		recurringInvoice.recurringType,
 		recurringInvoice.recurringInterval
 	);
 
-	const previousLastRunDate = recurringInvoice.lastRunDate;
-	const previousNextRunDate = recurringInvoice.nextRunDate;
+	await db.transaction(async (tx) => {
+		await tx.insert(table.invoice).values(newInvoice);
 
-	await db
-		.update(table.recurringInvoice)
-		.set({
-			lastRunDate: now,
-			nextRunDate,
-			updatedAt: new Date()
-		})
-		.where(eq(table.recurringInvoice.id, recurringInvoiceId));
+		// Create line items - always create at least one (required by SmartBill)
+		if (lineItems && lineItems.length > 0) {
+			const lineItemsToInsert = lineItems.map((item) => {
+				const itemRate = item.rate;
+				let itemSubtotal = Math.round(itemRate * item.quantity);
+
+				let itemDiscountCents: number | null = null;
+				if (item.discountType && item.discount !== undefined) {
+					if (item.discountType === 'percent') {
+						itemDiscountCents = Math.round((itemSubtotal * item.discount) / 100);
+					} else if (item.discountType === 'fixed') {
+						itemDiscountCents = Math.round(item.discount * 100);
+					}
+					if (itemDiscountCents) {
+						itemSubtotal -= itemDiscountCents;
+					}
+				}
+
+				return {
+					id: generateInvoiceLineItemId(),
+					invoiceId,
+					serviceId: item.serviceId || null,
+					description: item.description,
+					quantity: item.quantity,
+					rate: itemRate,
+					amount: itemSubtotal,
+					taxRate: item.taxRate ? Math.round(item.taxRate * 100) : null,
+					discountType: item.discountType || null,
+					discount: itemDiscountCents,
+					note: item.note || null,
+					currency: item.currency || null,
+					unitOfMeasure: item.unitOfMeasure || null,
+					keezItemExternalId: item.keezItemExternalId || null
+				};
+			});
+
+			await tx.insert(table.invoiceLineItem).values(lineItemsToInsert);
+		} else {
+			const lineItemToInsert = {
+				id: generateInvoiceLineItemId(),
+				invoiceId,
+				serviceId: recurringInvoice.serviceId || null,
+				description: recurringInvoice.name || 'Recurring Invoice Item',
+				quantity: 1,
+				rate: amount,
+				amount: amount,
+				taxRate: taxRate > 0 ? taxRate : null,
+				discountType: null,
+				discount: null,
+				note: null,
+				currency: recurringInvoice.currency || null,
+				unitOfMeasure: null,
+				keezItemExternalId: null
+			};
+
+			await tx.insert(table.invoiceLineItem).values([lineItemToInsert]);
+		}
+
+		// Update recurring invoice: set lastRunDate and calculate nextRunDate
+		await tx
+			.update(table.recurringInvoice)
+			.set({
+				lastRunDate: now,
+				nextRunDate,
+				updatedAt: new Date()
+			})
+			.where(eq(table.recurringInvoice.id, recurringInvoiceId));
+	});
 
 	// Get the saved invoice for hooks
 	const [savedInvoice] = await db

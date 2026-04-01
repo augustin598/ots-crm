@@ -453,7 +453,11 @@ export const updateRecurringInvoice = command(
 			updateData.recurringInterval !== undefined ||
 			updateData.startDate
 		) {
-			nextRunDate = calculateNextRunDate(startDate, recurringType, recurringInterval);
+			// If template hasn't run yet, first invoice should generate on startDate
+			// If it has already run, calculate next from startDate + interval
+			nextRunDate = existing.lastRunDate
+				? calculateNextRunDate(startDate, recurringType, recurringInterval)
+				: startDate;
 		}
 
 		await db

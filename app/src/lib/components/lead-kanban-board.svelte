@@ -5,8 +5,8 @@
 		LEAD_STATUSES,
 		LEAD_STATUS_LABELS,
 		LEAD_STATUS_COLORS,
+		LEAD_STATUS_DOT_COLORS,
 		getStatusBorderColor,
-		getColumnHeaderColor,
 		formatLeadDate
 	} from './lead-kanban-utils';
 
@@ -138,9 +138,12 @@
 		<div class="flex flex-col min-w-[240px]">
 			<!-- Column header -->
 			<div class="flex items-center justify-between mb-3 px-1">
-				<h3 class="font-semibold text-sm {getColumnHeaderColor(status)}">
-					{LEAD_STATUS_LABELS[status]}
-				</h3>
+				<div class="flex items-center gap-2">
+					<span class="h-2.5 w-2.5 rounded-full {LEAD_STATUS_DOT_COLORS[status]}"></span>
+					<h3 class="font-semibold text-sm text-foreground">
+						{LEAD_STATUS_LABELS[status]}
+					</h3>
+				</div>
 				<span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-xs font-medium {LEAD_STATUS_COLORS[status]}">
 					{statusLeads.length}
 				</span>

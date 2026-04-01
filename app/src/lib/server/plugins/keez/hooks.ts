@@ -288,8 +288,9 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	}
 
 	if (lastError) {
-		// All attempts failed — record the failure for manual retry
+		// All attempts failed — record the failure and throw so caller can rollback
 		const syncId = generateSyncId();
+		const errorMessage = lastError instanceof Error ? lastError.message : 'Failed to create invoice in Keez after retries';
 		try {
 			await db.insert(table.keezInvoiceSync).values({
 				id: syncId,
@@ -300,29 +301,30 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 				syncDirection: 'push',
 				lastSyncedAt: new Date(),
 				syncStatus: 'error',
-				errorMessage: lastError instanceof Error ? lastError.message : 'Failed to create invoice in Keez after retries'
+				errorMessage
 			});
 		} catch (dbError) {
 			const dbErr = serializeError(dbError);
 			logError('keez', `Failed to record sync error: ${dbErr.message}`, { tenantId, stackTrace: dbErr.stack });
 		}
-		return; // Exit hook gracefully
+		throw new Error(`Keez invoice sync failed after ${MAX_RETRY_ATTEMPTS} attempts: ${errorMessage}`);
 	}
+
+	// At this point response is guaranteed to be defined (lastError would have caused a throw above)
+	const keezResponse = response!;
 
 	// Fetch the created invoice from Keez to get all actual data (number, series, VAT, currency, dates, etc.)
 	let keezInvoiceData: any = null;
 	let keezInvoiceHeader: any = null;
 	try {
 		// Get full invoice data from Keez
-		keezInvoiceData = await keezClient.getInvoice(response.externalId);
+		keezInvoiceData = await keezClient.getInvoice(keezResponse.externalId);
 
 		// Also try to get invoice from list to get header with series/number
-		// Keez API might return invoice with series and number in the full invoice response
-		// or we might need to search for it in the list
 		try {
 			const invoicesList = await keezClient.getInvoices({
 				count: 100,
-				filter: `externalId eq '${response.externalId}'`
+				filter: `externalId eq '${keezResponse.externalId}'`
 			});
 
 			if (invoicesList.data && invoicesList.data.length > 0) {
@@ -334,7 +336,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		}
 	} catch (error) {
 		const fetchErr = serializeError(error);
-		logWarning('keez', `Could not fetch invoice ${response.externalId} from Keez: ${fetchErr.message}`, { tenantId, stackTrace: fetchErr.stack });
+		logWarning('keez', `Could not fetch invoice ${keezResponse.externalId} from Keez: ${fetchErr.message}`, { tenantId, stackTrace: fetchErr.stack });
 	}
 
 	// Auto-validate invoice in Keez ONLY for recurring invoices (fully automated flow)
@@ -342,13 +344,13 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	const isRecurring = (event as any).isRecurring === true;
 	if (isRecurring) {
 		try {
-			await keezClient.validateInvoice(response.externalId);
-			logInfo('keez', `Invoice validated in Keez (Draft → Valid): ${response.externalId}`, { tenantId, action: 'keez_invoice_validated', metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
+			await keezClient.validateInvoice(keezResponse.externalId);
+			logInfo('keez', `Invoice validated in Keez (Draft → Valid): ${keezResponse.externalId}`, { tenantId, action: 'keez_invoice_validated', metadata: { invoiceId: invoice.id, keezExternalId: keezResponse.externalId } });
 
 			// Re-fetch invoice data after validation to get updated status
 			try {
-				keezInvoiceData = await keezClient.getInvoice(response.externalId);
-				const invoicesList = await keezClient.getInvoices({ count: 10, filter: `externalId eq '${response.externalId}'` });
+				keezInvoiceData = await keezClient.getInvoice(keezResponse.externalId);
+				const invoicesList = await keezClient.getInvoices({ count: 10, filter: `externalId eq '${keezResponse.externalId}'` });
 				if (invoicesList.data && invoicesList.data.length > 0) {
 					keezInvoiceHeader = invoicesList.data[0];
 				}
@@ -357,14 +359,14 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			}
 		} catch (validateErr) {
 			const valErr = serializeError(validateErr);
-			logWarning('keez', `Failed to validate invoice in Keez (will remain as Proforma): ${valErr.message}`, { tenantId, action: 'keez_invoice_validate_failed', stackTrace: valErr.stack, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
+			logWarning('keez', `Failed to validate invoice in Keez (will remain as Proforma): ${valErr.message}`, { tenantId, action: 'keez_invoice_validate_failed', stackTrace: valErr.stack, metadata: { invoiceId: invoice.id, keezExternalId: keezResponse.externalId } });
 		}
 	}
 
 	// Calculate totals and extract data from Keez response
 	let updateData: any = {
-		keezInvoiceId: response.externalId,
-		keezExternalId: response.externalId,
+		keezInvoiceId: keezResponse.externalId,
+		keezExternalId: keezResponse.externalId,
 		keezStatus: keezInvoiceData?.status || keezInvoiceHeader?.status || 'Draft',
 		updatedAt: new Date()
 	};
@@ -525,26 +527,26 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// Update invoice with all Keez data
 	await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoice.id));
 
-	// Extract and save invoice line items from Keez
+	// Extract and save invoice line items from Keez (atomic delete+insert)
 	if (
 		keezInvoiceData?.invoiceDetails &&
 		Array.isArray(keezInvoiceData.invoiceDetails) &&
 		keezInvoiceData.invoiceDetails.length > 0
 	) {
 		try {
-			// Delete existing line items for this invoice (to avoid duplicates)
-			await db.delete(table.invoiceLineItem).where(eq(table.invoiceLineItem.invoiceId, invoice.id));
-
-			// Convert Keez invoice details to line items
 			const lineItemsData = mapKeezDetailsToLineItems(keezInvoiceData.invoiceDetails, invoice.id);
 
-			// Insert new line items with generated IDs
 			if (lineItemsData.length > 0) {
 				const lineItemsToInsert = lineItemsData.map((item) => ({
 					...item,
 					id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
 				}));
-				await db.insert(table.invoiceLineItem).values(lineItemsToInsert);
+
+				// Delete + insert in transaction to avoid leaving invoice without items
+				await db.transaction(async (tx) => {
+					await tx.delete(table.invoiceLineItem).where(eq(table.invoiceLineItem.invoiceId, invoice.id));
+					await tx.insert(table.invoiceLineItem).values(lineItemsToInsert);
+				});
 				logInfo('keez', `Added ${lineItemsToInsert.length} line items from Keez for invoice ${invoice.id}`, { tenantId });
 			}
 		} catch (error) {
@@ -567,15 +569,14 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		id: syncId,
 		invoiceId: invoice.id,
 		tenantId,
-		keezInvoiceId: response.externalId,
-		keezExternalId: response.externalId,
+		keezInvoiceId: keezResponse.externalId,
+		keezExternalId: keezResponse.externalId,
 		syncDirection: 'push',
 		lastSyncedAt: new Date(),
 		syncStatus: 'synced'
 	});
 
 	// Update invoice settings with last synced number
-	// Use the invoice number (not externalId) as the last synced number
 	const lastSyncedNumber = updatedInvoice?.invoiceNumber || invoice.invoiceNumber;
 	await db
 		.update(table.invoiceSettings)
@@ -594,7 +595,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		})
 		.where(eq(table.keezIntegration.id, integration.id));
 
-	logInfo('keez', `Successfully synced invoice ${invoice.id} to Keez with externalId: ${response.externalId}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: response.externalId } });
+	logInfo('keez', `Successfully synced invoice ${invoice.id} to Keez with externalId: ${keezResponse.externalId}`, { tenantId, metadata: { invoiceId: invoice.id, keezExternalId: keezResponse.externalId } });
 };
 
 /**

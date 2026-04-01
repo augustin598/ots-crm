@@ -14,7 +14,10 @@ import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { sql } from 'drizzle-orm';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
@@ -129,8 +132,17 @@ export function registerTask(type: string, handler: TaskHandler) {
 /**
  * Start the scheduler - sets up recurring jobs and starts the worker
  */
-export const startScheduler = () => {
+export const startScheduler = async () => {
 	logInfo('scheduler', 'Starting scheduler...');
+
+	// DB health check
+	try {
+		const [result] = await db.select({ count: sql<number>`count(*)` }).from(table.recurringInvoice);
+		logInfo('scheduler', `DB health check OK: ${result?.count ?? 0} recurring invoice templates`);
+	} catch (e) {
+		const { message, stack } = serializeError(e);
+		logError('scheduler', `DB health check FAILED — scheduler may not work correctly: ${message}`, { stackTrace: stack });
+	}
 
 	// Create scheduler worker
 	const worker = createSchedulerWorker();

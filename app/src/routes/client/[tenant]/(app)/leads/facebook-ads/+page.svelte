@@ -169,24 +169,6 @@
 			<p class="text-muted-foreground">Leaduri din campaniile Facebook & Instagram</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<div class="flex items-center gap-1 border rounded-md p-1">
-				<Button
-					variant={currentView === 'kanban' ? 'default' : 'ghost'}
-					size="sm"
-					onclick={() => switchView('kanban')}
-				>
-					<LayoutGridIcon class="h-4 w-4 mr-1" />
-					Kanban
-				</Button>
-				<Button
-					variant={currentView === 'table' ? 'default' : 'ghost'}
-					size="sm"
-					onclick={() => switchView('table')}
-				>
-					<TableIcon class="h-4 w-4 mr-1" />
-					Table
-				</Button>
-			</div>
 			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; loadLeads(); }} />
 			{#if clientPages.length > 1}
 				<select
@@ -207,7 +189,7 @@
 	</div>
 
 	<!-- Filters -->
-	<div class="flex flex-col sm:flex-row gap-3">
+	<div class="flex flex-col sm:flex-row gap-3 items-center">
 		<div class="relative flex-1 max-w-sm">
 			<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 			<Input
@@ -240,6 +222,24 @@
 				</Select.Content>
 			</Select.Root>
 		{/if}
+		<div class="flex items-center gap-1 border rounded-md p-1 ml-auto">
+			<Button
+				variant={currentView === 'kanban' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => switchView('kanban')}
+			>
+				<LayoutGridIcon class="h-4 w-4 mr-1" />
+				Kanban
+			</Button>
+			<Button
+				variant={currentView === 'table' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => switchView('table')}
+			>
+				<TableIcon class="h-4 w-4 mr-1" />
+				Table
+			</Button>
+		</div>
 	</div>
 
 	<!-- Content -->

@@ -133,10 +133,8 @@
 	async function handleSync() {
 		syncing = true;
 		try {
-			const result = await triggerLeadSync({ platform: 'facebook' });
+			const result = await triggerLeadSync({ platform: 'facebook' }).updates(getLeads(filterParams), getLastSyncInfo());
 			toast.success(`Sync finalizat: ${result.imported} noi, ${result.skipped} existente`);
-			leadsQuery.refetch();
-			syncInfoQuery.refetch();
 		} catch (e) {
 			toast.error('Sync eșuat');
 		} finally {
@@ -146,9 +144,8 @@
 
 	async function handleStatusChange(leadId: string, newStatus: string) {
 		try {
-			await updateLeadStatus({ leadId, status: newStatus as any });
+			await updateLeadStatus({ leadId, status: newStatus as any }).updates(getLeads(filterParams));
 			toast.success('Status actualizat');
-			leadsQuery.refetch();
 		} catch (e) {
 			toast.error('Eroare la actualizare status');
 		}
@@ -157,10 +154,9 @@
 	async function handleBulkStatus(newStatus: string) {
 		if (selectedIds.size === 0) return;
 		try {
-			await bulkUpdateLeadStatus({ leadIds: [...selectedIds], status: newStatus as any });
+			await bulkUpdateLeadStatus({ leadIds: [...selectedIds], status: newStatus as any }).updates(getLeads(filterParams));
 			toast.success(`${selectedIds.size} leaduri actualizate`);
 			selectedIds = new Set();
-			leadsQuery.refetch();
 		} catch (e) {
 			toast.error('Eroare la actualizare în masă');
 		}
@@ -231,24 +227,6 @@
 			</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<div class="flex items-center gap-1 border rounded-md p-1">
-				<Button
-					variant={view.current === 'kanban' ? 'default' : 'ghost'}
-					size="sm"
-					onclick={() => (view.current = 'kanban')}
-				>
-					<LayoutGridIcon class="h-4 w-4 mr-1" />
-					Kanban
-				</Button>
-				<Button
-					variant={view.current === 'table' ? 'default' : 'ghost'}
-					size="sm"
-					onclick={() => (view.current = 'table')}
-				>
-					<TableIcon class="h-4 w-4 mr-1" />
-					Table
-				</Button>
-			</div>
 			<DateRangePicker bind:since bind:until onchange={() => pageNum.set(1)} />
 			{#if monitoredPages.length > 0}
 				<div class="flex items-center gap-2">
@@ -277,7 +255,7 @@
 	</div>
 
 	<!-- Filters -->
-	<div class="flex flex-col sm:flex-row gap-3">
+	<div class="flex flex-col sm:flex-row gap-3 items-center">
 		<div class="relative flex-1 max-w-sm">
 			<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 			<Input
@@ -297,6 +275,24 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
+		<div class="flex items-center gap-1 border rounded-md p-1 ml-auto">
+			<Button
+				variant={view.current === 'kanban' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => (view.current = 'kanban')}
+			>
+				<LayoutGridIcon class="h-4 w-4 mr-1" />
+				Kanban
+			</Button>
+			<Button
+				variant={view.current === 'table' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => (view.current = 'table')}
+			>
+				<TableIcon class="h-4 w-4 mr-1" />
+				Table
+			</Button>
+		</div>
 	</div>
 
 	<!-- Bulk action bar (table view only) -->
