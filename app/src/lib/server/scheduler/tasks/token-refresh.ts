@@ -6,16 +6,16 @@ import { getAuthenticatedClient as getGoogleAdsAuth } from '$lib/server/google-a
 import { getAuthenticatedToken as getMetaAdsAuth } from '$lib/server/meta-ads/auth';
 import { getAuthenticatedToken as getTiktokAdsAuth } from '$lib/server/tiktok-ads/auth';
 import { createNotification } from '$lib/server/notifications';
-import { logInfo, logError } from '$lib/server/logger';
+import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { redis } from 'bun';
 
 // --- Helpers ---
 
 async function withRefreshLock<T>(integrationId: string, fn: () => Promise<T>): Promise<T | { skipped: true }> {
 	const lockKey = `token-refresh-lock:${integrationId}`;
-	const existing = await redis.get(lockKey);
-	if (existing) return { skipped: true };
-	await redis.setex(lockKey, 120, 'locked');
+	// Atomic SET NX EX — avoids TOCTOU race between get() and setex()
+	const acquired = await redis.send('SET', [lockKey, 'locked', 'NX', 'EX', '120']);
+	if (!acquired) return { skipped: true };
 	try {
 		return await fn();
 	} finally {
@@ -44,17 +44,25 @@ async function notifyTenantAdmins(tenantId: string, platform: string, link: stri
 				link
 			});
 		}
-	} catch {
-		// Never fail refresh loop for notification errors
+	} catch (err) {
+		logWarning('token-refresh', `Failed to notify admins for ${tenantId}/${platform}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
 	}
 }
 
+type IntegrationTable = typeof table.gmailIntegration | typeof table.googleAdsIntegration | typeof table.metaAdsIntegration | typeof table.tiktokAdsIntegration;
+
+/**
+ * Update refresh tracking columns and return the new consecutive failure count.
+ * On success, resets failures to 0. On failure, increments by 1.
+ */
 async function updateRefreshStatus(
-	schemaTable: typeof table.gmailIntegration | typeof table.googleAdsIntegration | typeof table.metaAdsIntegration | typeof table.tiktokAdsIntegration,
+	schemaTable: IntegrationTable,
 	integrationId: string,
 	success: boolean,
 	error?: string
-) {
+): Promise<number> {
 	try {
 		if (success) {
 			await db
@@ -66,6 +74,7 @@ async function updateRefreshStatus(
 					updatedAt: new Date()
 				})
 				.where(eq(schemaTable.id, integrationId));
+			return 0;
 		} else {
 			await db
 				.update(schemaTable)
@@ -76,23 +85,15 @@ async function updateRefreshStatus(
 					updatedAt: new Date()
 				})
 				.where(eq(schemaTable.id, integrationId));
+			// Read back the new value
+			const [row] = await db
+				.select({ failures: schemaTable.consecutiveRefreshFailures })
+				.from(schemaTable)
+				.where(eq(schemaTable.id, integrationId));
+			return row?.failures ?? 1;
 		}
 	} catch {
 		// Don't fail refresh for status update errors
-	}
-}
-
-async function getConsecutiveFailures(
-	schemaTable: typeof table.gmailIntegration | typeof table.googleAdsIntegration | typeof table.metaAdsIntegration | typeof table.tiktokAdsIntegration,
-	integrationId: string
-): Promise<number> {
-	try {
-		const [row] = await db
-			.select({ failures: schemaTable.consecutiveRefreshFailures })
-			.from(schemaTable)
-			.where(eq(schemaTable.id, integrationId));
-		return row?.failures ?? 0;
-	} catch {
 		return 0;
 	}
 }
@@ -130,8 +131,7 @@ async function refreshGmailTokens(results: RefreshResults) {
 			logError('token-refresh', `Gmail refresh failed for ${integration.tenantId}`, {
 				metadata: { error: msg }
 			});
-			await updateRefreshStatus(table.gmailIntegration, integration.id, false, msg);
-			const failures = await getConsecutiveFailures(table.gmailIntegration, integration.id);
+			const failures = await updateRefreshStatus(table.gmailIntegration, integration.id, false, msg);
 			if (failures >= 3) {
 				await notifyTenantAdmins(integration.tenantId, 'Gmail', 'facturi-furnizori?tab=gmail');
 			}
@@ -168,8 +168,7 @@ async function refreshGoogleAdsTokens(results: RefreshResults) {
 			logError('token-refresh', `Google Ads refresh failed for ${integration.tenantId}`, {
 				metadata: { error: msg }
 			});
-			await updateRefreshStatus(table.googleAdsIntegration, integration.id, false, msg);
-			const failures = await getConsecutiveFailures(table.googleAdsIntegration, integration.id);
+			const failures = await updateRefreshStatus(table.googleAdsIntegration, integration.id, false, msg);
 			if (failures >= 3) {
 				await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'invoices/google-ads');
 			}
@@ -193,25 +192,22 @@ async function refreshMetaAdsTokens(results: RefreshResults) {
 				continue;
 			}
 			if (result === null) {
+				// null = permanent failure (token revoked/invalid), notify immediately
 				results.deactivated++;
 				await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, 'Token exchange failed');
-				// Meta: notify only after 5+ failures (no refresh token, more tolerance needed)
-				const failures = await getConsecutiveFailures(table.metaAdsIntegration, integration.id);
-				if (failures >= 5) {
-					await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'invoices/meta-ads');
-				}
+				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'invoices/meta-ads');
 			} else {
 				results.refreshed++;
 				await updateRefreshStatus(table.metaAdsIntegration, integration.id, true);
 			}
 		} catch (err) {
+			// Transient error — notify only after 5+ consecutive failures (Meta has no refresh token)
 			results.failed++;
 			const msg = err instanceof Error ? err.message : String(err);
 			logError('token-refresh', `Meta Ads refresh failed for ${integration.tenantId}`, {
 				metadata: { error: msg }
 			});
-			await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, msg);
-			const failures = await getConsecutiveFailures(table.metaAdsIntegration, integration.id);
+			const failures = await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, msg);
 			if (failures >= 5) {
 				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'invoices/meta-ads');
 			}
@@ -248,8 +244,7 @@ async function refreshTiktokAdsTokens(results: RefreshResults) {
 			logError('token-refresh', `TikTok Ads refresh failed for ${integration.tenantId}`, {
 				metadata: { error: msg }
 			});
-			await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, false, msg);
-			const failures = await getConsecutiveFailures(table.tiktokAdsIntegration, integration.id);
+			const failures = await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, false, msg);
 			if (failures >= 3) {
 				await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'invoices/tiktok-ads');
 			}
