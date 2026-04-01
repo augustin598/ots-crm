@@ -7,6 +7,10 @@ import { logInfo, logWarning, logError, serializeError } from '$lib/server/logge
 
 const CALLBACK_PATH = '/api/google-ads/callback';
 
+function getAppOrigin(requestOrigin: string): string {
+	return env.PUBLIC_APP_URL || env.GOOGLE_ADS_REDIRECT_URI?.replace(CALLBACK_PATH, '') || requestOrigin;
+}
+
 function getOAuth2Client(redirectUri?: string) {
 	return new google.auth.OAuth2(
 		env.GOOGLE_CLIENT_ID,
@@ -24,7 +28,7 @@ const SCOPES = [
  * Generate Google Ads OAuth2 authorization URL
  */
 export function getOAuthUrl(state: string, origin: string): string {
-	const redirectUri = `${origin}${CALLBACK_PATH}`;
+	const redirectUri = `${getAppOrigin(origin)}${CALLBACK_PATH}`;
 	const oauth2Client = getOAuth2Client(redirectUri);
 	const url = oauth2Client.generateAuthUrl({
 		access_type: 'offline',
@@ -47,7 +51,7 @@ export async function handleCallback(
 	origin: string
 ): Promise<{ email: string }> {
 	logInfo('google-ads', 'OAuth: handleCallback started', { tenantId });
-	const redirectUri = `${origin}${CALLBACK_PATH}`;
+	const redirectUri = `${getAppOrigin(origin)}${CALLBACK_PATH}`;
 	const oauth2Client = getOAuth2Client(redirectUri);
 
 	const { tokens } = await oauth2Client.getToken(code);
