@@ -198,38 +198,43 @@ export async function getTenantTransporter(
 	}
 
 	// If tenant has email settings configured and enabled, use them
-	if (
-		emailSettings &&
-		emailSettings.isEnabled &&
-		emailSettings.smtpHost &&
-		emailSettings.smtpUser &&
-		emailSettings.smtpPassword
-	) {
-		try {
-			// Decrypt password
-			const decryptedPassword = decrypt(tenantId, emailSettings.smtpPassword);
-
-			// Create transporter with tenant-specific settings
-			const port = emailSettings.smtpPort || 587;
-			const secure = emailSettings.smtpSecure || port === 465;
-			const transporter = nodemailer.createTransport({
-				host: emailSettings.smtpHost,
-				port,
-				secure,
-				auth: {
-					user: emailSettings.smtpUser,
-					pass: decryptedPassword
-				},
-				tls: { rejectUnauthorized: false }
+	if (emailSettings) {
+		if (!emailSettings.isEnabled) {
+			logWarning('email', 'Tenant email settings exist but are disabled, skipping', { tenantId });
+			return null;
+		}
+		if (!emailSettings.smtpHost || !emailSettings.smtpUser || !emailSettings.smtpPassword) {
+			logWarning('email', 'Tenant email settings incomplete, falling back to default', {
+				tenantId,
+				metadata: { hasHost: !!emailSettings.smtpHost, hasUser: !!emailSettings.smtpUser, hasPassword: !!emailSettings.smtpPassword }
 			});
+		} else {
+			try {
+				// Decrypt password
+				const decryptedPassword = decrypt(tenantId, emailSettings.smtpPassword);
 
-			// Cache the transporter
-			tenantTransporters.set(tenantId, transporter);
-			logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
-			return transporter;
-		} catch (error) {
-			logError('email', 'Failed to create tenant transporter', { tenantId, stackTrace: serializeError(error).stack });
-			// Fall through to default transporter
+				// Create transporter with tenant-specific settings
+				const port = emailSettings.smtpPort || 587;
+				const secure = emailSettings.smtpSecure || port === 465;
+				const transporter = nodemailer.createTransport({
+					host: emailSettings.smtpHost,
+					port,
+					secure,
+					auth: {
+						user: emailSettings.smtpUser,
+						pass: decryptedPassword
+					},
+					tls: { rejectUnauthorized: false }
+				});
+
+				// Cache the transporter
+				tenantTransporters.set(tenantId, transporter);
+				logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
+				return transporter;
+			} catch (error) {
+				logError('email', 'Failed to create tenant transporter (password decryption may have failed). Re-save SMTP password in settings to fix.', { tenantId, stackTrace: serializeError(error).stack });
+				return null;
+			}
 		}
 	}
 
