@@ -181,5 +181,8 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 			break;
 	}
 
+	// Delete the failed log entry since a new successful one was created
+	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
+
 	return { success: true };
 });
