@@ -23,7 +23,6 @@
 	import LeadKanbanBoard from '$lib/components/lead-kanban-board.svelte';
 	import { LEAD_STATUS_LABELS, LEAD_STATUS_COLORS } from '$lib/components/lead-kanban-utils';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
-	import { getDefaultDateRange } from '$lib/utils/report-helpers';
 	import {
 		getLeads,
 		triggerLeadSync,
@@ -43,9 +42,8 @@
 	const pageNum = useQueryState('p', parseAsInteger.withDefault(1));
 	const view = useQueryState('view', parseAsStringEnum(['kanban', 'table']).withDefault('table'));
 
-	const defaults = getDefaultDateRange();
-	let since = $state(defaults.since);
-	let until = $state(defaults.until);
+	let since = $state('');
+	let until = $state('');
 
 	let pageSize = $state(25);
 	let syncing = $state(false);

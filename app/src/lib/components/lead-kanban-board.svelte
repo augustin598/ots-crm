@@ -72,6 +72,7 @@
 		isDragging = true;
 		e.dataTransfer!.effectAllowed = 'move';
 		e.dataTransfer!.dropEffect = 'move';
+		e.dataTransfer!.setData('text/plain', lead.id);
 		if (e.target) {
 			e.target.style.opacity = '0.5';
 		}

@@ -17,14 +17,13 @@
 	import LeadKanbanBoard from '$lib/components/lead-kanban-board.svelte';
 	import { LEAD_STATUS_LABELS, LEAD_STATUS_COLORS } from '$lib/components/lead-kanban-utils';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
-	import { getDefaultDateRange } from '$lib/utils/report-helpers';
-	import { getLeads, getMetaAdsPages } from '$lib/remotes/leads.remote';
+	import { getLeads, getMetaAdsPages, updateLeadStatus } from '$lib/remotes/leads.remote';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	const defaults = getDefaultDateRange();
-	let since = $state(defaults.since);
-	let until = $state(defaults.until);
+	let since = $state('');
+	let until = $state('');
 
 	let leads = $state<any[]>([]);
 	let kanbanLeads = $state<any[]>([]);
@@ -156,6 +155,16 @@
 		currentPage = 1;
 		loadLeads();
 	}
+
+	async function handleStatusChange(leadId: string, newStatus: string) {
+		try {
+			await updateLeadStatus({ leadId, status: newStatus as any });
+			toast.success('Status actualizat');
+			loadLeads();
+		} catch (e) {
+			toast.error('Eroare la actualizare status');
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -259,9 +268,10 @@
 		{:else}
 			<LeadKanbanBoard
 				leads={kanbanLeads}
-				readonly={true}
+				readonly={false}
 				{tenantSlug}
 				onLeadClick={(lead) => goto(`/client/${tenantSlug}/leads/${lead.id}`)}
+				onStatusChange={handleStatusChange}
 			/>
 		{/if}
 	{:else if loading && leads.length === 0}

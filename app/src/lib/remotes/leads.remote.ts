@@ -169,6 +169,13 @@ export const getLeadStats = query(async () => {
 		throw error(401, 'Unauthorized');
 	}
 
+	const conditions: any[] = [eq(table.lead.tenantId, event.locals.tenant.id)];
+
+	if (event.locals.isClientUser) {
+		if (!event.locals.client?.id) return [];
+		conditions.push(eq(table.lead.clientId, event.locals.client.id));
+	}
+
 	const rows = await db
 		.select({
 			platform: table.lead.platform,
@@ -176,7 +183,7 @@ export const getLeadStats = query(async () => {
 			count: sql<number>`count(*)`.as('count')
 		})
 		.from(table.lead)
-		.where(eq(table.lead.tenantId, event.locals.tenant.id))
+		.where(and(...conditions))
 		.groupBy(table.lead.platform, table.lead.status);
 
 	return rows;

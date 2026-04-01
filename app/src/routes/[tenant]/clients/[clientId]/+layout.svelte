@@ -50,7 +50,6 @@
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
 		{ id: 'marketing', label: 'Marketing', href: `/${tenantSlug}/clients/${clientId}/marketing` },
-		{ id: 'leads', label: 'Leads', href: `/${tenantSlug}/clients/${clientId}/leads` },
 		{ id: 'access-data', label: 'Date de acces', href: `/${tenantSlug}/clients/${clientId}/access-data` }
 	]);
 
