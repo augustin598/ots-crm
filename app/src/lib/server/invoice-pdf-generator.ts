@@ -10,6 +10,7 @@ interface TenantData {
 	vatNumber?: string | null;
 	legalRepresentative?: string | null;
 	iban?: string | null;
+	ibanEuro?: string | null;
 	bankName?: string | null;
 	address?: string | null;
 	city?: string | null;

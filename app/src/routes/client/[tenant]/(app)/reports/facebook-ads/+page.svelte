@@ -155,7 +155,7 @@
 					spend: 0, impressions: 0, reach: 0, frequency: 0, clicks: 0,
 					conversions: 0, conversionValue: 0, cpc: 0, cpm: 0, ctr: 0,
 					costPerConversion: 0, roas: 0, resultType: '', cpaLabel: 'CPA',
-					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
+					purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
 					status: ci.status, dailyBudget: ci.dailyBudget || null, lifetimeBudget: ci.lifetimeBudget || null, previewUrl: ci.previewUrl || null, startTime: ci.startTime || null, stopTime: ci.stopTime || null
 				});

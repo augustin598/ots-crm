@@ -184,8 +184,18 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 				}
 			};
 		} catch (err) {
-			logWarning('tiktok-ads', 'Token refresh failed, using existing token', {
-				metadata: { integrationId, error: err instanceof Error ? err.message : String(err) }
+			const message = err instanceof Error ? err.message : String(err);
+			const isExpired = integration.tokenExpiresAt && integration.tokenExpiresAt.getTime() < Date.now();
+
+			if (isExpired) {
+				logWarning('tiktok-ads', 'Token refresh failed and token already expired', {
+					metadata: { integrationId, error: message }
+				});
+				return null;
+			}
+
+			logWarning('tiktok-ads', 'Token refresh failed, using existing token (still valid)', {
+				metadata: { integrationId, error: message }
 			});
 		}
 	}

@@ -159,14 +159,14 @@ export const actions: Actions = {
 				await hooks.emit({
 					type: 'contract.signed',
 					contractId: contract.id,
-					contractTitle: contract.title || `Contract #${contract.contractNumber}`,
+					contractTitle: contract.contractTitle || `Contract #${contract.contractNumber}`,
 					signerEmail: signatureName, // using signer name as identifier
 					tenantId: contract.tenantId,
 					tenantSlug: tenant.slug
 				});
 			}
 		} catch (hookError) {
-			logError('server', 'Failed to emit contract.signed hook', { hookError });
+			logError('server', 'Failed to emit contract.signed hook', { metadata: { error: hookError instanceof Error ? hookError.message : String(hookError) } });
 			// Don't throw - signing should succeed even if notification fails
 		}
 

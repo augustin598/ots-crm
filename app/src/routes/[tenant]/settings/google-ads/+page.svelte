@@ -342,6 +342,10 @@
 										Sync Facturi
 									{/if}
 								</Button>
+								<Button variant="outline" onclick={handleConnect}>
+									<RefreshCw class="mr-2 h-4 w-4" />
+									Reconectează
+								</Button>
 								<Button variant="destructive" onclick={handleDisconnect} disabled={disconnecting}>
 									<Unlink class="mr-2 h-4 w-4" />
 									Deconectează

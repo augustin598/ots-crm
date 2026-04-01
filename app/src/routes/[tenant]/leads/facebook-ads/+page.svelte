@@ -263,7 +263,7 @@
 				oninput={handleSearchInput}
 			/>
 		</div>
-		<Select.Root onValueChange={(val) => statusFilter.set(val || null)}>
+		<Select.Root type="single" onValueChange={(val: string) => statusFilter.set(val || null)}>
 			<Select.Trigger class="w-[180px]">
 				{statusOptions.find((o) => o.value === (statusFilter.current || ''))?.label || 'Status'}
 			</Select.Trigger>
@@ -297,7 +297,7 @@
 	{#if view.current === 'table' && selectedIds.size > 0}
 		<div class="flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2">
 			<span class="text-sm font-medium">{selectedIds.size} selectate</span>
-			<Select.Root onValueChange={(val) => handleBulkStatus(val)}>
+			<Select.Root type="single" onValueChange={(val: string) => handleBulkStatus(val)}>
 				<Select.Trigger class="h-8 w-[180px]">
 					Schimbă status
 				</Select.Trigger>

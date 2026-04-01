@@ -208,7 +208,7 @@
 				oninput={handleSearchInput}
 			/>
 		</div>
-		<Select.Root onValueChange={handleFilterChange}>
+		<Select.Root type="single" onValueChange={handleFilterChange}>
 			<Select.Trigger class="w-[180px]">
 				{statusOptions.find((o) => o.value === statusFilter)?.label || 'Status'}
 			</Select.Trigger>
@@ -219,7 +219,7 @@
 			</Select.Content>
 		</Select.Root>
 		{#if clientPages.length > 1}
-			<Select.Root onValueChange={handlePageFilterChange}>
+			<Select.Root type="single" onValueChange={handlePageFilterChange}>
 				<Select.Trigger class="w-[220px]">
 					{clientPages.find((p: any) => p.id === pageFilter)?.pageName || 'Toate paginile'}
 				</Select.Trigger>

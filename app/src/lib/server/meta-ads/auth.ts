@@ -136,8 +136,24 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 			logInfo('meta-ads', 'Token refreshed', { metadata: { integrationId } });
 			return { accessToken, integration: { ...integration, accessToken, tokenExpiresAt } };
 		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			const isPermanent = message.includes('Error validating access token') ||
+				message.includes('has not authorized application') ||
+				message.includes('Session has expired');
+
+			if (isPermanent) {
+				logWarning('meta-ads', 'Token permanently invalid — deactivating integration', {
+					metadata: { integrationId, error: message }
+				});
+				await db
+					.update(table.metaAdsIntegration)
+					.set({ isActive: false, updatedAt: new Date() })
+					.where(eq(table.metaAdsIntegration.id, integrationId));
+				return null;
+			}
+
 			logWarning('meta-ads', 'Token refresh failed, using existing token', {
-				metadata: { integrationId, error: err instanceof Error ? err.message : String(err) }
+				metadata: { integrationId, error: message }
 			});
 		}
 	}

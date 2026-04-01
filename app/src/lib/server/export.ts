@@ -59,7 +59,7 @@ function escapeCsv(value: string): string {
  * NOTE: Cell styling (bold headers) requires SheetJS Pro.
  * Basic data export works perfectly with the community edition.
  */
-export function generateExcel(sheets: ExportSheet[]): Buffer {
+export function generateExcel(sheets: ExportSheet<any>[]): ArrayBuffer {
 	const workbook = XLSX.utils.book_new();
 
 	for (const sheet of sheets) {
@@ -81,10 +81,9 @@ export function generateExcel(sheets: ExportSheet[]): Buffer {
 		XLSX.utils.book_append_sheet(workbook, ws, sheet.name);
 	}
 
-	return Buffer.from(
-		XLSX.write(workbook, {
-			type: 'buffer',
-			bookType: 'xlsx'
-		})
-	);
+	const arrayBuffer: ArrayBuffer = XLSX.write(workbook, {
+		type: 'array',
+		bookType: 'xlsx'
+	});
+	return arrayBuffer;
 }

@@ -39,7 +39,7 @@
 		try {
 			const result = await triggerLeadSync({ platform: 'facebook' });
 			toast.success(`Sync finalizat: ${result.imported} noi, ${result.skipped} existente`);
-			statsQuery.refetch();
+			statsQuery.refresh();
 		} catch (e) {
 			toast.error('Sync eșuat');
 		} finally {

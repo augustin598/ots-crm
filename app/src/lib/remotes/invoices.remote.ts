@@ -932,7 +932,7 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
  */
 export const getInvoiceEmailLogs = query(async () => {
 	const event = getRequestEvent();
-	const tenantId = event.locals.tenant.id;
+	const tenantId = event.locals.tenant!.id;
 
 	const logs = await db
 		.select({

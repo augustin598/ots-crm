@@ -247,6 +247,7 @@
 					cpc: 0, cpm: 0, ctr: 0,
 					costPerConversion: 0, roas: 0,
 					resultType: '', cpaLabel: 'CPA',
+					purchases: 0, leads: 0,
 					linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
 					postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
 					status: ci.status,

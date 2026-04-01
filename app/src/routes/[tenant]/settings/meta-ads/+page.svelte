@@ -70,7 +70,7 @@
 
 	// Lead Pages
 	const pagesQuery = getMetaAdsPages();
-	const monitoredPages = $derived(pagesQuery.current || []);
+	const monitoredPages = $derived((pagesQuery.current || []) as Array<{ id: string; integrationId: string; metaPageId: string; pageName: string; isMonitored: boolean; lastLeadSyncAt: Date | null; clientId: string | null; businessName: string | null; clientName: string | null; leadCount: number }>);
 	let availablePages = $state<Array<{ pageId: string; pageName: string; pageAccessToken: string }>>([]);
 	let fetchingPages = $state(false);
 	let fetchingForIntegration = $state<string | null>(null);
@@ -269,7 +269,7 @@
 				pageAccessToken: pg.pageAccessToken
 			});
 			toast.success(`Pagina "${pg.pageName}" adăugată`);
-			pagesQuery.refetch();
+			pagesQuery.refresh();
 		} catch (e) {
 			console.error('[META-ADS] Error adding page:', e);
 			toast.error('Eroare la adăugarea paginii');
@@ -282,7 +282,7 @@
 		try {
 			await removeMetaAdsPage(pageId);
 			toast.success('Pagina eliminată');
-			pagesQuery.refetch();
+			pagesQuery.refresh();
 		} catch (e) {
 			toast.error('Eroare la eliminare');
 		}
@@ -292,7 +292,7 @@
 		try {
 			await togglePageMonitoring({ pageId, isMonitored: !isMonitored });
 			toast.success(isMonitored ? 'Monitorizare dezactivată' : 'Monitorizare activată');
-			pagesQuery.refetch();
+			pagesQuery.refresh();
 		} catch (e) {
 			toast.error('Eroare la actualizare');
 		}

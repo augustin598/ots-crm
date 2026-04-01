@@ -158,7 +158,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	}
 
 	// ---- Excel (multi-sheet) ----
-	const sheets: ExportSheet[] = [];
+	const sheets: ExportSheet<any>[] = [];
 	if (metaRows.length > 0) sheets.push({ name: 'Meta Ads', columns: metaColumns, data: metaRows });
 	if (tiktokRows.length > 0) sheets.push({ name: 'TikTok Ads', columns: tiktokColumns, data: tiktokRows });
 

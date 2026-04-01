@@ -129,19 +129,21 @@
 
 	// ---- Lifecycle ----
 
-	onMount(async () => {
-		try {
-			const [notifs, countData] = await Promise.all([
-				getNotifications({ limit: 20 }),
-				getUnreadCount()
-			]);
-			notifications = notifs;
-			unreadCount = countData.count;
-		} catch {
-			// silently fail — non-critical feature
-		} finally {
-			loading = false;
-		}
+	onMount(() => {
+		(async () => {
+			try {
+				const [notifs, countData] = await Promise.all([
+					getNotifications({ limit: 20 }),
+					getUnreadCount()
+				]);
+				notifications = notifs;
+				unreadCount = countData.count;
+			} catch {
+				// silently fail — non-critical feature
+			} finally {
+				loading = false;
+			}
+		})();
 
 		connectSSE();
 

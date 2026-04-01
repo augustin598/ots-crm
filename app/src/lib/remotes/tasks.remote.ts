@@ -618,7 +618,7 @@ export const updateTask = command(
 					tenantSlug: event.locals.tenant.slug
 				});
 			} catch (error) {
-				logError('server', 'Failed to emit task.assigned hook', { error });
+				logError('server', 'Failed to emit task.assigned hook', { metadata: { error: error instanceof Error ? error.message : String(error) } });
 				// Don't throw - task update should succeed even if notification fails
 			}
 		}

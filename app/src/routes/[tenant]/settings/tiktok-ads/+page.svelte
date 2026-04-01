@@ -231,15 +231,14 @@
 						Sync Toate
 					{/if}
 				</Button>
-				{#if connections.find((c: any) => c.lastSyncAt)}
-					{@const lastSync = connections.find((c: any) => c.lastSyncAt)}
+				{#each connections.filter((c: any) => c.lastSyncAt).slice(0, 1) as lastSync}
 					<p class="text-xs text-muted-foreground">
 						Sync: {formatDate(lastSync.lastSyncAt)}
 						{#if lastSync.lastSyncResults}
 							— {lastSync.lastSyncResults.imported ?? 0} noi, {lastSync.lastSyncResults.updated ?? 0} actualizate, {lastSync.lastSyncResults.errors ?? 0} erori
 						{/if}
 					</p>
-				{/if}
+				{/each}
 			</div>
 		{/if}
 	</div>
@@ -365,12 +364,10 @@
 
 								<div class="flex items-center gap-2 flex-wrap">
 									{#if conn.connected}
-										{#if conn.tokenExpired || conn.refreshTokenExpired}
-											<Button onclick={() => handleConnect(conn.id)}>
-												<RefreshCw class="mr-2 h-4 w-4" />
-												Reconectează
-											</Button>
-										{/if}
+										<Button variant="outline" onclick={() => handleConnect(conn.id)}>
+											<RefreshCw class="mr-2 h-4 w-4" />
+											Reconectează
+										</Button>
 										<Button variant="outline" onclick={() => handleFetchAccounts(conn.id)} disabled={fetchingAccountsFor === conn.id}>
 											{#if fetchingAccountsFor === conn.id}
 												<RefreshCw class="mr-2 h-4 w-4 animate-spin" />

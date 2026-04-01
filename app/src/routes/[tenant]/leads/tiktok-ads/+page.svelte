@@ -119,7 +119,7 @@
 				oninput={handleSearchInput}
 			/>
 		</div>
-		<Select.Root onValueChange={handleFilterChange}>
+		<Select.Root type="single" onValueChange={handleFilterChange}>
 			<Select.Trigger class="w-[180px]">
 				{statusOptions.find((o) => o.value === statusFilter)?.label || 'Status'}
 			</Select.Trigger>
@@ -175,7 +175,7 @@
 							</Table.Cell>
 							<Table.Cell class="text-sm text-muted-foreground">{formatDate(lead.externalCreatedAt)}</Table.Cell>
 							<Table.Cell>
-								<Select.Root onValueChange={(val) => { handleStatusChange(lead.id, val); }}>
+								<Select.Root type="single" onValueChange={(val: string) => { handleStatusChange(lead.id, val); }}>
 									<Select.Trigger class="h-7 w-7 p-0 border-0 shadow-none" onclick={(e) => e.stopPropagation()}>
 										<span class="sr-only">Status</span>
 										<span class="text-xs">&#8942;</span>

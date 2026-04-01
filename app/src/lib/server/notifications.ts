@@ -19,7 +19,7 @@ export interface CreateNotificationParams {
 	type: NotificationType;
 	title: string;
 	message: string;
-	link?: string;
+	link?: string | null;
 	metadata?: Record<string, unknown>;
 }
 
@@ -79,7 +79,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 	const controller = sseControllers.get(params.userId);
 	if (controller) {
 		try {
-			const notif: table.Notification = { ...newNotification, createdAt: new Date() };
+			const notif = { ...newNotification, link: newNotification.link ?? null, isRead: newNotification.isRead ?? false, metadata: newNotification.metadata ?? null, createdAt: new Date() } satisfies table.Notification;
 			controller.enqueue(formatSSEEvent('notification', notif));
 		} catch {
 			// Controller may be closed — remove it silently

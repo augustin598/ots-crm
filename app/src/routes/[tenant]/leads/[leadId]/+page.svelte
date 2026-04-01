@@ -161,7 +161,7 @@
 				</div>
 			</div>
 			<div class="flex items-center gap-2">
-				<Select.Root onValueChange={handleStatusChange}>
+				<Select.Root type="single" onValueChange={handleStatusChange}>
 					<Select.Trigger class="w-[160px]">
 						Schimbă status
 					</Select.Trigger>
@@ -276,7 +276,7 @@
 							</Card.Title>
 						</Card.Header>
 						<Card.Content>
-							<Select.Root onValueChange={handleLinkClient}>
+							<Select.Root type="single" onValueChange={handleLinkClient}>
 								<Select.Trigger class="w-full">
 									Selectează client...
 								</Select.Trigger>

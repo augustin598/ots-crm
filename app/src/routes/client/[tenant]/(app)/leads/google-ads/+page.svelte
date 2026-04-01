@@ -107,7 +107,7 @@
 				oninput={handleSearchInput}
 			/>
 		</div>
-		<Select.Root onValueChange={handleFilterChange}>
+		<Select.Root type="single" onValueChange={handleFilterChange}>
 			<Select.Trigger class="w-[180px]">
 				{statusOptions.find((o) => o.value === statusFilter)?.label || 'Status'}
 			</Select.Trigger>
