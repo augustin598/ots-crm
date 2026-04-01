@@ -11,6 +11,7 @@ export type NotificationType =
 	| 'invoice.paid'
 	| 'contract.signed'
 	| 'sync.error'
+	| 'integration.auth_expired'
 	| 'system';
 
 export interface CreateNotificationParams {

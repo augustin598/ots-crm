@@ -14,6 +14,7 @@ import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
+import { processTokenRefresh } from './tasks/token-refresh';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -80,7 +81,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
-	meta_ads_leads_sync: processMetaAdsLeadsSync
+	meta_ads_leads_sync: processMetaAdsLeadsSync,
+	token_refresh: processTokenRefresh
 };
 
 /**
@@ -388,7 +390,39 @@ export const startScheduler = async () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 15 jobs registered`);
+	// Token refresh — frequent (every 45 min) for Google/Gmail (1h token lifetime)
+	schedulerQueue.add(
+		'token-refresh-frequent',
+		{
+			type: 'token_refresh',
+			params: { platforms: ['gmail', 'google_ads'] }
+		},
+		{
+			repeat: {
+				pattern: '*/45 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'token-refresh-frequent'
+		}
+	);
+
+	// Token refresh — every 6 hours for Meta/TikTok (24h-60d token lifetime)
+	schedulerQueue.add(
+		'token-refresh-daily',
+		{
+			type: 'token_refresh',
+			params: { platforms: ['meta_ads', 'tiktok_ads'] }
+		},
+		{
+			repeat: {
+				pattern: '30 */6 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'token-refresh-daily'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 17 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -414,7 +448,8 @@ export const JOB_LABELS: Record<string, string> = {
 	google_ads_invoice_sync: 'Sync Facturi Google Ads',
 	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
-	meta_ads_leads_sync: 'Sync Leaduri Meta Ads'
+	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
+	token_refresh: 'Refresh Token-uri Integrări'
 };
 
 /** Default params for jobs that need specific parameters */

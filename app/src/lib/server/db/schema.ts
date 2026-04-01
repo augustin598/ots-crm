@@ -1344,6 +1344,9 @@ export const gmailIntegration = sqliteTable('gmail_integration', {
 	customMonitoredEmails: text('custom_monitored_emails'), // JSON: [{label: string, value: string}]
 	monitoredSupplierIds: text('monitored_supplier_ids'), // JSON: string[] (supplier IDs)
 	excludeEmails: text('exclude_emails'), // JSON: string[] (email/domain patterns)
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1396,6 +1399,9 @@ export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	googleSessionCookies: text('google_session_cookies'), // AES-256-GCM encrypted Google session cookies
 	googleSessionStatus: text('google_session_status').notNull().default('none'), // 'none' | 'active'
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1496,6 +1502,9 @@ export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	fbSessionCookies: text('fb_session_cookies'), // AES-256-GCM encrypted Facebook session cookies
 	fbSessionStatus: text('fb_session_status').notNull().default('none'), // 'none' | 'active'
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1694,6 +1703,9 @@ export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	ttSessionCookies: text('tt_session_cookies'), // AES-256-GCM encrypted TikTok session cookies
 	ttSessionStatus: text('tt_session_status').notNull().default('none'), // 'none' | 'active'
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
