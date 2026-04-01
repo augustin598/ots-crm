@@ -142,6 +142,9 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 
 	const metadata = log.metadata ? JSON.parse(log.metadata) : {};
 
+	// Delete the old failed log entry before retrying — the send function creates a new log
+	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
+
 	switch (log.emailType) {
 		case 'invoice':
 			await sendInvoiceEmail(metadata.invoiceId, log.toEmail);
@@ -180,9 +183,6 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 			await sendTaskReminderEmail(metadata.taskId, log.toEmail);
 			break;
 	}
-
-	// Delete the failed log entry since a new successful one was created
-	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
 
 	return { success: true };
 });
