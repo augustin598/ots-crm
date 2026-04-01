@@ -166,14 +166,17 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		let chromePath: string;
 		try {
 			chromePath = findChromePath();
+			console.log(`[SCRAPER-DEBUG] Chrome found at: ${chromePath}`);
 		} catch (e) {
 			const { message, stack } = serializeError(e);
+			console.error(`[SCRAPER-DEBUG] Chrome not found:`, message, stack);
 			logError('invoice-scraper', `Chrome not found: ${message}`, {
 				stackTrace: stack
 			});
 			throw e;
 		}
 
+		console.log(`[SCRAPER-DEBUG] Launching interactive browser at ${chromePath}`);
 		logInfo('invoice-scraper', `Launching interactive browser`, {
 			metadata: { chromePath }
 		});
@@ -203,10 +206,12 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		state.browser = browser;
 		state.launching = null;
 		resetInteractiveIdleTimer();
+		console.log(`[SCRAPER-DEBUG] Interactive browser launched successfully`);
 		logInfo('invoice-scraper', 'Interactive browser launched successfully');
 		return browser;
 	})().catch((err) => {
 		state.launching = null;
+		console.error(`[SCRAPER-DEBUG] Browser launch FAILED:`, err instanceof Error ? err.message : String(err), err instanceof Error ? err.stack : '');
 		logError(
 			'invoice-scraper',
 			`Browser launch failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -276,9 +281,12 @@ export async function createSession(
 	integrationId: string
 ): Promise<string> {
 	const sessionId = generateSessionId();
+	console.log(`[SCRAPER-DEBUG] createSession: ${sessionId}, platform=${platform}, tenantId=${tenantId}`);
 
 	const browser = await launchInteractiveBrowser();
+	console.log(`[SCRAPER-DEBUG] Browser obtained, creating new page...`);
 	const page = await browser.newPage();
+	console.log(`[SCRAPER-DEBUG] New page created`);
 
 	// Stealth settings
 	await page.setUserAgent(USER_AGENT);

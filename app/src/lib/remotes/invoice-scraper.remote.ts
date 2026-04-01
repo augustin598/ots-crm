@@ -41,12 +41,19 @@ export const startScraperSession = command(
 	}),
 	async (data) => {
 		const { tenantId } = requireAdmin();
-		const sessionId = await createSession(
-			data.platform as ScraperPlatform,
-			tenantId,
-			data.integrationId
-		);
-		return { sessionId };
+		console.log(`[SCRAPER-DEBUG] startScraperSession called: platform=${data.platform}, tenantId=${tenantId}, integrationId=${data.integrationId}`);
+		try {
+			const sessionId = await createSession(
+				data.platform as ScraperPlatform,
+				tenantId,
+				data.integrationId
+			);
+			console.log(`[SCRAPER-DEBUG] Session created: ${sessionId}`);
+			return { sessionId };
+		} catch (err) {
+			console.error(`[SCRAPER-DEBUG] createSession failed:`, err);
+			throw err;
+		}
 	}
 );
 
