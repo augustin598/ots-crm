@@ -155,6 +155,23 @@ export const handleError: import('@sveltejs/kit').HandleServerError = async ({ e
 	const serialized = serializeError(error);
 	const requestId = crypto.randomUUID();
 
+	// Debug: log full error details for client auth routes
+	if (event.url.pathname.includes('client') || event.request.method === 'POST') {
+		console.error('[HANDLE_ERROR_DEBUG]', {
+			requestId,
+			url: event.url.pathname,
+			method: event.request.method,
+			status,
+			errorType: typeof error,
+			errorName: error instanceof Error ? error.name : 'unknown',
+			errorMessage: error instanceof Error ? error.message : String(error),
+			errorStack: error instanceof Error ? error.stack : undefined,
+			rawError: JSON.stringify(error, Object.getOwnPropertyNames(error || {})),
+			serializedMessage: serialized.message,
+			serializedStack: serialized.stack
+		});
+	}
+
 	await logError('server', serialized.message, {
 		tenantId: event.locals.tenant?.id,
 		url: event.url.pathname,
