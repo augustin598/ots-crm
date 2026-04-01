@@ -6,6 +6,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
 import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
+import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
 
 // ---- Queries ----
 
@@ -505,7 +506,6 @@ export const triggerGoogleAdsSync = command(async () => {
 	}
 
 	try {
-		const { syncGoogleAdsInvoicesForTenant } = await import('$lib/server/google-ads/sync');
 		const result = await syncGoogleAdsInvoicesForTenant(event.locals.tenant.id);
 		return result;
 	} catch (err) {
