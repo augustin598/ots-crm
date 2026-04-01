@@ -148,7 +148,7 @@ export const startScheduler = async () => {
 	const worker = createSchedulerWorker();
 	logInfo('scheduler', 'Scheduler worker created');
 
-	// Schedule recurring invoice job to run daily at 2:00 AM
+	// Schedule recurring invoice job to run daily at 9:00 AM
 	schedulerQueue.add(
 		'recurring-invoices',
 		{
@@ -157,7 +157,7 @@ export const startScheduler = async () => {
 		},
 		{
 			repeat: {
-				pattern: '0 2 * * *', // Every day at 2:00 AM
+				pattern: '0 9 * * *', // Every day at 9:00 AM
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'recurring-invoices'
