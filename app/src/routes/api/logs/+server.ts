@@ -52,7 +52,7 @@ function validateLogEntry(entry: unknown): entry is LogInput {
 
 // POST /api/logs - receive client-side logs
 export const POST: RequestHandler = async ({ locals, request }) => {
-	if (!locals.user || !locals.tenant) {
+	if (!locals.user) {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
@@ -82,7 +82,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		if (!validateLogEntry(entry)) continue;
 
 		await logDebug({
-			tenantId: locals.tenant.id,
+			tenantId: locals.tenant?.id ?? null,
 			level: entry.level,
 			source: entry.source,
 			message: entry.message,

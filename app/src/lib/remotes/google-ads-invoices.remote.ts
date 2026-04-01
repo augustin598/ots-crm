@@ -504,10 +504,20 @@ export const triggerGoogleAdsSync = command(async () => {
 		throw new Error('Unauthorized');
 	}
 
-	// Dynamic import to avoid circular dependencies
-	const { syncGoogleAdsInvoicesForTenant } = await import('$lib/server/google-ads/sync');
-	const result = await syncGoogleAdsInvoicesForTenant(event.locals.tenant.id);
-	return result;
+	try {
+		const { syncGoogleAdsInvoicesForTenant } = await import('$lib/server/google-ads/sync');
+		const result = await syncGoogleAdsInvoicesForTenant(event.locals.tenant.id);
+		return result;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		const { logError } = await import('$lib/server/logger');
+		logError('google-ads-sync', `Sync command failed: ${message}`, {
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id,
+			metadata: { stack: err instanceof Error ? err.stack : undefined }
+		});
+		throw new Error(`Sincronizare Google Ads eșuată: ${message}`);
+	}
 });
 
 export const deleteGoogleAdsInvoice = command(

@@ -335,13 +335,20 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 		logInfo('google-ads-sync', `Spending sync: ${spendingInserted} inserted, ${spendingUpdated} updated, ${spendingErrors} errors`, { tenantId });
 	}
 
-	// Update integration status
-	await updateLastSyncAt(tenantId);
-	const syncResults = JSON.stringify({ imported, errors, skipped, spendingInserted, spendingUpdated, spendingErrors, timestamp: new Date().toISOString() });
-	await db
-		.update(table.googleAdsIntegration)
-		.set({ lastSyncResults: syncResults, updatedAt: new Date() })
-		.where(and(eq(table.googleAdsIntegration.tenantId, tenantId), eq(table.googleAdsIntegration.isActive, true)));
+	// Update integration status (non-critical — don't fail the sync for this)
+	try {
+		await updateLastSyncAt(tenantId);
+		const syncResults = JSON.stringify({ imported, errors, skipped, spendingInserted, spendingUpdated, spendingErrors, timestamp: new Date().toISOString() });
+		await db
+			.update(table.googleAdsIntegration)
+			.set({ lastSyncResults: syncResults, updatedAt: new Date() })
+			.where(and(eq(table.googleAdsIntegration.tenantId, tenantId), eq(table.googleAdsIntegration.isActive, true)));
+	} catch (statusErr) {
+		logError('google-ads-sync', 'Failed to update sync status', {
+			tenantId,
+			metadata: { error: statusErr instanceof Error ? statusErr.message : String(statusErr) }
+		});
+	}
 
 	logInfo('google-ads-sync', `Sync completed for tenant`, {
 		tenantId,
