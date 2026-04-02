@@ -203,7 +203,7 @@ interface TiktokInvoiceListItem {
 /**
  * List available invoices from TikTok Business Center billing API.
  */
-async function listInvoicesFromTiktok(
+export async function listInvoicesFromTiktok(
 	cookies: TtCookie[],
 	context: TiktokBillingContext,
 	startDate: string,

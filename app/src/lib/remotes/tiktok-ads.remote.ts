@@ -839,7 +839,8 @@ export const assignTiktokInvoiceToClient = command(
 	}
 );
 
-/** Auto-assign unassigned invoices to clients based on advertiser ID → account mapping */
+/** Auto-assign unassigned invoices to clients based on advertiser ID → account mapping.
+ *  First backfills missing advertiser data from TikTok API, then assigns. */
 export const autoAssignTiktokInvoices = command(
 	v.undefined(),
 	async () => {
@@ -851,7 +852,97 @@ export const autoAssignTiktokInvoices = command(
 
 		const tenantId = event.locals.tenant.id;
 
-		// Get all unassigned invoices
+		// Step 1: Backfill missing advertiser data from TikTok API
+		const invoicesMissingData = await db
+			.select({
+				id: table.tiktokInvoiceDownload.id,
+				tiktokInvoiceId: table.tiktokInvoiceDownload.tiktokInvoiceId,
+				tiktokAdvertiserId: table.tiktokInvoiceDownload.tiktokAdvertiserId,
+				invoiceNumber: table.tiktokInvoiceDownload.invoiceNumber,
+				amountCents: table.tiktokInvoiceDownload.amountCents,
+				integrationId: table.tiktokInvoiceDownload.integrationId
+			})
+			.from(table.tiktokInvoiceDownload)
+			.where(
+				and(
+					eq(table.tiktokInvoiceDownload.tenantId, tenantId),
+					isNull(table.tiktokInvoiceDownload.clientId)
+				)
+			);
+
+		// Fetch invoice details from TikTok API to fill missing data
+		if (invoicesMissingData.some(inv => !inv.tiktokAdvertiserId || !inv.invoiceNumber || inv.amountCents == null)) {
+			const [integration] = await db
+				.select()
+				.from(table.tiktokAdsIntegration)
+				.where(
+					and(
+						eq(table.tiktokAdsIntegration.tenantId, tenantId),
+						eq(table.tiktokAdsIntegration.isActive, true),
+						eq(table.tiktokAdsIntegration.ttSessionStatus, 'active')
+					)
+				)
+				.limit(1);
+
+			if (integration?.orgId && integration?.paymentAccountId) {
+				const cookies = await getDecryptedTtCookies(integration.id, tenantId);
+				if (cookies) {
+					try {
+						// Fetch all invoices from TikTok API (last 12 months)
+						const now = new Date();
+						const startDate = `${now.getFullYear() - 1}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+						const endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-28`;
+						const { listInvoicesFromTiktok: listInv } = await import('$lib/server/tiktok-ads/invoice-downloader');
+
+						const tiktokInvoices = await listInv(cookies, {
+							bc_id: integration.orgId,
+							pa_id: integration.paymentAccountId,
+							platform: 2
+						}, startDate, endDate);
+
+						// Build lookup by invoice_id
+						const tiktokMap = new Map<string, { advId: string; serial: string; amount: string; currency: string; accountName: string }>();
+						for (const inv of tiktokInvoices) {
+							tiktokMap.set(inv.invoice_id, {
+								advId: inv.adv_id_list[0] || '',
+								serial: inv.invoice_serial,
+								amount: inv.amount,
+								currency: inv.currency,
+								accountName: inv.account_name
+							});
+						}
+
+						// Update invoices with missing data
+						for (const inv of invoicesMissingData) {
+							const tiktokData = tiktokMap.get(inv.tiktokInvoiceId);
+							if (!tiktokData) continue;
+
+							const updates: Record<string, any> = {};
+							if (!inv.tiktokAdvertiserId && tiktokData.advId) updates.tiktokAdvertiserId = tiktokData.advId;
+							if (!inv.invoiceNumber && tiktokData.serial) updates.invoiceNumber = tiktokData.serial;
+							if (inv.amountCents == null && tiktokData.amount) {
+								const parsed = parseFloat(tiktokData.amount);
+								if (!isNaN(parsed)) updates.amountCents = Math.round(parsed * 100);
+							}
+							if (tiktokData.currency) updates.currencyCode = tiktokData.currency;
+							if (tiktokData.accountName) updates.adAccountName = tiktokData.accountName;
+
+							if (Object.keys(updates).length > 0) {
+								updates.updatedAt = new Date();
+								await db
+									.update(table.tiktokInvoiceDownload)
+									.set(updates)
+									.where(eq(table.tiktokInvoiceDownload.id, inv.id));
+							}
+						}
+					} catch {
+						// Non-critical: continue with assignment using whatever data we have
+					}
+				}
+			}
+		}
+
+		// Step 2: Re-read unassigned invoices (now with backfilled data)
 		const unassigned = await db
 			.select({
 				id: table.tiktokInvoiceDownload.id,
@@ -866,7 +957,7 @@ export const autoAssignTiktokInvoices = command(
 				)
 			);
 
-		if (unassigned.length === 0) return { assigned: 0, total: 0 };
+		if (unassigned.length === 0) return { assigned: 0, total: 0, backfilled: true };
 
 		// Build advertiser → client mapping from all active accounts
 		const accounts = await db
@@ -878,7 +969,6 @@ export const autoAssignTiktokInvoices = command(
 			.from(table.tiktokAdsAccount)
 			.where(eq(table.tiktokAdsAccount.isActive, true));
 
-		// Map by advertiser ID and by account name (case-insensitive)
 		const advToClient = new Map<string, string>();
 		const nameToClient = new Map<string, string>();
 		for (const acc of accounts) {
@@ -888,19 +978,11 @@ export const autoAssignTiktokInvoices = command(
 			}
 		}
 
-		// If only one account has a client mapped, use it as default for unmatchable invoices
-		const mappedAccounts = accounts.filter(a => a.clientId);
-		const defaultClientId = mappedAccounts.length === 1 ? mappedAccounts[0].clientId : null;
-
 		let assigned = 0;
 		for (const inv of unassigned) {
-			// Try by advertiser ID first, then by account name, then default
 			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
 			if (!clientId && inv.adAccountName) {
 				clientId = nameToClient.get(inv.adAccountName.toLowerCase());
-			}
-			if (!clientId && defaultClientId) {
-				clientId = defaultClientId;
 			}
 			if (clientId) {
 				await db
