@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, or, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logError, logInfo } from '$lib/server/logger';
 
@@ -31,6 +31,8 @@ export interface CreateNotificationParams {
 	message: string;
 	link?: string | null;
 	metadata?: Record<string, unknown>;
+	/** Override createdAt (used for backfilling historical events). */
+	createdAt?: Date;
 }
 
 // ---- SSE Controller Map ----
@@ -81,7 +83,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 		link: params.link ?? null,
 		isRead: false,
 		metadata: params.metadata ?? null,
-		createdAt: new Date()
+		createdAt: params.createdAt ?? new Date()
 	};
 
 	await db.insert(table.notification).values(newNotification);
@@ -101,34 +103,77 @@ export async function createNotification(params: CreateNotificationParams): Prom
 
 /**
  * Mark one or all notifications as read for a user.
+ * If clientId is provided, also marks client-scoped notifications.
  */
 export async function markNotificationsRead(
 	userId: string,
 	tenantId: string,
-	ids?: string[]
+	ids?: string[],
+	clientId?: string | null
 ): Promise<void> {
+	// Build ownership condition: user's own OR client-scoped notifications
+	const ownerCondition = clientId
+		? or(eq(table.notification.userId, userId), eq(table.notification.clientId, clientId))
+		: eq(table.notification.userId, userId);
+
 	if (ids && ids.length > 0) {
-		// Mark specific IDs — but only those belonging to this user
 		await db
 			.update(table.notification)
 			.set({ isRead: true })
 			.where(
 				and(
-					eq(table.notification.userId, userId),
+					ownerCondition,
 					eq(table.notification.tenantId, tenantId),
 					inArray(table.notification.id, ids)
 				)
 			);
 	} else {
-		// Mark all as read
 		await db
 			.update(table.notification)
 			.set({ isRead: true })
 			.where(
 				and(
-					eq(table.notification.userId, userId),
+					ownerCondition,
 					eq(table.notification.tenantId, tenantId)
 				)
 			);
+	}
+}
+
+/**
+ * Delete specific notifications or all for a user.
+ * If clientId is provided, also deletes client-scoped notifications.
+ */
+export async function deleteNotifications(
+	userId: string,
+	tenantId: string,
+	ids?: string[],
+	clientId?: string | null
+): Promise<number> {
+	const ownerCondition = clientId
+		? or(eq(table.notification.userId, userId), eq(table.notification.clientId, clientId))
+		: eq(table.notification.userId, userId);
+
+	if (ids && ids.length > 0) {
+		const result = await db
+			.delete(table.notification)
+			.where(
+				and(
+					ownerCondition,
+					eq(table.notification.tenantId, tenantId),
+					inArray(table.notification.id, ids)
+				)
+			);
+		return result.rowsAffected;
+	} else {
+		const result = await db
+			.delete(table.notification)
+			.where(
+				and(
+					ownerCondition,
+					eq(table.notification.tenantId, tenantId)
+				)
+			);
+		return result.rowsAffected;
 	}
 }

@@ -8,14 +8,18 @@ import {
 	failSession
 } from '../invoice-scraper';
 import { logInfo, logError } from '$lib/server/logger';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq } from 'drizzle-orm';
 
 /**
- * TikTok invoice list API response structure.
+ * TikTok invoice item — matches the actual API response from query_invoice_list.
  */
 interface TiktokInvoiceItem {
 	invoice_id?: string;
 	invoice_serial?: string;
 	invoice_no?: string;
+	account_name?: string;
 	amount?: string | number;
 	currency?: string;
 	currency_code?: string;
@@ -25,25 +29,174 @@ interface TiktokInvoiceItem {
 	status?: number;
 }
 
-interface TiktokInvoiceListResponse {
-	code?: number;
-	data?: {
-		invoice_list?: TiktokInvoiceItem[];
-		list?: TiktokInvoiceItem[];
-		total?: number;
-	};
+/**
+ * Parse TikTok invoice items into ScrapedInvoice format.
+ */
+function parseInvoiceItems(items: TiktokInvoiceItem[]): ScrapedInvoice[] {
+	const invoices: ScrapedInvoice[] = [];
+	for (const item of items) {
+		const invoiceId = item.invoice_id || item.invoice_serial || item.invoice_no || '';
+		if (!invoiceId) continue;
+
+		const amount =
+			typeof item.amount === 'string'
+				? Math.round(parseFloat(item.amount) * 100)
+				: typeof item.amount === 'number'
+					? Math.round(item.amount * 100)
+					: undefined;
+
+		invoices.push({
+			platform: 'tiktok',
+			invoiceId,
+			invoiceNumber: item.invoice_serial || item.invoice_no,
+			date: item.send_date || item.create_time || new Date().toISOString().slice(0, 10),
+			amount,
+			currencyCode: item.currency_code || item.currency,
+			accountId: item.adv_id_list?.[0] || 'unknown'
+		});
+	}
+	return invoices;
 }
 
 /**
- * Extract invoices from TikTok by intercepting the API response.
- * This is more reliable than DOM parsing since TikTok is a SPA.
+ * Strategy 1: Call TikTok's invoice list API directly from the browser context.
+ * Uses the same request format as invoice-downloader.ts (start_date, end_date, pagination).
+ */
+async function extractInvoicesViaDirectAPI(page: Page, integrationId: string): Promise<ScrapedInvoice[]> {
+	logInfo('tiktok-scraper', 'Trying direct API call from browser context');
+
+	// Get bc_id and pa_id from the integration record
+	const [integration] = await db
+		.select({
+			orgId: table.tiktokAdsIntegration.orgId,
+			paymentAccountId: table.tiktokAdsIntegration.paymentAccountId
+		})
+		.from(table.tiktokAdsIntegration)
+		.where(eq(table.tiktokAdsIntegration.id, integrationId))
+		.limit(1);
+
+	const bcId = integration?.orgId || '';
+	const paId = integration?.paymentAccountId || '';
+
+	logInfo('tiktok-scraper', `Direct API context: bc_id=${bcId}, pa_id=${paId}`);
+
+	// Ensure we're on TikTok before calling API
+	const currentUrl = page.url();
+	if (!currentUrl.includes('tiktok.com')) {
+		logInfo('tiktok-scraper', `Page not on TikTok (${currentUrl}), navigating...`);
+		try {
+			await page.goto('https://business.tiktok.com/manage/billing/v2', {
+				waitUntil: 'networkidle2',
+				timeout: 30_000
+			});
+		} catch {
+			// Navigation timeout is OK
+		}
+	}
+
+	// Date range: last 6 months to today
+	const now = new Date();
+	const sixMonthsAgo = new Date(now);
+	sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+	const startDate = sixMonthsAgo.toISOString().slice(0, 10);
+	const endDate = now.toISOString().slice(0, 10);
+
+	const apiResult = await page.evaluate(async (bcIdParam, paIdParam, startDateParam, endDateParam) => {
+		const allItems: any[] = [];
+		const pageSize = 50;
+		let pageNo = 1;
+		let totalFound = 0;
+		const debugInfo: any[] = [];
+
+		// Paginate through all results
+		while (true) {
+			try {
+				const res = await fetch('https://business.tiktok.com/pa/api/common/show/invoice/query_invoice_list', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'Accept': 'application/json'
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						start_date: startDateParam,
+						end_date: endDateParam,
+						pagination: { page_no: pageNo, page_size: pageSize },
+						Context: {
+							bc_id: bcIdParam,
+							pa_id: paIdParam,
+							platform: 2
+						}
+					})
+				});
+
+				if (!res.ok) {
+					debugInfo.push({ pageNo, status: res.status, error: 'HTTP ' + res.status });
+					break;
+				}
+
+				const json = await res.json();
+				debugInfo.push({
+					pageNo,
+					status: res.status,
+					code: json.code,
+					msg: json.msg,
+					dataKeys: json.data ? Object.keys(json.data) : [],
+					paginationInfo: json.data?.pagination,
+					itemCount: (json.data?.data || json.data?.invoice_list || json.data?.list || []).length,
+					// Dump first item for debugging structure
+					sampleItem: (json.data?.data || json.data?.invoice_list || json.data?.list || [])[0] || null
+				});
+
+				if (json.code !== 0) break;
+
+				// Try multiple response formats: data.data (confirmed), data.invoice_list, data.list
+				const items = json.data?.data || json.data?.invoice_list || json.data?.list || [];
+				allItems.push(...items);
+
+				totalFound = json.data?.pagination?.total || json.data?.total || items.length;
+				if (pageNo * pageSize >= totalFound) break;
+				pageNo++;
+			} catch (e) {
+				debugInfo.push({ pageNo, error: String(e) });
+				break;
+			}
+		}
+
+		return {
+			success: allItems.length > 0,
+			items: allItems,
+			totalFound,
+			debugInfo
+		};
+	}, bcId, paId, startDate, endDate);
+
+	logInfo('tiktok-scraper', 'Direct API results', {
+		metadata: {
+			itemCount: apiResult.items.length,
+			totalFound: apiResult.totalFound,
+			debugInfo: JSON.stringify(apiResult.debugInfo)
+		}
+	});
+
+	if (apiResult.success) {
+		logInfo('tiktok-scraper', `Direct API returned ${apiResult.items.length} invoices`);
+		return parseInvoiceItems(apiResult.items);
+	}
+
+	return [];
+}
+
+/**
+ * Strategy 2: Intercept XHR responses when navigating the billing page.
+ * Also logs raw response structure for debugging.
  */
 async function extractInvoicesViaXHR(page: Page): Promise<ScrapedInvoice[]> {
-	const invoices: ScrapedInvoice[] = [];
+	logInfo('tiktok-scraper', 'Trying XHR interception');
 
 	return new Promise<ScrapedInvoice[]>((resolve) => {
 		let resolved = false;
-		const capturedResponses: TiktokInvoiceListResponse[] = [];
+		const capturedItems: TiktokInvoiceItem[] = [];
 
 		const responseHandler = async (response: HTTPResponse) => {
 			const url = response.url();
@@ -53,11 +206,19 @@ async function extractInvoicesViaXHR(page: Page): Promise<ScrapedInvoice[]> {
 				url.includes('invoice_list')
 			) {
 				try {
-					const json = (await response.json()) as TiktokInvoiceListResponse;
-					logInfo('tiktok-scraper', `Captured invoice list API response`, {
-						metadata: { url, code: json.code }
+					const json = await response.json();
+					// Log raw response structure for debugging
+					const dataKeys = json.data ? Object.keys(json.data) : [];
+					const items = json.data?.data || json.data?.invoice_list || json.data?.list || [];
+					logInfo('tiktok-scraper', `XHR captured: ${url}`, {
+						metadata: {
+							code: json.code,
+							dataKeys: dataKeys.join(','),
+							itemCount: items.length,
+							sampleItem: items[0] ? JSON.stringify(items[0]).slice(0, 300) : 'none'
+						}
 					});
-					capturedResponses.push(json);
+					capturedItems.push(...items);
 				} catch {
 					// Response might not be JSON
 				}
@@ -66,10 +227,8 @@ async function extractInvoicesViaXHR(page: Page): Promise<ScrapedInvoice[]> {
 
 		page.on('response', responseHandler);
 
-		// Trigger the invoice list by navigating/refreshing the billing page
 		(async () => {
 			try {
-				// If we're already on billing, reload to trigger the API call
 				const currentUrl = page.url();
 				if (currentUrl.includes('billing')) {
 					await page.reload({ waitUntil: 'networkidle2', timeout: 30_000 });
@@ -85,35 +244,9 @@ async function extractInvoicesViaXHR(page: Page): Promise<ScrapedInvoice[]> {
 
 			// Wait for API responses
 			await new Promise((r) => setTimeout(r, 5000));
-
-			// Remove listener
 			page.off('response', responseHandler);
 
-			// Process captured responses
-			for (const json of capturedResponses) {
-				const items = json.data?.invoice_list || json.data?.list || [];
-				for (const item of items) {
-					const invoiceId =
-						item.invoice_id || item.invoice_serial || item.invoice_no || '';
-					if (!invoiceId) continue;
-
-					const amount = typeof item.amount === 'string'
-						? Math.round(parseFloat(item.amount) * 100)
-						: typeof item.amount === 'number'
-							? Math.round(item.amount * 100)
-							: undefined;
-
-					invoices.push({
-						platform: 'tiktok',
-						invoiceId,
-						invoiceNumber: item.invoice_serial || item.invoice_no,
-						date: item.send_date || item.create_time || new Date().toISOString().slice(0, 10),
-						amount,
-						currencyCode: item.currency_code || item.currency,
-						accountId: item.adv_id_list?.[0] || 'unknown'
-					});
-				}
-			}
+			const invoices = parseInvoiceItems(capturedItems);
 
 			resolved = true;
 			resolve(invoices);
@@ -123,21 +256,26 @@ async function extractInvoicesViaXHR(page: Page): Promise<ScrapedInvoice[]> {
 		setTimeout(() => {
 			if (!resolved) {
 				page.off('response', responseHandler);
-				resolve(invoices);
+				resolve([]);
 			}
 		}, 20_000);
 	});
 }
 
 /**
- * Fallback: extract invoices from TikTok billing page DOM.
+ * Strategy 3: Extract invoices from TikTok billing page DOM.
+ * Dumps sample row HTML for debugging. IDs are synthetic (for display only, not downloadable).
  */
 async function extractInvoicesFromDOM(page: Page): Promise<ScrapedInvoice[]> {
+	logInfo('tiktok-scraper', 'Trying DOM extraction (fallback — IDs will be synthetic)');
+
 	const rawInvoices = await page.evaluate(() => {
 		const invoices: Array<{
 			invoiceId: string;
 			date: string;
 			amount: string;
+			rowIndex: number;
+			debugHtml: string;
 		}> = [];
 
 		// Try to find invoice rows in the billing table
@@ -145,26 +283,80 @@ async function extractInvoicesFromDOM(page: Page): Promise<ScrapedInvoice[]> {
 			'table tbody tr, [class*="invoice"] [class*="row"], [class*="billing"] [class*="item"]'
 		);
 
+		let rowIndex = 0;
 		rows.forEach((row) => {
-			const text = (row as HTMLElement).innerText || '';
-			const cells = text.split('\n').filter((s) => s.trim());
+			const el = row as HTMLElement;
+			const text = el.innerText || '';
+			const cells = Array.from(el.querySelectorAll('td, [class*="cell"]'));
 
-			// Look for invoice-like patterns
-			const idMatch = text.match(/INV[-\d]+|TT[-\d]+|\d{10,}/);
-			const dateMatch = text.match(/\d{4}[-/]\d{2}[-/]\d{2}/);
-			const amountMatch = text.match(/([\d.,]+)\s*(RON|USD|EUR)/i);
+			// Try to find invoice ID from data attributes, links, or cell text
+			let invoiceId = '';
 
-			if (idMatch || dateMatch) {
+			// Check data attributes on the row and all ancestors up to table
+			const dataId = el.getAttribute('data-invoice-id') ||
+				el.getAttribute('data-id') ||
+				el.getAttribute('data-row-key') ||
+				el.getAttribute('data-key');
+			if (dataId) {
+				invoiceId = dataId;
+			}
+
+			// Check links inside the row
+			if (!invoiceId) {
+				const link = el.querySelector('a[href*="invoice"], a[href*="billing"]');
+				if (link) {
+					const href = link.getAttribute('href') || '';
+					const idFromHref = href.match(/(?:invoice|billing)[_/]?(\w+)/);
+					if (idFromHref) invoiceId = idFromHref[1];
+				}
+			}
+
+			// Check for invoice ID patterns in cell text
+			if (!invoiceId) {
+				for (const cell of cells) {
+					const cellText = (cell as HTMLElement).innerText?.trim() || '';
+					// Match TikTok invoice patterns: INV-xxx, TT-xxx, or standalone IDs
+					const idMatch = cellText.match(/^(INV[-\s]?\d+|TT[-\s]?\d+|\d{6,9})$/);
+					if (idMatch) {
+						invoiceId = idMatch[1].replace(/\s/g, '');
+						break;
+					}
+				}
+			}
+
+			// Look for dates
+			const dateMatch = text.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+			// Look for amounts
+			const amountMatch = text.match(/([\d.,]+)\s*(RON|USD|EUR|lei)/i);
+
+			// Only include if we found a date (minimum signal that this is a real invoice row)
+			if (dateMatch) {
 				invoices.push({
-					invoiceId: idMatch ? idMatch[0] : `tt_${Date.now()}`,
-					date: dateMatch ? dateMatch[0] : '',
-					amount: amountMatch ? amountMatch[0] : ''
+					invoiceId: invoiceId || `tt_dom_${rowIndex}_${dateMatch[1].replace(/[-/]/g, '')}`,
+					date: dateMatch[1],
+					amount: amountMatch ? amountMatch[0] : '',
+					rowIndex,
+					// Capture first 3 rows' HTML for debugging
+					debugHtml: rowIndex < 3 ? el.outerHTML.slice(0, 500) : ''
 				});
 			}
+			rowIndex++;
 		});
 
 		return invoices;
 	});
+
+	// Log sample HTML for debugging DOM structure
+	const samplesWithHtml = rawInvoices.filter(r => r.debugHtml);
+	if (samplesWithHtml.length > 0) {
+		for (const sample of samplesWithHtml) {
+			logInfo('tiktok-scraper', `DOM row #${sample.rowIndex} HTML sample`, {
+				metadata: { html: sample.debugHtml, invoiceId: sample.invoiceId }
+			});
+		}
+	}
+
+	logInfo('tiktok-scraper', `DOM extraction found ${rawInvoices.length} rows`);
 
 	return rawInvoices.map((inv) => ({
 		platform: 'tiktok' as const,
@@ -177,7 +369,7 @@ async function extractInvoicesFromDOM(page: Page): Promise<ScrapedInvoice[]> {
 
 /**
  * Run the TikTok Ads billing page scraper.
- * Uses XHR interception (primary) or DOM extraction (fallback).
+ * Strategies: Direct API → XHR interception → DOM extraction.
  * Saves fresh cookies for future API-based downloads.
  */
 export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedInvoice[]> {
@@ -190,15 +382,22 @@ export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedIn
 	session.status = 'scraping';
 
 	try {
-		// Strategy 1: XHR interception (more reliable for SPA)
-		let invoices = await extractInvoicesViaXHR(page);
-		logInfo('tiktok-scraper', `XHR extraction found ${invoices.length} invoices`, {
+		// Strategy 1: Direct API call from browser context (most reliable)
+		let invoices = await extractInvoicesViaDirectAPI(page, session.integrationId);
+		logInfo('tiktok-scraper', `Direct API found ${invoices.length} invoices`, {
 			tenantId: session.tenantId
 		});
 
-		// Strategy 2: DOM fallback
+		// Strategy 2: XHR interception
 		if (invoices.length === 0) {
-			logInfo('tiktok-scraper', 'No invoices from XHR, trying DOM extraction');
+			invoices = await extractInvoicesViaXHR(page);
+			logInfo('tiktok-scraper', `XHR extraction found ${invoices.length} invoices`, {
+				tenantId: session.tenantId
+			});
+		}
+
+		// Strategy 3: DOM fallback
+		if (invoices.length === 0) {
 			invoices = await extractInvoicesFromDOM(page);
 			logInfo('tiktok-scraper', `DOM extraction found ${invoices.length} invoices`, {
 				tenantId: session.tenantId
@@ -216,9 +415,13 @@ export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedIn
 				});
 			}
 		} catch (cookieErr) {
-			logError('tiktok-scraper', `Failed to refresh cookies: ${cookieErr instanceof Error ? cookieErr.message : String(cookieErr)}`, {
-				tenantId: session.tenantId
-			});
+			logError(
+				'tiktok-scraper',
+				`Failed to refresh cookies: ${cookieErr instanceof Error ? cookieErr.message : String(cookieErr)}`,
+				{
+					tenantId: session.tenantId
+				}
+			);
 		}
 
 		completeSession(sessionId, invoices);

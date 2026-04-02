@@ -4,7 +4,7 @@ import { findChromePath } from './find-chrome';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { join } from 'path';
 import { homedir } from 'os';
-import { mkdirSync, unlinkSync, existsSync } from 'fs';
+import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { saveFbSessionCookies } from '$lib/server/meta-ads/fb-cookies';
 import { saveGoogleSessionCookies } from '$lib/server/google-ads/google-cookies';
 import { saveTtSessionCookies } from '$lib/server/tiktok-ads/tt-cookies';
@@ -81,7 +81,7 @@ const LOGIN_INDICATORS: Record<
 	tiktok: {
 		billingUrl: 'https://business.tiktok.com/manage/billing/v2',
 		isLoggedIn: (url: string) =>
-			url.includes('manage/billing') && !url.includes('login') && !url.includes('signin')
+			url.includes('business.tiktok.com/manage') && !url.includes('login') && !url.includes('signin')
 	}
 };
 
@@ -181,7 +181,7 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		try { mkdirSync(scraperProfileDir, { recursive: true }); } catch { /* exists */ }
 
 		// Clean up stale lock files from previous crashed browser processes
-		for (const lockFile of ['SingletonLock', 'lockfile']) {
+		for (const lockFile of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile']) {
 			const lockPath = join(scraperProfileDir, lockFile);
 			if (existsSync(lockPath)) {
 				try {
@@ -193,9 +193,25 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 			}
 		}
 
+		// Fix "Chrome didn't shut down correctly" by patching exit_type in Preferences
+		const prefsPath = join(scraperProfileDir, 'Default', 'Preferences');
+		if (existsSync(prefsPath)) {
+			try {
+				const prefs = readFileSync(prefsPath, 'utf-8');
+				if (prefs.includes('"exit_type":"Crashed"') || prefs.includes('"exit_type": "Crashed"')) {
+					const fixed = prefs.replace(/"exit_type"\s*:\s*"Crashed"/g, '"exit_type":"Normal"');
+					writeFileSync(prefsPath, fixed, 'utf-8');
+					console.log(`[SCRAPER-DEBUG] Fixed Preferences exit_type: Crashed → Normal`);
+				}
+			} catch {
+				// Ignore — Preferences file may not exist yet
+			}
+		}
+
 		const isProduction = process.env.NODE_ENV === 'production';
-		const hasDisplay = !!process.env.DISPLAY;
-		// Force headless if no X server available (Linux servers without display)
+		const isMac = process.platform === 'darwin';
+		const hasDisplay = isMac || !!process.env.DISPLAY;
+		// Force headless if no X server available (Linux servers without display), but macOS doesn't need DISPLAY
 		const useHeadless = isProduction || !hasDisplay;
 		const headlessMode = useHeadless ? 'shell' : false;
 
@@ -228,7 +244,11 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 				'--window-size=1440,900',
 				'--no-first-run',
 				'--disable-background-networking',
-				'--disable-blink-features=AutomationControlled' // Don't expose navigator.webdriver
+				'--disable-blink-features=AutomationControlled', // Don't expose navigator.webdriver
+				'--disable-session-crashed-bubble', // Suppress "Chrome didn't shut down correctly" restore dialog
+				'--hide-crash-restore-bubble',
+				'--noerrdialogs', // Suppress error dialogs
+				'--disable-features=InfiniteSessionRestore' // Prevent session restore prompt
 				// Note: NO --disable-extensions (user may need password manager)
 			]
 		});
@@ -262,32 +282,43 @@ export async function shutdownInteractiveBrowser(): Promise<void> {
 
 // ── Session Management ────────────────────────────────────────────
 
-const sessions = new Map<string, ScraperSession>();
+const SESSIONS_SYMBOL = Symbol.for('scraper_sessions');
+const SESSIONS_CLEANUP_SYMBOL = Symbol.for('scraper_sessions_cleanup');
 
-// Auto-cleanup expired sessions every 5 minutes
-setInterval(
-	() => {
-		const now = Date.now();
-		for (const [id, session] of sessions) {
-			if (now - session.startedAt.getTime() > SESSION_EXPIRY_MS) {
-				// Close page if still open
-				if (session.page && !session.page.isClosed()) {
-					session.page.close().catch(() => {});
+function getSessions(): Map<string, ScraperSession> {
+	if (!(globalThis as any)[SESSIONS_SYMBOL]) {
+		(globalThis as any)[SESSIONS_SYMBOL] = new Map<string, ScraperSession>();
+	}
+	return (globalThis as any)[SESSIONS_SYMBOL];
+}
+
+// Auto-cleanup expired sessions every 5 minutes (only register once via symbol)
+if (!(globalThis as any)[SESSIONS_CLEANUP_SYMBOL]) {
+	(globalThis as any)[SESSIONS_CLEANUP_SYMBOL] = setInterval(
+		() => {
+			const sessions = getSessions();
+			const now = Date.now();
+			for (const [id, session] of sessions) {
+				if (now - session.startedAt.getTime() > SESSION_EXPIRY_MS) {
+					// Close page if still open
+					if (session.page && !session.page.isClosed()) {
+						session.page.close().catch(() => {});
+					}
+					sessions.delete(id);
+					logInfo('invoice-scraper', `Session ${id} expired and cleaned up`);
 				}
-				sessions.delete(id);
-				logInfo('invoice-scraper', `Session ${id} expired and cleaned up`);
 			}
-		}
-	},
-	5 * 60 * 1000
-);
+		},
+		5 * 60 * 1000
+	);
+}
 
 function generateSessionId(): string {
 	return `scraper_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function getSession(sessionId: string): ScraperSession | undefined {
-	return sessions.get(sessionId);
+	return getSessions().get(sessionId);
 }
 
 /**
@@ -296,7 +327,7 @@ export function getSession(sessionId: string): ScraperSession | undefined {
 export function getSessionForClient(
 	sessionId: string
 ): Omit<ScraperSession, 'page'> | undefined {
-	const session = sessions.get(sessionId);
+	const session = getSessions().get(sessionId);
 	if (!session) return undefined;
 	const { page: _page, ...clientSafe } = session;
 	return clientSafe;
@@ -339,7 +370,7 @@ export async function createSession(
 		page
 	};
 
-	sessions.set(sessionId, session);
+	getSessions().set(sessionId, session);
 
 	// Navigate to billing page
 	const { billingUrl } = LOGIN_INDICATORS[platform];
@@ -377,7 +408,7 @@ export async function createSession(
  * Returns true if logged in.
  */
 export async function checkLogin(sessionId: string): Promise<boolean> {
-	const session = sessions.get(sessionId);
+	const session = getSessions().get(sessionId);
 	if (!session || !session.page || session.page.isClosed()) {
 		throw new Error('Sesiunea nu există sau browserul s-a închis');
 	}
@@ -429,16 +460,33 @@ export async function extractBrowserCookies(
 ): Promise<Cookie[]> {
 	const domains = COOKIE_DOMAINS[platform];
 
-	// Get all cookies from browser
-	const allCookies = await page.cookies();
+	// Get cookies from all platform-relevant URLs (page.cookies() without args only returns current page cookies)
+	const cookieUrls: Record<ScraperPlatform, string[]> = {
+		meta: ['https://www.facebook.com', 'https://business.facebook.com'],
+		google: ['https://www.google.com', 'https://ads.google.com', 'https://accounts.google.com'],
+		tiktok: ['https://www.tiktok.com', 'https://business.tiktok.com', 'https://ads.tiktok.com']
+	};
+
+	const allCookies = await page.cookies(...cookieUrls[platform]);
 
 	// Filter by platform domains
 	const filtered = allCookies.filter((c) =>
 		domains.some((d) => c.domain.endsWith(d.replace(/^\./, '')) || c.domain === d)
 	);
 
+	// Debug: log cookie names to help diagnose missing session cookies
+	const cookieNames = filtered.map(c => c.name);
+	const sessionRelated = cookieNames.filter(n =>
+		n.toLowerCase().includes('session') || n.toLowerCase().includes('sid') || n === 'tt_csrf_token'
+	);
+
 	logInfo('invoice-scraper', `Extracted ${filtered.length} cookies for ${platform}`, {
-		metadata: { totalCookies: allCookies.length, filteredCookies: filtered.length }
+		metadata: {
+			totalCookies: allCookies.length,
+			filteredCookies: filtered.length,
+			sessionCookies: sessionRelated.join(', ') || 'NONE',
+			allCookieNames: cookieNames.join(', ')
+		}
 	});
 
 	return filtered;
@@ -492,14 +540,14 @@ export async function saveCookiesFromBrowser(
  * Cancel a scraper session and close the browser page.
  */
 export async function cancelSession(sessionId: string): Promise<void> {
-	const session = sessions.get(sessionId);
+	const session = getSessions().get(sessionId);
 	if (!session) return;
 
 	session.status = 'cancelled';
 	if (session.page && !session.page.isClosed()) {
 		await session.page.close().catch(() => {});
 	}
-	sessions.delete(sessionId);
+	getSessions().delete(sessionId);
 
 	logInfo('invoice-scraper', `Session ${sessionId} cancelled`);
 }
@@ -508,7 +556,7 @@ export async function cancelSession(sessionId: string): Promise<void> {
  * Mark session as done with results.
  */
 export function completeSession(sessionId: string, invoices: ScrapedInvoice[]): void {
-	const session = sessions.get(sessionId);
+	const session = getSessions().get(sessionId);
 	if (!session) return;
 
 	session.invoices = invoices;
@@ -524,7 +572,7 @@ export function completeSession(sessionId: string, invoices: ScrapedInvoice[]): 
  * Mark session as errored.
  */
 export function failSession(sessionId: string, error: string): void {
-	const session = sessions.get(sessionId);
+	const session = getSessions().get(sessionId);
 	if (!session) return;
 
 	session.status = 'error';

@@ -1,13 +1,13 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { markNotificationsRead } from '$lib/server/notifications';
+import { deleteNotifications } from '$lib/server/notifications';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 
-// POST /api/notifications/mark-read
-// Body: { ids: string[] }  — mark specific notifications
-//    or { all: true }      — mark all notifications as read
+// POST /api/notifications/delete
+// Body: { ids: string[] }  — delete specific notifications
+//    or { all: true }      — delete all notifications
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) {
 		return json({ error: 'Unauthorized' }, { status: 401 });
@@ -15,7 +15,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const userId = locals.user.id;
 
-	// Get tenantId from locals or look it up
+	// Resolve tenantId
 	let tenantId = locals.tenant?.id;
 	if (!tenantId) {
 		const [tu] = await db
@@ -24,7 +24,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			.where(eq(table.tenantUser.userId, userId))
 			.limit(1);
 		if (!tu) {
-			// Try client user
 			const [cu] = await db
 				.select({ tenantId: table.clientUser.tenantId })
 				.from(table.clientUser)
@@ -40,7 +39,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		return json({ error: 'Tenant not found' }, { status: 400 });
 	}
 
-	// Get clientId if this is a client user
 	const clientId = (locals as any).client?.id as string | undefined;
 
 	let body: { ids?: string[]; all?: boolean };
@@ -50,13 +48,14 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		return json({ error: 'Invalid JSON body' }, { status: 400 });
 	}
 
+	let deleted = 0;
 	if (body.all === true) {
-		await markNotificationsRead(userId, tenantId, undefined, clientId);
+		deleted = await deleteNotifications(userId, tenantId, undefined, clientId);
 	} else if (Array.isArray(body.ids) && body.ids.length > 0) {
-		await markNotificationsRead(userId, tenantId, body.ids, clientId);
+		deleted = await deleteNotifications(userId, tenantId, body.ids, clientId);
 	} else {
 		return json({ error: 'Provide "ids" array or "all: true"' }, { status: 400 });
 	}
 
-	return json({ ok: true });
+	return json({ ok: true, deleted });
 };

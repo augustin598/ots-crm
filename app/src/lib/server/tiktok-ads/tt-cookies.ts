@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encrypt, decrypt } from '$lib/server/plugins/smartbill/crypto';
-import { logInfo, logError } from '$lib/server/logger';
+import { logInfo, logError, logWarning } from '$lib/server/logger';
 
 export interface TtCookie {
 	name: string;
@@ -35,11 +35,21 @@ export async function saveTtSessionCookies(
 		throw new Error('Array-ul de cookies este gol');
 	}
 
-	// Check for required TikTok cookie
-	const hasSessionId = cookies.some(c => c.name === 'sessionid');
-	if (!hasSessionId) {
-		throw new Error('Cookies-urile trebuie să conțină cel puțin sessionid (sesiune TikTok)');
+	// Check for required TikTok session cookie (accept various TikTok session cookie names)
+	const sessionCookieNames = ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard', 'tt_csrf_token'];
+	const foundSessionCookies = cookies.filter(c => sessionCookieNames.includes(c.name));
+	const cookieNames = cookies.map(c => c.name);
+
+	if (foundSessionCookies.length === 0) {
+		logWarning('tt-cookies', 'No known TikTok session cookie found', {
+			metadata: { cookieNames: cookieNames.join(', '), cookieCount: cookies.length }
+		});
+		throw new Error(`Cookies-urile nu conțin nicio sesiune TikTok cunoscută (${sessionCookieNames.join(', ')}). Cookies găsite: ${cookieNames.slice(0, 20).join(', ')}`);
 	}
+
+	logInfo('tt-cookies', `Found session cookies: ${foundSessionCookies.map(c => c.name).join(', ')}`, {
+		metadata: { integrationId, cookieCount: cookies.length }
+	});
 
 	const encrypted = encrypt(tenantId, JSON.stringify(cookies));
 

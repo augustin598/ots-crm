@@ -16,11 +16,11 @@
 	import { Switch } from '$lib/components/ui/switch';
 
 	const tenantSlug = $derived(page.params.tenant);
-	const serviceId = $derived(page.params.serviceId ?? '');
+	const serviceId = $derived(page.params.serviceId);
 
-	const serviceQuery = getService(serviceId);
-	const service = $derived(serviceQuery.current);
-	const loading = $derived(serviceQuery.loading);
+	const serviceQuery = $derived(serviceId ? getService(serviceId) : null);
+	const service = $derived(serviceQuery?.current);
+	const loading = $derived(serviceQuery?.loading ?? false);
 
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
@@ -99,7 +99,7 @@
 	});
 
 	async function handleSubmit() {
-		if (!name || !clientId) {
+		if (!name || !clientId || !serviceId) {
 			error = 'Service name and client are required';
 			return;
 		}
@@ -108,6 +108,9 @@
 		error = null;
 
 		try {
+			const updates = [getServices({})];
+			if (serviceQuery) updates.push(serviceQuery);
+
 			await updateService({
 				serviceId,
 				name,
@@ -120,7 +123,7 @@
 				recurringType: getRecurringTypeFromUnit(unit),
 				recurringInterval: 1,
 				isActive: isActive
-			}).updates(serviceQuery, getService(serviceId), getServices({}));
+			}).updates(...updates);
 
 			goto(`/${tenantSlug}/services/${serviceId}`);
 		} catch (e) {

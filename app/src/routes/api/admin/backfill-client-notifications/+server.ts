@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, or, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, or, isNotNull, sql } from 'drizzle-orm';
 import { createNotification } from '$lib/server/notifications';
 import { logInfo, logError } from '$lib/server/logger';
 
@@ -18,29 +18,50 @@ import { logInfo, logError } from '$lib/server/logger';
 export const GET: RequestHandler = async (event) => POST(event);
 
 export const POST: RequestHandler = async ({ locals }) => {
-	if (!locals.user || !locals.tenant) {
+	if (!locals.user) {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	// Check role
+	// Find the user's tenant (owner or admin role)
 	const [tenantUser] = await db
-		.select({ role: table.tenantUser.role })
+		.select({
+			role: table.tenantUser.role,
+			tenantId: table.tenantUser.tenantId
+		})
 		.from(table.tenantUser)
-		.where(
-			and(
-				eq(table.tenantUser.tenantId, locals.tenant.id),
-				eq(table.tenantUser.userId, locals.user.id)
-			)
-		)
+		.where(eq(table.tenantUser.userId, locals.user.id))
 		.limit(1);
 
-	if (!tenantUser || (tenantUser.role !== 'owner' && tenantUser.role !== 'server')) {
-		return json({ error: 'Forbidden' }, { status: 403 });
+	if (!tenantUser || (tenantUser.role !== 'owner' && tenantUser.role !== 'admin')) {
+		return json({ error: 'Forbidden - must be owner or admin' }, { status: 403 });
 	}
 
-	const tenantId = locals.tenant.id;
-	const tenantSlug = locals.tenant.slug;
+	const [tenant] = await db
+		.select({ id: table.tenant.id, slug: table.tenant.slug })
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantUser.tenantId))
+		.limit(1);
+
+	if (!tenant) {
+		return json({ error: 'Tenant not found' }, { status: 404 });
+	}
+
+	const tenantId = tenant.id;
+	const tenantSlug = tenant.slug;
 	const userId = locals.user.id;
+
+	// Guard: check if backfill already ran (any notification with backfill metadata exists)
+	const [existing] = await db
+		.select({ count: sql<number>`count(*)`.as('count') })
+		.from(table.notification)
+		.where(sql`json_extract(${table.notification.metadata}, '$.backfill') = 1`);
+
+	if (Number(existing?.count) > 0) {
+		return json({
+			error: 'Backfill already ran. Delete existing backfill notifications first.',
+			existingCount: Number(existing.count)
+		}, { status: 409 });
+	}
 
 	let created = 0;
 	const errors: string[] = [];
@@ -53,6 +74,9 @@ export const POST: RequestHandler = async ({ locals }) => {
 				clientId: table.invoice.clientId,
 				invoiceNumber: table.invoice.invoiceNumber,
 				status: table.invoice.status,
+				issueDate: table.invoice.issueDate,
+				paidDate: table.invoice.paidDate,
+				dueDate: table.invoice.dueDate,
 				createdAt: table.invoice.createdAt
 			})
 			.from(table.invoice)
@@ -66,6 +90,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 		for (const inv of invoices) {
 			try {
+				const invoiceDate = inv.issueDate ?? inv.createdAt ?? new Date();
+
 				// invoice.created for all invoices
 				await createNotification({
 					tenantId,
@@ -75,12 +101,14 @@ export const POST: RequestHandler = async ({ locals }) => {
 					title: 'Factură creată',
 					message: `Factura ${inv.invoiceNumber || 'N/A'} a fost creată`,
 					link: `/${tenantSlug}/invoices/${inv.id}`,
-					metadata: { invoiceId: inv.id, backfill: true }
+					metadata: { invoiceId: inv.id, backfill: true },
+					createdAt: new Date(invoiceDate)
 				});
 				created++;
 
 				// invoice.paid if status is paid
 				if (inv.status === 'paid') {
+					const paidAt = inv.paidDate ?? invoiceDate;
 					await createNotification({
 						tenantId,
 						userId,
@@ -89,13 +117,15 @@ export const POST: RequestHandler = async ({ locals }) => {
 						title: 'Factură plătită',
 						message: `Factura ${inv.invoiceNumber || 'N/A'} a fost marcată ca plătită`,
 						link: `/${tenantSlug}/invoices/${inv.id}`,
-						metadata: { invoiceId: inv.id, backfill: true }
+						metadata: { invoiceId: inv.id, backfill: true },
+						createdAt: new Date(paidAt)
 					});
 					created++;
 				}
 
 				// invoice.overdue if status is overdue
 				if (inv.status === 'overdue') {
+					const overdueAt = inv.dueDate ?? invoiceDate;
 					await createNotification({
 						tenantId,
 						userId,
@@ -104,7 +134,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 						title: 'Factură restantă',
 						message: `Factura ${inv.invoiceNumber || 'N/A'} a depășit termenul de plată`,
 						link: `/${tenantSlug}/invoices/${inv.id}`,
-						metadata: { invoiceId: inv.id, backfill: true }
+						metadata: { invoiceId: inv.id, backfill: true },
+						createdAt: new Date(overdueAt)
 					});
 					created++;
 				}
@@ -121,6 +152,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 				contractNumber: table.contract.contractNumber,
 				contractTitle: table.contract.contractTitle,
 				status: table.contract.status,
+				contractDate: table.contract.contractDate,
+				beneficiarSignedAt: table.contract.beneficiarSignedAt,
 				createdAt: table.contract.createdAt
 			})
 			.from(table.contract)
@@ -129,7 +162,10 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 		for (const c of contracts) {
 			try {
+				const contractCreated = c.createdAt ?? new Date();
+
 				if (c.status === 'signed' || c.status === 'active' || c.status === 'expired') {
+					const signedAt = c.beneficiarSignedAt ?? contractCreated;
 					await createNotification({
 						tenantId,
 						userId,
@@ -138,12 +174,14 @@ export const POST: RequestHandler = async ({ locals }) => {
 						title: 'Contract semnat',
 						message: `Contractul "${c.contractTitle}" (${c.contractNumber}) a fost semnat`,
 						link: `/${tenantSlug}/contracts/${c.id}`,
-						metadata: { contractId: c.id, backfill: true }
+						metadata: { contractId: c.id, backfill: true },
+						createdAt: new Date(signedAt)
 					});
 					created++;
 				}
 
 				if (c.status === 'active') {
+					const activatedAt = c.contractDate ?? contractCreated;
 					await createNotification({
 						tenantId,
 						userId,
@@ -152,7 +190,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 						title: 'Contract activat',
 						message: `Contractul "${c.contractTitle}" (${c.contractNumber}) este activ`,
 						link: `/${tenantSlug}/contracts/${c.id}`,
-						metadata: { contractId: c.id, backfill: true }
+						metadata: { contractId: c.id, backfill: true },
+						createdAt: new Date(activatedAt)
 					});
 					created++;
 				}
@@ -166,7 +205,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 						title: 'Contract expirat',
 						message: `Contractul "${c.contractTitle}" (${c.contractNumber}) a expirat`,
 						link: `/${tenantSlug}/contracts/${c.id}`,
-						metadata: { contractId: c.id, backfill: true }
+						metadata: { contractId: c.id, backfill: true },
+						createdAt: new Date(contractCreated)
 					});
 					created++;
 				}
@@ -179,7 +219,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 		const leadsWithClient = await db
 			.select({
 				clientId: table.lead.clientId,
-				platform: table.lead.platform
+				platform: table.lead.platform,
+				createdAt: table.lead.createdAt
 			})
 			.from(table.lead)
 			.where(
@@ -189,13 +230,15 @@ export const POST: RequestHandler = async ({ locals }) => {
 				)
 			);
 
-		// Group leads by clientId
-		const leadsByClient = new Map<string, { count: number; platforms: Set<string> }>();
+		// Group leads by clientId, track latest date
+		const leadsByClient = new Map<string, { count: number; platforms: Set<string>; latestDate: Date }>();
 		for (const lead of leadsWithClient) {
 			if (!lead.clientId) continue;
-			const existing = leadsByClient.get(lead.clientId) || { count: 0, platforms: new Set() };
+			const existing = leadsByClient.get(lead.clientId) || { count: 0, platforms: new Set(), latestDate: new Date(0) };
 			existing.count++;
 			existing.platforms.add(lead.platform);
+			const leadDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
+			if (leadDate > existing.latestDate) existing.latestDate = leadDate;
 			leadsByClient.set(lead.clientId, existing);
 		}
 
@@ -210,7 +253,8 @@ export const POST: RequestHandler = async ({ locals }) => {
 					title: `${data.count} leaduri importate`,
 					message: `${data.count} leaduri din ${platformLabel} asociate acestui client`,
 					link: `/${tenantSlug}/leads/facebook-ads`,
-					metadata: { leadCount: data.count, backfill: true }
+					metadata: { leadCount: data.count, backfill: true },
+					createdAt: data.latestDate
 				});
 				created++;
 			} catch (e) {
