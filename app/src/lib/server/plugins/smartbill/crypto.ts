@@ -1,10 +1,20 @@
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
 import { env } from '$env/dynamic/private';
 
+/**
+ * Typed error for decryption failures - allows callers to distinguish
+ * credential corruption from other errors and handle gracefully.
+ */
+export class DecryptionError extends Error {
+	constructor(message: string, public readonly cause?: unknown) {
+		super(message);
+		this.name = 'DecryptionError';
+	}
+}
+
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const SALT_LENGTH = 32;
-const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 const ITERATIONS = 100000;
 
@@ -46,6 +56,19 @@ export function encrypt(tenantId: string, data: string): string {
 }
 
 /**
+ * Encrypt and immediately verify decryption round-trip.
+ * Prevents storing corrupted ciphertext that can't be decrypted later.
+ */
+export function encryptVerified(tenantId: string, data: string): string {
+	const encrypted = encrypt(tenantId, data);
+	const decrypted = decrypt(tenantId, encrypted);
+	if (decrypted !== data) {
+		throw new Error('Encryption round-trip verification failed');
+	}
+	return encrypted;
+}
+
+/**
  * Decrypt data for a specific tenant
  */
 export function decrypt(tenantId: string, encryptedData: string): string {
@@ -54,7 +77,7 @@ export function decrypt(tenantId: string, encryptedData: string): string {
 
 	const parts = encryptedData.split(':');
 	if (parts.length !== 3) {
-		throw new Error('Invalid encrypted data format');
+		throw new DecryptionError(`Invalid encrypted data format: expected 3 parts, got ${parts.length}`);
 	}
 
 	const [ivHex, tagHex, encrypted] = parts;
@@ -64,8 +87,14 @@ export function decrypt(tenantId: string, encryptedData: string): string {
 	const decipher = createDecipheriv(ALGORITHM, key, iv);
 	decipher.setAuthTag(tag);
 
-	let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-	decrypted += decipher.final('utf8');
-
-	return decrypted;
+	try {
+		let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+		decrypted += decipher.final('utf8');
+		return decrypted;
+	} catch (error) {
+		throw new DecryptionError(
+			error instanceof Error ? error.message : String(error),
+			error
+		);
+	}
 }

@@ -2,8 +2,25 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { KeezClient } from './client';
-import { decrypt, encrypt } from './crypto';
+import { decrypt, encryptVerified, DecryptionError } from './crypto';
 import { logInfo } from '$lib/server/logger';
+
+/**
+ * Thrown when stored Keez credentials cannot be decrypted.
+ * Callers should catch this to show a user-friendly re-auth prompt instead of a 500.
+ */
+export class KeezCredentialsCorruptError extends Error {
+	public readonly requiresReauth = true;
+
+	constructor(tenantId: string, cause?: unknown) {
+		super(
+			`Keez credentials for tenant ${tenantId} are corrupted or were encrypted with a different key. ` +
+			`Please re-save your Keez integration in Settings.`
+		);
+		this.name = 'KeezCredentialsCorruptError';
+		this.cause = cause;
+	}
+}
 
 interface IntegrationCredentials {
 	clientEid: string;
@@ -26,10 +43,11 @@ export async function createKeezClientForTenant(
 	try {
 		secret = decrypt(tenantId, integration.secret);
 	} catch (error) {
+		if (error instanceof DecryptionError) {
+			throw new KeezCredentialsCorruptError(tenantId, error);
+		}
 		throw new Error(
 			`Failed to decrypt Keez secret for tenant ${tenantId}. ` +
-			`This usually means ENCRYPTION_SECRET changed since credentials were saved, ` +
-			`or the stored credentials are corrupted. Re-save Keez integration to fix. ` +
 			`Original: ${error instanceof Error ? error.message : error}`
 		);
 	}
@@ -51,7 +69,7 @@ export async function createKeezClientForTenant(
 		secret,
 		cachedTokenData,
 		onTokenRefreshed: async (token: string, expiresAt: Date) => {
-			const encryptedToken = encrypt(tenantId, token);
+			const encryptedToken = encryptVerified(tenantId, token);
 			await db
 				.update(table.keezIntegration)
 				.set({ accessToken: encryptedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })

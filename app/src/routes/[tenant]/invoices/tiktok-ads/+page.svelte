@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokAdsSpendingList, deleteTiktokAdsSpending, triggerTiktokAdsSync, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -8,15 +8,12 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
-	import { Download, Search, Eye, Trash2, FileArchive } from '@lucide/svelte';
+	import { Download, Search, Eye, FileArchive } from '@lucide/svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
-	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -53,9 +50,9 @@
 		return null;
 	});
 
-	const spendingQuery = getTiktokAdsSpendingList();
-	const spending = $derived(spendingQuery.current || []);
-	const loading = $derived(spendingQuery.loading);
+	const invoicesQuery = getTiktokInvoiceDownloads();
+	const invoices = $derived(invoicesQuery.current || []);
+	const loading = $derived(invoicesQuery.loading);
 
 	// ---- Helpers ----
 
@@ -71,15 +68,10 @@
 		} catch { return start; }
 	}
 
-	function formatNumber(n: number | null): string {
-		if (n == null) return '-';
-		return n.toLocaleString('ro-RO');
-	}
+	// ---- Data grouping ----
 
-	// ---- Data grouping (mirroring Meta's structure) ----
-
-	const dateFilteredSpending = $derived(
-		spending.filter((r: any) => {
+	const dateFilteredInvoices = $derived(
+		invoices.filter((r: any) => {
 			if (!r.periodStart) return true;
 			const period = r.periodStart.substring(0, 7);
 			return period >= since.substring(0, 7) && period <= until.substring(0, 7);
@@ -87,8 +79,8 @@
 	);
 
 	const groupedByClient = $derived.by(() => {
-		const groups = new Map<string, { clientName: string; hasMultipleAccounts: boolean; rows: typeof spending }>();
-		for (const row of dateFilteredSpending) {
+		const groups = new Map<string, { clientName: string; hasMultipleAccounts: boolean; rows: typeof invoices }>();
+		for (const row of dateFilteredInvoices) {
 			const key = row.clientName || 'Neatribuit';
 			const existing = groups.get(key) || { clientName: key, hasMultipleAccounts: false, rows: [] };
 			existing.rows.push(row);
@@ -102,13 +94,13 @@
 		return Array.from(groups.values()).sort((a, b) => a.clientName.localeCompare(b.clientName));
 	});
 
-	// Count invoices per client for badge
+	// Count downloaded invoices per client for badge
 	const invoiceCountByClient = $derived.by(() => {
 		const sinceMonth = since.substring(0, 7);
 		const untilMonth = until.substring(0, 7);
 		const map = new Map<string, number>();
-		for (const row of spending) {
-			if (!row.pdfPath) continue;
+		for (const row of invoices) {
+			if (row.status !== 'downloaded' || !row.pdfPath) continue;
 			const period = row.periodStart?.substring(0, 7);
 			if (period && (period < sinceMonth || period > untilMonth)) continue;
 			const key = row.clientName || 'Neatribuit';
@@ -119,18 +111,22 @@
 
 	// ---- UI state ----
 
-	let spendSearchQuery = $state('');
+	let searchQuery = $state('');
 	let expandedAccounts = new SvelteSet<string>();
-	let expandedPeriods = new SvelteSet<string>();
 	let selectedInvoices = new SvelteSet<string>();
 	let zipping = $state(false);
 
 	const filteredGroupedByClient = $derived(
-		spendSearchQuery.trim()
-			? groupedByClient.filter((g) =>
-				g.clientName.toLowerCase().includes(spendSearchQuery.trim().toLowerCase()) ||
-				g.rows.some((r: any) => (r.tiktokAdvertiserId || '').toLowerCase().includes(spendSearchQuery.trim().toLowerCase()))
-			)
+		searchQuery.trim()
+			? groupedByClient.filter((g) => {
+				const q = searchQuery.trim().toLowerCase();
+				return g.clientName.toLowerCase().includes(q) ||
+					g.rows.some((r: any) =>
+						(r.tiktokAdvertiserId || '').toLowerCase().includes(q) ||
+						(r.adAccountName || '').toLowerCase().includes(q) ||
+						(r.invoiceNumber || '').toLowerCase().includes(q)
+					);
+			})
 			: groupedByClient
 	);
 
@@ -139,57 +135,23 @@
 		else expandedAccounts.add(key);
 	}
 
-	function togglePeriod(key: string) {
-		if (expandedPeriods.has(key)) expandedPeriods.delete(key);
-		else expandedPeriods.add(key);
-	}
-
 	function toggleSelectInvoice(id: string) {
 		if (selectedInvoices.has(id)) selectedInvoices.delete(id);
 		else selectedInvoices.add(id);
 	}
 
-	// ---- Sync ----
-
-	let syncing = $state(false);
-	let lastSyncResult = $state<{ imported: number; updated: number; errors: number; at: Date } | null>(null);
-
-	async function handleSync() {
-		syncing = true;
-		try {
-			const result = await triggerTiktokAdsSync().updates(spendingQuery);
-			lastSyncResult = { imported: result.imported, updated: result.updated, errors: result.errors, at: new Date() };
-			toast.success(`Sync complet: ${result.imported} noi, ${result.updated} actualizate, ${result.errors} erori`);
-		} catch (e) {
-			clientLogger.apiError('tiktok_ads_sync', e, 'TIKTOK_API_FETCH_FAILED');
-		} finally {
-			syncing = false;
-		}
-	}
-
-	// ---- Delete ----
-
-	async function handleDelete(id: string) {
-		if (!confirm('Ești sigur că vrei să ștergi acest raport?')) return;
-		try {
-			await deleteTiktokAdsSpending(id).updates(spendingQuery);
-			toast.success('Raport șters');
-		} catch (e) {
-			clientLogger.apiError('tiktok_ads_delete', e);
-		}
-	}
-
 	// ---- PDF download/preview ----
 
-	async function handleDownloadPDF(id: string, period: string) {
+	async function handleDownloadPDF(id: string, invoiceNumber: string | null, period: string) {
 		try {
-			const response = await fetch(`/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+			const response = await fetch(`/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to download PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `TikTokAds-Cheltuieli-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			const name = invoiceNumber || `TikTokAds-${period}`;
+			a.download = `${name.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
@@ -199,7 +161,7 @@
 
 	async function handlePreviewPDF(id: string) {
 		try {
-			const response = await fetch(`/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+			const response = await fetch(`/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to load PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
@@ -216,13 +178,15 @@
 		try {
 			const zip = new JSZip();
 			for (const id of invoiceIds) {
-				const res = await fetch(`/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+				const res = await fetch(`/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 				if (!res.ok) continue;
 				const blob = await res.blob();
-				const row = spending.find((s: any) => s.id === id);
-				const fileName = row?.periodStart
-					? `TikTokAds-${row.periodStart}.pdf`
-					: `TikTokAds-${id.substring(0, 8)}.pdf`;
+				const row = invoices.find((s: any) => s.id === id);
+				const fileName = row?.invoiceNumber
+					? `${row.invoiceNumber}.pdf`
+					: row?.periodStart
+						? `TikTokAds-Factura-${row.periodStart}.pdf`
+						: `TikTokAds-${id.substring(0, 8)}.pdf`;
 				zip.file(fileName, blob);
 			}
 			const content = await zip.generateAsync({ type: 'blob' });
@@ -369,19 +333,12 @@
 				<svg class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.75a8.16 8.16 0 004.76 1.52V6.84a4.84 4.84 0 01-1-.15z"/></svg>
 				Facturi TikTok Ads
 			</h1>
-			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+			<p class="text-muted-foreground">Facturi oficiale descărcate din TikTok Business Center</p>
 		</div>
 		<div class="flex items-center gap-2 flex-wrap">
 			<DateRangePicker bind:since bind:until />
 			<Button variant="outline" size="sm" onclick={() => showBulkImport = !showBulkImport}>
 				<Download class="mr-2 h-4 w-4" />Import Facturi
-			</Button>
-			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing}>
-				{#if syncing}
-					<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...
-				{:else}
-					<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum
-				{/if}
 			</Button>
 			{#if tiktokIntegrationId}
 				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
@@ -393,12 +350,6 @@
 
 	{#if tiktokIntegrationId}
 		<ScraperPanel bind:this={scraperPanelRef} platform="tiktok" integrationId={tiktokIntegrationId} showTrigger={false} />
-	{/if}
-
-	{#if lastSyncResult}
-		<p class="text-xs text-muted-foreground text-right">
-			{lastSyncResult.at.toLocaleString('ro-RO')} — {lastSyncResult.imported} noi, {lastSyncResult.updated} actualizate, {lastSyncResult.errors} erori
-		</p>
 	{/if}
 
 	<!-- Bulk Import Panel -->
@@ -501,19 +452,19 @@
 		</div>
 	{/if}
 
-	<!-- Spending cards per client (Meta-style) -->
+	<!-- Invoice cards per client -->
 	{#if loading}
 		<div class="space-y-4">
 			{#each Array(2) as _, idx (idx)}<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>{/each}
 		</div>
-	{:else if spending.length === 0}
+	{:else if invoices.length === 0}
 		<Card class="p-12 text-center">
 			<div class="flex flex-col items-center gap-3">
 				<div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-					<DollarSignIcon class="h-7 w-7 text-muted-foreground" />
+					<FileTextIcon class="h-7 w-7 text-muted-foreground" />
 				</div>
-				<p class="text-lg font-medium">Nu sunt date de cheltuieli</p>
-				<p class="text-sm text-muted-foreground">Apasă "Sync Acum" pentru a importa datele din TikTok Ads.</p>
+				<p class="text-lg font-medium">Nu sunt facturi oficiale TikTok</p>
+				<p class="text-sm text-muted-foreground">Folosește „Import Facturi" sau „Scan cu Browser" pentru a importa facturile din TikTok.</p>
 			</div>
 		</Card>
 	{:else}
@@ -521,18 +472,16 @@
 		<div class="flex items-center gap-3">
 			<div class="relative flex-1">
 				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-				<Input bind:value={spendSearchQuery} type="text" placeholder="Caută cont sau client..." class="pl-9" />
+				<Input bind:value={searchQuery} type="text" placeholder="Caută cont, client sau nr. factură..." class="pl-9" />
 			</div>
 		</div>
 
 		{#if filteredGroupedByClient.length === 0}
-			<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{spendSearchQuery}"</p>
+			<p class="text-sm text-muted-foreground text-center py-4">Niciun rezultat găsit pentru „{searchQuery}"</p>
 		{:else}
 			<div class="space-y-4">
 				{#each filteredGroupedByClient as group (group.clientName)}
-					{@const totalSpend = group.rows.reduce((s: number, r: any) => s + (r.spendCents || 0), 0)}
-					{@const totalClicks = group.rows.reduce((s: number, r: any) => s + (r.clicks || 0), 0)}
-					{@const totalImpressions = group.rows.reduce((s: number, r: any) => s + (r.impressions || 0), 0)}
+					{@const totalAmount = group.rows.reduce((s: number, r: any) => s + (r.amountCents || 0), 0)}
 					{@const curr = group.rows[0]?.currencyCode || 'RON'}
 					{@const isExpanded = expandedAccounts.has(group.clientName)}
 					{@const dlCount = invoiceCountByClient.get(group.clientName) || 0}
@@ -557,16 +506,8 @@
 										</div>
 										<div class="flex items-center gap-4">
 											<div class="text-right">
-												<p class="text-xs text-muted-foreground">Total cheltuieli</p>
-												<p class="text-lg font-bold">{formatAmount(totalSpend, curr)}</p>
-											</div>
-											<div class="text-right hidden sm:block">
-												<p class="text-xs text-muted-foreground">Click-uri</p>
-												<p class="text-base font-semibold">{formatNumber(totalClicks)}</p>
-											</div>
-											<div class="text-right hidden sm:block">
-												<p class="text-xs text-muted-foreground">Impresii</p>
-												<p class="text-base font-semibold">{formatNumber(totalImpressions)}</p>
+												<p class="text-xs text-muted-foreground">Total facturi</p>
+												<p class="text-lg font-bold">{formatAmount(totalAmount, curr)}</p>
 											</div>
 											<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
 										</div>
@@ -576,75 +517,49 @@
 
 							<CollapsibleContent>
 								<!-- Column headers -->
-								<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
+								<div class="grid grid-cols-[2fr_minmax(120px,1fr)_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
 									<span>Perioadă</span>
-									<span class="text-right">Cheltuieli</span>
-									<span class="text-right"></span>
-									<span class="text-right hidden sm:block">Impresii</span>
-									<span class="text-right hidden sm:block">Click-uri</span>
-									<span class="text-right">Facturi</span>
+									<span>Nr. Factură</span>
+									<span class="text-right">Sumă</span>
+									<span class="text-center">Status</span>
+									<span class="text-right">Acțiuni</span>
 								</div>
 								<div class="divide-y">
-									{#each group.rows as row, i (row.id)}
-										{@const prevSpend = group.rows[i + 1]?.spendCents}
-										{@const trend = prevSpend ? (((row.spendCents || 0) - prevSpend) / prevSpend) * 100 : null}
-										{@const hasPdf = !!row.pdfPath}
-										{@const periodKey = `${group.clientName}:${row.tiktokAdvertiserId}:${row.periodStart}`}
-										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
-										<!-- Period row -->
-										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => hasPdf && togglePeriod(periodKey)} onkeydown={(e) => e.key === 'Enter' && hasPdf && togglePeriod(periodKey)} role="button" tabindex="0">
+									{#each group.rows as row (row.id)}
+										{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
+										<div class="grid grid-cols-[2fr_minmax(120px,1fr)_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
 											<div class="flex items-center gap-2 min-w-0">
+												{#if hasPdf}
+													<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
+												{/if}
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
-												{#if group.hasMultipleAccounts && row.tiktokAdvertiserId}
-													<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{row.tiktokAdvertiserId}</span>
+												{#if group.hasMultipleAccounts && (row.adAccountName || row.tiktokAdvertiserId)}
+													<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground truncate max-w-[150px]">{row.adAccountName || row.tiktokAdvertiserId}</span>
 												{/if}
 											</div>
-											<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(row.spendCents, row.currencyCode)}</span>
-											<span class="text-right whitespace-nowrap">
-												{#if trend !== null}
-													<span class="text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-												{/if}
-											</span>
-											<span class="text-sm text-muted-foreground text-right whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
-											<span class="text-sm text-right whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
-											<div class="text-right">
-												{#if hasPdf}
-													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={(e) => { e.stopPropagation(); togglePeriod(periodKey); }}>
-														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-														1 factură
-													</button>
+											<span class="text-sm text-muted-foreground truncate" title={row.invoiceNumber || ''}>{row.invoiceNumber || '-'}</span>
+											<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(row.amountCents, row.currencyCode)}</span>
+											<div class="text-center">
+												{#if row.status === 'downloaded' && row.pdfPath}
+													<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">Descărcată</span>
+												{:else if row.status === 'pending'}
+													<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
+												{:else if row.status === 'error'}
+													<span class="inline-flex items-center rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
 												{:else}
-													<span class="text-xs text-orange-500">În așteptare</span>
+													<span class="text-xs text-muted-foreground">-</span>
 												{/if}
 											</div>
-										</div>
-										<!-- Expandable invoice row -->
-										{#if isPeriodExpanded && hasPdf}
-											<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
-												<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
-												<div class="flex items-center gap-2 min-w-0 flex-1">
-													<span class="text-sm font-medium text-blue-600">Factura PDF</span>
-													<span class="text-xs text-muted-foreground">{formatAmount(row.spendCents, row.currencyCode)}</span>
-												</div>
-												<div class="flex items-center gap-0.5 shrink-0">
-													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.periodStart)}>
+											<div class="flex items-center justify-end gap-0.5">
+												{#if hasPdf}
+													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
 														<Download class="mr-1 h-3 w-3" />PDF
 													</Button>
 													<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
-													<DropdownMenu>
-														<DropdownMenuTrigger>
-															<Button variant="ghost" size="icon" class="h-7 w-7"><EllipsisIcon class="h-3.5 w-3.5" /></Button>
-														</DropdownMenuTrigger>
-														<DropdownMenuContent align="end">
-															<DropdownMenuItem class="text-red-600" onclick={() => handleDelete(row.id)}>
-																<Trash2 class="mr-2 h-3.5 w-3.5" />Șterge factura
-															</DropdownMenuItem>
-														</DropdownMenuContent>
-													</DropdownMenu>
-												</div>
+												{/if}
 											</div>
-										{/if}
+										</div>
 									{/each}
 								</div>
 							</CollapsibleContent>

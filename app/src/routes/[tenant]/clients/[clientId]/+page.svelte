@@ -24,6 +24,7 @@
 		Building2,
 		CreditCard
 	} from '@lucide/svelte';
+	import ClientActivityFeed from '$lib/components/client/ClientActivityFeed.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
@@ -249,45 +250,11 @@
 			<!-- Recent Activity -->
 			<Card class="md:col-span-2">
 				<CardHeader>
-					<CardTitle>Recent Activity</CardTitle>
-					<CardDescription>Latest invoices for this client</CardDescription>
+					<CardTitle>Activitate recentă</CardTitle>
+					<CardDescription>Ultimele evenimente pentru acest client</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div class="space-y-4">
-						{#if recentInvoices.length === 0}
-							<p class="text-sm text-muted-foreground">No recent invoices.</p>
-						{:else}
-							{#each recentInvoices as invoice}
-								<div class="flex items-center gap-4 pb-4 border-b last:border-0 last:pb-0">
-									<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-										<FileText class="h-5 w-5 text-primary" />
-									</div>
-									<div class="flex-1">
-										<p class="font-medium">{formatInvoiceNumberDisplay(invoice, invoiceSettings)}</p>
-										<p class="text-sm text-muted-foreground">
-											Issued on {invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : '—'}
-										</p>
-									</div>
-									<div class="text-right">
-										<p class="font-semibold">
-											{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}
-										</p>
-										<Badge
-											variant={
-												invoice.status === 'paid'
-													? 'default'
-													: invoice.status === 'overdue'
-													? 'destructive'
-													: 'secondary'
-											}
-										>
-											{invoice.status}
-										</Badge>
-									</div>
-								</div>
-							{/each}
-						{/if}
-					</div>
+					<ClientActivityFeed {clientId} compact />
 				</CardContent>
 			</Card>
 		</div>

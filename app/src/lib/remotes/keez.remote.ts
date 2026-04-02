@@ -4,8 +4,8 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
-import { encrypt, decrypt } from '$lib/server/plugins/keez/crypto';
-import { createKeezClientForTenant } from '$lib/server/plugins/keez/factory';
+import { encrypt, decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/keez/crypto';
+import { createKeezClientForTenant, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/factory';
 import {
 	mapInvoiceToKeez,
 	mapKeezInvoiceToCRM,
@@ -64,8 +64,8 @@ export const connectKeez = command(
 			);
 		}
 
-		// Encrypt secret
-		const encryptedSecret = encrypt(event.locals.tenant.id, data.secret);
+		// Encrypt secret with round-trip verification
+		const encryptedSecret = encryptVerified(event.locals.tenant.id, data.secret);
 
 		// Check if integration exists
 		const [existing] = await db
@@ -136,7 +136,8 @@ export const getKeezStatus = query(async () => {
 			clientEid: table.keezIntegration.clientEid,
 			applicationId: table.keezIntegration.applicationId,
 			isActive: table.keezIntegration.isActive,
-			lastSyncAt: table.keezIntegration.lastSyncAt
+			lastSyncAt: table.keezIntegration.lastSyncAt,
+			secret: table.keezIntegration.secret
 		})
 		.from(table.keezIntegration)
 		.where(eq(table.keezIntegration.tenantId, event.locals.tenant.id))
@@ -149,12 +150,21 @@ export const getKeezStatus = query(async () => {
 		};
 	}
 
+	// Check if stored credentials can be decrypted
+	let credentialsValid = true;
+	try {
+		decrypt(event.locals.tenant.id, integration.secret);
+	} catch {
+		credentialsValid = false;
+	}
+
 	return {
 		connected: true,
 		isActive: integration.isActive,
 		clientEid: integration.clientEid,
 		applicationId: integration.applicationId,
-		lastSyncAt: integration.lastSyncAt
+		lastSyncAt: integration.lastSyncAt,
+		credentialsValid
 	};
 });
 

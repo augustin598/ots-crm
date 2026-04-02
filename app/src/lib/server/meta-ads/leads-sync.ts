@@ -45,6 +45,16 @@ export async function syncMetaAdsLeadsForTenant(tenantId: string, source: 'manua
 	let totalSkipped = 0;
 	let totalErrors = 0;
 
+	// Collect affected clientIds from monitored pages
+	const affectedClientIds = new Set<string>();
+	const monitoredPages = await db
+		.select({ clientId: table.metaAdsPage.clientId })
+		.from(table.metaAdsPage)
+		.where(eq(table.metaAdsPage.isMonitored, true));
+	for (const p of monitoredPages) {
+		if (p.clientId) affectedClientIds.add(p.clientId);
+	}
+
 	for (const integration of integrations) {
 		const result = await syncLeadsForIntegration(tenantId, integration);
 		totalImported += result.imported;
@@ -67,7 +77,8 @@ export async function syncMetaAdsLeadsForTenant(tenantId: string, source: 'manua
 				imported: totalImported,
 				skipped: totalSkipped,
 				errors: totalErrors,
-				source
+				source,
+				clientIds: [...affectedClientIds]
 			});
 		} catch {
 			// Don't fail sync for notification errors

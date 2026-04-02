@@ -2,6 +2,7 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq, and, lte, sql } from 'drizzle-orm';
 import { recordContractActivity } from '../../contract-activity';
+import { getHooksManager } from '../../plugins/hooks';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
@@ -16,10 +17,14 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 		let expired = 0;
 		const errors: Array<{ id: string; error: string }> = [];
 
+		const hooks = getHooksManager();
+
 		// Select only needed columns for lifecycle processing
 		const lifecycleColumns = {
 			id: table.contract.id,
 			tenantId: table.contract.tenantId,
+			clientId: table.contract.clientId,
+			contractTitle: table.contract.contractTitle,
 			version: table.contract.version,
 			contractDate: table.contract.contractDate,
 			contractDurationMonths: table.contract.contractDurationMonths
@@ -56,6 +61,26 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 					oldValue: 'signed',
 					newValue: 'active'
 				});
+
+				// Get tenant slug for notification link
+				if (contract.clientId) {
+					const [tenant] = await db
+						.select({ slug: table.tenant.slug })
+						.from(table.tenant)
+						.where(eq(table.tenant.id, contract.tenantId))
+						.limit(1);
+					if (tenant) {
+						await hooks.emit({
+							type: 'contract.activated',
+							contractId: contract.id,
+							contractTitle: contract.contractTitle || 'Fără titlu',
+							clientId: contract.clientId,
+							tenantId: contract.tenantId,
+							tenantSlug: tenant.slug
+						});
+					}
+				}
+
 				activated++;
 			} catch (err) {
 				errors.push({ id: contract.id, error: String(err) });
@@ -94,6 +119,25 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 					oldValue: 'active',
 					newValue: 'expired'
 				});
+
+				if (contract.clientId) {
+					const [tenant] = await db
+						.select({ slug: table.tenant.slug })
+						.from(table.tenant)
+						.where(eq(table.tenant.id, contract.tenantId))
+						.limit(1);
+					if (tenant) {
+						await hooks.emit({
+							type: 'contract.expired',
+							contractId: contract.id,
+							contractTitle: contract.contractTitle || 'Fără titlu',
+							clientId: contract.clientId,
+							tenantId: contract.tenantId,
+							tenantSlug: tenant.slug
+						});
+					}
+				}
+
 				expired++;
 			} catch (err) {
 				errors.push({ id: contract.id, error: String(err) });

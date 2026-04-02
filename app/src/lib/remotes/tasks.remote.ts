@@ -431,6 +431,23 @@ export const createTask = command(taskSchema, async (data) => {
 				// Don't throw - task creation should succeed even if email fails
 			}
 		}
+
+		// Emit task.assigned hook for in-app notification
+		try {
+			const hooks = getHooksManager();
+			await hooks.emit({
+				type: 'task.assigned',
+				taskId,
+				taskTitle: data.title,
+				assignedToUserId: data.assignedToUserId,
+				assignedByUserId: event.locals.user.id,
+				clientId: clientId,
+				tenantId: targetTenantId,
+				tenantSlug: event.locals.tenant.slug
+			});
+		} catch {
+			// Don't throw - task creation should succeed even if notification fails
+		}
 	}
 
 	// Record activity
@@ -614,6 +631,7 @@ export const updateTask = command(
 					taskTitle: existing.title,
 					assignedToUserId: newAssigneeId,
 					assignedByUserId: event.locals.user.id,
+					clientId: existing.clientId,
 					tenantId: existing.tenantId,
 					tenantSlug: event.locals.tenant.slug
 				});

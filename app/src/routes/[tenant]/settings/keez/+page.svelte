@@ -15,7 +15,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
-	import { CheckCircle2, XCircle, Link as LinkIcon, Download, Upload } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Download, Upload, AlertTriangle } from '@lucide/svelte';
 	import { page } from '$app/state';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -34,6 +34,18 @@
 	let disconnecting = $state(false);
 	let error = $state<string | null>(null);
 	let success = $state(false);
+
+	const credentialsCorrupt = $derived(
+		status?.connected && status?.isActive && status?.credentialsValid === false
+	);
+
+	// Pre-fill fields when credentials are corrupt so user only needs to re-enter secret
+	$effect(() => {
+		if (credentialsCorrupt && status) {
+			clientEid = status.clientEid || '';
+			applicationId = status.applicationId || '';
+		}
+	});
 
 	// Import states
 	let importingClients = $state(false);
@@ -153,6 +165,104 @@
 				<div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
 				<div class="h-10 bg-gray-200 dark:bg-gray-700 rounded"></div>
 			</div>
+		</CardContent>
+	</Card>
+{:else if credentialsCorrupt}
+	<Card>
+		<CardHeader>
+			<div class="flex items-center gap-2">
+				<CardTitle>Keez Connection</CardTitle>
+				<Badge variant="destructive" class="gap-1">
+					<AlertTriangle class="h-3 w-3" />
+					Credentials Error
+				</Badge>
+			</div>
+			<CardDescription>
+				Your Keez credentials are corrupted and need to be re-saved. Please re-enter your secret below.
+			</CardDescription>
+		</CardHeader>
+		<CardContent>
+			<div class="rounded-md bg-yellow-50 dark:bg-yellow-900/20 p-4 mb-6">
+				<div class="flex items-start gap-3">
+					<AlertTriangle class="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+					<div>
+						<p class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+							Keez credentials need to be re-saved
+						</p>
+						<p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+							Your stored credentials could not be decrypted. This can happen after a server configuration change.
+							Re-enter your Keez API secret to restore the connection. Your Client EID and Application ID have been pre-filled.
+						</p>
+					</div>
+				</div>
+			</div>
+
+			<form
+				onsubmit={(e) => {
+					e.preventDefault();
+					handleConnect();
+				}}
+				class="space-y-6"
+			>
+				<div class="space-y-4">
+					<div class="space-y-2">
+						<Label for="clientEid">Client EID</Label>
+						<Input
+							id="clientEid"
+							type="text"
+							bind:value={clientEid}
+							placeholder="Enter your Client EID"
+							required
+						/>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="applicationId">Application ID</Label>
+						<Input
+							id="applicationId"
+							type="text"
+							bind:value={applicationId}
+							placeholder="Enter your Application ID"
+							required
+						/>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="secret">Secret</Label>
+						<Input
+							id="secret"
+							type="password"
+							bind:value={secret}
+							placeholder="Re-enter your Keez API secret"
+							required
+						/>
+						<p class="text-xs text-muted-foreground">
+							Re-enter your Keez API secret to restore the connection
+						</p>
+					</div>
+				</div>
+
+				{#if error}
+					<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
+						<p class="text-sm text-red-800 dark:text-red-200">{error}</p>
+					</div>
+				{/if}
+
+				{#if success}
+					<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
+						<p class="text-sm text-green-800 dark:text-green-200">Credentials re-saved successfully!</p>
+					</div>
+				{/if}
+
+				<div class="flex gap-2">
+					<Button type="submit" disabled={connecting || !clientEid || !applicationId || !secret}>
+						{connecting ? 'Reconnecting...' : 'Re-save Credentials'}
+					</Button>
+					<Button variant="outline" onclick={handleDisconnect} disabled={disconnecting}>
+						{disconnecting ? 'Disconnecting...' : 'Disconnect'}
+					</Button>
+				</div>
+			</form>
 		</CardContent>
 	</Card>
 {:else if status?.connected && status?.isActive}

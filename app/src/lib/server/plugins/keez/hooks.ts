@@ -2,7 +2,7 @@ import type { HookHandler, InvoiceCreatedEvent, InvoiceUpdatedEvent, InvoiceDele
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { createKeezClientForTenant } from './factory';
+import { createKeezClientForTenant, KeezCredentialsCorruptError } from './factory';
 import { mapInvoiceToKeez, generateNextInvoiceNumber, mapKeezDetailsToLineItems } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
@@ -83,7 +83,27 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
 
 	// Create Keez client with DB token cache
-	const keezClient = await createKeezClientForTenant(tenantId, integration);
+	let keezClient;
+	try {
+		keezClient = await createKeezClientForTenant(tenantId, integration);
+	} catch (error) {
+		if (error instanceof KeezCredentialsCorruptError) {
+			logWarning('keez', `Skipping invoice sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+			// Record sync error instead of crashing invoice creation
+			await db.insert(table.keezInvoiceSync).values({
+				id: generateSyncId(),
+				invoiceId: invoice.id,
+				tenantId,
+				keezInvoiceId: '',
+				syncStatus: 'error',
+				syncDirection: 'push',
+				errorMessage: 'Keez credentials are corrupted. Please re-save your Keez integration in Settings.',
+				lastSyncedAt: new Date()
+			});
+			return;
+		}
+		throw error;
+	}
 
 	logInfo('keez', `Starting invoice sync for invoice ${invoice.id} with ${lineItems.length} line items`, { tenantId, metadata: { invoiceId: invoice.id, lineItemCount: lineItems.length } });
 
@@ -662,7 +682,16 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 		.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
 
 	try {
-		const keezClient = await createKeezClientForTenant(tenantId, integration);
+		let keezClient;
+		try {
+			keezClient = await createKeezClientForTenant(tenantId, integration);
+		} catch (error) {
+			if (error instanceof KeezCredentialsCorruptError) {
+				logWarning('keez', `Skipping invoice update sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+				return;
+			}
+			throw error;
+		}
 
 		// Map updated invoice to Keez format, preserving existing Keez external ID
 		const keezInvoice = await mapInvoiceToKeez(
@@ -745,7 +774,16 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 	}
 
 	try {
-		const keezClient = await createKeezClientForTenant(tenantId, integration);
+		let keezClient;
+		try {
+			keezClient = await createKeezClientForTenant(tenantId, integration);
+		} catch (error) {
+			if (error instanceof KeezCredentialsCorruptError) {
+				logWarning('keez', `Skipping invoice delete sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+				return;
+			}
+			throw error;
+		}
 
 		// Only draft/proforma invoices can be deleted in Keez
 		// Validated fiscal invoices cannot be deleted (must be storno'd)

@@ -46,6 +46,7 @@
 
 	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/clients/${clientId}` },
+		{ id: 'activity', label: 'Activitate', href: `/${tenantSlug}/clients/${clientId}/activity` },
 		{ id: 'projects', label: `Projects (${projects.length})`, href: `/${tenantSlug}/clients/${clientId}/projects` },
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
@@ -99,6 +100,7 @@
 
 	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/clients/${clientId}`) return 'overview';
+		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/activity`)) return 'activity';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
@@ -192,7 +194,7 @@
 	</Dialog.Root>
 
 	<Tabs value={activeTab()} class="w-full">
-			<TabsList class="grid w-full grid-cols-6">
+			<TabsList class="grid w-full grid-cols-7">
 				{#each tabs as tab}
 					<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 						{tab.label}

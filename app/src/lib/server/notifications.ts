@@ -8,8 +8,16 @@ import { logError, logInfo } from '$lib/server/logger';
 
 export type NotificationType =
 	| 'task.assigned'
+	| 'task.completed'
+	| 'invoice.created'
 	| 'invoice.paid'
+	| 'invoice.overdue'
 	| 'contract.signed'
+	| 'contract.activated'
+	| 'contract.expired'
+	| 'lead.imported'
+	| 'lead.status_changed'
+	| 'ad.spending_synced'
 	| 'sync.error'
 	| 'integration.auth_expired'
 	| 'system';
@@ -17,6 +25,7 @@ export type NotificationType =
 export interface CreateNotificationParams {
 	tenantId: string;
 	userId: string;
+	clientId?: string | null;
 	type: NotificationType;
 	title: string;
 	message: string;
@@ -65,6 +74,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 		id,
 		tenantId: params.tenantId,
 		userId: params.userId,
+		clientId: params.clientId ?? null,
 		type: params.type,
 		title: params.title,
 		message: params.message,
@@ -80,7 +90,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 	const controller = sseControllers.get(params.userId);
 	if (controller) {
 		try {
-			const notif = { ...newNotification, link: newNotification.link ?? null, isRead: newNotification.isRead ?? false, metadata: newNotification.metadata ?? null, createdAt: new Date() } satisfies table.Notification;
+			const notif = { ...newNotification, clientId: newNotification.clientId ?? null, link: newNotification.link ?? null, isRead: newNotification.isRead ?? false, metadata: newNotification.metadata ?? null, createdAt: new Date() } satisfies table.Notification;
 			controller.enqueue(formatSSEEvent('notification', notif));
 		} catch {
 			// Controller may be closed — remove it silently

@@ -19,6 +19,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
+	import NotificationBell from '$lib/components/app/notification-bell/NotificationBell.svelte';
 	import { browser } from '$app/environment';
 	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
@@ -304,6 +305,9 @@
 		</SidebarContent>
 		<SidebarFooter>
 			<SidebarMenu>
+				<SidebarMenuItem>
+					<NotificationBell />
+				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton onclick={toggleTheme} variant="outline">
 						<div class="relative size-4">

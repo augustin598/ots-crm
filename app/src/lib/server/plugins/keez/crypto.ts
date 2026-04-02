@@ -1,2 +1,2 @@
 // Reuse SmartBill's crypto utilities
-export { encrypt, decrypt } from '../smartbill/crypto';
+export { encrypt, decrypt, encryptVerified, DecryptionError } from '../smartbill/crypto';

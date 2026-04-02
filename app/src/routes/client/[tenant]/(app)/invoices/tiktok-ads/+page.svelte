@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokAdsSpendingList } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokInvoiceDownloads } from '$lib/remotes/tiktok-ads.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
@@ -11,13 +11,8 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import EyeIcon from '@lucide/svelte/icons/eye';
-	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
-	import AccountSpendChart from '$lib/components/reports/account-spend-chart.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -40,9 +35,9 @@
 		return `${fmt(since)} — ${fmt(until)}`;
 	});
 
-	const spendingQuery = getTiktokAdsSpendingList();
-	const spending = $derived(spendingQuery.current || []);
-	const loading = $derived(spendingQuery.loading);
+	const invoicesQuery = getTiktokInvoiceDownloads();
+	const invoices = $derived(invoicesQuery.current || []);
+	const loading = $derived(invoicesQuery.loading);
 
 	// ---- Helpers ----
 
@@ -58,15 +53,10 @@
 		} catch { return start; }
 	}
 
-	function formatNumber(n: number | null): string {
-		if (n == null) return '-';
-		return n.toLocaleString('ro-RO');
-	}
+	// ---- Data grouping ----
 
-	// ---- Data grouping (mirroring Meta client structure) ----
-
-	const dateFilteredSpending = $derived(
-		spending.filter((r: any) => {
+	const dateFilteredInvoices = $derived(
+		invoices.filter((r: any) => {
 			if (!r.periodStart) return true;
 			const period = r.periodStart.substring(0, 7);
 			return period >= since.substring(0, 7) && period <= until.substring(0, 7);
@@ -74,8 +64,8 @@
 	);
 
 	const groupedByClient = $derived.by(() => {
-		const groups = new Map<string, { clientName: string; hasMultipleAccounts: boolean; rows: typeof spending }>();
-		for (const row of dateFilteredSpending) {
+		const groups = new Map<string, { clientName: string; hasMultipleAccounts: boolean; rows: typeof invoices }>();
+		for (const row of dateFilteredInvoices) {
 			const key = row.clientName || 'Neatribuit';
 			const existing = groups.get(key) || { clientName: key, hasMultipleAccounts: false, rows: [] };
 			existing.rows.push(row);
@@ -89,13 +79,13 @@
 		return Array.from(groups.values()).sort((a, b) => a.clientName.localeCompare(b.clientName));
 	});
 
-	// Count invoices per client for badge
+	// Count downloaded invoices per client for badge
 	const invoiceCountByClient = $derived.by(() => {
 		const sinceMonth = since.substring(0, 7);
 		const untilMonth = until.substring(0, 7);
 		const map = new Map<string, number>();
-		for (const row of spending) {
-			if (!row.pdfPath) continue;
+		for (const row of invoices) {
+			if (row.status !== 'downloaded' || !row.pdfPath) continue;
 			const period = row.periodStart?.substring(0, 7);
 			if (period && (period < sinceMonth || period > untilMonth)) continue;
 			const key = row.clientName || 'Neatribuit';
@@ -106,29 +96,28 @@
 
 	// ---- UI state ----
 
-	let spendSearchQuery = $state('');
+	let searchQuery = $state('');
 	let expandedAccounts = new SvelteSet<string>();
-	let expandedPeriods = new SvelteSet<string>();
 	let selectedInvoices = new SvelteSet<string>();
 	let zipping = $state(false);
 
 	const filteredGroupedByClient = $derived(
-		spendSearchQuery.trim()
-			? groupedByClient.filter((g) =>
-				g.clientName.toLowerCase().includes(spendSearchQuery.trim().toLowerCase()) ||
-				g.rows.some((r: any) => (r.tiktokAdvertiserId || '').toLowerCase().includes(spendSearchQuery.trim().toLowerCase()))
-			)
+		searchQuery.trim()
+			? groupedByClient.filter((g) => {
+				const q = searchQuery.trim().toLowerCase();
+				return g.clientName.toLowerCase().includes(q) ||
+					g.rows.some((r: any) =>
+						(r.tiktokAdvertiserId || '').toLowerCase().includes(q) ||
+						(r.adAccountName || '').toLowerCase().includes(q) ||
+						(r.invoiceNumber || '').toLowerCase().includes(q)
+					);
+			})
 			: groupedByClient
 	);
 
 	function toggleAccount(key: string) {
 		if (expandedAccounts.has(key)) expandedAccounts.delete(key);
 		else expandedAccounts.add(key);
-	}
-
-	function togglePeriod(key: string) {
-		if (expandedPeriods.has(key)) expandedPeriods.delete(key);
-		else expandedPeriods.add(key);
 	}
 
 	let autoExpandedOnce = false;
@@ -147,15 +136,16 @@
 
 	// ---- PDF download/preview ----
 
-	async function handleDownloadPDF(id: string, period: string) {
+	async function handleDownloadPDF(id: string, invoiceNumber: string | null, period: string) {
 		try {
-			const response = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+			const response = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to download PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `TikTokAds-Cheltuieli-${period.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+			const name = invoiceNumber || `TikTokAds-${period}`;
+			a.download = `${name.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
@@ -165,7 +155,7 @@
 
 	async function handlePreviewPDF(id: string) {
 		try {
-			const response = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+			const response = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 			if (!response.ok) throw new Error('Failed to load PDF');
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
@@ -182,13 +172,15 @@
 		try {
 			const zip = new JSZip();
 			for (const id of invoiceIds) {
-				const res = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/${id}/pdf`);
+				const res = await fetch(`/client/${tenantSlug}/invoices/tiktok-ads/downloads/${id}/pdf`);
 				if (!res.ok) continue;
 				const blob = await res.blob();
-				const row = spending.find((s: any) => s.id === id);
-				const fileName = row?.periodStart
-					? `TikTokAds-${row.periodStart}.pdf`
-					: `TikTokAds-${id.substring(0, 8)}.pdf`;
+				const row = invoices.find((s: any) => s.id === id);
+				const fileName = row?.invoiceNumber
+					? `${row.invoiceNumber}.pdf`
+					: row?.periodStart
+						? `TikTokAds-Factura-${row.periodStart}.pdf`
+						: `TikTokAds-${id.substring(0, 8)}.pdf`;
 				zip.file(fileName, blob);
 			}
 			const content = await zip.generateAsync({ type: 'blob' });
@@ -221,45 +213,41 @@
 				<IconTiktok class="h-8 w-8" />
 				Facturi TikTok Ads
 			</h1>
-			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
+			<p class="text-muted-foreground">Facturi oficiale descărcate din TikTok Business Center</p>
 		</div>
 		<div class="flex items-center gap-2">
 			<div class="relative w-48">
 				<Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-				<Input bind:value={spendSearchQuery} type="text" placeholder="Caută..." class="pl-8 h-9 text-sm" />
+				<Input bind:value={searchQuery} type="text" placeholder="Caută..." class="pl-8 h-9 text-sm" />
 			</div>
 			<DateRangePicker bind:since bind:until />
 		</div>
 	</div>
 
-	<!-- Spending cards per client (Meta-style) -->
+	<!-- Invoice cards per client -->
 	{#if loading}
 		<div class="space-y-4">
 			{#each Array(2) as _, idx (idx)}<Card class="p-6"><Skeleton class="h-48 w-full" /></Card>{/each}
 		</div>
-	{:else if spending.length === 0}
+	{:else if invoices.length === 0}
 		<Card class="p-12 text-center">
 			<div class="flex flex-col items-center gap-3">
 				<div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-					<DollarSignIcon class="h-7 w-7 text-muted-foreground" />
+					<FileTextIcon class="h-7 w-7 text-muted-foreground" />
 				</div>
-				<p class="text-lg font-medium">Nu există date de facturare</p>
-				<p class="text-sm text-muted-foreground">Nu sunt cheltuieli TikTok Ads înregistrate.</p>
+				<p class="text-lg font-medium">Nu sunt facturi oficiale TikTok</p>
+				<p class="text-sm text-muted-foreground">Nu sunt facturi TikTok Ads descărcate pentru acest cont.</p>
 			</div>
 		</Card>
 	{:else}
 
 		{#if filteredGroupedByClient.length === 0}
-			<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{spendSearchQuery}"</p>
+			<p class="text-sm text-muted-foreground text-center py-4">Niciun rezultat găsit pentru „{searchQuery}"</p>
 		{:else}
 			<div class="space-y-4">
 				{#each filteredGroupedByClient as group (group.clientName)}
-					{@const totalSpend = group.rows.reduce((s: number, r: any) => s + (r.spendCents || 0), 0)}
-					{@const totalClicks = group.rows.reduce((s: number, r: any) => s + (r.clicks || 0), 0)}
-					{@const totalImpressions = group.rows.reduce((s: number, r: any) => s + (r.impressions || 0), 0)}
+					{@const totalAmount = group.rows.reduce((s: number, r: any) => s + (r.amountCents || 0), 0)}
 					{@const curr = group.rows[0]?.currencyCode || 'RON'}
-					{@const daysInRange = Math.max(1, Math.round((new Date(until).getTime() - new Date(since).getTime()) / 86400000) + 1)}
-					{@const spendPerDay = totalSpend > 0 ? Math.round(totalSpend / daysInRange) : 0}
 					{@const isExpanded = expandedAccounts.has(group.clientName)}
 					{@const dlCount = invoiceCountByClient.get(group.clientName) || 0}
 					<Collapsible open={isExpanded} onOpenChange={() => toggleAccount(group.clientName)}>
@@ -283,11 +271,8 @@
 										</div>
 										<div class="flex items-center gap-4">
 											<div class="text-right">
-												<p class="text-sm text-muted-foreground">Total cheltuieli · {new Date(since + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })} — {new Date(until + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-												<p class="text-2xl font-bold">{formatAmount(totalSpend, curr)}</p>
-												{#if spendPerDay > 0}
-													<p class="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 mt-1">{formatAmount(spendPerDay, curr)} / zi</p>
-												{/if}
+												<p class="text-xs text-muted-foreground">Total facturi</p>
+												<p class="text-lg font-bold">{formatAmount(totalAmount, curr)}</p>
 											</div>
 											<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
 										</div>
@@ -296,102 +281,70 @@
 							</CollapsibleTrigger>
 
 							<CollapsibleContent>
-								{#if group.rows.some((r: any) => r.spendCents > 0)}
-									<div class="px-6 py-4 border-t">
-										<p class="text-sm font-medium mb-3">Cheltuieli per zi / cont</p>
-										<AccountSpendChart rows={group.rows.map((r: any) => ({ periodStart: r.periodStart, periodEnd: r.periodEnd || r.periodStart, adAccountName: r.tiktokAdvertiserId, metaAdAccountId: r.tiktokAdvertiserId, spendCents: r.spendCents || 0, currencyCode: r.currencyCode }))} currency={curr} />
-									</div>
-								{/if}
 								<table class="w-full border-t">
 									<thead>
 										<tr class="bg-muted/30 text-sm font-semibold text-muted-foreground">
 											<td class="px-6 py-2.5"><span class="inline-flex items-center gap-1.5"><CalendarIcon class="h-3.5 w-3.5" />Perioadă</span></td>
-											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><WalletIcon class="h-3.5 w-3.5" />Cheltuieli</span></td>
-											<td class="px-2 py-2.5 text-right w-[60px]"></td>
-											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><EyeIcon class="h-3.5 w-3.5" />Impresii</span></td>
-											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><MousePointerClickIcon class="h-3.5 w-3.5" />Click-uri</span></td>
-											<td class="px-6 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><FileTextIcon class="h-3.5 w-3.5" />Facturi</span></td>
+											<td class="px-3 py-2.5">Nr. Factură</td>
+											<td class="px-3 py-2.5 text-right">Sumă</td>
+											<td class="px-3 py-2.5 text-center">Status</td>
+											<td class="px-6 py-2.5 text-right">Acțiuni</td>
 										</tr>
 									</thead>
 									<tbody class="divide-y">
-										{#each group.rows as row, i (row.id)}
-											{@const prevSpend = group.rows[i + 1]?.spendCents}
-											{@const trend = prevSpend ? (((row.spendCents || 0) - prevSpend) / prevSpend) * 100 : null}
-											{@const hasPdf = !!row.pdfPath}
-											{@const periodKey = `${group.clientName}:${row.tiktokAdvertiserId}:${row.periodStart}`}
-											{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
-											{@const periodDays = (() => { const start = new Date(row.periodStart); const end = new Date(row.periodEnd || row.periodStart); return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1); })()}
-											{@const rowSpendPerDay = (row.spendCents || 0) > 0 ? Math.round((row.spendCents || 0) / periodDays) : 0}
-											<!-- Period row -->
-											<tr class="hover:bg-muted/30 transition-colors cursor-pointer" onclick={() => hasPdf && togglePeriod(periodKey)} onkeydown={(e) => e.key === 'Enter' && hasPdf && togglePeriod(periodKey)} role="button" tabindex="0">
+										{#each group.rows as row (row.id)}
+											{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
+											<tr class="hover:bg-muted/30 transition-colors">
 												<td class="px-6 py-3">
 													<div class="flex items-center gap-2 min-w-0">
+														{#if hasPdf}
+															<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
+														{/if}
 														<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 														<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
-														{#if group.hasMultipleAccounts && row.tiktokAdvertiserId}
-															<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{row.tiktokAdvertiserId}</span>
+														{#if group.hasMultipleAccounts && (row.adAccountName || row.tiktokAdvertiserId)}
+															<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground truncate max-w-[150px]">{row.adAccountName || row.tiktokAdvertiserId}</span>
 														{/if}
 													</div>
 												</td>
+												<td class="px-3 py-3 text-sm text-muted-foreground truncate" title={row.invoiceNumber || ''}>{row.invoiceNumber || '-'}</td>
 												<td class="px-3 py-3 text-right whitespace-nowrap">
-													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
-													{#if rowSpendPerDay > 0}
-														<p class="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700 mt-0.5">{formatAmount(rowSpendPerDay, row.currencyCode)} / zi</p>
-													{/if}
+													<span class="text-base font-semibold">{formatAmount(row.amountCents, row.currencyCode)}</span>
 												</td>
-												<td class="px-2 py-3 text-right whitespace-nowrap">
-													{#if trend !== null}
-														<span class="text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
-													{/if}
-												</td>
-												<td class="px-3 py-3 text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)}</td>
-												<td class="px-3 py-3 text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)}</td>
-												<td class="px-6 py-3 text-right">
-													{#if hasPdf}
-														<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={(e) => { e.stopPropagation(); togglePeriod(periodKey); }}>
-															<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
-															1 factură
-														</button>
+												<td class="px-3 py-3 text-center">
+													{#if row.status === 'downloaded' && row.pdfPath}
+														<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">Descărcată</span>
+													{:else if row.status === 'pending'}
+														<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
+													{:else if row.status === 'error'}
+														<span class="inline-flex items-center rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
 													{:else}
-														<span class="text-xs text-orange-500">In asteptare</span>
+														<span class="text-xs text-muted-foreground">-</span>
 													{/if}
+												</td>
+												<td class="px-6 py-3 text-right">
+													<div class="flex items-center justify-end gap-0.5">
+														{#if hasPdf}
+															<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
+																<Download class="mr-1 h-3 w-3" />Descarcă
+															</Button>
+															<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+														{/if}
+													</div>
 												</td>
 											</tr>
-											<!-- Expandable invoice row -->
-											{#if isPeriodExpanded && hasPdf}
-												<tr class="bg-muted/10 hover:bg-muted/20 transition-colors">
-													<td colspan="6">
-														<div class="flex items-center gap-3 px-6 py-2 pl-10">
-															<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
-															<div class="flex items-center gap-2 min-w-0 flex-1">
-																<span class="text-sm font-medium text-blue-600">Factura PDF</span>
-																<span class="text-xs text-muted-foreground">{formatAmount(row.spendCents, row.currencyCode)}</span>
-															</div>
-															<div class="flex items-center gap-0.5 shrink-0">
-																<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.periodStart)}>
-																	<Download class="mr-1 h-3 w-3" />Descarca factura
-																</Button>
-																<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
-															</div>
-														</div>
-													</td>
-												</tr>
-											{/if}
 										{/each}
 									</tbody>
 									{#if group.rows.length > 1}
-										{@const totalPdfRows = group.rows.filter((r: any) => r.pdfPath)}
-										{@const totalInvoices = totalPdfRows.length}
 										<tfoot>
 											<tr class="border-t-2 border-border bg-muted">
 												<td class="px-6 py-3 font-semibold text-sm">Total</td>
-												<td class="px-3 py-3 text-right whitespace-nowrap"><span class="text-base font-bold">{formatAmount(totalSpend, curr)}</span></td>
 												<td></td>
-												<td class="px-3 py-3 text-sm font-semibold text-right whitespace-nowrap">{formatNumber(totalImpressions)}</td>
-												<td class="px-3 py-3 text-sm font-semibold text-right whitespace-nowrap">{formatNumber(totalClicks)}</td>
+												<td class="px-3 py-3 text-right whitespace-nowrap"><span class="text-base font-bold">{formatAmount(totalAmount, curr)}</span></td>
+												<td></td>
 												<td class="px-6 py-3 text-right">
-													{#if totalInvoices > 0}
-														<span class="inline-flex items-center rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50">{totalInvoices} facturi</span>
+													{#if dlCount > 0}
+														<span class="inline-flex items-center rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50">{dlCount} facturi</span>
 													{/if}
 												</td>
 											</tr>

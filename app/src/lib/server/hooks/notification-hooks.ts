@@ -4,9 +4,13 @@ import { db } from '../db';
 import * as table from '../db/schema';
 import { eq, and, or } from 'drizzle-orm';
 import type {
+	InvoiceCreatedEvent,
 	InvoicePaidEvent,
+	InvoiceStatusChangedEvent,
 	TaskAssignedEvent,
 	ContractSignedEvent,
+	ContractActivatedEvent,
+	ContractExpiredEvent,
 	SyncErrorEvent,
 	LeadsImportedEvent
 } from '../plugins/types';
@@ -58,6 +62,7 @@ export function registerNotificationHooks(): void {
 					createNotification({
 						tenantId: event.tenantId,
 						userId,
+						clientId: event.invoice.clientId,
 						type: 'invoice.paid',
 						title: 'Factură plătită',
 						message: `Factura ${invoiceNumber} a fost marcată ca plătită`,
@@ -79,6 +84,7 @@ export function registerNotificationHooks(): void {
 			await createNotification({
 				tenantId: event.tenantId,
 				userId: event.assignedToUserId,
+				clientId: event.clientId,
 				type: 'task.assigned',
 				title: 'Task asignat',
 				message: `Ți-a fost asignat task-ul: "${event.taskTitle}"`,
@@ -97,11 +103,19 @@ export function registerNotificationHooks(): void {
 		try {
 			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
 
+			// Look up clientId from contract
+			const [contract] = await db
+				.select({ clientId: table.contract.clientId })
+				.from(table.contract)
+				.where(eq(table.contract.id, event.contractId))
+				.limit(1);
+
 			await Promise.all(
 				adminUserIds.map((userId) =>
 					createNotification({
 						tenantId: event.tenantId,
 						userId,
+						clientId: contract?.clientId,
 						type: 'contract.signed',
 						title: 'Contract semnat',
 						message: `Contractul "${event.contractTitle}" a fost semnat de ${event.signerEmail}`,
@@ -165,20 +179,165 @@ export function registerNotificationHooks(): void {
 			const link = tenant ? `/${tenant.slug}/leads/facebook-ads` : undefined;
 			const sourceLabel = event.source === 'scheduled' ? 'automat' : 'manual';
 
+			// Create per-client notifications if clientIds are available
+			const clientIds = event.clientIds ?? [];
+			if (clientIds.length > 0) {
+				for (const clientId of clientIds) {
+					await Promise.all(
+						adminUserIds.map((userId) =>
+							createNotification({
+								tenantId: event.tenantId,
+								userId,
+								clientId,
+								type: 'lead.imported',
+								title: `Leaduri noi importate`,
+								message: `Sync ${sourceLabel}: ${event.imported} noi${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
+								link
+							})
+						)
+					);
+				}
+			} else {
+				// Fallback: global notification without clientId
+				await Promise.all(
+					adminUserIds.map((userId) =>
+						createNotification({
+							tenantId: event.tenantId,
+							userId,
+							type: 'lead.imported',
+							title: `${event.imported} leaduri noi importate`,
+							message: `Sync ${sourceLabel}: ${event.imported} noi, ${event.skipped} existente${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
+							link
+						})
+					)
+				);
+			}
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create leads.imported notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Invoice Created ----
+	hooks.on('invoice.created', async (event: InvoiceCreatedEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, event.tenantId))
+				.limit(1);
+
+			const invoiceNumber = event.invoice.invoiceNumber || 'N/A';
+			const link = tenant ? `/${tenant.slug}/invoices/${event.invoice.id}` : null;
+
 			await Promise.all(
 				adminUserIds.map((userId) =>
 					createNotification({
 						tenantId: event.tenantId,
 						userId,
-						type: 'system',
-						title: `${event.imported} leaduri noi importate`,
-						message: `Sync ${sourceLabel}: ${event.imported} noi, ${event.skipped} existente${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
-						link
+						clientId: event.invoice.clientId,
+						type: 'invoice.created',
+						title: 'Factură nouă creată',
+						message: `Factura ${invoiceNumber}${event.isRecurring ? ' (recurentă)' : ''} a fost creată`,
+						link: link ?? undefined,
+						metadata: { invoiceId: event.invoice.id }
 					})
 				)
 			);
 		} catch (error) {
-			logError('server', 'notification-hooks: failed to create leads.imported notification', {
+			logError('server', 'notification-hooks: failed to create invoice.created notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Invoice Overdue (status changed to overdue) ----
+	hooks.on('invoice.status.changed', async (event: InvoiceStatusChangedEvent) => {
+		try {
+			if (event.newStatus !== 'overdue') return;
+
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, event.tenantId))
+				.limit(1);
+
+			const invoiceNumber = event.invoice.invoiceNumber || 'N/A';
+			const link = tenant ? `/${tenant.slug}/invoices/${event.invoice.id}` : null;
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						clientId: event.invoice.clientId,
+						type: 'invoice.overdue',
+						title: 'Factură restantă',
+						message: `Factura ${invoiceNumber} a depășit termenul de plată`,
+						link: link ?? undefined,
+						metadata: { invoiceId: event.invoice.id }
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create invoice.overdue notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Contract Activated ----
+	hooks.on('contract.activated', async (event: ContractActivatedEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						clientId: event.clientId,
+						type: 'contract.activated',
+						title: 'Contract activat',
+						message: `Contractul "${event.contractTitle}" a fost activat automat`,
+						link: `/${event.tenantSlug}/contracts/${event.contractId}`,
+						metadata: { contractId: event.contractId }
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create contract.activated notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Contract Expired ----
+	hooks.on('contract.expired', async (event: ContractExpiredEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						clientId: event.clientId,
+						type: 'contract.expired',
+						title: 'Contract expirat',
+						message: `Contractul "${event.contractTitle}" a expirat`,
+						link: `/${event.tenantSlug}/contracts/${event.contractId}`,
+						metadata: { contractId: event.contractId }
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create contract.expired notification', {
 				tenantId: event.tenantId
 			});
 		}

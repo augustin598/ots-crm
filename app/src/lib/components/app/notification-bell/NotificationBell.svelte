@@ -1,16 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import CheckCheckIcon from '@lucide/svelte/icons/check-check';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
-	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import InfoIcon from '@lucide/svelte/icons/info';
+	import XIcon from '@lucide/svelte/icons/x';
 	import { getNotifications, getUnreadCount } from '$lib/remotes/notifications.remote';
+	import { getActivityIcon, getActivityColor } from '$lib/utils/activity-icons.svelte';
+	import { connectNotificationStream, latestNotification } from '$lib/stores/notification-stream';
 	import type { Notification } from '$lib/server/db/schema';
 
 	// ---- State ----
@@ -18,7 +16,6 @@
 	let unreadCount = $state(0);
 	let open = $state(false);
 	let loading = $state(true);
-	let eventSource: EventSource | null = null;
 
 	// ---- Helpers ----
 
@@ -33,62 +30,6 @@
 		if (diffH < 24) return `${diffH}h`;
 		const diffD = Math.floor(diffH / 24);
 		return `${diffD}z`;
-	}
-
-	function getNotificationIcon(type: string) {
-		switch (type) {
-			case 'task.assigned':
-				return CheckSquareIcon;
-			case 'invoice.paid':
-				return FileTextIcon;
-			case 'contract.signed':
-				return FileTextIcon;
-			case 'sync.error':
-				return AlertCircleIcon;
-			default:
-				return InfoIcon;
-		}
-	}
-
-	function getNotificationColor(type: string): string {
-		switch (type) {
-			case 'sync.error':
-				return 'text-destructive';
-			case 'invoice.paid':
-				return 'text-green-600 dark:text-green-400';
-			case 'task.assigned':
-				return 'text-blue-600 dark:text-blue-400';
-			case 'contract.signed':
-				return 'text-purple-600 dark:text-purple-400';
-			default:
-				return 'text-muted-foreground';
-		}
-	}
-
-	// ---- SSE ----
-
-	function connectSSE() {
-		if (eventSource) return;
-
-		eventSource = new EventSource('/api/notifications/stream');
-
-		eventSource.addEventListener('notification', (e) => {
-			try {
-				const newNotif: Notification = JSON.parse(e.data);
-				// Prepend and cap at 20
-				notifications = [newNotif, ...notifications].slice(0, 20);
-				unreadCount = unreadCount + 1;
-			} catch {
-				// ignore malformed events
-			}
-		});
-
-		eventSource.onerror = () => {
-			// Browser auto-reconnects EventSource — we just clean up our ref on close
-			if (eventSource?.readyState === EventSource.CLOSED) {
-				eventSource = null;
-			}
-		};
 	}
 
 	// ---- Mark as read ----
@@ -128,6 +69,7 @@
 	}
 
 	// ---- Lifecycle ----
+	let cleanupSSE: (() => void) | null = null;
 
 	onMount(() => {
 		(async () => {
@@ -145,62 +87,83 @@
 			}
 		})();
 
-		connectSSE();
+		// Use shared SSE store
+		cleanupSSE = connectNotificationStream();
 
-		// Reconnect on tab visibility change
-		const handleVisibility = () => {
-			if (!document.hidden && !eventSource) {
-				connectSSE();
+		const unsubscribe = latestNotification.subscribe((notif) => {
+			if (notif) {
+				notifications = [notif, ...notifications].slice(0, 20);
+				unreadCount = unreadCount + 1;
 			}
-		};
-		document.addEventListener('visibilitychange', handleVisibility);
+		});
 
 		return () => {
-			document.removeEventListener('visibilitychange', handleVisibility);
+			unsubscribe();
 		};
 	});
 
 	onDestroy(() => {
-		eventSource?.close();
-		eventSource = null;
+		cleanupSSE?.();
 	});
 </script>
 
-<Popover bind:open>
-	<PopoverTrigger>
-		{#snippet child({ props })}
-			<button
-				{...props}
-				class="relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-				aria-label="Notificări"
+<!-- Trigger button -->
+<button
+	class="relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+	aria-label="Notificări"
+	onclick={() => (open = !open)}
+>
+	<BellIcon class="size-4 shrink-0" />
+	<span class="flex-1 text-left">Notificări</span>
+	{#if unreadCount > 0}
+		<span class="relative flex h-5 min-w-5 items-center justify-center px-1">
+			<span
+				class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75"
+			></span>
+			<span
+				class="relative inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white"
 			>
-				<BellIcon class="size-4 shrink-0" />
-				<span class="flex-1 text-left">Notificări</span>
-				{#if unreadCount > 0}
-					<span
-						class="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground"
-					>
-						{unreadCount > 99 ? '99+' : unreadCount}
-					</span>
-				{/if}
-			</button>
-		{/snippet}
-	</PopoverTrigger>
+				{unreadCount > 99 ? '99+' : unreadCount}
+			</span>
+		</span>
+	{/if}
+</button>
 
-	<PopoverContent class="w-80 p-0" align="start" side="right" sideOffset={8}>
+<!-- Backdrop -->
+{#if open}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="fixed inset-0 z-40" onclick={() => (open = false)} onkeydown={() => {}}></div>
+
+	<!-- Notification panel — fixed to top, next to sidebar -->
+	<div
+		class="fixed left-[var(--sidebar-width)] top-0 z-50 flex h-screen w-80 flex-col border-r bg-background shadow-xl"
+	>
 		<!-- Header -->
 		<div class="flex items-center justify-between border-b px-4 py-3">
-			<h3 class="text-sm font-semibold">Notificări</h3>
-			{#if unreadCount > 0}
-				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" onclick={markAllRead}>
-					<CheckCheckIcon class="size-3" />
-					Marchează toate
-				</Button>
-			{/if}
+			<h3 class="text-sm font-semibold text-foreground">Notificări</h3>
+			<div class="flex items-center gap-1">
+				{#if unreadCount > 0}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-7 gap-1 px-2 text-xs"
+						onclick={markAllRead}
+					>
+						<CheckCheckIcon class="size-3" />
+						Marchează toate
+					</Button>
+				{/if}
+				<button
+					class="rounded-sm p-1 opacity-70 hover:opacity-100"
+					onclick={() => (open = false)}
+				>
+					<XIcon class="size-4" />
+				</button>
+			</div>
 		</div>
 
 		<!-- List -->
-		<div class="max-h-80 overflow-y-auto">
+		<div class="flex-1 overflow-y-auto">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
 					<span class="text-xs text-muted-foreground">Se încarcă...</span>
@@ -212,12 +175,14 @@
 				</div>
 			{:else}
 				{#each notifications as notif (notif.id)}
-					{@const Icon = getNotificationIcon(notif.type)}
-					{@const iconColor = getNotificationColor(notif.type)}
+					{@const Icon = getActivityIcon(notif.type)}
+					{@const iconColor = getActivityColor(notif.type)}
 					<div
 						class={cn(
 							'flex gap-3 border-b px-4 py-3 last:border-b-0',
-							!notif.isRead && 'bg-accent/40'
+							!notif.isRead
+								? 'bg-accent/50 dark:bg-accent/30'
+								: 'hover:bg-muted/50'
 						)}
 					>
 						<!-- Icon -->
@@ -227,7 +192,12 @@
 
 						<!-- Content -->
 						<div class="min-w-0 flex-1">
-							<p class={cn('text-xs font-medium', !notif.isRead && 'font-semibold')}>
+							<p
+								class={cn(
+									'text-xs text-foreground',
+									!notif.isRead ? 'font-semibold' : 'font-medium'
+								)}
+							>
 								{notif.title}
 							</p>
 							<p class="mt-0.5 text-xs text-muted-foreground">
@@ -240,7 +210,7 @@
 								{#if notif.link}
 									<a
 										href={notif.link}
-										class="flex items-center gap-0.5 text-[10px] text-primary hover:underline"
+										class="flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
 										onclick={() => {
 											if (!notif.isRead) markOneRead(notif.id);
 											open = false;
@@ -264,5 +234,5 @@
 				{/each}
 			{/if}
 		</div>
-	</PopoverContent>
-</Popover>
+	</div>
+{/if}

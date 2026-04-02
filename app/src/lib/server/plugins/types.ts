@@ -53,6 +53,7 @@ export type TaskAssignedEvent = {
 	taskTitle: string;
 	assignedToUserId: string;
 	assignedByUserId: string;
+	clientId?: string | null;
 	tenantId: string;
 	tenantSlug: string;
 };
@@ -80,6 +81,36 @@ export type LeadsImportedEvent = {
 	skipped: number;
 	errors: number;
 	source: 'manual' | 'scheduled';
+	/** Client IDs affected by the import (for per-client activity feed) */
+	clientIds?: string[];
+};
+
+export type ContractActivatedEvent = {
+	type: 'contract.activated';
+	contractId: string;
+	contractTitle: string;
+	clientId: string;
+	tenantId: string;
+	tenantSlug: string;
+};
+
+export type ContractExpiredEvent = {
+	type: 'contract.expired';
+	contractId: string;
+	contractTitle: string;
+	clientId: string;
+	tenantId: string;
+	tenantSlug: string;
+};
+
+export type TaskCompletedEvent = {
+	type: 'task.completed';
+	taskId: string;
+	taskTitle: string;
+	completedByUserId: string;
+	clientId?: string;
+	tenantId: string;
+	tenantSlug: string;
 };
 
 export type HookEvent =
@@ -89,7 +120,10 @@ export type HookEvent =
 	| InvoiceStatusChangedEvent
 	| InvoicePaidEvent
 	| TaskAssignedEvent
+	| TaskCompletedEvent
 	| ContractSignedEvent
+	| ContractActivatedEvent
+	| ContractExpiredEvent
 	| SyncErrorEvent
 	| LeadsImportedEvent;
 

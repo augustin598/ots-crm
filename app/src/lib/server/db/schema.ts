@@ -1820,7 +1820,8 @@ export const notification = sqliteTable('notification', {
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id),
-	// 'task.assigned' | 'invoice.paid' | 'contract.signed' | 'sync.error' | 'system'
+	clientId: text('client_id').references(() => client.id),
+	// notification type — see NotificationType in notifications.ts
 	type: text('type').notNull(),
 	title: text('title').notNull(),
 	message: text('message').notNull(),

@@ -4,7 +4,7 @@ import { findChromePath } from './find-chrome';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { join } from 'path';
 import { homedir } from 'os';
-import { mkdirSync } from 'fs';
+import { mkdirSync, unlinkSync, existsSync } from 'fs';
 import { saveFbSessionCookies } from '$lib/server/meta-ads/fb-cookies';
 import { saveGoogleSessionCookies } from '$lib/server/google-ads/google-cookies';
 import { saveTtSessionCookies } from '$lib/server/tiktok-ads/tt-cookies';
@@ -179,6 +179,19 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		// Use a persistent profile directory so login sessions survive between scans
 		const scraperProfileDir = join(homedir(), '.crm-scraper-profile');
 		try { mkdirSync(scraperProfileDir, { recursive: true }); } catch { /* exists */ }
+
+		// Clean up stale lock files from previous crashed browser processes
+		for (const lockFile of ['SingletonLock', 'lockfile']) {
+			const lockPath = join(scraperProfileDir, lockFile);
+			if (existsSync(lockPath)) {
+				try {
+					unlinkSync(lockPath);
+					console.log(`[SCRAPER-DEBUG] Removed stale lock file: ${lockPath}`);
+				} catch {
+					// Ignore — file may have been removed between check and unlink
+				}
+			}
+		}
 
 		const isProduction = process.env.NODE_ENV === 'production';
 		const hasDisplay = !!process.env.DISPLAY;

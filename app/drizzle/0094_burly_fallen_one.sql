@@ -1,0 +1,1 @@
+ALTER TABLE `notification` ADD `client_id` text REFERENCES client(id);
