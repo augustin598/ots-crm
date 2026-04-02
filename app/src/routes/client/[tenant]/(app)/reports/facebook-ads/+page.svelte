@@ -503,10 +503,9 @@
 		{#if insightsError}
 			<Card class="p-8">
 				<div class="rounded-md bg-red-50 p-4 space-y-2">
-					<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
+					<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : (insightsError as any)?.body?.message || (insightsError as any)?.message || 'Eroare la încărcarea datelor'}</p>
 					<p class="text-sm text-red-700">
-						Dacă tokenul a expirat, reconectează din
-						<a href="/{tenantSlug}/settings/meta-ads" class="underline font-medium">Settings → Meta Ads</a>.
+						Dacă tokenul a expirat, contactează administratorul pentru reconectare.
 					</p>
 				</div>
 			</Card>

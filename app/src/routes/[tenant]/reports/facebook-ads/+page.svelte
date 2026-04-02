@@ -91,10 +91,19 @@
 		return account?.currency || 'RON';
 	});
 
-	// Token expiration warning
+	// Token / integration status warning
 	const tokenWarning = $derived.by(() => {
 		const account = accounts.find((a: any) => a.metaAdAccountId === selectedAccountId);
-		if (!account?.tokenExpiresAt) return null;
+		if (!account) return null;
+		// Check if integration is deactivated (token revoked/invalid)
+		if (account.integrationActive === false) {
+			return { expired: true, text: 'Conexiunea Meta Ads pentru acest cont a fost dezactivată (token revocat sau invalid). Reconectează din Settings.' };
+		}
+		// Check if account itself is inactive
+		if (account.isActive === false) {
+			return { expired: true, text: 'Acest cont Meta Ads este dezactivat. Verifică starea contului în Business Manager sau reconectează din Settings.' };
+		}
+		if (!account.tokenExpiresAt) return null;
 		const expiresAt = new Date(account.tokenExpiresAt);
 		const now = new Date();
 		const daysLeft = Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -678,6 +687,7 @@
 							<option value={account.metaAdAccountId}>
 								{account.accountName || account.metaAdAccountId}
 								{#if account.clientName} — {account.clientName}{/if}
+								{#if account.integrationActive === false} ⚠ Dezactivat{/if}
 							</option>
 						{/each}
 					</select>
@@ -726,7 +736,7 @@
 	{:else if insightsError}
 		<Card class="p-8">
 			<div class="rounded-md bg-red-50 p-4 space-y-2">
-				<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
+				<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : (insightsError as any)?.body?.message || (insightsError as any)?.message || 'Eroare la încărcarea datelor'}</p>
 				<p class="text-sm text-red-700">
 					Dacă tokenul a expirat, reconectează din
 					<a href="/{tenantSlug}/settings/meta-ads" class="underline font-medium">Settings → Meta Ads</a>.

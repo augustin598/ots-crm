@@ -129,6 +129,17 @@ Populeaza din 3 surse (in ordine):
 | 0088 | Added `amount_text` column |
 | 0089 | Added `invoice_type` column (invoice/credit) |
 
+## Token & Integration Lifecycle
+- **Un token per Business Manager** — partajat de TOATE conturile ad din acel BM
+- `metaAdsIntegration.isActive` = token valid; `false` = dezactivat automat sau manual
+- Token refresh scheduler ruleaza la fiecare 6 ore (`token-refresh.ts`)
+- Erori permanente (`Error validating access token`, `Session has expired`, `has not authorized application`) → `isActive = false` automat
+- `consecutiveRefreshFailures` — tracked dar NU folosit pentru dezactivare, doar pentru notificari (>= 5 failures)
+- `getAuthenticatedToken(integrationId)` → filtreaza `isActive = true` → returneaza `null` daca dezactivat
+- **Reports page** (`reports.remote.ts`): `getReportAdAccounts()` returneaza `integrationActive` pentru a marca conturile cu integrare dezactivata in dropdown
+- **Cache keys** includ `integrationId` pentru a evita coliziuni intre integrari diferite
+- **Error classification** (`throwMetaApiError`): diferentiaza token expired (401), permisiuni (403), autorizare (401), si erori generice (500)
+
 ## Known Limitations
 - Client page (`/client/[tenant]/(app)/invoices/meta-ads/`) is a separate copy — changes in admin page don't propagate
 - Facebook cookies expire periodically — manual refresh required

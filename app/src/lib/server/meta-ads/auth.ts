@@ -117,7 +117,16 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 		.where(and(eq(table.metaAdsIntegration.id, integrationId), eq(table.metaAdsIntegration.isActive, true)))
 		.limit(1);
 
-	if (!integration || !integration.accessToken) {
+	if (!integration) {
+		logWarning('meta-ads', 'getAuthenticatedToken: integration not found or inactive', {
+			metadata: { integrationId }
+		});
+		return null;
+	}
+	if (!integration.accessToken) {
+		logWarning('meta-ads', 'getAuthenticatedToken: integration has no access token', {
+			metadata: { integrationId, isActive: integration.isActive }
+		});
 		return null;
 	}
 

@@ -33,6 +33,21 @@ function setCache(key: string, data: any): void {
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
+/** Classify Meta API errors and throw appropriate SvelteKit error */
+function throwMetaApiError(err: unknown): never {
+	const msg = err instanceof Error ? err.message : String(err);
+	if (msg.includes('validating access token') || msg.includes('session has been invalidated') || msg.includes('Session has expired')) {
+		throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
+	}
+	if (msg.includes('does not have permission') || msg.includes('(#200)')) {
+		throw error(403, 'Nu ai acces la acest cont Meta Ads. Verifică permisiunile în Business Manager.');
+	}
+	if (msg.includes('has not authorized application') || msg.includes('(#190)')) {
+		throw error(401, 'Aplicația nu mai este autorizată. Reconectează din Settings → Meta Ads.');
+	}
+	throw error(500, msg);
+}
+
 // ---- Queries ----
 
 /** Get all Meta Ads accounts for the tenant (for the ad account filter dropdown) */
@@ -53,7 +68,8 @@ export const getReportAdAccounts = query(async () => {
 			clientName: table.client.name,
 			isActive: table.metaAdsAccount.isActive,
 			businessName: table.metaAdsIntegration.businessName,
-			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt
+			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt,
+			integrationActive: table.metaAdsIntegration.isActive
 		})
 		.from(table.metaAdsAccount)
 		.leftJoin(table.client, eq(table.metaAdsAccount.clientId, table.client.id))
@@ -87,7 +103,8 @@ export const getReportAdAccounts = query(async () => {
 	return accounts.map(acc => ({
 		...acc,
 		currency: currencyMap.get(acc.metaAdAccountId) || 'RON',
-		tokenExpiresAt: acc.tokenExpiresAt
+		tokenExpiresAt: acc.tokenExpiresAt,
+		integrationActive: acc.integrationActive ?? true
 	}));
 });
 
@@ -210,7 +227,7 @@ export const getMetaCampaignInsights = query(
 		const tenantId = event.locals.tenant.id;
 
 		// Check cache
-		const cacheKey = `insights:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${params.timeIncrement}`;
+		const cacheKey = `insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.since}:${params.until}:${params.timeIncrement}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -327,11 +344,7 @@ export const getMetaCampaignInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
-				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
-			}
-			throw error(500, msg);
+			throwMetaApiError(err);
 		}
 	}
 );
@@ -366,7 +379,7 @@ export const getMetaActiveCampaigns = query(
 
 		const tenantId = event.locals.tenant.id;
 
-		const cacheKey = `campaigns:${tenantId}:${params.adAccountId}`;
+		const cacheKey = `campaigns:${tenantId}:${params.integrationId}:${params.adAccountId}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -390,11 +403,7 @@ export const getMetaActiveCampaigns = query(
 			setCache(cacheKey, campaigns);
 			return campaigns;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
-				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
-			}
-			throw error(500, msg);
+			throwMetaApiError(err);
 		}
 	}
 );
@@ -435,7 +444,7 @@ export const getMetaDemographicInsights = query(
 		const campaignKey = params.campaignIds?.length ? params.campaignIds.sort().join(',') : 'all';
 		const resultKey = params.resultActionTypes?.length ? params.resultActionTypes.sort().join(',') : 'none';
 
-		const cacheKey = `demographics:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
+		const cacheKey = `demographics:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -463,11 +472,7 @@ export const getMetaDemographicInsights = query(
 			setCache(cacheKey, demographics);
 			return demographics;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
-				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
-			}
-			throw error(500, msg);
+			throwMetaApiError(err);
 		}
 	}
 );
@@ -586,7 +591,7 @@ export const getMetaAdsetInsights = query(
 		}
 
 		const tenantId = event.locals.tenant.id;
-		const cacheKey = `adset-insights:${tenantId}:${params.adAccountId}:${params.campaignId}:${params.since}:${params.until}`;
+		const cacheKey = `adset-insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.campaignId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -661,11 +666,7 @@ export const getMetaAdsetInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
-				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat.');
-			}
-			throw error(500, msg);
+			throwMetaApiError(err);
 		}
 	}
 );
@@ -702,7 +703,7 @@ export const getMetaAdInsights = query(
 		}
 
 		const tenantId = event.locals.tenant.id;
-		const cacheKey = `ad-insights:${tenantId}:${params.adAccountId}:${params.adsetId}:${params.since}:${params.until}`;
+		const cacheKey = `ad-insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.adsetId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
@@ -776,11 +777,7 @@ export const getMetaAdInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (msg.includes('validating access token') || msg.includes('session has been invalidated')) {
-				throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat.');
-			}
-			throw error(500, msg);
+			throwMetaApiError(err);
 		}
 	}
 );
