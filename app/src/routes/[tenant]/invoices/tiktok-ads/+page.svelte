@@ -86,20 +86,37 @@
 		})
 	);
 
+	type MonthGroup = { period: string; label: string; rows: typeof invoices; totalCents: number };
+	type ClientGroup = { clientName: string; months: MonthGroup[]; totalCents: number; invoiceCount: number };
+
 	const groupedByClient = $derived.by(() => {
-		const groups = new Map<string, { clientName: string; hasMultipleAccounts: boolean; rows: typeof invoices }>();
+		const clientMap = new Map<string, Map<string, typeof invoices>>();
 		for (const row of dateFilteredInvoices) {
-			const key = row.clientName || 'Neatribuit';
-			const existing = groups.get(key) || { clientName: key, hasMultipleAccounts: false, rows: [] };
-			existing.rows.push(row);
-			groups.set(key, existing);
+			const clientKey = row.clientName || 'Neatribuit';
+			if (!clientMap.has(clientKey)) clientMap.set(clientKey, new Map());
+			const monthKey = (row.periodStart || '').substring(0, 7);
+			const monthMap = clientMap.get(clientKey)!;
+			if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
+			monthMap.get(monthKey)!.push(row);
 		}
-		for (const group of groups.values()) {
-			const uniqueAccounts = new Set(group.rows.map((r: any) => r.tiktokAdvertiserId));
-			group.hasMultipleAccounts = uniqueAccounts.size > 1;
-			group.rows.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''));
+
+		const result: ClientGroup[] = [];
+		for (const [clientName, monthMap] of clientMap) {
+			const months: MonthGroup[] = [];
+			let totalCents = 0;
+			let invoiceCount = 0;
+			for (const [period, rows] of monthMap) {
+				rows.sort((a: any, b: any) => (b.periodStart || '').localeCompare(a.periodStart || ''));
+				const monthTotal = rows.reduce((sum: number, r: any) => sum + (r.amountCents || 0), 0);
+				totalCents += monthTotal;
+				invoiceCount += rows.length;
+				const label = formatPeriod(period + '-01');
+				months.push({ period, label, rows, totalCents: monthTotal });
+			}
+			months.sort((a, b) => b.period.localeCompare(a.period));
+			result.push({ clientName, months, totalCents, invoiceCount });
 		}
-		return Array.from(groups.values()).sort((a, b) => a.clientName.localeCompare(b.clientName));
+		return result.sort((a, b) => a.clientName.localeCompare(b.clientName));
 	});
 
 	// Count downloaded invoices per client for badge
@@ -129,11 +146,11 @@
 			? groupedByClient.filter((g) => {
 				const q = searchQuery.trim().toLowerCase();
 				return g.clientName.toLowerCase().includes(q) ||
-					g.rows.some((r: any) =>
+					g.months.some(m => m.rows.some((r: any) =>
 						(r.tiktokAdvertiserId || '').toLowerCase().includes(q) ||
 						(r.adAccountName || '').toLowerCase().includes(q) ||
 						(r.invoiceNumber || '').toLowerCase().includes(q)
-					);
+					));
 			})
 			: groupedByClient
 	);
@@ -591,10 +608,8 @@
 		{:else}
 			<div class="space-y-4">
 				{#each filteredGroupedByClient as group (group.clientName)}
-					{@const totalAmount = group.rows.reduce((s: number, r: any) => s + (r.amountCents || 0), 0)}
-					{@const curr = group.rows[0]?.currencyCode || 'RON'}
+					{@const curr = group.months[0]?.rows[0]?.currencyCode || 'RON'}
 					{@const isExpanded = expandedAccounts.has(group.clientName)}
-					{@const dlCount = invoiceCountByClient.get(group.clientName) || 0}
 					<Collapsible open={isExpanded} onOpenChange={() => toggleAccount(group.clientName)}>
 						<Card class="overflow-hidden">
 							<CollapsibleTrigger class="w-full text-left cursor-pointer">
@@ -607,9 +622,7 @@
 											<div>
 												<div class="flex items-center gap-2">
 													<h3 class="text-lg font-semibold">{group.clientName}</h3>
-													{#if dlCount > 0}
-														<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">{dlCount} {dlCount === 1 ? 'factură' : 'facturi'}</span>
-													{/if}
+													<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">{group.invoiceCount} {group.invoiceCount === 1 ? 'factură' : 'facturi'}</span>
 												</div>
 												<span class="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"><CalendarIcon class="h-3 w-3" />{dateRangeLabel}</span>
 											</div>
@@ -617,7 +630,7 @@
 										<div class="flex items-center gap-4">
 											<div class="text-right">
 												<p class="text-xs text-muted-foreground">Total facturi</p>
-												<p class="text-lg font-bold">{formatAmount(totalAmount, curr)}</p>
+												<p class="text-lg font-bold">{formatAmount(group.totalCents, curr)}</p>
 											</div>
 											<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
 										</div>
@@ -626,59 +639,56 @@
 							</CollapsibleTrigger>
 
 							<CollapsibleContent>
-								<!-- Column headers -->
-								<div class="grid grid-cols-[2fr_minmax(120px,1fr)_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
-									<span>Perioadă</span>
-									<span>Nr. Factură</span>
-									<span class="text-right">Sumă</span>
-									<span class="text-center">Status</span>
-									<span class="text-right">Acțiuni</span>
-								</div>
-								<div class="divide-y">
-									{#each group.rows as row (row.id)}
-										{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
-										<div class="grid grid-cols-[2fr_minmax(120px,1fr)_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center">
-											<div class="flex items-center gap-2 min-w-0">
-												{#if hasPdf}
-													<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
-												{/if}
-												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
-												{#if group.hasMultipleAccounts && (row.adAccountName || row.tiktokAdvertiserId)}
-													<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground truncate max-w-[150px]">{row.adAccountName || row.tiktokAdvertiserId}</span>
-												{/if}
-											</div>
-											<span class="text-sm text-muted-foreground truncate" title={row.invoiceNumber || ''}>{row.invoiceNumber || '-'}</span>
-											<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(row.amountCents, row.currencyCode)}</span>
-											<div class="text-center">
-												{#if row.status === 'downloaded' && row.pdfPath}
-													<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">Descărcată</span>
-												{:else if row.status === 'pending'}
-													<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
-												{:else if row.status === 'error'}
-													<span class="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>
-														Eroare
-													</span>
-												{:else}
-													<span class="text-xs text-muted-foreground">-</span>
-												{/if}
-											</div>
-											<div class="flex items-center justify-end gap-0.5">
-												{#if hasPdf}
-													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
-														<Download class="mr-1 h-3 w-3" />PDF
-													</Button>
-													<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
-												{:else if row.status === 'error'}
-													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleRetryDownload(row.id)} title="Reîncearcă descărcarea">
-														<RefreshCwIcon class="mr-1 h-3 w-3" />Retry
-													</Button>
-													<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive" onclick={() => handleDeleteInvoice(row.id)} title="Șterge"><Trash2Icon class="h-3.5 w-3.5" /></Button>
-												{/if}
-											</div>
+								{#each group.months as month (month.period)}
+									<!-- Month header -->
+									<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-2.5 border-t bg-muted/30 items-center">
+										<div class="flex items-center gap-2">
+											<CalendarIcon class="h-4 w-4 text-muted-foreground" />
+											<span class="text-sm font-semibold capitalize">{month.label}</span>
 										</div>
-									{/each}
-								</div>
+										<span class="text-sm font-bold text-right">{formatAmount(month.totalCents, curr)}</span>
+										<span class="text-xs text-muted-foreground text-right">{month.rows.length} {month.rows.length === 1 ? 'factură' : 'facturi'}</span>
+									</div>
+									<!-- Invoices in this month -->
+									<div class="divide-y">
+										{#each month.rows as row (row.id)}
+											{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
+											<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 pl-12 py-2.5 hover:bg-muted/30 transition-colors items-center">
+												<div class="flex items-center gap-2 min-w-0">
+													{#if hasPdf}
+														<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
+													{/if}
+													<span class="text-sm text-muted-foreground truncate" title={row.invoiceNumber || ''}>{row.invoiceNumber || row.tiktokInvoiceId?.substring(0, 12) || '-'}</span>
+												</div>
+												<span class="text-sm font-semibold text-right whitespace-nowrap">{formatAmount(row.amountCents, row.currencyCode)}</span>
+												<div class="text-center">
+													{#if row.status === 'downloaded' && row.pdfPath}
+														<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">Descărcată</span>
+													{:else if row.status === 'pending'}
+														<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
+													{:else if row.status === 'error'}
+														<span class="inline-flex items-center rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
+													{:else}
+														<span class="text-xs text-muted-foreground">-</span>
+													{/if}
+												</div>
+												<div class="flex items-center justify-end gap-0.5">
+													{#if hasPdf}
+														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
+															<Download class="mr-1 h-3 w-3" />PDF
+														</Button>
+														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+													{:else if row.status === 'error'}
+														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleRetryDownload(row.id)} title="Reîncearcă descărcarea">
+															<RefreshCwIcon class="mr-1 h-3 w-3" />Retry
+														</Button>
+														<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive" onclick={() => handleDeleteInvoice(row.id)} title="Șterge"><Trash2Icon class="h-3.5 w-3.5" /></Button>
+													{/if}
+												</div>
+											</div>
+										{/each}
+									</div>
+								{/each}
 							</CollapsibleContent>
 						</Card>
 					</Collapsible>
