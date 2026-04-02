@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNotNull } from 'drizzle-orm';
 import { getMetaAdsConnections, disconnectMetaAds, getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listBusinessAdAccounts } from '$lib/server/meta-ads/client';
 import { saveFbSessionCookies, clearFbSession, getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
@@ -152,6 +152,43 @@ export const getMetaAdsAccounts = query(
 		return accounts;
 	}
 );
+
+/** Get all active Meta Ads accounts that have a CRM client mapped (for invoices page) */
+export const getMappedMetaAdsClients = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+
+	let conditions: any = and(
+		eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
+		eq(table.metaAdsAccount.isActive, true),
+		isNotNull(table.metaAdsAccount.clientId)
+	);
+
+	// Client users only see their own mapped accounts
+	if (event.locals.isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary) return [];
+		conditions = and(conditions, eq(table.metaAdsAccount.clientId, event.locals.client.id));
+	}
+
+	const accounts = await db
+		.select({
+			clientId: table.metaAdsAccount.clientId,
+			clientName: table.client.name,
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			accountName: table.metaAdsAccount.accountName,
+			integrationId: table.metaAdsAccount.integrationId,
+			bmName: table.metaAdsIntegration.businessName
+		})
+		.from(table.metaAdsAccount)
+		.leftJoin(table.client, eq(table.metaAdsAccount.clientId, table.client.id))
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
+		.where(conditions)
+		.orderBy(table.client.name);
+
+	return accounts;
+});
 
 /** Get all CRM clients (for mapping dropdown) */
 export const getClientsForMetaMapping = query(async () => {
@@ -1249,6 +1286,7 @@ export const bulkDownloadMetaInvoices = command(
 			url: v.pipe(v.string(), v.minLength(1)),
 			txid: v.optional(v.string()),
 			invoiceId: v.optional(v.string()),
+			invoiceNumber: v.optional(v.string()),
 			date: v.optional(v.string()),
 			amount: v.optional(v.string())
 		}))
@@ -1332,11 +1370,28 @@ export const bulkDownloadMetaInvoices = command(
 			// Check dedup by txid (primary) or fallback to period
 			if (txid) {
 				const [existing] = await db
-					.select({ id: table.metaInvoiceDownload.id })
+					.select({ id: table.metaInvoiceDownload.id, invoiceNumber: table.metaInvoiceDownload.invoiceNumber })
 					.from(table.metaInvoiceDownload)
 					.where(and(eq(table.metaInvoiceDownload.tenantId, tenantId), eq(table.metaInvoiceDownload.txid, txid)))
 					.limit(1);
 				if (existing) {
+					// Update invoiceNumber/amountText if missing or incorrect in DB but present in JSON
+					const updates: Record<string, unknown> = {};
+					const isMissingOrTxid = !existing.invoiceNumber || /^\d+-\d+$/.test(existing.invoiceNumber);
+					if (isMissingOrTxid && link.invoiceNumber) updates.invoiceNumber = link.invoiceNumber;
+					if (link.amount) {
+						const [existingDl] = await db
+							.select({ amountText: table.metaInvoiceDownload.amountText })
+							.from(table.metaInvoiceDownload)
+							.where(eq(table.metaInvoiceDownload.id, existing.id))
+							.limit(1);
+						if (!existingDl?.amountText) updates.amountText = link.amount;
+					}
+					if (Object.keys(updates).length > 0) {
+						await db.update(table.metaInvoiceDownload)
+							.set({ ...updates, updatedAt: new Date() })
+							.where(eq(table.metaInvoiceDownload.id, existing.id));
+					}
 					skipped++;
 					continue;
 				}
@@ -1366,9 +1421,9 @@ export const bulkDownloadMetaInvoices = command(
 						periodStart,
 						periodEnd,
 						txid: txid || null,
-						invoiceNumber: link.invoiceId || null,
+						invoiceNumber: link.invoiceNumber || null,
 						amountText: link.amount || null,
-						invoiceType: link.invoiceId ? 'invoice' : 'credit',
+						invoiceType: link.invoiceNumber ? 'invoice' : 'credit',
 						pdfPath: upload.path,
 						status: 'downloaded',
 						downloadedAt: new Date(),

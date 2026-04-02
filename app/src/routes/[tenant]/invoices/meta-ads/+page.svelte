@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount, getMappedMetaAdsClients } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
@@ -72,6 +72,9 @@
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
 	const loading = $derived(spendingQuery.loading);
+
+	const mappedClientsQuery = getMappedMetaAdsClients();
+	const mappedClients = $derived(mappedClientsQuery.current || []);
 
 	let syncing = $state(false);
 
@@ -161,6 +164,13 @@
 				}
 			}
 			groups.set(clientKey, group);
+		}
+		// Add mapped accounts that have no spending/download data yet
+		for (const mapped of mappedClients) {
+			const key = mapped.clientName || 'Neatribuit';
+			if (!groups.has(key)) {
+				groups.set(key, { clientName: key, businessName: mapped.bmName || '', hasMultipleAccounts: false, rows: [] });
+			}
 		}
 		// Detect multi-account clients + sort
 		for (const group of groups.values()) {
@@ -458,19 +468,38 @@
 		return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
 	});
 
+	function extractAccountId(item: Record<string, unknown>): string | null {
+		if (typeof item.accountId === 'string' && item.accountId.startsWith('act_')) {
+			return item.accountId;
+		}
+		const url = (item.url || item.downloadUrl) as string | undefined;
+		if (url) {
+			const match = url.match(/[?&]act=(\d+)/);
+			if (match) return `act_${match[1]}`;
+		}
+		return null;
+	}
+
+	function getAccountLabel(accId: string): string {
+		return downloadableAccounts.find(a => a.metaAdAccountId === accId)?.accountName
+			|| spending.find(s => s.metaAdAccountId === accId)?.adAccountName
+			|| downloads.find(d => d.metaAdAccountId === accId)?.adAccountName
+			|| accId;
+	}
+
 	async function handleBulkImport() {
 		if (!bulkJson.trim()) {
 			toast.error('Inserează JSON-ul cu link-uri');
 			return;
 		}
-		let links: { url: string; invoiceId?: string; date?: string; amount?: string; txid?: string }[];
+		let links: { url: string; invoiceId?: string; date?: string; amount?: string; txid?: string; accountId?: string }[];
 		try {
 			const parsed = JSON.parse(bulkJson.trim());
 			if (Array.isArray(parsed)) {
-				// Normalize: accept both "url" and "downloadUrl" field names
 				links = parsed.map((item: Record<string, unknown>) => ({
 					...item,
-					url: (item.url || item.downloadUrl) as string
+					url: (item.url || item.downloadUrl) as string,
+					accountId: extractAccountId(item) || undefined
 				}));
 			} else {
 				toast.error('JSON-ul trebuie să fie un array');
@@ -481,54 +510,72 @@
 			return;
 		}
 
-		// Auto-detect ad account ID from URLs if not selected
-		let accountId = bulkAdAccountId;
-		if (!accountId && links.length > 0) {
-			const actMatch = links[0].url.match(/act=(\d+)/);
-			if (actMatch) {
-				accountId = `act_${actMatch[1]}`;
-				console.log(`[BULK-IMPORT] Auto-detected ad account: ${accountId}`);
-			}
-		}
-		if (!accountId) {
-			toast.error('Selectează contul sau asigură-te că URL-urile conțin parametrul act=');
-			return;
-		}
-		bulkAdAccountId = accountId;
 		if (links.length === 0) {
 			toast.error('Array-ul de link-uri este gol');
 			return;
 		}
+
+		// Auto mode: validate all links have accountId
+		if (!bulkAdAccountId) {
+			const missingIndices = links
+				.map((link, i) => !link.accountId ? i + 1 : null)
+				.filter(Boolean);
+			if (missingIndices.length > 0) {
+				toast.error(`Factura ${missingIndices.join(', ')} nu are cont detectat. Selectează manual un cont sau verifică JSON-ul.`);
+				return;
+			}
+		}
+
 		bulkImporting = true;
 		bulkDone = false;
 		bulkCurrent = 0;
-		bulkTotal = links.length;
 		bulkResults = [];
 		bulkCurrentLabel = '';
 
-		const adAccountLabel = downloadableAccounts.find(a => a.metaAdAccountId === bulkAdAccountId)?.accountName
-			|| spending.find(s => s.metaAdAccountId === bulkAdAccountId)?.adAccountName
-			|| downloads.find(d => d.metaAdAccountId === bulkAdAccountId)?.adAccountName
-			|| bulkAdAccountId;
-
+		// Group invoices by account for batched processing
+		const isAutoMode = !bulkAdAccountId;
+		const groupedByAccount = new Map<string, typeof links>();
 		for (const link of links) {
-			const label = link.invoiceId || (link.url.match(/txid=([^&]{0,16})/) || [])[1] || `#${bulkCurrent + 1}`;
-			bulkCurrentLabel = label;
-			try {
-				const result = await bulkDownloadMetaInvoices({ adAccountId: bulkAdAccountId, links: [link] }).updates(downloadsQuery);
-				if (result.skipped > 0) {
-					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'skipped', httpInfo: '200', error: null }];
-				} else if (result.downloaded > 0) {
-					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'downloaded', httpInfo: '200', error: null }];
-				} else {
-					const err = result.errorDetails?.[0] || 'unknown';
-					const httpMatch = err.match(/HTTP (\d+)/);
-					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: httpMatch?.[1] || '—', error: err }];
-				}
-			} catch (e) {
-				bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: '—', error: e instanceof Error ? e.message : 'Eroare' }];
+			const accId = isAutoMode ? link.accountId! : bulkAdAccountId;
+			if (!groupedByAccount.has(accId)) {
+				groupedByAccount.set(accId, []);
 			}
-			bulkCurrent++;
+			groupedByAccount.get(accId)!.push(link);
+		}
+
+		// Count total for progress
+		bulkTotal = links.length;
+
+		if (isAutoMode) {
+			const accountSummary = Array.from(groupedByAccount.entries())
+				.map(([accId, items]) => `${getAccountLabel(accId)} (${items.length})`)
+				.join(', ');
+			console.log(`[BULK-IMPORT] Atribuire automată: ${groupedByAccount.size} conturi — ${accountSummary}`);
+		}
+
+		// Process each account group
+		for (const [accId, accountLinks] of groupedByAccount) {
+			const adAccountLabel = getAccountLabel(accId);
+
+			for (const link of accountLinks) {
+				const label = link.invoiceId || (link.url.match(/txid=([^&]{0,16})/) || [])[1] || `#${bulkCurrent + 1}`;
+				bulkCurrentLabel = `${label} → ${adAccountLabel}`;
+				try {
+					const result = await bulkDownloadMetaInvoices({ adAccountId: accId, links: [link] }).updates(downloadsQuery);
+					if (result.skipped > 0) {
+						bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'skipped', httpInfo: '200', error: null }];
+					} else if (result.downloaded > 0) {
+						bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'downloaded', httpInfo: '200', error: null }];
+					} else {
+						const err = result.errorDetails?.[0] || 'unknown';
+						const httpMatch = err.match(/HTTP (\d+)/);
+						bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: httpMatch?.[1] || '—', error: err }];
+					}
+				} catch (e) {
+					bulkResults = [...bulkResults, { label, adAccount: adAccountLabel, status: 'error', httpInfo: '—', error: e instanceof Error ? e.message : 'Eroare' }];
+				}
+				bulkCurrent++;
+			}
 		}
 
 		// Auto-expand date range
@@ -627,7 +674,7 @@
 			<textarea bind:value={bulkJson} placeholder={'[{"url":"https://business.facebook.com/ads/manage/billing_transaction/?act=...","invoiceId":"FBADS-...","date":"6 Jan 2025","amount":"RON1,234.56"}]'} class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
 			<div class="flex items-center gap-2">
 				<select bind:value={bulkAdAccountId} class="rounded-md border px-3 py-2 text-sm bg-background">
-					<option value="">Selectează contul</option>
+					<option value="">Atribuire automată</option>
 					{#each adAccountOptions as opt}
 						<option value={opt.id}>{opt.label}</option>
 					{/each}
@@ -890,7 +937,7 @@
 												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
 													<Checkbox checked={selectedInvoices.has(inv.id)} onCheckedChange={() => toggleSelectInvoice(inv.id)} />
 													<div class="flex items-center gap-2 min-w-0 flex-1">
-														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : 'Factura PDF')}</span>
+														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber ? `Invoice no. ${inv.invoiceNumber}` : (inv.txid ? `TX-${inv.txid.substring(0, 16)}…` : 'Factura PDF')}</span>
 														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
 														{#if inv.amountText}<span class="text-xs text-muted-foreground">{inv.amountText}</span>{/if}
 													</div>

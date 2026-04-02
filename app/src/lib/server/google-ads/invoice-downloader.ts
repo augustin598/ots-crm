@@ -244,7 +244,13 @@ export async function downloadGoogleInvoicesFromLinks(
 
 		// Dedup
 		const [existing] = await db
-			.select({ id: table.googleAdsInvoice.id, pdfPath: table.googleAdsInvoice.pdfPath, totalAmountMicros: table.googleAdsInvoice.totalAmountMicros })
+			.select({
+				id: table.googleAdsInvoice.id,
+				pdfPath: table.googleAdsInvoice.pdfPath,
+				totalAmountMicros: table.googleAdsInvoice.totalAmountMicros,
+				googleAdsCustomerId: table.googleAdsInvoice.googleAdsCustomerId,
+				clientId: table.googleAdsInvoice.clientId
+			})
 			.from(table.googleAdsInvoice)
 			.where(and(
 				eq(table.googleAdsInvoice.tenantId, tenantId),
@@ -253,23 +259,33 @@ export async function downloadGoogleInvoicesFromLinks(
 			.limit(1);
 
 		if (existing?.pdfPath) {
-			// Backfill amount if missing
 			const parsedBackfill = parseAmountString(link.amount);
 			logInfo('google-ads-dl', `[DEBUG] Invoice ${invoiceId} EXISTS — pdfPath: ${existing.pdfPath ? 'YES' : 'NO'}, totalAmountMicros: ${existing.totalAmountMicros}, link.amount: "${link.amount}", parsedBackfill: ${parsedBackfill}`, { tenantId });
 
-			if (existing.totalAmountMicros == null && link.amount) {
-				if (parsedBackfill != null) {
-					const micros = Math.round(parsedBackfill * 1_000_000);
-					logInfo('google-ads-dl', `[DEBUG] BACKFILLING invoice ${invoiceId} — setting totalAmountMicros=${micros} (from "${link.amount}")`, { tenantId });
-					await db.update(table.googleAdsInvoice)
-						.set({ totalAmountMicros: micros, updatedAt: new Date() })
-						.where(eq(table.googleAdsInvoice.id, existing.id));
-				} else {
-					logWarning('google-ads-dl', `[DEBUG] Invoice ${invoiceId} — parseAmountString("${link.amount}") returned NULL`, { tenantId });
-				}
-			} else {
-				logInfo('google-ads-dl', `[DEBUG] Invoice ${invoiceId} — skipping backfill: totalAmountMicros=${existing.totalAmountMicros}, link.amount="${link.amount}"`, { tenantId });
+			// Build update fields: fix account attribution + backfill amount
+			const updateFields: Record<string, any> = {};
+
+			// Fix account attribution if stored under wrong account
+			if (existing.googleAdsCustomerId !== customerId || existing.clientId !== account.clientId) {
+				logInfo('google-ads-dl', `[DEBUG] FIXING attribution for invoice ${invoiceId} — googleAdsCustomerId: ${existing.googleAdsCustomerId} → ${customerId}, clientId: ${existing.clientId} → ${account.clientId}`, { tenantId });
+				updateFields.googleAdsCustomerId = customerId;
+				updateFields.clientId = account.clientId;
 			}
+
+			// Backfill amount if missing
+			if (existing.totalAmountMicros == null && parsedBackfill != null) {
+				const micros = Math.round(parsedBackfill * 1_000_000);
+				logInfo('google-ads-dl', `[DEBUG] BACKFILLING invoice ${invoiceId} — setting totalAmountMicros=${micros} (from "${link.amount}")`, { tenantId });
+				updateFields.totalAmountMicros = micros;
+			}
+
+			if (Object.keys(updateFields).length > 0) {
+				updateFields.updatedAt = new Date();
+				await db.update(table.googleAdsInvoice)
+					.set(updateFields)
+					.where(eq(table.googleAdsInvoice.id, existing.id));
+			}
+
 			skipped++;
 			continue;
 		}
@@ -306,6 +322,8 @@ export async function downloadGoogleInvoicesFromLinks(
 					await db.update(table.googleAdsInvoice)
 						.set({
 							pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date(),
+							googleAdsCustomerId: customerId,
+							clientId: account.clientId!,
 							...(totalAmountMicros != null && { totalAmountMicros })
 						})
 						.where(eq(table.googleAdsInvoice.id, existing.id));

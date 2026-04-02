@@ -185,11 +185,12 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		const scraperProfileDir = join(homedir(), '.crm-scraper-profile');
 		try { mkdirSync(scraperProfileDir, { recursive: true }); } catch { /* exists */ }
 
+		const isProduction = process.env.NODE_ENV === 'production';
 		const browser = await puppeteer.launch({
-			headless: false,
+			headless: isProduction ? 'shell' : false,
 			executablePath: chromePath,
 			userDataDir: scraperProfileDir, // Persistent profile — keeps login sessions
-			defaultViewport: null, // Use full window size
+			defaultViewport: isProduction ? { width: 1440, height: 900 } : null,
 			ignoreDefaultArgs: ['--enable-automation'], // Hide "controlled by automated test software" banner
 			args: [
 				'--no-sandbox',

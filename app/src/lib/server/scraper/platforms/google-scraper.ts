@@ -165,11 +165,11 @@ async function handleAccountSelector(page: Page): Promise<boolean> {
  * Set the accounts table to show 100 rows per page.
  * Google Ads defaults to 10, which misses accounts.
  */
-async function setPageSizeTo100(page: Page): Promise<void> {
+async function setPageSizeTo100(page: Page): Promise<boolean> {
 	try {
 		// Find and click the "Rows per page" dropdown (shows "10" by default)
 		const clicked = await page.evaluate(() => {
-			// Look for the dropdown button with page size text
+			// Strategy 1: dropdown-button .button (legacy Material)
 			const buttons = document.querySelectorAll('dropdown-button .button');
 			for (const btn of buttons) {
 				const text = btn.querySelector('.button-text')?.textContent?.trim();
@@ -178,20 +178,70 @@ async function setPageSizeTo100(page: Page): Promise<void> {
 					return text;
 				}
 			}
+
+			// Strategy 2: Look for any element near "Rânduri pe pagină" / "Rows per page"
+			// that shows a number (the page size value)
+			const allText = document.body.innerText;
+			const pageSizeLabels = ['Rânduri pe pagină', 'Rows per page', 'rânduri pe pagină', 'rows per page'];
+			for (const label of pageSizeLabels) {
+				if (!allText.includes(label)) continue;
+				// Find the label element, then look for a clickable number nearby
+				const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+				while (walker.nextNode()) {
+					if (walker.currentNode.textContent?.includes(label)) {
+						const parent = walker.currentNode.parentElement?.closest('[class*="pagination"], [class*="paging"], [class*="footer"], [class*="table-footer"]')
+							|| walker.currentNode.parentElement?.parentElement?.parentElement;
+						if (parent) {
+							const clickables = parent.querySelectorAll('button, [role="button"], [tabindex], .clickable, dropdown-button, [class*="dropdown"]');
+							for (const el of clickables) {
+								const t = (el as HTMLElement).textContent?.trim();
+								if (t && /^\d+$/.test(t) && parseInt(t) < 100) {
+									(el as HTMLElement).click();
+									return t;
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Strategy 3: Look for any dropdown/select near bottom of table with numeric values
+			const dropdowns = document.querySelectorAll('select, [role="listbox"], [role="combobox"]');
+			for (const dd of dropdowns) {
+				if (dd.tagName === 'SELECT') {
+					const opts = Array.from((dd as HTMLSelectElement).options);
+					if (opts.some(o => ['10', '25', '50', '100'].includes(o.value))) {
+						const opt100 = opts.find(o => o.value === '100');
+						if (opt100) {
+							(dd as HTMLSelectElement).value = '100';
+							dd.dispatchEvent(new Event('change', { bubbles: true }));
+							return 'select:100';
+						}
+					}
+				}
+			}
+
 			return null;
 		});
 
 		if (!clicked) {
 			logInfo('google-scraper', 'Page size dropdown not found or already at max');
-			return;
+			return false;
 		}
 
 		logInfo('google-scraper', `Clicked page size dropdown (was ${clicked}), selecting 100`);
 		await new Promise((r) => setTimeout(r, 500));
 
+		// If we used a <select>, it's already set — skip dropdown option click
+		if (typeof clicked === 'string' && clicked.startsWith('select:')) {
+			logInfo('google-scraper', 'Page size set via native select, waiting for table reload');
+			await new Promise((r) => setTimeout(r, 3000));
+			return true;
+		}
+
 		// Select "100" from the dropdown options
 		const selected = await page.evaluate(() => {
-			const items = document.querySelectorAll('material-select-dropdown-item, [role="option"], material-list-item');
+			const items = document.querySelectorAll('material-select-dropdown-item, [role="option"], material-list-item, [role="menuitem"], li');
 			for (const item of items) {
 				const text = (item as HTMLElement).textContent?.trim();
 				if (text === '100') {
@@ -205,12 +255,134 @@ async function setPageSizeTo100(page: Page): Promise<void> {
 		if (selected) {
 			logInfo('google-scraper', 'Selected 100 rows per page, waiting for table reload');
 			await new Promise((r) => setTimeout(r, 3000));
+			return true;
 		} else {
 			logInfo('google-scraper', 'Could not find "100" option in dropdown');
+			return false;
 		}
 	} catch (err) {
 		logInfo('google-scraper', `setPageSizeTo100 failed: ${err instanceof Error ? err.message : String(err)}`);
+		return false;
 	}
+}
+
+/**
+ * Extract all accounts by paginating through the table.
+ * Clicks "Next page" button repeatedly until no more pages.
+ */
+async function paginateAndExtractAll(page: Page): Promise<Array<{ ocid: string; name: string; customerId: string; isManager: boolean }>> {
+	const allResults: Array<{ ocid: string; name: string; customerId: string; isManager: boolean }> = [];
+	const seenOcids = new Set<string>();
+	let pageNum = 1;
+
+	const extractCurrentPage = async () => {
+		return page.evaluate(() => {
+			const results: Array<{ ocid: string; name: string; customerId: string; isManager: boolean }> = [];
+			document.querySelectorAll('a.account-cell-link').forEach((link) => {
+				const href = link.getAttribute('href') || '';
+				const ocidMatch = href.match(/[?&]ocid=(\d+)/);
+				if (!ocidMatch) return;
+
+				const ocid = ocidMatch[1];
+				const name = link.textContent?.trim() || '';
+				const cell = link.closest('ess-cell, td, [role="gridcell"]');
+				const parent = cell || link.parentElement;
+				const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
+				const rawCid = cidEl?.textContent?.trim() || '';
+				const row = link.closest('ess-row, tr, [role="row"]');
+				const rowText = row ? (row as HTMLElement).innerText : '';
+				const isManager = rowText.includes('Manager') || rawCid.includes('Manager');
+				const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
+
+				results.push({ ocid, name, customerId, isManager });
+			});
+			return results;
+		});
+	};
+
+	// Extract first page
+	const firstPage = await extractCurrentPage();
+	for (const acc of firstPage) {
+		if (!seenOcids.has(acc.ocid)) {
+			seenOcids.add(acc.ocid);
+			allResults.push(acc);
+		}
+	}
+
+	// Paginate through remaining pages
+	const MAX_PAGES = 20;
+	while (pageNum < MAX_PAGES) {
+		// Look for a "Next page" button
+		const hasNext = await page.evaluate(() => {
+			// Google Ads uses various next-page selectors
+			const nextBtns = document.querySelectorAll<HTMLElement>(
+				'[aria-label="Next page"], [aria-label="Pagina următoare"], [aria-label="Go to next page"], ' +
+				'button.next-page, [class*="next-page"], [class*="pagination"] button:last-child, ' +
+				'material-button[icon="chevron_right"], [icon="navigate_next"], ' +
+				'button[icon="chevron_right"], [data-tooltip="Next page"], [data-tooltip="Pagina următoare"]'
+			);
+			for (const btn of nextBtns) {
+				// Check if the button is enabled (not disabled)
+				if (!btn.hasAttribute('disabled') && !btn.classList.contains('disabled') &&
+					btn.getAttribute('aria-disabled') !== 'true' && btn.offsetParent !== null) {
+					btn.click();
+					return true;
+				}
+			}
+
+			// Fallback: look for a ">" or "›" navigation button near pagination area
+			const paginationArea = document.querySelector('[class*="pagination"], [class*="paging"], [class*="table-footer"]');
+			if (paginationArea) {
+				const buttons = paginationArea.querySelectorAll<HTMLElement>('button, [role="button"]');
+				const arr = Array.from(buttons);
+				// The last enabled button in pagination is typically "Next"
+				for (let i = arr.length - 1; i >= 0; i--) {
+					const btn = arr[i];
+					const text = btn.textContent?.trim() || '';
+					const icon = btn.querySelector('material-icon, [class*="icon"]')?.textContent?.trim() || '';
+					if ((text === '›' || text === '>' || icon === 'chevron_right' || icon === 'navigate_next') &&
+						!btn.hasAttribute('disabled') && btn.getAttribute('aria-disabled') !== 'true') {
+						btn.click();
+						return true;
+					}
+				}
+			}
+
+			return false;
+		});
+
+		if (!hasNext) {
+			logInfo('google-scraper', `Pagination ended at page ${pageNum} (no next button or disabled)`);
+			break;
+		}
+
+		pageNum++;
+		logInfo('google-scraper', `Navigating to page ${pageNum} of accounts table`);
+		await new Promise((r) => setTimeout(r, 3000));
+
+		// Wait for table to update
+		await page.waitForSelector('a.account-cell-link', { timeout: 10_000 }).catch(() => {});
+
+		const pageAccounts = await extractCurrentPage();
+		let newCount = 0;
+		for (const acc of pageAccounts) {
+			if (!seenOcids.has(acc.ocid)) {
+				seenOcids.add(acc.ocid);
+				allResults.push(acc);
+				newCount++;
+			}
+		}
+
+		logInfo('google-scraper', `Page ${pageNum}: found ${pageAccounts.length} entries, ${newCount} new`);
+
+		// If we got no new accounts, we've likely looped back or reached the end
+		if (newCount === 0) {
+			logInfo('google-scraper', 'No new accounts on this page, stopping pagination');
+			break;
+		}
+	}
+
+	return allResults;
 }
 
 /**
@@ -434,30 +606,118 @@ async function searchAccountById(page: Page, customerId: string): Promise<SubAcc
 }
 
 /**
- * Extract sub-accounts from the MCC accounts page.
- * Handles nested MCC accounts (Manager) recursively.
+ * Extract ALL sub-accounts using the Graph (Hartă) view which shows all accounts
+ * as cards without pagination. This is more reliable than the Table view.
+ *
+ * Each card has a "go-to-table" link like:
+ *   <a href="/aw/campaigns?ocid=7875955146&ascid=..." aria-label="beautyoneshop.ro">
+ * The card also contains the customer ID (xxx-xxx-xxxx) and "(Administrator)" for managers.
  */
-async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Promise<SubAccount[]> {
-	// Navigate to accounts page
-	const currentUrl = page.url();
-	if (!currentUrl.includes('/aw/accounts')) {
+async function extractAccountsFromGraphView(page: Page): Promise<Array<{ ocid: string; name: string; customerId: string; isManager: boolean }> | null> {
+	try {
+		// Navigate to graph view — keep essential URL params (ocid, ascid, authuser, etc.)
+		const currentUrl = page.url();
 		const urlObj = new URL(currentUrl);
-		const accountsUrl = `https://ads.google.com/aw/accounts?${urlObj.searchParams.toString()}`;
-		logInfo('google-scraper', `Navigating to accounts page: ${accountsUrl}`);
-		await page.goto(accountsUrl, { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {});
-		await new Promise((r) => setTimeout(r, 3000));
-	}
+		const graphUrl = `https://ads.google.com/aw/accounts/graph?${urlObj.searchParams.toString()}`;
+		logInfo('google-scraper', `Navigating to graph (Hartă) view: ${graphUrl}`);
+		await page.goto(graphUrl, { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {});
+		await new Promise((r) => setTimeout(r, 5000));
 
-	// Wait for account links to appear
+		// Scroll to bottom to ensure all cards are rendered (lazy-loaded)
+		await page.evaluate(async () => {
+			for (let i = 0; i < 10; i++) {
+				window.scrollTo(0, document.body.scrollHeight);
+				await new Promise(r => setTimeout(r, 800));
+			}
+		});
+		await new Promise((r) => setTimeout(r, 2000));
+
+		// Extract accounts from graph card nodes (tree-node-cell elements)
+		// Each card structure:
+		//   tree-node-cell > .cell-container > .title-container >
+		//     .titles > .title (account name) + .sub-title > .cid (xxx-xxx-xxxx)
+		//     .go-to-table-model > .go-to-table-container > a[href="/aw/campaigns?ocid=..."]
+		const accounts = await page.evaluate(() => {
+			const results: Array<{ ocid: string; name: string; customerId: string; isManager: boolean }> = [];
+			const seen = new Set<string>();
+
+			// Each account is a tree-node-cell in the graph
+			const cells = document.querySelectorAll('tree-node-cell');
+
+			for (const cell of cells) {
+				// Get the ocid from the go-to-table link
+				const link = cell.querySelector<HTMLAnchorElement>('a[href*="ocid="]');
+				if (!link) continue;
+
+				const href = link.getAttribute('href') || '';
+				const ocidMatch = href.match(/[?&]ocid=(\d+)/);
+				if (!ocidMatch) continue;
+
+				const ocid = ocidMatch[1];
+				if (seen.has(ocid)) continue;
+				seen.add(ocid);
+
+				// Account name from .title element
+				const titleEl = cell.querySelector('.title');
+				const name = titleEl?.textContent?.trim() || link.getAttribute('aria-label') || '';
+
+				// Customer ID from .cid element (format: xxx-xxx-xxxx)
+				const cidEl = cell.querySelector('.cid');
+				const customerId = cidEl?.textContent?.trim() || '';
+
+				// Check if it's a Manager/Administrator account — shown in .sub-title
+				const subTitle = cell.querySelector('.sub-title');
+				const subTitleText = subTitle?.textContent?.trim() || '';
+				const isManager = subTitleText.includes('Administrator') || subTitleText.includes('Manager');
+
+				if (customerId) {
+					results.push({ ocid, name, customerId, isManager });
+				}
+			}
+
+			return results;
+		});
+
+		if (accounts.length > 0) {
+			logInfo('google-scraper', `Graph view: found ${accounts.length} accounts`, {
+				metadata: { accounts: accounts.map(a => `${a.name} (${a.customerId}${a.isManager ? ' Manager' : ''})`).slice(0, 25) }
+			});
+			return accounts;
+		}
+
+		logInfo('google-scraper', 'Graph view: no accounts extracted, falling back to table view');
+		return null;
+	} catch (err) {
+		logInfo('google-scraper', `Graph view extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+		return null;
+	}
+}
+
+/**
+ * Extract sub-accounts from the MCC table view (legacy fallback).
+ */
+async function extractAccountsFromTableView(page: Page): Promise<Array<{ ocid: string; name: string; customerId: string; isManager: boolean }>> {
+	// Navigate to table view
+	const currentUrl = page.url();
+	const urlObj = new URL(currentUrl);
+	const accountsUrl = `https://ads.google.com/aw/accounts?${urlObj.searchParams.toString()}`;
+	logInfo('google-scraper', `Navigating to accounts table view: ${accountsUrl}`);
+	await page.goto(accountsUrl, { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {});
+	await new Promise((r) => setTimeout(r, 3000));
+
 	await page.waitForSelector('a.account-cell-link', { timeout: 15_000 }).catch(() => {
 		logInfo('google-scraper', 'No account-cell-link elements found');
 	});
 
-	// Set page size to 100 to see all accounts (avoid pagination)
-	await setPageSizeTo100(page);
+	// Try to set page size to 100
+	const pageSizeChanged = await setPageSizeTo100(page);
 
-	// Extract sub-accounts from the accounts table
-	const rawAccounts = await page.evaluate(() => {
+	if (!pageSizeChanged) {
+		logInfo('google-scraper', 'Page size change failed, using pagination');
+		return await paginateAndExtractAll(page);
+	}
+
+	return page.evaluate(() => {
 		const results: Array<{ ocid: string; name: string; customerId: string; isManager: boolean }> = [];
 		const seen = new Set<string>();
 
@@ -471,19 +731,13 @@ async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Pr
 			seen.add(ocid);
 
 			const name = link.textContent?.trim() || '';
-
-			// Customer ID and Manager tag
 			const cell = link.closest('ess-cell, td, [role="gridcell"]');
 			const parent = cell || link.parentElement;
 			const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
 			const rawCid = cidEl?.textContent?.trim() || '';
-
-			// Check if this is a Manager (sub-MCC) account
 			const row = link.closest('ess-row, tr, [role="row"]');
 			const rowText = row ? (row as HTMLElement).innerText : '';
 			const isManager = rowText.includes('Manager') || rawCid.includes('Manager');
-
-			// Clean customer ID (remove "(Manager)" suffix)
 			const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
 
 			results.push({ ocid, name, customerId, isManager });
@@ -491,9 +745,24 @@ async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Pr
 
 		return results;
 	});
+}
+
+/**
+ * Extract sub-accounts from the MCC.
+ * Primary: uses Graph (Hartă) view which shows ALL accounts without pagination.
+ * Fallback: uses Table view with pagination if Graph view fails.
+ */
+async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Promise<SubAccount[]> {
+	// Primary strategy: Graph view (shows all accounts without pagination)
+	let rawAccounts = await extractAccountsFromGraphView(page);
+
+	// Fallback: Table view with pagination
+	if (!rawAccounts || rawAccounts.length === 0) {
+		rawAccounts = await extractAccountsFromTableView(page);
+	}
 
 	logInfo('google-scraper', `Found ${rawAccounts.length} entries on accounts page`, {
-		metadata: { accounts: rawAccounts.map(a => `${a.name} (${a.customerId}${a.isManager ? ' Manager' : ''})`).slice(0, 15) }
+		metadata: { accounts: rawAccounts.map(a => `${a.name} (${a.customerId}${a.isManager ? ' Manager' : ''})`).slice(0, 20) }
 	});
 
 	// Separate regular accounts from sub-MCC (Manager) accounts
@@ -508,83 +777,76 @@ async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Pr
 		}
 	}
 
-	// If we have allowedCustomerIds, check if any are missing from regular accounts
-	// If so, we need to explore sub-MCC accounts to find them
-	let neededFromSubMcc = false;
+	// Check if any allowed accounts are still missing — explore sub-MCCs
 	if (allowedCustomerIds?.length && managerAccounts.length > 0) {
 		const foundIds = new Set(regularAccounts.map(a => a.customerId.replace(/-/g, '')));
 		const missingIds = allowedCustomerIds.filter(id => !foundIds.has(id));
 		if (missingIds.length > 0) {
-			neededFromSubMcc = true;
 			logInfo('google-scraper', `${missingIds.length} CRM accounts not found at top level, exploring ${managerAccounts.length} sub-MCC(s)`, {
 				metadata: { missingIds, subMccs: managerAccounts.map(a => a.name) }
 			});
-		}
-	}
 
-	// Recursively explore sub-MCC accounts if needed
-	if (neededFromSubMcc) {
-		for (const mcc of managerAccounts) {
-			try {
-				const mccAccountsUrl = `https://ads.google.com/aw/accounts?ocid=${mcc.ocid}&ascid=${mcc.ocid}`;
-				logInfo('google-scraper', `Exploring sub-MCC: ${mcc.name} (${mcc.customerId})`);
-				await page.goto(mccAccountsUrl, { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {});
-				await new Promise((r) => setTimeout(r, 3000));
+			for (const mcc of managerAccounts) {
+				try {
+					const mccAccountsUrl = `https://ads.google.com/aw/accounts?ocid=${mcc.ocid}&ascid=${mcc.ocid}`;
+					logInfo('google-scraper', `Exploring sub-MCC: ${mcc.name} (${mcc.customerId})`);
+					await page.goto(mccAccountsUrl, { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {});
+					await new Promise((r) => setTimeout(r, 3000));
 
-				await page.waitForSelector('a.account-cell-link', { timeout: 10_000 }).catch(() => {});
-				await setPageSizeTo100(page);
+					await page.waitForSelector('a.account-cell-link', { timeout: 10_000 }).catch(() => {});
+					await setPageSizeTo100(page);
 
-				const subAccounts = await page.evaluate(() => {
-					const results: Array<{ ocid: string; name: string; customerId: string }> = [];
-					const seen = new Set<string>();
+					const subAccounts = await page.evaluate(() => {
+						const results: Array<{ ocid: string; name: string; customerId: string }> = [];
+						const seen = new Set<string>();
 
-					document.querySelectorAll('a.account-cell-link').forEach((link) => {
-						const href = link.getAttribute('href') || '';
-						const ocidMatch = href.match(/[?&]ocid=(\d+)/);
-						if (!ocidMatch) return;
+						document.querySelectorAll('a.account-cell-link').forEach((link) => {
+							const href = link.getAttribute('href') || '';
+							const ocidMatch = href.match(/[?&]ocid=(\d+)/);
+							if (!ocidMatch) return;
 
-						const ocid = ocidMatch[1];
-						if (seen.has(ocid)) return;
-						seen.add(ocid);
+							const ocid = ocidMatch[1];
+							if (seen.has(ocid)) return;
+							seen.add(ocid);
 
-						const name = link.textContent?.trim() || '';
-						const cell = link.closest('ess-cell, td, [role="gridcell"]');
-						const parent = cell || link.parentElement;
-						const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
-						const rawCid = cidEl?.textContent?.trim() || '';
-						const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
+							const name = link.textContent?.trim() || '';
+							const cell = link.closest('ess-cell, td, [role="gridcell"]');
+							const parent = cell || link.parentElement;
+							const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
+							const rawCid = cidEl?.textContent?.trim() || '';
+							const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
 
-						results.push({ ocid, name, customerId });
+							results.push({ ocid, name, customerId });
+						});
+
+						return results;
 					});
 
-					return results;
-				});
+					logInfo('google-scraper', `Sub-MCC ${mcc.name}: found ${subAccounts.length} accounts`, {
+						metadata: { accounts: subAccounts.map(a => `${a.name} (${a.customerId})`).slice(0, 10) }
+					});
 
-				logInfo('google-scraper', `Sub-MCC ${mcc.name}: found ${subAccounts.length} accounts`, {
-					metadata: { accounts: subAccounts.map(a => `${a.name} (${a.customerId})`).slice(0, 10) }
-				});
-
-				// Add sub-accounts that aren't already in the list
-				const existingOcids = new Set(regularAccounts.map(a => a.ocid));
-				for (const sub of subAccounts) {
-					if (!existingOcids.has(sub.ocid)) {
-						regularAccounts.push(sub);
-						existingOcids.add(sub.ocid);
+					const existingOcids = new Set(regularAccounts.map(a => a.ocid));
+					for (const sub of subAccounts) {
+						if (!existingOcids.has(sub.ocid)) {
+							regularAccounts.push(sub);
+							existingOcids.add(sub.ocid);
+						}
 					}
+				} catch (err) {
+					logInfo('google-scraper', `Could not explore sub-MCC ${mcc.name}: ${err instanceof Error ? err.message : String(err)}`);
 				}
-			} catch (err) {
-				logInfo('google-scraper', `Could not explore sub-MCC ${mcc.name}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
 	}
 
-	// Check if any allowed accounts are still missing — try search-based discovery
+	// Last resort: search for still-missing accounts individually
 	if (allowedCustomerIds?.length) {
 		const foundIds = new Set(regularAccounts.map(a => a.customerId.replace(/-/g, '')));
 		const stillMissing = allowedCustomerIds.filter(id => !foundIds.has(id));
 
 		if (stillMissing.length > 0) {
-			logInfo('google-scraper', `${stillMissing.length} accounts still missing after sub-MCC exploration, trying search`, {
+			logInfo('google-scraper', `${stillMissing.length} accounts still missing after all discovery, trying search`, {
 				metadata: { missingIds: stillMissing }
 			});
 

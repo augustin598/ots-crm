@@ -33,6 +33,7 @@ export type LogSource =
 	| 'meta-scraper'
 	| 'google-scraper'
 	| 'tiktok-scraper'
+	| 'token-refresh'
 	| 'meta-ads-leads';
 
 function generateId() {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, getMetaInvoiceDownloads } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, getMetaInvoiceDownloads, getMappedMetaAdsClients } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible';
@@ -11,6 +11,10 @@
 	import JSZip from 'jszip';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import EyeIcon from '@lucide/svelte/icons/eye';
+	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
@@ -18,18 +22,23 @@
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { clientLogger } from '$lib/client-logger';
+	import AccountSpendChart from '$lib/components/reports/account-spend-chart.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	// Date range — implicit: luna curenta (la fel ca admin Meta)
-	const _defaults = getDefaultDateRange();
+	// Date range — implicit: luna trecuta (clientul vede facturile finalizate)
+	const _presets = getDatePresets();
+	const _lastMonth = _presets.find(p => p.label === 'Luna trecută');
+	const _defaults = _lastMonth || getDefaultDateRange();
 	let since = $state(_defaults.since);
 	let until = $state(_defaults.until);
-	const _presets = getDatePresets();
 
 	const spendingQuery = getMetaAdsSpendingList();
 	const spending = $derived(spendingQuery.current || []);
 	const loading = $derived(spendingQuery.loading);
+
+	const mappedClientsQuery = getMappedMetaAdsClients();
+	const mappedClients = $derived(mappedClientsQuery.current || []);
 
 	const downloadsQuery = getMetaInvoiceDownloads();
 	const downloads = $derived(downloadsQuery.current || []);
@@ -104,6 +113,13 @@
 				}
 			}
 			groups.set(clientKey, group);
+		}
+		// Add mapped accounts that have no spending/download data yet
+		for (const mapped of mappedClients) {
+			const key = mapped.clientName || 'Neatribuit';
+			if (!groups.has(key)) {
+				groups.set(key, { clientName: key, businessName: mapped.bmName || '', hasMultipleAccounts: false, rows: [] });
+			}
 		}
 		// Detect multi-account clients + sort
 		for (const group of groups.values()) {
@@ -180,6 +196,16 @@
 		if (expandedAccounts.has(key)) expandedAccounts.delete(key);
 		else expandedAccounts.add(key);
 	}
+
+	// Auto-expand all clients on load (client view) — periods stay collapsed
+	let autoExpandedOnce = false;
+	$effect(() => {
+		if (autoExpandedOnce || groupedByClient.length === 0) return;
+		autoExpandedOnce = true;
+		for (const group of groupedByClient) {
+			expandedAccounts.add(group.clientName);
+		}
+	});
 
 	const filteredGroupedByClient = $derived(
 		spendSearchQuery.trim()
@@ -262,7 +288,13 @@
 			</h1>
 			<p class="text-muted-foreground">Cheltuieli lunare și documente de facturare</p>
 		</div>
-		<DateRangePicker bind:since bind:until />
+		<div class="flex items-center gap-2">
+			<div class="relative w-48">
+				<Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+				<Input bind:value={spendSearchQuery} type="text" placeholder="Caută..." class="pl-8 h-9 text-sm" />
+			</div>
+			<DateRangePicker bind:since bind:until />
+		</div>
 	</div>
 
 	<!-- Spending cards per client -->
@@ -281,17 +313,6 @@
 			</div>
 		</Card>
 	{:else}
-		<!-- Search + Filters -->
-		<div class="flex items-center gap-3">
-			<div class="relative flex-1">
-				<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-				<Input bind:value={spendSearchQuery} type="text" placeholder="Caută cont sau client..." class="pl-9" />
-			</div>
-			<label class="flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
-				<input type="checkbox" bind:checked={showCredits} class="rounded border-input" />
-				Credite Ad
-			</label>
-		</div>
 
 		{#if filteredGroupedByClient.length === 0}
 			<p class="text-sm text-muted-foreground text-center py-4">Niciun cont găsit pentru „{spendSearchQuery}"</p>
@@ -302,6 +323,8 @@
 					{@const totalClicks = group.rows.reduce((s, r) => s + (r.clicks || 0), 0)}
 					{@const totalImpressions = group.rows.reduce((s, r) => s + (r.impressions || 0), 0)}
 					{@const curr = group.rows[0]?.currencyCode || 'RON'}
+					{@const daysInRange = Math.max(1, Math.round((new Date(until).getTime() - new Date(since).getTime()) / 86400000) + 1)}
+					{@const spendPerDay = totalSpend > 0 ? Math.round(totalSpend / daysInRange) : 0}
 					{@const isExpanded = expandedAccounts.has(group.clientName)}
 					{@const clientDls = downloadsByClient.get(group.clientName) || []}
 					{@const dlCount = clientDls.filter(d => d.status === 'downloaded' && d.invoiceType !== 'credit').length}
@@ -330,16 +353,11 @@
 										</div>
 										<div class="flex items-center gap-4">
 											<div class="text-right">
-												<p class="text-xs text-muted-foreground">Total cheltuieli</p>
-												<p class="text-lg font-bold">{formatAmount(totalSpend, curr)}</p>
-											</div>
-											<div class="text-right hidden sm:block">
-												<p class="text-xs text-muted-foreground">Click-uri</p>
-												<p class="text-base font-semibold">{formatNumber(totalClicks)}</p>
-											</div>
-											<div class="text-right hidden sm:block">
-												<p class="text-xs text-muted-foreground">Impresii</p>
-												<p class="text-base font-semibold">{formatNumber(totalImpressions)}</p>
+												<p class="text-sm text-muted-foreground">Total cheltuieli · {new Date(since + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })} — {new Date(until + 'T00:00:00').toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+												<p class="text-2xl font-bold">{formatAmount(totalSpend, curr)}</p>
+												{#if spendPerDay > 0}
+													<p class="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 mt-1">{formatAmount(spendPerDay, curr)} / zi</p>
+												{/if}
 											</div>
 											<ChevronDownIcon class="h-5 w-5 text-muted-foreground shrink-0 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
 										</div>
@@ -348,16 +366,26 @@
 							</CollapsibleTrigger>
 
 							<CollapsibleContent>
-								<!-- Column headers -->
-								<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-2 border-t bg-muted/30 text-xs font-medium text-muted-foreground">
-									<span>Perioadă</span>
-									<span class="text-right">Cheltuieli</span>
-									<span class="text-right"></span>
-									<span class="text-right hidden sm:block">Impresii</span>
-									<span class="text-right hidden sm:block">Click-uri</span>
-									<span class="text-right">Facturi</span>
-								</div>
-								<div class="divide-y">
+								<!-- Spend chart per account -->
+								{#if group.rows.some(r => r.spendCents > 0)}
+									<div class="px-6 py-4 border-t">
+										<p class="text-sm font-medium mb-3">Cheltuieli per zi / cont</p>
+										<AccountSpendChart rows={group.rows} currency={curr} />
+									</div>
+								{/if}
+								<!-- Data table -->
+								<table class="w-full border-t">
+									<thead>
+										<tr class="bg-muted/30 text-sm font-semibold text-muted-foreground">
+											<td class="px-6 py-2.5"><span class="inline-flex items-center gap-1.5"><CalendarIcon class="h-3.5 w-3.5" />Perioadă</span></td>
+											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><WalletIcon class="h-3.5 w-3.5" />Cheltuieli</span></td>
+											<td class="px-2 py-2.5 text-right w-[60px]"></td>
+											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><EyeIcon class="h-3.5 w-3.5" />Impresii</span></td>
+											<td class="px-3 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><MousePointerClickIcon class="h-3.5 w-3.5" />Click-uri</span></td>
+											<td class="px-6 py-2.5 text-right"><span class="inline-flex items-center gap-1.5"><FileTextIcon class="h-3.5 w-3.5" />Facturi</span></td>
+										</tr>
+									</thead>
+									<tbody class="divide-y">
 									{#each group.rows as row, i (row.id)}
 										{@const isDownloadOnly = (row as any)._downloadOnly === true}
 										{@const prevSpend = !isDownloadOnly ? group.rows[i + 1]?.spendCents : null}
@@ -370,32 +398,41 @@
 										{@const periodKey = `${group.clientName}:${row.metaAdAccountId}:${row.periodStart}`}
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										<!-- Period row -->
-										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_60px_minmax(80px,1fr)_minmax(80px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} onkeydown={(e) => e.key === 'Enter' && downloadedInvoices.length > 0 && togglePeriod(periodKey)} role="button" tabindex="0">
-											<div class="flex items-center gap-2 min-w-0">
-												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-												<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
-												{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
-													<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{row.adAccountName || row.metaAdAccountId}</span>
-												{/if}
-											</div>
+										<tr class="hover:bg-muted/30 transition-colors cursor-pointer" onclick={() => downloadedInvoices.length > 0 && togglePeriod(periodKey)} onkeydown={(e) => e.key === 'Enter' && downloadedInvoices.length > 0 && togglePeriod(periodKey)} tabindex="0">
+											<td class="px-6 py-3">
+												<div class="flex items-center gap-2 min-w-0">
+													<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+													<span class="font-medium capitalize whitespace-nowrap">{formatPeriod(row.periodStart)}</span>
+													{#if group.hasMultipleAccounts && (row.adAccountName || row.metaAdAccountId)}
+														<span class="inline-flex items-center rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{row.adAccountName || row.metaAdAccountId}</span>
+													{/if}
+												</div>
+											</td>
 											{#if isDownloadOnly}
-												<span></span>
-												<span></span>
-												<span class="hidden sm:block"></span>
-												<span class="hidden sm:block"></span>
+												<td></td>
+												<td></td>
+												<td></td>
+												<td></td>
 											{:else}
-												<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(row.spendCents, row.currencyCode)}</span>
-												<span class="text-right whitespace-nowrap">
+												{@const periodDays = (() => { const start = new Date(row.periodStart); const end = new Date(row.periodEnd || row.periodStart); return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1); })()}
+												{@const rowSpendPerDay = row.spendCents > 0 ? Math.round(row.spendCents / periodDays) : 0}
+												<td class="px-3 py-3 text-right whitespace-nowrap">
+													<span class="text-base font-semibold">{formatAmount(row.spendCents, row.currencyCode)}</span>
+													{#if rowSpendPerDay > 0}
+														<br><span class="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">{formatAmount(rowSpendPerDay, row.currencyCode)} / zi</span>
+													{/if}
+												</td>
+												<td class="px-2 py-3 text-right whitespace-nowrap">
 													{#if trend !== null}
 														<span class="text-xs {trend >= 0 ? 'text-red-500' : 'text-green-500'}">{trend >= 0 ? '+' : ''}{trend.toFixed(1)}%</span>
 													{/if}
-												</span>
-												<span class="text-sm text-muted-foreground text-right whitespace-nowrap hidden sm:block">{formatNumber(row.impressions)}</span>
-												<span class="text-sm text-right whitespace-nowrap hidden sm:block">{formatNumber(row.clicks)}</span>
+												</td>
+												<td class="px-3 py-3 text-sm text-muted-foreground text-right whitespace-nowrap">{formatNumber(row.impressions)}</td>
+												<td class="px-3 py-3 text-sm text-right whitespace-nowrap">{formatNumber(row.clicks)}</td>
 											{/if}
-											<div class="text-right">
+											<td class="px-6 py-3 text-right">
 												{#if downloadedInvoices.length > 0}
-													<div class="flex items-center gap-1">
+													<div class="flex items-center justify-end gap-1">
 														<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={(e) => { e.stopPropagation(); togglePeriod(periodKey); }}>
 															<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
 															{downloadedInvoices.length} {downloadedInvoices.length === 1 ? 'factură' : 'facturi'}
@@ -407,29 +444,66 @@
 												{:else if !isDownloadOnly}
 													<span class="text-xs text-orange-500">În așteptare</span>
 												{/if}
-											</div>
-										</div>
+											</td>
+										</tr>
 										<!-- Expandable invoice list -->
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
 											{#each downloadedInvoices as inv}
-												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
-													<Checkbox checked={selectedInvoices.has(inv.id)} onCheckedChange={() => toggleSelectInvoice(inv.id)} />
-													<div class="flex items-center gap-2 min-w-0 flex-1">
-														<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber || (inv.txid ? `TX-${inv.txid.substring(0, 8)}…` : 'Factura PDF')}</span>
-														{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
-														{#if inv.amountText}<span class="text-xs text-muted-foreground">{inv.amountText}</span>{/if}
-													</div>
-													<div class="flex items-center gap-0.5 shrink-0">
-														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadInvoicePDF(inv.id, row.periodStart)}>
-															<Download class="mr-1 h-3 w-3" />PDF
-														</Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewInvoicePDF(inv.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
-													</div>
-												</div>
+												<tr class="bg-muted/10 hover:bg-muted/20 transition-colors">
+													<td colspan="6" class="px-6 py-2 pl-10">
+														<div class="flex items-center gap-3">
+															<Checkbox checked={selectedInvoices.has(inv.id)} onCheckedChange={() => toggleSelectInvoice(inv.id)} />
+															<div class="flex items-center gap-2 min-w-0 flex-1">
+																<span class="text-sm font-medium text-blue-600">{inv.invoiceNumber ? `Invoice no. ${inv.invoiceNumber}` : (inv.txid ? `TX-${inv.txid.substring(0, 16)}…` : 'Factura PDF')}</span>
+																{#if inv.invoiceType === 'credit'}<span class="inline-flex items-center rounded-full border border-amber-200 px-1.5 py-0 text-[10px] font-medium text-amber-700 bg-amber-50">Credit</span>{/if}
+																{#if inv.amountText}<span class="text-xs text-muted-foreground">{inv.amountText}</span>{/if}
+															</div>
+															<div class="flex items-center gap-0.5 shrink-0">
+																<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadInvoicePDF(inv.id, row.periodStart)}>
+																	<Download class="mr-1 h-3 w-3" />Descarcă factura
+																</Button>
+																<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewInvoicePDF(inv.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+															</div>
+														</div>
+													</td>
+												</tr>
 											{/each}
 										{/if}
 									{/each}
-								</div>
+									</tbody>
+									<!-- Total row -->
+									{#if group.rows.length > 1}
+										{@const allGroupInvoices = group.rows.flatMap(r => {
+											const key = `${r.metaAdAccountId}:${r.periodStart}`;
+											const all = (downloadsByKey.get(key) || []).filter(d => d.status === 'downloaded' && d.pdfPath);
+											const filtered = showCredits ? all : all.filter(d => d.invoiceType !== 'credit');
+											const hasIndividual = filtered.some(d => d.txid);
+											return hasIndividual ? filtered.filter(d => d.txid) : filtered;
+										})}
+										{@const totalInvoices = allGroupInvoices.length}
+										<tfoot>
+											<tr class="border-t-2 border-border bg-muted">
+												<td class="px-6 py-3 font-semibold text-sm">Total</td>
+												<td class="px-3 py-3 text-right whitespace-nowrap">
+													<span class="text-base font-bold">{formatAmount(totalSpend, curr)}</span>
+												</td>
+												<td></td>
+												<td class="px-3 py-3 text-sm font-semibold text-right whitespace-nowrap">{formatNumber(totalImpressions)}</td>
+												<td class="px-3 py-3 text-sm font-semibold text-right whitespace-nowrap">{formatNumber(totalClicks)}</td>
+												<td class="px-6 py-3 text-right">
+													{#if totalInvoices > 0}
+														<div class="flex items-center justify-end gap-1">
+															<span class="inline-flex items-center rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50">{totalInvoices} facturi</span>
+															<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => downloadPeriodZip(allGroupInvoices, `${group.clientName}-total`)} title="Descarcă toate ca ZIP" disabled={zipping}>
+																<FileArchive class="h-3.5 w-3.5" />
+															</Button>
+														</div>
+													{/if}
+												</td>
+											</tr>
+										</tfoot>
+									{/if}
+								</table>
 							</CollapsibleContent>
 						</Card>
 					</Collapsible>

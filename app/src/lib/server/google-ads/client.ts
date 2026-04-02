@@ -131,14 +131,15 @@ export async function listInvoices(
 		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
 
 		// First, find the billing setup ID for this account via GAQL
+		// Include CANCELLED setups because they still have historical invoices
 		const billingSetups = await customer.query(`
 			SELECT billing_setup.id, billing_setup.status
 			FROM billing_setup
-			WHERE billing_setup.status = 'APPROVED'
+			WHERE billing_setup.status IN ('APPROVED', 'CANCELLED')
 		`);
 
 		if (!billingSetups || billingSetups.length === 0) {
-			logInfo('google-ads', `No approved billing setup for ${cleanCustomer} - skipping`);
+			logInfo('google-ads', `No billing setup found for ${cleanCustomer} - skipping`);
 			return [];
 		}
 

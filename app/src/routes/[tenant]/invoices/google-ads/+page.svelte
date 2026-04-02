@@ -175,6 +175,16 @@
 		conversions: number;
 	};
 
+	// Map customerId → accountName from spending data for invoice-only row display
+	const accountNameByCustomerId = $derived.by(() => {
+		const map = new Map<string, string>();
+		for (const account of monthlySpend) {
+			const custId = account.googleAdsCustomerId.replace(/-/g, '');
+			if (account.accountName) map.set(custId, account.accountName);
+		}
+		return map;
+	});
+
 	const groupedByClient = $derived.by(() => {
 		const sinceMonth = since.substring(0, 7);
 		const untilMonth = until.substring(0, 7);
@@ -215,7 +225,7 @@
 				group.rows.push({
 					id: `inv-${custId}:${invMonth}`,
 					month: invMonth,
-					accountName: inv.clientName || custId,
+					accountName: accountNameByCustomerId.get(custId) || inv.clientName || custId,
 					googleAdsCustomerId: inv.googleAdsCustomerId || '',
 					spend: (inv.totalAmountMicros || 0) / 1_000_000,
 					currencyCode: inv.currencyCode || 'RON',
