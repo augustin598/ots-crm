@@ -9,7 +9,8 @@ import { listAdvertiserAccounts } from '$lib/server/tiktok-ads/client';
 import { saveTtSessionCookies, clearTtSession } from '$lib/server/tiktok-ads/tt-cookies';
 import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { generateSpendingReportPdf } from '$lib/server/tiktok-ads/spending-report-pdf';
-import { downloadAllInvoicesForMonth, downloadInvoice } from '$lib/server/tiktok-ads/invoice-downloader';
+import { downloadAllInvoicesForMonth, downloadInvoice, listInvoicesFromTiktok } from '$lib/server/tiktok-ads/invoice-downloader';
+import { logInfo, logError } from '$lib/server/logger';
 import { getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
@@ -840,7 +841,7 @@ export const assignTiktokInvoiceToClient = command(
 );
 
 /** Auto-assign unassigned invoices to clients based on advertiser ID → account mapping.
- *  First backfills missing advertiser data from TikTok API, then assigns. */
+ *  First backfills ALL invoice data from TikTok API (fixes amounts, serial numbers, advertiser IDs). */
 export const autoAssignTiktokInvoices = command(
 	v.undefined(),
 	async () => {
@@ -851,98 +852,102 @@ export const autoAssignTiktokInvoices = command(
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
+		let backfilled = 0;
 
-		// Step 1: Backfill missing advertiser data from TikTok API
-		const invoicesMissingData = await db
+		// Step 1: Get ALL invoices for this tenant (backfill operates on everything, not just unassigned)
+		const allInvoices = await db
 			.select({
 				id: table.tiktokInvoiceDownload.id,
 				tiktokInvoiceId: table.tiktokInvoiceDownload.tiktokInvoiceId,
 				tiktokAdvertiserId: table.tiktokInvoiceDownload.tiktokAdvertiserId,
 				invoiceNumber: table.tiktokInvoiceDownload.invoiceNumber,
 				amountCents: table.tiktokInvoiceDownload.amountCents,
-				integrationId: table.tiktokInvoiceDownload.integrationId
+				adAccountName: table.tiktokInvoiceDownload.adAccountName,
+				clientId: table.tiktokInvoiceDownload.clientId
 			})
 			.from(table.tiktokInvoiceDownload)
+			.where(eq(table.tiktokInvoiceDownload.tenantId, tenantId));
+
+		const allUnassigned = allInvoices.filter(inv => !inv.clientId);
+
+		logInfo('tiktok-auto-assign', `Found ${allInvoices.length} total invoices, ${allUnassigned.length} unassigned`, { tenantId });
+
+		if (allInvoices.length === 0) return { assigned: 0, total: 0, backfilled: 0 };
+
+		// Step 2: Backfill data from TikTok API — ALWAYS update amounts/serial/advId (fixes wrong values too)
+		const [integration] = await db
+			.select()
+			.from(table.tiktokAdsIntegration)
 			.where(
 				and(
-					eq(table.tiktokInvoiceDownload.tenantId, tenantId),
-					isNull(table.tiktokInvoiceDownload.clientId)
+					eq(table.tiktokAdsIntegration.tenantId, tenantId),
+					eq(table.tiktokAdsIntegration.isActive, true),
+					eq(table.tiktokAdsIntegration.ttSessionStatus, 'active')
 				)
-			);
+			)
+			.limit(1);
 
-		// Fetch invoice details from TikTok API to fill missing data
-		if (invoicesMissingData.some(inv => !inv.tiktokAdvertiserId || !inv.invoiceNumber || inv.amountCents == null)) {
-			const [integration] = await db
-				.select()
-				.from(table.tiktokAdsIntegration)
-				.where(
-					and(
-						eq(table.tiktokAdsIntegration.tenantId, tenantId),
-						eq(table.tiktokAdsIntegration.isActive, true),
-						eq(table.tiktokAdsIntegration.ttSessionStatus, 'active')
-					)
-				)
-				.limit(1);
+		if (integration?.orgId && integration?.paymentAccountId) {
+			const cookies = await getDecryptedTtCookies(integration.id, tenantId);
+			if (cookies) {
+				try {
+					const now = new Date();
+					const startDate = `${now.getFullYear() - 1}-01-01`;
+					const endDate = `${now.getFullYear()}-12-31`;
 
-			if (integration?.orgId && integration?.paymentAccountId) {
-				const cookies = await getDecryptedTtCookies(integration.id, tenantId);
-				if (cookies) {
-					try {
-						// Fetch all invoices from TikTok API (last 12 months)
-						const now = new Date();
-						const startDate = `${now.getFullYear() - 1}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-						const endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-28`;
-						const { listInvoicesFromTiktok: listInv } = await import('$lib/server/tiktok-ads/invoice-downloader');
+					const tiktokInvoices = await listInvoicesFromTiktok(cookies, {
+						bc_id: integration.orgId,
+						pa_id: integration.paymentAccountId,
+						platform: 2
+					}, startDate, endDate);
 
-						const tiktokInvoices = await listInv(cookies, {
-							bc_id: integration.orgId,
-							pa_id: integration.paymentAccountId,
-							platform: 2
-						}, startDate, endDate);
+					logInfo('tiktok-auto-assign', `Fetched ${tiktokInvoices.length} invoices from TikTok API`, { tenantId });
 
-						// Build lookup by invoice_id
-						const tiktokMap = new Map<string, { advId: string; serial: string; amount: string; currency: string; accountName: string }>();
-						for (const inv of tiktokInvoices) {
-							tiktokMap.set(inv.invoice_id, {
-								advId: inv.adv_id_list[0] || '',
-								serial: inv.invoice_serial,
-								amount: inv.amount,
-								currency: inv.currency,
-								accountName: inv.account_name
-							});
-						}
-
-						// Update invoices with missing data
-						for (const inv of invoicesMissingData) {
-							const tiktokData = tiktokMap.get(inv.tiktokInvoiceId);
-							if (!tiktokData) continue;
-
-							const updates: Record<string, any> = {};
-							if (!inv.tiktokAdvertiserId && tiktokData.advId) updates.tiktokAdvertiserId = tiktokData.advId;
-							if (!inv.invoiceNumber && tiktokData.serial) updates.invoiceNumber = tiktokData.serial;
-							if (inv.amountCents == null && tiktokData.amount) {
-								const parsed = parseFloat(tiktokData.amount);
-								if (!isNaN(parsed)) updates.amountCents = Math.round(parsed * 100);
-							}
-							if (tiktokData.currency) updates.currencyCode = tiktokData.currency;
-							if (tiktokData.accountName) updates.adAccountName = tiktokData.accountName;
-
-							if (Object.keys(updates).length > 0) {
-								updates.updatedAt = new Date();
-								await db
-									.update(table.tiktokInvoiceDownload)
-									.set(updates)
-									.where(eq(table.tiktokInvoiceDownload.id, inv.id));
-							}
-						}
-					} catch {
-						// Non-critical: continue with assignment using whatever data we have
+					const tiktokMap = new Map<string, { advId: string; serial: string; amount: string; currency: string; accountName: string }>();
+					for (const inv of tiktokInvoices) {
+						tiktokMap.set(inv.invoice_id, {
+							advId: inv.adv_id_list[0] || '',
+							serial: inv.invoice_serial,
+							amount: inv.amount,
+							currency: inv.currency,
+							accountName: inv.account_name
+						});
 					}
+
+					// ALWAYS overwrite data from TikTok API (fixes wrong amounts from prior imports)
+					for (const inv of allInvoices) {
+						const td = tiktokMap.get(inv.tiktokInvoiceId);
+						if (!td) continue;
+
+						const correctAmountCents = td.amount ? Math.round(parseFloat(td.amount) * 100) : null;
+						const updates: Record<string, any> = { updatedAt: new Date() };
+
+						if (td.advId) updates.tiktokAdvertiserId = td.advId;
+						if (td.serial) updates.invoiceNumber = td.serial;
+						if (correctAmountCents != null) updates.amountCents = correctAmountCents;
+						if (td.currency) updates.currencyCode = td.currency;
+						if (td.accountName) updates.adAccountName = td.accountName;
+
+						await db
+							.update(table.tiktokInvoiceDownload)
+							.set(updates)
+							.where(eq(table.tiktokInvoiceDownload.id, inv.id));
+						backfilled++;
+					}
+
+					logInfo('tiktok-auto-assign', `Backfilled ${backfilled} invoices with TikTok API data`, { tenantId });
+				} catch (err) {
+					const errMsg = err instanceof Error ? err.message : String(err);
+					logError('tiktok-auto-assign', `Failed to backfill from TikTok API: ${errMsg}`, { tenantId });
 				}
+			} else {
+				logError('tiktok-auto-assign', 'No TikTok cookies available for backfill', { tenantId });
 			}
+		} else {
+			logError('tiktok-auto-assign', 'No active TikTok integration for backfill', { tenantId });
 		}
 
-		// Step 2: Re-read unassigned invoices (now with backfilled data)
+		// Step 3: Re-read unassigned invoices (now with backfilled data)
 		const unassigned = await db
 			.select({
 				id: table.tiktokInvoiceDownload.id,
@@ -957,9 +962,9 @@ export const autoAssignTiktokInvoices = command(
 				)
 			);
 
-		if (unassigned.length === 0) return { assigned: 0, total: 0, backfilled: true };
+		if (unassigned.length === 0) return { assigned: 0, total: 0, backfilled };
 
-		// Build advertiser → client mapping from all active accounts
+		// Build advertiser → client mapping
 		const accounts = await db
 			.select({
 				tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
@@ -978,6 +983,11 @@ export const autoAssignTiktokInvoices = command(
 			}
 		}
 
+		logInfo('tiktok-auto-assign', `Account mappings: ${advToClient.size} by advId, ${nameToClient.size} by name`, {
+			tenantId,
+			metadata: { advIds: [...advToClient.keys()], names: [...nameToClient.keys()] }
+		});
+
 		let assigned = 0;
 		for (const inv of unassigned) {
 			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
@@ -993,7 +1003,8 @@ export const autoAssignTiktokInvoices = command(
 			}
 		}
 
-		return { assigned, total: unassigned.length };
+		logInfo('tiktok-auto-assign', `Auto-assign complete: ${assigned}/${unassigned.length} assigned, ${backfilled} backfilled`, { tenantId });
+		return { assigned, total: unassigned.length, backfilled };
 	}
 );
 

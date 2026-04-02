@@ -316,13 +316,16 @@
 		autoAssigning = true;
 		try {
 			const result = await autoAssignTiktokInvoices(undefined).updates(invoicesQuery);
-			if (result.assigned > 0) {
-				toast.success(`${result.assigned} din ${result.total} facturi atribuite automat`);
+			const parts: string[] = [];
+			if (result.backfilled > 0) parts.push(`${result.backfilled} actualizate din API`);
+			if (result.assigned > 0) parts.push(`${result.assigned} atribuite`);
+			if (parts.length > 0) {
+				toast.success(parts.join(', '));
 			} else {
-				toast.info(`Nicio factură de atribuit (${result.total} neatribuite, dar lipsesc mapări advertiser → client în Settings)`);
+				toast.info(`Nicio factură atribuită (${result.total} neatribuite — verifică mapările din Settings > TikTok Ads)`);
 			}
 		} catch (e) {
-			toast.error('Eroare la atribuire automată');
+			toast.error(e instanceof Error ? e.message : 'Eroare la atribuire automată');
 		} finally {
 			autoAssigning = false;
 		}
@@ -403,6 +406,7 @@
 				currency: inv.currencyCode || undefined,
 				period: inv.date ? inv.date.substring(0, 7) : undefined
 			};
+			console.log('[TIKTOK-IMPORT] Scraper →', { raw: { id: inv.invoiceId, amount: inv.amount, accountId: inv.accountId }, mapped: { amount: mapped.amount, advId: mapped.advId } });
 			const label = mapped.invoiceSerial || mapped.invoiceId.substring(0, 16);
 			bulkCurrentLabel = label;
 			try {
