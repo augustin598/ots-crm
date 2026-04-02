@@ -855,7 +855,8 @@ export const autoAssignTiktokInvoices = command(
 		const unassigned = await db
 			.select({
 				id: table.tiktokInvoiceDownload.id,
-				tiktokAdvertiserId: table.tiktokInvoiceDownload.tiktokAdvertiserId
+				tiktokAdvertiserId: table.tiktokInvoiceDownload.tiktokAdvertiserId,
+				adAccountName: table.tiktokInvoiceDownload.adAccountName
 			})
 			.from(table.tiktokInvoiceDownload)
 			.where(
@@ -871,21 +872,36 @@ export const autoAssignTiktokInvoices = command(
 		const accounts = await db
 			.select({
 				tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
+				accountName: table.tiktokAdsAccount.accountName,
 				clientId: table.tiktokAdsAccount.clientId
 			})
 			.from(table.tiktokAdsAccount)
 			.where(eq(table.tiktokAdsAccount.isActive, true));
 
+		// Map by advertiser ID and by account name (case-insensitive)
 		const advToClient = new Map<string, string>();
+		const nameToClient = new Map<string, string>();
 		for (const acc of accounts) {
-			if (acc.clientId && acc.tiktokAdvertiserId) {
-				advToClient.set(acc.tiktokAdvertiserId, acc.clientId);
+			if (acc.clientId) {
+				if (acc.tiktokAdvertiserId) advToClient.set(acc.tiktokAdvertiserId, acc.clientId);
+				if (acc.accountName) nameToClient.set(acc.accountName.toLowerCase(), acc.clientId);
 			}
 		}
 
+		// If only one account has a client mapped, use it as default for unmatchable invoices
+		const mappedAccounts = accounts.filter(a => a.clientId);
+		const defaultClientId = mappedAccounts.length === 1 ? mappedAccounts[0].clientId : null;
+
 		let assigned = 0;
 		for (const inv of unassigned) {
-			const clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : null;
+			// Try by advertiser ID first, then by account name, then default
+			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
+			if (!clientId && inv.adAccountName) {
+				clientId = nameToClient.get(inv.adAccountName.toLowerCase());
+			}
+			if (!clientId && defaultClientId) {
+				clientId = defaultClientId;
+			}
 			if (clientId) {
 				await db
 					.update(table.tiktokInvoiceDownload)
