@@ -36,7 +36,7 @@ export async function saveTtSessionCookies(
 	}
 
 	// Check for required TikTok session cookie (accept various TikTok session cookie names)
-	const sessionCookieNames = ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard', 'tt_csrf_token'];
+	const sessionCookieNames = ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard', 'tt_csrf_token', 'sessionid_ads', 'sessionid_ss_ads', 'sid_tt_ads', 'sid_guard_ads'];
 	const foundSessionCookies = cookies.filter(c => sessionCookieNames.includes(c.name));
 	const cookieNames = cookies.map(c => c.name);
 

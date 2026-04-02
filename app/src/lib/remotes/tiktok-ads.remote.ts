@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { getTiktokAdsConnections, disconnectTiktokAds, getAuthenticatedToken } from '$lib/server/tiktok-ads/auth';
 import { listAdvertiserAccounts } from '$lib/server/tiktok-ads/client';
 import { saveTtSessionCookies, clearTtSession } from '$lib/server/tiktok-ads/tt-cookies';
@@ -861,7 +861,7 @@ export const autoAssignTiktokInvoices = command(
 			.where(
 				and(
 					eq(table.tiktokInvoiceDownload.tenantId, tenantId),
-					sql`${table.tiktokInvoiceDownload.clientId} IS NULL`
+					isNull(table.tiktokInvoiceDownload.clientId)
 				)
 			);
 
@@ -1038,7 +1038,18 @@ export const bulkDownloadTiktokInvoices = command(
 				recordId = existing.id;
 				await db
 					.update(table.tiktokInvoiceDownload)
-					.set({ status: 'pending', errorMessage: null, updatedAt: new Date() })
+					.set({
+						status: 'pending',
+						errorMessage: null,
+						// Update fields that may have been missing on first import
+						...(link.invoiceSerial ? { invoiceNumber: link.invoiceSerial } : {}),
+						...(amountCents != null ? { amountCents } : {}),
+						...(clientId ? { clientId } : {}),
+						...(accountName ? { adAccountName: accountName } : {}),
+						...(advId ? { tiktokAdvertiserId: advId } : {}),
+						...(link.currency ? { currencyCode: link.currency } : {}),
+						updatedAt: new Date()
+					})
 					.where(eq(table.tiktokInvoiceDownload.id, existing.id));
 			} else {
 				const { encodeBase32LowerCase } = await import('@oslojs/encoding');
