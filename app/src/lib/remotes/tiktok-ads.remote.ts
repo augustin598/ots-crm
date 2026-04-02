@@ -1000,7 +1000,17 @@ export const autoAssignTiktokInvoices = command(
 		for (const inv of unassigned) {
 			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
 			if (!clientId && inv.adAccountName) {
-				clientId = nameToClient.get(inv.adAccountName.toLowerCase());
+				const invName = inv.adAccountName.toLowerCase();
+				// Try exact match first, then fuzzy (contains) match
+				clientId = nameToClient.get(invName);
+				if (!clientId) {
+					for (const [accName, accClientId] of nameToClient) {
+						if (invName.includes(accName) || accName.includes(invName)) {
+							clientId = accClientId;
+							break;
+						}
+					}
+				}
 			}
 			if (clientId) {
 				await db
