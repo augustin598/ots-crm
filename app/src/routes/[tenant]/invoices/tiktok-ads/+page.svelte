@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, assignTiktokInvoiceToClient, deleteTiktokInvoiceDownload } from '$lib/remotes/tiktok-ads.remote';
+	import { getClientsForMetaMapping } from '$lib/remotes/meta-ads-invoices.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -8,12 +9,16 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import * as Select from '$lib/components/ui/select';
 	import { Download, Search, Eye, FileArchive } from '@lucide/svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -53,6 +58,9 @@
 	const invoicesQuery = getTiktokInvoiceDownloads();
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
+
+	const clientsQuery = getClientsForMetaMapping();
+	const clients = $derived(clientsQuery.current || []);
 
 	// ---- Helpers ----
 
@@ -281,6 +289,39 @@
 		if (bulkDownloaded > 0) bulkJson = '';
 	}
 
+	async function handleRetryDownload(downloadId: string) {
+		try {
+			const result = await redownloadTiktokInvoice(downloadId);
+			if (result.success) {
+				toast.success('Factura a fost redescărcată');
+				invoicesQuery.refresh();
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la redescărcare');
+		}
+	}
+
+	async function handleAssignClient(downloadId: string, clientId: string | null) {
+		try {
+			await assignTiktokInvoiceToClient({ downloadId, clientId: clientId || null });
+			toast.success('Client atribuit');
+			invoicesQuery.refresh();
+		} catch (e) {
+			toast.error('Eroare la atribuire client');
+		}
+	}
+
+	async function handleDeleteInvoice(downloadId: string) {
+		if (!confirm('Ștergi această factură?')) return;
+		try {
+			await deleteTiktokInvoiceDownload(downloadId);
+			toast.success('Factură ștearsă');
+			invoicesQuery.refresh();
+		} catch (e) {
+			toast.error('Eroare la ștergere');
+		}
+	}
+
 	const ttBillingScript = `// TikTok Business Center → Billing → Invoices — extrage facturi
 // Tastează "allow pasting" în Console înainte de paste!
 (function(){
@@ -323,6 +364,50 @@
 		navigator.clipboard.writeText(ttBillingScript);
 		toast.success('Script copiat în clipboard! Rulează-l în Console pe pagina TikTok Billing.');
 	}
+
+	// ---- Scraper → Bulk Import bridge ----
+	// Maps ScrapedInvoice fields to the format expected by bulkDownloadTiktokInvoices
+	async function handleScraperImport(scrapedInvoices: any[]) {
+		bulkImporting = true;
+		bulkDone = false;
+		bulkCurrent = 0;
+		bulkTotal = scrapedInvoices.length;
+		bulkResults = [];
+		bulkCurrentLabel = '';
+		showBulkImport = true;
+
+		for (const inv of scrapedInvoices) {
+			const mapped = {
+				invoiceId: inv.invoiceId,
+				invoiceSerial: inv.invoiceNumber || undefined,
+				advId: inv.accountId && inv.accountId !== 'unknown' ? inv.accountId : undefined,
+				accountName: inv.accountName || undefined,
+				amount: inv.amount != null ? (inv.amount / 100).toFixed(2) : undefined,
+				currency: inv.currencyCode || undefined,
+				period: inv.date ? inv.date.substring(0, 7) : undefined
+			};
+			const label = mapped.invoiceSerial || mapped.invoiceId.substring(0, 16);
+			bulkCurrentLabel = label;
+			try {
+				const result = await bulkDownloadTiktokInvoices({ links: [mapped] });
+				if (result.skipped > 0) {
+					bulkResults = [...bulkResults, { label, status: 'skipped', error: null }];
+				} else if (result.downloaded > 0) {
+					bulkResults = [...bulkResults, { label, status: 'downloaded', error: null }];
+				} else {
+					const err = result.errorDetails?.[0] || 'unknown';
+					bulkResults = [...bulkResults, { label, status: 'error', error: err }];
+				}
+			} catch (e) {
+				bulkResults = [...bulkResults, { label, status: 'error', error: e instanceof Error ? e.message : 'Eroare' }];
+			}
+			bulkCurrent++;
+		}
+
+		bulkImporting = false;
+		bulkDone = true;
+		bulkCurrentLabel = '';
+	}
 </script>
 
 <div class="space-y-6">
@@ -349,7 +434,7 @@
 	</div>
 
 	{#if tiktokIntegrationId}
-		<ScraperPanel bind:this={scraperPanelRef} platform="tiktok" integrationId={tiktokIntegrationId} showTrigger={false} />
+		<ScraperPanel bind:this={scraperPanelRef} platform="tiktok" integrationId={tiktokIntegrationId} showTrigger={false} onImport={handleScraperImport} />
 	{/if}
 
 	<!-- Bulk Import Panel -->
@@ -546,17 +631,34 @@
 												{:else if row.status === 'pending'}
 													<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
 												{:else if row.status === 'error'}
-													<span class="inline-flex items-center rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
+													<span class="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>
+														Eroare
+													</span>
 												{:else}
 													<span class="text-xs text-muted-foreground">-</span>
 												{/if}
 											</div>
 											<div class="flex items-center justify-end gap-0.5">
+												{#if !row.clientId && clients.length > 0}
+													<Select.Root type="single" onValueChange={(clientId) => handleAssignClient(row.id, clientId)}>
+														<Select.Trigger class="h-7 text-xs w-[120px]">Atribuie</Select.Trigger>
+														<Select.Content>
+															{#each clients as client (client.id)}
+																<Select.Item value={client.id}>{client.businessName || client.name}</Select.Item>
+															{/each}
+														</Select.Content>
+													</Select.Root>
+												{/if}
 												{#if hasPdf}
 													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
 														<Download class="mr-1 h-3 w-3" />PDF
 													</Button>
 													<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+												{:else if row.status === 'error'}
+													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleRetryDownload(row.id)} title="Reîncearcă descărcarea">
+														<RefreshCwIcon class="mr-1 h-3 w-3" />Retry
+													</Button>
+													<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive" onclick={() => handleDeleteInvoice(row.id)} title="Șterge"><Trash2Icon class="h-3.5 w-3.5" /></Button>
 												{/if}
 											</div>
 										</div>

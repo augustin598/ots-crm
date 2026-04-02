@@ -802,17 +802,54 @@ export const deleteTiktokInvoiceDownload = command(
 	}
 );
 
+/** Assign/reassign a TikTok invoice to a client */
+export const assignTiktokInvoiceToClient = command(
+	v.object({
+		downloadId: v.pipe(v.string(), v.minLength(1)),
+		clientId: v.union([v.pipe(v.string(), v.minLength(1)), v.null()])
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+
+		const [dl] = await db
+			.select({ id: table.tiktokInvoiceDownload.id })
+			.from(table.tiktokInvoiceDownload)
+			.where(
+				and(
+					eq(table.tiktokInvoiceDownload.id, data.downloadId),
+					eq(table.tiktokInvoiceDownload.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!dl) throw error(404, 'Invoice not found');
+
+		await db
+			.update(table.tiktokInvoiceDownload)
+			.set({ clientId: data.clientId, updatedAt: new Date() })
+			.where(eq(table.tiktokInvoiceDownload.id, data.downloadId));
+
+		return { success: true };
+	}
+);
+
 // ---- Bulk Import (JSON) ----
 
 export const bulkDownloadTiktokInvoices = command(
 	v.object({
 		links: v.array(
 			v.object({
-				invoiceId: v.string(),
-				invoiceSerial: v.optional(v.string()),
-				advId: v.optional(v.string()),
+				invoiceId: v.pipe(v.union([v.string(), v.number()]), v.transform(String)),
+				invoiceSerial: v.optional(v.pipe(v.union([v.string(), v.number()]), v.transform(String))),
+				advId: v.optional(v.pipe(v.union([v.string(), v.number()]), v.transform(String))),
 				accountName: v.optional(v.string()),
-				amount: v.optional(v.string()),
+				amount: v.optional(v.pipe(v.union([v.string(), v.number()]), v.transform(String))),
 				currency: v.optional(v.string()),
 				period: v.optional(v.string())
 			})
@@ -932,7 +969,8 @@ export const bulkDownloadTiktokInvoices = command(
 				if (mapping.accountName) accountName = mapping.accountName;
 			}
 
-			const amountCents = link.amount ? Math.round(parseFloat(link.amount) * 100) : null;
+			const parsedAmount = link.amount ? parseFloat(String(link.amount)) : NaN;
+			const amountCents = isNaN(parsedAmount) ? null : Math.round(parsedAmount * 100);
 
 			// Create or reuse DB record
 			let recordId: string;

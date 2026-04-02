@@ -284,32 +284,12 @@
 				{/if}
 
 				<!-- Meta info -->
-				<Card.Root class="bg-muted/50">
-					<Card.Content class="pt-5">
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<p class="text-xs text-muted-foreground">Lead ID</p>
-								<p class="text-xs font-mono mt-0.5">{lead.externalLeadId}</p>
-							</div>
-							{#if lead.externalFormId}
-								<div>
-									<p class="text-xs text-muted-foreground">Form ID</p>
-									<p class="text-xs font-mono mt-0.5">{lead.externalFormId}</p>
-								</div>
-							{/if}
-							{#if lead.externalAdId}
-								<div>
-									<p class="text-xs text-muted-foreground">Ad</p>
-									<p class="text-xs font-mono mt-0.5">{lead.adName || lead.externalAdId}</p>
-								</div>
-							{/if}
-							<div>
-								<p class="text-xs text-muted-foreground">Importat</p>
-								<p class="text-xs font-mono mt-0.5">{formatDate(lead.importedAt)}</p>
-							</div>
-						</div>
-					</Card.Content>
-				</Card.Root>
+				<div class="flex flex-wrap gap-x-5 gap-y-1 text-xs px-1">
+					<span class="text-muted-foreground">Lead ID: <span class="font-mono text-foreground/70">{lead.externalLeadId}</span></span>
+					{#if lead.externalFormId}<span class="text-muted-foreground">Form ID: <span class="font-mono text-foreground/70">{lead.externalFormId}</span></span>{/if}
+					{#if lead.externalAdId}<span class="text-muted-foreground">Ad: <span class="font-mono text-foreground/70">{lead.adName || lead.externalAdId}</span></span>{/if}
+					<span class="text-muted-foreground">Importat: <span class="font-mono text-foreground/70">{formatDate(lead.importedAt)}</span></span>
+				</div>
 
 				{#if !lead.clientId && clients.length > 0}
 					<Card.Root>
