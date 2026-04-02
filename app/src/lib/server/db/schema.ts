@@ -1661,6 +1661,7 @@ export const lead = sqliteTable('lead', {
 	externalFormId: text('external_form_id'),
 	externalAdId: text('external_ad_id'),
 	externalCampaignId: text('external_campaign_id'),
+	adName: text('ad_name'),
 	formName: text('form_name'),
 	fullName: text('full_name'),
 	email: text('email'),

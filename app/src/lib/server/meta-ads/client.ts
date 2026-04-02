@@ -1311,6 +1311,27 @@ export async function getLeadDetail(
 }
 
 /**
+ * Fetch the name of a Facebook ad by its ID.
+ * Returns null if the ad is not found or the request fails.
+ */
+export async function getAdName(
+	adId: string,
+	accessToken: string,
+	appSecret: string
+): Promise<string | null> {
+	try {
+		const proof = generateAppSecretProof(accessToken, appSecret);
+		const res: Response = await fetch(
+			`${META_GRAPH_URL}/${adId}?fields=name&access_token=${accessToken}&appsecret_proof=${proof}`
+		);
+		const data: any = await res.json();
+		return data.name || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Get the date range for sync (current + previous 2 months).
  * Returns YYYY-MM-DD strings (local timezone).
  */

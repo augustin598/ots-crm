@@ -1,0 +1,1 @@
+ALTER TABLE `lead` ADD `ad_name` text;

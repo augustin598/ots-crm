@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getAuthenticatedToken } from './auth';
-import { listLeadForms, getLeadsByForm, listPages } from './client';
+import { listLeadForms, getLeadsByForm, listPages, getAdName } from './client';
 import type { MetaLeadForm, MetaLeadData } from './client';
 import { logInfo, logError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
@@ -283,6 +283,17 @@ async function syncSingleForm(
 			);
 		const existingSet = new Set(existingRows.map((r) => r.externalLeadId));
 
+		// Batch-resolve ad names: one API call per unique ad ID (cached within this form)
+		const adNameCache = new Map<string, string | null>();
+		const newLeads = leads.filter((l) => !existingSet.has(l.leadId));
+		const uniqueAdIds = [...new Set(newLeads.map((l) => l.adId).filter(Boolean))] as string[];
+		await Promise.all(
+			uniqueAdIds.map(async (adId) => {
+				const name = await getAdName(adId, page.pageAccessToken, appSecret);
+				adNameCache.set(adId, name);
+			})
+		);
+
 		for (const lead of leads) {
 			if (existingSet.has(lead.leadId)) {
 				skipped++;
@@ -293,6 +304,7 @@ async function syncSingleForm(
 				const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
 				const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
 				const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
+				const adName = lead.adId ? adNameCache.get(lead.adId) ?? null : null;
 
 				await db.insert(table.lead).values({
 					id: crypto.randomUUID(),
@@ -301,6 +313,7 @@ async function syncSingleForm(
 					externalLeadId: lead.leadId,
 					externalFormId: lead.formId,
 					externalAdId: lead.adId,
+					adName,
 					formName: form.formName,
 					fullName,
 					email,
@@ -337,8 +350,7 @@ async function syncSingleForm(
 }
 
 /**
- * Backfill existing leads that have fieldData but missing contact fields.
- * Re-extracts fullName, email, phoneNumber using the expanded alias matching.
+ * Backfill existing leads: re-extract contact fields + resolve ad names from Meta API.
  */
 export async function backfillLeadContactFields(tenantId: string) {
 	const leads = await db
@@ -347,6 +359,9 @@ export async function backfillLeadContactFields(tenantId: string) {
 			fullName: table.lead.fullName,
 			email: table.lead.email,
 			phoneNumber: table.lead.phoneNumber,
+			adName: table.lead.adName,
+			externalAdId: table.lead.externalAdId,
+			integrationId: table.lead.integrationId,
 			fieldData: table.lead.fieldData
 		})
 		.from(table.lead)
@@ -357,20 +372,58 @@ export async function backfillLeadContactFields(tenantId: string) {
 			)
 		);
 
+	// Resolve ad names in bulk: one API call per unique ad ID
+	const adNameCache = new Map<string, string | null>();
+	const uniqueAdIds = [...new Set(leads.map((l) => l.externalAdId).filter(Boolean))] as string[];
+
+	if (uniqueAdIds.length > 0) {
+		// Get a valid access token from any active integration for this tenant
+		const integrations = await db
+			.select()
+			.from(table.metaAdsIntegration)
+			.where(
+				and(
+					eq(table.metaAdsIntegration.tenantId, tenantId),
+					eq(table.metaAdsIntegration.isActive, true)
+				)
+			);
+
+		const appSecret = env.META_APP_SECRET!;
+		for (const integration of integrations) {
+			const auth = await getAuthenticatedToken(integration.id);
+			if (!auth) continue;
+
+			await Promise.all(
+				uniqueAdIds.filter((id) => !adNameCache.has(id)).map(async (adId) => {
+					const name = await getAdName(adId, auth.accessToken, appSecret);
+					adNameCache.set(adId, name);
+				})
+			);
+			if (adNameCache.size >= uniqueAdIds.length) break;
+		}
+	}
+
 	let updated = 0;
 
 	for (const lead of leads) {
-		if (!lead.fieldData || lead.fieldData.length === 0) continue;
-
-		const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
-		const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
-		const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
-
-		// Only update if we found new data that was previously missing
 		const updates: Record<string, string> = {};
-		if (!lead.fullName && fullName) updates.fullName = fullName;
-		if (!lead.email && email) updates.email = email;
-		if (!lead.phoneNumber && phoneNumber) updates.phoneNumber = phoneNumber;
+
+		// Re-extract contact fields from fieldData
+		if (lead.fieldData && lead.fieldData.length > 0) {
+			const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
+			const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
+			const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
+
+			if (!lead.fullName && fullName) updates.fullName = fullName;
+			if (!lead.email && email) updates.email = email;
+			if (!lead.phoneNumber && phoneNumber) updates.phoneNumber = phoneNumber;
+		}
+
+		// Populate ad name if missing
+		if (!lead.adName && lead.externalAdId) {
+			const adName = adNameCache.get(lead.externalAdId);
+			if (adName) updates.adName = adName;
+		}
 
 		if (Object.keys(updates).length > 0) {
 			await db

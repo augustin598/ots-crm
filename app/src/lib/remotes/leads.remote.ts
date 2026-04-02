@@ -131,6 +131,7 @@ export const getLeadDetail = query(
 				externalFormId: table.lead.externalFormId,
 				externalAdId: table.lead.externalAdId,
 				externalCampaignId: table.lead.externalCampaignId,
+				adName: table.lead.adName,
 				formName: table.lead.formName,
 				fullName: table.lead.fullName,
 				email: table.lead.email,

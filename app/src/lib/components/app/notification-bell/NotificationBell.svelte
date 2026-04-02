@@ -215,7 +215,7 @@
 
 <!-- Trigger button -->
 <button
-	class="relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+	class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 	aria-label="Notificări"
 	onclick={() => (open = !open)}
 >
@@ -284,9 +284,10 @@
 					{@const iconColor = getActivityColor(notif.type)}
 					<div
 						class={cn(
-							'group flex cursor-pointer gap-3 border-b px-4 py-3 last:border-b-0',
+							'group flex gap-3 border-b px-4 py-3 last:border-b-0',
 							!notif.isRead ? 'bg-accent/50 dark:bg-accent/30' : 'hover:bg-muted/50'
 						)}
+						style="cursor: pointer;"
 						onclick={() => {
 							const link = resolveLink(notif.link);
 							if (link) {

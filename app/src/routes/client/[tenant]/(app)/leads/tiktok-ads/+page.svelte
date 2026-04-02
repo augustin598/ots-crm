@@ -28,11 +28,11 @@
 	];
 
 	const statusColors: Record<string, string> = {
-		new: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-		contacted: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
-		qualified: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
-		converted: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300',
-		disqualified: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+		new: 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-200',
+		contacted: 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-200',
+		qualified: 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-200',
+		converted: 'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200',
+		disqualified: 'bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200'
 	};
 
 	const statusLabels: Record<string, string> = {
@@ -142,7 +142,7 @@
 						<Table.Head>Telefon</Table.Head>
 						<Table.Head>Formular</Table.Head>
 						<Table.Head>Status</Table.Head>
-						<Table.Head>Data</Table.Head>
+						<Table.Head>Data și ora</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>

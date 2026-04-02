@@ -19,11 +19,11 @@
 	let loading = $state(true);
 
 	const statusColors: Record<string, string> = {
-		new: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-		contacted: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
-		qualified: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
-		converted: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300',
-		disqualified: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+		new: 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-200',
+		contacted: 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-200',
+		qualified: 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-200',
+		converted: 'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200',
+		disqualified: 'bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200'
 	};
 
 	const statusLabels: Record<string, string> = {
@@ -149,23 +149,40 @@
 			</Card.Root>
 
 			<!-- Additional fields -->
-			{#if lead.fieldData && lead.fieldData.length > 0}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title>Câmpuri formular</Card.Title>
-					</Card.Header>
-					<Card.Content>
-						<div class="space-y-3">
-							{#each lead.fieldData as field (field.name)}
-								<div class="flex justify-between items-start border-b pb-2 last:border-0">
-									<span class="text-sm text-muted-foreground capitalize">{field.name.replace(/_/g, ' ')}</span>
-									<span class="text-sm font-medium text-right">{field.values?.map((v: string) => v.replace(/_/g, ' ')).join(', ') || '-'}</span>
-								</div>
-							{/each}
+			<div class="space-y-6">
+				{#if lead.fieldData && lead.fieldData.length > 0}
+					<Card.Root>
+						<Card.Header>
+							<Card.Title class="flex items-center gap-2">
+								<FileTextIcon class="h-5 w-5" />
+								Câmpuri formular
+							</Card.Title>
+						</Card.Header>
+						<Card.Content>
+							<div class="divide-y">
+								{#each lead.fieldData as field (field.name)}
+									<div class="flex justify-between items-start py-2.5 first:pt-0 last:pb-0">
+										<span class="text-sm text-muted-foreground capitalize min-w-0 shrink-0">{field.name.replace(/_/g, ' ')}</span>
+										<span class="text-sm font-medium text-right ml-4 break-words min-w-0">{field.values?.map((v: string) => v.replace(/_/g, ' ')).join(', ') || '-'}</span>
+									</div>
+								{/each}
+							</div>
+						</Card.Content>
+					</Card.Root>
+				{/if}
+
+				<!-- Meta info -->
+				<Card.Root class="bg-muted/50">
+					<Card.Content class="pt-5">
+						<div class="grid grid-cols-2 gap-3">
+							<div>
+								<p class="text-xs text-muted-foreground">Importat</p>
+								<p class="text-xs font-mono mt-0.5">{formatDate(lead.importedAt)}</p>
+							</div>
 						</div>
 					</Card.Content>
 				</Card.Root>
-			{/if}
+			</div>
 		</div>
 
 		{#if lead.notes}
@@ -178,10 +195,5 @@
 				</Card.Content>
 			</Card.Root>
 		{/if}
-
-		<!-- Meta info -->
-		<div class="text-xs text-muted-foreground flex flex-wrap gap-4">
-			<span>Importat: {formatDate(lead.importedAt)}</span>
-		</div>
 	</div>
 {/if}
