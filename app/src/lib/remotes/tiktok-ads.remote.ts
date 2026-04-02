@@ -988,6 +988,14 @@ export const autoAssignTiktokInvoices = command(
 			metadata: { advIds: [...advToClient.keys()], names: [...nameToClient.keys()] }
 		});
 
+		// Debug: log what unassigned invoices have for matching
+		const unmatchedSample = unassigned.slice(0, 5).map(inv => ({
+			id: inv.id.substring(0, 8),
+			advId: inv.tiktokAdvertiserId || '(empty)',
+			name: inv.adAccountName || '(empty)'
+		}));
+		logInfo('tiktok-auto-assign', `Unassigned sample (first 5):`, { tenantId, metadata: { sample: unmatchedSample } });
+
 		let assigned = 0;
 		for (const inv of unassigned) {
 			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
