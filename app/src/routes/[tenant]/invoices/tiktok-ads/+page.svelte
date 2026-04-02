@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, assignTiktokInvoiceToClient, deleteTiktokInvoiceDownload, autoAssignTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
-	import { getClientsForMetaMapping } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, autoAssignTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -9,16 +8,16 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import * as Select from '$lib/components/ui/select';
+
 	import { Download, Search, Eye, FileArchive } from '@lucide/svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
-	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -59,8 +58,6 @@
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
 
-	const clientsQuery = getClientsForMetaMapping();
-	const clients = $derived(clientsQuery.current || []);
 
 	// ---- Helpers ----
 
@@ -119,26 +116,18 @@
 		return result.sort((a, b) => a.clientName.localeCompare(b.clientName));
 	});
 
-	// Count downloaded invoices per client for badge
-	const invoiceCountByClient = $derived.by(() => {
-		const sinceMonth = since.substring(0, 7);
-		const untilMonth = until.substring(0, 7);
-		const map = new Map<string, number>();
-		for (const row of invoices) {
-			if (row.status !== 'downloaded' || !row.pdfPath) continue;
-			const period = row.periodStart?.substring(0, 7);
-			if (period && (period < sinceMonth || period > untilMonth)) continue;
-			const key = row.clientName || 'Neatribuit';
-			map.set(key, (map.get(key) || 0) + 1);
-		}
-		return map;
-	});
 
 	// ---- UI state ----
 
 	let searchQuery = $state('');
 	let expandedAccounts = new SvelteSet<string>();
+	let expandedPeriods = new SvelteSet<string>();
 	let selectedInvoices = new SvelteSet<string>();
+
+	function togglePeriod(key: string) {
+		if (expandedPeriods.has(key)) expandedPeriods.delete(key);
+		else expandedPeriods.add(key);
+	}
 	let zipping = $state(false);
 
 	const filteredGroupedByClient = $derived(
@@ -318,16 +307,6 @@
 		}
 	}
 
-	async function handleAssignClient(downloadId: string, clientId: string | null) {
-		try {
-			await assignTiktokInvoiceToClient({ downloadId, clientId: clientId || null });
-			toast.success('Client atribuit');
-			invoicesQuery.refresh();
-		} catch (e) {
-			toast.error('Eroare la atribuire client');
-		}
-	}
-
 	let autoAssigning = $state(false);
 	async function handleAutoAssign() {
 		autoAssigning = true;
@@ -336,7 +315,7 @@
 			const parts: string[] = [];
 			if (result.backfilled > 0) parts.push(`${result.backfilled} actualizate din API`);
 			if (result.assigned > 0) parts.push(`${result.assigned} atribuite`);
-			if (result.cleaned > 0) parts.push(`${result.cleaned} șterse (fără date)`);
+			if (result.cleaned && result.cleaned > 0) parts.push(`${result.cleaned} șterse (fără date)`);
 			if (parts.length > 0) {
 				toast.success(parts.join(', '));
 			} else {
@@ -639,56 +618,69 @@
 							</CollapsibleTrigger>
 
 							<CollapsibleContent>
-								{#each group.months as month (month.period)}
-									<!-- Month header -->
-									<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-2.5 border-t bg-muted/30 items-center">
-										<div class="flex items-center gap-2">
-											<CalendarIcon class="h-4 w-4 text-muted-foreground" />
-											<span class="text-sm font-semibold capitalize">{month.label}</span>
-										</div>
-										<span class="text-sm font-bold text-right">{formatAmount(month.totalCents, curr)}</span>
-										<span class="text-xs text-muted-foreground text-right">{month.rows.length} {month.rows.length === 1 ? 'factură' : 'facturi'}</span>
-									</div>
-									<!-- Invoices in this month -->
-									<div class="divide-y">
-										{#each month.rows as row (row.id)}
-											{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
-											<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(80px,auto)_minmax(90px,auto)] gap-x-2 px-6 pl-12 py-2.5 hover:bg-muted/30 transition-colors items-center">
-												<div class="flex items-center gap-2 min-w-0">
-													{#if hasPdf}
-														<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
-													{/if}
-													<span class="text-sm text-muted-foreground truncate" title={row.invoiceNumber || ''}>{row.invoiceNumber || row.tiktokInvoiceId?.substring(0, 12) || '-'}</span>
-												</div>
-												<span class="text-sm font-semibold text-right whitespace-nowrap">{formatAmount(row.amountCents, row.currencyCode)}</span>
-												<div class="text-center">
-													{#if row.status === 'downloaded' && row.pdfPath}
-														<span class="inline-flex items-center rounded-full border border-green-200 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-50">Descărcată</span>
-													{:else if row.status === 'pending'}
-														<span class="inline-flex items-center rounded-full border border-orange-200 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50">În așteptare</span>
-													{:else if row.status === 'error'}
-														<span class="inline-flex items-center rounded-full border border-red-200 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
-													{:else}
-														<span class="text-xs text-muted-foreground">-</span>
-													{/if}
-												</div>
-												<div class="flex items-center justify-end gap-0.5">
-													{#if hasPdf}
-														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
-															<Download class="mr-1 h-3 w-3" />PDF
+								<div class="divide-y border-t">
+									{#each group.months as month (month.period)}
+										{@const periodKey = `${group.clientName}:${month.period}`}
+										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
+										{@const downloadedInvoices = month.rows.filter((r: any) => r.status === 'downloaded' && r.pdfPath)}
+										<!-- Period row (like Facebook Ads) -->
+										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => togglePeriod(periodKey)} role="button" tabindex="0">
+											<div class="flex items-center gap-2">
+												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+												<span class="font-medium capitalize whitespace-nowrap">{month.label}</span>
+											</div>
+											<span class="text-base font-semibold text-right whitespace-nowrap">{formatAmount(month.totalCents, curr)}</span>
+											<div class="text-right">
+												<div class="flex items-center justify-end gap-1">
+													<button class="inline-flex items-center gap-1 rounded-full border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer whitespace-nowrap" onclick={(e) => { e.stopPropagation(); togglePeriod(periodKey); }}>
+														<ChevronRightIcon class="h-3 w-3 transition-transform duration-200 {isPeriodExpanded ? 'rotate-90' : ''}" />
+														{month.rows.length} {month.rows.length === 1 ? 'factură' : 'facturi'}
+													</button>
+													{#if downloadedInvoices.length > 0}
+														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={(e) => { e.stopPropagation(); downloadAsZip(downloadedInvoices.map((r: any) => r.id), `TikTok-${group.clientName}-${month.period}`); }} title="Descarcă toate ca ZIP" disabled={zipping}>
+															<FileArchive class="h-3.5 w-3.5" />
 														</Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
-													{:else if row.status === 'error'}
-														<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleRetryDownload(row.id)} title="Reîncearcă descărcarea">
-															<RefreshCwIcon class="mr-1 h-3 w-3" />Retry
-														</Button>
-														<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive" onclick={() => handleDeleteInvoice(row.id)} title="Șterge"><Trash2Icon class="h-3.5 w-3.5" /></Button>
 													{/if}
 												</div>
 											</div>
-										{/each}
-									</div>
-								{/each}
+										</div>
+										<!-- Expandable invoice list -->
+										{#if isPeriodExpanded}
+											{#each month.rows as row (row.id)}
+												{@const hasPdf = row.status === 'downloaded' && !!row.pdfPath}
+												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
+													{#if hasPdf}
+														<Checkbox checked={selectedInvoices.has(row.id)} onCheckedChange={() => toggleSelectInvoice(row.id)} />
+													{/if}
+													<div class="flex items-center gap-2 min-w-0 flex-1">
+														<a href="/{tenantSlug}/invoices/tiktok-ads/downloads/{row.id}/pdf" target="_blank" class="text-sm text-primary hover:underline truncate">
+															{row.invoiceNumber || row.tiktokInvoiceId?.substring(0, 16) || '-'}
+														</a>
+														<span class="text-xs text-muted-foreground whitespace-nowrap">{formatAmount(row.amountCents, row.currencyCode)}</span>
+														{#if row.status === 'error'}
+															<span class="inline-flex items-center rounded-full border border-red-200 px-1.5 py-0.5 text-[10px] font-medium text-red-700 bg-red-50" title={row.errorMessage || ''}>Eroare</span>
+														{:else if row.status === 'pending'}
+															<span class="inline-flex items-center rounded-full border border-orange-200 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 bg-orange-50">Pending</span>
+														{/if}
+													</div>
+													<div class="flex items-center gap-0.5 shrink-0">
+														{#if hasPdf}
+															<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
+																<Download class="mr-1 h-3 w-3" />PDF
+															</Button>
+															<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => handlePreviewPDF(row.id)} title="Previzualizare"><Eye class="h-3.5 w-3.5" /></Button>
+														{:else if row.status === 'error'}
+															<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleRetryDownload(row.id)} title="Retry">
+																<RefreshCwIcon class="mr-1 h-3 w-3" />Retry
+															</Button>
+															<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive" onclick={() => handleDeleteInvoice(row.id)} title="Șterge"><Trash2Icon class="h-3.5 w-3.5" /></Button>
+														{/if}
+													</div>
+												</div>
+											{/each}
+										{/if}
+									{/each}
+								</div>
 							</CollapsibleContent>
 						</Card>
 					</Collapsible>
