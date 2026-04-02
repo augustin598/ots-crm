@@ -3,6 +3,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import * as Select from '$lib/components/ui/select';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import MailIcon from '@lucide/svelte/icons/mail';
@@ -10,13 +11,33 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import { getLeadDetail } from '$lib/remotes/leads.remote';
+	import { Textarea } from '$lib/components/ui/textarea';
+	import { getLeadDetail, updateLeadStatus, addLeadNote } from '$lib/remotes/leads.remote';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const leadId = $derived(page.params.leadId as string);
 
 	let lead = $state<any>(null);
 	let loading = $state(true);
+	let notes = $state('');
+	let savingNotes = $state(false);
+
+	const statusOptions = [
+		{ value: 'new', label: 'Nou' },
+		{ value: 'contacted', label: 'Contactat' },
+		{ value: 'qualified', label: 'Calificat' },
+		{ value: 'converted', label: 'Convertit' },
+		{ value: 'disqualified', label: 'Descalificat' }
+	];
+
+	const statusDotColors: Record<string, string> = {
+		new: 'bg-blue-500',
+		contacted: 'bg-violet-500',
+		qualified: 'bg-amber-500',
+		converted: 'bg-green-500',
+		disqualified: 'bg-red-500'
+	};
 
 	const statusColors: Record<string, string> = {
 		new: 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-200',
@@ -48,10 +69,33 @@
 		loading = true;
 		try {
 			lead = await getLeadDetail(leadId);
+			notes = lead.notes || '';
 		} catch (e) {
 			console.error('Failed to load lead:', e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function handleSaveNotes() {
+		savingNotes = true;
+		try {
+			await addLeadNote({ leadId, notes });
+			toast.success('Notițe salvate');
+		} catch (e) {
+			toast.error('Eroare la salvare');
+		} finally {
+			savingNotes = false;
+		}
+	}
+
+	async function handleStatusChange(newStatus: string) {
+		try {
+			await updateLeadStatus({ leadId, status: newStatus as any });
+			lead.status = newStatus;
+			toast.success('Status actualizat');
+		} catch (e) {
+			toast.error('Eroare la actualizarea statusului');
 		}
 	}
 
@@ -77,18 +121,37 @@
 {:else}
 	<div class="space-y-6">
 		<!-- Header -->
-		<div class="flex items-center gap-3">
-			<Button href="/client/{tenantSlug}/leads/{lead.platform === 'facebook' ? 'facebook-ads' : lead.platform === 'google' ? 'google-ads' : 'tiktok-ads'}" variant="ghost" size="icon">
-				<ArrowLeftIcon class="h-4 w-4" />
-			</Button>
-			<div>
-				<h1 class="text-2xl font-bold">{lead.fullName || 'Lead fără nume'}</h1>
-				<div class="flex items-center gap-2 mt-1">
-					<Badge variant="outline">{platformLabels[lead.platform] || lead.platform}</Badge>
-					<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColors[lead.status] || ''}">
-						{statusLabels[lead.status] || lead.status}
-					</span>
+		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+			<div class="flex items-center gap-3">
+				<Button href="/client/{tenantSlug}/leads/{lead.platform === 'facebook' ? 'facebook-ads' : lead.platform === 'google' ? 'google-ads' : 'tiktok-ads'}" variant="ghost" size="icon">
+					<ArrowLeftIcon class="h-4 w-4" />
+				</Button>
+				<div>
+					<h1 class="text-2xl font-bold">{lead.fullName || 'Lead fără nume'}</h1>
+					<div class="flex items-center gap-2 mt-1">
+						<Badge variant="outline">{platformLabels[lead.platform] || lead.platform}</Badge>
+						<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColors[lead.status] || ''}">
+							{statusLabels[lead.status] || lead.status}
+						</span>
+					</div>
 				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<Select.Root type="single" onValueChange={handleStatusChange}>
+					<Select.Trigger class="w-[160px]">
+						Schimbă status
+					</Select.Trigger>
+					<Select.Content>
+						{#each statusOptions as opt (opt.value)}
+							<Select.Item value={opt.value}>
+								<span class="flex items-center gap-2">
+									<span class="h-2 w-2 rounded-full {statusDotColors[opt.value] || ''}"></span>
+									{opt.label}
+								</span>
+							</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
 			</div>
 		</div>
 
@@ -176,6 +239,22 @@
 					<Card.Content class="pt-5">
 						<div class="grid grid-cols-2 gap-3">
 							<div>
+								<p class="text-xs text-muted-foreground">Lead ID</p>
+								<p class="text-xs font-mono mt-0.5">{lead.externalLeadId}</p>
+							</div>
+							{#if lead.externalFormId}
+								<div>
+									<p class="text-xs text-muted-foreground">Form ID</p>
+									<p class="text-xs font-mono mt-0.5">{lead.externalFormId}</p>
+								</div>
+							{/if}
+							{#if lead.externalAdId}
+								<div>
+									<p class="text-xs text-muted-foreground">Ad</p>
+									<p class="text-xs font-mono mt-0.5">{lead.adName || lead.externalAdId}</p>
+								</div>
+							{/if}
+							<div>
 								<p class="text-xs text-muted-foreground">Importat</p>
 								<p class="text-xs font-mono mt-0.5">{formatDate(lead.importedAt)}</p>
 							</div>
@@ -185,15 +264,23 @@
 			</div>
 		</div>
 
-		{#if lead.notes}
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Notițe</Card.Title>
-				</Card.Header>
-				<Card.Content>
-					<p class="text-sm whitespace-pre-wrap">{lead.notes}</p>
-				</Card.Content>
-			</Card.Root>
-		{/if}
+		<!-- Notes -->
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Notițe</Card.Title>
+			</Card.Header>
+			<Card.Content>
+				<Textarea
+					bind:value={notes}
+					placeholder="Adaugă notițe despre acest lead..."
+					rows={4}
+				/>
+				<div class="flex justify-end mt-3">
+					<Button onclick={handleSaveNotes} disabled={savingNotes} size="sm">
+						{savingNotes ? 'Se salvează...' : 'Salvează notițele'}
+					</Button>
+				</div>
+			</Card.Content>
+		</Card.Root>
 	</div>
 {/if}

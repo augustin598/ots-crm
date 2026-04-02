@@ -331,17 +331,22 @@ export const updateLeadStatus = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
-		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
+
+		const conditions = [
+			eq(table.lead.id, data.leadId),
+			eq(table.lead.tenantId, event.locals.tenant.id)
+		];
+
+		// Client users can only update leads assigned to their client
+		if (event.locals.isClientUser) {
+			if (!event.locals.client?.id) throw error(401, 'Unauthorized');
+			conditions.push(eq(table.lead.clientId, event.locals.client.id));
+		}
 
 		await db
 			.update(table.lead)
 			.set({ status: data.status, updatedAt: new Date() })
-			.where(
-				and(
-					eq(table.lead.id, data.leadId),
-					eq(table.lead.tenantId, event.locals.tenant.id)
-				)
-			);
+			.where(and(...conditions));
 
 		return { success: true };
 	}
@@ -414,17 +419,21 @@ export const addLeadNote = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
-		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
+
+		const conditions = [
+			eq(table.lead.id, data.leadId),
+			eq(table.lead.tenantId, event.locals.tenant.id)
+		];
+
+		if (event.locals.isClientUser) {
+			if (!event.locals.client?.id) throw error(401, 'Unauthorized');
+			conditions.push(eq(table.lead.clientId, event.locals.client.id));
+		}
 
 		await db
 			.update(table.lead)
 			.set({ notes: data.notes, updatedAt: new Date() })
-			.where(
-				and(
-					eq(table.lead.id, data.leadId),
-					eq(table.lead.tenantId, event.locals.tenant.id)
-				)
-			);
+			.where(and(...conditions));
 
 		return { success: true };
 	}
