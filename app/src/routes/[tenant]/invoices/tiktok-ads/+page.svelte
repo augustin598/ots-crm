@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, assignTiktokInvoiceToClient, deleteTiktokInvoiceDownload } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, assignTiktokInvoiceToClient, deleteTiktokInvoiceDownload, autoAssignTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
 	import { getClientsForMetaMapping } from '$lib/remotes/meta-ads-invoices.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
@@ -311,6 +311,23 @@
 		}
 	}
 
+	let autoAssigning = $state(false);
+	async function handleAutoAssign() {
+		autoAssigning = true;
+		try {
+			const result = await autoAssignTiktokInvoices(undefined).updates(invoicesQuery);
+			if (result.assigned > 0) {
+				toast.success(`${result.assigned} din ${result.total} facturi atribuite automat`);
+			} else {
+				toast.info(`Nicio factură de atribuit (${result.total} neatribuite, dar lipsesc mapări advertiser → client în Settings)`);
+			}
+		} catch (e) {
+			toast.error('Eroare la atribuire automată');
+		} finally {
+			autoAssigning = false;
+		}
+	}
+
 	async function handleDeleteInvoice(downloadId: string) {
 		if (!confirm('Ștergi această factură?')) return;
 		try {
@@ -422,6 +439,9 @@
 		</div>
 		<div class="flex items-center gap-2 flex-wrap">
 			<DateRangePicker bind:since bind:until />
+			<Button variant="outline" size="sm" onclick={handleAutoAssign} disabled={autoAssigning}>
+				{autoAssigning ? 'Se atribuie...' : 'Atribuie automat'}
+			</Button>
 			<Button variant="outline" size="sm" onclick={() => showBulkImport = !showBulkImport}>
 				<Download class="mr-2 h-4 w-4" />Import Facturi
 			</Button>
@@ -639,16 +659,6 @@
 												{/if}
 											</div>
 											<div class="flex items-center justify-end gap-0.5">
-												{#if !row.clientId && clients.length > 0}
-													<Select.Root type="single" onValueChange={(clientId) => handleAssignClient(row.id, clientId)}>
-														<Select.Trigger class="h-7 text-xs w-[120px]">Atribuie</Select.Trigger>
-														<Select.Content>
-															{#each clients as client (client.id)}
-																<Select.Item value={client.id}>{client.businessName || client.name}</Select.Item>
-															{/each}
-														</Select.Content>
-													</Select.Root>
-												{/if}
 												{#if hasPdf}
 													<Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => handleDownloadPDF(row.id, row.invoiceNumber, row.periodStart)}>
 														<Download class="mr-1 h-3 w-3" />PDF

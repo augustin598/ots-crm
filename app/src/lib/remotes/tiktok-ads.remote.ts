@@ -839,6 +839,66 @@ export const assignTiktokInvoiceToClient = command(
 	}
 );
 
+/** Auto-assign unassigned invoices to clients based on advertiser ID → account mapping */
+export const autoAssignTiktokInvoices = command(
+	v.undefined(),
+	async () => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+
+		// Get all unassigned invoices
+		const unassigned = await db
+			.select({
+				id: table.tiktokInvoiceDownload.id,
+				tiktokAdvertiserId: table.tiktokInvoiceDownload.tiktokAdvertiserId
+			})
+			.from(table.tiktokInvoiceDownload)
+			.where(
+				and(
+					eq(table.tiktokInvoiceDownload.tenantId, tenantId),
+					sql`${table.tiktokInvoiceDownload.clientId} IS NULL`
+				)
+			);
+
+		if (unassigned.length === 0) return { assigned: 0, total: 0 };
+
+		// Build advertiser → client mapping from all active accounts
+		const accounts = await db
+			.select({
+				tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
+				clientId: table.tiktokAdsAccount.clientId
+			})
+			.from(table.tiktokAdsAccount)
+			.where(eq(table.tiktokAdsAccount.isActive, true));
+
+		const advToClient = new Map<string, string>();
+		for (const acc of accounts) {
+			if (acc.clientId && acc.tiktokAdvertiserId) {
+				advToClient.set(acc.tiktokAdvertiserId, acc.clientId);
+			}
+		}
+
+		let assigned = 0;
+		for (const inv of unassigned) {
+			const clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : null;
+			if (clientId) {
+				await db
+					.update(table.tiktokInvoiceDownload)
+					.set({ clientId, updatedAt: new Date() })
+					.where(eq(table.tiktokInvoiceDownload.id, inv.id));
+				assigned++;
+			}
+		}
+
+		return { assigned, total: unassigned.length };
+	}
+);
+
 // ---- Bulk Import (JSON) ----
 
 export const bulkDownloadTiktokInvoices = command(
