@@ -284,9 +284,19 @@
 					{@const iconColor = getActivityColor(notif.type)}
 					<div
 						class={cn(
-							'group flex gap-3 border-b px-4 py-3 last:border-b-0',
+							'group flex cursor-pointer gap-3 border-b px-4 py-3 last:border-b-0',
 							!notif.isRead ? 'bg-accent/50 dark:bg-accent/30' : 'hover:bg-muted/50'
 						)}
+						onclick={() => {
+							const link = resolveLink(notif.link);
+							if (link) {
+								if (!notif.isRead) markOneRead(notif.id);
+								open = false;
+								window.location.href = link;
+							}
+						}}
+						role="button"
+						tabindex="0"
 					>
 						<div class="mt-0.5 shrink-0">
 							<Icon class={cn('size-4', iconColor)} />

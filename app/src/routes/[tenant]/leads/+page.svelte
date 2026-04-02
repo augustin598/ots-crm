@@ -9,7 +9,7 @@
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
-	import { getLeadStats, triggerLeadSync, getMetaAdsPages } from '$lib/remotes/leads.remote';
+	import { getLeadStats, triggerLeadSync, backfillLeadContacts, getMetaAdsPages } from '$lib/remotes/leads.remote';
 	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -21,6 +21,7 @@
 	const monitoredPages = $derived((pagesQuery.current || []).filter((p: any) => p.isMonitored));
 
 	let syncing = $state(false);
+	let backfilling = $state(false);
 
 	function getCountForPlatform(platform: string, statusFilter?: string): number {
 		return stats
@@ -32,6 +33,18 @@
 		return stats
 			.filter((s: any) => !statusFilter || s.status === statusFilter)
 			.reduce((sum: number, s: any) => sum + s.count, 0);
+	}
+
+	async function handleBackfill() {
+		backfilling = true;
+		try {
+			const result = await backfillLeadContacts(undefined);
+			toast.success(`Backfill finalizat: ${result.updated} din ${result.total} lead-uri actualizate`);
+		} catch (e) {
+			toast.error('Backfill eșuat');
+		} finally {
+			backfilling = false;
+		}
 	}
 
 	async function handleSyncAll() {
@@ -92,6 +105,9 @@
 			<p class="text-muted-foreground">Leaduri din campaniile publicitare</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<Button onclick={handleBackfill} disabled={backfilling} variant="outline" size="sm">
+				{backfilling ? 'Se actualizează...' : 'Backfill contacte'}
+			</Button>
 			<Button onclick={handleSyncAll} disabled={syncing} variant="outline">
 				<RefreshCwIcon class="h-4 w-4 {syncing ? 'animate-spin' : ''}" />
 				{syncing ? 'Se sincronizează...' : 'Sync All'}

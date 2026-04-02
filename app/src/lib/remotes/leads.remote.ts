@@ -7,7 +7,7 @@ import { eq, and, desc, like, or, sql, inArray, gte, lte, max } from 'drizzle-or
 import { env } from '$env/dynamic/private';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listPages } from '$lib/server/meta-ads/client';
-import { syncMetaAdsLeadsForTenant } from '$lib/server/meta-ads/leads-sync';
+import { syncMetaAdsLeadsForTenant, backfillLeadContactFields } from '$lib/server/meta-ads/leads-sync';
 import { logInfo } from '$lib/server/logger';
 
 // ---- Queries ----
@@ -301,6 +301,21 @@ export const triggerLeadSync = command(
 
 		// TikTok and Google — future phases
 		return { imported: 0, skipped: 0, errors: 0, message: 'Not implemented yet' };
+	}
+);
+
+/** Backfill contact fields for existing leads from their stored fieldData */
+export const backfillLeadContacts = command(
+	v.undefined(),
+	async () => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		return await backfillLeadContactFields(tenantId);
 	}
 );
 

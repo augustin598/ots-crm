@@ -32,6 +32,7 @@
 		removeMetaAdsPage,
 		togglePageMonitoring,
 		triggerLeadSync,
+		backfillLeadContacts,
 		assignPageToClient
 	} from '$lib/remotes/leads.remote';
 
@@ -75,6 +76,7 @@
 	let fetchingPages = $state(false);
 	let fetchingForIntegration = $state<string | null>(null);
 	let syncingLeads = $state(false);
+	let backfilling = $state(false);
 	let addingPage = $state<string | null>(null);
 
 	async function handleSaveCookies(integrationId: string) {
@@ -310,6 +312,18 @@
 		}
 	}
 
+	async function handleBackfill() {
+		backfilling = true;
+		try {
+			const result = await backfillLeadContacts(undefined);
+			toast.success(`Backfill finalizat: ${result.updated} din ${result.total} lead-uri actualizate`);
+		} catch (e) {
+			toast.error('Backfill eșuat');
+		} finally {
+			backfilling = false;
+		}
+	}
+
 	function isPageAlreadyAdded(metaPageId: string): boolean {
 		return monitoredPages.some((p: any) => p.metaPageId === metaPageId);
 	}
@@ -347,6 +361,9 @@
 							<RefreshCw class="mr-2 h-4 w-4" />
 							Sync Leads
 						{/if}
+					</Button>
+					<Button variant="outline" size="sm" onclick={handleBackfill} disabled={backfilling}>
+						{backfilling ? 'Backfill...' : 'Backfill contacte'}
 					</Button>
 				</div>
 				{#if connections.find((c: any) => c.lastSyncAt)}

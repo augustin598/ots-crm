@@ -159,7 +159,7 @@
 							{#each lead.fieldData as field (field.name)}
 								<div class="flex justify-between items-start border-b pb-2 last:border-0">
 									<span class="text-sm text-muted-foreground capitalize">{field.name.replace(/_/g, ' ')}</span>
-									<span class="text-sm font-medium text-right">{field.values?.join(', ') || '-'}</span>
+									<span class="text-sm font-medium text-right">{field.values?.map((v: string) => v.replace(/_/g, ' ')).join(', ') || '-'}</span>
 								</div>
 							{/each}
 						</div>

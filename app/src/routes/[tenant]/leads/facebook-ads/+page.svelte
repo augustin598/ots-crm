@@ -26,6 +26,7 @@
 	import {
 		getLeads,
 		triggerLeadSync,
+		backfillLeadContacts,
 		updateLeadStatus,
 		bulkUpdateLeadStatus,
 		getMetaAdsPages,
@@ -47,6 +48,7 @@
 
 	let pageSize = $state(25);
 	let syncing = $state(false);
+	let backfilling = $state(false);
 	let selectedIds = $state<Set<string>>(new Set());
 
 	const statusOptions = [
@@ -126,6 +128,18 @@
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
 		selectedIds = next;
+	}
+
+	async function handleBackfill() {
+		backfilling = true;
+		try {
+			const result = await backfillLeadContacts(undefined).updates(getLeads(filterParams));
+			toast.success(`Backfill finalizat: ${result.updated} din ${result.total} lead-uri actualizate`);
+		} catch (e) {
+			toast.error('Backfill eșuat');
+		} finally {
+			backfilling = false;
+		}
 	}
 
 	async function handleSync() {

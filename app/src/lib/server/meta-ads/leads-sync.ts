@@ -11,12 +11,21 @@ import { getHooksManager } from '$lib/server/plugins/hooks';
 /** Concurrency limit for parallel form fetching (respects Meta API rate limits). */
 const FORM_BATCH_SIZE = 5;
 
+/** Known field name variants for standard contact fields (English + Romanian). */
+const FULL_NAME_ALIASES = ['full_name', 'nume_complet', 'nume_și_prenume', 'nume_si_prenume', 'name', 'nume'];
+const EMAIL_ALIASES = ['email', 'e-mail', 'adresă_de_e-mail', 'adresa_de_e-mail', 'adresa_de_email'];
+const PHONE_ALIASES = ['phone_number', 'număr_de_telefon', 'numar_de_telefon', 'telefon', 'phone', 'nr_telefon'];
+
 /**
  * Extract a structured field value from Facebook's field_data array.
+ * Tries multiple field name aliases (case-insensitive) to handle localized forms.
  */
-function getFieldValue(fieldData: Array<{ name: string; values: string[] }>, fieldName: string): string | null {
-	const field = fieldData.find((f) => f.name === fieldName);
-	return field?.values?.[0] || null;
+function getFieldValue(fieldData: Array<{ name: string; values: string[] }>, fieldNames: string[]): string | null {
+	for (const name of fieldNames) {
+		const field = fieldData.find((f) => f.name.toLowerCase() === name.toLowerCase());
+		if (field?.values?.[0]) return field.values[0];
+	}
+	return null;
 }
 
 /**
@@ -281,9 +290,9 @@ async function syncSingleForm(
 			}
 
 			try {
-				const fullName = getFieldValue(lead.fieldData, 'full_name');
-				const email = getFieldValue(lead.fieldData, 'email');
-				const phoneNumber = getFieldValue(lead.fieldData, 'phone_number');
+				const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
+				const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
+				const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
 
 				await db.insert(table.lead).values({
 					id: crypto.randomUUID(),
@@ -325,4 +334,53 @@ async function syncSingleForm(
 	}
 
 	return { imported, skipped, errors };
+}
+
+/**
+ * Backfill existing leads that have fieldData but missing contact fields.
+ * Re-extracts fullName, email, phoneNumber using the expanded alias matching.
+ */
+export async function backfillLeadContactFields(tenantId: string) {
+	const leads = await db
+		.select({
+			id: table.lead.id,
+			fullName: table.lead.fullName,
+			email: table.lead.email,
+			phoneNumber: table.lead.phoneNumber,
+			fieldData: table.lead.fieldData
+		})
+		.from(table.lead)
+		.where(
+			and(
+				eq(table.lead.tenantId, tenantId),
+				eq(table.lead.platform, 'facebook')
+			)
+		);
+
+	let updated = 0;
+
+	for (const lead of leads) {
+		if (!lead.fieldData || lead.fieldData.length === 0) continue;
+
+		const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
+		const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
+		const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
+
+		// Only update if we found new data that was previously missing
+		const updates: Record<string, string> = {};
+		if (!lead.fullName && fullName) updates.fullName = fullName;
+		if (!lead.email && email) updates.email = email;
+		if (!lead.phoneNumber && phoneNumber) updates.phoneNumber = phoneNumber;
+
+		if (Object.keys(updates).length > 0) {
+			await db
+				.update(table.lead)
+				.set({ ...updates, updatedAt: new Date() })
+				.where(eq(table.lead.id, lead.id));
+			updated++;
+		}
+	}
+
+	logInfo('meta-ads-leads', 'Backfill completed', { tenantId, metadata: { total: leads.length, updated } });
+	return { total: leads.length, updated };
 }
