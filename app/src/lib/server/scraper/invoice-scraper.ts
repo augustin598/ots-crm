@@ -176,21 +176,37 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 			throw e;
 		}
 
-		console.log(`[SCRAPER-DEBUG] Launching interactive browser at ${chromePath}`);
-		logInfo('invoice-scraper', `Launching interactive browser`, {
-			metadata: { chromePath }
-		});
-
 		// Use a persistent profile directory so login sessions survive between scans
 		const scraperProfileDir = join(homedir(), '.crm-scraper-profile');
 		try { mkdirSync(scraperProfileDir, { recursive: true }); } catch { /* exists */ }
 
 		const isProduction = process.env.NODE_ENV === 'production';
+		const hasDisplay = !!process.env.DISPLAY;
+		// Force headless if no X server available (Linux servers without display)
+		const useHeadless = isProduction || !hasDisplay;
+		const headlessMode = useHeadless ? 'shell' : false;
+
+		console.log(`[SCRAPER-DEBUG] Launching interactive browser at ${chromePath}`);
+		console.log(`[SCRAPER-DEBUG] Environment check:`, JSON.stringify({
+			NODE_ENV: process.env.NODE_ENV,
+			isProduction,
+			DISPLAY: process.env.DISPLAY || '(not set)',
+			hasDisplay,
+			useHeadless,
+			headlessMode,
+			platform: process.platform,
+			userDataDir: scraperProfileDir,
+			chromePath
+		}));
+		logInfo('invoice-scraper', `Launching interactive browser`, {
+			metadata: { chromePath, headlessMode: String(headlessMode), isProduction, hasDisplay }
+		});
+
 		const browser = await puppeteer.launch({
-			headless: isProduction ? 'shell' : false,
+			headless: headlessMode,
 			executablePath: chromePath,
 			userDataDir: scraperProfileDir, // Persistent profile — keeps login sessions
-			defaultViewport: isProduction ? { width: 1440, height: 900 } : null,
+			defaultViewport: useHeadless ? { width: 1440, height: 900 } : null,
 			ignoreDefaultArgs: ['--enable-automation'], // Hide "controlled by automated test software" banner
 			args: [
 				'--no-sandbox',
