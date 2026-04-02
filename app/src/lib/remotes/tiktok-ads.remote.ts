@@ -1011,8 +1011,21 @@ export const autoAssignTiktokInvoices = command(
 			}
 		}
 
-		logInfo('tiktok-auto-assign', `Auto-assign complete: ${assigned}/${unassigned.length} assigned, ${backfilled} backfilled`, { tenantId });
-		return { assigned, total: unassigned.length, backfilled };
+		// Step 4: Clean up ghost invoices (no advId, no invoiceNumber, no amount — not found in TikTok API)
+		const ghostInvoices = unassigned.filter(inv => !inv.tiktokAdvertiserId && !inv.adAccountName);
+		let cleaned = 0;
+		if (ghostInvoices.length > 0) {
+			for (const ghost of ghostInvoices) {
+				await db
+					.delete(table.tiktokInvoiceDownload)
+					.where(eq(table.tiktokInvoiceDownload.id, ghost.id));
+				cleaned++;
+			}
+			logInfo('tiktok-auto-assign', `Cleaned ${cleaned} ghost invoices (no data, not in TikTok API)`, { tenantId });
+		}
+
+		logInfo('tiktok-auto-assign', `Auto-assign complete: ${assigned} assigned, ${backfilled} backfilled, ${cleaned} cleaned`, { tenantId });
+		return { assigned, total: unassigned.length, backfilled, cleaned };
 	}
 );
 

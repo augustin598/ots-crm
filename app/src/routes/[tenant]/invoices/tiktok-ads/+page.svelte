@@ -319,6 +319,7 @@
 			const parts: string[] = [];
 			if (result.backfilled > 0) parts.push(`${result.backfilled} actualizate din API`);
 			if (result.assigned > 0) parts.push(`${result.assigned} atribuite`);
+			if (result.cleaned > 0) parts.push(`${result.cleaned} șterse (fără date)`);
 			if (parts.length > 0) {
 				toast.success(parts.join(', '));
 			} else {
