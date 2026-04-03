@@ -53,6 +53,61 @@ export function serializeError(err: unknown): { message: string; stack?: string 
 	return { message: String(err) };
 }
 
+// ---------------------------------------------------------------------------
+// Buffered batch-write system
+// Instead of inserting each log row individually (which saturates the single
+// libsql connection under load), we push entries into an in-memory buffer and
+// flush them in batches every FLUSH_INTERVAL_MS.
+// ---------------------------------------------------------------------------
+
+type DebugLogInsert = typeof table.debugLog.$inferInsert;
+
+const LOG_BUFFER: DebugLogInsert[] = [];
+const FLUSH_INTERVAL_MS = 2_000;
+const MAX_BUFFER = 500;
+const BATCH_SIZE = 50; // ~16 cols × 50 = 800 bind params (SQLite limit: 999)
+
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+let flushing = false;
+
+/**
+ * Flush all buffered log entries to the database in batches.
+ * Exported so it can be called during graceful shutdown.
+ */
+export async function flushLogBuffer(): Promise<void> {
+	if (LOG_BUFFER.length === 0 || flushing) return;
+	flushing = true;
+	try {
+		// Drain the buffer
+		const entries = LOG_BUFFER.splice(0, LOG_BUFFER.length);
+		for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+			const batch = entries.slice(i, i + BATCH_SIZE);
+			try {
+				await db.insert(table.debugLog).values(batch);
+			} catch (err) {
+				// KEEP: raw console — cannot recursively call logger
+				console.error('[logger] Batch flush failed:', err);
+			}
+		}
+	} finally {
+		flushing = false;
+	}
+}
+
+function ensureFlushTimer() {
+	if (!flushTimer) {
+		flushTimer = setInterval(() => {
+			flushLogBuffer();
+		}, FLUSH_INTERVAL_MS);
+		// Allow the process to exit even if the timer is still running
+		if (flushTimer && typeof flushTimer === 'object' && 'unref' in flushTimer) {
+			flushTimer.unref();
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+
 export async function logDebug(params: {
 	tenantId?: string | null;
 	level: LogLevel;
@@ -80,30 +135,33 @@ export async function logDebug(params: {
 		console[method](prefix, params.message);
 	}
 
-	// Write to DB
-	try {
-		await db.insert(table.debugLog).values({
-			id: generateId(),
-			tenantId: params.tenantId ?? null,
-			level: params.level,
-			source: params.source,
-			message: params.message,
-			url: params.url ?? null,
-			stackTrace: params.stackTrace ?? null,
-			metadata: params.metadata ? JSON.stringify(params.metadata) : null,
-			userId: params.userId ?? null,
-			createdAt: new Date(),
-			action: params.action ?? null,
-			errorCode: params.errorCode ?? null,
-			ipAddress: params.ipAddress ?? null,
-			userAgent: params.userAgent ?? null,
-			requestId: params.requestId ?? null,
-			duration: params.duration ?? null
-		});
-	} catch (err) {
-		// KEEP: raw console — cannot recursively call logger
-		console.error('[logger] Failed to write debug log:', err);
+	// Push to buffer instead of direct DB insert
+	LOG_BUFFER.push({
+		id: generateId(),
+		tenantId: params.tenantId ?? null,
+		level: params.level,
+		source: params.source,
+		message: params.message,
+		url: params.url ?? null,
+		stackTrace: params.stackTrace ?? null,
+		metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+		userId: params.userId ?? null,
+		createdAt: new Date(),
+		action: params.action ?? null,
+		errorCode: params.errorCode ?? null,
+		ipAddress: params.ipAddress ?? null,
+		userAgent: params.userAgent ?? null,
+		requestId: params.requestId ?? null,
+		duration: params.duration ?? null
+	});
+
+	// Force-flush if buffer is getting too large
+	if (LOG_BUFFER.length >= MAX_BUFFER) {
+		flushLogBuffer();
 	}
+
+	// Ensure the periodic flush timer is running
+	ensureFlushTimer();
 }
 
 export const logInfo = (

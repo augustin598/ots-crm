@@ -15,6 +15,7 @@ import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
+import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -82,7 +83,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
-	token_refresh: processTokenRefresh
+	token_refresh: processTokenRefresh,
+	debug_log_cleanup: processDebugLogCleanup
 };
 
 /**
@@ -422,7 +424,23 @@ export const startScheduler = async () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 17 jobs registered`);
+	// Debug log cleanup — daily at 2:00 AM (info 7d, warning 30d, error 90d)
+	schedulerQueue.add(
+		'debug-log-cleanup',
+		{
+			type: 'debug_log_cleanup',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 2 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'debug-log-cleanup'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 18 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -449,7 +467,8 @@ export const JOB_LABELS: Record<string, string> = {
 	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
-	token_refresh: 'Refresh Token-uri Integrări'
+	token_refresh: 'Refresh Token-uri Integrări',
+	debug_log_cleanup: 'Cleanup Loguri Debug'
 };
 
 /** Default params for jobs that need specific parameters */

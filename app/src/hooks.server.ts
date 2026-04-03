@@ -9,6 +9,7 @@ import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifica
 import { registerNotificationHooks } from '$lib/server/hooks/notification-hooks';
 import { runMigrations } from '$lib/server/db/migrate';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
+import { flushLogBuffer } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -142,11 +143,13 @@ export const init = async () => {
 
 export const handle: Handle = handleAuth;
 
-// Graceful shutdown: close Puppeteer browser if running
+// Graceful shutdown: flush logs + close Puppeteer browser
 process.on('SIGTERM', async () => {
+	await flushLogBuffer();
 	await shutdownBrowser();
 });
 process.on('SIGINT', async () => {
+	await flushLogBuffer();
 	await shutdownBrowser();
 });
 
