@@ -148,8 +148,50 @@ Populeaza din 3 surse (in ordine):
 - `metaAdsInvoice` table (legacy) is separate from `metaInvoiceDownload` — different data sources
 - Year selector in download dialog: dynamic range `currentYear-2` to `currentYear+1`
 
+## Invoice Download Flow (invoice-downloader.ts)
+
+### Download Strategy (3-level fallback)
+1. **invoices_generator** — monthly aggregated invoice (may return PDF or ZIP with multiple PDFs)
+2. **billing_transaction** — individual transaction download via Graph API transaction list
+3. **No invoice** — clean up stale errors
+
+### Multi-PDF ZIP Handling
+- `invoices_generator` may return a ZIP with multiple PDFs (one per transaction)
+- `extractAllPdfsFromZip()` extracts ALL PDFs (not just first)
+- Each PDF is saved as a separate `metaInvoiceDownload` row
+- txid parsed from ZIP filename (pattern: `{digits}-{digits}` or `{digits}_{digits}`)
+
+### Billing Transaction Fallback
+- Graph API `GET /act_{id}/transactions` fetches all transactions for the month
+- Downloads ALL transactions individually (not just the first)
+- Each transaction gets its own DB row with `txid`, `amountText`, `invoiceType`
+- `invoiceType` auto-detected: `amountCents > 0` → `'invoice'`, otherwise `'credit'`
+
+### Re-download Logic
+- If record has `txid` → uses `billing_transaction` direct URL
+- If no `txid` → falls back to `invoices_generator` (monthly ZIP/PDF)
+
+### Deduplication Strategy
+- **No period-based skip**: months are NOT skipped even if downloads exist (fixes old bug where only 1st PDF from ZIP was saved)
+- **txid-based dedup**: individual transactions are deduplicated by `(tenant_id, txid)` unique index
+- This allows re-processing months to recover previously missed transactions while preventing actual duplicates
+
+### Scheduler Catch-Up
+- Scheduler runs monthly, downloads previous month + up to 11 catch-up months (full year)
+- `downloadAllReceiptsForMonth()` re-processes all months; txid dedup prevents duplicates
+
+### Scraper (meta-scraper.ts)
+- Uses `loadAllTransactions()` — scrolls + clicks "See More" button (max 50 iterations)
+- Date range: account lifetime (`1642284000` to now), not just last 6 months
+- Supports English and Romanian date formats
+
+### Userscript (facebook-ads-invoice-extractor.user.js)
+- Match patterns: `/billing_hub/*`, `/latest/billing_hub/*`, `/ads/manage/billing*`
+- 2-strategy extraction: table rows first (FBADS + txid patterns), billing_transaction links fallback
+
 ## Error Handling
 - Storage errors: logged via `logError('storage', ...)` + returned as `storage_error` status
 - Download errors: caught per-invoice, aggregated in `errorDetails[]`
-- PDF serving: errors logged with `console.error` + returns 404
+- PDF serving: errors logged with `logError` + returns 404
 - Bulk import: try/catch per link, continues on error, returns `{ downloaded, skipped, errors, errorDetails }`
+- All logging uses structured logger (`logInfo`/`logWarning`/`logError`) — no console.log/error

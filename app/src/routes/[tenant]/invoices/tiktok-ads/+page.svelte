@@ -624,7 +624,7 @@
 										{@const isPeriodExpanded = expandedPeriods.has(periodKey)}
 										{@const downloadedInvoices = month.rows.filter((r: any) => r.status === 'downloaded' && r.pdfPath)}
 										<!-- Period row (like Facebook Ads) -->
-										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => togglePeriod(periodKey)} role="button" tabindex="0">
+										<div class="grid grid-cols-[2fr_minmax(100px,1fr)_minmax(90px,auto)] gap-x-2 px-6 py-3 hover:bg-muted/30 transition-colors items-center cursor-pointer" onclick={() => togglePeriod(periodKey)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePeriod(periodKey); } }} role="button" tabindex="0">
 											<div class="flex items-center gap-2">
 												<CalendarIcon class="h-4 w-4 text-muted-foreground shrink-0" />
 												<span class="font-medium capitalize whitespace-nowrap">{month.label}</span>

@@ -5,6 +5,7 @@
 // @description  Extrage link-urile de download facturi Facebook Ads din Billing Hub
 // @author       OTS CRM
 // @match        https://business.facebook.com/billing_hub/*
+// @match        https://business.facebook.com/latest/billing_hub/*
 // @match        https://business.facebook.com/ads/manage/billing*
 // @grant        GM_setClipboard
 // ==/UserScript==
@@ -53,33 +54,80 @@
         var links = [];
         var seen = {};
 
-        // Find all billing_transaction download links on the page
-        document.querySelectorAll('a[href*="billing_transaction"]').forEach(function(a) {
-            var url = a.href;
-            if (!url || !url.includes('pdf=true')) return;
-            if (seen[url]) return;
-            seen[url] = true;
-
-            // Walk up to the table row to get metadata
-            var row = a.closest('[role="row"]') || a.closest('tr');
-            var text = row ? row.innerText : '';
-
-            // Extract txid from URL parameter
-            var txidMatch = url.match(/txid=([^&]+)/);
-            var txid = txidMatch ? txidMatch[1] : undefined;
+        // Strategy 1: Find rows in the payment activity table (preferred)
+        var allRows = document.querySelectorAll('[role="row"], tr');
+        for (var i = 0; i < allRows.length; i++) {
+            var row = allRows[i];
+            var text = row.innerText || '';
+            if (!text.includes('FBADS-') && !/\d{10,}-\d{10,}/.test(text)) continue;
 
             var invoiceMatch = text.match(/(FBADS-[\w-]+)/);
             var dateMatch = text.match(/(\d{1,2}\s+\w{3,9}\s+\d{4})/);
-            var amountMatch = text.match(/(RON[\d.,]+|USD[\d.,]+|EUR[\d.,]+)/);
+            var amountMatch = text.match(/(RON[\s]?[\d.,]+|USD[\s]?[\d.,]+|EUR[\s]?[\d.,]+)/);
 
-            links.push({
-                url: url,
-                txid: txid,
-                invoiceId: invoiceMatch ? invoiceMatch[1] : undefined,
-                date: dateMatch ? parseDate(dateMatch[1]) : undefined,
-                amount: amountMatch ? amountMatch[1] : undefined
+            // Extract transaction ID from link or text
+            var txid;
+            var downloadUrl;
+            var txLink = row.querySelector('a[href*="billing_transaction"]');
+            if (txLink) {
+                downloadUrl = txLink.href;
+                var txidFromUrl = downloadUrl.match(/txid=([^&]+)/);
+                txid = txidFromUrl ? txidFromUrl[1] : undefined;
+            }
+            if (!txid) {
+                var allLinks = row.querySelectorAll('a[href]');
+                for (var j = 0; j < allLinks.length; j++) {
+                    var linkText = allLinks[j].innerText.trim();
+                    if (/^\d+-\d+$/.test(linkText)) {
+                        txid = linkText;
+                        break;
+                    }
+                }
+            }
+            if (!downloadUrl) {
+                var actionLinks = row.querySelectorAll('a[href*="pdf"], a[download], a[aria-label*="Download"], a[aria-label*="Descarcă"]');
+                if (actionLinks.length > 0) downloadUrl = actionLinks[0].href;
+            }
+
+            if ((invoiceMatch || txid) && !seen[txid || invoiceMatch[1]]) {
+                seen[txid || invoiceMatch[1]] = true;
+                links.push({
+                    url: downloadUrl || '',
+                    txid: txid,
+                    invoiceId: invoiceMatch ? invoiceMatch[1] : undefined,
+                    date: dateMatch ? parseDate(dateMatch[1]) : undefined,
+                    amount: amountMatch ? amountMatch[1] : undefined
+                });
+            }
+        }
+
+        // Strategy 2: Fallback — find billing_transaction links directly
+        if (links.length === 0) {
+            document.querySelectorAll('a[href*="billing_transaction"]').forEach(function(a) {
+                var url = a.href;
+                if (!url || !url.includes('pdf=true')) return;
+                if (seen[url]) return;
+                seen[url] = true;
+
+                var row = a.closest('[role="row"]') || a.closest('tr');
+                var text = row ? row.innerText : '';
+
+                var txidMatch = url.match(/txid=([^&]+)/);
+                var txid = txidMatch ? txidMatch[1] : undefined;
+
+                var invoiceMatch = text.match(/(FBADS-[\w-]+)/);
+                var dateMatch = text.match(/(\d{1,2}\s+\w{3,9}\s+\d{4})/);
+                var amountMatch = text.match(/(RON[\d.,]+|USD[\d.,]+|EUR[\d.,]+)/);
+
+                links.push({
+                    url: url,
+                    txid: txid,
+                    invoiceId: invoiceMatch ? invoiceMatch[1] : undefined,
+                    date: dateMatch ? parseDate(dateMatch[1]) : undefined,
+                    amount: amountMatch ? amountMatch[1] : undefined
+                });
             });
-        });
+        }
 
         return links;
     }
@@ -191,7 +239,7 @@
 
     // Re-check if button got removed (SPA navigation)
     setInterval(function() {
-        if (!document.getElementById('ots-fb-btn') && window.location.href.includes('billing')) {
+        if (!document.getElementById('ots-fb-btn') && (window.location.href.includes('billing') || window.location.href.includes('billing_hub'))) {
             createButton();
         }
     }, 5000);

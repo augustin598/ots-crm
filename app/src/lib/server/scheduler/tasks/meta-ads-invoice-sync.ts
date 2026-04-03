@@ -53,22 +53,37 @@ export async function processMetaAdsInvoiceSync() {
 		}
 	}
 
-	// Step 2: Invoice PDF downloads (previous month)
+	// Step 2: Invoice PDF downloads (previous month + catch-up for missed months)
 	const now = new Date();
 	const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth(); // getMonth() is 0-indexed
 	const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
 
+	// Build list of months to download: previous month + up to 11 more catch-up months (full year)
+	const MAX_CATCHUP_MONTHS = 11;
+	const monthsToDownload: Array<{ year: number; month: number }> = [];
+
+	// Always include previous month
+	monthsToDownload.push({ year: prevYear, month: prevMonth });
+
+	// Add catch-up months (going further back)
+	for (let i = 1; i <= MAX_CATCHUP_MONTHS; i++) {
+		const d = new Date(prevYear, prevMonth - 1 - i, 1); // prevMonth is 1-indexed, Date month is 0-indexed
+		monthsToDownload.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+	}
+
 	for (const tenantId of tenantIds) {
-		try {
-			const result = await downloadAllReceiptsForMonth(tenantId, prevYear, prevMonth);
-			totalDownloaded += result.downloaded;
-			totalSkipped += result.skipped;
-			totalErrors += result.errors;
-		} catch (err) {
-			logError('scheduler', `Meta Ads invoice download failed for tenant ${tenantId}`, {
-				metadata: { error: err instanceof Error ? err.message : String(err) }
-			});
-			totalErrors++;
+		for (const { year, month } of monthsToDownload) {
+			try {
+				const result = await downloadAllReceiptsForMonth(tenantId, year, month);
+				totalDownloaded += result.downloaded;
+				totalSkipped += result.skipped;
+				totalErrors += result.errors;
+			} catch (err) {
+				logError('scheduler', `Meta Ads invoice download failed for tenant ${tenantId}`, {
+					metadata: { error: err instanceof Error ? err.message : String(err), year, month }
+				});
+				totalErrors++;
+			}
 		}
 	}
 

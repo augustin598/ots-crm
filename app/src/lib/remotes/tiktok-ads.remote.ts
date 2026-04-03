@@ -721,7 +721,8 @@ export const redownloadTiktokInvoice = command(
 		const result = await downloadInvoice(
 			dl.tiktokInvoiceId,
 			cookies,
-			{ bc_id: integration.orgId, pa_id: integration.paymentAccountId, platform: 2 }
+			{ bc_id: integration.orgId, pa_id: integration.paymentAccountId, platform: 2 },
+			dl.tiktokAdvertiserId ? { advertiserId: dl.tiktokAdvertiserId } : undefined
 		);
 
 		if (!result.success || !result.pdfBuffer) {
@@ -964,7 +965,7 @@ export const autoAssignTiktokInvoices = command(
 
 		if (unassigned.length === 0) return { assigned: 0, total: 0, backfilled };
 
-		// Build advertiser → client mapping
+		// Build advertiser → client mapping from ad accounts configured in Settings
 		const accounts = await db
 			.select({
 				tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
@@ -983,25 +984,52 @@ export const autoAssignTiktokInvoices = command(
 			}
 		}
 
-		logInfo('tiktok-auto-assign', `Account mappings: ${advToClient.size} by advId, ${nameToClient.size} by name`, {
+		// Build smart match: client name/businessName → clientId (for invoices with no ad account mapping)
+		const clients = await db
+			.select({ id: table.client.id, name: table.client.name, businessName: table.client.businessName })
+			.from(table.client)
+			.where(eq(table.client.tenantId, tenantId));
+
+		// Normalize: strip numbers/suffixes, lowercase, trim for fuzzy matching
+		function normalize(s: string): string {
+			return s.toLowerCase().replace(/[0-9]+$/g, '').replace(/[^a-zăâîșț\s.-]/g, '').trim();
+		}
+
+		// Build client name → id maps (name + businessName)
+		const clientNameToId = new Map<string, string>();
+		const clientNamesNormalized: { normalized: string; clientId: string }[] = [];
+		for (const c of clients) {
+			if (c.name) {
+				clientNameToId.set(c.name.toLowerCase(), c.id);
+				clientNamesNormalized.push({ normalized: normalize(c.name), clientId: c.id });
+			}
+			if (c.businessName) {
+				clientNameToId.set(c.businessName.toLowerCase(), c.id);
+				clientNamesNormalized.push({ normalized: normalize(c.businessName), clientId: c.id });
+			}
+		}
+
+		logInfo('tiktok-auto-assign', `Mappings: ${advToClient.size} by advId, ${nameToClient.size} by accName, ${clientNamesNormalized.length} client names for smart match`, {
 			tenantId,
-			metadata: { advIds: [...advToClient.keys()], names: [...nameToClient.keys()] }
+			metadata: { advIds: [...advToClient.keys()], accNames: [...nameToClient.keys()], clientNames: clientNamesNormalized.map(c => c.normalized) }
 		});
 
 		// Debug: log what unassigned invoices have for matching
-		const unmatchedSample = unassigned.slice(0, 5).map(inv => ({
+		const unmatchedSample = unassigned.slice(0, 10).map(inv => ({
 			id: inv.id.substring(0, 8),
 			advId: inv.tiktokAdvertiserId || '(empty)',
 			name: inv.adAccountName || '(empty)'
 		}));
-		logInfo('tiktok-auto-assign', `Unassigned sample (first 5):`, { tenantId, metadata: { sample: unmatchedSample } });
+		logInfo('tiktok-auto-assign', `Unassigned sample:`, { tenantId, metadata: { sample: unmatchedSample } });
 
 		let assigned = 0;
 		for (const inv of unassigned) {
+			// Priority 1: Match by advertiser ID (from Settings ad account → client mapping)
 			let clientId = inv.tiktokAdvertiserId ? advToClient.get(inv.tiktokAdvertiserId) : undefined;
+
+			// Priority 2: Match by ad account name (from Settings)
 			if (!clientId && inv.adAccountName) {
 				const invName = inv.adAccountName.toLowerCase();
-				// Try exact match first, then fuzzy (contains) match
 				clientId = nameToClient.get(invName);
 				if (!clientId) {
 					for (const [accName, accClientId] of nameToClient) {
@@ -1012,6 +1040,32 @@ export const autoAssignTiktokInvoices = command(
 					}
 				}
 			}
+
+			// Priority 3: Smart match — compare invoice adAccountName against client name/businessName
+			if (!clientId && inv.adAccountName) {
+				const invNorm = normalize(inv.adAccountName);
+				if (invNorm.length >= 3) {
+					// Exact normalized match
+					for (const entry of clientNamesNormalized) {
+						if (entry.normalized === invNorm) {
+							clientId = entry.clientId;
+							logInfo('tiktok-auto-assign', `Smart match (exact): "${inv.adAccountName}" → client ${entry.normalized}`, { tenantId });
+							break;
+						}
+					}
+					// Contains match (one includes the other, min 4 chars overlap)
+					if (!clientId) {
+						for (const entry of clientNamesNormalized) {
+							if (entry.normalized.length >= 4 && (invNorm.includes(entry.normalized) || entry.normalized.includes(invNorm))) {
+								clientId = entry.clientId;
+								logInfo('tiktok-auto-assign', `Smart match (contains): "${inv.adAccountName}" → client ${entry.normalized}`, { tenantId });
+								break;
+							}
+						}
+					}
+				}
+			}
+
 			if (clientId) {
 				await db
 					.update(table.tiktokInvoiceDownload)
@@ -1034,8 +1088,31 @@ export const autoAssignTiktokInvoices = command(
 			logInfo('tiktok-auto-assign', `Cleaned ${cleaned} ghost invoices (no data, not in TikTok API)`, { tenantId });
 		}
 
-		logInfo('tiktok-auto-assign', `Auto-assign complete: ${assigned} assigned, ${backfilled} backfilled, ${cleaned} cleaned`, { tenantId });
-		return { assigned, total: unassigned.length, backfilled, cleaned };
+		// Step 5: Clean up status=2 download failures (can be reimported with Ads Manager fallback)
+		const status2Errors = await db
+			.select({ id: table.tiktokInvoiceDownload.id, tiktokInvoiceId: table.tiktokInvoiceDownload.tiktokInvoiceId })
+			.from(table.tiktokInvoiceDownload)
+			.where(
+				and(
+					eq(table.tiktokInvoiceDownload.tenantId, tenantId),
+					eq(table.tiktokInvoiceDownload.status, 'error'),
+					sql`${table.tiktokInvoiceDownload.errorMessage} LIKE '%Download task failed with status=%'`
+				)
+			);
+
+		let cleanedStatus2 = 0;
+		if (status2Errors.length > 0) {
+			for (const err of status2Errors) {
+				await db
+					.delete(table.tiktokInvoiceDownload)
+					.where(eq(table.tiktokInvoiceDownload.id, err.id));
+				cleanedStatus2++;
+			}
+			logInfo('tiktok-auto-assign', `Cleaned ${cleanedStatus2} status=2 download failures for reimport`, { tenantId });
+		}
+
+		logInfo('tiktok-auto-assign', `Auto-assign complete: ${assigned} assigned, ${backfilled} backfilled, ${cleaned} ghost cleaned, ${cleanedStatus2} status=2 cleaned`, { tenantId });
+		return { assigned, total: unassigned.length, backfilled, cleaned: cleaned + cleanedStatus2 };
 	}
 );
 
@@ -1123,7 +1200,7 @@ export const bulkDownloadTiktokInvoices = command(
 		const errorDetails: string[] = [];
 
 		for (const link of links) {
-			// Check if already exists
+			// Check if already exists by tiktokInvoiceId
 			const [existing] = await db
 				.select({ id: table.tiktokInvoiceDownload.id, status: table.tiktokInvoiceDownload.status })
 				.from(table.tiktokInvoiceDownload)
@@ -1138,6 +1215,25 @@ export const bulkDownloadTiktokInvoices = command(
 			if (existing && existing.status === 'downloaded') {
 				skipped++;
 				continue;
+			}
+
+			// Also check by invoice serial (BDUK number) — same physical invoice can have different TikTok IDs
+			if (link.invoiceSerial) {
+				const [existingBySerial] = await db
+					.select({ id: table.tiktokInvoiceDownload.id, status: table.tiktokInvoiceDownload.status })
+					.from(table.tiktokInvoiceDownload)
+					.where(
+						and(
+							eq(table.tiktokInvoiceDownload.tenantId, tenantId),
+							eq(table.tiktokInvoiceDownload.invoiceNumber, link.invoiceSerial)
+						)
+					)
+					.limit(1);
+
+				if (existingBySerial && existingBySerial.status === 'downloaded') {
+					skipped++;
+					continue;
+				}
 			}
 
 			// Parse period from link or default to current month
@@ -1215,7 +1311,12 @@ export const bulkDownloadTiktokInvoices = command(
 
 			// Download via 3-step async
 			try {
-				const result = await downloadInvoice(link.invoiceId, cookies, context);
+				const result = await downloadInvoice(
+					link.invoiceId,
+					cookies,
+					context,
+					advId ? { advertiserId: advId } : undefined
+				);
 				if (result.success && result.pdfBuffer) {
 					const [year, month] = periodStart.split('-').map(Number);
 					const monthStr = String(month).padStart(2, '0');

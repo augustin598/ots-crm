@@ -64,11 +64,9 @@ function buildPaymentActivityUrl(businessId: string, adAccountId: string): strin
 	// Strip "act_" prefix for the URL parameters
 	const numericId = adAccountId.replace(/^act_/, '');
 
-	// Date range: 6 months ago to now
-	const now = new Date();
-	const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-	const startTs = Math.floor(sixMonthsAgo.getTime() / 1000);
-	const endTs = Math.floor(now.getTime() / 1000);
+	// Date range: wide range covering account lifetime (Jan 2022 – far future)
+	const startTs = 1642284000;
+	const endTs = Math.floor(Date.now() / 1000) + 86400; // now + 1 day
 
 	return `https://business.facebook.com/latest/billing_hub/payment_activity?business_id=${businessId}&asset_id=${numericId}&payment_account_id=${numericId}&placement=mbs_all_tools_menu&query=&date=${startTs}_${endTs}`;
 }
@@ -232,9 +230,8 @@ export async function scrapeMetaInvoices(sessionId: string, accounts: MetaAccoun
 					logInfo('meta-scraper', `No table rows found for ${account.accountName}, scrolling...`);
 				});
 
-				// Scroll to load lazy content
-				await autoScroll(page);
-				await new Promise((r) => setTimeout(r, 2000));
+				// Load all transactions (scroll + click "See More")
+				await loadAllTransactions(page);
 
 				const invoices = await extractInvoicesFromPage(page, account.metaAdAccountId);
 				logInfo('meta-scraper', `Extracted ${invoices.length} invoices for ${account.accountName}`, {
@@ -286,27 +283,42 @@ export async function scrapeMetaInvoices(sessionId: string, accounts: MetaAccoun
 }
 
 /**
- * Scroll down the page to trigger lazy loading of invoice rows.
+ * Load all transactions by scrolling and clicking "See More" button.
+ * Facebook loads ~10 items initially, then requires clicking "See More" for more.
  */
-async function autoScroll(page: Page): Promise<void> {
-	await page.evaluate(async () => {
-		await new Promise<void>((resolve) => {
-			let totalHeight = 0;
-			const distance = 400;
-			const maxScrolls = 10;
-			let scrollCount = 0;
+async function loadAllTransactions(page: Page): Promise<void> {
+	const MAX_ITERATIONS = 50; // ~500 transactions max
 
-			const timer = setInterval(() => {
-				const scrollHeight = document.body.scrollHeight;
-				window.scrollBy(0, distance);
-				totalHeight += distance;
-				scrollCount++;
+	for (let i = 0; i < MAX_ITERATIONS; i++) {
+		// Scroll to bottom first to make sure "See More" button is visible
+		await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+		await new Promise(r => setTimeout(r, 500));
 
-				if (totalHeight >= scrollHeight || scrollCount >= maxScrolls) {
-					clearInterval(timer);
-					resolve();
+		// Try to find and click "See More" / "Afișează mai multe" / "Vezi mai multe" button
+		const clicked = await page.evaluate(() => {
+			const buttons = Array.from(document.querySelectorAll('div[role="button"], button, span[role="button"], a[role="button"]'));
+			const seeMoreTexts = ['see more', 'afișează mai multe', 'vezi mai multe', 'show more', 'afiseaza mai multe'];
+
+			for (const btn of buttons) {
+				const text = ((btn as HTMLElement).innerText || '').toLowerCase().trim();
+				if (seeMoreTexts.some(t => text.includes(t))) {
+					(btn as HTMLElement).click();
+					return true;
 				}
-			}, 300);
+			}
+			return false;
 		});
-	});
+
+		if (!clicked) {
+			// No "See More" button found — all transactions loaded
+			break;
+		}
+
+		// Wait for new content to load
+		await new Promise(r => setTimeout(r, 2000));
+	}
+
+	// Final scroll to ensure everything is visible
+	await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+	await new Promise(r => setTimeout(r, 500));
 }

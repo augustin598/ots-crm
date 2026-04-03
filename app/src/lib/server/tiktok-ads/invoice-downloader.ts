@@ -12,6 +12,7 @@ function generateId() {
 }
 
 const TIKTOK_BUSINESS_URL = 'https://business.tiktok.com';
+const TIKTOK_ADS_URL = 'https://ads.tiktok.com';
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DOWNLOAD_DELAY_MS = 2000;
 const POLL_INTERVAL_MS = 2000;
@@ -49,6 +50,214 @@ function getHeaders(cookies: TtCookie[]): Record<string, string> {
 		'Referer': `${TIKTOK_BUSINESS_URL}/manage/billing/v2`,
 		'Origin': TIKTOK_BUSINESS_URL
 	};
+}
+
+/**
+ * Common headers for TikTok Ads Manager API requests (ads.tiktok.com).
+ */
+function getAdsManagerHeaders(cookies: TtCookie[], advertiserId: string): Record<string, string> {
+	return {
+		'Cookie': buildCookieHeader(cookies),
+		'User-Agent': USER_AGENT,
+		'Content-Type': 'application/json',
+		'Accept': 'application/json, text/plain, */*',
+		'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
+		'X-Requested-With': 'XMLHttpRequest',
+		'Referer': `${TIKTOK_ADS_URL}/i18n/account/payment_invoice?aadvid=${advertiserId}`,
+		'Origin': TIKTOK_ADS_URL
+	};
+}
+
+/** Cache per-advertiser pa_id to avoid repeated API calls. */
+const adsManagerPaIdCache = new Map<string, string>();
+
+/**
+ * Fetch the Ads Manager payment account ID (pa_id) for an advertiser.
+ * This is DIFFERENT from the BC pa_id — each advertiser has its own.
+ * See docs/tiktok-ads-invoices-api.md §2.
+ */
+async function queryAdsManagerPaymentAccount(
+	cookies: TtCookie[],
+	advertiserId: string
+): Promise<string> {
+	const cached = adsManagerPaIdCache.get(advertiserId);
+	if (cached) return cached;
+
+	const res = await fetch(`${TIKTOK_ADS_URL}/pa/api/spider/query_payment_account`, {
+		method: 'POST',
+		headers: getAdsManagerHeaders(cookies, advertiserId),
+		body: JSON.stringify({
+			Context: { platform: 1, adv_id: advertiserId, bc_id: '' },
+			module_list: [0, 3]
+		})
+	});
+
+	if (res.status >= 300 && res.status < 400) {
+		throw new Error('session_expired');
+	}
+
+	const json = await res.json();
+
+	logInfo('tiktok-invoice-downloader', `Ads Manager query_payment_account response`, {
+		metadata: {
+			code: json.code,
+			msg: json.msg,
+			hasPaId: !!json.data?.pa_info?.pa_id,
+			advertiserId,
+			paId: json.data?.pa_info?.pa_id || 'N/A'
+		}
+	});
+
+	if (json.code !== 0 || !json.data?.pa_info?.pa_id) {
+		throw new Error(`Ads Manager query_payment_account failed: code=${json.code}, msg=${json.msg || 'unknown'}`);
+	}
+
+	const paId = json.data.pa_info.pa_id;
+	adsManagerPaIdCache.set(advertiserId, paId);
+	return paId;
+}
+
+/**
+ * Create a download task via Ads Manager API (fallback for BC failures).
+ * Context: { platform: 1, pa_id, adv_id } — see docs/tiktok-ads-invoices-api.md §4.
+ */
+async function createDownloadTaskAdsManager(
+	invoiceId: string,
+	cookies: TtCookie[],
+	advertiserId: string,
+	paId: string
+): Promise<string> {
+	const res = await fetch(`${TIKTOK_ADS_URL}/pa/api/download/create`, {
+		method: 'POST',
+		headers: getAdsManagerHeaders(cookies, advertiserId),
+		body: JSON.stringify({
+			download_task_type: 136,
+			query_param: JSON.stringify({ invoice_id: invoiceId }),
+			timezone: 'Europe/Bucharest',
+			Context: { platform: 1, pa_id: paId, adv_id: advertiserId }
+		})
+	});
+
+	if (res.status >= 300 && res.status < 400) {
+		throw new Error('session_expired');
+	}
+
+	const json = await res.json();
+
+	logInfo('tiktok-invoice-downloader', `Ads Manager create task response`, {
+		metadata: { code: json.code, msg: json.message || json.msg, hasTaskId: !!json.data?.task_id, invoiceId, advertiserId, paId }
+	});
+
+	if (json.code !== 0 || !json.data?.task_id) {
+		throw new Error(`Ads Manager create task failed: code=${json.code}, msg=${json.message || json.msg || 'unknown'}`);
+	}
+
+	return json.data.task_id;
+}
+
+/**
+ * Poll for download URL via Ads Manager API.
+ */
+async function pollForDownloadUrlAdsManager(
+	taskId: string,
+	cookies: TtCookie[],
+	advertiserId: string,
+	paId: string
+): Promise<string> {
+	for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+		if (attempt > 0) {
+			await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+		}
+
+		const res = await fetch(`${TIKTOK_ADS_URL}/pa/api/download/query`, {
+			method: 'POST',
+			headers: getAdsManagerHeaders(cookies, advertiserId),
+			body: JSON.stringify({
+				task_id: taskId,
+				Context: { platform: 1, pa_id: paId, adv_id: advertiserId }
+			})
+		});
+
+		if (res.status >= 300 && res.status < 400) {
+			throw new Error('session_expired');
+		}
+
+		const json = await res.json();
+
+		if (json.code !== 0) {
+			throw new Error(`Ads Manager poll failed: code=${json.code}, msg=${json.message || json.msg || 'unknown'}`);
+		}
+
+		if (json.data?.status === 1 && json.data?.download_url) {
+			return json.data.download_url;
+		}
+
+		if (json.data?.status === 0) {
+			continue;
+		}
+
+		if (json.data?.status && json.data.status !== 0 && json.data.status !== 1) {
+			throw new Error(`Ads Manager download task failed with status=${json.data.status}`);
+		}
+	}
+
+	throw new Error('Ads Manager download task timed out after polling');
+}
+
+/**
+ * Download invoice via Ads Manager API (per-advertiser context).
+ * 3-step: fetch pa_id → create task → poll → download signed URL.
+ */
+async function downloadInvoiceViaAdsManager(
+	invoiceId: string,
+	cookies: TtCookie[],
+	advertiserId: string
+): Promise<DownloadResult> {
+	try {
+		// Step 0: Get per-advertiser payment account ID
+		const paId = await queryAdsManagerPaymentAccount(cookies, advertiserId);
+
+		// Step 1: Create download task
+		const taskId = await createDownloadTaskAdsManager(invoiceId, cookies, advertiserId, paId);
+
+		// Step 2: Poll for download URL
+		const downloadUrl = await pollForDownloadUrlAdsManager(taskId, cookies, advertiserId, paId);
+
+		// Step 3: Download the PDF
+		const pdfRes = await fetch(downloadUrl, {
+			headers: {
+				'Cookie': buildCookieHeader(cookies),
+				'User-Agent': USER_AGENT
+			}
+		});
+
+		if (!pdfRes.ok) {
+			return { success: false, error: `Ads Manager PDF download HTTP ${pdfRes.status}` };
+		}
+
+		const buffer = Buffer.from(await pdfRes.arrayBuffer());
+
+		if (buffer.length < 100) {
+			return { success: false, error: 'empty_pdf' };
+		}
+
+		const isPdf = buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46;
+		if (!isPdf) {
+			const contentType = pdfRes.headers.get('content-type') || '';
+			if (contentType.includes('text/html')) {
+				return { success: false, error: 'session_expired' };
+			}
+			return { success: false, error: `unexpected_content (type: ${contentType}, size: ${buffer.length})` };
+		}
+
+		return { success: true, pdfBuffer: buffer };
+	} catch (err) {
+		const errMsg = err instanceof Error ? err.message : String(err);
+		if (errMsg === 'session_expired') {
+			return { success: false, error: 'session_expired' };
+		}
+		return { success: false, error: errMsg };
+	}
 }
 
 /**
@@ -138,12 +347,15 @@ async function pollForDownloadUrl(
 
 /**
  * Download a single invoice PDF from TikTok's billing API.
- * 3-step async: create task → poll → download signed URL
+ * 3-step async: create task → poll → download signed URL.
+ * If BC download fails with status=2 and adsManagerFallback is provided,
+ * retries via the Ads Manager API (per-advertiser context).
  */
 export async function downloadInvoice(
 	invoiceId: string,
 	cookies: TtCookie[],
-	context: TiktokBillingContext
+	context: TiktokBillingContext,
+	adsManagerFallback?: { advertiserId: string }
 ): Promise<DownloadResult> {
 	try {
 		// Step 1: Create download task
@@ -183,6 +395,15 @@ export async function downloadInvoice(
 		return { success: true, pdfBuffer: buffer };
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);
+
+		// Fallback: if BC download fails with status=2, try Ads Manager download
+		if (errMsg.includes('Download task failed with status=') && adsManagerFallback?.advertiserId) {
+			logInfo('tiktok-invoice-downloader', `BC download failed (${errMsg}), trying Ads Manager fallback for ${invoiceId}`, {
+				metadata: { advertiserId: adsManagerFallback.advertiserId }
+			});
+			return downloadInvoiceViaAdsManager(invoiceId, cookies, adsManagerFallback.advertiserId);
+		}
+
 		if (errMsg === 'session_expired') {
 			return { success: false, error: 'session_expired' };
 		}
@@ -455,7 +676,12 @@ export async function downloadAllInvoicesForMonth(
 				continue;
 			}
 
-			const result = await downloadInvoice(pending.tiktokInvoiceId, cookies, context);
+			const result = await downloadInvoice(
+				pending.tiktokInvoiceId,
+				cookies,
+				context,
+				pending.tiktokAdvertiserId ? { advertiserId: pending.tiktokAdvertiserId } : undefined
+			);
 
 			if (result.success && result.pdfBuffer) {
 				let storagePath: string;

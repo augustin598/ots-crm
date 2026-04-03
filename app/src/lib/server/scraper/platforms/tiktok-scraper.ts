@@ -560,15 +560,20 @@ export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedIn
 				.where(eq(table.tiktokAdsAccount.integrationId, session.integrationId));
 
 			const bcInvoiceIds = new Set(invoices.map(inv => inv.invoiceId));
+			const bcInvoiceSerials = new Set(
+				invoices.map(inv => inv.invoiceNumber).filter((s): s is string => !!s)
+			);
 
 			for (const account of accounts) {
 				try {
 					const adsInvoices = await extractInvoicesFromAdsManager(page, account.tiktokAdvertiserId, account.accountName);
-					// Only add invoices not already found via BC
+					// Only add invoices not already found via BC (dedup by ID and serial)
 					for (const inv of adsInvoices) {
-						if (!bcInvoiceIds.has(inv.invoiceId)) {
+						if (!bcInvoiceIds.has(inv.invoiceId) &&
+							!(inv.invoiceNumber && bcInvoiceSerials.has(inv.invoiceNumber))) {
 							invoices.push(inv);
 							bcInvoiceIds.add(inv.invoiceId);
+							if (inv.invoiceNumber) bcInvoiceSerials.add(inv.invoiceNumber);
 						}
 					}
 				} catch (err) {
