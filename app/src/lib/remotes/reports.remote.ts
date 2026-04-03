@@ -5,6 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
+import { logError } from '$lib/server/logger';
 import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, listDemographicInsights, listAdsetInsights, listAdInsights, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
@@ -33,17 +34,102 @@ function setCache(key: string, data: any): void {
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
+// Short-lived request cache to avoid repeated DB lookups within the same page load
+const _clientAccessCache = new Map<string, string[]>();
+const _integrationCache = new Map<string, string>();
+const _helperCacheTTL = 30_000; // 30s
+let _helperCacheTs = 0;
+
+function clearHelperCacheIfStale() {
+	if (Date.now() - _helperCacheTs > _helperCacheTTL) {
+		_clientAccessCache.clear();
+		_integrationCache.clear();
+		_helperCacheTs = Date.now();
+	}
+}
+
+/**
+ * Verify that a client user has access to a specific ad account.
+ * Client users can only access accounts mapped to their own clientId.
+ */
+async function verifyClientAccess(event: any, adAccountId: string): Promise<void> {
+	if (!event.locals.isClientUser) return;
+	if (!event.locals.client) {
+		throw error(403, 'Nu ai acces — contul de client nu este configurat.');
+	}
+
+	clearHelperCacheIfStale();
+	const cacheKey = `${event.locals.client.id}:${event.locals.tenant.id}`;
+	let allowedIds = _clientAccessCache.get(cacheKey);
+
+	if (!allowedIds) {
+		const clientAccounts = await db
+			.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
+			.from(table.metaAdsAccount)
+			.where(and(
+				eq(table.metaAdsAccount.clientId, event.locals.client.id),
+				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
+			));
+		allowedIds = clientAccounts.map(a => a.metaAdAccountId);
+		_clientAccessCache.set(cacheKey, allowedIds);
+	}
+
+	if (!allowedIds.includes(adAccountId)) {
+		throw error(403, 'Nu ai acces la acest cont Meta Ads. Contul nu este asociat profilului tău de client.');
+	}
+}
+
+/**
+ * Resolve the correct integrationId for an ad account.
+ * When the same ad account exists under multiple integrations (e.g. after reconnect),
+ * we prefer the one linked to an active integration.
+ */
+async function resolveAccountIntegration(adAccountId: string, tenantId: string): Promise<string> {
+	clearHelperCacheIfStale();
+	const ck = `${adAccountId}:${tenantId}`;
+	const cached = _integrationCache.get(ck);
+	if (cached) return cached;
+
+	const rows = await db
+		.select({
+			integrationId: table.metaAdsAccount.integrationId,
+			integrationActive: table.metaAdsIntegration.isActive
+		})
+		.from(table.metaAdsAccount)
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
+		.where(
+			and(
+				eq(table.metaAdsAccount.metaAdAccountId, adAccountId),
+				eq(table.metaAdsAccount.tenantId, tenantId)
+			)
+		);
+
+	if (!rows.length) {
+		throw error(404, 'Cont Meta Ads negăsit');
+	}
+
+	const best = rows.find(r => r.integrationActive === true) ?? rows[0];
+	_integrationCache.set(ck, best.integrationId);
+	return best.integrationId;
+}
+
 /** Classify Meta API errors and throw appropriate SvelteKit error */
-function throwMetaApiError(err: unknown): never {
+function throwMetaApiError(err: unknown, context?: { adAccountId?: string; integrationId?: string }): never {
 	const msg = err instanceof Error ? err.message : String(err);
+	logError('meta-ads', `API error${context?.adAccountId ? ` for account ${context.adAccountId}` : ''}`, {
+		metadata: { error: msg, ...context }
+	});
 	if (msg.includes('validating access token') || msg.includes('session has been invalidated') || msg.includes('Session has expired')) {
 		throw error(401, 'Tokenul Meta Ads a expirat sau a fost revocat. Reconectează din Settings → Meta Ads.');
 	}
 	if (msg.includes('does not have permission') || msg.includes('(#200)')) {
-		throw error(403, 'Nu ai acces la acest cont Meta Ads. Verifică permisiunile în Business Manager.');
+		throw error(403, 'Nu ai permisiuni pentru acest cont Meta Ads. Verifică că utilizatorul conectat are rol de Analist sau mai mare în Business Manager.');
 	}
 	if (msg.includes('has not authorized application') || msg.includes('(#190)')) {
 		throw error(401, 'Aplicația nu mai este autorizată. Reconectează din Settings → Meta Ads.');
+	}
+	if (msg.includes('Invalid OAuth') || msg.includes('OAuthException')) {
+		throw error(401, 'Token OAuth invalid. Reconectează din Settings → Meta Ads.');
 	}
 	throw error(500, msg);
 }
@@ -56,7 +142,12 @@ export const getReportAdAccounts = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	if (event.locals.isClientUser) return [];
+	// Client users: only show accounts mapped to their own clientId
+	const clientFilter = event.locals.isClientUser && event.locals.client
+		? eq(table.metaAdsAccount.clientId, event.locals.client.id)
+		: isNotNull(table.metaAdsAccount.clientId);
+
+	if (event.locals.isClientUser && !event.locals.client) return [];
 
 	const accounts = await db
 		.select({
@@ -67,6 +158,8 @@ export const getReportAdAccounts = query(async () => {
 			clientId: table.metaAdsAccount.clientId,
 			clientName: table.client.name,
 			isActive: table.metaAdsAccount.isActive,
+			accountStatus: table.metaAdsAccount.accountStatus,
+			disableReason: table.metaAdsAccount.disableReason,
 			businessName: table.metaAdsIntegration.businessName,
 			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt,
 			integrationActive: table.metaAdsIntegration.isActive
@@ -77,7 +170,7 @@ export const getReportAdAccounts = query(async () => {
 		.where(
 			and(
 				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
-				isNotNull(table.metaAdsAccount.clientId)
+				clientFilter
 			)
 		)
 		.orderBy(table.metaAdsAccount.accountName);
@@ -100,7 +193,17 @@ export const getReportAdAccounts = query(async () => {
 		}
 	}
 
-	return accounts.map(acc => ({
+	// Deduplicate by metaAdAccountId — if same account exists under multiple integrations
+	// (e.g. after a reconnect), prefer the one linked to an active integration.
+	const deduped = new Map<string, typeof accounts[0]>();
+	for (const acc of accounts) {
+		const existing = deduped.get(acc.metaAdAccountId);
+		if (!existing || (!existing.integrationActive && acc.integrationActive)) {
+			deduped.set(acc.metaAdAccountId, acc);
+		}
+	}
+
+	return Array.from(deduped.values()).map(acc => ({
 		...acc,
 		currency: currencyMap.get(acc.metaAdAccountId) || 'RON',
 		tokenExpiresAt: acc.tokenExpiresAt,
@@ -208,48 +311,21 @@ export const getMetaCampaignInsights = query(
 			throw error(401, 'Unauthorized');
 		}
 
-		// Client users can only access their own ad account
-		if (event.locals.isClientUser) {
-			if (!event.locals.client) throw error(401, 'Unauthorized');
-			const [clientAccount] = await db
-				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
-				.from(table.metaAdsAccount)
-				.where(and(
-					eq(table.metaAdsAccount.clientId, event.locals.client.id),
-					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
-				))
-				.limit(1);
-			if (!clientAccount || clientAccount.metaAdAccountId !== params.adAccountId) {
-				throw error(401, 'Unauthorized');
-			}
-		}
+		await verifyClientAccess(event, params.adAccountId);
 
 		const tenantId = event.locals.tenant.id;
 
 		// Check cache
-		const cacheKey = `insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.since}:${params.until}:${params.timeIncrement}`;
+		const cacheKey = `insights:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${params.timeIncrement}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
-		// Verify account belongs to tenant
-		const [account] = await db
-			.select({ id: table.metaAdsAccount.id })
-			.from(table.metaAdsAccount)
-			.where(
-				and(
-					eq(table.metaAdsAccount.metaAdAccountId, params.adAccountId),
-					eq(table.metaAdsAccount.tenantId, tenantId)
-				)
-			)
-			.limit(1);
+		// Resolve the correct integrationId from DB (prefers active integration)
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
 
-		if (!account) {
-			throw error(404, 'Cont Meta Ads negăsit');
-		}
-
-		const authResult = await getAuthenticatedToken(params.integrationId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
 		if (!authResult) {
-			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Reconectează integrarea din Settings → Meta Ads.');
 		}
 
 		const appSecret = env.META_APP_SECRET;
@@ -344,7 +420,7 @@ export const getMetaCampaignInsights = query(
 			setCache(cacheKey, insights);
 			return insights;
 		} catch (err) {
-			throwMetaApiError(err);
+			throwMetaApiError(err, { adAccountId: params.adAccountId, integrationId: resolvedIntegrationId });
 		}
 	}
 );
@@ -362,28 +438,16 @@ export const getMetaActiveCampaigns = query(
 		}
 
 		// Client users can only access their own ad account
-		if (event.locals.isClientUser) {
-			if (!event.locals.client) throw error(401, 'Unauthorized');
-			const [clientAccount] = await db
-				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
-				.from(table.metaAdsAccount)
-				.where(and(
-					eq(table.metaAdsAccount.clientId, event.locals.client.id),
-					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
-				))
-				.limit(1);
-			if (!clientAccount || clientAccount.metaAdAccountId !== params.adAccountId) {
-				throw error(401, 'Unauthorized');
-			}
-		}
+		await verifyClientAccess(event, params.adAccountId);
 
 		const tenantId = event.locals.tenant.id;
 
-		const cacheKey = `campaigns:${tenantId}:${params.integrationId}:${params.adAccountId}`;
+		const cacheKey = `campaigns:${tenantId}:${params.adAccountId}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
-		const authResult = await getAuthenticatedToken(params.integrationId);
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
 		}
@@ -403,7 +467,7 @@ export const getMetaActiveCampaigns = query(
 			setCache(cacheKey, campaigns);
 			return campaigns;
 		} catch (err) {
-			throwMetaApiError(err);
+			throwMetaApiError(err, { adAccountId: params.adAccountId, integrationId: resolvedIntegrationId });
 		}
 	}
 );
@@ -424,31 +488,18 @@ export const getMetaDemographicInsights = query(
 			throw error(401, 'Unauthorized');
 		}
 
-		// Client users can only access their own ad account
-		if (event.locals.isClientUser) {
-			if (!event.locals.client) throw error(401, 'Unauthorized');
-			const [clientAccount] = await db
-				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
-				.from(table.metaAdsAccount)
-				.where(and(
-					eq(table.metaAdsAccount.clientId, event.locals.client.id),
-					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id)
-				))
-				.limit(1);
-			if (!clientAccount || clientAccount.metaAdAccountId !== params.adAccountId) {
-				throw error(401, 'Unauthorized');
-			}
-		}
+		await verifyClientAccess(event, params.adAccountId);
 
 		const tenantId = event.locals.tenant.id;
 		const campaignKey = params.campaignIds?.length ? params.campaignIds.sort().join(',') : 'all';
 		const resultKey = params.resultActionTypes?.length ? params.resultActionTypes.sort().join(',') : 'none';
 
-		const cacheKey = `demographics:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
+		const cacheKey = `demographics:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
-		const authResult = await getAuthenticatedToken(params.integrationId);
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
 		}
@@ -574,28 +625,15 @@ export const getMetaAdsetInsights = query(
 			throw error(401, 'Unauthorized');
 		}
 
-		if (event.locals.isClientUser) {
-			if (!event.locals.client) throw error(401, 'Unauthorized');
-			const [clientAccount] = await db
-				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
-				.from(table.metaAdsAccount)
-				.where(and(
-					eq(table.metaAdsAccount.clientId, event.locals.client.id),
-					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
-					eq(table.metaAdsAccount.metaAdAccountId, params.adAccountId)
-				))
-				.limit(1);
-			if (!clientAccount) {
-				throw error(401, 'Unauthorized');
-			}
-		}
+		await verifyClientAccess(event, params.adAccountId);
 
 		const tenantId = event.locals.tenant.id;
-		const cacheKey = `adset-insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.campaignId}:${params.since}:${params.until}`;
+		const cacheKey = `adset-insights:${tenantId}:${params.adAccountId}:${params.campaignId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
-		const authResult = await getAuthenticatedToken(params.integrationId);
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
 		}
@@ -686,28 +724,15 @@ export const getMetaAdInsights = query(
 			throw error(401, 'Unauthorized');
 		}
 
-		if (event.locals.isClientUser) {
-			if (!event.locals.client) throw error(401, 'Unauthorized');
-			const [clientAccount] = await db
-				.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
-				.from(table.metaAdsAccount)
-				.where(and(
-					eq(table.metaAdsAccount.clientId, event.locals.client.id),
-					eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
-					eq(table.metaAdsAccount.metaAdAccountId, params.adAccountId)
-				))
-				.limit(1);
-			if (!clientAccount) {
-				throw error(401, 'Unauthorized');
-			}
-		}
+		await verifyClientAccess(event, params.adAccountId);
 
 		const tenantId = event.locals.tenant.id;
-		const cacheKey = `ad-insights:${tenantId}:${params.integrationId}:${params.adAccountId}:${params.adsetId}:${params.since}:${params.until}`;
+		const cacheKey = `ad-insights:${tenantId}:${params.adAccountId}:${params.adsetId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
-		const authResult = await getAuthenticatedToken(params.integrationId);
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
 		}

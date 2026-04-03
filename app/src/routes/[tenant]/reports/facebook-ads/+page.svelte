@@ -91,6 +91,34 @@
 		return account?.currency || 'RON';
 	});
 
+	// Payment warning (unpaid balance, grace period, account stopped for payment issues)
+	const paymentWarning = $derived.by(() => {
+		const account = accounts.find((a: any) => a.metaAdAccountId === selectedAccountId);
+		if (!account) return null;
+		// Cont dezactivat din cauza problemelor de plată
+		if (account.disableReason === 3) {
+			return {
+				level: 'error' as const,
+				text: 'Contul Meta Ads a fost dezactivat din cauza problemelor de plată. Verifică și actualizează metoda de plată în Business Manager.'
+			};
+		}
+		// Factură neachitată – livrarea reclamelor poate fi pauzată
+		if (account.accountStatus === 3) {
+			return {
+				level: 'error' as const,
+				text: 'Contul Meta Ads are o factură neachitată (UNSETTLED). Reclamele pot fi oprite până la efectuarea plății.'
+			};
+		}
+		// Perioadă de grație – plată restantă dar contul încă activ
+		if (account.accountStatus === 9) {
+			return {
+				level: 'warning' as const,
+				text: 'Contul Meta Ads se află în perioadă de grație pentru plată. Achită factura pentru a evita oprirea reclamelor.'
+			};
+		}
+		return null;
+	});
+
 	// Token / integration status warning
 	const tokenWarning = $derived.by(() => {
 		const account = accounts.find((a: any) => a.metaAdAccountId === selectedAccountId);
@@ -704,6 +732,19 @@
 		</div>
 	</div>
 
+	<!-- Payment warning (unpaid balance / grace period / stopped for payment) -->
+	{#if paymentWarning}
+		<div class="rounded-md p-4 {paymentWarning.level === 'error' ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'}">
+			<div class="flex items-start gap-2">
+				<span class="text-base leading-5">{paymentWarning.level === 'error' ? '💳' : '⚠️'}</span>
+				<p class="text-sm {paymentWarning.level === 'error' ? 'text-red-800' : 'text-amber-800'}">
+					{paymentWarning.text}
+					<a href="https://business.facebook.com/billing" target="_blank" rel="noopener noreferrer" class="underline font-medium ml-1">Mergi la facturare →</a>
+				</p>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Token expiration warning -->
 	{#if tokenWarning}
 		<div class="rounded-md p-4 {tokenWarning.expired ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'}">
@@ -736,7 +777,7 @@
 	{:else if insightsError}
 		<Card class="p-8">
 			<div class="rounded-md bg-red-50 p-4 space-y-2">
-				<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : (insightsError as any)?.body?.message || (insightsError as any)?.message || 'Eroare la încărcarea datelor'}</p>
+				<p class="text-sm font-medium text-red-800">{(insightsError as any)?.body?.message || (insightsError instanceof Error ? insightsError.message : null) || (insightsError as any)?.message || 'Eroare la încărcarea datelor'}</p>
 				<p class="text-sm text-red-700">
 					Dacă tokenul a expirat, reconectează din
 					<a href="/{tenantSlug}/settings/meta-ads" class="underline font-medium">Settings → Meta Ads</a>.

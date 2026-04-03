@@ -1526,6 +1526,8 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	accountName: text('account_name').notNull().default(''),
 	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
 	isActive: boolean('is_active').notNull().default(true),
+	accountStatus: integer('account_status').notNull().default(1), // 1=ACTIVE, 3=UNSETTLED, 9=IN_GRACE_PERIOD
+	disableReason: integer('disable_reason').notNull().default(0), // 0=none, 3=RISK_PAYMENT
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()

@@ -380,6 +380,8 @@ export const fetchMetaAdsAccounts = command(
 					.set({
 						accountName: account.accountName,
 						isActive: account.isActive,
+						accountStatus: account.accountStatus,
+						disableReason: account.disableReason,
 						lastFetchedAt: now,
 						updatedAt: now
 					})
@@ -393,6 +395,8 @@ export const fetchMetaAdsAccounts = command(
 					accountName: account.accountName,
 					clientId: null,
 					isActive: account.isActive,
+					accountStatus: account.accountStatus,
+					disableReason: account.disableReason,
 					lastFetchedAt: now,
 					createdAt: now,
 					updatedAt: now
@@ -626,7 +630,7 @@ export const setMetaAdsCookies = command(
 			await saveFbSessionCookies(data.integrationId, tenantId, data.cookiesJson);
 			return { success: true };
 		} catch (err) {
-			console.error('[Meta Ads] saveFbSessionCookies failed:', err);
+			logWarning('meta-ads', `saveFbSessionCookies failed: ${err instanceof Error ? err.message : String(err)}`, { tenantId });
 			throw error(400, err instanceof Error ? err.message : 'Eroare la salvare cookies');
 		}
 	}
@@ -804,7 +808,7 @@ export const downloadInvoiceForAccount = command(
 			return { status: 'error', httpCode: null, invoiceId: null, error: 'no_cookies' };
 		}
 
-		// Check dedup
+		// Find existing download (for update-vs-insert; no skip — allow recovery of missing transactions)
 		const [existing] = await db
 			.select({ id: table.metaInvoiceDownload.id, status: table.metaInvoiceDownload.status })
 			.from(table.metaInvoiceDownload)
@@ -816,10 +820,6 @@ export const downloadInvoiceForAccount = command(
 				)
 			)
 			.limit(1);
-
-		if (existing && existing.status === 'downloaded') {
-			return { status: 'skip', httpCode: 200, invoiceId: null, error: null };
-		}
 
 		// Try invoices_generator first
 		const result = await downloadReceipt({ adAccountId: data.adAccountId, year: data.year, month: data.month, cookies });
@@ -859,7 +859,7 @@ export const downloadInvoiceForAccount = command(
 				return { status: 'downloaded', httpCode: 200, invoiceId: null, error: null };
 			} catch (uploadErr) {
 				const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-				console.error(`[META-INVOICE] Upload/DB error for ${data.adAccountId}: ${msg}`);
+				logWarning('meta-ads', `Upload/DB error for ${data.adAccountId}: ${msg}`, { tenantId });
 				return { status: 'error', httpCode: null, invoiceId: null, error: `storage_error: ${msg}` };
 			}
 		}
@@ -900,6 +900,7 @@ export const downloadInvoiceForAccount = command(
 								'application/pdf',
 								{ type: 'meta-invoice', adAccountId: data.adAccountId, txid: tx.txid || '' }
 							);
+							const txInvoiceType = tx.amountCents > 0 ? 'invoice' : 'credit';
 							await db.insert(table.metaInvoiceDownload).values({
 								id: crypto.randomUUID(),
 								tenantId,
@@ -911,6 +912,8 @@ export const downloadInvoiceForAccount = command(
 								periodStart,
 								periodEnd,
 								txid: tx.txid || null,
+								amountText: tx.amount || null,
+								invoiceType: txInvoiceType,
 								pdfPath: upload.path,
 								status: 'downloaded',
 								downloadedAt: new Date(),
@@ -919,7 +922,7 @@ export const downloadInvoiceForAccount = command(
 							});
 							txDownloaded++;
 						} catch (uploadErr) {
-							console.error(`[META-INVOICE] Upload/DB error for tx ${tx.txid}: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`);
+							logWarning('meta-ads', `Upload/DB error for tx ${tx.txid}: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`, { tenantId });
 						}
 					}
 					await new Promise(r => setTimeout(r, 1000));
@@ -1016,12 +1019,21 @@ export const redownloadInvoice = command(
 			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
 		}
 
-		const result = await downloadReceipt({
-			adAccountId: dl.metaAdAccountId,
-			year,
-			month,
-			cookies
-		});
+		// If this invoice was originally downloaded via billing_transaction (has txid),
+		// use the direct URL. Otherwise use invoices_generator.
+		let result;
+		if (dl.txid) {
+			const numericId = dl.metaAdAccountId.replace(/^act_/, '');
+			const billingUrl = `https://business.facebook.com/ads/manage/billing_transaction/?act=${numericId}&pdf=true&print=false&source=billing_summary&tx_type=3&txid=${dl.txid}`;
+			result = await downloadReceiptFromUrl(billingUrl, cookies);
+		} else {
+			result = await downloadReceipt({
+				adAccountId: dl.metaAdAccountId,
+				year,
+				month,
+				cookies
+			});
+		}
 
 		if (!result.success || !result.pdfBuffer) {
 			await db
@@ -1434,7 +1446,7 @@ export const bulkDownloadMetaInvoices = command(
 					downloaded++;
 				} catch (uploadErr) {
 					const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-					console.error(`[META-INVOICE] Bulk upload/DB error for txid=${txid}: ${msg}`);
+					logWarning('meta-ads', `Bulk upload/DB error for txid=${txid}: ${msg}`, { tenantId });
 					errors++;
 					errorDetails.push(`${txid || link.url.substring(0, 60)}: ${msg}`);
 				}

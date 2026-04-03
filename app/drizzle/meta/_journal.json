@@ -694,6 +694,13 @@
       "when": 1775260810000,
       "tag": "0098_lead_unique_index",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1775347200000,
+      "tag": "0099_meta_ads_account_payment_status",
+      "breakpoints": true
     }
   ]
 }

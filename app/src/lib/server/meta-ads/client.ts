@@ -1,13 +1,14 @@
 import { logInfo, logError } from '$lib/server/logger';
 import { createHmac } from 'crypto';
 
-const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
+export const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
 
 export interface MetaAdsAdAccount {
 	adAccountId: string; // e.g. act_XXXXXXXXX
 	accountName: string;
-	accountStatus: number; // 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, etc.
+	accountStatus: number; // 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 9=IN_GRACE_PERIOD, etc.
 	isActive: boolean;
+	disableReason: number; // 0=none, 3=RISK_PAYMENT (stopped for payment issues)
 }
 
 export interface MetaAdsInsightData {
@@ -83,7 +84,7 @@ export async function listBusinessAdAccounts(
 	logInfo('meta-ads', `Listing ad accounts for BM`, { metadata: { businessId } });
 
 	const accounts: MetaAdsAdAccount[] = [];
-	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status&limit=100&access_token=${accessToken}`;
+	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status,disable_reason&limit=100&access_token=${accessToken}`;
 
 	try {
 		while (url) {
@@ -99,7 +100,8 @@ export async function listBusinessAdAccounts(
 					adAccountId: acc.id || '',
 					accountName: acc.name || '',
 					accountStatus: acc.account_status || 0,
-					isActive: acc.account_status === 1
+					isActive: acc.account_status === 1,
+					disableReason: acc.disable_reason ?? 0
 				});
 			}
 
@@ -382,7 +384,7 @@ export async function listCampaignInsights(
 
 			if (data.error) {
 				logError('meta-ads', `Campaign insights API error for ${adAccountId}`, {
-					metadata: { errorMessage: data.error.message, errorCode: data.error.code }
+					metadata: { errorMessage: data.error.message, errorCode: data.error.code, errorType: data.error.type, errorSubcode: data.error.error_subcode, fbTraceId: data.error.fbtrace_id }
 				});
 				throw new Error(`Meta API error: ${data.error.message}`);
 			}
@@ -894,7 +896,7 @@ export async function listActiveCampaigns(
 
 			if (data.error) {
 				logError('meta-ads', `Campaigns API error for ${adAccountId}`, {
-					metadata: { errorMessage: data.error.message, errorCode: data.error.code }
+					metadata: { errorMessage: data.error.message, errorCode: data.error.code, errorType: data.error.type, errorSubcode: data.error.error_subcode }
 				});
 				throw new Error(`Meta API error: ${data.error.message}`);
 			}
