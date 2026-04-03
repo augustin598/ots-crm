@@ -277,6 +277,7 @@ async function syncSingleForm(
 			.from(table.lead)
 			.where(
 				and(
+					eq(table.lead.tenantId, tenantId),
 					inArray(table.lead.externalLeadId, externalIds),
 					eq(table.lead.platform, 'facebook')
 				)
@@ -327,7 +328,7 @@ async function syncSingleForm(
 					importedAt: new Date(),
 					createdAt: new Date(),
 					updatedAt: new Date()
-				});
+				}).onConflictDoNothing();
 
 				imported++;
 			} catch (err) {

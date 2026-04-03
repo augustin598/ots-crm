@@ -1682,7 +1682,9 @@ export const lead = sqliteTable('lead', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (table) => [
+	uniqueIndex('lead_tenant_external_platform_idx').on(table.tenantId, table.externalLeadId, table.platform)
+]);
 
 // TikTok Ads integration — one per tenant connection (OAuth2 + session cookies)
 export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
