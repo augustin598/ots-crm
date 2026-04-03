@@ -1,5 +1,5 @@
 -- Google Ads spending table for periodic spend data (mirrors meta_ads_spending / tiktok_ads_spending)
-CREATE TABLE `google_ads_spending` (
+CREATE TABLE IF NOT EXISTS `google_ads_spending` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`client_id` text NOT NULL REFERENCES `client`(`id`),
@@ -17,8 +17,8 @@ CREATE TABLE `google_ads_spending` (
 	`updated_at` timestamp DEFAULT (current_date) NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `google_ads_spending_tenant_idx` ON `google_ads_spending`(`tenant_id`);
+CREATE INDEX IF NOT EXISTS `google_ads_spending_tenant_idx` ON `google_ads_spending`(`tenant_id`);
 --> statement-breakpoint
-CREATE INDEX `google_ads_spending_client_idx` ON `google_ads_spending`(`client_id`);
+CREATE INDEX IF NOT EXISTS `google_ads_spending_client_idx` ON `google_ads_spending`(`client_id`);
 --> statement-breakpoint
-CREATE INDEX `google_ads_spending_period_idx` ON `google_ads_spending`(`tenant_id`, `google_ads_customer_id`, `period_start`);
+CREATE INDEX IF NOT EXISTS `google_ads_spending_period_idx` ON `google_ads_spending`(`tenant_id`, `google_ads_customer_id`, `period_start`);

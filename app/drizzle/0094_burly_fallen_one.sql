@@ -1,1 +1,2 @@
-ALTER TABLE `notification` ADD `client_id` text REFERENCES client(id);
+-- notification.client_id already exists from prior manual migration
+SELECT 1;

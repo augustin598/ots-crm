@@ -1,5 +1,5 @@
 -- Notification table for in-app notifications (SSE-based)
-CREATE TABLE `notification` (
+CREATE TABLE IF NOT EXISTS `notification` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`user_id` text NOT NULL REFERENCES `user`(`id`),
@@ -12,6 +12,6 @@ CREATE TABLE `notification` (
 	`created_at` timestamp DEFAULT (current_timestamp) NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `notification_user_read_idx` ON `notification`(`user_id`, `is_read`);
+CREATE INDEX IF NOT EXISTS `notification_user_read_idx` ON `notification`(`user_id`, `is_read`);
 --> statement-breakpoint
-CREATE INDEX `notification_tenant_user_idx` ON `notification`(`tenant_id`, `user_id`);
+CREATE INDEX IF NOT EXISTS `notification_tenant_user_idx` ON `notification`(`tenant_id`, `user_id`);

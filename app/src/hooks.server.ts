@@ -131,8 +131,12 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 };
 
 export const init = async () => {
-	// Run migrations on every startup (dev + production)
-	await runMigrations();
+	// Run migrations on every startup (dev + production) — don't block if Turso times out
+	try {
+		await runMigrations();
+	} catch (e) {
+		console.error('[INIT] Migrations failed, continuing startup:', e instanceof Error ? e.message : e);
+	}
 	await ensurePluginsInitialized();
 	registerEmailNotificationHooks();
 	registerNotificationHooks();

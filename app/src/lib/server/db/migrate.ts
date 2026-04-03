@@ -23,10 +23,12 @@ export async function runMigrations() {
 				authToken: undefined
 			});
 		} else if (tursoUrl) {
-			// Fallback to Turso if URI is set
+			// Fallback to Turso if URI is set — use longer timeout for migrations
 			client = createClient({
 				url: tursoUrl,
-				authToken: tursoAuthToken
+				authToken: tursoAuthToken,
+				fetch: (input, init) =>
+					fetch(input, { ...init, signal: AbortSignal.timeout(30_000) })
 			});
 		} else {
 			throw new Error('Neither SQLITE_PATH nor Turso database URL is set in environment');
