@@ -1,4 +1,4 @@
-CREATE TABLE `gmail_integration` (
+CREATE TABLE IF NOT EXISTS `gmail_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`email` text NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE `gmail_integration` (
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
-CREATE TABLE `supplier_invoice` (
+CREATE TABLE IF NOT EXISTS `supplier_invoice` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`supplier_id` text,

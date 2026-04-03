@@ -1,4 +1,4 @@
-CREATE TABLE `user_work_hours` (
+CREATE TABLE IF NOT EXISTS `user_work_hours` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`tenant_id` text NOT NULL,

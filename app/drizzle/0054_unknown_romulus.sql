@@ -1,4 +1,4 @@
-CREATE TABLE `debug_log` (
+CREATE TABLE IF NOT EXISTS `debug_log` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text,
 	`level` text DEFAULT 'info' NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE `debug_log` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
-CREATE TABLE `email_log` (
+CREATE TABLE IF NOT EXISTS `email_log` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text,
 	`to_email` text NOT NULL,

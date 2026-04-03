@@ -15,6 +15,7 @@
 		"lint": "prettier --check . && eslint .",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
+		"db:gen": "drizzle-kit generate && bun scripts/fix-migrations.ts",
 		"db:pull": "drizzle-kit pull",
 		"db:migrate": "drizzle-kit migrate",
 		"db:check": "drizzle-kit check",

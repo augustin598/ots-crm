@@ -1,4 +1,4 @@
-CREATE TABLE `keez_client_sync` (
+CREATE TABLE IF NOT EXISTS `keez_client_sync` (
 	`id` text PRIMARY KEY NOT NULL,
 	`client_id` text NOT NULL,
 	`tenant_id` text NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE `keez_client_sync` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `keez_integration` (
+CREATE TABLE IF NOT EXISTS `keez_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_eid` text NOT NULL,
@@ -28,8 +28,8 @@ CREATE TABLE `keez_integration` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `keez_integration_tenant_id_unique` ON `keez_integration` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `keez_invoice_sync` (
+CREATE UNIQUE INDEX IF NOT EXISTS `keez_integration_tenant_id_unique` ON `keez_integration` (`tenant_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `keez_invoice_sync` (
 	`id` text PRIMARY KEY NOT NULL,
 	`invoice_id` text NOT NULL,
 	`tenant_id` text NOT NULL,

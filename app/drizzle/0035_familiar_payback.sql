@@ -1,4 +1,4 @@
-CREATE TABLE `partner` (
+CREATE TABLE IF NOT EXISTS `partner` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE `partner` (
 	FOREIGN KEY (`partner_tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `project_partner` (
+CREATE TABLE IF NOT EXISTS `project_partner` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`project_id` text NOT NULL,

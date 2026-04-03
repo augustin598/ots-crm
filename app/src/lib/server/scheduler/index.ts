@@ -16,6 +16,7 @@ import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
+import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -84,7 +85,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
-	debug_log_cleanup: processDebugLogCleanup
+	debug_log_cleanup: processDebugLogCleanup,
+	db_write_health_check: processDbWriteHealthCheck
 };
 
 /**
@@ -440,7 +442,24 @@ export const startScheduler = async () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 18 jobs registered`);
+	// DB write health check — every 5 minutes (no retries — next scheduled run is sufficient)
+	schedulerQueue.add(
+		'db-write-health-check',
+		{
+			type: 'db_write_health_check',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '*/5 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'db-write-health-check',
+			attempts: 1
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 19 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -468,7 +487,8 @@ export const JOB_LABELS: Record<string, string> = {
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
 	token_refresh: 'Refresh Token-uri Integrări',
-	debug_log_cleanup: 'Cleanup Loguri Debug'
+	debug_log_cleanup: 'Cleanup Loguri Debug',
+	db_write_health_check: 'Health Check Scriere DB'
 };
 
 /** Default params for jobs that need specific parameters */

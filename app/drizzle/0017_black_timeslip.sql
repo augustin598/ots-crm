@@ -1,4 +1,4 @@
-CREATE TABLE `project_user` (
+CREATE TABLE IF NOT EXISTS `project_user` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`project_id` text NOT NULL,

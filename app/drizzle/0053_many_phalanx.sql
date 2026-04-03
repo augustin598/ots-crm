@@ -1,4 +1,4 @@
-CREATE TABLE `client_user_preferences` (
+CREATE TABLE IF NOT EXISTS `client_user_preferences` (
 	`id` text PRIMARY KEY NOT NULL,
 	`client_user_id` text NOT NULL,
 	`tenant_id` text NOT NULL,
@@ -16,4 +16,4 @@ CREATE TABLE `client_user_preferences` (
 	FOREIGN KEY (`client_user_id`) REFERENCES `client_user`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
-CREATE UNIQUE INDEX `client_user_preferences_client_user_id_unique` ON `client_user_preferences` (`client_user_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `client_user_preferences_client_user_id_unique` ON `client_user_preferences` (`client_user_id`);

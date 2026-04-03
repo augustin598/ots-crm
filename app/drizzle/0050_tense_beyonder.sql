@@ -1,4 +1,4 @@
-CREATE TABLE `bnr_exchange_rate` (
+CREATE TABLE IF NOT EXISTS `bnr_exchange_rate` (
 	`id` text PRIMARY KEY NOT NULL,
 	`currency` text NOT NULL,
 	`rate` real NOT NULL,
@@ -6,4 +6,4 @@ CREATE TABLE `bnr_exchange_rate` (
 	`rate_date` text NOT NULL,
 	`fetched_at` integer
 );--> statement-breakpoint
-CREATE UNIQUE INDEX `bnr_rate_currency_date_idx` ON `bnr_exchange_rate` (`currency`,`rate_date`);
+CREATE UNIQUE INDEX IF NOT EXISTS `bnr_rate_currency_date_idx` ON `bnr_exchange_rate` (`currency`,`rate_date`);

@@ -1,4 +1,4 @@
-CREATE TABLE `task_activity` (
+CREATE TABLE IF NOT EXISTS `task_activity` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_id` text NOT NULL,
 	`user_id` text NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE `task_activity` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
-CREATE TABLE `__new_task_comment` (
+CREATE TABLE IF NOT EXISTS `__new_task_comment` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_id` text NOT NULL,
 	`user_id` text NOT NULL,

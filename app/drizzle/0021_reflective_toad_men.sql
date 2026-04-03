@@ -1,4 +1,4 @@
-CREATE TABLE `transaction_match_rule` (
+CREATE TABLE IF NOT EXISTS `transaction_match_rule` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`match_type` text NOT NULL,

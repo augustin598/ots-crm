@@ -1,4 +1,4 @@
-CREATE TABLE `lead` (
+CREATE TABLE IF NOT EXISTS `lead` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`platform` text DEFAULT 'facebook' NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE `lead` (
 	FOREIGN KEY (`page_id`) REFERENCES `meta_ads_page`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `meta_ads_page` (
+CREATE TABLE IF NOT EXISTS `meta_ads_page` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`integration_id` text NOT NULL,

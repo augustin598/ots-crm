@@ -1,4 +1,4 @@
-CREATE TABLE `seo_link_check` (
+CREATE TABLE IF NOT EXISTS `seo_link_check` (
 	`id` text PRIMARY KEY NOT NULL,
 	`seo_link_id` text NOT NULL,
 	`checked_at` timestamp DEFAULT current_date NOT NULL,

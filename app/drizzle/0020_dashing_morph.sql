@@ -1,4 +1,4 @@
-CREATE TABLE `supplier` (
+CREATE TABLE IF NOT EXISTS `supplier` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`name` text NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE `supplier` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `user_bank_account` (
+CREATE TABLE IF NOT EXISTS `user_bank_account` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`user_id` text NOT NULL,

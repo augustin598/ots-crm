@@ -1,4 +1,4 @@
-CREATE TABLE `seo_link` (
+CREATE TABLE IF NOT EXISTS `seo_link` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`client_id` text NOT NULL,

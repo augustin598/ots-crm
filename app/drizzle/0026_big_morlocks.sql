@@ -1,4 +1,4 @@
-CREATE TABLE `anaf_spv_integration` (
+CREATE TABLE IF NOT EXISTS `anaf_spv_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`access_token` text NOT NULL,
@@ -11,8 +11,8 @@ CREATE TABLE `anaf_spv_integration` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `anaf_spv_integration_tenant_id_unique` ON `anaf_spv_integration` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `anaf_spv_invoice_sync` (
+CREATE UNIQUE INDEX IF NOT EXISTS `anaf_spv_integration_tenant_id_unique` ON `anaf_spv_integration` (`tenant_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `anaf_spv_invoice_sync` (
 	`id` text PRIMARY KEY NOT NULL,
 	`invoice_id` text NOT NULL,
 	`tenant_id` text NOT NULL,

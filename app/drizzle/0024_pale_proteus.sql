@@ -1,4 +1,4 @@
-CREATE TABLE `client_user` (
+CREATE TABLE IF NOT EXISTS `client_user` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`client_id` text NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE `client_user` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `magic_link_token` (
+CREATE TABLE IF NOT EXISTS `magic_link_token` (
 	`id` text PRIMARY KEY NOT NULL,
 	`token` text NOT NULL,
 	`email` text NOT NULL,
@@ -24,4 +24,4 @@ CREATE TABLE `magic_link_token` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `magic_link_token_token_unique` ON `magic_link_token` (`token`);
+CREATE UNIQUE INDEX IF NOT EXISTS `magic_link_token_token_unique` ON `magic_link_token` (`token`);

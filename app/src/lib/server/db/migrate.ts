@@ -27,8 +27,10 @@ export async function runMigrations() {
 			client = createClient({
 				url: tursoUrl,
 				authToken: tursoAuthToken,
-				fetch: (input, init) =>
-					fetch(input, { ...init, signal: AbortSignal.timeout(30_000) })
+				fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+					const { signal: _ignored, ...rest } = init || {};
+					return fetch(input, { ...rest, signal: AbortSignal.timeout(30_000) });
+				}
 			});
 		} else {
 			throw new Error('Neither SQLITE_PATH nor Turso database URL is set in environment');

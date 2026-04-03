@@ -1,4 +1,4 @@
-CREATE TABLE `email_settings` (
+CREATE TABLE IF NOT EXISTS `email_settings` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`smtp_host` text,
@@ -13,4 +13,4 @@ CREATE TABLE `email_settings` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `email_settings_tenant_id_unique` ON `email_settings` (`tenant_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `email_settings_tenant_id_unique` ON `email_settings` (`tenant_id`);
