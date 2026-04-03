@@ -368,8 +368,153 @@ async function extractInvoicesFromDOM(page: Page): Promise<ScrapedInvoice[]> {
 }
 
 /**
+ * Strategy 4: Scrape invoices from TikTok Ads Manager (per-advertiser).
+ * Navigates to ads.tiktok.com/i18n/account/payment_invoice and intercepts XHR + DOM.
+ */
+async function extractInvoicesFromAdsManager(
+	page: Page,
+	advertiserId: string,
+	accountName: string
+): Promise<ScrapedInvoice[]> {
+	const invoices: ScrapedInvoice[] = [];
+	const interceptedData: any[] = [];
+
+	// Set up XHR interception
+	const responseHandler = async (response: HTTPResponse) => {
+		try {
+			const url = response.url();
+			if (url.includes('/invoice') && response.status() === 200) {
+				const text = await response.text().catch(() => '');
+				if (text.includes('invoice') || text.includes('amount')) {
+					try {
+						const json = JSON.parse(text);
+						interceptedData.push({ url, json });
+						logInfo('tiktok-scraper', `[ADS-MANAGER] Intercepted API: ${url.substring(0, 100)}`, {
+							metadata: { keys: Object.keys(json), dataKeys: json.data ? Object.keys(json.data) : [] }
+						});
+					} catch { /* not JSON */ }
+				}
+			}
+		} catch { /* ignore */ }
+	};
+	page.on('response', responseHandler);
+
+	try {
+		const adsManagerUrl = `https://ads.tiktok.com/i18n/account/payment_invoice?aadvid=${advertiserId}`;
+		logInfo('tiktok-scraper', `[ADS-MANAGER] Navigating to ${adsManagerUrl}`);
+
+		await page.goto(adsManagerUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+		await new Promise(resolve => setTimeout(resolve, 3000));
+
+		// Try to parse intercepted API responses
+		for (const { json } of interceptedData) {
+			const items = json?.data?.invoices || json?.data?.list || json?.data?.data || json?.data || [];
+			if (Array.isArray(items) && items.length > 0) {
+				for (const item of items) {
+					const invoiceId = item.invoice_id || item.id || item.invoice_no || '';
+					if (!invoiceId) continue;
+
+					const amount = typeof item.amount === 'string'
+						? Math.round(parseFloat(item.amount) * 100)
+						: typeof item.amount === 'number'
+							? Math.round(item.amount * 100)
+							: undefined;
+
+					invoices.push({
+						platform: 'tiktok',
+						invoiceId: String(invoiceId),
+						invoiceNumber: item.invoice_serial || item.invoice_no || item.invoice_number,
+						date: item.issue_date || item.send_date || item.create_time || new Date().toISOString().slice(0, 10),
+						amount,
+						currencyCode: item.currency_code || item.currency,
+						accountId: advertiserId,
+						accountName: item.billed_to || accountName
+					});
+				}
+				logInfo('tiktok-scraper', `[ADS-MANAGER] Parsed ${invoices.length} invoices from API for ${accountName}`);
+				return invoices;
+			}
+		}
+
+		// Fallback: DOM scraping from card-based layout
+		logInfo('tiktok-scraper', `[ADS-MANAGER] No API data intercepted, trying DOM scraping for ${accountName}`);
+
+		const domInvoices = await page.evaluate((advId: string, accName: string) => {
+			const results: any[] = [];
+			// TikTok Ads Manager shows invoices as cards with "Total amount", "Billed to", "Issue date"
+			const cards = document.querySelectorAll('[class*="invoice-card"], [class*="InvoiceCard"], [class*="card"]');
+			for (const card of cards) {
+				const text = card.textContent || '';
+				const amountMatch = text.match(/([\d,]+\.?\d*)\s*(?:RON|USD|EUR)/);
+				const dateMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+				const serialMatch = text.match(/([A-Z]{2,6}\d{8,})/);
+
+				// Also try download button links
+				const downloadBtn = card.querySelector('a[href*="download"], button[class*="download"]');
+				const downloadUrl = downloadBtn?.getAttribute('href') || '';
+				const invoiceIdMatch = downloadUrl.match(/invoice_id=([^&]+)/) || text.match(/invoice_id[:\s]+(\d+)/);
+
+				if (amountMatch || serialMatch || invoiceIdMatch) {
+					results.push({
+						invoiceId: invoiceIdMatch?.[1] || serialMatch?.[1] || `ads_${advId}_${results.length}`,
+						invoiceNumber: serialMatch?.[1],
+						amount: amountMatch ? amountMatch[1].replace(/,/g, '') : undefined,
+						date: dateMatch?.[1],
+						currency: text.match(/(RON|USD|EUR)/)?.[1] || 'RON',
+						accountId: advId,
+						accountName: accName
+					});
+				}
+			}
+
+			// Also try table rows if cards don't work
+			if (results.length === 0) {
+				const rows = document.querySelectorAll('tr, [class*="Row"], [class*="row"]');
+				for (const row of rows) {
+					const text = row.textContent || '';
+					const amountMatch = text.match(/([\d,]+\.?\d*)\s*(?:RON|USD|EUR)/);
+					const serialMatch = text.match(/([A-Z]{2,6}\d{8,})/);
+					if (amountMatch && serialMatch) {
+						const dateMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+						results.push({
+							invoiceId: serialMatch[1],
+							invoiceNumber: serialMatch[1],
+							amount: amountMatch[1].replace(/,/g, ''),
+							date: dateMatch?.[1],
+							currency: text.match(/(RON|USD|EUR)/)?.[1] || 'RON',
+							accountId: advId,
+							accountName: accName
+						});
+					}
+				}
+			}
+			return results;
+		}, advertiserId, accountName);
+
+		for (const item of domInvoices) {
+			const amount = item.amount ? Math.round(parseFloat(item.amount) * 100) : undefined;
+			invoices.push({
+				platform: 'tiktok',
+				invoiceId: String(item.invoiceId),
+				invoiceNumber: item.invoiceNumber,
+				date: item.date || new Date().toISOString().slice(0, 10),
+				amount,
+				currencyCode: item.currency,
+				accountId: advertiserId,
+				accountName: item.accountName || accountName
+			});
+		}
+
+		logInfo('tiktok-scraper', `[ADS-MANAGER] DOM scraping found ${invoices.length} invoices for ${accountName}`);
+		return invoices;
+	} finally {
+		page.off('response', responseHandler);
+	}
+}
+
+/**
  * Run the TikTok Ads billing page scraper.
- * Strategies: Direct API → XHR interception → DOM extraction.
+ * Strategies: Direct API → XHR interception → DOM extraction → Ads Manager per-advertiser.
  * Saves fresh cookies for future API-based downloads.
  */
 export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedInvoice[]> {
@@ -400,6 +545,42 @@ export async function scrapeTiktokInvoices(sessionId: string): Promise<ScrapedIn
 		if (invoices.length === 0) {
 			invoices = await extractInvoicesFromDOM(page);
 			logInfo('tiktok-scraper', `DOM extraction found ${invoices.length} invoices`, {
+				tenantId: session.tenantId
+			});
+		}
+
+		// Strategy 4: Ads Manager per-advertiser invoices
+		try {
+			const accounts = await db
+				.select({
+					tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
+					accountName: table.tiktokAdsAccount.accountName
+				})
+				.from(table.tiktokAdsAccount)
+				.where(eq(table.tiktokAdsAccount.integrationId, session.integrationId));
+
+			const bcInvoiceIds = new Set(invoices.map(inv => inv.invoiceId));
+
+			for (const account of accounts) {
+				try {
+					const adsInvoices = await extractInvoicesFromAdsManager(page, account.tiktokAdvertiserId, account.accountName);
+					// Only add invoices not already found via BC
+					for (const inv of adsInvoices) {
+						if (!bcInvoiceIds.has(inv.invoiceId)) {
+							invoices.push(inv);
+							bcInvoiceIds.add(inv.invoiceId);
+						}
+					}
+				} catch (err) {
+					logError('tiktok-scraper', `[ADS-MANAGER] Failed for ${account.accountName}: ${err instanceof Error ? err.message : String(err)}`, {
+						tenantId: session.tenantId,
+						metadata: { advertiserId: account.tiktokAdvertiserId }
+					});
+				}
+			}
+			logInfo('tiktok-scraper', `Total after Ads Manager: ${invoices.length} invoices`, { tenantId: session.tenantId });
+		} catch (err) {
+			logError('tiktok-scraper', `Ads Manager scraping failed: ${err instanceof Error ? err.message : String(err)}`, {
 				tenantId: session.tenantId
 			});
 		}
