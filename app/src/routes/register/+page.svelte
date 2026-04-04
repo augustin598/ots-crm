@@ -36,7 +36,7 @@
 
 	// Step management
 	let currentStep = $state(1);
-	const totalSteps = invitationToken ? 2 : 3;
+	const totalSteps = $derived(invitationToken ? 2 : 3);
 
 	// Form fields
 	let email = $state('');
@@ -360,7 +360,7 @@
 							</p>
 						</div>
 					</div>
-					<div class="h-px w-8 bg-gray-300" />
+					<div class="h-px w-8 bg-gray-300"></div>
 					<!-- Step 2 -->
 					<div class="flex items-center">
 						<div
@@ -388,7 +388,7 @@
 						</div>
 					</div>
 					{#if !invitationToken}
-						<div class="h-px w-8 bg-gray-300" />
+						<div class="h-px w-8 bg-gray-300"></div>
 						<!-- Step 3 -->
 						<div class="flex items-center">
 							<div

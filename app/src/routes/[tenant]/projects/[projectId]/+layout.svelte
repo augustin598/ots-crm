@@ -14,7 +14,7 @@
 	const projectId = $derived(page.params.projectId ?? '');
 	const currentPath = $derived(page.url.pathname);
 
-	const projectQuery = getProject(projectId);
+	const projectQuery = $derived(getProject(projectId));
 	const project = $derived(projectQuery.current);
 
 	const breadcrumbItems = $derived([
@@ -23,12 +23,12 @@
 		{ label: project?.name || 'Project', href: `/${tenantSlug}/projects/${projectId}` }
 	]);
 
-	const tabs = [
+	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/projects/${projectId}` },
 		{ id: 'tasks', label: 'Tasks', href: `/${tenantSlug}/projects/${projectId}/tasks` },
 		{ id: 'documents', label: 'Documents', href: `/${tenantSlug}/projects/${projectId}/documents` },
 		{ id: 'invoices', label: 'Invoices', href: `/${tenantSlug}/projects/${projectId}/invoices` }
-	];
+	]);
 
 	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/projects/${projectId}`) return 'overview';

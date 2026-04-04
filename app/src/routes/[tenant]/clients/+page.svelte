@@ -430,8 +430,7 @@
 				role="link"
 			>
 				<!-- Section 1: Header -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="flex items-start gap-4 p-5 pb-3" onclick={(e) => e.stopPropagation()}>
+				<div class="flex items-start gap-4 p-5 pb-3" role="presentation" onclick={(e) => e.stopPropagation()}>
 					<ClientLogo website={client.defaultWebsiteUrl ?? client.website} name={client.name} size="sm" />
 					<div class="min-w-0 flex-1">
 						{#if editingClientId === client.id}
@@ -448,15 +447,14 @@
 								onclick={(e) => e.stopPropagation()}
 							/>
 						{:else}
-							<h3
-								class="font-semibold text-base text-foreground cursor-text hover:bg-muted/50 rounded px-1 -mx-1 py-0.5 transition-colors line-clamp-1"
+							<button
+								type="button"
+								class="font-semibold text-base text-foreground cursor-text hover:bg-muted/50 rounded px-1 -mx-1 py-0.5 transition-colors line-clamp-1 text-left w-full bg-transparent border-0 p-0"
 								onclick={() => startEditName(client)}
-								role="button"
-								tabindex="0"
 								onkeydown={(e) => e.key === 'Enter' && startEditName(client)}
 							>
 								{client.name}
-							</h3>
+							</button>
 						{/if}
 						<div class="flex items-center gap-1.5 mt-1 flex-wrap">
 							{#if client.status}

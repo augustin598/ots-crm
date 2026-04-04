@@ -12,7 +12,7 @@
 
 	import { CreditCard } from '@lucide/svelte';
 
-	const tabs = [
+	const tabs = $derived([
 		{ id: 'general', label: 'General', href: `/${tenantSlug}/settings`, icon: Settings },
 		{ id: 'account', label: 'Cont', href: `/${tenantSlug}/settings/account`, icon: UserCircle },
 		{ id: 'invoices', label: 'Invoices', href: `/${tenantSlug}/settings/invoices`, icon: Receipt },
@@ -21,7 +21,7 @@
 		{ id: 'banking', label: 'Banking', href: `/${tenantSlug}/settings/banking`, icon: CreditCard },
 		{ id: 'email', label: 'Email', href: `/${tenantSlug}/settings/email`, icon: Mail },
 		{ id: 'plugins', label: 'Plugins', href: `/${tenantSlug}/settings/plugins`, icon: Plug }
-	];
+	]);
 
 	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/settings` || currentPath === `/${tenantSlug}/settings/`) return 'general';
@@ -55,7 +55,8 @@
 		<TabsList class="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
 			{#each tabs as tab}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
-					<svelte:component this={tab.icon} class="h-4 w-4 mr-2" />
+					{@const TabIcon = tab.icon}
+					<TabIcon class="h-4 w-4 mr-2" />
 					{tab.label}
 				</TabsTrigger>
 			{/each}

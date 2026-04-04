@@ -36,21 +36,21 @@
 	let fromDate = $state<string>('');
 	let toDate = $state<string>('');
 
-	const transactionsQuery = getUserTransactions({
+	const transactionsQuery = $derived(getUserTransactions({
 		userId,
 		fromDate: fromDate || undefined,
 		toDate: toDate || undefined
-	});
+	}));
 	const transactions = $derived(transactionsQuery.current || []);
 
-	const spendingQuery = getUserSpending({
+	const spendingQuery = $derived(getUserSpending({
 		userId,
 		fromDate: fromDate || undefined,
 		toDate: toDate || undefined
-	});
+	}));
 	const spending = $derived(spendingQuery.current || { totalSpending: 0, transactionCount: 0, byCurrency: {} });
 
-	const bankAccountsQuery = getUserBankAccounts({ userId });
+	const bankAccountsQuery = $derived(getUserBankAccounts({ userId }));
 	const bankAccounts = $derived(bankAccountsQuery.current || []);
 
 	const accountsQuery = getBankAccounts();

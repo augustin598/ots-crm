@@ -498,6 +498,7 @@
 			</div>
 			<div
 				class="flex-1 space-y-3 min-h-[200px]"
+				role="list"
 				ondragover={(e) => handleDragOver(e, status, statusTasks.length)}
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, status, statusTasks.length)}

@@ -204,7 +204,7 @@
 
 <div class="space-y-2">
 	{#if label}
-		<label class="text-sm font-medium">{label}</label>
+		<label for="markdown-editor-textarea" class="text-sm font-medium">{label}</label>
 	{/if}
 
 	<div class="border rounded-lg overflow-hidden">
@@ -388,6 +388,7 @@
 			{#if !(showPreview && compact)}
 				<div class="relative" bind:this={editorWrapperRef}>
 					<textarea
+						id="markdown-editor-textarea"
 						bind:this={editorRef}
 						bind:value={value}
 						oninput={handleInput}
@@ -395,7 +396,7 @@
 						onpaste={onpaste}
 						placeholder={placeholder}
 						class="{compact ? 'min-h-[120px]' : 'min-h-[400px]'} resize-none border-0 rounded-none font-mono text-sm focus-visible:ring-0 w-full p-4 bg-transparent outline-none"
-					/>
+					></textarea>
 					{#if users.length > 0}
 						<MentionDropdown
 							{users}

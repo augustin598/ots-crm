@@ -66,11 +66,13 @@
 		<div
 			bind:this={previewRef}
 			contenteditable="true"
+			role="textbox"
+			aria-multiline="true"
+			tabindex="0"
 			class="document-preview-container min-h-full p-8"
 			oninput={handleContentChange}
 			onmouseup={handleSelection}
 			onkeyup={handleSelection}
-			
 		>
 			{@html renderedHTML}
 		</div>

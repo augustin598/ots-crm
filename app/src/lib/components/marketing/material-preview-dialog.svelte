@@ -124,7 +124,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="{material?.type === 'video' ? 'sm:max-w-4xl p-0 overflow-hidden' : (isDocPdf || isDocx) ? 'sm:max-w-5xl p-0 overflow-hidden' : 'sm:max-w-2xl max-h-[85vh] overflow-y-auto'}">
+	<Dialog.Content class={material?.type === 'video' ? 'sm:max-w-4xl p-0 overflow-hidden' : (isDocPdf || isDocx) ? 'sm:max-w-5xl p-0 overflow-hidden' : 'sm:max-w-2xl max-h-[85vh] overflow-y-auto'}>
 		{#if material?.type === 'video' && presignedUrl}
 			<!-- Video preview -->
 			<!-- svelte-ignore a11y_media_has_caption -->

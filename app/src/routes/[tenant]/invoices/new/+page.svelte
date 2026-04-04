@@ -181,10 +181,8 @@
 	let invoiceSeries = $state('');
 	let invoiceNumber = $state('');
 	// Initialize currency from settings if available, otherwise use first available currency
-	let currency = $state<Currency>((invoiceSettings?.defaultCurrency as Currency) || CURRENCIES[0]);
-	let invoiceCurrency = $state<Currency>(
-		(invoiceSettings?.defaultCurrency as Currency) || CURRENCIES[0]
-	);
+	let currency = $state<Currency>(CURRENCIES[0]);
+	let invoiceCurrency = $state<Currency>(CURRENCIES[0]);
 	let issueDate = $state(new Date().toISOString().split('T')[0]);
 	let issueDateValue = $state<DateValue | undefined>((() => { const d = new Date(); return new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate()); })());
 	let issueDateOpen = $state(false);

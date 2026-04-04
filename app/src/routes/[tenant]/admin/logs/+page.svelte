@@ -952,7 +952,7 @@
 
 						{#each paginatedDebugLogsResolved as log (log.id)}
 							<Collapsible>
-								<Card class="{log.resolved ? 'opacity-60' : ''}">
+								<Card class={log.resolved ? 'opacity-60' : ''}>
 									<CardContent class="pt-4 pb-4">
 										<div class="flex items-start justify-between gap-4">
 											<div class="flex items-start gap-3 flex-1 min-w-0">

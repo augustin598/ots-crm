@@ -155,6 +155,7 @@
 			<!-- Column body -->
 			<div
 				class="flex-1 space-y-2 min-h-[200px] rounded-lg p-2 transition-colors {dragOverStatus === status ? 'bg-muted/60 ring-2 ring-primary/30' : 'bg-muted/20'}"
+				role="list"
 				ondragover={(e) => handleDragOver(e, status)}
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, status)}

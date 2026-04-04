@@ -13,10 +13,10 @@
 	const loading = $derived(workHoursQuery.loading);
 	const error = $derived(workHoursQuery.error);
 
-	let workStartTime = $state(workHours?.workStartTime || '09:00');
-	let workEndTime = $state(workHours?.workEndTime || '17:00');
-	let workDays = $state<string[]>(workHours?.workDays || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
-	let remindersEnabled = $state(workHours?.remindersEnabled ?? true);
+	let workStartTime = $state('09:00');
+	let workEndTime = $state('17:00');
+	let workDays = $state<string[]>(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
+	let remindersEnabled = $state(true);
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
 	let saveSuccess = $state(false);

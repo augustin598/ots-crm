@@ -12,7 +12,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const templateId = $derived(page.params.templateId || '');
 
-	const templateQuery = getDocumentTemplate(templateId);
+	const templateQuery = $derived(getDocumentTemplate(templateId));
 	const template = $derived(templateQuery.current);
 	const loading = $derived(templateQuery.loading);
 

@@ -38,10 +38,10 @@
 	let selectedClientId = $state<string | undefined>(undefined);
 
 	// Fetch data
-	const documentsQuery = getDocuments({
+	const documentsQuery = $derived(getDocuments({
 		clientId: selectedClientId,
 		projectId: undefined
-	});
+	}));
 	const documents = $derived(documentsQuery.current || []);
 
 	const clientsQuery = getClients();

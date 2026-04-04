@@ -17,13 +17,17 @@
 
 	const isResetSuccess = $derived(resetParam === 'success');
 
-	let loginMethod = $state<'password' | 'magic-link' | 'reset-password'>(
-		resetParam === '1' ? 'reset-password' : 'password'
-	);
+	let loginMethod = $state<'password' | 'magic-link' | 'reset-password'>('password');
+	$effect(() => {
+		loginMethod = resetParam === '1' ? 'reset-password' : 'password';
+	});
 	let email = $state('');
 	let password = $state('');
 	let loading = $state(false);
-	let error = $state<string | null>(urlError ? decodeURIComponent(urlError) : null);
+	let error = $state<string | null>(null);
+	$effect(() => {
+		error = urlError ? decodeURIComponent(urlError) : null;
+	});
 	let success = $state<string | null>(null);
 
 	async function handlePasswordLogin(e: SubmitEvent) {

@@ -12,7 +12,7 @@
 
 	const token = $derived(page.params.token || '');
 
-	let email = $state(data.invitation?.email || '');
+	let email = $state('');
 	let firstName = $state('');
 	let lastName = $state('');
 	let password = $state('');

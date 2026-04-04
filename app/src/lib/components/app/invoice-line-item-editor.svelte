@@ -53,7 +53,10 @@
 	let newItemName = $state('');
 	let newItemCode = $state('');
 	let newItemDescription = $state('');
-	let newItemVatRate = $state(String(defaultTaxRate));
+	let newItemVatRate = $state('19');
+	$effect(() => {
+		newItemVatRate = String(defaultTaxRate);
+	});
 	let createItemError = $state<string | null>(null);
 
 	function updateItem(id: string, field: keyof LineItem, value: any) {

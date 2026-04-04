@@ -17,7 +17,7 @@
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
 
-	const invoicesQuery = getInvoices({ clientId });
+	const invoicesQuery = $derived(getInvoices({ clientId }));
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
 

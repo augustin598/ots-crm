@@ -17,7 +17,10 @@
 		children: import('svelte').Snippet;
 	} = $props();
 
-	let isOpen = $state(defaultOpen);
+	let isOpen = $state(false);
+	$effect(() => {
+		isOpen = defaultOpen;
+	});
 </script>
 
 <Collapsible bind:open={isOpen} class="border rounded-lg bg-card">

@@ -569,12 +569,13 @@
 							isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 bg-muted/50',
 							!uploading && 'cursor-pointer hover:border-primary/50'
 						)}
+						role="button"
+						tabindex="0"
 						ondragover={handleDragOver}
 						ondragleave={handleDragLeave}
 						ondrop={handleDrop}
 						onclick={() => !uploading && fileInputRef?.click()}
-						role="button"
-						tabindex="0"
+						onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !uploading) { e.preventDefault(); fileInputRef?.click(); } }}
 					>
 						<input
 							bind:this={fileInputRef}

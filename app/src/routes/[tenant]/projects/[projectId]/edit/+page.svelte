@@ -22,7 +22,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const projectId = $derived(page.params.projectId ?? '');
 
-	const projectQuery = getProject(projectId);
+	const projectQuery = $derived(getProject(projectId));
 	const project = $derived(projectQuery.current);
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);

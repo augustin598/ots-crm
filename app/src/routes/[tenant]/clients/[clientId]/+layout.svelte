@@ -27,15 +27,15 @@
 	const clientId = $derived(page.params.clientId as string);
 	const currentPath = $derived(page.url.pathname);
 
-	const clientQuery = getClient(clientId);
+	const clientQuery = $derived(getClient(clientId));
 	const client = $derived(clientQuery.current);
 
 	// Counts for tabs
-	const projectsQuery = getProjects(clientId);
+	const projectsQuery = $derived(getProjects(clientId));
 	const projects = $derived(projectsQuery.current || []);
-	const invoicesQuery = getInvoices({ clientId });
+	const invoicesQuery = $derived(getInvoices({ clientId }));
 	const invoices = $derived(invoicesQuery.current || []);
-	const contractsQuery = getContracts({ clientId });
+	const contractsQuery = $derived(getContracts({ clientId }));
 	const contracts = $derived(contractsQuery.current?.contracts || []);
 
 	const breadcrumbItems = $derived([

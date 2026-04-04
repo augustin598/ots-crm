@@ -17,8 +17,8 @@
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
-	let since = $state(data.since as string);
-	let until = $state(data.until as string);
+	let since = $state('');
+	let until = $state('');
 
 	// Keep in sync when server data updates after navigation
 	$effect(() => {

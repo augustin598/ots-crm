@@ -34,7 +34,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const invoiceId = $derived(page.params.invoiceId || '');
 
-	const invoiceQuery = getInvoice(invoiceId);
+	const invoiceQuery = $derived(getInvoice(invoiceId));
 	const invoice = $derived(invoiceQuery.current);
 	const loading = $derived(invoiceQuery.loading);
 

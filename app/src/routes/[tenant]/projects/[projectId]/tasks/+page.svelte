@@ -179,7 +179,7 @@
 		</DialogHeader>
 		<div class="grid gap-4 py-4">
 			<div class="grid gap-2">
-				<label class="text-sm font-medium">Status</label>
+				<p class="text-sm font-medium">Status</p>
 				<Select type="single" bind:value={newStatus}>
 					<SelectTrigger>
 						{#if newStatus === 'todo'}

@@ -262,7 +262,7 @@
 	let formTargetUrl = $state('');
 	let formArticlePublishedAt = $state<string | null>(null);
 	let formPrice = $state('');
-	let formCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
+	let formCurrency = $state<Currency>('RON');
 	let formAnchorText = $state('');
 	let formProjectId = $state('');
 	let formNotes = $state('');
@@ -3197,7 +3197,7 @@
 								<TableCell class="px-3 py-3.5 max-w-[180px] align-middle whitespace-normal">
 									{@const elLinks = parseExtractedLinks(link)}
 									{#if editingKeywordId === link.id}
-										<div onclick={(e) => e.stopPropagation()}>
+										<div role="presentation" onclick={(e) => e.stopPropagation()}>
 											<Input
 												type="text"
 												class="h-8 w-full text-[13px] px-2"
@@ -3370,7 +3370,7 @@
 								</TableCell>
 								<TableCell class="px-3 py-3.5 text-[13px] align-middle">
 									{#if editingPriceId === link.id}
-										<div class="flex items-center gap-1.5" onclick={(e) => e.stopPropagation()}>
+										<div class="flex items-center gap-1.5" role="presentation" onclick={(e) => e.stopPropagation()}>
 											<Input
 												type="number"
 												inputmode="decimal"

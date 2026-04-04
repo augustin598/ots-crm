@@ -46,7 +46,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
 
-	const clientQuery = getClient(clientId as string);
+	const clientQuery = $derived(getClient(clientId as string));
 	const client = $derived(clientQuery.current);
 	const loading = $derived(clientQuery.loading);
 

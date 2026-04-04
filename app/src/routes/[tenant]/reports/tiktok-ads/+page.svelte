@@ -680,9 +680,10 @@
 											</div>
 											{#if true}
 												{@const objConfig = getObjectiveConfig(campaign.objective)}
+												{@const ObjIcon = objConfig.icon}
 												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
 													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
-														<svelte:component this={objConfig.icon} class="h-3 w-3" />
+														<ObjIcon class="h-3 w-3" />
 														{objConfig.label}
 													</span>
 													{#if campaign.createTime}

@@ -45,32 +45,59 @@
 
 	let { data }: { data: PageData } = $props();
 
-	let name = $state(data.tenant?.name || '');
-	let slug = $state(data.tenant?.slug || '');
-	let website = $state(data.tenant?.website || '');
+	let name = $state('');
+	let slug = $state('');
+	let website = $state('');
 	let loading = $state(false);
 	let loadingAnaf = $state(false);
 	let error = $state<string | null>(null);
 
 	// Romanian legal data
-	let companyType = $state(data.tenant?.companyType || '');
-	let cui = $state(data.tenant?.cui || '');
-	let registrationNumber = $state(data.tenant?.registrationNumber || '');
-	let tradeRegister = $state(data.tenant?.tradeRegister || '');
-	let vatNumber = $state(data.tenant?.vatNumber || '');
-	let legalRepresentative = $state(data.tenant?.legalRepresentative || '');
-	let iban = $state(data.tenant?.iban || '');
-	let ibanEuro = $state(data.tenant?.ibanEuro || '');
-	let bankName = $state(data.tenant?.bankName || '');
-	let address = $state(data.tenant?.address || '');
-	let city = $state(data.tenant?.city || '');
-	let county = $state(data.tenant?.county || '');
-	let postalCode = $state(data.tenant?.postalCode || '');
-	let country = $state(data.tenant?.country || 'România');
-	let phone = $state(data.tenant?.phone || '');
-	let email = $state(data.tenant?.email || '');
-	let contractPrefix = $state(data.tenant?.contractPrefix || 'CTR');
-	let themeColor = $state(data.tenant?.themeColor || DEFAULT_THEME_COLOR);
+	let companyType = $state('');
+	let cui = $state('');
+	let registrationNumber = $state('');
+	let tradeRegister = $state('');
+	let vatNumber = $state('');
+	let legalRepresentative = $state('');
+	let iban = $state('');
+	let ibanEuro = $state('');
+	let bankName = $state('');
+	let address = $state('');
+	let city = $state('');
+	let county = $state('');
+	let postalCode = $state('');
+	let country = $state('România');
+	let phone = $state('');
+	let email = $state('');
+	let contractPrefix = $state('CTR');
+	let themeColor = $state(DEFAULT_THEME_COLOR);
+
+	// Sync from page data
+	$effect(() => {
+		const t = data.tenant;
+		if (!t) return;
+		name = t.name || '';
+		slug = t.slug || '';
+		website = t.website || '';
+		companyType = t.companyType || '';
+		cui = t.cui || '';
+		registrationNumber = t.registrationNumber || '';
+		tradeRegister = t.tradeRegister || '';
+		vatNumber = t.vatNumber || '';
+		legalRepresentative = t.legalRepresentative || '';
+		iban = t.iban || '';
+		ibanEuro = t.ibanEuro || '';
+		bankName = t.bankName || '';
+		address = t.address || '';
+		city = t.city || '';
+		county = t.county || '';
+		postalCode = t.postalCode || '';
+		country = t.country || 'România';
+		phone = t.phone || '';
+		email = t.email || '';
+		contractPrefix = t.contractPrefix || 'CTR';
+		themeColor = t.themeColor || DEFAULT_THEME_COLOR;
+	});
 
 	// Live preview: update CSS variable immediately on color change
 	$effect(() => {

@@ -790,7 +790,7 @@
 		</DialogHeader>
 		<div class="space-y-4 py-2">
 			<div>
-				<label class="block text-sm font-medium mb-2">Semnătură <span class="text-red-500">*</span></label>
+				<p class="block text-sm font-medium mb-2">Semnătură <span class="text-red-500">*</span></p>
 				<SignaturePad
 					bind:this={prestatorPadRef}
 					onchange={(url) => { prestatorSignatureDataUrl = url; }}

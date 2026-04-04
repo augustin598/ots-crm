@@ -83,8 +83,11 @@
 	const allTasks = $derived(allTasksQuery.current || []);
 
 	// Filter params for create task dialog - provide empty object for context
-	const filterParams = $derived({
-		assignee: currentUser?.id || ''
+	let filterParams = $state({
+		assignee: ''
+	});
+	$effect(() => {
+		filterParams.assignee = currentUser?.id || '';
 	});
 
 	// Provide filterParams via context so create task dialog can access it
@@ -453,7 +456,10 @@
 					{#each allTasks as task}
 						<div
 							class="p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
+							role="button"
+							tabindex="0"
 							onclick={() => handleAssignTask(task)}
+							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleAssignTask(task); } }}
 						>
 							<div class="flex items-start justify-between gap-2">
 								<div class="flex-1 min-w-0">
@@ -521,11 +527,14 @@
 					{#each selectedDayTasksForDialog as task}
 						<div
 							class="p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
+							role="button"
+							tabindex="0"
 							onclick={() => {
 								isDayDialogOpen = false;
 								selectedTask = task;
 								isTaskDetailOpen = true;
 							}}
+							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); isDayDialogOpen = false; selectedTask = task; isTaskDetailOpen = true; } }}
 						>
 							<div class="flex items-start justify-between gap-2">
 								<div class="flex-1 min-w-0">

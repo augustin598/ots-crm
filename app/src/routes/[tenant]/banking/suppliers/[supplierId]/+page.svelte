@@ -14,11 +14,11 @@
 	const tenantSlug = $derived(page.params.tenant as string);
 	const supplierId = $derived(page.params.supplierId as string);
 
-	const supplierQuery = getSupplier(supplierId);
+	const supplierQuery = $derived(getSupplier(supplierId));
 	const supplier = $derived(supplierQuery.current);
 	const loading = $derived(supplierQuery.loading);
 
-	const expensesQuery = getExpenses({ supplierId });
+	const expensesQuery = $derived(getExpenses({ supplierId }));
 	const expenses = $derived(expensesQuery.current || []);
 
 	let isEditing = $state(false);

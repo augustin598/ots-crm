@@ -38,7 +38,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const clientId = $derived(page.params.clientId);
 
-	const contractsQuery = getContracts({ clientId });
+	const contractsQuery = $derived(getContracts({ clientId }));
 	const contracts = $derived(contractsQuery.current?.contracts || []);
 	const loading = $derived(contractsQuery.loading);
 
@@ -47,7 +47,7 @@
 	let extractionReport = $state<{ extracted: Record<string, string>; updated: Record<string, string>; skipped: Record<string, string> } | null>(null);
 	let updatingSkipped = $state(false);
 
-	const clientQuery = getClient(clientId as string);
+	const clientQuery = $derived(getClient(clientId as string));
 
 	async function handleUpdateSkippedFields() {
 		if (!extractionReport || Object.keys(extractionReport.skipped).length === 0) return;
@@ -363,12 +363,13 @@
 							isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 bg-muted/50',
 							!uploading && 'cursor-pointer hover:border-primary/50'
 						)}
+						role="button"
+						tabindex="0"
 						ondragover={handleDragOver}
 						ondragleave={handleDragLeave}
 						ondrop={handleDrop}
 						onclick={() => !uploading && fileInputRef?.click()}
-						role="button"
-						tabindex="0"
+						onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !uploading) { e.preventDefault(); fileInputRef?.click(); } }}
 					>
 						<input
 							bind:this={fileInputRef}

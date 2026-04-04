@@ -13,13 +13,13 @@
 	const loading = $derived(settingsQuery.loading);
 	const error = $derived(settingsQuery.error);
 
-	let smtpHost = $state(settings?.smtpHost || '');
-	let smtpPort = $state(settings?.smtpPort || 587);
-	let smtpSecure = $state(settings?.smtpSecure || false);
-	let smtpUser = $state(settings?.smtpUser || '');
+	let smtpHost = $state('');
+	let smtpPort = $state(587);
+	let smtpSecure = $state(false);
+	let smtpUser = $state('');
 	let smtpPassword = $state('');
-	let smtpFrom = $state(settings?.smtpFrom || '');
-	let isEnabled = $state(settings?.isEnabled ?? true);
+	let smtpFrom = $state('');
+	let isEnabled = $state(true);
 	let saving = $state(false);
 	let testing = $state(false);
 	let saveError = $state<string | null>(null);

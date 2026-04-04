@@ -13,12 +13,12 @@
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
 
-	const projectsQuery = getProjects(clientId);
+	const projectsQuery = $derived(getProjects(clientId));
 	const projects = $derived(projectsQuery.current || []);
 	const loading = $derived(projectsQuery.loading);
 
 	// Get all tasks for this client to compute progress per project
-	const tasksQuery = getTasks({ clientId });
+	const tasksQuery = $derived(getTasks({ clientId }));
 	const tasks = $derived(tasksQuery.current || []);
 
 	function getProjectProgress(projectId: string) {
@@ -64,7 +64,7 @@
 								<div
 									class="h-full bg-primary"
 									style={`width: ${getProjectProgress(project.id)}%`}
-								/>
+								></div>
 							</div>
 						</div>
 						<div class="flex items-center justify-between pt-2 border-t">

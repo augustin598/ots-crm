@@ -39,7 +39,7 @@
 	});
 
 	// Fetch data
-	const templatesQuery = getDocumentTemplates({ type: templateTypeFilter });
+	const templatesQuery = $derived(getDocumentTemplates({ type: templateTypeFilter }));
 	const templates = $derived(templatesQuery.current || []);
 
 	const clientsQuery = getClients();

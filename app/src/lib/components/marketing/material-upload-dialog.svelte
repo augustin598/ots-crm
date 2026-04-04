@@ -44,7 +44,10 @@
 	let seoLinkId = $state('');
 	let tags = $state<ColorTag[]>([]);
 	let textContent = $state('');
-	let materialType = $state<'file' | 'text' | 'url'>(initialType || 'file');
+	let materialType = $state<'file' | 'text' | 'url'>('file');
+	$effect(() => {
+		materialType = initialType || 'file';
+	});
 
 	$effect(() => {
 		if (open && initialType) {

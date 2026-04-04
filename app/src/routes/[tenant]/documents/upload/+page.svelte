@@ -216,10 +216,13 @@
 								loading && 'opacity-50 cursor-not-allowed',
 								!loading && 'cursor-pointer hover:border-primary/50'
 							)}
+							role="button"
+							tabindex={loading ? -1 : 0}
 							ondragover={handleDragOver}
 							ondragleave={handleDragLeave}
 							ondrop={handleDrop}
 							onclick={() => !loading && fileInput?.click()}
+							onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !loading) { e.preventDefault(); fileInput?.click(); } }}
 						>
 							<input
 								bind:this={fileInput}

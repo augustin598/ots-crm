@@ -296,6 +296,17 @@
 								window.location.href = link;
 							}
 						}}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								const link = resolveLink(notif.link);
+								if (link) {
+									if (!notif.isRead) markOneRead(notif.id);
+									open = false;
+									window.location.href = link;
+								}
+							}
+						}}
 						role="button"
 						tabindex="0"
 					>

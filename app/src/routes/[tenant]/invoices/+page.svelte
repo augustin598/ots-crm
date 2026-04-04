@@ -149,7 +149,7 @@ import { goto } from '$app/navigation';
 	let recurringServiceId = $state('');
 	let recurringAmount = $state('');
 	let recurringTaxRate = $state('19');
-	let recurringCurrency = $state<Currency>((invoiceSettings?.defaultCurrency || 'RON') as Currency);
+	let recurringCurrency = $state<Currency>('RON');
 	let recurringType = $state<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
 	let recurringInterval = $state('1');
 	let recurringStartDate = $state(new Date().toISOString().split('T')[0]);

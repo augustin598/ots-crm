@@ -307,7 +307,10 @@
 							{#each newPreviews as preview}
 								<div
 									class="border rounded-md p-3 flex items-start gap-3 hover:bg-muted/25 cursor-pointer"
+									role="button"
+									tabindex="0"
 									onclick={() => toggleSelect(preview.gmailMessageId)}
+									onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(preview.gmailMessageId); } }}
 								>
 									<Checkbox
 										checked={selectedIds.has(preview.gmailMessageId)}

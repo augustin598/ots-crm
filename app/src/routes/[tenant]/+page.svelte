@@ -145,7 +145,7 @@
 					{#each data.recentActivity as activity}
 						<a href="{activity.link}">
 							<div class="flex items-start gap-3 pb-4 border-b last:border-0 last:pb-0 cursor-pointer hover:bg-accent/50 -mx-2 px-2 py-2 rounded transition-colors">
-								<div class="mt-1 h-2 w-2 rounded-full bg-primary" />
+								<div class="mt-1 h-2 w-2 rounded-full bg-primary"></div>
 								<div class="flex-1">
 									<p class="text-sm font-medium">{activity.action}</p>
 									<p class="text-sm text-muted-foreground">{activity.detail}</p>

@@ -52,7 +52,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const projectId = $derived(page.params.projectId as string);
 
-	const projectQuery = getProject(projectId);
+	const projectQuery = $derived(getProject(projectId));
 	const project = $derived(projectQuery.current);
 	const loading = $derived(projectQuery.loading);
 
@@ -61,10 +61,10 @@
 	);
 	const client = $derived(clientQuery?.current);
 
-	const tasksQuery = getTasks({ projectId });
+	const tasksQuery = $derived(getTasks({ projectId }));
 	const tasks = $derived(tasksQuery.current || []);
 
-	const milestonesQuery = getMilestones(projectId);
+	const milestonesQuery = $derived(getMilestones(projectId));
 	const milestones = $derived(milestonesQuery.current || []);
 
 	// Get team members for the project
@@ -442,7 +442,7 @@
 					{@const milestoneTasks = getTasksForMilestone(milestone.id)}
 					<div class="relative">
 						{#if index !== milestones.length - 1}
-							<div class="absolute left-6 top-12 h-full w-0.5 bg-border" />
+							<div class="absolute left-6 top-12 h-full w-0.5 bg-border"></div>
 						{/if}
 						<div class="flex gap-4">
 							<div

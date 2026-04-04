@@ -19,7 +19,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	let selectedType = $state<string | undefined>(undefined);
 
-	const templatesQuery = getDocumentTemplates({ type: selectedType });
+	const templatesQuery = $derived(getDocumentTemplates({ type: selectedType }));
 	const templates = $derived(templatesQuery.current || []);
 	const loading = $derived(templatesQuery.loading);
 

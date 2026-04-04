@@ -1,17 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
-	let { 
+	let {
 		delay = 0,
 		duration = 600,
 		opacity = 0,
-		class: className = ''
+		class: className = '',
+		children
 	}: {
 		delay?: number;
 		duration?: number;
 		opacity?: number;
 		class?: string;
+		children: Snippet;
 	} = $props();
 
 	let element: HTMLElement;
@@ -51,11 +54,11 @@
 		<span
 			transition:fade={{ duration, delay }}
 		>
-			<slot />
+			{@render children()}
 		</span>
 	{:else}
 		<span style="opacity: {opacity};">
-			<slot />
+			{@render children()}
 		</span>
 	{/if}
 </span>

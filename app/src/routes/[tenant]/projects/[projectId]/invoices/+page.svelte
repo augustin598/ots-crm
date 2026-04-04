@@ -20,7 +20,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const projectId = $derived(page.params.projectId);
 
-	const invoicesQuery = getInvoices({ projectId });
+	const invoicesQuery = $derived(getInvoices({ projectId }));
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
 

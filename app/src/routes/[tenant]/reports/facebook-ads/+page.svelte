@@ -983,9 +983,10 @@
 											</div>
 											{#if true}
 												{@const objConfig = getObjectiveConfig(campaign.objective)}
+												{@const ObjIcon = objConfig.icon}
 												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
 													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
-														<svelte:component this={objConfig.icon} class="h-3 w-3" />
+														<ObjIcon class="h-3 w-3" />
 														{objConfig.label}
 													</span>
 													{#if campaign.startTime}
@@ -1177,7 +1178,7 @@
 		</Dialog.Header>
 		<div class="space-y-4 py-4">
 			<div class="space-y-2">
-				<label class="text-sm font-medium">Tip buget</label>
+				<p class="text-sm font-medium">Tip buget</p>
 				<div class="flex gap-2">
 					<Button
 						variant={budgetEditCampaign?.budgetType === 'daily' ? 'default' : 'outline'}
@@ -1192,8 +1193,9 @@
 				</div>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-medium">Sumă ({selectedCurrency})</label>
+				<label for="budget-amount-input" class="text-sm font-medium">Sumă ({selectedCurrency})</label>
 				<Input
+					id="budget-amount-input"
 					type="number"
 					min="1"
 					step="0.01"

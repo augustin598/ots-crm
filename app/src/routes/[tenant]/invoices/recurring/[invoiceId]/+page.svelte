@@ -123,10 +123,8 @@
 	let invoiceSeries = $state('');
 	let invoiceNumber = $state('');
 	// Initialize currency from settings if available, otherwise use first available currency
-	let currency = $state<Currency>((invoiceSettings?.defaultCurrency as Currency) || CURRENCIES[0]);
-	let invoiceCurrency = $state<Currency>(
-		(invoiceSettings?.defaultCurrency as Currency) || CURRENCIES[0]
-	);
+	let currency = $state<Currency>(CURRENCIES[0]);
+	let invoiceCurrency = $state<Currency>(CURRENCIES[0]);
 	let issueDate = $state(new Date().toISOString().split('T')[0]);
 	let dueDate = $state('');
 	let paymentTerms = $state('Net 15');

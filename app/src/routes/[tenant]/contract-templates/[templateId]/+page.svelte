@@ -25,7 +25,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const templateId = $derived(page.params.templateId ?? '');
 
-	const templateQuery = getContractTemplate(templateId);
+	const templateQuery = $derived(getContractTemplate(templateId));
 	const template = $derived(templateQuery.current);
 	const loadingTemplate = $derived(templateQuery.loading);
 

@@ -162,15 +162,12 @@
 	let docPreviewLoading = $state(false);
 
 	// Reset URLs when material changes
-	let prevMaterialId = $state(material.id);
 	$effect(() => {
-		if (material.id !== prevMaterialId) {
-			prevMaterialId = material.id;
-			attachedImgUrl = null;
-			attachedImgLoading = false;
-			docPreviewUrl = null;
-			docPreviewLoading = false;
-		}
+		const _id = material.id;
+		attachedImgUrl = null;
+		attachedImgLoading = false;
+		docPreviewUrl = null;
+		docPreviewLoading = false;
 	});
 
 	// Load first attached image as thumbnail for document materials
@@ -244,10 +241,13 @@
 
 <Card class="group overflow-hidden transition-all hover:shadow-md border-l-4 {colors.border}">
 	<!-- Thumbnail area -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div
-		class="relative aspect-video bg-muted flex items-center justify-center overflow-hidden {onPreview ? 'cursor-pointer' : ''}"
+		class="relative aspect-video bg-muted flex items-center justify-center overflow-hidden {onPreview && material.type !== 'video' ? 'cursor-pointer' : ''}"
+		role={onPreview && material.type !== 'video' ? 'button' : undefined}
+		tabindex={onPreview && material.type !== 'video' ? 0 : undefined}
 		onclick={() => { if (onPreview && material.type !== 'video') onPreview(material); }}
+		onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && onPreview && material.type !== 'video') { e.preventDefault(); onPreview(material); } }}
 	>
 		{#if material.type === 'video' && videoPlaying && videoUrl}
 			<!-- svelte-ignore a11y_media_has_caption -->

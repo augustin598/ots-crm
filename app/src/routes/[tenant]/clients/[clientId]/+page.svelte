@@ -29,18 +29,18 @@
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
 
-	const clientQuery = getClient(clientId);
+	const clientQuery = $derived(getClient(clientId));
 	const client = $derived(clientQuery.current);
 	const loading = $derived(clientQuery.loading);
 	const error = $derived(clientQuery.error);
 
-	const projectsQuery = getProjects(clientId);
+	const projectsQuery = $derived(getProjects(clientId));
 	const projects = $derived(projectsQuery.current || []);
 
-	const invoicesQuery = getInvoices({ clientId });
+	const invoicesQuery = $derived(getInvoices({ clientId }));
 	const invoices = $derived(invoicesQuery.current || []);
 
-	const documentsQuery = getDocuments({ clientId });
+	const documentsQuery = $derived(getDocuments({ clientId }));
 	const documents = $derived(documentsQuery.current || []);
 	const contracts = $derived(documents.filter((d) => d.type === 'contract'));
 
@@ -56,7 +56,7 @@
 			.slice(0, 3)
 	);
 
-	const creditQuery = getClientCredit(clientId);
+	const creditQuery = $derived(getClientCredit(clientId));
 	const credit = $derived(creditQuery.current);
 
 	const invoiceSettingsQuery = getInvoiceSettings();

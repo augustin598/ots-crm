@@ -409,9 +409,10 @@
 											</div>
 											{#if true}
 												{@const chConfig = getChannelConfig(campaign.channelType)}
+												{@const ChIcon = chConfig.icon}
 												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
 													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {chConfig.color}">
-														<svelte:component this={chConfig.icon} class="h-3 w-3" />
+														<ChIcon class="h-3 w-3" />
 														{chConfig.label}
 													</span>
 													{#if campaign.startDate}
