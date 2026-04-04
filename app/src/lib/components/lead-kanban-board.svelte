@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { Card } from '$lib/components/ui/card';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { Button } from '$lib/components/ui/button';
+	import EllipsisVerticalIcon from '@lucide/svelte/icons/ellipsis-vertical';
 	import { toast } from 'svelte-sonner';
 	import {
 		LEAD_STATUSES,
@@ -20,8 +23,8 @@
 
 	let { leads, readonly, tenantSlug, onLeadClick, onStatusChange }: Props = $props();
 
-	// Optimistic updates
-	let optimisticLeads = $state<any[]>(leads);
+	// Optimistic updates — initialized and synced from prop
+	let optimisticLeads = $state<any[]>([]);
 
 	$effect(() => {
 		optimisticLeads = leads;
@@ -110,7 +113,6 @@
 		}
 
 		const leadId = draggedLead.id;
-		const oldStatus = draggedFromStatus;
 
 		// Optimistic update
 		optimisticLeads = optimisticLeads.map((l) =>
@@ -180,18 +182,41 @@
 								<p class="text-xs text-muted-foreground truncate">{lead.phoneNumber}</p>
 							{/if}
 
-							<!-- Form name badge + date -->
+							<!-- Form name badge + date + status menu -->
 							<div class="flex items-center justify-between gap-2 mt-2">
 								{#if lead.formName}
-									<span class="inline-flex items-center text-[10px] font-medium bg-muted px-1.5 py-0.5 rounded truncate max-w-[140px]">
+									<span class="inline-flex items-center text-[10px] font-medium bg-muted px-1.5 py-0.5 rounded truncate max-w-[120px]">
 										{lead.formName}
 									</span>
 								{:else}
 									<span></span>
 								{/if}
-								<span class="text-[10px] text-muted-foreground whitespace-nowrap">
-									{formatLeadDate(lead.externalCreatedAt)}
-								</span>
+								<div class="flex items-center gap-1">
+									<span class="text-[10px] text-muted-foreground whitespace-nowrap">
+										{formatLeadDate(lead.externalCreatedAt)}
+									</span>
+									{#if !readonly && onStatusChange}
+										<!-- svelte-ignore a11y_click_events_have_key_events -->
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div onclick={(e) => e.stopPropagation()}>
+											<DropdownMenu.Root>
+												<DropdownMenu.Trigger>
+													<Button variant="ghost" size="sm" class="h-5 w-5 p-0">
+														<EllipsisVerticalIcon class="h-3 w-3" />
+													</Button>
+												</DropdownMenu.Trigger>
+												<DropdownMenu.Content align="end">
+													{#each LEAD_STATUSES.filter((s) => s !== status) as targetStatus (targetStatus)}
+														<DropdownMenu.Item onclick={() => onStatusChange(lead.id, targetStatus)}>
+															<span class="h-2 w-2 rounded-full {LEAD_STATUS_DOT_COLORS[targetStatus]} mr-2 inline-block"></span>
+															{LEAD_STATUS_LABELS[targetStatus]}
+														</DropdownMenu.Item>
+													{/each}
+												</DropdownMenu.Content>
+											</DropdownMenu.Root>
+										</div>
+									{/if}
+								</div>
 							</div>
 						</div>
 					</Card>

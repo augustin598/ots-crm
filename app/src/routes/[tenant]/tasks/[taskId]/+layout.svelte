@@ -14,7 +14,7 @@
 	const taskId = $derived(page.params.taskId!);
 	const currentPath = $derived(page.url.pathname);
 
-	const taskQuery = getTask(taskId);
+	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current);
 
 	const breadcrumbItems = $derived([
@@ -23,10 +23,10 @@
 		{ label: task?.title || 'Task', href: `/${tenantSlug}/tasks/${taskId}` }
 	]);
 
-	const tabs = [
+	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/tasks/${taskId}` },
 		{ id: 'documents', label: 'Documents', href: `/${tenantSlug}/tasks/${taskId}/documents` }
-	];
+	]);
 
 	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/tasks/${taskId}`) return 'overview';

@@ -19,7 +19,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId);
 
-	const documentsQuery = getDocuments({ taskId } as any);
+	const documentsQuery = $derived(getDocuments({ taskId } as any));
 	const documents = $derived(documentsQuery.current || []);
 	const loading = $derived(documentsQuery.loading);
 

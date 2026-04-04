@@ -5,7 +5,6 @@
 	import { parseAsString, parseAsStringEnum, parseAsInteger } from 'nuqs-svelte';
 	import * as Table from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Select from '$lib/components/ui/select';
@@ -21,7 +20,7 @@
 	import TableIcon from '@lucide/svelte/icons/table';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import LeadKanbanBoard from '$lib/components/lead-kanban-board.svelte';
-	import { LEAD_STATUS_LABELS, LEAD_STATUS_COLORS } from '$lib/components/lead-kanban-utils';
+	import { LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, type LeadStatus } from '$lib/components/lead-kanban-utils';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import {
 		getLeads,
@@ -33,6 +32,7 @@
 		getLastSyncInfo
 	} from '$lib/remotes/leads.remote';
 	import { toast } from 'svelte-sonner';
+	import { untrack } from 'svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -59,22 +59,6 @@
 		{ value: 'converted', label: 'Convertit' },
 		{ value: 'disqualified', label: 'Descalificat' }
 	];
-
-	const statusColors: Record<string, string> = {
-		new: 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-200',
-		contacted: 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-200',
-		qualified: 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-200',
-		converted: 'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200',
-		disqualified: 'bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200'
-	};
-
-	const statusLabels: Record<string, string> = {
-		new: 'Nou',
-		contacted: 'Contactat',
-		qualified: 'Calificat',
-		converted: 'Convertit',
-		disqualified: 'Descalificat'
-	};
 
 	// Build filter params reactively
 	const filterParams = $derived({
@@ -110,7 +94,7 @@
 		search.current;
 		statusFilter.current;
 		pageFilter.current;
-		pageNum.set(1);
+		untrack(() => pageNum.set(1));
 	});
 
 	const allSelected = $derived(leads.length > 0 && leads.every((l: any) => selectedIds.has(l.id)));
@@ -156,7 +140,7 @@
 
 	async function handleStatusChange(leadId: string, newStatus: string) {
 		try {
-			await updateLeadStatus({ leadId, status: newStatus as any }).updates(getLeads(filterParams));
+			await updateLeadStatus({ leadId, status: newStatus as LeadStatus }).updates(getLeads(filterParams));
 			toast.success('Status actualizat');
 		} catch (e) {
 			toast.error('Eroare la actualizare status');
@@ -166,7 +150,7 @@
 	async function handleBulkStatus(newStatus: string) {
 		if (selectedIds.size === 0) return;
 		try {
-			await bulkUpdateLeadStatus({ leadIds: [...selectedIds], status: newStatus as any }).updates(getLeads(filterParams));
+			await bulkUpdateLeadStatus({ leadIds: [...selectedIds], status: newStatus as LeadStatus }).updates(getLeads(filterParams));
 			toast.success(`${selectedIds.size} leaduri actualizate`);
 			selectedIds = new Set();
 		} catch (e) {
@@ -176,13 +160,16 @@
 
 	function exportCSV() {
 		if (leads.length === 0) return;
+		if (totalCount > leads.length) {
+			toast.info(`Se exportă ${leads.length} din ${totalCount} leaduri (pagina curentă). Pentru export complet, folosește view Kanban.`);
+		}
 		const headers = ['Nume', 'Email', 'Telefon', 'Formular', 'Status', 'Data', 'Note'];
 		const rows = leads.map((l: any) => [
 			l.fullName || '',
 			l.email || '',
 			l.phoneNumber || '',
 			l.formName || '',
-			statusLabels[l.status] || l.status,
+			LEAD_STATUS_LABELS[l.status as keyof typeof LEAD_STATUS_LABELS] || l.status,
 			formatDate(l.externalCreatedAt),
 			(l.notes || '').replace(/"/g, '""')
 		]);
@@ -426,8 +413,8 @@
 							<Table.Cell>{lead.phoneNumber || '-'}</Table.Cell>
 							<Table.Cell class="text-sm text-muted-foreground">{lead.formName || '-'}</Table.Cell>
 							<Table.Cell>
-								<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColors[lead.status] || ''}">
-									{statusLabels[lead.status] || lead.status}
+								<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {LEAD_STATUS_COLORS[lead.status as LeadStatus] || ''}">
+									{LEAD_STATUS_LABELS[lead.status as LeadStatus] || lead.status}
 								</span>
 							</Table.Cell>
 							<Table.Cell class="text-sm text-muted-foreground">{formatDate(lead.externalCreatedAt)}</Table.Cell>

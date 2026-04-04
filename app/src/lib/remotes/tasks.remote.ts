@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, inArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
+import { eq, and, or, inArray, notInArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import { recordTaskActivity } from '$lib/server/task-activity';
@@ -141,7 +141,8 @@ export const getTasks = query(
 		dueDate: v.optional(v.string()), // 'overdue', 'today', 'thisWeek', 'thisMonth', or date range
 		createdDate: v.optional(v.string()), // date range format: 'YYYY-MM-DD:YYYY-MM-DD'
 		sortBy: v.optional(v.string()),
-		sortDir: v.optional(v.union([v.literal('asc'), v.literal('desc')]))
+		sortDir: v.optional(v.union([v.literal('asc'), v.literal('desc')])),
+		excludeCompleted: v.optional(v.boolean()) // when true, excludes done/cancelled (used by kanban view)
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -270,6 +271,14 @@ export const getTasks = query(
 			) as any;
 		}
 
+		// Exclude done/cancelled when in kanban view (loaded separately via getCompletedTasks)
+		if (filters.excludeCompleted && !filters.status) {
+			conditions = and(
+				conditions,
+				notInArray(table.task.status, ['done', 'cancelled'])
+			) as any;
+		}
+
 		// Build query
 		let queryBuilder: any = db.select().from(table.task).where(conditions);
 
@@ -310,6 +319,189 @@ export const getTasks = query(
 		}
 
 		return await queryBuilder;
+	}
+);
+
+export const getCompletedTasks = query(
+	v.object({
+		projectId: v.optional(v.union([v.string(), v.array(v.string())])),
+		clientId: v.optional(v.union([v.string(), v.array(v.string())])),
+		milestoneId: v.optional(v.union([v.string(), v.array(v.string())])),
+		priority: v.optional(v.union([v.string(), v.array(v.string())])),
+		assignee: v.optional(v.union([v.string(), v.array(v.string())])),
+		search: v.optional(v.string()),
+		dueDate: v.optional(v.string()),
+		createdDate: v.optional(v.string()),
+		sortBy: v.optional(v.string()),
+		sortDir: v.optional(v.union([v.literal('asc'), v.literal('desc')])),
+		page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+		pageSize: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)))
+	}),
+	async (filters) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const page = filters.page ?? 1;
+		const pageSize = filters.pageSize ?? 20;
+		const offset = (page - 1) * pageSize;
+
+		// Get shared project IDs
+		const sharedProjects = await db
+			.select({ id: table.projectPartner.projectId })
+			.from(table.projectPartner)
+			.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+			.where(eq(table.partner.partnerTenantId, event.locals.tenant.id));
+
+		const sharedProjectIds = sharedProjects.map((p) => p.id);
+
+		let conditions: any =
+			sharedProjectIds.length > 0
+				? or(
+						eq(table.task.tenantId, event.locals.tenant!.id),
+						inArray(table.task.projectId, sharedProjectIds)
+					)
+				: eq(table.task.tenantId, event.locals.tenant.id);
+
+		// If user is a client user, filter by their client ID
+		if (event.locals.isClientUser && event.locals.client) {
+			conditions = and(conditions, eq(table.task.clientId, event.locals.client.id)) as any;
+		}
+
+		// Hard-scope to completed statuses
+		conditions = and(conditions, inArray(table.task.status, ['done', 'cancelled'])) as any;
+
+		// Project filter
+		if (filters.projectId) {
+			const projectIds = Array.isArray(filters.projectId) ? filters.projectId : [filters.projectId];
+			conditions = and(conditions, inArray(table.task.projectId, projectIds)) as any;
+		}
+
+		// Client filter
+		if (filters.clientId) {
+			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
+			conditions = and(conditions, inArray(table.task.clientId, clientIds)) as any;
+		}
+
+		// Milestone filter
+		if (filters.milestoneId) {
+			const milestoneIds = Array.isArray(filters.milestoneId)
+				? filters.milestoneId
+				: [filters.milestoneId];
+			conditions = and(conditions, inArray(table.task.milestoneId, milestoneIds)) as any;
+		}
+
+		// Priority filter
+		if (filters.priority) {
+			const priorities = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
+			conditions = and(conditions, inArray(table.task.priority, priorities)) as any;
+		}
+
+		// Assignee filter
+		if (filters.assignee) {
+			const assignees = Array.isArray(filters.assignee) ? filters.assignee : [filters.assignee];
+			conditions = and(conditions, inArray(table.task.assignedToUserId, assignees)) as any;
+		}
+
+		// Search filter
+		if (filters.search) {
+			const searchPattern = `%${filters.search}%`;
+			conditions = and(
+				conditions,
+				or(like(table.task.title, searchPattern), like(table.task.description, searchPattern))
+			) as any;
+		}
+
+		// Due date filter
+		if (filters.dueDate) {
+			const now = new Date();
+			now.setHours(0, 0, 0, 0);
+			const todayEnd = new Date(now);
+			todayEnd.setHours(23, 59, 59, 999);
+
+			if (filters.dueDate === 'overdue') {
+				conditions = and(conditions, lt(table.task.dueDate, now)) as any;
+			} else if (filters.dueDate === 'today') {
+				conditions = and(
+					conditions,
+					and(gte(table.task.dueDate, now), lte(table.task.dueDate, todayEnd))
+				) as any;
+			} else if (filters.dueDate === 'thisWeek') {
+				const weekEnd = new Date(now);
+				weekEnd.setDate(weekEnd.getDate() + 7);
+				conditions = and(
+					conditions,
+					and(gte(table.task.dueDate, now), lte(table.task.dueDate, weekEnd))
+				) as any;
+			} else if (filters.dueDate === 'thisMonth') {
+				const monthEnd = new Date(now);
+				monthEnd.setMonth(monthEnd.getMonth() + 1);
+				conditions = and(
+					conditions,
+					and(gte(table.task.dueDate, now), lte(table.task.dueDate, monthEnd))
+				) as any;
+			} else if (filters.dueDate.startsWith('dateRange:')) {
+				const [startStr, endStr] = filters.dueDate.replace('dateRange:', '').split(':');
+				const startDate = new Date(startStr);
+				const endDate = new Date(endStr);
+				endDate.setHours(23, 59, 59, 999);
+				conditions = and(
+					conditions,
+					and(gte(table.task.dueDate, startDate), lte(table.task.dueDate, endDate))
+				) as any;
+			}
+		}
+
+		// Created date filter
+		if (filters.createdDate && filters.createdDate.startsWith('dateRange:')) {
+			const [startStr, endStr] = filters.createdDate.replace('dateRange:', '').split(':');
+			const startDate = new Date(startStr);
+			const endDate = new Date(endStr);
+			endDate.setHours(23, 59, 59, 999);
+			conditions = and(
+				conditions,
+				and(gte(table.task.createdAt, startDate), lte(table.task.createdAt, endDate))
+			) as any;
+		}
+
+		// Count query
+		const [countResult] = await db
+			.select({ count: sql<number>`count(*)` })
+			.from(table.task)
+			.where(conditions);
+
+		const totalCount = Number(countResult?.count ?? 0);
+		const totalPages = Math.ceil(totalCount / pageSize);
+
+		// Data query with pagination, sorted by position then createdAt desc
+		const sortDir = filters.sortDir === 'desc' ? desc : asc;
+		let queryBuilder: any = db.select().from(table.task).where(conditions);
+
+		if (filters.sortBy) {
+			switch (filters.sortBy) {
+				case 'title':
+					queryBuilder = queryBuilder.orderBy(sortDir(table.task.title));
+					break;
+				case 'priority':
+					queryBuilder = queryBuilder.orderBy(sortDir(table.task.priority));
+					break;
+				case 'dueDate':
+					queryBuilder = queryBuilder.orderBy(sortDir(table.task.dueDate));
+					break;
+				case 'createdAt':
+					queryBuilder = queryBuilder.orderBy(sortDir(table.task.createdAt));
+					break;
+				default:
+					queryBuilder = queryBuilder.orderBy(asc(table.task.position), desc(table.task.createdAt));
+			}
+		} else {
+			queryBuilder = queryBuilder.orderBy(asc(table.task.position), desc(table.task.createdAt));
+		}
+
+		const items = await queryBuilder.limit(pageSize).offset(offset);
+
+		return { items, totalCount, totalPages, page, pageSize };
 	}
 );
 

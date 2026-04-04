@@ -34,7 +34,8 @@ export type LogSource =
 	| 'google-scraper'
 	| 'tiktok-scraper'
 	| 'token-refresh'
-	| 'meta-ads-leads';
+	| 'meta-ads-leads'
+	| 'tiktok-auto-assign';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

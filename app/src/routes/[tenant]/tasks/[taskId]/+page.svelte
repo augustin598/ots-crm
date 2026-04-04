@@ -21,12 +21,12 @@
 	const taskId = $derived(page.params.taskId!);
 	const currentUserId = $derived((page.data as any)?.tenantUser?.userId as string | undefined);
 
-	const taskQuery = getTask(taskId);
+	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current);
 	const loading = $derived(taskQuery.loading);
 	const error = $derived(taskQuery.error);
 
-	const commentsQuery = getTaskComments(taskId);
+	const commentsQuery = $derived(getTaskComments(taskId));
 	const comments = $derived(commentsQuery.current || []);
 
 	const usersQuery = getTenantUsers();
@@ -49,7 +49,7 @@
 	const projectQuery = $derived(task?.projectId ? getProject(task.projectId) : null);
 	const project = $derived(projectQuery?.current);
 
-	const activitiesQuery = getTaskActivities(taskId);
+	const activitiesQuery = $derived(getTaskActivities(taskId));
 	const activities = $derived(activitiesQuery.current || []);
 
 	let commentLoading = $state(false);

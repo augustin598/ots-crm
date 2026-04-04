@@ -9,7 +9,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import type { Task } from '$lib/server/db/schema';
-	import { updateTaskPosition, getTasks } from '$lib/remotes/tasks.remote';
+	import { updateTaskPosition, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { formatStatus, getPriorityColor, getPriorityDotColor, getPriorityCardClass, formatPriority, formatDate } from './task-kanban-utils';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { toast } from 'svelte-sonner';
@@ -44,8 +44,62 @@
 
 	const STATUSES = ['pending-approval', 'todo', 'in-progress', 'review', 'done'] as const;
 
-		// Optimistic updates
-	let optimisticTasks = $state<Task[]>(tasks);
+	// Optimistic updates for active tasks — synced from prop via $effect
+	let optimisticTasks = $state<Task[]>([]);
+
+	// --- Done column lazy loading ---
+	const DONE_PAGE_SIZE = 20;
+	let doneLoadedPages = $state(1);
+
+	// Reset done pagination when filters change
+	$effect(() => {
+		filterParams; // reactive dependency
+		doneLoadedPages = 1;
+	});
+
+	// Build one query per loaded page of completed tasks
+	const completedQueries = $derived.by(() => {
+		const fp = filterParams as any;
+		const queries = [];
+		for (let p = 1; p <= doneLoadedPages; p++) {
+			queries.push(
+				getCompletedTasks({
+					projectId: fp?.projectId,
+					clientId: fp?.clientId,
+					milestoneId: fp?.milestoneId,
+					priority: fp?.priority,
+					assignee: fp?.assignee,
+					search: fp?.search,
+					dueDate: fp?.dueDate,
+					createdDate: fp?.createdDate,
+					sortBy: fp?.sortBy,
+					sortDir: fp?.sortDir as 'asc' | 'desc' | undefined,
+					page: p,
+					pageSize: DONE_PAGE_SIZE
+				})
+			);
+		}
+		return queries;
+	});
+
+	// Flatten all loaded pages of done tasks into one array
+	const doneTasks = $derived.by(() => {
+		const all: Task[] = [];
+		for (const q of completedQueries) {
+			if (q.current?.items) all.push(...q.current.items);
+		}
+		return all;
+	});
+
+	const doneTotalCount = $derived(completedQueries[0]?.current?.totalCount ?? 0);
+	const doneIsLoading = $derived(completedQueries.some((q) => q.loading));
+	const doneHasMore = $derived(doneTasks.length < doneTotalCount);
+
+	// Separate optimistic state for done column
+	let optimisticDoneTasks = $state<Task[]>([]);
+	$effect(() => {
+		optimisticDoneTasks = doneTasks;
+	});
 
 	// Group tasks by status and sort by position
 	const groupedTasks = $derived.by(() => {
@@ -57,17 +111,21 @@
 			done: []
 		};
 
-		// Use optimistic tasks for display
+		// Active tasks — from optimisticTasks (excludes done/cancelled)
 		const tasksToGroup = optimisticTasks.length > 0 ? optimisticTasks : tasks;
-
 		for (const task of tasksToGroup) {
 			const status = task.status || 'todo';
-			if (status in groups) {
+			if (status in groups && status !== 'done') {
 				groups[status].push(task);
 			}
 		}
 
-		// Sort each group by position, then by createdAt
+		// Done tasks — from their own optimistic state
+		for (const task of optimisticDoneTasks) {
+			groups['done'].push(task);
+		}
+
+		// Sort each group by position, then by createdAt desc
 		for (const status in groups) {
 			groups[status].sort((a, b) => {
 				const posA = a.position ?? 0;
@@ -137,6 +195,38 @@
 		dragOverIndex = -1;
 	}
 
+	// Build completed tasks query args from current filter context
+	function buildCompletedQueryArgs(page: number) {
+		const fp = filterParams as any;
+		return {
+			projectId: fp?.projectId,
+			clientId: fp?.clientId,
+			milestoneId: fp?.milestoneId,
+			priority: fp?.priority,
+			assignee: fp?.assignee,
+			search: fp?.search,
+			dueDate: fp?.dueDate,
+			createdDate: fp?.createdDate,
+			sortBy: fp?.sortBy,
+			sortDir: fp?.sortDir as 'asc' | 'desc' | undefined,
+			page,
+			pageSize: DONE_PAGE_SIZE
+		};
+	}
+
+	// Build the full .updates() list for position changes
+	function buildPositionUpdates(involvesDone: boolean) {
+		const updates: any[] = [
+			getTasks({ ...(filterParams as any || {}), excludeCompleted: true })
+		];
+		if (involvesDone) {
+			for (let p = 1; p <= doneLoadedPages; p++) {
+				updates.push(getCompletedTasks(buildCompletedQueryArgs(p)));
+			}
+		}
+		return updates;
+	}
+
 	async function handleDrop(e: DragEvent, targetStatus: string, targetIndex: number) {
 		e.preventDefault();
 		if (!draggedTask || draggedFromStatus === null) return;
@@ -145,42 +235,9 @@
 		const oldIndex = draggedFromIndex;
 		const newStatus = targetStatus;
 		const newPosition = targetIndex;
-		const taskId = draggedTask.id;
+		const savedTask = { ...draggedTask };
 
-		// Optimistic update - create new array with updated task
-		const taskIndex = optimisticTasks.findIndex((t) => t.id === taskId);
-		if (taskIndex === -1) return;
-
-		const updatedTask: Task = {
-			...draggedTask,
-			status: newStatus,
-			position: newPosition
-		};
-
-		// Create new tasks array
-		const newTasks = [...optimisticTasks];
-		newTasks[taskIndex] = updatedTask;
-
-		// Update positions for tasks in old status column
-		if (oldStatus !== newStatus) {
-			newTasks.forEach((t, i) => {
-				if (t.status === oldStatus && i !== taskIndex && (t.position ?? 0) > oldIndex) {
-					newTasks[i] = { ...t, position: (t.position ?? 0) - 1 };
-				}
-			});
-		}
-
-		// Update positions for tasks in new status column
-		newTasks.forEach((t, i) => {
-			if (t.status === newStatus && i !== taskIndex && (t.position ?? 0) >= newPosition) {
-				newTasks[i] = { ...t, position: (t.position ?? 0) + 1 };
-			}
-		});
-
-		optimisticTasks = newTasks;
-
-		// Reset drag state
-		const savedTask = draggedTask;
+		// Reset drag state early
 		draggedTask = null;
 		draggedFromStatus = null;
 		draggedFromIndex = -1;
@@ -188,7 +245,74 @@
 		dragOverIndex = -1;
 		isDragging = false;
 
+		// Snapshot for rollback
+		const prevOptimisticTasks = [...optimisticTasks];
+		const prevOptimisticDoneTasks = [...optimisticDoneTasks];
+
+		// --- Optimistic update ---
+		if (oldStatus === 'done' && newStatus === 'done') {
+			// Reorder within done column
+			const taskIdx = optimisticDoneTasks.findIndex((t) => t.id === savedTask.id);
+			if (taskIdx === -1) return;
+			const updatedTask: Task = { ...savedTask, status: 'done', position: newPosition };
+			const newDone = [...optimisticDoneTasks];
+			newDone[taskIdx] = updatedTask;
+			newDone.forEach((t, i) => {
+				if (i !== taskIdx && (t.position ?? 0) >= newPosition) {
+					newDone[i] = { ...t, position: (t.position ?? 0) + 1 };
+				}
+			});
+			optimisticDoneTasks = newDone;
+		} else if (oldStatus === 'done' && newStatus !== 'done') {
+			// Moving FROM done → active column
+			optimisticDoneTasks = optimisticDoneTasks.filter((t) => t.id !== savedTask.id);
+			const movedTask: Task = { ...savedTask, status: newStatus, position: newPosition };
+			const newActive = [...optimisticTasks, movedTask];
+			newActive.forEach((t, i) => {
+				if (t.id !== savedTask.id && t.status === newStatus && (t.position ?? 0) >= newPosition) {
+					newActive[i] = { ...t, position: (t.position ?? 0) + 1 };
+				}
+			});
+			optimisticTasks = newActive;
+		} else if (oldStatus !== 'done' && newStatus === 'done') {
+			// Moving FROM active → done column
+			const taskIdx = optimisticTasks.findIndex((t) => t.id === savedTask.id);
+			if (taskIdx === -1) return;
+			const newActive = [...optimisticTasks];
+			newActive.splice(taskIdx, 1);
+			newActive.forEach((t, i) => {
+				if (t.status === oldStatus && (t.position ?? 0) > oldIndex) {
+					newActive[i] = { ...t, position: (t.position ?? 0) - 1 };
+				}
+			});
+			optimisticTasks = newActive;
+			// Prepend to done column at position 0
+			const movedTask: Task = { ...savedTask, status: 'done', position: 0 };
+			optimisticDoneTasks = [movedTask, ...optimisticDoneTasks];
+		} else {
+			// Active → active (standard behavior)
+			const taskIdx = optimisticTasks.findIndex((t) => t.id === savedTask.id);
+			if (taskIdx === -1) return;
+			const updatedTask: Task = { ...savedTask, status: newStatus, position: newPosition };
+			const newActive = [...optimisticTasks];
+			newActive[taskIdx] = updatedTask;
+			if (oldStatus !== newStatus) {
+				newActive.forEach((t, i) => {
+					if (t.status === oldStatus && i !== taskIdx && (t.position ?? 0) > oldIndex) {
+						newActive[i] = { ...t, position: (t.position ?? 0) - 1 };
+					}
+				});
+			}
+			newActive.forEach((t, i) => {
+				if (t.status === newStatus && i !== taskIdx && (t.position ?? 0) >= newPosition) {
+					newActive[i] = { ...t, position: (t.position ?? 0) + 1 };
+				}
+			});
+			optimisticTasks = newActive;
+		}
+
 		// Update server
+		const involvesDone = oldStatus === 'done' || newStatus === 'done';
 		try {
 			await updateTaskPosition({
 				taskId: savedTask.id,
@@ -196,38 +320,80 @@
 				newPosition,
 				oldStatus: oldStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				oldPosition: oldIndex
-			}).updates(getTasks(filterParams || {}));
+			}).updates(...buildPositionUpdates(involvesDone));
 			onTasksUpdate?.();
 		} catch (error) {
 			// Rollback on error
-			optimisticTasks = tasks;
+			optimisticTasks = prevOptimisticTasks;
+			optimisticDoneTasks = prevOptimisticDoneTasks;
 			toast.error(error instanceof Error ? error.message : 'Failed to update task position');
 		}
 	}
 
 	async function moveTask(task: Task, oldStatus: string, oldIndex: number, newStatus: string, newPosition: number) {
-		const taskIndex = optimisticTasks.findIndex((t) => t.id === task.id);
-		if (taskIndex === -1) return;
+		// Snapshot for rollback
+		const prevOptimisticTasks = [...optimisticTasks];
+		const prevOptimisticDoneTasks = [...optimisticDoneTasks];
 
-		const updatedTask: Task = { ...task, status: newStatus, position: newPosition };
-		const newTasks = [...optimisticTasks];
-		newTasks[taskIndex] = updatedTask;
-
-		if (oldStatus !== newStatus) {
-			newTasks.forEach((t, i) => {
-				if (t.status === oldStatus && i !== taskIndex && (t.position ?? 0) > oldIndex) {
-					newTasks[i] = { ...t, position: (t.position ?? 0) - 1 };
+		if (oldStatus === 'done' && newStatus === 'done') {
+			// Reorder within done column
+			const taskIdx = optimisticDoneTasks.findIndex((t) => t.id === task.id);
+			if (taskIdx === -1) return;
+			const updatedTask: Task = { ...task, status: 'done', position: newPosition };
+			const newDone = [...optimisticDoneTasks];
+			newDone[taskIdx] = updatedTask;
+			newDone.forEach((t, i) => {
+				if (i !== taskIdx && (t.position ?? 0) >= newPosition) {
+					newDone[i] = { ...t, position: (t.position ?? 0) + 1 };
 				}
 			});
-		}
-		newTasks.forEach((t, i) => {
-			if (t.status === newStatus && i !== taskIndex && (t.position ?? 0) >= newPosition) {
-				newTasks[i] = { ...t, position: (t.position ?? 0) + 1 };
+			optimisticDoneTasks = newDone;
+		} else if (oldStatus === 'done' && newStatus !== 'done') {
+			optimisticDoneTasks = optimisticDoneTasks.filter((t) => t.id !== task.id);
+			const movedTask: Task = { ...task, status: newStatus, position: newPosition };
+			const newActive = [...optimisticTasks, movedTask];
+			newActive.forEach((t, i) => {
+				if (t.id !== task.id && t.status === newStatus && (t.position ?? 0) >= newPosition) {
+					newActive[i] = { ...t, position: (t.position ?? 0) + 1 };
+				}
+			});
+			optimisticTasks = newActive;
+		} else if (oldStatus !== 'done' && newStatus === 'done') {
+			const taskIdx = optimisticTasks.findIndex((t) => t.id === task.id);
+			if (taskIdx === -1) return;
+			const newActive = [...optimisticTasks];
+			newActive.splice(taskIdx, 1);
+			newActive.forEach((t, i) => {
+				if (t.status === oldStatus && (t.position ?? 0) > oldIndex) {
+					newActive[i] = { ...t, position: (t.position ?? 0) - 1 };
+				}
+			});
+			optimisticTasks = newActive;
+			const movedTask: Task = { ...task, status: 'done', position: 0 };
+			optimisticDoneTasks = [movedTask, ...optimisticDoneTasks];
+		} else {
+			// Active → active
+			const taskIdx = optimisticTasks.findIndex((t) => t.id === task.id);
+			if (taskIdx === -1) return;
+			const updatedTask: Task = { ...task, status: newStatus, position: newPosition };
+			const newActive = [...optimisticTasks];
+			newActive[taskIdx] = updatedTask;
+			if (oldStatus !== newStatus) {
+				newActive.forEach((t, i) => {
+					if (t.status === oldStatus && i !== taskIdx && (t.position ?? 0) > oldIndex) {
+						newActive[i] = { ...t, position: (t.position ?? 0) - 1 };
+					}
+				});
 			}
-		});
+			newActive.forEach((t, i) => {
+				if (t.status === newStatus && i !== taskIdx && (t.position ?? 0) >= newPosition) {
+					newActive[i] = { ...t, position: (t.position ?? 0) + 1 };
+				}
+			});
+			optimisticTasks = newActive;
+		}
 
-		optimisticTasks = newTasks;
-
+		const involvesDone = oldStatus === 'done' || newStatus === 'done';
 		try {
 			await updateTaskPosition({
 				taskId: task.id,
@@ -235,10 +401,11 @@
 				newPosition,
 				oldStatus: oldStatus as 'todo' | 'in-progress' | 'review' | 'done' | 'cancelled' | 'pending-approval',
 				oldPosition: oldIndex
-			}).updates(getTasks(filterParams || {}));
+			}).updates(...buildPositionUpdates(involvesDone));
 			onTasksUpdate?.();
 		} catch (error) {
-			optimisticTasks = tasks;
+			optimisticTasks = prevOptimisticTasks;
+			optimisticDoneTasks = prevOptimisticDoneTasks;
 			toast.error(error instanceof Error ? error.message : 'Failed to update task position');
 		}
 
@@ -312,9 +479,22 @@
 		{@const statusTasks = groupedTasks[status] || []}
 		<div class="flex flex-col min-w-[280px]" role="region" aria-label="{formatStatus(status)} column, {statusTasks.length} tasks">
 			<div class="flex items-center justify-between mb-4">
-				<h3 class="font-semibold capitalize">
-					{formatStatus(status)} ({statusTasks.length})
-				</h3>
+				{#if status === 'done'}
+					<div>
+						<h3 class="font-semibold capitalize">
+							{formatStatus(status)} ({doneTasks.length}{doneHasMore ? '+' : ''})
+						</h3>
+						{#if doneTotalCount > 0}
+							<p class="text-xs text-muted-foreground mt-0.5">
+								{doneTasks.length} din {doneTotalCount} finalizate
+							</p>
+						{/if}
+					</div>
+				{:else}
+					<h3 class="font-semibold capitalize">
+						{formatStatus(status)} ({statusTasks.length})
+					</h3>
+				{/if}
 			</div>
 			<div
 				class="flex-1 space-y-3 min-h-[200px]"
@@ -422,6 +602,18 @@
 				{/each}
 				{#if dragOverStatus === status && dragOverIndex === statusTasks.length && draggedTask}
 					<div class="h-2 border-2 border-dashed border-primary rounded"></div>
+				{/if}
+				{#if status === 'done' && doneHasMore}
+					<Button
+						variant="outline"
+						class="w-full mt-2"
+						disabled={doneIsLoading}
+						onclick={() => { doneLoadedPages += 1; }}
+					>
+						{doneIsLoading
+							? 'Se încarcă...'
+							: `Mai multe (${doneTotalCount - doneTasks.length} rămase)`}
+					</Button>
 				{/if}
 			</div>
 		</div>

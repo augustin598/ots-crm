@@ -10,6 +10,10 @@ import { listPages } from '$lib/server/meta-ads/client';
 import { syncMetaAdsLeadsForTenant, backfillLeadContactFields } from '$lib/server/meta-ads/leads-sync';
 import { logInfo } from '$lib/server/logger';
 
+function escapeLike(str: string): string {
+	return str.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 // ---- Queries ----
 
 /** Get leads list with filtering by platform, status, search, pageId, date range, pagination */
@@ -50,7 +54,7 @@ export const getLeads = query(
 			conditions.push(eq(table.lead.status, filters.status));
 		}
 		if (filters?.search) {
-			const term = `%${filters.search}%`;
+			const term = `%${escapeLike(filters.search)}%`;
 			conditions.push(
 				or(
 					like(table.lead.fullName, term),
@@ -66,7 +70,7 @@ export const getLeads = query(
 			conditions.push(eq(table.lead.clientId, filters.clientId));
 		}
 		if (filters?.formName) {
-			conditions.push(like(table.lead.formName, `%${filters.formName}%`));
+			conditions.push(like(table.lead.formName, `%${escapeLike(filters.formName)}%`));
 		}
 		if (filters?.dateFrom) {
 			conditions.push(gte(table.lead.externalCreatedAt, new Date(filters.dateFrom)));

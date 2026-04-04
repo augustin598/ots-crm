@@ -108,9 +108,6 @@
 		error = null;
 
 		try {
-			const updates = [getServices({})];
-			if (serviceQuery) updates.push(serviceQuery);
-
 			await updateService({
 				serviceId,
 				name,
@@ -123,7 +120,7 @@
 				recurringType: getRecurringTypeFromUnit(unit),
 				recurringInterval: 1,
 				isActive: isActive
-			}).updates(...updates);
+			}).updates(getServices({}), ...(serviceQuery ? [serviceQuery] as any : []));
 
 			goto(`/${tenantSlug}/services/${serviceId}`);
 		} catch (e) {

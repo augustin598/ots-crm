@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
+	import { updateTask, getTasks, getTask, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -154,7 +154,7 @@
 				priority: (priority || undefined) as 'medium' | 'low' | 'high' | 'urgent' | undefined,
 				assignedToUserId: assignedToUserId || undefined,
 				dueDate: dueDate || undefined
-			}).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
+			}).updates(getTasks({ ...(filterParams as any || {}), excludeCompleted: true }), getTask(task.id), getCompletedTasks({ ...(filterParams as any || {}), page: 1, pageSize: 20 }), ...additionalQueriesToUpdate);
 
 			onOpenChange(false);
 			onSuccess?.();

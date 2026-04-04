@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createTask, getTasks } from '$lib/remotes/tasks.remote';
+	import { createTask, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -71,7 +71,11 @@
 	let milestoneId = $state('');
 	let previousProjectId = $state('');
 	let status = $state('todo');
-	let priority = $state(defaultPriorityProp || 'medium');
+	let priority = $state('medium');
+
+	$effect(() => {
+		if (defaultPriorityProp) priority = defaultPriorityProp;
+	});
 	let assignedToUserId = $state('');
 	let dueDate = $state('');
 	let dueDateOpen = $state(false);
@@ -158,7 +162,7 @@
 				priority: (priority || undefined) as 'medium' | 'low' | 'high' | 'urgent' | undefined,
 				dueDate: dueDate || undefined,
 				assignedToUserId: assignedToUserId || undefined
-			}).updates(getTasks(filterParams || {}), ...additionalQueriesToUpdate);
+			}).updates(getTasks({ ...(filterParams as any || {}), excludeCompleted: true }), getCompletedTasks({ ...(filterParams as any || {}), page: 1, pageSize: 20 }), ...additionalQueriesToUpdate);
 
 			onOpenChange(false);
 			onSuccess?.();

@@ -54,18 +54,18 @@
 	const taskId = $derived(page.params.taskId!);
 	const currentUserId = $derived((page.data as any)?.clientUser?.userId as string | undefined);
 
-	const taskQuery = getTask(taskId);
+	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current);
 	const loading = $derived(taskQuery.loading);
 	const error = $derived(taskQuery.error);
 
-	const commentsQuery = getTaskComments(taskId);
+	const commentsQuery = $derived(getTaskComments(taskId));
 	const comments = $derived(commentsQuery.current || []);
 
-	const activitiesQuery = getTaskActivities(taskId);
+	const activitiesQuery = $derived(getTaskActivities(taskId));
 	const activities = $derived(activitiesQuery.current || []);
 
-	const materialsQuery = getTaskMaterials(taskId);
+	const materialsQuery = $derived(getTaskMaterials(taskId));
 	const taskMaterials = $derived(materialsQuery.current || []);
 
 	const MATERIAL_TYPE_ICONS: Record<string, any> = {

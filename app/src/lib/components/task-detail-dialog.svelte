@@ -4,7 +4,7 @@
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
-	import { approveTask, rejectTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
+	import { approveTask, rejectTask, getTasks, getTask, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { goto } from '$app/navigation';
@@ -337,7 +337,7 @@
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id }).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
+			await approveTask({ taskId: task.id }).updates(getTasks({ ...(filterParams as any || {}), excludeCompleted: true }), getTask(task.id), getCompletedTasks({ ...(filterParams as any || {}), page: 1, pageSize: 20 }), ...additionalQueriesToUpdate);
 			toast.success('Task approved');
 			onOpenChange(false);
 		} catch (e) {
@@ -352,7 +352,7 @@
 		if (!confirm('Are you sure you want to reject this task?')) return;
 		approvalLoading = true;
 		try {
-			await rejectTask(task.id).updates(getTasks(filterParams || {}), getTask(task.id), ...additionalQueriesToUpdate);
+			await rejectTask(task.id).updates(getTasks({ ...(filterParams as any || {}), excludeCompleted: true }), getTask(task.id), getCompletedTasks({ ...(filterParams as any || {}), page: 1, pageSize: 20 }), ...additionalQueriesToUpdate);
 			toast.success('Task rejected');
 			onOpenChange(false);
 		} catch (e) {

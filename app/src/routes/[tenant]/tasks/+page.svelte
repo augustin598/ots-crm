@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTasks, deleteTask } from '$lib/remotes/tasks.remote';
+	import { getTasks, deleteTask, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getMilestones } from '$lib/remotes/milestones.remote';
@@ -63,8 +63,14 @@
 	// Provide filterParams via context so child components can access it without prop drilling
 	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
 
-	// Fetch data
-	const tasksQuery = $derived(getTasks(filterParams));
+	// Fetch data — in kanban view, exclude done/cancelled (they are loaded lazily by the kanban board)
+	const tasksQuery = $derived(
+		getTasks({
+			...filterParams,
+			excludeCompleted:
+				view.current === 'kanban' && !filterParams.status ? true : undefined
+		})
+	);
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
 
@@ -128,7 +134,10 @@
 		}
 
 		try {
-			await deleteTask(taskId).updates(getTasks(filterParams));
+			await deleteTask(taskId).updates(
+				getTasks({ ...filterParams, excludeCompleted: view.current === 'kanban' && !filterParams.status ? true : undefined }),
+				getCompletedTasks({ ...(filterParams as any), page: 1, pageSize: 20 })
+			);
 			if (selectedTask?.id === taskId) {
 				isTaskDetailOpen = false;
 				selectedTask = null;

@@ -17,7 +17,7 @@
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId ?? '');
 
-	const taskQuery = getTask(taskId);
+	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current);
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
