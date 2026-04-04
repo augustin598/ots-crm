@@ -2,7 +2,7 @@
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { page } from '$app/state';
-	import { Settings, Receipt, Plug, CheckSquare, Mail, Calendar, UserCircle } from '@lucide/svelte';
+	import { Settings, Receipt, Plug, CheckSquare, Mail, Calendar, UserCircle, FileBarChart } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 
 	let { data, children }: { data: PageData; children: any } = $props();
@@ -20,6 +20,7 @@
 		{ id: 'my-plans', label: 'My Plans', href: `/${tenantSlug}/settings/my-plans`, icon: Calendar },
 		{ id: 'banking', label: 'Banking', href: `/${tenantSlug}/settings/banking`, icon: CreditCard },
 		{ id: 'email', label: 'Email', href: `/${tenantSlug}/settings/email`, icon: Mail },
+		{ id: 'reports', label: 'Rapoarte', href: `/${tenantSlug}/settings/reports`, icon: FileBarChart },
 		{ id: 'plugins', label: 'Plugins', href: `/${tenantSlug}/settings/plugins`, icon: Plug }
 	]);
 
@@ -31,6 +32,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/settings/my-plans`)) return 'my-plans';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/banking`)) return 'banking';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/email`)) return 'email';
+		if (currentPath.startsWith(`/${tenantSlug}/settings/reports`)) return 'reports';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/plugins`)) return 'plugins';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/smartbill`)) return 'plugins'; // SmartBill is under plugins
 		if (currentPath.startsWith(`/${tenantSlug}/settings/keez`)) return 'plugins'; // Keez is under plugins
@@ -52,7 +54,7 @@
 	</div>
 
 	<Tabs value={activeTab()} class="w-full">
-		<TabsList class="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
+		<TabsList class="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-9">
 			{#each tabs as tab}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{@const TabIcon = tab.icon}

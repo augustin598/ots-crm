@@ -55,6 +55,9 @@
 	import SavedViewSelector from '$lib/components/reports/saved-view-selector.svelte';
 	import { detectDatePreset, resolveDatePreset } from '$lib/utils/date-preset-resolver';
 	import type { SavedViewFilters } from '$lib/remotes/saved-views.remote';
+	import { calculateHealthScore, calculateAverageHealthScore } from '$lib/utils/health-score';
+	import HealthScoreBadge from '$lib/components/reports/health-score-badge.svelte';
+	import HeartPulseIcon from '@lucide/svelte/icons/heart-pulse';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -131,6 +134,14 @@
 
 	// Campaign data always from ALL insights (table always shows full data)
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
+
+	// Health scores
+	const healthScores = $derived(new Map(
+		campaignData
+			.filter((c) => c.spend > 0 && c.impressions >= 1000)
+			.map((c) => [c.campaignId, calculateHealthScore(c)])
+	));
+	const avgHealth = $derived(calculateAverageHealthScore(campaignData));
 
 	// KPI cards, charts, demographics use filtered insights when campaigns are selected
 	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
@@ -557,6 +568,14 @@
 				<KpiCard label="CPC" value={formatCurrency(totals.avgCpc, currency)} icon={MousePointerClickIcon} subtext="{formatNumber(totals.totalClicks)} click-uri" />
 				<KpiCard label="CTR" value={formatPercent(totals.avgCtr)} icon={PercentIcon} subtext="Click-through rate" />
 				<KpiCard label={resultKpi.label} value={resultKpi.value} icon={TrendingUpIcon} subtext={resultKpi.subtext} />
+				{#if avgHealth.score > 0}
+					<KpiCard
+						label="Health Score"
+						value={String(avgHealth.score)}
+						icon={HeartPulseIcon}
+						subtext={avgHealth.level === 'good' ? 'Performanță bună' : avgHealth.level === 'warning' ? 'Necesită atenție' : 'Performanță critică'}
+					/>
+				{/if}
 			</div>
 
 			<!-- Charts -->
@@ -704,7 +723,13 @@
 											{/if}
 										</TableCell>
 										<TableCell>
-											<Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge>
+											<div class="flex flex-wrap items-center gap-1">
+												<Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge>
+												{#if healthScores.has(campaign.campaignId)}
+													{@const hs = healthScores.get(campaign.campaignId)!}
+													<HealthScoreBadge score={hs.score} level={hs.level} issues={hs.issues} />
+												{/if}
+											</div>
 										</TableCell>
 										{#each activePreset.columns as col}
 											<TableCell class={col.align === 'right' ? 'text-right' : ''}>

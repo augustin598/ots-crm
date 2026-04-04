@@ -2,6 +2,7 @@
 	import { getClientUserPreferences, updateClientUserPreferences } from '$lib/remotes/client-user-preferences.remote';
 	import { updateClientCompanyData } from '$lib/remotes/clients.remote';
 	import { updateClientUserProfile } from '$lib/remotes/client-profile.remote';
+	import { getMyReportSchedule, updateMyReportSchedule } from '$lib/remotes/report-schedule.remote';
 	import { page } from '$app/state';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -19,6 +20,7 @@
 	import Building2Icon from '@lucide/svelte/icons/building-2';
 	import UserIcon from '@lucide/svelte/icons/user';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
+	import FileBarChartIcon from '@lucide/svelte/icons/file-bar-chart';
 
 	const client = $derived((page.data as any)?.client);
 	const userData = $derived((page.data as any)?.user);
@@ -73,6 +75,56 @@
 	let editingProfile = $state(false);
 	let savingProfile = $state(false);
 	let profileForm = $state({ firstName: '', lastName: '' });
+
+	// Report schedule
+	const reportQuery = getMyReportSchedule();
+	const reportSchedule = $derived(reportQuery.current);
+	const reportLoading = $derived(reportQuery.loading);
+
+	let reportEmails = $state('');
+	let reportEnabled = $state(true);
+	let savingReport = $state(false);
+
+	$effect(() => {
+		if (reportSchedule) {
+			reportEmails = reportSchedule.recipientEmails.join(', ');
+			reportEnabled = reportSchedule.isEnabled;
+		}
+	});
+
+	const frequencyLabels: Record<string, string> = {
+		weekly: 'Săptămânal',
+		monthly: 'Lunar',
+		disabled: 'Dezactivat'
+	};
+
+	const dayNames: Record<number, string> = {
+		1: 'Luni', 2: 'Marți', 3: 'Miercuri', 4: 'Joi',
+		5: 'Vineri', 6: 'Sâmbătă', 7: 'Duminică'
+	};
+
+	const platformLabels: Record<string, string> = {
+		meta: 'Meta Ads', google: 'Google Ads', tiktok: 'TikTok Ads'
+	};
+
+	async function saveReportPrefs() {
+		savingReport = true;
+		try {
+			const emails = reportEmails
+				.split(/[,;\n]/)
+				.map((e) => e.trim())
+				.filter((e) => e.length > 0);
+			await updateMyReportSchedule({
+				recipientEmails: emails,
+				isEnabled: reportEnabled
+			}).updates(reportQuery);
+			toast.success('Preferințele de raportare au fost salvate.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la salvare.');
+		} finally {
+			savingReport = false;
+		}
+	}
 
 	// Sync local state from query
 	$effect(() => {
@@ -663,6 +715,99 @@
 						{savingDefaults ? 'Se salvează...' : 'Salvează'}
 					</Button>
 				</form>
+			{/if}
+		</CardContent>
+	</Card>
+
+	<!-- Section 5: Report Schedule Preferences -->
+	<Card>
+		<CardHeader>
+			<CardTitle class="flex items-center gap-2">
+				<FileBarChartIcon class="h-5 w-5" />
+				Rapoarte Automate
+			</CardTitle>
+			<CardDescription>Configurează preferințele pentru rapoartele de marketing trimise automat.</CardDescription>
+		</CardHeader>
+		<CardContent>
+			{#if reportLoading}
+				<div class="animate-pulse space-y-4">
+					<div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
+					<div class="h-10 bg-gray-200 dark:bg-gray-700 rounded"></div>
+				</div>
+			{:else if !reportSchedule}
+				<p class="text-sm text-muted-foreground">
+					Nu ai un program de raportare configurat. Contactează administratorul pentru a activa rapoartele automate.
+				</p>
+			{:else}
+				<div class="space-y-6">
+					<!-- Read-only info from admin -->
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+						<div class="space-y-1">
+							<p class="text-xs text-muted-foreground">Frecvență</p>
+							<p class="text-sm font-medium">{frequencyLabels[reportSchedule.frequency] || reportSchedule.frequency}</p>
+						</div>
+						<div class="space-y-1">
+							<p class="text-xs text-muted-foreground">Ziua trimiterii</p>
+							<p class="text-sm font-medium">
+								{#if reportSchedule.frequency === 'weekly'}
+									{dayNames[reportSchedule.dayOfWeek ?? 1]}
+								{:else if reportSchedule.frequency === 'monthly'}
+									Ziua {reportSchedule.dayOfMonth}
+								{:else}
+									—
+								{/if}
+							</p>
+						</div>
+						<div class="space-y-1">
+							<p class="text-xs text-muted-foreground">Platforme</p>
+							<p class="text-sm font-medium">
+								{reportSchedule.platforms.map((p: string) => platformLabels[p] || p).join(', ')}
+							</p>
+						</div>
+					</div>
+
+					{#if reportSchedule.lastSentAt}
+						<p class="text-xs text-muted-foreground">
+							Ultimul raport trimis: {new Date(reportSchedule.lastSentAt).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+						</p>
+					{/if}
+
+					<Separator />
+
+					<!-- Editable fields -->
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							saveReportPrefs();
+						}}
+						class="space-y-6"
+					>
+						<div class="flex items-center justify-between">
+							<div class="space-y-0.5">
+								<Label for="reportEnabled">Primește rapoarte</Label>
+								<p class="text-xs text-muted-foreground">Activează sau dezactivează primirea rapoartelor pe email.</p>
+							</div>
+							<Switch id="reportEnabled" bind:checked={reportEnabled} />
+						</div>
+
+						<div class="space-y-2">
+							<Label for="reportEmails">Adrese email suplimentare</Label>
+							<Input
+								id="reportEmails"
+								bind:value={reportEmails}
+								placeholder="alt-email@exemplu.com"
+								disabled={!reportEnabled}
+							/>
+							<p class="text-xs text-muted-foreground">
+								Separă adresele cu virgulă. Lasă gol pentru a primi doar pe emailul principal.
+							</p>
+						</div>
+
+						<Button type="submit" disabled={savingReport}>
+							{savingReport ? 'Se salvează...' : 'Salvează preferințe rapoarte'}
+						</Button>
+					</form>
+				</div>
 			{/if}
 		</CardContent>
 	</Card>

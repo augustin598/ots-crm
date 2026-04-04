@@ -70,6 +70,9 @@
 	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset, getRecommendedPreset } from '$lib/utils/column-presets';
 	import { getChartsForObjective, DEFAULT_CHARTS } from '$lib/utils/chart-config';
 	import { detectAnomalies, getAnomalySummary, type CampaignAnomaly } from '$lib/utils/anomaly-detection';
+	import { calculateHealthScore, calculateAverageHealthScore, type HealthScoreResult } from '$lib/utils/health-score';
+	import HealthScoreBadge from '$lib/components/reports/health-score-badge.svelte';
+	import HeartPulseIcon from '@lucide/svelte/icons/heart-pulse';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -231,6 +234,14 @@
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
 	const campaignAnomalies = $derived(detectAnomalies(campaignData));
 	const anomalySummary = $derived(getAnomalySummary(campaignAnomalies));
+
+	// Health scores
+	const healthScores = $derived(new Map(
+		campaignData
+			.filter((c) => c.spend > 0 && c.impressions >= 1000)
+			.map((c) => [c.campaignId, calculateHealthScore(c)])
+	));
+	const avgHealth = $derived(calculateAverageHealthScore(campaignData));
 
 	// KPI cards, charts, demographics use filtered insights when campaigns are selected
 	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
@@ -1066,7 +1077,15 @@
 						change={pctChange(totals.totalConversions, prevTotals.totalConversions)}
 					/>
 				{/if}
-			</div>
+				{#if avgHealth.score > 0}
+					<KpiCard
+						label="Health Score"
+						value={String(avgHealth.score)}
+						icon={HeartPulseIcon}
+						subtext={avgHealth.level === 'good' ? 'Performanță bună' : avgHealth.level === 'warning' ? 'Necesită atenție' : 'Performanță critică'}
+					/>
+				{/if}
+				</div>
 		{/if}
 
 		<!-- Charts (objective-aware) -->
@@ -1265,6 +1284,10 @@
 												<Badge variant={getStatusVariant(campaign.status)}>
 													{campaign.status}
 												</Badge>
+												{#if healthScores.has(campaign.campaignId)}
+													{@const hs = healthScores.get(campaign.campaignId)!}
+													<HealthScoreBadge score={hs.score} level={hs.level} issues={hs.issues} />
+												{/if}
 												{#if campaignAnomalies.has(campaign.campaignId)}
 													{@const issues = campaignAnomalies.get(campaign.campaignId) || []}
 													<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium
