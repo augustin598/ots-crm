@@ -2123,3 +2123,67 @@ export async function sendContractSigningEmail(
 		throw new Error('Failed to send contract signing email');
 	}
 }
+
+/**
+ * Send a scheduled marketing report email with PDF attachment.
+ */
+export async function sendReportEmail(
+	tenantId: string,
+	clientId: string,
+	recipientEmail: string,
+	clientName: string,
+	periodLabel: string,
+	pdfBuffer: Buffer
+): Promise<void> {
+	const transporter = await getTenantTransporter(tenantId);
+	if (!transporter) throw new Error('SMTP transporter not configured');
+
+	const [tenant] = await db.select({ name: table.tenant.name }).from(table.tenant).where(eq(table.tenant.id, tenantId)).limit(1);
+	const tenantName = tenant?.name || 'CRM';
+
+	const subject = `Raport Marketing — ${clientName} — ${periodLabel}`;
+	const filename = `raport-${clientName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${periodLabel.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`;
+
+	const html = `
+		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+			<h2 style="color: #1E293B;">Raport Marketing</h2>
+			<p>Bună ziua,</p>
+			<p>Atașat găsiți raportul de marketing pentru <strong>${clientName}</strong> aferent perioadei <strong>${periodLabel}</strong>.</p>
+			<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active.</p>
+			<br>
+			<p style="color: #64748B; font-size: 12px;">Acest email a fost generat automat de ${tenantName}.</p>
+		</div>
+	`;
+
+	const logId = await logEmailAttempt({
+		tenantId,
+		toEmail: recipientEmail,
+		subject,
+		emailType: 'report' as any,
+		metadata: { clientId, clientName, periodLabel },
+		htmlBody: html
+	});
+
+	try {
+		await logEmailProcessing(logId);
+
+		const mailOptions: nodemailer.SendMailOptions = {
+			to: recipientEmail,
+			subject,
+			html,
+			attachments: [{
+				filename,
+				content: pdfBuffer,
+				contentType: 'application/pdf'
+			}]
+		};
+
+		const info = await sendMailWithRetry(transporter, mailOptions, tenantId, logId);
+		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
+		logInfo('email', `Report email sent to ${recipientEmail}`, { tenantId, metadata: { clientId, clientName, periodLabel } });
+	} catch (error) {
+		await logEmailFailure(logId, (error as Error).message);
+		logError('email', 'Failed to send report email', { tenantId, metadata: { recipientEmail, clientName, periodLabel }, stackTrace: serializeError(error).stack });
+		throw error;
+	}
+}

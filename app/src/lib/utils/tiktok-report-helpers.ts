@@ -1,5 +1,18 @@
 import type { TiktokAdsCampaignInsight, TiktokAdsAdGroupInsight } from '$lib/server/tiktok-ads/client';
-import type { DailyAggregate } from './report-helpers';
+
+export interface TiktokDailyAggregate {
+	date: string;
+	spend: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+	conversionValue: number;
+	cpc: number;
+	cpm: number;
+	ctr: number;
+	costPerConversion: number;
+	roas: number;
+}
 
 export interface TiktokCampaignAggregate {
 	campaignId: string;
@@ -35,7 +48,7 @@ export interface TiktokCampaignAggregate {
 }
 
 /** Aggregate TikTok campaign insights by date for time-series charts */
-export function aggregateTiktokInsightsByDate(insights: TiktokAdsCampaignInsight[]): DailyAggregate[] {
+export function aggregateTiktokInsightsByDate(insights: TiktokAdsCampaignInsight[]): TiktokDailyAggregate[] {
 	const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>();
 
 	for (const row of insights) {

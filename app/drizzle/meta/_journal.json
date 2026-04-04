@@ -708,6 +708,20 @@
       "when": 1775433600000,
       "tag": "0100_debug_log_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1775327661942,
+      "tag": "0101_saved_report_view",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1775332254442,
+      "tag": "0102_report_schedule",
+      "breakpoints": true
     }
   ]
 }

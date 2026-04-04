@@ -52,6 +52,9 @@
 		type AdAggregate
 	} from '$lib/utils/report-helpers';
 	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset } from '$lib/utils/column-presets';
+	import SavedViewSelector from '$lib/components/reports/saved-view-selector.svelte';
+	import { detectDatePreset, resolveDatePreset } from '$lib/utils/date-preset-resolver';
+	import type { SavedViewFilters } from '$lib/remotes/saved-views.remote';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -440,6 +443,36 @@
 		selectedCampaigns = next;
 	}
 
+	// ---- Saved Views ----
+	const currentFilters = $derived<SavedViewFilters>({
+		datePreset: detectDatePreset(since, until),
+		since: detectDatePreset(since, until) ? null : since,
+		until: detectDatePreset(since, until) ? null : until,
+		accountId: selectedAccountId,
+		columnPreset: selectedPresetKey,
+		objectiveFilter,
+		statusFilter,
+		pageSize: 25
+	});
+
+	function applyView(filters: SavedViewFilters) {
+		if (filters.datePreset) {
+			const dates = resolveDatePreset(filters.datePreset);
+			if (dates) { since = dates.since; until = dates.until; }
+		} else if (filters.since && filters.until) {
+			since = filters.since;
+			until = filters.until;
+		}
+		if (filters.accountId) {
+			const accExists = accounts.find((a: any) => a.metaAdAccountId === filters.accountId);
+			if (accExists) selectedAccountId = filters.accountId;
+		}
+		selectedPresetKey = filters.columnPreset;
+		objectiveFilter = filters.objectiveFilter;
+		statusFilter = filters.statusFilter as typeof statusFilter;
+		selectedCampaigns = new Set();
+	}
+
 	function handleSort(column: typeof sortColumn) {
 		if (sortColumn === column) {
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
@@ -484,7 +517,8 @@
 				<p class="text-muted-foreground">Rapoarte performanță campanii Meta/Facebook Ads</p>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
-				<DateRangePicker bind:since bind:until onchange={() => { objectiveFilter = 'all'; selectedCampaigns = new Set(); }} />
+				<SavedViewSelector platform="meta" {tenantSlug} currentAccountId={selectedAccountId} {currentFilters} onApplyView={applyView} />
+			<DateRangePicker bind:since bind:until onchange={() => { objectiveFilter = 'all'; selectedCampaigns = new Set(); }} />
 				{#if accounts.length > 0}
 					<select class="h-9 rounded-md border border-input bg-background px-3 text-sm" value={selectedAccountId} onchange={handleAccountChange}>
 						{#each accounts as account}

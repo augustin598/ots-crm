@@ -1870,6 +1870,53 @@ export const sessionRelations = relations(session, ({ one }) => ({
 	})
 }));
 
+// ---- Report Schedule ----
+
+export const reportSchedule = sqliteTable('report_schedule', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	frequency: text('frequency').notNull().default('disabled'), // 'weekly' | 'monthly' | 'disabled'
+	dayOfWeek: integer('day_of_week').default(1), // 1=Monday (for weekly)
+	dayOfMonth: integer('day_of_month').default(1), // 1-28 (for monthly)
+	platforms: text('platforms').notNull().default('["meta","google","tiktok"]'), // JSON array
+	recipientEmails: text('recipient_emails'), // JSON array, null = use client.email
+	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+	lastSentAt: timestamp('last_sent_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+// ---- Saved Report Views ----
+
+export const savedReportView = sqliteTable('saved_report_view', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id),
+	name: text('name').notNull(),
+	platform: text('platform').notNull(), // 'meta' | 'google' | 'tiktok'
+	filters: text('filters').notNull(), // JSON string: SavedViewFilters
+	isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	tenantUsers: many(tenantUser),
 	clients: many(client),

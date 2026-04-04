@@ -4,6 +4,7 @@ export interface DailyAggregate {
 	date: string;
 	spend: number;
 	impressions: number;
+	reach: number;
 	clicks: number;
 	conversions: number;
 	conversionValue: number;
@@ -12,6 +13,18 @@ export interface DailyAggregate {
 	ctr: number;
 	costPerConversion: number;
 	roas: number;
+	frequency: number;
+	linkClicks: number;
+	landingPageViews: number;
+	pageEngagement: number;
+	postReactions: number;
+	postComments: number;
+	postSaves: number;
+	postShares: number;
+	videoViews: number;
+	leads: number;
+	purchases: number;
+	callsPlaced: number;
 }
 
 export interface CampaignAggregate {
@@ -52,16 +65,41 @@ export function calculateROAS(revenue: number, spend: number): number {
 
 /** Aggregate campaign insights by date for time-series charts */
 export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): DailyAggregate[] {
-	const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; conversionValue: number }>();
+	type Acc = {
+		spend: number; impressions: number; reach: number; clicks: number;
+		conversions: number; conversionValue: number;
+		linkClicks: number; landingPageViews: number; pageEngagement: number;
+		postReactions: number; postComments: number; postSaves: number; postShares: number;
+		videoViews: number; leads: number; purchases: number; callsPlaced: number;
+	};
+	const byDate = new Map<string, Acc>();
 
 	for (const row of insights) {
 		const date = row.dateStart;
-		const existing = byDate.get(date) || { spend: 0, impressions: 0, clicks: 0, conversions: 0, conversionValue: 0 };
+		const existing = byDate.get(date) || {
+			spend: 0, impressions: 0, reach: 0, clicks: 0,
+			conversions: 0, conversionValue: 0,
+			linkClicks: 0, landingPageViews: 0, pageEngagement: 0,
+			postReactions: 0, postComments: 0, postSaves: 0, postShares: 0,
+			videoViews: 0, leads: 0, purchases: 0, callsPlaced: 0
+		};
 		existing.spend += parseFloat(row.spend);
 		existing.impressions += parseInt(row.impressions);
+		existing.reach += parseInt(row.reach || '0');
 		existing.clicks += parseInt(row.clicks);
 		existing.conversions += row.conversions;
 		existing.conversionValue += row.conversionValue;
+		existing.linkClicks += row.linkClicks;
+		existing.landingPageViews += row.landingPageViews;
+		existing.pageEngagement += row.pageEngagement;
+		existing.postReactions += row.postReactions;
+		existing.postComments += row.postComments;
+		existing.postSaves += row.postSaves;
+		existing.postShares += row.postShares;
+		existing.videoViews += row.videoViews;
+		existing.leads += row.leads;
+		existing.purchases += row.purchases;
+		existing.callsPlaced += row.callsPlaced;
 		byDate.set(date, existing);
 	}
 
@@ -71,6 +109,7 @@ export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): Dai
 			date,
 			spend: d.spend,
 			impressions: d.impressions,
+			reach: d.reach,
 			clicks: d.clicks,
 			conversions: d.conversions,
 			conversionValue: d.conversionValue,
@@ -78,7 +117,19 @@ export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): Dai
 			cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
 			ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
 			costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
-			roas: calculateROAS(d.conversionValue, d.spend)
+			roas: calculateROAS(d.conversionValue, d.spend),
+			frequency: d.reach > 0 ? d.impressions / d.reach : 0,
+			linkClicks: d.linkClicks,
+			landingPageViews: d.landingPageViews,
+			pageEngagement: d.pageEngagement,
+			postReactions: d.postReactions,
+			postComments: d.postComments,
+			postSaves: d.postSaves,
+			postShares: d.postShares,
+			videoViews: d.videoViews,
+			leads: d.leads,
+			purchases: d.purchases,
+			callsPlaced: d.callsPlaced
 		}));
 }
 
@@ -149,7 +200,7 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 }
 
 /** Compute totals from daily aggregates for KPI cards */
-export function computeTotals(dailyData: DailyAggregate[]): {
+export function computeTotals(dailyData: Pick<DailyAggregate, 'spend' | 'impressions' | 'clicks' | 'conversions' | 'conversionValue'>[]): {
 	totalSpend: number;
 	totalImpressions: number;
 	totalClicks: number;
@@ -189,7 +240,118 @@ export function computeTotals(dailyData: DailyAggregate[]): {
 	};
 }
 
-export function formatCurrency(value: number, currency = 'EUR'): string {
+/** KPI card descriptor — icon is a string key mapped to Lucide icons in the page */
+export interface KpiDescriptor {
+	key: string;
+	label: string;
+	icon: string;
+	value: string;
+	subtext: string;
+}
+
+/**
+ * Get 5 KPI card configs adapted to the dominant campaign objective.
+ * Uses campaign-level aggregates for action-specific metrics (linkClicks, leads, etc.)
+ * and daily totals for aggregate metrics (spend, impressions, etc.).
+ */
+export function getObjectiveKpiCards(
+	objective: string,
+	totals: ReturnType<typeof computeTotals>,
+	campaignAggregates: CampaignAggregate[],
+	currency: string,
+	resultKpi: { label: string; value: string; subtext: string }
+): KpiDescriptor[] {
+	// Sum campaign-level action metrics
+	const sum = (fn: (c: CampaignAggregate) => number) => campaignAggregates.reduce((s, c) => s + fn(c), 0);
+	const totalLinkClicks = sum(c => c.linkClicks);
+	const totalLPV = sum(c => c.landingPageViews);
+	const totalReach = sum(c => c.reach);
+	const totalVideoViews = sum(c => c.videoViews);
+	const totalEngagement = sum(c => c.pageEngagement);
+	const totalReactions = sum(c => c.postReactions);
+	const totalComments = sum(c => c.postComments);
+	const totalLeads = sum(c => c.leads);
+	const totalPurchases = sum(c => c.purchases);
+	const totalConvValue = sum(c => c.conversionValue);
+
+	const avgFreq = totalReach > 0 ? totals.totalImpressions / totalReach : 0;
+	const cpcLink = totalLinkClicks > 0 ? totals.totalSpend / totalLinkClicks : 0;
+	const ctrLink = totals.totalImpressions > 0 ? (totalLinkClicks / totals.totalImpressions) * 100 : 0;
+	const costPerLPV = totalLPV > 0 ? totals.totalSpend / totalLPV : 0;
+	const cpe = totalEngagement > 0 ? totals.totalSpend / totalEngagement : 0;
+	const cpl = totalLeads > 0 ? totals.totalSpend / totalLeads : 0;
+	const roas = totals.totalSpend > 0 ? totalConvValue / totals.totalSpend : 0;
+	const cpa = totalPurchases > 0 ? totals.totalSpend / totalPurchases : 0;
+
+	switch (objective) {
+		case 'OUTCOME_AWARENESS':
+		case 'REACH':
+		case 'BRAND_AWARENESS':
+			return [
+				{ key: 'reach', label: 'Reach', icon: 'users', value: formatNumber(totalReach), subtext: `${formatDecimal(avgFreq)} frecvență medie` },
+				{ key: 'frequency', label: 'Frecvență', icon: 'repeat', value: formatDecimal(avgFreq), subtext: `${formatNumber(totalReach)} persoane unice` },
+				{ key: 'cpm', label: 'CPM', icon: 'eye', value: formatCurrency(totals.avgCpm, currency), subtext: 'Cost per 1000 impresii' },
+				{ key: 'impressions', label: 'Impresii', icon: 'eye', value: formatNumber(totals.totalImpressions), subtext: formatCurrency(totals.totalSpend, currency) + ' cheltuieli' },
+				{ key: 'videoViews', label: 'Video views', icon: 'play', value: formatNumber(totalVideoViews), subtext: totalVideoViews > 0 ? formatCurrency(totals.totalSpend / totalVideoViews, currency) + '/view' : 'Fără date' }
+			];
+
+		case 'OUTCOME_TRAFFIC':
+		case 'LINK_CLICKS':
+			return [
+				{ key: 'linkClicks', label: 'Link clicks', icon: 'mouse-pointer-click', value: formatNumber(totalLinkClicks), subtext: formatCurrency(cpcLink, currency) + ' per click' },
+				{ key: 'cpc', label: 'CPC (link)', icon: 'dollar-sign', value: formatCurrency(cpcLink, currency), subtext: `${formatNumber(totalLinkClicks)} click-uri` },
+				{ key: 'ctrLink', label: 'CTR (link)', icon: 'percent', value: formatPercent(ctrLink), subtext: 'Click-through rate' },
+				{ key: 'lpv', label: 'Landing page views', icon: 'file-text', value: formatNumber(totalLPV), subtext: totalLPV > 0 ? formatCurrency(costPerLPV, currency) + '/vizită' : 'Fără date' },
+				{ key: 'spend', label: 'Cheltuieli', icon: 'dollar-sign', value: formatCurrency(totals.totalSpend, currency), subtext: `${formatNumber(totals.totalImpressions)} impresii` }
+			];
+
+		case 'OUTCOME_ENGAGEMENT':
+		case 'POST_ENGAGEMENT':
+			return [
+				{ key: 'engagement', label: 'Post engagement', icon: 'heart', value: formatNumber(totalEngagement), subtext: formatCurrency(cpe, currency) + ' per engagement' },
+				{ key: 'reactions', label: 'Reacții', icon: 'thumbs-up', value: formatNumber(totalReactions), subtext: `${formatNumber(totalComments)} comentarii` },
+				{ key: 'videoViews', label: 'Video views', icon: 'play', value: formatNumber(totalVideoViews), subtext: totalVideoViews > 0 ? formatCurrency(totals.totalSpend / totalVideoViews, currency) + '/view' : 'Fără date' },
+				{ key: 'cpe', label: 'Cost/engagement', icon: 'dollar-sign', value: totalEngagement > 0 ? formatCurrency(cpe, currency) : '-', subtext: `${formatNumber(totalEngagement)} interacțiuni` },
+				{ key: 'spend', label: 'Cheltuieli', icon: 'dollar-sign', value: formatCurrency(totals.totalSpend, currency), subtext: `${formatNumber(totals.totalImpressions)} impresii` }
+			];
+
+		case 'OUTCOME_LEADS':
+		case 'LEAD_GENERATION':
+			return [
+				{ key: 'leads', label: 'Leads', icon: 'users', value: formatNumber(totalLeads > 0 ? totalLeads : totals.totalConversions), subtext: totalLeads > 0 ? formatCurrency(cpl, currency) + ' per lead' : resultKpi.subtext },
+				{ key: 'cpl', label: 'Cost per lead', icon: 'dollar-sign', value: totalLeads > 0 ? formatCurrency(cpl, currency) : formatCurrency(totals.avgCostPerConversion, currency), subtext: `${formatNumber(totalLeads > 0 ? totalLeads : totals.totalConversions)} leads` },
+				{ key: 'linkClicks', label: 'Link clicks', icon: 'mouse-pointer-click', value: formatNumber(totalLinkClicks), subtext: formatCurrency(cpcLink, currency) + ' CPC' },
+				{ key: 'lpv', label: 'Landing page views', icon: 'file-text', value: formatNumber(totalLPV), subtext: totalLPV > 0 ? formatCurrency(costPerLPV, currency) + '/vizită' : 'Fără date' },
+				{ key: 'spend', label: 'Cheltuieli', icon: 'dollar-sign', value: formatCurrency(totals.totalSpend, currency), subtext: `${formatNumber(totals.totalImpressions)} impresii` }
+			];
+
+		case 'OUTCOME_SALES':
+		case 'CONVERSIONS':
+			return [
+				{ key: 'purchases', label: 'Achiziții', icon: 'shopping-cart', value: formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions), subtext: totalPurchases > 0 ? formatCurrency(cpa, currency) + ' per achiziție' : resultKpi.subtext },
+				{ key: 'roas', label: 'ROAS', icon: 'trending-up', value: roas > 0 ? formatROAS(roas) : '-', subtext: roas > 0 ? formatCurrency(totalConvValue, currency) + ' venituri' : 'Fără date' },
+				{ key: 'revenue', label: 'Venituri', icon: 'dollar-sign', value: totalConvValue > 0 ? formatCurrency(totalConvValue, currency) : '-', subtext: `din ${formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions)} conversii` },
+				{ key: 'cpa', label: 'Cost per achiziție', icon: 'dollar-sign', value: totalPurchases > 0 ? formatCurrency(cpa, currency) : formatCurrency(totals.avgCostPerConversion, currency), subtext: `${formatNumber(totals.totalClicks)} click-uri totale` },
+				{ key: 'linkClicks', label: 'Link clicks', icon: 'mouse-pointer-click', value: formatNumber(totalLinkClicks), subtext: formatCurrency(cpcLink, currency) + ' CPC' }
+			];
+
+		case 'OUTCOME_APP_PROMOTION':
+		case 'APP_INSTALLS':
+			return [
+				{ key: 'results', label: resultKpi.label, value: resultKpi.value, icon: 'download', subtext: resultKpi.subtext },
+				{ key: 'cpi', label: 'Cost per install', icon: 'dollar-sign', value: formatCurrency(totals.avgCostPerConversion, currency), subtext: `${formatNumber(totals.totalConversions)} installs` },
+				{ key: 'linkClicks', label: 'Link clicks', icon: 'mouse-pointer-click', value: formatNumber(totalLinkClicks), subtext: formatCurrency(cpcLink, currency) + ' CPC' },
+				{ key: 'ctr', label: 'CTR', icon: 'percent', value: formatPercent(totals.avgCtr), subtext: 'Click-through rate' },
+				{ key: 'spend', label: 'Cheltuieli', icon: 'dollar-sign', value: formatCurrency(totals.totalSpend, currency), subtext: `${formatNumber(totals.totalImpressions)} impresii` }
+			];
+
+		default:
+			// Mixed / unknown — default KPIs
+			return [];
+	}
+}
+
+export function formatCurrency(value: number, currency = 'RON'): string {
 	return new Intl.NumberFormat('ro-RO', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
 }
 

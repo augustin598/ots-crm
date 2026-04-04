@@ -34,6 +34,15 @@ function setCache(key: string, data: any): void {
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
+/** Invalidate cache entries matching a substring (e.g. adAccountId or tenantId) */
+function invalidateCache(...patterns: string[]): void {
+	for (const key of cache.keys()) {
+		if (patterns.some(p => key.includes(p))) {
+			cache.delete(key);
+		}
+	}
+}
+
 // Short-lived request cache to avoid repeated DB lookups within the same page load
 const _clientAccessCache = new Map<string, string[]>();
 const _integrationCache = new Map<string, string>();
@@ -545,6 +554,7 @@ export const updateBudget = command(
 			throw error(401, 'Doar adminii pot modifica bugetul');
 		}
 
+		const tenantId = event.locals.tenant.id;
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
@@ -566,8 +576,8 @@ export const updateBudget = command(
 				budgetCents
 			);
 
-			// Clear all cache so refresh shows updated budget
-			cache.clear();
+			// Invalidate campaign/insight caches for this tenant
+			invalidateCache(tenantId);
 
 			return { success: true };
 		} catch (err) {
@@ -593,6 +603,7 @@ export const toggleCampaignStatus = command(
 			throw error(401, 'Doar adminii pot schimba statusul campaniilor');
 		}
 
+		const tenantId = event.locals.tenant.id;
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) throw error(500, 'Nu s-a putut obține token-ul Meta Ads.');
 
@@ -601,7 +612,7 @@ export const toggleCampaignStatus = command(
 
 		try {
 			await toggleCampaignStatusApi(params.campaignId, authResult.accessToken, appSecret, params.newStatus);
-			cache.clear();
+			invalidateCache(tenantId);
 			return { success: true };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

@@ -17,6 +17,7 @@ import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
+import { processPdfReportSend } from './tasks/pdf-report-send';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -86,7 +87,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
-	db_write_health_check: processDbWriteHealthCheck
+	db_write_health_check: processDbWriteHealthCheck,
+	pdf_report_send: processPdfReportSend
 };
 
 /**
@@ -459,7 +461,23 @@ export const startScheduler = async () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 19 jobs registered`);
+	// PDF report send — daily at 08:00
+	schedulerQueue.add(
+		'pdf-report-send',
+		{
+			type: 'pdf_report_send',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 8 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'pdf-report-send'
+		}
+	);
+
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 20 jobs registered`);
 
 	return { queue: schedulerQueue, worker };
 };
@@ -488,7 +506,8 @@ export const JOB_LABELS: Record<string, string> = {
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
 	token_refresh: 'Refresh Token-uri Integrări',
 	debug_log_cleanup: 'Cleanup Loguri Debug',
-	db_write_health_check: 'Health Check Scriere DB'
+	db_write_health_check: 'Health Check Scriere DB',
+	pdf_report_send: 'Trimitere Rapoarte PDF'
 };
 
 /** Default params for jobs that need specific parameters */

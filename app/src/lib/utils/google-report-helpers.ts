@@ -1,5 +1,19 @@
 import type { GoogleAdsCampaignInsight, GoogleAdsAdGroupInsight } from '$lib/server/google-ads/client';
-import type { DailyAggregate } from './report-helpers';
+
+export interface GoogleDailyAggregate {
+	date: string;
+	spend: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+	conversionValue: number;
+	cpc: number;
+	cpm: number;
+	ctr: number;
+	conversionRate: number;
+	costPerConversion: number;
+	roas: number;
+}
 
 export interface GoogleCampaignAggregate {
 	campaignId: string;
@@ -43,7 +57,7 @@ export interface GoogleAdGroupAggregate {
 }
 
 /** Aggregate Google campaign insights by date for time-series charts */
-export function aggregateGoogleInsightsByDate(insights: GoogleAdsCampaignInsight[]): DailyAggregate[] {
+export function aggregateGoogleInsightsByDate(insights: GoogleAdsCampaignInsight[]): GoogleDailyAggregate[] {
 	const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; conversionValue: number }>();
 
 	for (const row of insights) {

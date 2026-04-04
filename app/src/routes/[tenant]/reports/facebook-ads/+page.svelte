@@ -14,9 +14,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import KpiCard from '$lib/components/reports/kpi-card.svelte';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
-	import SpendChart from '$lib/components/reports/spend-chart.svelte';
-	import ConversionsChart from '$lib/components/reports/conversions-chart.svelte';
+	import DynamicChart from '$lib/components/reports/dynamic-chart.svelte';
+	import BudgetPacing from '$lib/components/reports/budget-pacing.svelte';
+	import FunnelChart from '$lib/components/reports/funnel-chart.svelte';
+	import CreativeRanking from '$lib/components/reports/creative-ranking.svelte';
 	import DemographicsSection from '$lib/components/reports/demographics-section.svelte';
+	import SavedViewSelector from '$lib/components/reports/saved-view-selector.svelte';
+	import { detectDatePreset, resolveDatePreset } from '$lib/utils/date-preset-resolver';
+	import type { SavedViewFilters } from '$lib/remotes/saved-views.remote';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import EyeIcon from '@lucide/svelte/icons/eye';
@@ -41,6 +46,10 @@
 	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import ThumbsUpIcon from '@lucide/svelte/icons/thumbs-up';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import {
@@ -53,11 +62,14 @@
 		formatPercent,
 		formatNumber,
 		getDefaultDateRange,
+		getObjectiveKpiCards,
 		type CampaignAggregate,
 		type AdsetAggregate,
 		type AdAggregate
 	} from '$lib/utils/report-helpers';
-	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset } from '$lib/utils/column-presets';
+	import { COLUMN_PRESETS, DEFAULT_PRESET, getPreset, getRecommendedPreset } from '$lib/utils/column-presets';
+	import { getChartsForObjective, DEFAULT_CHARTS } from '$lib/utils/chart-config';
+	import { detectAnomalies, getAnomalySummary, type CampaignAnomaly } from '$lib/utils/anomaly-detection';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -148,11 +160,26 @@
 		selectedCampaigns = new Set();
 		objectiveFilter = 'all';
 		currentPage = 1;
+		userOverrodePreset = false;
 	}
 
 	// Campaign insights (reactive based on account + date range)
 	let insightsQuery = $state<ReturnType<typeof getMetaCampaignInsights> | null>(null);
 	let campaignsQuery = $state<ReturnType<typeof getMetaActiveCampaigns> | null>(null);
+
+	// Previous period (same duration, shifted back)
+	const prevPeriod = $derived.by(() => {
+		const s = new Date(since + 'T00:00:00');
+		const u = new Date(until + 'T00:00:00');
+		const durationMs = u.getTime() - s.getTime() + 86400000; // include both endpoints
+		const prevEnd = new Date(s.getTime() - 86400000); // day before since
+		const prevStart = new Date(prevEnd.getTime() - durationMs + 86400000);
+		const pad = (n: number) => String(n).padStart(2, '0');
+		const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+		return { since: fmt(prevStart), until: fmt(prevEnd) };
+	});
+
+	let prevInsightsQuery = $state<ReturnType<typeof getMetaCampaignInsights> | null>(null);
 
 	$effect(() => {
 		if (selectedAccountId && selectedIntegrationId && since && until) {
@@ -161,6 +188,13 @@
 				integrationId: selectedIntegrationId,
 				since,
 				until,
+				timeIncrement: 'daily'
+			});
+			prevInsightsQuery = getMetaCampaignInsights({
+				adAccountId: selectedAccountId,
+				integrationId: selectedIntegrationId,
+				since: prevPeriod.since,
+				until: prevPeriod.until,
 				timeIncrement: 'daily'
 			});
 			campaignsQuery = getMetaActiveCampaigns({
@@ -173,6 +207,7 @@
 	const insights = $derived(insightsQuery?.current || []);
 	const insightsLoading = $derived(insightsQuery?.loading ?? false);
 	const insightsError = $derived(insightsQuery?.error);
+	const prevInsights = $derived(prevInsightsQuery?.current || []);
 
 	const campaigns = $derived(campaignsQuery?.current || []);
 
@@ -194,10 +229,63 @@
 
 	// Campaign data always from ALL insights (table always shows full data)
 	const campaignData = $derived(aggregateInsightsByCampaign(insights));
+	const campaignAnomalies = $derived(detectAnomalies(campaignData));
+	const anomalySummary = $derived(getAnomalySummary(campaignAnomalies));
 
 	// KPI cards, charts, demographics use filtered insights when campaigns are selected
 	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
 	const totals = $derived(computeTotals(dailyData));
+
+	// Previous period totals for comparison
+	const prevFilteredInsights = $derived.by(() => {
+		let result = prevInsights;
+		if (selectedCampaigns.size > 0) {
+			result = result.filter((i: any) => selectedCampaigns.has(i.campaignId));
+		}
+		if (objectiveFilter !== 'all') {
+			result = result.filter((i: any) => getObjectiveConfig(i.objective || '').label === objectiveFilter);
+		}
+		return result;
+	});
+	const prevDailyData = $derived(aggregateInsightsByDate(prevFilteredInsights));
+	const prevTotals = $derived(computeTotals(prevDailyData));
+
+	/** Calculate % change between current and previous period */
+	function pctChange(current: number, previous: number): number | undefined {
+		if (previous === 0) return current > 0 ? undefined : undefined;
+		return ((current - previous) / previous) * 100;
+	}
+
+	// All loaded ad aggregates (from expanded adsets) for creative ranking
+	const allLoadedAds = $derived.by(() => {
+		const all: AdAggregate[] = [];
+		for (const [, ads] of adsData) {
+			all.push(...ads);
+		}
+		return all;
+	});
+
+	// Funnel totals from filtered campaigns
+	const funnelTotals = $derived.by(() => {
+		const fc = aggregateInsightsByCampaign(filteredInsights);
+		return {
+			impressions: fc.reduce((s, c) => s + c.impressions, 0),
+			clicks: fc.reduce((s, c) => s + c.clicks, 0),
+			linkClicks: fc.reduce((s, c) => s + c.linkClicks, 0),
+			lpv: fc.reduce((s, c) => s + c.landingPageViews, 0),
+			conversions: fc.reduce((s, c) => s + c.conversions, 0)
+		};
+	});
+
+	// Total daily budget from visible active campaigns (for budget pacing)
+	const totalDailyBudget = $derived.by(() => {
+		return filteredCampaigns.reduce((sum: number, c: any) => {
+			if (c.dailyBudget && (c.status === 'ACTIVE' || c.status === 'WITH_ISSUES')) {
+				return sum + parseFloat(c.dailyBudget) / 100;
+			}
+			return sum;
+		}, 0);
+	});
 
 	// Campaign IDs for demographics — respects both selectedCampaigns and objectiveFilter
 	const demographicCampaignIds = $derived.by(() => {
@@ -250,6 +338,60 @@
 			value: formatNumber(totalResults),
 			subtext: totalResults > 0 ? `${formatCurrency(costPer, selectedCurrency)} ${costLabel}` : 'Fără date'
 		};
+	});
+
+	// ---- Icon map for KPI descriptors ----
+	const KPI_ICON_MAP: Record<string, any> = {
+		'users': UsersIcon,
+		'repeat': RepeatIcon,
+		'eye': EyeIcon,
+		'play': PlayIcon,
+		'mouse-pointer-click': MousePointerClickIcon,
+		'dollar-sign': DollarSignIcon,
+		'percent': PercentIcon,
+		'file-text': FileTextIcon,
+		'heart': HeartIcon,
+		'thumbs-up': ThumbsUpIcon,
+		'trending-up': TrendingUpIcon,
+		'shopping-cart': ShoppingCartIcon,
+		'download': DownloadIcon,
+		'megaphone': MegaphoneIcon
+	};
+
+	// ---- Detect dominant objective from visible campaigns ----
+	const dominantObjective = $derived.by(() => {
+		const visible = filteredCampaigns;
+		if (visible.length === 0) return '';
+		const objCounts = new Map<string, number>();
+		for (const c of visible) {
+			if (c.objective) objCounts.set(c.objective, (objCounts.get(c.objective) || 0) + 1);
+		}
+		const unique = [...objCounts.keys()];
+		if (unique.length === 1) return unique[0];
+		return ''; // mixed
+	});
+
+	// ---- Objective-aware KPI cards ----
+	const objectiveKpis = $derived.by(() => {
+		if (!dominantObjective) return []; // mixed → use default KPI cards
+		const filteredCampaignData = aggregateInsightsByCampaign(filteredInsights);
+		return getObjectiveKpiCards(dominantObjective, totals, filteredCampaignData, selectedCurrency, resultKpi);
+	});
+
+	// ---- Objective-aware chart specs ----
+	const chartSpecs = $derived(dominantObjective ? getChartsForObjective(dominantObjective) : DEFAULT_CHARTS);
+
+	// ---- Auto-switch column preset based on objective ----
+	let userOverrodePreset = $state(false);
+
+	$effect(() => {
+		if (userOverrodePreset) return;
+		const visible = filteredCampaigns;
+		const objectives = visible.map(c => c.objective).filter(Boolean);
+		const recommended = getRecommendedPreset(objectives);
+		if (recommended !== selectedPresetKey) {
+			selectedPresetKey = recommended;
+		}
 	});
 
 	// Build campaign table data by merging insights with ALL campaigns (including those without data)
@@ -375,6 +517,24 @@
 	let selectedPresetKey = $state(DEFAULT_PRESET);
 	const activePreset = $derived(getPreset(selectedPresetKey));
 
+	// Client-side CSV export with active columns
+	function exportCSV() {
+		const headers = ['Campanie', 'Status', ...activePreset.columns.map(c => c.label)];
+		const rows = sortedCampaigns.map(c => [
+			`"${c.campaignName.replace(/"/g, '""')}"`,
+			c.status,
+			...activePreset.columns.map(col => `"${col.getValue(c as any, selectedCurrency).replace(/"/g, '""')}"`)
+		]);
+		const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+		const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `facebook-ads-${since}-${until}.csv`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
 	// Pagination
 	let pageSize = $state(25);
 	let currentPage = $state(1);
@@ -388,6 +548,42 @@
 	$effect(() => {
 		if (currentPage > totalPages) currentPage = totalPages;
 	});
+
+	// ---- Saved Views ----
+	const currentFilters = $derived<SavedViewFilters>({
+		datePreset: detectDatePreset(since, until),
+		since: detectDatePreset(since, until) ? null : since,
+		until: detectDatePreset(since, until) ? null : until,
+		accountId: selectedAccountId,
+		columnPreset: selectedPresetKey,
+		objectiveFilter,
+		statusFilter,
+		pageSize
+	});
+
+	function applyView(filters: SavedViewFilters) {
+		if (filters.datePreset) {
+			const dates = resolveDatePreset(filters.datePreset);
+			if (dates) { since = dates.since; until = dates.until; }
+		} else if (filters.since && filters.until) {
+			since = filters.since;
+			until = filters.until;
+		}
+		if (filters.accountId) {
+			const accExists = accounts.find((a: any) => a.metaAdAccountId === filters.accountId);
+			if (accExists) {
+				selectedAccountId = filters.accountId;
+				selectedIntegrationId = accExists.integrationId;
+			}
+		}
+		selectedPresetKey = filters.columnPreset;
+		userOverrodePreset = true;
+		objectiveFilter = filters.objectiveFilter;
+		statusFilter = filters.statusFilter as typeof statusFilter;
+		pageSize = filters.pageSize;
+		currentPage = 1;
+		selectedCampaigns = new Set();
+	}
 
 	function handleSort(column: typeof sortColumn) {
 		if (sortColumn === column) {
@@ -468,14 +664,14 @@
 		}
 	}
 
-	const allSelected = $derived(paginatedCampaigns.length > 0 && paginatedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
-	const someSelected = $derived(paginatedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
+	const allSelected = $derived(sortedCampaigns.length > 0 && sortedCampaigns.every(c => selectedCampaigns.has(c.campaignId)));
+	const someSelected = $derived(sortedCampaigns.some(c => selectedCampaigns.has(c.campaignId)));
 
 	function toggleSelectAll() {
 		if (allSelected) {
 			selectedCampaigns = new Set();
 		} else {
-			selectedCampaigns = new Set(paginatedCampaigns.map(c => c.campaignId));
+			selectedCampaigns = new Set(sortedCampaigns.map(c => c.campaignId));
 		}
 	}
 
@@ -562,6 +758,9 @@
 	}
 
 	// ---- Expandable ad sets ----
+	const activeIntervals = new Set<ReturnType<typeof setInterval>>();
+	onDestroy(() => { for (const id of activeIntervals) clearInterval(id); });
+
 	let expandedCampaigns = $state<Set<string>>(new Set());
 	let adsetData = $state<Map<string, AdsetAggregate[]>>(new Map());
 	let adsetLoading = $state<Set<string>>(new Set());
@@ -597,6 +796,7 @@
 				const checkInterval = setInterval(() => {
 					if (!query.loading) {
 						clearInterval(checkInterval);
+						activeIntervals.delete(checkInterval);
 						const loadDone = new Set(adsetLoading);
 						loadDone.delete(campaignId);
 						adsetLoading = loadDone;
@@ -609,6 +809,7 @@
 						}
 					}
 				}, 100);
+				activeIntervals.add(checkInterval);
 			} catch {
 				const loadDone = new Set(adsetLoading);
 				loadDone.delete(campaignId);
@@ -643,6 +844,7 @@
 				const checkInterval = setInterval(() => {
 					if (!query.loading) {
 						clearInterval(checkInterval);
+						activeIntervals.delete(checkInterval);
 						const loadDone = new Set(adsLoading);
 						loadDone.delete(adsetId);
 						adsLoading = loadDone;
@@ -655,6 +857,7 @@
 						}
 					}
 				}, 100);
+				activeIntervals.add(checkInterval);
 			} catch {
 				const loadDone = new Set(adsLoading);
 				loadDone.delete(adsetId);
@@ -702,7 +905,8 @@
 			<p class="text-muted-foreground">Rapoarte performanță campanii Meta/Facebook Ads</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; objectiveFilter = 'all'; selectedCampaigns = new Set(); }} />
+			<SavedViewSelector platform="meta" {tenantSlug} currentAccountId={selectedAccountId} {currentFilters} onApplyView={applyView} />
+			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; objectiveFilter = 'all'; selectedCampaigns = new Set(); userOverrodePreset = false; }} />
 			{#if accounts.length > 0}
 				<div class="flex items-center gap-2">
 					<IconFacebook class="h-4 w-4" />
@@ -721,11 +925,9 @@
 					</select>
 				</div>
 			{/if}
-			<a href="/api/export/spending?format=excel&platform=meta" download>
-				<Button variant="outline" size="sm">
-					<DownloadIcon class="h-4 w-4" />
-				</Button>
-			</a>
+			<Button variant="outline" size="sm" onclick={exportCSV} title="Export CSV cu coloanele vizibile">
+				<DownloadIcon class="h-4 w-4" />
+			</Button>
 			<Button variant="outline" size="sm" onclick={handleRefresh}>
 				<RefreshCwIcon class="h-4 w-4" />
 			</Button>
@@ -785,6 +987,19 @@
 			</div>
 		</Card>
 	{:else}
+		<!-- Anomaly Alert Banner -->
+		{#if !insightsLoading && anomalySummary.total > 0}
+			<div class="rounded-md p-3 bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+				<p class="text-sm text-amber-800 dark:text-amber-300">
+					<span class="font-semibold">Atenție:</span>
+					{anomalySummary.criticalCount > 0 ? `${anomalySummary.criticalCount} probleme critice` : ''}
+					{anomalySummary.criticalCount > 0 && anomalySummary.warningCount > 0 ? ' și ' : ''}
+					{anomalySummary.warningCount > 0 ? `${anomalySummary.warningCount} avertismente` : ''}
+					detectate în campaniile active. Verifică campaniile marcate cu badge în tabel.
+				</p>
+			</div>
+		{/if}
+
 		<!-- KPI Cards -->
 		{#if insightsLoading}
 			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
@@ -802,51 +1017,99 @@
 			</div>
 		{:else}
 			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-				<KpiCard
-					label="Cheltuieli totale"
-					value={formatCurrency(totals.totalSpend, selectedCurrency)}
-					icon={DollarSignIcon}
-					subtext="{formatNumber(totals.totalImpressions)} impresii"
-				/>
-				<KpiCard
-					label="CPM"
-					value={formatCurrency(totals.avgCpm, selectedCurrency)}
-					icon={EyeIcon}
-					subtext="Cost per 1000 impresii"
-				/>
-				<KpiCard
-					label="CPC"
-					value={formatCurrency(totals.avgCpc, selectedCurrency)}
-					icon={MousePointerClickIcon}
-					subtext="{formatNumber(totals.totalClicks)} click-uri"
-				/>
-				<KpiCard
-					label="CTR"
-					value={formatPercent(totals.avgCtr)}
-					icon={PercentIcon}
-					subtext="Click-through rate"
-				/>
-				<KpiCard
-					label={resultKpi.label}
-					value={resultKpi.value}
-					icon={TrendingUpIcon}
-					subtext={resultKpi.subtext}
-				/>
+				{#if objectiveKpis.length > 0}
+					{#each objectiveKpis as kpi}
+						<KpiCard
+							label={kpi.label}
+							value={kpi.value}
+							icon={KPI_ICON_MAP[kpi.icon] || TrendingUpIcon}
+							subtext={kpi.subtext}
+						/>
+					{/each}
+				{:else}
+					<KpiCard
+						label="Cheltuieli totale"
+						value={formatCurrency(totals.totalSpend, selectedCurrency)}
+						icon={DollarSignIcon}
+						subtext="{formatNumber(totals.totalImpressions)} impresii"
+						change={pctChange(totals.totalSpend, prevTotals.totalSpend)}
+						invertChange
+					/>
+					<KpiCard
+						label="CPM"
+						value={formatCurrency(totals.avgCpm, selectedCurrency)}
+						icon={EyeIcon}
+						subtext="Cost per 1000 impresii"
+						change={pctChange(totals.avgCpm, prevTotals.avgCpm)}
+						invertChange
+					/>
+					<KpiCard
+						label="CPC"
+						value={formatCurrency(totals.avgCpc, selectedCurrency)}
+						icon={MousePointerClickIcon}
+						subtext="{formatNumber(totals.totalClicks)} click-uri"
+						change={pctChange(totals.avgCpc, prevTotals.avgCpc)}
+						invertChange
+					/>
+					<KpiCard
+						label="CTR"
+						value={formatPercent(totals.avgCtr)}
+						icon={PercentIcon}
+						subtext="Click-through rate"
+						change={pctChange(totals.avgCtr, prevTotals.avgCtr)}
+					/>
+					<KpiCard
+						label={resultKpi.label}
+						value={resultKpi.value}
+						icon={TrendingUpIcon}
+						subtext={resultKpi.subtext}
+						change={pctChange(totals.totalConversions, prevTotals.totalConversions)}
+					/>
+				{/if}
 			</div>
 		{/if}
 
-		<!-- Charts -->
+		<!-- Charts (objective-aware) -->
 		{#if !insightsLoading && dailyData.length > 0}
 			<div class="grid gap-6 xl:grid-cols-2">
-				<Card class="p-4">
-					{#key objectiveFilter + String(selectedCampaigns.size)}<h3 class="mb-4 text-lg font-semibold">Cheltuieli în timp</h3>
-					<SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency} />{/key}
-				</Card>
-				<Card class="p-4">
-					{#key objectiveFilter + String(selectedCampaigns.size)}<h3 class="mb-4 text-lg font-semibold">{resultKpi.label} & Cost per {resultKpi.label.toLowerCase()}</h3>
-					<ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} currency={selectedCurrency} />
-				{/key}</Card>
+				{#each chartSpecs as spec (spec.title + dominantObjective)}
+					<Card class="p-4">
+						{#key objectiveFilter + String(selectedCampaigns.size)}
+							<h3 class="mb-4 text-lg font-semibold">{spec.title}</h3>
+							<DynamicChart data={dailyData} {spec} currency={selectedCurrency} />
+						{/key}
+					</Card>
+				{/each}
 			</div>
+		{/if}
+
+		<!-- Budget Pacing & Funnel -->
+		{#if !insightsLoading}
+			<div class="grid gap-6 xl:grid-cols-2">
+				{#if totalDailyBudget > 0}
+					<BudgetPacing
+						totalSpend={totals.totalSpend}
+						{totalDailyBudget}
+						{since}
+						{until}
+						currency={selectedCurrency}
+					/>
+				{/if}
+				{#if funnelTotals.impressions > 0}
+					<FunnelChart
+						impressions={funnelTotals.impressions}
+						clicks={funnelTotals.clicks}
+						linkClicks={funnelTotals.linkClicks}
+						landingPageViews={funnelTotals.lpv}
+						conversions={funnelTotals.conversions}
+					/>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- Creative Performance Ranking -->
+		{#if !insightsLoading && allLoadedAds.length > 0}
+			<CreativeRanking ads={allLoadedAds} currency={selectedCurrency} />
 		{/if}
 
 		<!-- Demographics -->
@@ -881,12 +1144,12 @@
 							<div class="flex items-center gap-1.5"><span class="text-xs text-muted-foreground">Tip:</span><div class="flex items-center gap-1 rounded-lg border p-0.5">
 								<button
 									class="px-3 py-1 text-xs rounded-md transition-colors {objectiveFilter === 'all' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
-									onclick={() => { objectiveFilter = 'all'; currentPage = 1; }}
+									onclick={() => { objectiveFilter = 'all'; currentPage = 1; userOverrodePreset = false; }}
 								>Toate</button>
 								{#each availableObjectives as obj}
 									<button
 										class="flex items-center gap-1 px-3 py-1 text-xs rounded-md transition-colors {objectiveFilter === obj.label ? obj.color : 'text-muted-foreground hover:text-foreground'}"
-										onclick={() => { objectiveFilter = obj.label; currentPage = 1; }}
+										onclick={() => { objectiveFilter = obj.label; currentPage = 1; userOverrodePreset = false; }}
 									><obj.icon class="h-3 w-3" />{obj.label}</button>
 								{/each}
 							</div></div>
@@ -901,7 +1164,7 @@
 							<select
 								class="h-8 rounded-md border border-input bg-background px-2 text-sm"
 								value={selectedPresetKey}
-								onchange={(e) => { selectedPresetKey = e.currentTarget.value; }}
+								onchange={(e) => { selectedPresetKey = e.currentTarget.value; userOverrodePreset = true; }}
 							>
 								{#each COLUMN_PRESETS as preset}
 									<option value={preset.key}>{preset.label}</option>
@@ -981,8 +1244,7 @@
 												{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											{#if true}
-												{@const objConfig = getObjectiveConfig(campaign.objective)}
+											{@const objConfig = getObjectiveConfig(campaign.objective)}
 												{@const ObjIcon = objConfig.icon}
 												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
 													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {objConfig.color}">
@@ -997,12 +1259,21 @@
 														</span>
 													{/if}
 												</div>
-											{/if}
 										</TableCell>
 										<TableCell>
-											<Badge variant={getStatusVariant(campaign.status)}>
-												{campaign.status}
-											</Badge>
+											<div class="flex flex-wrap items-center gap-1">
+												<Badge variant={getStatusVariant(campaign.status)}>
+													{campaign.status}
+												</Badge>
+												{#if campaignAnomalies.has(campaign.campaignId)}
+													{@const issues = campaignAnomalies.get(campaign.campaignId) || []}
+													<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium
+														{issues.some(i => i.severity === 'critical') ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'}"
+														title={issues.map(i => i.message).join('\n')}>
+														{issues.length} {issues.length === 1 ? 'alertă' : 'alerte'}
+													</span>
+												{/if}
+											</div>
 										</TableCell>
 										{#each activePreset.columns as col}
 											<TableCell class={col.align === 'right' ? 'text-right' : ''} onclick={(e) => col.key === 'budget' ? e.stopPropagation() : null}>

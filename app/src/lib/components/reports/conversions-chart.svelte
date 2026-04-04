@@ -5,7 +5,7 @@
 
 	let {
 		data,
-		currency = 'EUR'
+		currency = 'RON'
 	}: {
 		data: { date: string; conversions: number; costPerConversion: number }[];
 		currency?: string;

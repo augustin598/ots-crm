@@ -230,9 +230,29 @@ export const COLUMN_PRESETS: ColumnPreset[] = [
 		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.reach, COL.roas]
 	},
 	{
+		key: 'awareness',
+		label: 'Awareness',
+		columns: [COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.videoViews, COL.spend, COL.budget]
+	},
+	{
+		key: 'traffic',
+		label: 'Traffic',
+		columns: [COL.linkClicks, COL.cpc, COL.ctrLink, COL.landingPageViews, COL.costPerLPV, COL.spend, COL.impressions, COL.budget]
+	},
+	{
+		key: 'leads',
+		label: 'Leads',
+		columns: [COL.results, COL.costPerResult, COL.linkClicks, COL.landingPageViews, COL.spend, COL.impressions, COL.budget]
+	},
+	{
+		key: 'sales',
+		label: 'Sales',
+		columns: [COL.results, COL.costPerResult, COL.roas, COL.spend, COL.linkClicks, COL.landingPageViews, COL.budget]
+	},
+	{
 		key: 'engagement',
 		label: 'Engagement',
-		columns: [COL.pageEngagement, COL.postReactions, COL.postComments, COL.postSaves, COL.postShares, COL.linkClicks, COL.cpc]
+		columns: [COL.pageEngagement, COL.postReactions, COL.postComments, COL.postSaves, COL.postShares, COL.videoViews, COL.linkClicks, COL.cpc, COL.spend, COL.budget]
 	},
 	{
 		key: 'delivery',
@@ -247,6 +267,39 @@ export const COLUMN_PRESETS: ColumnPreset[] = [
 ];
 
 export const DEFAULT_PRESET = 'performance_clicks';
+
+/** Map campaign objective → recommended column preset */
+export const OBJECTIVE_PRESET_MAP: Record<string, string> = {
+	// Modern objectives
+	OUTCOME_AWARENESS: 'awareness',
+	OUTCOME_TRAFFIC: 'traffic',
+	OUTCOME_ENGAGEMENT: 'engagement',
+	OUTCOME_LEADS: 'leads',
+	OUTCOME_SALES: 'sales',
+	OUTCOME_APP_PROMOTION: 'performance',
+	// Legacy objectives
+	REACH: 'awareness',
+	BRAND_AWARENESS: 'awareness',
+	LINK_CLICKS: 'traffic',
+	LEAD_GENERATION: 'leads',
+	CONVERSIONS: 'sales',
+	POST_ENGAGEMENT: 'engagement',
+	VIDEO_VIEWS: 'video',
+	APP_INSTALLS: 'performance',
+	MESSAGES: 'engagement'
+};
+
+/**
+ * Get recommended preset based on visible campaign objectives.
+ * If all campaigns share the same objective category, returns matching preset.
+ * Otherwise returns 'performance_clicks' (default).
+ */
+export function getRecommendedPreset(objectives: string[]): string {
+	if (objectives.length === 0) return DEFAULT_PRESET;
+	const presets = new Set(objectives.map(o => OBJECTIVE_PRESET_MAP[o]).filter(Boolean));
+	if (presets.size === 1) return [...presets][0];
+	return DEFAULT_PRESET;
+}
 
 export function getPreset(key: string): ColumnPreset {
 	return COLUMN_PRESETS.find(p => p.key === key) || COLUMN_PRESETS[0];
