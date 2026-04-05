@@ -120,6 +120,18 @@ function isMetricApplicable(campaign: CampaignAggregate, metric: string): boolea
 	return true;
 }
 
+// ---- Formatting ----
+
+function formatMetricValue(metric: string, value: number): string {
+	if (metric === 'ctr') return `${value.toFixed(2)}%`;
+	if (metric === 'roas') return `${value.toFixed(1)}x`;
+	if (metric === 'frequency') return value.toFixed(2);
+	if (metric === 'impressions') return new Intl.NumberFormat('ro-RO').format(Math.round(value));
+	if (metric === 'computed:lpvRatio' || metric === 'computed:reachRatio') return `${(value * 100).toFixed(1)}%`;
+	if (['cpc', 'cpm', 'costPerConversion'].includes(metric)) return `${value.toFixed(2)} RON`;
+	return value.toFixed(2);
+}
+
 // ---- Scoring functions ----
 
 function scoreMetric(value: number, threshold: number, direction: 'above' | 'below', maxPoints: number): number {
@@ -163,9 +175,12 @@ export function calculateHealthScore(campaign: CampaignAggregate): HealthScoreRe
 		const metricScore = scoreMetric(value, check.threshold, check.direction, scaledWeight);
 		totalScore += metricScore;
 
-		// Add issue if score < 50% of max for this metric
+		// Add issue with real data if score < 50% of max for this metric
 		if (metricScore < scaledWeight * 0.5) {
-			issues.push(check.issue);
+			const actual = formatMetricValue(check.metric, value);
+			const target = formatMetricValue(check.metric, check.threshold);
+			const direction = check.direction === 'above' ? '↑' : '↓';
+			issues.push(`${check.issue} (actual: ${actual}, target: ${direction} ${target})`);
 		}
 	}
 

@@ -50,8 +50,7 @@
 		{ id: 'projects', label: `Projects (${projects.length})`, href: `/${tenantSlug}/clients/${clientId}/projects` },
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
-		{ id: 'marketing', label: 'Marketing', href: `/${tenantSlug}/clients/${clientId}/marketing` },
-		{ id: 'access-data', label: 'Date de acces', href: `/${tenantSlug}/clients/${clientId}/access-data` }
+		{ id: 'budget', label: 'Buget', href: `/${tenantSlug}/clients/${clientId}/budget` }
 	]);
 
 	let magicLinkDialogOpen = $state(false);
@@ -104,8 +103,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
-		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/marketing`)) return 'marketing';
-		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/access-data`)) return 'access-data';
+		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/budget`)) return 'budget';
 		return 'overview';
 	});
 </script>
@@ -151,7 +149,7 @@
 		</div>
 	</div>
 
-		<Dialog.Root bind:open={magicLinkDialogOpen}>
+	<Dialog.Root bind:open={magicLinkDialogOpen}>
 		<Dialog.Content class="sm:max-w-md max-h-[85vh] overflow-y-auto">
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
@@ -194,15 +192,15 @@
 	</Dialog.Root>
 
 	<Tabs value={activeTab()} class="w-full">
-			<TabsList class="grid w-full grid-cols-7">
-				{#each tabs as tab}
-					<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
-						{tab.label}
-					</TabsTrigger>
-				{/each}
-			</TabsList>
-			<TabsContent value={activeTab()} class="mt-6">
-				{@render children()}
-			</TabsContent>
-		</Tabs>
+		<TabsList class="grid w-full grid-cols-6">
+			{#each tabs as tab}
+				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
+					{tab.label}
+				</TabsTrigger>
+			{/each}
+		</TabsList>
+		<TabsContent value={activeTab()} class="mt-6">
+			{@render children()}
+		</TabsContent>
+	</Tabs>
 </div>

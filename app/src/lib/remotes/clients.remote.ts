@@ -785,3 +785,42 @@ export const deleteClient = command(v.pipe(v.string(), v.minLength(1)), async (c
 
 	return { success: true };
 });
+
+/** Get monthly budget for a client (in RON, converted from cents) */
+export const getClientBudget = query(
+	v.object({ clientId: v.string() }),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [result] = await db
+			.select({ monthlyBudget: table.client.monthlyBudget })
+			.from(table.client)
+			.where(and(eq(table.client.id, params.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		return { monthlyBudget: result?.monthlyBudget ? result.monthlyBudget / 100 : null };
+	}
+);
+
+/** Update monthly budget for a client (input in RON, stored in cents) */
+export const updateClientBudget = command(
+	v.object({
+		clientId: v.string(),
+		monthlyBudget: v.nullable(v.pipe(v.number(), v.minValue(0)))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		await db
+			.update(table.client)
+			.set({
+				monthlyBudget: params.monthlyBudget !== null ? Math.round(params.monthlyBudget * 100) : null,
+				updatedAt: new Date()
+			})
+			.where(and(eq(table.client.id, params.clientId), eq(table.client.tenantId, event.locals.tenant.id)));
+
+		return { success: true };
+	}
+);
