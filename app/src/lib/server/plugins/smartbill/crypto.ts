@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync, createHash } from 'crypto';
 import { env } from '$env/dynamic/private';
 
 /**
@@ -19,6 +19,12 @@ const KEY_LENGTH = 32;
 const ITERATIONS = 100000;
 
 /**
+ * Cached fingerprint of the encryption secret — detects runtime changes
+ * that would make all encrypted data unreadable.
+ */
+let cachedSecretFingerprint: string | null = null;
+
+/**
  * Get encryption secret from environment
  */
 function getEncryptionSecret(): string {
@@ -26,6 +32,13 @@ function getEncryptionSecret(): string {
 	if (!secret) {
 		throw new Error('ENCRYPTION_SECRET environment variable is not set');
 	}
+	const fingerprint = createHash('sha256').update(secret).digest('hex').slice(0, 8);
+	if (cachedSecretFingerprint && cachedSecretFingerprint !== fingerprint) {
+		console.error(
+			`[CRYPTO] ENCRYPTION_SECRET changed at runtime! Old fingerprint: ${cachedSecretFingerprint}, New: ${fingerprint}. All previously encrypted data is now unreadable.`
+		);
+	}
+	cachedSecretFingerprint = fingerprint;
 	return secret;
 }
 

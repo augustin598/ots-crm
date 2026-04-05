@@ -3,7 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { KeezClient } from './client';
 import { decrypt, encryptVerified, DecryptionError } from './crypto';
-import { logInfo } from '$lib/server/logger';
+import { logInfo, logError } from '$lib/server/logger';
 
 /**
  * Thrown when stored Keez credentials cannot be decrypted.
@@ -69,12 +69,19 @@ export async function createKeezClientForTenant(
 		secret,
 		cachedTokenData,
 		onTokenRefreshed: async (token: string, expiresAt: Date) => {
-			const encryptedToken = encryptVerified(tenantId, token);
-			await db
-				.update(table.keezIntegration)
-				.set({ accessToken: encryptedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })
-				.where(eq(table.keezIntegration.tenantId, tenantId));
-			logInfo('keez', `Token refreshed and persisted to DB`, { tenantId });
+			try {
+				const encryptedToken = encryptVerified(tenantId, token);
+				await db
+					.update(table.keezIntegration)
+					.set({ accessToken: encryptedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })
+					.where(eq(table.keezIntegration.tenantId, tenantId));
+				logInfo('keez', `Token refreshed and persisted to DB`, { tenantId });
+			} catch (error) {
+				logError('keez', 'Failed to persist refreshed token to DB', {
+					tenantId,
+					metadata: { error: error instanceof Error ? error.message : String(error) }
+				});
+			}
 		}
 	});
 }

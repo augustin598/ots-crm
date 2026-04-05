@@ -14,6 +14,8 @@ import {
 	findOrCreateClientForKeezPartner
 } from '$lib/server/plugins/keez/mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { logWarning } from '$lib/server/logger';
+import { env } from '$env/dynamic/private';
 
 function generateIntegrationId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -83,6 +85,8 @@ export const connectKeez = command(
 					applicationId: data.applicationId,
 					secret: encryptedSecret,
 					isActive: true,
+					accessToken: null,
+					tokenExpiresAt: null,
 					updatedAt: new Date()
 				})
 				.where(eq(table.keezIntegration.tenantId, event.locals.tenant.id));
@@ -154,8 +158,17 @@ export const getKeezStatus = query(async () => {
 	let credentialsValid = true;
 	try {
 		decrypt(event.locals.tenant.id, integration.secret);
-	} catch {
+	} catch (error) {
 		credentialsValid = false;
+		logWarning('keez', 'Credential decryption failed — user will see reconnect prompt', {
+			tenantId: event.locals.tenant.id,
+			metadata: {
+				errorMessage: error instanceof Error ? error.message : String(error),
+				secretFormat: integration.secret?.split(':').length ?? 0,
+				hasEncryptionSecret: !!env.ENCRYPTION_SECRET,
+				encryptionSecretLength: env.ENCRYPTION_SECRET?.length ?? 0
+			}
+		});
 	}
 
 	return {
