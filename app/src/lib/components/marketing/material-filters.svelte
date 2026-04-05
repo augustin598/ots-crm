@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import * as Popover from '$lib/components/ui/popover';
 	import { RangeCalendar } from '$lib/components/ui/range-calendar';
@@ -20,15 +21,38 @@
 		filterType = $bindable(''),
 		searchTerm = $bindable(''),
 		viewMode = $bindable<'grid' | 'list'>('grid'),
-		dateRange = $bindable<DateRange>({ start: undefined, end: undefined })
+		dateRange = $bindable<DateRange>({ start: undefined, end: undefined }),
+		activeCategory = 'all',
+		materials = []
 	}: {
 		filterType: string;
 		searchTerm: string;
 		viewMode: 'grid' | 'list';
 		dateRange: DateRange;
+		activeCategory?: string;
+		materials?: any[];
 	} = $props();
 
 	let dateOpen = $state(false);
+
+	// Debounce search — local input value syncs to parent after 300ms
+	let localSearch = $state(searchTerm);
+	let searchTimeout: ReturnType<typeof setTimeout>;
+
+	$effect(() => {
+		// Sync from parent when it resets (e.g. tab switch)
+		if (searchTerm === '' && localSearch !== '') {
+			localSearch = '';
+		}
+	});
+
+	function handleSearchInput(e: Event) {
+		localSearch = (e.target as HTMLInputElement).value;
+		clearTimeout(searchTimeout);
+		searchTimeout = setTimeout(() => {
+			searchTerm = localSearch;
+		}, 300);
+	}
 
 	const dateRangeLabel = $derived.by(() => {
 		const { start, end } = dateRange;
@@ -43,7 +67,7 @@
 		return `${fmt(start)} – ${fmt(end)}`;
 	});
 
-	const typeFilters = [
+	const allTypeFilters = [
 		{ id: '', label: 'Toate', icon: null },
 		{ id: 'image', label: 'Imagine', icon: ImageIcon },
 		{ id: 'video', label: 'Video', icon: VideoIcon },
@@ -51,11 +75,44 @@
 		{ id: 'text', label: 'Text', icon: TypeIcon },
 		{ id: 'url', label: 'URL', icon: LinkIcon }
 	];
+
+	// Hide irrelevant type filters per category
+	const hiddenTypesPerCategory: Record<string, string[]> = {
+		'google-ads': ['url', 'document'],
+		'facebook-ads': ['text', 'document'],
+		'tiktok-ads': ['text', 'document'],
+		'press-article': ['url', 'text'],
+		'seo-article': ['url', 'text']
+	};
+
+	const typeFilters = $derived(
+		activeCategory === 'all'
+			? allTypeFilters
+			: allTypeFilters.filter((f) => !hiddenTypesPerCategory[activeCategory]?.includes(f.id))
+	);
+
+	// Reset filterType if current selection is hidden in new category
+	$effect(() => {
+		if (filterType && hiddenTypesPerCategory[activeCategory]?.includes(filterType)) {
+			filterType = '';
+		}
+	});
+
+	// Count materials per type
+	const typeCounts = $derived.by(() => {
+		if (materials.length === 0) return {};
+		const counts: Record<string, number> = {};
+		for (const f of allTypeFilters) {
+			if (f.id === '') continue;
+			counts[f.id] = materials.filter((m: any) => m.type === f.id).length;
+		}
+		return counts;
+	});
 </script>
 
 <div class="flex flex-wrap items-center gap-3">
 	<div class="flex items-center gap-1.5">
-		{#each typeFilters as filter}
+		{#each typeFilters as filter (filter.id)}
 			<Button
 				variant={filterType === filter.id ? 'default' : 'outline'}
 				size="sm"
@@ -67,17 +124,23 @@
 					<Icon class="h-3.5 w-3.5 mr-1" />
 				{/if}
 				{filter.label}
+				{#if filter.id && typeCounts[filter.id] != null}
+					<Badge variant={filterType === filter.id ? 'secondary' : 'outline'} class="ml-1 h-4 min-w-4 px-1 text-[10px]">
+						{typeCounts[filter.id]}
+					</Badge>
+				{/if}
 			</Button>
 		{/each}
 	</div>
 
 	<div class="relative flex-1 min-w-[200px] max-w-xs">
-		<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+		<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 {localSearch !== searchTerm ? 'text-primary' : 'text-muted-foreground'}" />
 		<Input
 			type="text"
 			placeholder="Caută materiale..."
 			class="pl-9 h-8 text-sm"
-			bind:value={searchTerm}
+			value={localSearch}
+			oninput={handleSearchInput}
 		/>
 	</div>
 

@@ -5,18 +5,71 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import { GOOGLE_ADS_SPECS, CAMPAIGN_TYPE_LABELS, type GoogleAdsCampaignType } from '$lib/shared/google-ads-specs';
 	import { getMaterialTextContent } from '$lib/remotes/marketing-materials.remote';
+	import { toast } from 'svelte-sonner';
 
 	let {
 		open = $bindable(false),
 		material = null,
-		presignedUrl = null
+		presignedUrl = null,
+		onNavigate
 	}: {
 		open?: boolean;
 		material?: any | null;
 		presignedUrl?: string | null;
+		onNavigate?: (direction: 'prev' | 'next') => void;
 	} = $props();
+
+	// Keyboard navigation
+	function handleKeydown(e: KeyboardEvent) {
+		if (!open || !onNavigate) return;
+		if (e.key === 'ArrowLeft') { e.preventDefault(); onNavigate('prev'); }
+		else if (e.key === 'ArrowRight') { e.preventDefault(); onNavigate('next'); }
+	}
+
+	$effect(() => {
+		if (open && onNavigate) {
+			window.addEventListener('keydown', handleKeydown);
+			return () => window.removeEventListener('keydown', handleKeydown);
+		}
+	});
+
+	// Copy to clipboard
+	let copied = $state(false);
+	async function handleCopy(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+			copied = true;
+			toast.success('Copiat în clipboard');
+			setTimeout(() => { copied = false; }, 2000);
+		} catch {
+			toast.error('Nu s-a putut copia');
+		}
+	}
+
+	function getCopyableContent(): string | null {
+		if (!material) return null;
+		if (material.type === 'url' && material.externalUrl) return material.externalUrl;
+		if (material.type === 'text' && material.textContent) return material.textContent;
+		if (material.type === 'url' && material.textContent) {
+			try {
+				const parsed = JSON.parse(material.textContent);
+				if (Array.isArray(parsed)) {
+					const urls = parsed.flatMap((s: any) => s.urls || [s]).filter(Boolean);
+					return urls.join('\n');
+				}
+			} catch { /* not json */ }
+			return material.textContent;
+		}
+		return null;
+	}
+
+	const copyableContent = $derived(getCopyableContent());
 
 	// Parse Google Ads structured content
 	function parseGoogleAdsContent(textContent: string | null): Record<string, string[]> | null {
@@ -345,6 +398,34 @@
 				<Dialog.Title>{material?.title || 'Preview'}</Dialog.Title>
 			</Dialog.Header>
 			<p class="text-sm text-muted-foreground">Nu se poate previzualiza acest tip de material.</p>
+		{/if}
+
+		<!-- Navigation + Copy bar -->
+		{#if onNavigate || copyableContent}
+			<div class="flex items-center justify-between px-4 py-2 border-t">
+				<div class="flex items-center gap-1">
+					{#if onNavigate}
+						<Button variant="ghost" size="sm" onclick={() => onNavigate?.('prev')} aria-label="Material anterior">
+							<ChevronLeftIcon class="h-4 w-4" />
+						</Button>
+						<span class="text-xs text-muted-foreground">← →</span>
+						<Button variant="ghost" size="sm" onclick={() => onNavigate?.('next')} aria-label="Material următor">
+							<ChevronRightIcon class="h-4 w-4" />
+						</Button>
+					{/if}
+				</div>
+				{#if copyableContent}
+					<Button variant="outline" size="sm" onclick={() => handleCopy(copyableContent!)}>
+						{#if copied}
+							<CheckIcon class="h-3.5 w-3.5 mr-1.5 text-green-500" />
+							Copiat
+						{:else}
+							<CopyIcon class="h-3.5 w-3.5 mr-1.5" />
+							Copiază
+						{/if}
+					</Button>
+				{/if}
+			</div>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

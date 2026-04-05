@@ -246,6 +246,7 @@
 		class="relative aspect-video bg-muted flex items-center justify-center overflow-hidden {onPreview && material.type !== 'video' ? 'cursor-pointer' : ''}"
 		role={onPreview && material.type !== 'video' ? 'button' : undefined}
 		tabindex={onPreview && material.type !== 'video' ? 0 : undefined}
+		aria-label={onPreview && material.type !== 'video' ? `Previzualizare: ${material.title}` : undefined}
 		onclick={() => { if (onPreview && material.type !== 'video') onPreview(material); }}
 		onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && onPreview && material.type !== 'video') { e.preventDefault(); onPreview(material); } }}
 	>
@@ -304,6 +305,7 @@
 					class="pointer-events-none border-0 origin-top-left"
 					style="width: 200%; height: 200%; transform: scale(0.5); transform-origin: top left;"
 					loading="lazy"
+					sandbox="allow-same-origin"
 				></iframe>
 			</div>
 		{:else}

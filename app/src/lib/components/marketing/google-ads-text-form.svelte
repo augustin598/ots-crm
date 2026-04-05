@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
@@ -14,13 +15,16 @@
 		textData: Record<string, string[]>;
 	} = $props();
 
-	// Initialize textData for each field with min slots
+	// Initialize textData for each field with min slots (only when fields change)
 	$effect(() => {
-		for (const field of fields) {
-			if (!textData[field.key]) {
-				textData[field.key] = Array(Math.max(field.min, 1)).fill('');
+		const f = fields; // track fields dependency only
+		untrack(() => {
+			for (const field of f) {
+				if (!textData[field.key]) {
+					textData[field.key] = Array(Math.max(field.min, 1)).fill('');
+				}
 			}
-		}
+		});
 	});
 
 	function addField(key: string, max: number) {

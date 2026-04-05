@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
@@ -28,9 +29,12 @@
 	import SocialUrlDialog from '$lib/components/marketing/social-url-dialog.svelte';
 	import ArticleUploadDialog from '$lib/components/marketing/article-upload-dialog.svelte';
 	import MaterialGroupedView from '$lib/components/marketing/material-grouped-view.svelte';
+	import MaterialSkeleton from '$lib/components/marketing/material-skeleton.svelte';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import MaterialPreviewDialog from '$lib/components/marketing/material-preview-dialog.svelte';
+	import CollectionManager from '$lib/components/marketing/collection-manager.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl, getMaterialPreviewUrl } from '$lib/remotes/marketing-materials.remote';
+	import { getCollectionMaterialIds } from '$lib/remotes/marketing-collections.remote';
 	import { linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
@@ -38,6 +42,9 @@
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import LinkIcon from '@lucide/svelte/icons/link';
 	import type { DateRange } from 'bits-ui';
 
 	const tenantSlug = $derived(page.params.tenant as string);
@@ -51,6 +58,7 @@
 	let googleAdsDialogOpen = $state(false);
 	let socialUrlDialogOpen = $state(false);
 	let articleDialogOpen = $state(false);
+	let activeCollectionId = $state<string | null>(null);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
 	let deleteConfirmOpen = $state(false);
@@ -158,6 +166,76 @@
 		});
 	});
 
+	// Collection filter — fetch material IDs when a collection is selected
+	const collectionMaterialIdsQuery = $derived(
+		activeCollectionId ? getCollectionMaterialIds({ collectionId: activeCollectionId }) : null
+	);
+	const collectionMaterialIds = $derived(
+		collectionMaterialIdsQuery?.current ? new Set(collectionMaterialIdsQuery.current) : null
+	);
+
+	// Apply collection filter on top of date-filtered materials
+	const displayMaterials = $derived(
+		collectionMaterialIds
+			? filteredMaterials.filter((m: any) => collectionMaterialIds.has(m.id))
+			: filteredMaterials
+	);
+
+	// Multi-select state
+	let selectedIds = $state<Set<string>>(new Set());
+	let batchDeleting = $state(false);
+	const selectedCount = $derived(selectedIds.size);
+	const allSelected = $derived(displayMaterials.length > 0 && selectedIds.size === displayMaterials.length);
+
+	function toggleSelect(id: string) {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id); else next.add(id);
+		selectedIds = next;
+	}
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedIds = new Set();
+		} else {
+			selectedIds = new Set(displayMaterials.map((m: any) => m.id));
+		}
+	}
+
+	function clearSelection() {
+		selectedIds = new Set();
+	}
+
+	async function handleBatchDelete() {
+		if (selectedCount === 0 || batchDeleting) return;
+		batchDeleting = true;
+		let deleted = 0;
+		try {
+			for (const id of selectedIds) {
+				await deleteMarketingMaterial(id);
+				deleted++;
+			}
+			toast.success(`${deleted} materiale șterse`);
+			selectedIds = new Set();
+			refreshKey++;
+		} catch (e: any) {
+			clientLogger.apiError('marketing_batch_delete', e);
+			if (deleted > 0) {
+				toast.success(`${deleted} șterse, eroare la restul`);
+				refreshKey++;
+			}
+		} finally {
+			batchDeleting = false;
+		}
+	}
+
+	// Clear selection when filters change
+	$effect(() => {
+		void activeCategory;
+		void filterType;
+		void searchTerm;
+		untrack(() => { selectedIds = new Set(); });
+	});
+
 	// For upload dialogs — pick first selected client or empty
 	const uploadClientId = $derived(selectedClientIds.length === 1 ? selectedClientIds[0] : '');
 
@@ -183,29 +261,45 @@
 			: []
 	);
 
+	function resetFilters(category: string) {
+		activeCategory = category;
+		filterType = '';
+		searchTerm = '';
+		dateRange = { start: undefined, end: undefined };
+	}
+
 	// Thumbnail URLs cache with TTL — clear on context switch
 	const THUMBNAIL_TTL_MS = 240_000; // 4 min (presigned URLs expire at 5 min)
 	let thumbnailCache = $state<Record<string, { url: string; fetchedAt: number }>>({});
 	let thumbnailUrls = $derived(Object.fromEntries(Object.entries(thumbnailCache).map(([id, v]) => [id, v.url])));
-	const loadingThumbnailIds = new Set<string>();
+	const loadingThumbnailIds = $state(new Set<string>());
 
 	$effect(() => {
 		void selectedClientIds;
 		void activeCategory;
-		thumbnailCache = {};
-		loadingThumbnailIds.clear();
+		untrack(() => {
+			thumbnailCache = {};
+			loadingThumbnailIds.clear();
+		});
 	});
 
 	$effect(() => {
 		const now = Date.now();
+		const cache = untrack(() => thumbnailCache);
+		const loading = untrack(() => loadingThumbnailIds);
 		const mediaMaterials = materials.filter(
-			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !loadingThumbnailIds.has(m.id) && (!thumbnailCache[m.id] || now - thumbnailCache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
+			(m: any) => (m.type === 'image' || m.type === 'video') &&
+			m.filePath &&
+			!loading.has(m.id) &&
+			(!cache[m.id] || now - cache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
 		);
 		for (const m of mediaMaterials) {
 			loadingThumbnailIds.add(m.id);
 			getMaterialDownloadUrl(m.id)
 				.then((r) => {
-					thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
+					untrack(() => {
+						thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
+					});
 				})
 				.catch(() => {})
 				.finally(() => loadingThumbnailIds.delete(m.id));
@@ -223,19 +317,17 @@
 	}
 
 	async function handleDeleteConfirm() {
-		if (!deleteTarget) return;
+		if (!deleteTarget || deleting) return;
 		deleting = true;
 		try {
 			await deleteMarketingMaterial(deleteTarget.id).updates(materialsQuery);
 			toast.success('Material șters');
-			deleteConfirmOpen = false;
-			deleteTarget = null;
 		} catch (e: any) {
 			clientLogger.apiError('marketing_delete', e);
-			deleteConfirmOpen = false;
-			deleteTarget = null;
 		} finally {
 			deleting = false;
+			deleteConfirmOpen = false;
+			deleteTarget = null;
 		}
 	}
 
@@ -254,14 +346,29 @@
 	let lightboxOpen = $state(false);
 	let lightboxSrc = $state('');
 
+	function handlePreviewNavigate(direction: 'prev' | 'next') {
+		if (!previewMaterial) return;
+		const idx = displayMaterials.findIndex((m: any) => m.id === previewMaterial.id);
+		if (idx === -1) return;
+		const newIdx = direction === 'prev'
+			? (idx - 1 + displayMaterials.length) % displayMaterials.length
+			: (idx + 1) % displayMaterials.length;
+		handlePreview(displayMaterials[newIdx]);
+	}
+
+	function isValidHttpUrl(value: string): boolean {
+		try { const u = new URL(value); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
+	}
+
 	async function handlePreview(material: any) {
 		if (material.type === 'url') {
-			if (material.externalUrl) {
-				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
-			} else if (material.textContent) {
+			// Social URL sets (tiktok/facebook) — always open preview dialog to show all sets
+			if (material.textContent) {
 				previewMaterial = material;
 				previewUrl = null;
 				previewOpen = true;
+			} else if (material.externalUrl && isValidHttpUrl(material.externalUrl)) {
+				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
 			} else {
 				clientLogger.warn({ message: 'Materialul nu are conținut de previzualizat', action: 'marketing_preview' });
 			}
@@ -320,27 +427,42 @@
 	const uploadUrl = $derived(`/${tenantSlug}/marketing-materials/upload`);
 	const isFileFilterType = $derived(['image', 'video', 'document'].includes(filterType));
 
-	// Active tasks for task picker
-	const activeTasksQuery = getTasks({ status: ['todo', 'in-progress', 'review', 'pending-approval'] });
+	// Active tasks for task picker — scoped to selected clients
+	const activeTasksQuery = $derived(getTasks({
+		status: ['todo', 'in-progress', 'review', 'pending-approval'],
+		...(selectedClientIds.length > 0 && selectedClientIds.length < activeClients.length ? { clientIds: selectedClientIds } : {})
+	}));
 	const activeTasks = $derived(
 		(activeTasksQuery.current || []).map((t: any) => ({ id: t.id, title: t.title, status: t.status, clientId: t.clientId }))
 	);
 
+	const linkingIds = new Set<string>();
+
 	async function handleLinkTask(materialId: string, taskId: string) {
+		const key = `${materialId}:${taskId}`;
+		if (linkingIds.has(key)) return;
+		linkingIds.add(key);
 		try {
 			await linkMaterialToTask({ taskId, materialId }).updates(materialsQuery);
 			toast.success('Task asociat');
 		} catch (e: any) {
 			clientLogger.apiError('marketing_link_task', e);
+		} finally {
+			linkingIds.delete(key);
 		}
 	}
 
 	async function handleUnlinkTask(materialId: string, taskId: string) {
+		const key = `${materialId}:${taskId}`;
+		if (linkingIds.has(key)) return;
+		linkingIds.add(key);
 		try {
 			await unlinkMaterialFromTask({ taskId, materialId }).updates(materialsQuery);
 			toast.success('Task dezasociat');
 		} catch (e: any) {
 			clientLogger.apiError('marketing_unlink_task', e);
+		} finally {
+			linkingIds.delete(key);
 		}
 	}
 
@@ -425,17 +547,68 @@
 				</Popover>
 			{/if}
 
-			{#if !isFileFilterType && activeCategory !== 'all'}
-				<Button onclick={() => {
-					if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
-					if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
-					else if (activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads') { socialUrlDialogOpen = true; }
-					else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
-					else { uploadDialogOpen = true; }
-				}}>
-					<PlusIcon class="h-4 w-4 mr-2" />
-					Adaugă Material
-				</Button>
+			<!-- Collection filter -->
+			<CollectionManager
+				clientId={uploadClientId}
+				clientIds={selectedClientIds}
+				bind:activeCollectionId
+				selectedMaterialIds={selectedIds}
+			/>
+
+			{#if activeCategory !== 'all'}
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger>
+						{#snippet child({ props })}
+							<Button {...props}>
+								<PlusIcon class="h-4 w-4 mr-2" />
+								Adaugă Material
+							</Button>
+						{/snippet}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="end" class="w-72">
+						<DropdownMenu.Item onclick={() => {
+							if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
+							uploadDialogOpen = true;
+						}}>
+							<UploadIcon class="h-4 w-4 mr-2" />
+							Încarcă fișier
+							<span class="ml-auto text-xs text-muted-foreground">Imagine, video, doc</span>
+						</DropdownMenu.Item>
+
+						{#if activeCategory === 'google-ads'}
+							<DropdownMenu.Item onclick={() => {
+								if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
+								googleAdsDialogOpen = true;
+							}}>
+								<GoogleAdsIcon class="h-4 w-4 mr-2" />
+								Google Ads Assets
+								<span class="ml-auto text-xs text-muted-foreground">Text + imagini</span>
+							</DropdownMenu.Item>
+						{/if}
+
+						{#if activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads'}
+							<DropdownMenu.Item onclick={() => {
+								if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
+								socialUrlDialogOpen = true;
+							}}>
+								<LinkIcon class="h-4 w-4 mr-2" />
+								Seturi URL-uri
+								<span class="ml-auto text-xs text-muted-foreground">Link-uri campanii</span>
+							</DropdownMenu.Item>
+						{/if}
+
+						{#if activeCategory === 'press-article' || activeCategory === 'seo-article'}
+							<DropdownMenu.Item onclick={() => {
+								if (selectedClientIds.length !== 1) { clientLogger.warn({ message: 'Selectează un singur client mai întâi', action: 'marketing_add_material' }); return; }
+								articleDialogOpen = true;
+							}}>
+								<NewspaperIcon class="h-4 w-4 mr-2" />
+								Articol
+								<span class="ml-auto text-xs text-muted-foreground">Document + imagini</span>
+							</DropdownMenu.Item>
+						{/if}
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
 			{/if}
 		</div>
 	</div>
@@ -443,29 +616,29 @@
 	<!-- Category tabs -->
 	<Tabs value={activeCategory} class="w-full">
 		<TabsList class="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
-			<TabsTrigger value="all" onclick={() => { activeCategory = 'all'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="all" onclick={() => resetFilters('all')}>
 				<Layers3Icon class="h-4 w-4 mr-1.5 shrink-0" /> Toate
 			</TabsTrigger>
-			<TabsTrigger value="google-ads" onclick={() => { activeCategory = 'google-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="google-ads" onclick={() => resetFilters('google-ads')}>
 				<GoogleAdsIcon class="h-4 w-4 mr-1.5 shrink-0" /> Google Ads
 			</TabsTrigger>
-			<TabsTrigger value="facebook-ads" onclick={() => { activeCategory = 'facebook-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="facebook-ads" onclick={() => resetFilters('facebook-ads')}>
 				<FacebookIcon class="h-4 w-4 mr-1.5 shrink-0" /> Facebook Ads
 			</TabsTrigger>
-			<TabsTrigger value="tiktok-ads" onclick={() => { activeCategory = 'tiktok-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="tiktok-ads" onclick={() => resetFilters('tiktok-ads')}>
 				<TiktokIcon class="h-4 w-4 mr-1.5 shrink-0" /> TikTok Ads
 			</TabsTrigger>
-			<TabsTrigger value="press-article" onclick={() => { activeCategory = 'press-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="press-article" onclick={() => resetFilters('press-article')}>
 				<NewspaperIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole Presă
 			</TabsTrigger>
-			<TabsTrigger value="seo-article" onclick={() => { activeCategory = 'seo-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="seo-article" onclick={() => resetFilters('seo-article')}>
 				<SearchIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole SEO
 			</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value={activeCategory} class="mt-4 space-y-4">
 			<!-- Filters + view toggle -->
-			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode bind:dateRange />
+			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode bind:dateRange {activeCategory} {materials} />
 
 			<!-- Inline upload zone for file type filters -->
 			{#if isFileFilterType && uploadClientId && activeCategory !== 'all'}
@@ -480,27 +653,40 @@
 
 			<!-- Loading -->
 			{#if loading}
-				<div class="flex items-center justify-center py-12">
-					<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
-				</div>
+				<MaterialSkeleton />
 			{:else}
-			<!-- Stats -->
+			<!-- Stats + Batch actions -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
-				<span>{filteredMaterials.length} materiale</span>
-				{#if filteredMaterials.length > 0}
-					{@const totalSize = filteredMaterials.reduce((acc: number, m: any) => acc + (m.fileSize || 0), 0)}
-					{#if totalSize > 0}
-						<span>·</span>
-						<span>{(totalSize / (1024 * 1024)).toFixed(1)} MB total</span>
+				{#if displayMaterials.length > 0}
+					<Checkbox
+						checked={allSelected}
+						onCheckedChange={toggleSelectAll}
+						aria-label="Selectează toate"
+					/>
+				{/if}
+				{#if selectedCount > 0}
+					<span class="font-medium text-foreground">{selectedCount} selectate</span>
+					<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={clearSelection}>Deselectează</Button>
+					<Button variant="destructive" size="sm" class="h-7 text-xs" onclick={handleBatchDelete} disabled={batchDeleting}>
+						{batchDeleting ? 'Se șterge...' : `Șterge (${selectedCount})`}
+					</Button>
+				{:else}
+					<span>{displayMaterials.length} materiale</span>
+					{#if displayMaterials.length > 0}
+						{@const totalSize = displayMaterials.reduce((acc: number, m: any) => acc + (m.fileSize || 0), 0)}
+						{#if totalSize > 0}
+							<span>·</span>
+							<span>{(totalSize / (1024 * 1024)).toFixed(1)} MB total</span>
+						{/if}
 					{/if}
 				{/if}
 			</div>
 
 			<!-- Content -->
-			{#if filteredMaterials.length === 0}
+			{#if displayMaterials.length === 0}
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
-					<p class="text-sm">Niciun material în această categorie.</p>
+					<p class="text-sm">{materials.length === 0 ? 'Niciun material în această categorie.' : 'Niciun material nu corespunde filtrelor aplicate.'}</p>
 					{#if !isFileFilterType && uploadClientId && activeCategory !== 'all'}
 						<Button variant="outline" class="mt-3" onclick={() => {
 							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
@@ -515,7 +701,7 @@
 				</div>
 			{:else if activeCategory === 'all'}
 				<MaterialGroupedView
-					materials={filteredMaterials}
+					materials={displayMaterials}
 					{thumbnailUrls}
 					{viewMode}
 					clientNameFn={selectedClientIds.length !== 1 ? getClientName : undefined}
@@ -528,7 +714,7 @@
 				/>
 			{:else if viewMode === 'list'}
 				<MaterialListView
-					materials={filteredMaterials}
+					materials={displayMaterials}
 					clientNameFn={selectedClientIds.length !== 1 ? getClientName : undefined}
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
@@ -539,21 +725,30 @@
 				/>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-					{#each filteredMaterials as material (material.id)}
-						<div>
+					{#each displayMaterials as material (material.id)}
+						<div class="relative group/select">
 							{#if selectedClientIds.length !== 1}
 								<p class="text-xs text-muted-foreground mb-1 truncate">{getClientName(material.clientId)}</p>
 							{/if}
-							<MaterialCard
-								{material}
-								thumbnailUrl={thumbnailUrls[material.id] || null}
-								onEdit={handleEdit}
-								onDelete={handleDeleteClick}
-								onPreview={handlePreview}
-								{activeTasks}
-								onLinkTask={handleLinkTask}
-								onUnlinkTask={handleUnlinkTask}
-							/>
+							<div class="absolute top-1 left-1 z-10 {selectedIds.has(material.id) ? 'opacity-100' : 'opacity-0 group-hover/select:opacity-100'} transition-opacity">
+								<Checkbox
+									checked={selectedIds.has(material.id)}
+									onCheckedChange={() => toggleSelect(material.id)}
+									class="bg-white/80 dark:bg-black/60 backdrop-blur-sm rounded"
+								/>
+							</div>
+							<div class={selectedIds.has(material.id) ? 'ring-2 ring-primary rounded-lg' : ''}>
+								<MaterialCard
+									{material}
+									thumbnailUrl={thumbnailUrls[material.id] || null}
+									onEdit={handleEdit}
+									onDelete={handleDeleteClick}
+									onPreview={handlePreview}
+									{activeTasks}
+									onLinkTask={handleLinkTask}
+									onUnlinkTask={handleUnlinkTask}
+								/>
+							</div>
 						</div>
 					{/each}
 				</div>
@@ -622,6 +817,7 @@
 	bind:open={previewOpen}
 	material={previewMaterial}
 	presignedUrl={previewUrl}
+	onNavigate={handlePreviewNavigate}
 />
 
 <!-- Delete Confirmation -->

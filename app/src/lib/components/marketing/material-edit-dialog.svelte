@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -7,6 +8,9 @@
 	import * as Select from '$lib/components/ui/select';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import ImageIcon from '@lucide/svelte/icons/image';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import XIcon from '@lucide/svelte/icons/x';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import { toast } from 'svelte-sonner';
 	import MaterialColorTagPicker from './material-color-tag-picker.svelte';
 	import { parseColorTags, serializeColorTags, type ColorTag } from './tag-colors';
@@ -54,16 +58,67 @@
 	let status = $state('active');
 	let tags = $state<ColorTag[]>([]);
 	let saving = $state(false);
+	let initMaterialId = '';
 
+	// Social URL sets editing
+	let urlSets = $state<{ title: string; urls: string[] }[]>([]);
+
+	const isSocialUrl = $derived(
+		material ? (material.category === 'tiktok-ads' || material.category === 'facebook-ads') && material.type === 'url' : false
+	);
+
+	function parseSocialSets(textContent: string | null): { title: string; urls: string[] }[] {
+		if (!textContent) return [];
+		try {
+			const parsed = JSON.parse(textContent);
+			if (!Array.isArray(parsed)) return [];
+			if (parsed.length > 0 && typeof parsed[0] === 'object' && 'title' in parsed[0]) {
+				return parsed.filter((s: any) => s.title && Array.isArray(s.urls)).map((s: any) => ({ title: s.title, urls: [...s.urls] }));
+			}
+			const urls = parsed.filter((u: any) => typeof u === 'string' && u.trim());
+			if (urls.length > 0) return [{ title: '', urls: [...urls] }];
+		} catch { /* not JSON */ }
+		return [];
+	}
+
+	function addUrlToSet(setIdx: number) {
+		urlSets[setIdx].urls = [...urlSets[setIdx].urls, ''];
+		urlSets = [...urlSets];
+	}
+
+	function removeUrlFromSet(setIdx: number, urlIdx: number) {
+		urlSets[setIdx].urls = urlSets[setIdx].urls.filter((_, i) => i !== urlIdx);
+		urlSets = [...urlSets];
+	}
+
+	function addSet() {
+		urlSets = [...urlSets, { title: '', urls: [''] }];
+	}
+
+	function removeSet(setIdx: number) {
+		urlSets = urlSets.filter((_, i) => i !== setIdx);
+	}
+
+	// Init fields only when dialog opens (open transitions false→true), not on background refreshes
 	$effect(() => {
-		if (material && open) {
-			title = material.title || '';
-			description = material.description || '';
-			textContent = material.textContent || '';
-			externalUrl = material.externalUrl || '';
-			seoLinkId = material.seoLinkId || '';
-			status = material.status || 'active';
-			tags = parseColorTags(material.tags);
+		const isOpen = open;
+		const mat = material;
+		if (isOpen && mat) {
+			const prevId = untrack(() => initMaterialId);
+			if (prevId !== mat.id) {
+				initMaterialId = mat.id;
+				title = mat.title || '';
+				description = mat.description || '';
+				textContent = mat.textContent || '';
+				externalUrl = mat.externalUrl || '';
+				seoLinkId = mat.seoLinkId || '';
+				status = mat.status || 'active';
+				tags = parseColorTags(mat.tags);
+				urlSets = parseSocialSets(mat.textContent);
+			}
+		}
+		if (!isOpen) {
+			initMaterialId = '';
 		}
 	});
 
@@ -92,13 +147,26 @@
 		}
 		saving = true;
 		try {
-			const isStructured = material ? ['google-ads', 'tiktok-ads', 'facebook-ads'].includes(material.category) : false;
+			const isGoogleAds = material ? material.category === 'google-ads' : false;
+			// Social URL sets — serialize back to JSON
+			let updatedTextContent: string | null | undefined = undefined;
+			if (isSocialUrl) {
+				const cleanSets = urlSets
+					.map((s) => ({ title: s.title.trim(), urls: s.urls.filter((u) => u.trim()) }))
+					.filter((s) => s.urls.length > 0);
+				updatedTextContent = cleanSets.length > 0 ? JSON.stringify(cleanSets) : null;
+			} else if (!isGoogleAds) {
+				updatedTextContent = textContent.trim() || null;
+			}
+
 			await updateMarketingMaterial({
 				id: material.id,
 				title: title.trim(),
 				description: description.trim() || null,
-				...(isStructured ? {} : { textContent: textContent.trim() || null }),
-				externalUrl: externalUrl.trim() || null,
+				...(updatedTextContent !== undefined ? { textContent: updatedTextContent } : {}),
+				externalUrl: isSocialUrl && urlSets.length > 0 && urlSets[0].urls.length > 0
+					? urlSets[0].urls[0].trim() || null
+					: externalUrl.trim() || null,
 				seoLinkId: seoLinkId || null,
 				status: status as 'draft' | 'active' | 'archived',
 				tags: serializeColorTags(tags)
@@ -133,19 +201,63 @@
 					<p class="text-xs text-muted-foreground text-right">{description.length}/1000</p>
 				</div>
 
-				{#if material.textContent !== null || material.type === 'text'}
-					{@const isStructured = ['google-ads', 'tiktok-ads', 'facebook-ads'].includes(material.category)}
+				{#if isSocialUrl}
+					<!-- Social URL sets editor -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<Label>Seturi de URL-uri</Label>
+							<Button variant="ghost" size="sm" class="h-7 text-xs gap-1" onclick={addSet}>
+								<PlusIcon class="h-3 w-3" /> Set nou
+							</Button>
+						</div>
+						{#each urlSets as set, si (si)}
+							<div class="border rounded-lg p-3 space-y-2">
+								<div class="flex items-center gap-2">
+									<Input
+										bind:value={set.title}
+										placeholder="Nume set (ex: Campania Aprilie)"
+										class="h-7 text-xs flex-1"
+									/>
+									{#if urlSets.length > 1}
+										<Button variant="ghost" size="sm" class="h-7 w-7 p-0 text-destructive" onclick={() => removeSet(si)}>
+											<XIcon class="h-3.5 w-3.5" />
+										</Button>
+									{/if}
+								</div>
+								{#each set.urls as url, ui (ui)}
+									<div class="flex items-center gap-1.5 pl-2">
+										<ExternalLinkIcon class="h-3 w-3 text-muted-foreground shrink-0" />
+										<Input
+											bind:value={set.urls[ui]}
+											placeholder="https://..."
+											class="h-7 text-xs flex-1"
+										/>
+										{#if set.urls.length > 1}
+											<Button variant="ghost" size="sm" class="h-6 w-6 p-0 text-muted-foreground hover:text-destructive" onclick={() => removeUrlFromSet(si, ui)}>
+												<XIcon class="h-3 w-3" />
+											</Button>
+										{/if}
+									</div>
+								{/each}
+								<Button variant="ghost" size="sm" class="h-6 text-xs text-muted-foreground w-full" onclick={() => addUrlToSet(si)}>
+									<PlusIcon class="h-3 w-3 mr-1" /> Adaugă URL
+								</Button>
+							</div>
+						{/each}
+					</div>
+				{:else if material.textContent !== null || material.type === 'text'}
+					{@const isGoogleAds = material.category === 'google-ads'}
 					<div class="space-y-1.5">
 						<Label for="edit-text">Conținut Text</Label>
-						{#if isStructured}
-							<p class="text-xs text-muted-foreground italic">Conținut structurat — editează prin dialogul dedicat categoriei.</p>
+						{#if isGoogleAds}
+							<p class="text-xs text-muted-foreground italic">Conținut structurat — editează prin dialogul Google Ads.</p>
 						{:else}
 							<Textarea id="edit-text" bind:value={textContent} rows={4} maxlength={50000} />
 						{/if}
 					</div>
 				{/if}
 
-				{#if material.externalUrl !== null || material.type === 'url'}
+				{#if !isSocialUrl && (material.externalUrl !== null || material.type === 'url')}
 					<div class="space-y-1.5">
 						<Label for="edit-url">URL Extern</Label>
 						<Input id="edit-url" type="url" bind:value={externalUrl} />

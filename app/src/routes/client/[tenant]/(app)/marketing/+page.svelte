@@ -1,9 +1,13 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import LinkIcon from '@lucide/svelte/icons/link';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
@@ -19,13 +23,18 @@
 	import MaterialEditDialog from '$lib/components/marketing/material-edit-dialog.svelte';
 	import MaterialListView from '$lib/components/marketing/material-list-view.svelte';
 	import GoogleAdsAssetDialog from '$lib/components/marketing/google-ads-asset-dialog.svelte';
+	import SocialUrlDialog from '$lib/components/marketing/social-url-dialog.svelte';
 	import ArticleUploadDialog from '$lib/components/marketing/article-upload-dialog.svelte';
 	import MaterialGroupedView from '$lib/components/marketing/material-grouped-view.svelte';
+	import MaterialSkeleton from '$lib/components/marketing/material-skeleton.svelte';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import MaterialPreviewDialog from '$lib/components/marketing/material-preview-dialog.svelte';
 	import { getMarketingMaterials, deleteMarketingMaterial, getMaterialDownloadUrl, getMaterialPreviewUrl } from '$lib/remotes/marketing-materials.remote';
+	import { linkMaterialToTask, unlinkMaterialFromTask } from '$lib/remotes/task-materials.remote';
+	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getSeoLinks } from '$lib/remotes/seo-links.remote';
 	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { DateRange } from 'bits-ui';
 
@@ -41,6 +50,7 @@
 	let refreshKey = $state(0);
 	let uploadDialogOpen = $state(false);
 	let googleAdsDialogOpen = $state(false);
+	let socialUrlDialogOpen = $state(false);
 	let articleDialogOpen = $state(false);
 	let editDialogOpen = $state(false);
 	let editMaterial = $state<any>(null);
@@ -107,14 +117,17 @@
 
 	$effect(() => {
 		const now = Date.now();
+		const cache = untrack(() => thumbnailCache);
 		const mediaMaterials = materials.filter(
-			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !loadingThumbnailIds.has(m.id) && (!thumbnailCache[m.id] || now - thumbnailCache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
+			(m: any) => (m.type === 'image' || m.type === 'video') && m.filePath && !loadingThumbnailIds.has(m.id) && (!cache[m.id] || now - cache[m.id].fetchedAt > THUMBNAIL_TTL_MS)
 		);
 		for (const m of mediaMaterials) {
 			loadingThumbnailIds.add(m.id);
 			getMaterialDownloadUrl(m.id)
 				.then((r) => {
-					thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
+					untrack(() => {
+						thumbnailCache = { ...thumbnailCache, [m.id]: { url: r.url, fetchedAt: Date.now() } };
+					});
 				})
 				.catch(() => {})
 				.finally(() => loadingThumbnailIds.delete(m.id));
@@ -132,19 +145,17 @@
 	}
 
 	async function handleDeleteConfirm() {
-		if (!deleteTarget) return;
+		if (!deleteTarget || deleting) return;
 		deleting = true;
 		try {
 			await deleteMarketingMaterial(deleteTarget.id).updates(materialsQuery);
 			toast.success('Material șters');
-			deleteConfirmOpen = false;
-			deleteTarget = null;
 		} catch (e: any) {
 			toast.error(e?.message || 'Eroare la ștergere');
-			deleteConfirmOpen = false;
-			deleteTarget = null;
 		} finally {
 			deleting = false;
+			deleteConfirmOpen = false;
+			deleteTarget = null;
 		}
 	}
 
@@ -156,6 +167,45 @@
 		refreshKey++;
 	}
 
+	// Active tasks for task picker — scoped to current client
+	const activeTasksQuery = $derived(clientId ? getTasks({
+		clientId,
+		status: ['todo', 'in-progress', 'review', 'pending-approval']
+	}) : null);
+	const activeTasks = $derived(
+		(activeTasksQuery?.current || []).map((t: any) => ({ id: t.id, title: t.title, status: t.status, clientId: t.clientId }))
+	);
+
+	const linkingIds = new Set<string>();
+
+	async function handleLinkTask(materialId: string, taskId: string) {
+		const key = `${materialId}:${taskId}`;
+		if (linkingIds.has(key)) return;
+		linkingIds.add(key);
+		try {
+			await linkMaterialToTask({ taskId, materialId }).updates(materialsQuery);
+			toast.success('Task asociat');
+		} catch (e: any) {
+			clientLogger.apiError('marketing_link_task', e);
+		} finally {
+			linkingIds.delete(key);
+		}
+	}
+
+	async function handleUnlinkTask(materialId: string, taskId: string) {
+		const key = `${materialId}:${taskId}`;
+		if (linkingIds.has(key)) return;
+		linkingIds.add(key);
+		try {
+			await unlinkMaterialFromTask({ taskId, materialId }).updates(materialsQuery);
+			toast.success('Task dezasociat');
+		} catch (e: any) {
+			clientLogger.apiError('marketing_unlink_task', e);
+		} finally {
+			linkingIds.delete(key);
+		}
+	}
+
 	// Preview state
 	let previewOpen = $state(false);
 	let previewMaterial = $state<any>(null);
@@ -163,14 +213,28 @@
 	let lightboxOpen = $state(false);
 	let lightboxSrc = $state('');
 
+	function handlePreviewNavigate(direction: 'prev' | 'next') {
+		if (!previewMaterial) return;
+		const idx = filteredMaterials.findIndex((m: any) => m.id === previewMaterial.id);
+		if (idx === -1) return;
+		const newIdx = direction === 'prev'
+			? (idx - 1 + filteredMaterials.length) % filteredMaterials.length
+			: (idx + 1) % filteredMaterials.length;
+		handlePreview(filteredMaterials[newIdx]);
+	}
+
+	function isValidHttpUrl(value: string): boolean {
+		try { const u = new URL(value); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
+	}
+
 	async function handlePreview(material: any) {
 		if (material.type === 'url') {
-			if (material.externalUrl) {
-				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
-			} else if (material.textContent) {
+			if (material.textContent) {
 				previewMaterial = material;
 				previewUrl = null;
 				previewOpen = true;
+			} else if (material.externalUrl && isValidHttpUrl(material.externalUrl)) {
+				window.open(material.externalUrl, '_blank', 'noopener,noreferrer');
 			} else {
 				toast.error('Materialul nu are conținut de previzualizat');
 			}
@@ -228,6 +292,13 @@
 
 	const uploadUrl = $derived(`/client/${tenantSlug}/marketing/upload`);
 	const isFileFilterType = $derived(['image', 'video', 'document'].includes(filterType));
+
+	function resetFilters(category: string) {
+		activeCategory = category;
+		filterType = '';
+		searchTerm = '';
+		dateRange = { start: undefined, end: undefined };
+	}
 </script>
 
 <div class="space-y-6">
@@ -236,44 +307,77 @@
 			<MegaphoneIcon class="h-6 w-6 text-primary" />
 			<h2 class="text-xl font-semibold">Materiale Marketing</h2>
 		</div>
-		{#if !isFileFilterType && activeCategory !== 'all' && activeCategory !== 'tiktok-ads' && activeCategory !== 'facebook-ads'}
-			<Button onclick={() => {
-				if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
-				else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
-				else { uploadDialogOpen = true; }
-			}}>
-				<PlusIcon class="h-4 w-4 mr-2" />
-				Adaugă Material
-			</Button>
+		{#if activeCategory !== 'all'}
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger>
+					{#snippet child({ props })}
+						<Button {...props}>
+							<PlusIcon class="h-4 w-4 mr-2" />
+							Adaugă Material
+						</Button>
+					{/snippet}
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="end" class="w-72">
+					<DropdownMenu.Item onclick={() => { uploadDialogOpen = true; }}>
+						<UploadIcon class="h-4 w-4 mr-2" />
+						Încarcă fișier
+						<span class="ml-auto text-xs text-muted-foreground">Imagine, video, doc</span>
+					</DropdownMenu.Item>
+
+					{#if activeCategory === 'google-ads'}
+						<DropdownMenu.Item onclick={() => { googleAdsDialogOpen = true; }}>
+							<GoogleAdsIcon class="h-4 w-4 mr-2" />
+							Google Ads Assets
+							<span class="ml-auto text-xs text-muted-foreground">Text + imagini</span>
+						</DropdownMenu.Item>
+					{/if}
+
+					{#if activeCategory === 'tiktok-ads' || activeCategory === 'facebook-ads'}
+						<DropdownMenu.Item onclick={() => { socialUrlDialogOpen = true; }}>
+							<LinkIcon class="h-4 w-4 mr-2" />
+							Seturi URL-uri
+							<span class="ml-auto text-xs text-muted-foreground">Link-uri campanii</span>
+						</DropdownMenu.Item>
+					{/if}
+
+					{#if activeCategory === 'press-article' || activeCategory === 'seo-article'}
+						<DropdownMenu.Item onclick={() => { articleDialogOpen = true; }}>
+							<NewspaperIcon class="h-4 w-4 mr-2" />
+							Articol
+							<span class="ml-auto text-xs text-muted-foreground">Document + imagini</span>
+						</DropdownMenu.Item>
+					{/if}
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
 		{/if}
 	</div>
 
 	<!-- Category tabs -->
 	<Tabs value={activeCategory} class="w-full">
 		<TabsList class="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
-			<TabsTrigger value="all" onclick={() => { activeCategory = 'all'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="all" onclick={() => resetFilters('all')}>
 				<Layers3Icon class="h-4 w-4 mr-1.5 shrink-0" /> Toate
 			</TabsTrigger>
-			<TabsTrigger value="google-ads" onclick={() => { activeCategory = 'google-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="google-ads" onclick={() => resetFilters('google-ads')}>
 				<GoogleAdsIcon class="h-4 w-4 mr-1.5 shrink-0" /> Google Ads
 			</TabsTrigger>
-			<TabsTrigger value="facebook-ads" onclick={() => { activeCategory = 'facebook-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="facebook-ads" onclick={() => resetFilters('facebook-ads')}>
 				<FacebookIcon class="h-4 w-4 mr-1.5 shrink-0" /> Facebook Ads
 			</TabsTrigger>
-			<TabsTrigger value="tiktok-ads" onclick={() => { activeCategory = 'tiktok-ads'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="tiktok-ads" onclick={() => resetFilters('tiktok-ads')}>
 				<TiktokIcon class="h-4 w-4 mr-1.5 shrink-0" /> TikTok Ads
 			</TabsTrigger>
-			<TabsTrigger value="press-article" onclick={() => { activeCategory = 'press-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="press-article" onclick={() => resetFilters('press-article')}>
 				<NewspaperIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole Presă
 			</TabsTrigger>
-			<TabsTrigger value="seo-article" onclick={() => { activeCategory = 'seo-article'; filterType = ''; searchTerm = ''; dateRange = { start: undefined, end: undefined }; }}>
+			<TabsTrigger value="seo-article" onclick={() => resetFilters('seo-article')}>
 				<SearchIcon class="h-4 w-4 mr-1.5 shrink-0" /> Articole SEO
 			</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value={activeCategory} class="mt-4 space-y-4">
 			<!-- Filters + view toggle -->
-			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode bind:dateRange />
+			<MaterialFilters bind:filterType bind:searchTerm bind:viewMode bind:dateRange {activeCategory} {materials} />
 
 			<!-- Inline upload zone for file type filters -->
 			{#if isFileFilterType && clientId && activeCategory !== 'all'}
@@ -288,9 +392,7 @@
 
 			<!-- Loading -->
 			{#if loading}
-				<div class="flex items-center justify-center py-12">
-					<LoaderIcon class="h-6 w-6 animate-spin text-muted-foreground" />
-				</div>
+				<MaterialSkeleton />
 			{:else}
 			<!-- Stats -->
 			<div class="flex items-center gap-3 text-sm text-muted-foreground">
@@ -308,15 +410,11 @@
 			{#if filteredMaterials.length === 0}
 				<div class="text-center py-12 text-muted-foreground">
 					<MegaphoneIcon class="h-12 w-12 mx-auto mb-3 opacity-30" />
-					<p class="text-sm">Niciun material în această categorie.</p>
-					{#if !isFileFilterType && activeCategory !== 'all' && activeCategory !== 'tiktok-ads' && activeCategory !== 'facebook-ads'}
-						<Button variant="outline" class="mt-3" onclick={() => {
-							if (activeCategory === 'google-ads') { googleAdsDialogOpen = true; }
-							else if (activeCategory === 'press-article' || activeCategory === 'seo-article') { articleDialogOpen = true; }
-							else { uploadDialogOpen = true; }
-						}}>
+					<p class="text-sm">{materials.length === 0 ? 'Niciun material în această categorie.' : 'Niciun material nu corespunde filtrelor aplicate.'}</p>
+					{#if activeCategory !== 'all'}
+						<Button variant="outline" class="mt-3" onclick={() => { uploadDialogOpen = true; }}>
 							<PlusIcon class="h-4 w-4 mr-2" />
-							Adaugă primul material
+							Încarcă primul material
 						</Button>
 					{/if}
 				</div>
@@ -329,7 +427,9 @@
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
 					onPreview={handlePreview}
-					activeTasks={[]}
+					{activeTasks}
+					onLinkTask={handleLinkTask}
+					onUnlinkTask={handleUnlinkTask}
 				/>
 			{:else if viewMode === 'list'}
 				<MaterialListView
@@ -338,7 +438,9 @@
 					onEdit={handleEdit}
 					onDelete={handleDeleteClick}
 					onPreview={handlePreview}
-					activeTasks={[]}
+					{activeTasks}
+					onLinkTask={handleLinkTask}
+					onUnlinkTask={handleUnlinkTask}
 				/>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -350,7 +452,9 @@
 							onEdit={handleEdit}
 							onDelete={handleDeleteClick}
 							onPreview={handlePreview}
-							activeTasks={[]}
+							{activeTasks}
+							onLinkTask={handleLinkTask}
+							onUnlinkTask={handleUnlinkTask}
 						/>
 					{/each}
 				</div>
@@ -377,6 +481,14 @@
 		bind:open={googleAdsDialogOpen}
 		{clientId}
 		{uploadUrl}
+		onSaved={handleUploaded}
+	/>
+
+	<!-- Social URL Dialog (TikTok / Facebook) -->
+	<SocialUrlDialog
+		bind:open={socialUrlDialogOpen}
+		{clientId}
+		category={activeCategory as 'tiktok-ads' | 'facebook-ads'}
 		onSaved={handleUploaded}
 	/>
 
@@ -412,6 +524,7 @@
 	bind:open={previewOpen}
 	material={previewMaterial}
 	presignedUrl={previewUrl}
+	onNavigate={handlePreviewNavigate}
 />
 
 <!-- Delete Confirmation -->

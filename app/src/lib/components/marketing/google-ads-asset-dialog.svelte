@@ -53,8 +53,19 @@
 
 	function selectCampaignType(type: GoogleAdsCampaignType) {
 		selectedCampaignType = type;
-		textData = {};
-		imageCounts = {};
+		// Pre-initialize textData with empty slots to avoid reactive loop in child $effect
+		const spec = GOOGLE_ADS_SPECS[type];
+		const initData: Record<string, string[]> = {};
+		for (const field of spec.textFields) {
+			initData[field.key] = Array(Math.max(field.min, 1)).fill('');
+		}
+		textData = initData;
+		// Pre-initialize imageCounts to avoid bind:uploadedCount={undefined} error
+		const initCounts: Record<string, number> = {};
+		for (const slot of spec.imageSlots) {
+			initCounts[slot.key] = 0;
+		}
+		imageCounts = initCounts;
 	}
 
 	function resetDialog() {
@@ -120,7 +131,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (!o) handleClose(); }}>
-	<Dialog.Content class="max-w-3xl max-h-[85vh] overflow-y-auto">
+	<Dialog.Content class="sm:max-w-7xl max-h-[95vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Google Ads - Creează Materiale</Dialog.Title>
 			<Dialog.Description>
@@ -161,59 +172,81 @@
 				missing={completion.missing}
 			/>
 
-			<!-- Text Assets Section -->
-			<div class="mt-6 space-y-4">
-				<h3 class="text-sm font-semibold flex items-center gap-2">
-					Text Assets
-					<span class="text-xs font-normal text-muted-foreground">({spec.label})</span>
-				</h3>
-
-				<GoogleAdsTextForm
-					fields={spec.textFields}
-					bind:textData
-				/>
-
-				<div class="flex justify-end">
-					<Button
-						onclick={saveTextAssets}
-						disabled={saving}
-						size="sm"
-					>
-						{#if saving}
-							<LoaderIcon class="h-4 w-4 mr-2 animate-spin" />
-						{:else}
-							<SaveIcon class="h-4 w-4 mr-2" />
-						{/if}
-						Salvează Text
-					</Button>
-				</div>
-			</div>
-
-			<!-- Image Slots Section -->
-			{#if !spec.textOnly && spec.imageSlots.length > 0}
-				<div class="mt-6 space-y-4">
+			<!-- Two-column layout: Text (left) + Images (right) -->
+			<div class="mt-6 {!spec.textOnly && spec.imageSlots.length > 0 ? 'grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6' : ''}">
+				<!-- Text Assets Section -->
+				<div class="space-y-4">
 					<h3 class="text-sm font-semibold flex items-center gap-2">
-						Imagini
-						<span class="text-xs font-normal text-muted-foreground">
-							(se salvează automat la upload)
-						</span>
+						Text Assets
+						<span class="text-xs font-normal text-muted-foreground">({spec.label})</span>
 					</h3>
 
-					{#each spec.imageSlots as slot (slot.key)}
-						<GoogleAdsImageSlot
-							{slot}
-							campaignType={selectedCampaignType}
-							{clientId}
-							{uploadUrl}
-							bind:uploadedCount={imageCounts[slot.key]}
-							onUploaded={handleImageUploaded}
-						/>
-					{/each}
-				</div>
-			{/if}
+					<GoogleAdsTextForm
+						fields={spec.textFields}
+						bind:textData
+					/>
 
-			<!-- Video Info -->
-			{#if spec.maxVideos > 0}
+					<div class="flex justify-end">
+						<Button
+							onclick={saveTextAssets}
+							disabled={saving}
+							size="sm"
+						>
+							{#if saving}
+								<LoaderIcon class="h-4 w-4 mr-2 animate-spin" />
+							{:else}
+								<SaveIcon class="h-4 w-4 mr-2" />
+							{/if}
+							Salvează Text
+						</Button>
+					</div>
+				</div>
+
+				<!-- Image Slots Section -->
+				{#if !spec.textOnly && spec.imageSlots.length > 0}
+					<div class="space-y-4">
+						<h3 class="text-sm font-semibold flex items-center gap-2">
+							Imagini
+							<span class="text-xs font-normal text-muted-foreground">
+								(se salvează automat la upload)
+							</span>
+						</h3>
+
+						<div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+							{#each spec.imageSlots as slot (slot.key)}
+								<GoogleAdsImageSlot
+									{slot}
+									campaignType={selectedCampaignType}
+									{clientId}
+									{uploadUrl}
+									bind:uploadedCount={imageCounts[slot.key]}
+									onUploaded={handleImageUploaded}
+								/>
+							{/each}
+						</div>
+
+						<!-- Video Info -->
+						{#if spec.maxVideos > 0}
+							<div class="p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+								<p class="font-medium text-foreground mb-1">Video (opțional)</p>
+								<p>
+									Max {spec.maxVideos} videoclipuri.
+									{#if spec.minVideoSeconds}
+										Min {spec.minVideoSeconds}s.
+									{/if}
+									{#if spec.maxVideoSeconds}
+										Max {spec.maxVideoSeconds}s.
+									{/if}
+									Folosește upload-ul standard pentru video.
+								</p>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- Video Info for text-only campaigns -->
+			{#if spec.textOnly && spec.maxVideos > 0}
 				<div class="mt-4 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
 					<p class="font-medium text-foreground mb-1">Video (opțional)</p>
 					<p>
