@@ -196,9 +196,9 @@
 										Proiecție totală: {td.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({td.projectedPct}% din buget)
 									</p>
 									<p class="text-muted-foreground mt-0.5">
-										Media curentă: {td.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
-										Reduce la {td.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
-										(−{td.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+										Media curentă: {Math.round(td.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
+										Țintă: {Math.round(td.dailyRemaining).toLocaleString('ro-RO')} RON/zi
+										(reduce cu {Math.round(td.currentDailyAvg - td.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
 									</p>
 								</div>
 							{:else}
@@ -308,9 +308,9 @@
 														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {daily.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
-														Reduce la {daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
-														(−{daily.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
 													</p>
 												</div>
 											{:else}
@@ -418,9 +418,9 @@
 														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {daily.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
-														Reduce la {daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
-														(−{daily.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
 													</p>
 												</div>
 											{:else}
@@ -528,9 +528,9 @@
 														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {daily.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
-														Reduce la {daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
-														(−{daily.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
 													</p>
 												</div>
 											{:else}

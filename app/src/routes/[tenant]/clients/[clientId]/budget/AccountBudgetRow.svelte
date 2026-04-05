@@ -146,9 +146,9 @@
 									Proiecție: {d.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({d.projectedPct}% din buget)
 								</p>
 								<p class="text-muted-foreground mt-0.5">
-									Media curentă: {d.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
-									Reduce la {d.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
-									(−{d.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+									Media curentă: {Math.round(d.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
+									Țintă: {Math.round(d.dailyRemaining).toLocaleString('ro-RO')} RON/zi
+									(reduce cu {Math.round(d.currentDailyAvg - d.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
 								</p>
 							</div>
 						{:else}
