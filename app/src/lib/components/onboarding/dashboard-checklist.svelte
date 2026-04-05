@@ -15,7 +15,7 @@
 
 	let { isPrimary, tenantSlug }: { isPrimary: boolean; tenantSlug: string } = $props();
 
-	const items = getChecklistItems(isPrimary);
+	const items = $derived(getChecklistItems(isPrimary));
 	const prefsQuery = getClientUserPreferences();
 	const prefs = $derived(prefsQuery.current);
 

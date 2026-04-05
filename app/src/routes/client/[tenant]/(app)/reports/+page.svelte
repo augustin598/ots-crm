@@ -57,7 +57,7 @@
 	// ---- Streaming: merge API conversion data when it arrives ----
 	let apiConversionsLoaded = $state(false);
 	let apiError = $state<string | null>(null);
-	let enrichedPlatformMetrics = $state(data.platformMetrics);
+	let enrichedPlatformMetrics: typeof data.platformMetrics = $state(undefined!);
 
 	const apiConversionsRef = $derived(data.apiConversions);
 	const platformMetricsRef = $derived(data.platformMetrics);

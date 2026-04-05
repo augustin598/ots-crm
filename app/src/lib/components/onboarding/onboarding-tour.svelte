@@ -10,7 +10,7 @@
 	let { isPrimary, tenantSlug }: { isPrimary: boolean; tenantSlug: string } = $props();
 
 	const steps = $derived(getTourSteps(isPrimary));
-	const checklistItems = getChecklistItems(isPrimary);
+	const checklistItems = $derived(getChecklistItems(isPrimary));
 	let showCard = $state(false);
 	let navigating = $state(false);
 

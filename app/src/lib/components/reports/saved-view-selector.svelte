@@ -33,7 +33,7 @@
 	let saving = $state(false);
 
 	// ---- Fetch views ----
-	const viewsQuery = getSavedViews({ platform });
+	const viewsQuery = $derived(getSavedViews({ platform }));
 	const viewsLoading = $derived(viewsQuery.loading ?? false);
 	const allViews = $derived(viewsQuery.current || []);
 	// Filter views by current account — show only views for this account + views without account

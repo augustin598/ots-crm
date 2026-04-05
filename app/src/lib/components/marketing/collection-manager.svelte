@@ -143,7 +143,7 @@
 							<span
 								class="h-2.5 w-2.5 rounded-full shrink-0"
 								style="background-color: {collection.color || '#6b7280'}"
-							/>
+							></span>
 							<span class="text-sm truncate flex-1">{collection.name}</span>
 							<span class="text-[10px] text-muted-foreground">{collection.materialCount}</span>
 							{#if activeCollectionId === collection.id}

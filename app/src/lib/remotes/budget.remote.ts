@@ -1,0 +1,299 @@
+import { query, command, getRequestEvent } from '$app/server';
+import * as v from 'valibot';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq, and, sql, gte, lte } from 'drizzle-orm';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
+import { listAdAccountInsights } from '$lib/server/meta-ads/client';
+import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
+import { listMonthlySpend, formatCustomerId } from '$lib/server/google-ads/client';
+import { env } from '$env/dynamic/private';
+import { logWarning, logInfo } from '$lib/server/logger';
+
+function generateBudgetId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
+const updateBudgetSchema = v.object({
+	clientId: v.pipe(v.string(), v.minLength(1)),
+	platform: v.picklist(['google', 'meta', 'tiktok']),
+	adsAccountId: v.pipe(v.string(), v.minLength(1)),
+	monthlyBudget: v.nullable(v.pipe(v.number(), v.minValue(0)))
+});
+
+/** Fetch all ads accounts for a client with their current budgets and REAL-TIME spend */
+export const getClientAccountBudgets = query(
+	v.object({ clientId: v.string() }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+
+		// Security: client users can only access their own data
+		if (event.locals.isClientUser && event.locals.client) {
+			if (event.locals.client.id !== clientId) {
+				console.warn(`[budget] Client user ${event.locals.user.id} tried to access budget for client ${clientId}, but owns ${event.locals.client.id}`);
+				throw new Error('Unauthorized');
+			}
+		}
+
+		const startTime = Date.now();
+		console.log(`[budget] Fetching budgets for client=${clientId} tenant=${tenantId}`);
+
+		// 1. Fetch platform accounts + budgets in parallel
+		const [metaAccounts, ttAccounts, googleAccounts, budgets] = await Promise.all([
+			db.select().from(table.metaAdsAccount)
+				.where(and(eq(table.metaAdsAccount.clientId, clientId), eq(table.metaAdsAccount.tenantId, tenantId))),
+			db.select().from(table.tiktokAdsAccount)
+				.where(and(eq(table.tiktokAdsAccount.clientId, clientId), eq(table.tiktokAdsAccount.tenantId, tenantId))),
+			db.select().from(table.googleAdsAccount)
+				.where(and(eq(table.googleAdsAccount.clientId, clientId), eq(table.googleAdsAccount.tenantId, tenantId))),
+			db.select().from(table.adsAccountBudget)
+				.where(and(eq(table.adsAccountBudget.clientId, clientId), eq(table.adsAccountBudget.tenantId, tenantId)))
+		]);
+
+		console.log(`[budget] Found accounts: meta=${metaAccounts.length} google=${googleAccounts.length} tiktok=${ttAccounts.length} budgets=${budgets.length}`);
+
+		// 2. Current month date range
+		const now = new Date();
+		const y = now.getFullYear();
+		const m = now.getMonth();
+		const pad = (n: number) => String(n).padStart(2, '0');
+		const monthStart = `${y}-${pad(m + 1)}-01`;
+		const lastDay = new Date(y, m + 1, 0).getDate();
+		const monthEnd = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+
+		console.log(`[budget] Date range: ${monthStart} → ${monthEnd}`);
+
+		// DB fallback for spend
+		const getDbSpend = async (tbl: any, accountIdField: any, accountId: string): Promise<number> => {
+			const [res] = await db
+				.select({ totalCents: sql<number>`coalesce(sum(${tbl.spendCents}), 0)` })
+				.from(tbl)
+				.where(and(
+					eq(tbl.tenantId, tenantId),
+					eq(accountIdField, accountId),
+					gte(tbl.periodStart, monthStart),
+					lte(tbl.periodEnd, monthEnd)
+				));
+			return res?.totalCents || 0;
+		};
+
+		// 3. META — real-time spend from API (group by integrationId to avoid duplicate auth calls)
+		const metaIntegrationIds = [...new Set(metaAccounts.map(a => a.integrationId))];
+		const metaTokenCache = new Map<string, { accessToken: string } | null>();
+
+		for (const integrationId of metaIntegrationIds) {
+			try {
+				metaTokenCache.set(integrationId, await getAuthenticatedToken(integrationId));
+			} catch {
+				metaTokenCache.set(integrationId, null);
+			}
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		const metaWithBudgets = await Promise.all(metaAccounts.map(async acc => {
+			const budget = budgets.find(b => b.platform === 'meta' && b.adsAccountId === acc.id);
+			let spendAmount = 0;
+			let source = 'db';
+
+			try {
+				const authResult = metaTokenCache.get(acc.integrationId);
+				if (authResult && appSecret) {
+					const insights = await listAdAccountInsights(
+						acc.metaAdAccountId, authResult.accessToken, appSecret, monthStart, monthEnd
+					) ?? [];
+					spendAmount = insights.reduce((sum, i) => sum + (parseFloat(i.spend) || 0), 0);
+					source = 'api';
+				} else {
+					const spendCents = await getDbSpend(table.metaAdsSpending, table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId);
+					spendAmount = spendCents / 100;
+				}
+			} catch (err) {
+				logWarning('meta-ads', `Budget: API fallback to DB for ${acc.metaAdAccountId}`, {
+					tenantId, metadata: { error: err instanceof Error ? err.message : String(err) }
+				});
+				console.warn(`[budget] Meta API failed for ${acc.metaAdAccountId}, using DB fallback:`, err instanceof Error ? err.message : err);
+				const spendCents = await getDbSpend(table.metaAdsSpending, table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId);
+				spendAmount = spendCents / 100;
+			}
+
+			console.log(`[budget] Meta ${acc.metaAdAccountId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+
+			return {
+				...acc,
+				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
+				spendCents: Math.round(spendAmount * 100),
+				spendAmount
+			};
+		}));
+
+		// 4. GOOGLE — real-time spend from API (auth once per tenant)
+		let googleAuth: Awaited<ReturnType<typeof getAuthenticatedClient>> = null;
+		if (googleAccounts.length > 0) {
+			try {
+				googleAuth = await getAuthenticatedClient(tenantId);
+			} catch (err) {
+				console.warn(`[budget] Google Ads auth failed for tenant=${tenantId}:`, err instanceof Error ? err.message : err);
+			}
+		}
+
+		const googleWithBudgets = await Promise.all(googleAccounts.map(async acc => {
+			const budget = budgets.find(b => b.platform === 'google' && b.adsAccountId === acc.id);
+			let spendAmount = 0;
+			let source = 'db';
+
+			try {
+				if (googleAuth) {
+					const { integration } = googleAuth;
+					const cleanId = formatCustomerId(acc.googleAdsCustomerId);
+					const monthlySpend = await listMonthlySpend(
+						integration.mccAccountId, cleanId,
+						integration.developerToken, integration.refreshToken,
+						monthStart, monthEnd
+					) ?? [];
+					const currentMonth = `${y}-${pad(m + 1)}`;
+					const match = monthlySpend.find(ms => ms.month?.startsWith(currentMonth));
+					spendAmount = typeof match?.spend === 'number' ? match.spend : 0;
+					source = 'api';
+				} else {
+					const spendCents = await getDbSpend(table.googleAdsSpending, table.googleAdsSpending.googleAdsCustomerId, acc.googleAdsCustomerId);
+					spendAmount = spendCents / 100;
+				}
+			} catch (err) {
+				logWarning('google-ads', `Budget: API fallback to DB for ${acc.googleAdsCustomerId}`, {
+					tenantId, metadata: { error: err instanceof Error ? err.message : String(err) }
+				});
+				console.warn(`[budget] Google API failed for ${acc.googleAdsCustomerId}, using DB fallback:`, err instanceof Error ? err.message : err);
+				const spendCents = await getDbSpend(table.googleAdsSpending, table.googleAdsSpending.googleAdsCustomerId, acc.googleAdsCustomerId);
+				spendAmount = spendCents / 100;
+			}
+
+			console.log(`[budget] Google ${acc.googleAdsCustomerId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+
+			return {
+				...acc,
+				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
+				spendCents: Math.round(spendAmount * 100),
+				spendAmount
+			};
+		}));
+
+		// 5. TIKTOK — DB only (no real-time API available)
+		const tiktokWithBudgets = await Promise.all(ttAccounts.map(async acc => {
+			const budget = budgets.find(b => b.platform === 'tiktok' && b.adsAccountId === acc.id);
+			const spendCents = await getDbSpend(table.tiktokAdsSpending, table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId);
+
+			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendCents / 100} source=db budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+
+			return {
+				...acc,
+				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
+				spendCents,
+				spendAmount: spendCents / 100
+			};
+		}));
+
+		const elapsed = Date.now() - startTime;
+		console.log(`[budget] Done in ${elapsed}ms — meta=${metaWithBudgets.length} google=${googleWithBudgets.length} tiktok=${tiktokWithBudgets.length}`);
+
+		return {
+			meta: metaWithBudgets,
+			tiktok: tiktokWithBudgets,
+			google: googleWithBudgets
+		};
+	}
+);
+
+export const updateAccountBudget = command(
+	updateBudgetSchema,
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+
+		// Security: client users can only modify their own budgets
+		if (event.locals.isClientUser && event.locals.client) {
+			if (event.locals.client.id !== data.clientId) {
+				console.warn(`[budget] Client user ${event.locals.user.id} tried to update budget for client ${data.clientId}, but owns ${event.locals.client.id}`);
+				throw new Error('Unauthorized');
+			}
+		}
+
+		// Verify the ads account belongs to this client and tenant
+		let accountExists = false;
+		if (data.platform === 'meta') {
+			const [acc] = await db.select({ id: table.metaAdsAccount.id })
+				.from(table.metaAdsAccount)
+				.where(and(
+					eq(table.metaAdsAccount.id, data.adsAccountId),
+					eq(table.metaAdsAccount.clientId, data.clientId),
+					eq(table.metaAdsAccount.tenantId, tenantId)
+				)).limit(1);
+			accountExists = !!acc;
+		} else if (data.platform === 'google') {
+			const [acc] = await db.select({ id: table.googleAdsAccount.id })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.id, data.adsAccountId),
+					eq(table.googleAdsAccount.clientId, data.clientId),
+					eq(table.googleAdsAccount.tenantId, tenantId)
+				)).limit(1);
+			accountExists = !!acc;
+		} else if (data.platform === 'tiktok') {
+			const [acc] = await db.select({ id: table.tiktokAdsAccount.id })
+				.from(table.tiktokAdsAccount)
+				.where(and(
+					eq(table.tiktokAdsAccount.id, data.adsAccountId),
+					eq(table.tiktokAdsAccount.clientId, data.clientId),
+					eq(table.tiktokAdsAccount.tenantId, tenantId)
+				)).limit(1);
+			accountExists = !!acc;
+		}
+
+		if (!accountExists) {
+			console.warn(`[budget] Account ${data.adsAccountId} (${data.platform}) not found for client=${data.clientId} tenant=${tenantId}`);
+			throw new Error('Contul de ads nu a fost găsit sau nu aparține acestui client.');
+		}
+
+		const budgetCents = data.monthlyBudget !== null ? Math.round(data.monthlyBudget * 100) : null;
+
+		// Upsert: use adsAccountId + tenantId as unique key
+		const [existing] = await db.select({ id: table.adsAccountBudget.id })
+			.from(table.adsAccountBudget)
+			.where(and(
+				eq(table.adsAccountBudget.tenantId, tenantId),
+				eq(table.adsAccountBudget.adsAccountId, data.adsAccountId)
+			))
+			.limit(1);
+
+		if (existing) {
+			await db.update(table.adsAccountBudget)
+				.set({
+					monthlyBudget: budgetCents,
+					updatedAt: new Date()
+				})
+				.where(eq(table.adsAccountBudget.id, existing.id));
+			console.log(`[budget] Updated budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents`);
+		} else {
+			await db.insert(table.adsAccountBudget).values({
+				id: generateBudgetId(),
+				tenantId,
+				clientId: data.clientId,
+				platform: data.platform,
+				adsAccountId: data.adsAccountId,
+				monthlyBudget: budgetCents
+			});
+			console.log(`[budget] Created budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents`);
+		}
+
+		logInfo('server', `Budget updated: ${data.platform}/${data.adsAccountId} = ${data.monthlyBudget} RON`, {
+			tenantId,
+			metadata: { clientId: data.clientId, platform: data.platform, amount: data.monthlyBudget }
+		});
+
+		return { success: true };
+	}
+);

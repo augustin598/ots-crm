@@ -2,16 +2,22 @@
 	import { getTasks } from '$lib/remotes/tasks.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { getContracts } from '$lib/remotes/contracts.remote';
+	import { getClientAccountBudgets } from '$lib/remotes/budget.remote';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { CheckSquare, FileText, Receipt } from '@lucide/svelte';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
 	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
 	import DashboardChecklist from '$lib/components/onboarding/dashboard-checklist.svelte';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const isPrimary = $derived((page.data as any)?.isClientUserPrimary ?? true);
+	const clientId = $derived((page.data as any)?.client?.id as string);
 
 	function getInvoiceStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
@@ -43,6 +49,35 @@
 
 	const contractsQuery = getContracts({});
 	const contracts = $derived(contractsQuery.current?.contracts || []);
+
+	// Lazy budget query — only when clientId available
+	let budgetQuery = $state<ReturnType<typeof getClientAccountBudgets> | null>(null);
+	$effect(() => {
+		if (clientId) {
+			budgetQuery = getClientAccountBudgets({ clientId });
+		}
+	});
+	const budgetData = $derived(budgetQuery?.current);
+
+	// Budget totals — computed once as derived values, not functions
+	const allBudgetAccounts = $derived.by(() => {
+		if (!budgetData) return [];
+		return [
+			...budgetData.meta.map(a => ({ ...a, platform: 'meta' as const })),
+			...budgetData.tiktok.map(a => ({ ...a, platform: 'tiktok' as const })),
+			...budgetData.google.map(a => ({ ...a, platform: 'google' as const }))
+		];
+	});
+	const totalBudget = $derived(allBudgetAccounts.reduce((sum, a) => sum + (a.monthlyBudget || 0), 0));
+	const totalSpend = $derived(allBudgetAccounts.reduce((sum, a) => sum + a.spendAmount, 0));
+	const totalPct = $derived(totalBudget > 0 ? Math.round((totalSpend / totalBudget) * 100) : 0);
+	const accountsWithBudget = $derived(allBudgetAccounts.filter(a => a.monthlyBudget && a.monthlyBudget > 0));
+
+	function budgetColor(pct: number) {
+		if (pct >= 100) return { bar: 'budget-bar-red', text: 'text-destructive font-bold' };
+		if (pct >= 75) return { bar: 'budget-bar-yellow', text: 'text-yellow-600 dark:text-yellow-400 font-semibold' };
+		return { bar: '', text: '' };
+	}
 
 	const pendingTasks = $derived(tasks.filter((t: any) => t.status === 'pending-approval').length);
 	const activeTasks = $derived(tasks.filter((t: any) => t.status !== 'done' && t.status !== 'cancelled').length);
@@ -101,6 +136,68 @@
 			</CardContent>
 		</Card>
 	</div>
+
+	<!-- Budget Overview -->
+	{#if budgetData && allBudgetAccounts.length > 0}
+		{@const totalColors = budgetColor(totalPct)}
+		<Card class="cursor-pointer hover:border-primary/50 transition-colors overflow-hidden" onclick={() => goto(`/client/${tenantSlug}/budgets`)}>
+			<CardHeader>
+				<CardTitle class="flex items-center justify-between">
+					<span class="flex items-center gap-2">
+						<WalletIcon class="h-5 w-5" />
+						Buget Publicitate — Luna Curentă
+					</span>
+					<span class="text-sm font-normal text-muted-foreground">Vezi detalii →</span>
+				</CardTitle>
+			</CardHeader>
+			<CardContent class="space-y-4">
+				{#if totalBudget > 0}
+					<div class="space-y-2">
+						<div class="flex justify-between text-sm">
+							<span class={totalColors.text}>
+								Consumat: {totalSpend.toLocaleString('ro-RO')} / {totalBudget.toLocaleString('ro-RO')} RON
+							</span>
+							<span class={totalColors.text}>{totalPct}%</span>
+						</div>
+						<div class="relative h-3 rounded-full overflow-hidden bg-muted {totalColors.bar}">
+							<div
+								class="absolute inset-y-0 left-0 rounded-full budget-bar-glow"
+								style="width: {Math.min(totalPct, 100)}%"
+							></div>
+						</div>
+					</div>
+				{/if}
+				<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					{#each accountsWithBudget as account (account.id)}
+						{@const pct = account.monthlyBudget && account.monthlyBudget > 0 ? Math.round((account.spendAmount / account.monthlyBudget) * 100) : 0}
+						{@const colors = budgetColor(pct)}
+						<div class="rounded-lg border p-3 space-y-2">
+							<div class="flex items-center gap-2">
+								{#if account.platform === 'meta'}
+									<IconFacebook class="h-4 w-4 text-blue-600 shrink-0" />
+								{:else if account.platform === 'tiktok'}
+									<IconTiktok class="h-4 w-4 text-pink-600 shrink-0" />
+								{:else}
+									<IconGoogleAds class="h-4 w-4 text-yellow-600 shrink-0" />
+								{/if}
+								<span class="text-sm font-medium truncate">{account.accountName}</span>
+							</div>
+							<div class="flex justify-between text-xs text-muted-foreground">
+								<span class={colors.text}>{account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget?.toLocaleString('ro-RO')} RON</span>
+								<span class={colors.text}>{pct}%</span>
+							</div>
+							<div class="relative h-1.5 rounded-full overflow-hidden bg-muted {colors.bar}">
+								<div
+									class="absolute inset-y-0 left-0 rounded-full budget-bar-glow"
+									style="width: {Math.min(pct, 100)}%"
+								></div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</CardContent>
+		</Card>
+	{/if}
 
 	<div class="grid gap-4 md:grid-cols-2">
 		<Card>
@@ -180,3 +277,35 @@
 
 	<DashboardChecklist {isPrimary} {tenantSlug} />
 </div>
+
+<style>
+	@keyframes budget-flow {
+		0% { background-position: 200% center; }
+		100% { background-position: -200% center; }
+	}
+	:global(.budget-bar-glow) {
+		background: linear-gradient(
+			90deg,
+			var(--primary) 0%,
+			color-mix(in oklch, var(--primary) 60%, white) 50%,
+			var(--primary) 100%
+		);
+		background-size: 200% 100%;
+		animation: budget-flow 3s ease-in-out infinite;
+	}
+	:global(.budget-bar-yellow .budget-bar-glow) {
+		background: linear-gradient(90deg, #eab308 0%, #fde047 50%, #eab308 100%);
+		background-size: 200% 100%;
+		animation: budget-flow 3s ease-in-out infinite;
+	}
+	:global(.budget-bar-red .budget-bar-glow) {
+		background: linear-gradient(
+			90deg,
+			var(--destructive) 0%,
+			color-mix(in oklch, var(--destructive) 60%, white) 50%,
+			var(--destructive) 100%
+		);
+		background-size: 200% 100%;
+		animation: budget-flow 3s ease-in-out infinite;
+	}
+</style>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights, getMetaAdInsights, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
-	import { getClientBudget } from '$lib/remotes/clients.remote';
+	import { getClientAccountBudgets } from '$lib/remotes/budget.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -125,9 +125,14 @@
 	const selectedCurrency = $derived(selectedAccount?.currency || 'RON');
 	const selectedClientId = $derived(selectedAccount?.clientId as string | undefined);
 
-	// Monthly budget for selected client
-	const budgetQuery = $derived(selectedClientId ? getClientBudget({ clientId: selectedClientId }) : null);
-	const monthlyBudget = $derived(budgetQuery?.current?.monthlyBudget ?? undefined);
+	// Monthly budget for selected ad account
+	const accountBudgetsQuery = $derived(selectedClientId ? getClientAccountBudgets({ clientId: selectedClientId }) : null);
+	const monthlyBudget = $derived(() => {
+		const budgets = accountBudgetsQuery?.current;
+		if (!budgets) return undefined;
+		const match = budgets.meta.find(a => a.metaAdAccountId === selectedAccountId);
+		return match?.monthlyBudget ?? undefined;
+	});
 
 	// Payment warning (unpaid balance, grace period, account stopped for payment issues)
 	const paymentWarning = $derived.by(() => {
@@ -284,7 +289,7 @@
 	const totals = $derived(computeTotals(dailyData));
 
 	// Advanced KPI derived values
-	const budgetForecast = $derived(calculateBudgetBurnForecast(dailyData, monthlyBudget));
+	const budgetForecast = $derived(calculateBudgetBurnForecast(dailyData, monthlyBudget()));
 	const cpaMomentum = $derived(calculateCpaMomentum(dailyData));
 	const funnelAnalysis = $derived(calculateFunnelAnalysis(campaignData));
 	const saturationMatrix = $derived(calculateSaturationMatrix(campaignData));
@@ -797,7 +802,7 @@
 		OUTCOME_TRAFFIC: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
 		LINK_CLICKS: { label: 'Trafic', icon: MousePointerIcon, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
 		OUTCOME_SALES: { label: 'Vânzări', icon: ShoppingCartIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-		CONVERSIONS: { label: 'Conversii', icon: TargetIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+		CONVERSIONS: { label: 'Vânzări', icon: ShoppingCartIcon, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
 		OUTCOME_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
 		POST_ENGAGEMENT: { label: 'Engagement', icon: HeartIcon, color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' },
 		OUTCOME_AWARENESS: { label: 'Awareness', icon: MegaphoneIcon, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },

@@ -1,102 +1,109 @@
 <script lang="ts">
-	import { getClientBudget, updateClientBudget } from '$lib/remotes/clients.remote';
+	import { getClientAccountBudgets } from '$lib/remotes/budget.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { toast } from 'svelte-sonner';
 	import { page } from '$app/state';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import AccountBudgetRow from './AccountBudgetRow.svelte';
+	import MetaIcon from '@lucide/svelte/icons/facebook';
+	import TikTokIcon from '@lucide/svelte/icons/video';
+	import GoogleIcon from '@lucide/svelte/icons/search';
 
 	const clientId = $derived(page.params.clientId as string);
-	const budgetQuery = $derived(getClientBudget({ clientId }));
-	const budgetData = $derived(budgetQuery.current);
 
-	let formBudget = $state<number | null>(null);
-	let saving = $state(false);
-
+	// Lazy query — re-fetch only budget data on save
+	let budgetQuery = $state<ReturnType<typeof getClientAccountBudgets> | null>(null);
 	$effect(() => {
-		if (budgetData) {
-			formBudget = budgetData.monthlyBudget;
+		if (clientId) {
+			budgetQuery = getClientAccountBudgets({ clientId });
 		}
 	});
+	const data = $derived(budgetQuery?.current);
 
-	async function handleSave() {
-		saving = true;
-		try {
-			await updateClientBudget({
-				clientId,
-				monthlyBudget: formBudget && formBudget > 0 ? formBudget : null
-			}).updates(budgetQuery);
-			toast.success('Bugetul a fost salvat.');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare.');
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function handleClear() {
-		saving = true;
-		try {
-			await updateClientBudget({ clientId, monthlyBudget: null }).updates(budgetQuery);
-			formBudget = null;
-			toast.success('Bugetul a fost șters.');
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere.');
-		} finally {
-			saving = false;
-		}
+	function refresh() {
+		budgetQuery = getClientAccountBudgets({ clientId });
 	}
 </script>
 
-<Card>
-	<CardHeader>
-		<CardTitle class="flex items-center gap-2">
-			<WalletIcon class="h-5 w-5" />
-			Buget lunar publicitate
-		</CardTitle>
-		<CardDescription>
-			Setează bugetul lunar alocat pentru campaniile de advertising. Acest buget e folosit în rapoartele Facebook Ads pentru proiecția lunară și alerte de overspend/underspend.
-		</CardDescription>
-	</CardHeader>
-	<CardContent>
-		{#if budgetQuery.loading}
-			<div class="animate-pulse space-y-4">
-				<div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
-				<div class="h-10 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
-			</div>
-		{:else}
-			<form
-				onsubmit={(e) => { e.preventDefault(); handleSave(); }}
-				class="space-y-4"
-			>
-				<div class="max-w-xs space-y-2">
-					<Label for="monthlyBudget">Buget lunar (RON)</Label>
-					<Input
-						id="monthlyBudget"
-						type="number"
-						min="0"
-						step="100"
-						placeholder="ex: 5000"
-						bind:value={formBudget}
-					/>
-					<p class="text-xs text-muted-foreground">
-						Lasă gol sau 0 pentru a dezactiva tracking-ul de buget.
-					</p>
-				</div>
+<div class="space-y-6">
+	<Card>
+		<CardHeader>
+			<CardTitle class="flex items-center gap-2">
+				<WalletIcon class="h-5 w-5" />
+				Configurare Buget Publicitate
+			</CardTitle>
+			<CardDescription>
+				Setează bugetele lunare alocate pentru fiecare cont de publicitate conectat. Consumul este calculat automat pentru luna curentă.
+			</CardDescription>
+		</CardHeader>
+	</Card>
 
-				<div class="flex gap-2">
-					<Button type="submit" disabled={saving}>
-						{saving ? 'Se salvează...' : 'Salvează buget'}
-					</Button>
-					{#if formBudget && formBudget > 0}
-						<Button type="button" variant="outline" onclick={handleClear} disabled={saving}>
-							Șterge buget
-						</Button>
-					{/if}
-				</div>
-			</form>
+	{#if budgetQuery?.loading && !data}
+		<div class="space-y-4">
+			{#each Array(3) as _}
+				<Card class="animate-pulse">
+					<CardHeader><div class="h-6 w-32 bg-muted rounded"></div></CardHeader>
+					<CardContent><div class="h-20 bg-muted rounded"></div></CardContent>
+				</Card>
+			{/each}
+		</div>
+	{:else if data}
+		<!-- Meta Ads -->
+		{#if data.meta.length > 0}
+			<Card>
+				<CardHeader>
+					<CardTitle class="flex items-center gap-2 text-blue-600">
+						<MetaIcon class="h-5 w-5" />
+						Meta Ads (Facebook)
+					</CardTitle>
+				</CardHeader>
+				<CardContent class="space-y-4">
+					{#each data.meta as account (account.id)}
+						<AccountBudgetRow {account} platform="meta" {clientId} onUpdated={refresh} />
+					{/each}
+				</CardContent>
+			</Card>
 		{/if}
-	</CardContent>
-</Card>
+
+		<!-- TikTok Ads -->
+		{#if data.tiktok.length > 0}
+			<Card>
+				<CardHeader>
+					<CardTitle class="flex items-center gap-2 text-pink-600">
+						<TikTokIcon class="h-5 w-5" />
+						TikTok Ads
+					</CardTitle>
+				</CardHeader>
+				<CardContent class="space-y-4">
+					{#each data.tiktok as account (account.id)}
+						<AccountBudgetRow {account} platform="tiktok" {clientId} onUpdated={refresh} />
+					{/each}
+				</CardContent>
+			</Card>
+		{/if}
+
+		<!-- Google Ads -->
+		{#if data.google.length > 0}
+			<Card>
+				<CardHeader>
+					<CardTitle class="flex items-center gap-2">
+						<GoogleIcon class="h-5 w-5" />
+						Google Ads
+					</CardTitle>
+				</CardHeader>
+				<CardContent class="space-y-4">
+					{#each data.google as account (account.id)}
+						<AccountBudgetRow {account} platform="google" {clientId} onUpdated={refresh} />
+					{/each}
+				</CardContent>
+			</Card>
+		{/if}
+
+		{#if data.meta.length === 0 && data.tiktok.length === 0 && data.google.length === 0}
+			<Card>
+				<CardContent class="py-10 text-center">
+					<p class="text-muted-foreground">Niciun cont de publicitate conectat pentru acest client.</p>
+				</CardContent>
+			</Card>
+		{/if}
+	{/if}
+</div>

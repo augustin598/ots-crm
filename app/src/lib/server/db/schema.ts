@@ -1807,6 +1807,39 @@ export const tiktokInvoiceDownload = sqliteTable('tiktok_invoice_download', {
 		.default(sql`current_date`)
 });
 
+export const adsAccountBudget = sqliteTable('ads_account_budget', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	platform: text('platform').notNull(), // 'google', 'meta', 'tiktok'
+	adsAccountId: text('ads_account_id').notNull(), // Platform-specific account ID
+	monthlyBudget: integer('monthly_budget'), // in cents
+	isActive: boolean('is_active').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+}, (table) => [
+	uniqueIndex('ads_account_budget_acc_idx').on(table.adsAccountId)
+]);
+
+export const adsAccountBudgetRelations = relations(adsAccountBudget, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [adsAccountBudget.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [adsAccountBudget.clientId],
+		references: [client.id]
+	})
+}));
+
 export const passwordResetToken = sqliteTable('password_reset_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -2010,7 +2043,8 @@ export const clientRelations = relations(client, ({ one, many }) => ({
 	metaAdsSpending: many(metaAdsSpending),
 	tiktokAdsAccounts: many(tiktokAdsAccount),
 	tiktokAdsSpending: many(tiktokAdsSpending),
-	tiktokInvoiceDownloads: many(tiktokInvoiceDownload)
+	tiktokInvoiceDownloads: many(tiktokInvoiceDownload),
+	adsAccountBudgets: many(adsAccountBudget)
 }));
 
 export const clientSecondaryEmailRelations = relations(clientSecondaryEmail, ({ one }) => ({

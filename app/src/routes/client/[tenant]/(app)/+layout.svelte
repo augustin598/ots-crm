@@ -25,6 +25,7 @@
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
@@ -172,6 +173,18 @@
 							</SidebarMenuSubItem>
 						</SidebarMenuSub>
 					{/if}
+				</SidebarMenuItem>
+				{/if}
+				{#if data.isClientUserPrimary}
+				<SidebarMenuItem>
+					<SidebarMenuButton data-sidebar-id="budgets" isActive={currentPath.startsWith(`/client/${tenantSlug}/budgets`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/budgets" {...props}>
+								<WalletIcon />
+								<span>Bugete Ads</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
 				</SidebarMenuItem>
 				{/if}
 				<SidebarMenuItem>
