@@ -128,6 +128,7 @@ export const client = sqliteTable('client', {
 	notes: text('notes'),
 	googleAdsCustomerId: text('google_ads_customer_id'), // Google Ads customer ID (e.g., "1234567890")
 	restrictedAccess: text('restricted_access'), // null=auto (based on invoices), 'forced'=admin ban, 'unrestricted'=admin unban
+	monthlyBudget: integer('monthly_budget'), // Monthly ad budget in cents (e.g., 500000 = 5000 RON), nullable
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1269,6 +1270,10 @@ export const clientUserPreferences = sqliteTable('client_user_preferences', {
 	itemsPerPage: integer('items_per_page').default(25), // 10 | 25 | 50
 	// Task creation defaults
 	defaultPriority: text('default_priority').default('medium'), // 'low' | 'medium' | 'high' | 'urgent'
+	// Onboarding
+	onboardingTourCompleted: integer('onboarding_tour_completed', { mode: 'boolean' }).notNull().default(false),
+	onboardingTourEnabled: integer('onboarding_tour_enabled', { mode: 'boolean' }).notNull().default(true),
+	onboardingChecklist: text('onboarding_checklist'), // JSON: {"dashboard":true,"tasks":false,...}
 	// Timestamps
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -2981,6 +2986,57 @@ export const marketingMaterialRelations = relations(marketingMaterial, ({ one, m
 		references: [clientUser.id]
 	}),
 	taskLinks: many(taskMarketingMaterial)
+}));
+
+// ==================== MARKETING COLLECTIONS ====================
+
+export const marketingCollection = sqliteTable('marketing_collection', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id')
+		.notNull()
+		.references(() => client.id),
+	name: text('name').notNull(),
+	description: text('description'),
+	color: text('color'), // hex color for visual grouping
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
+});
+
+export const marketingCollectionMaterial = sqliteTable('marketing_collection_material', {
+	id: text('id').primaryKey(),
+	collectionId: text('collection_id')
+		.notNull()
+		.references(() => marketingCollection.id, { onDelete: 'cascade' }),
+	materialId: text('material_id')
+		.notNull()
+		.references(() => marketingMaterial.id, { onDelete: 'cascade' }),
+	addedAt: timestamp('added_at').notNull().default(sql`current_timestamp`)
+});
+
+export const marketingCollectionRelations = relations(marketingCollection, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [marketingCollection.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [marketingCollection.clientId],
+		references: [client.id]
+	}),
+	materials: many(marketingCollectionMaterial)
+}));
+
+export const marketingCollectionMaterialRelations = relations(marketingCollectionMaterial, ({ one }) => ({
+	collection: one(marketingCollection, {
+		fields: [marketingCollectionMaterial.collectionId],
+		references: [marketingCollection.id]
+	}),
+	material: one(marketingMaterial, {
+		fields: [marketingCollectionMaterial.materialId],
+		references: [marketingMaterial.id]
+	})
 }));
 
 // ==================== CLIENT ACCESS DATA ====================

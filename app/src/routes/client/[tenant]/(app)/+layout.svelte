@@ -29,6 +29,7 @@
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import OnboardingTour from '$lib/components/onboarding/onboarding-tour.svelte';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
@@ -89,7 +90,7 @@
 		<SidebarContent>
 			<SidebarMenu>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath === `/client/${tenantSlug}/dashboard` || currentPath === `/client/${tenantSlug}`}>
+					<SidebarMenuButton data-sidebar-id="dashboard" isActive={currentPath === `/client/${tenantSlug}/dashboard` || currentPath === `/client/${tenantSlug}`}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/dashboard" {...props}>
 								<LayoutDashboardIcon />
@@ -99,7 +100,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/tasks`)}>
+					<SidebarMenuButton data-sidebar-id="tasks" isActive={currentPath.startsWith(`/client/${tenantSlug}/tasks`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/tasks" {...props}>
 								<CheckSquareIcon />
@@ -110,7 +111,7 @@
 				</SidebarMenuItem>
 				{#if data.isClientUserPrimary}
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/contracts`)}>
+					<SidebarMenuButton data-sidebar-id="contracts" isActive={currentPath.startsWith(`/client/${tenantSlug}/contracts`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/contracts" {...props}>
 								<FileTextIcon />
@@ -120,7 +121,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices`)}>
+					<SidebarMenuButton data-sidebar-id="invoices" isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/invoices" {...props}>
 								<ReceiptIcon />
@@ -174,7 +175,7 @@
 				</SidebarMenuItem>
 				{/if}
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/marketing`)}>
+					<SidebarMenuButton data-sidebar-id="marketing" isActive={currentPath.startsWith(`/client/${tenantSlug}/marketing`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/marketing" {...props}>
 								<MegaphoneIcon />
@@ -184,7 +185,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/reports`)}>
+					<SidebarMenuButton data-sidebar-id="reports" isActive={currentPath.startsWith(`/client/${tenantSlug}/reports`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/reports" {...props}>
 								<BarChart3Icon />
@@ -228,7 +229,7 @@
 					{/if}
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/leads`)}>
+					<SidebarMenuButton data-sidebar-id="leads" isActive={currentPath.startsWith(`/client/${tenantSlug}/leads`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/leads" {...props}>
 								<ContactIcon />
@@ -272,7 +273,7 @@
 					{/if}
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/access-data`)}>
+					<SidebarMenuButton data-sidebar-id="access-data" isActive={currentPath.startsWith(`/client/${tenantSlug}/access-data`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/access-data" {...props}>
 								<KeyRoundIcon />
@@ -282,7 +283,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/backlinks`)}>
+					<SidebarMenuButton data-sidebar-id="backlinks" isActive={currentPath.startsWith(`/client/${tenantSlug}/backlinks`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/backlinks" {...props}>
 								<Link2Icon />
@@ -292,7 +293,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
-					<SidebarMenuButton isActive={currentPath.startsWith(`/client/${tenantSlug}/settings`)}>
+					<SidebarMenuButton data-sidebar-id="settings" isActive={currentPath.startsWith(`/client/${tenantSlug}/settings`)}>
 						{#snippet child({ props })}
 							<a href="/client/{tenantSlug}/settings" {...props}>
 								<SettingsIcon />
@@ -363,6 +364,7 @@
 		</main>
 	</SidebarInset>
 </SidebarProvider>
+<OnboardingTour isPrimary={data.isClientUserPrimary ?? true} tenantSlug={tenantSlug ?? ''} />
 {#if browser}
 	<Toaster />
 {/if}

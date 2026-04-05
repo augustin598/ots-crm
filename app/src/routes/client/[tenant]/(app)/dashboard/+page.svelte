@@ -8,8 +8,10 @@
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
 	import { formatStatus, getStatusBadgeVariant } from '$lib/components/task-kanban-utils';
+	import DashboardChecklist from '$lib/components/onboarding/dashboard-checklist.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
+	const isPrimary = $derived((page.data as any)?.isClientUserPrimary ?? true);
 
 	function getInvoiceStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
 		switch (status) {
@@ -175,4 +177,6 @@
 			</CardContent>
 		</Card>
 	</div>
+
+	<DashboardChecklist {isPrimary} {tenantSlug} />
 </div>

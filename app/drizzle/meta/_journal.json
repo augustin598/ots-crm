@@ -722,6 +722,48 @@
       "when": 1775332254442,
       "tag": "0102_report_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1775418654000,
+      "tag": "0103_client_monthly_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "6",
+      "when": 1775505054000,
+      "tag": "0104_marketing_collections",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1775505055000,
+      "tag": "0105_marketing_collection_materials",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1775591455000,
+      "tag": "0106_onboarding_tour_completed",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1775591456000,
+      "tag": "0107_onboarding_checklist",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1775591457000,
+      "tag": "0108_onboarding_tour_enabled",
+      "breakpoints": true
     }
   ]
 }

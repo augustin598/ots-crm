@@ -25,6 +25,7 @@
 		CreditCard
 	} from '@lucide/svelte';
 	import ClientActivityFeed from '$lib/components/client/ClientActivityFeed.svelte';
+	import ClientOnboardingControl from '$lib/components/client/client-onboarding-control.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
@@ -246,6 +247,9 @@
 					</p>
 				</CardContent>
 			</Card>
+
+			<!-- Onboarding Control -->
+			<ClientOnboardingControl {clientId} />
 
 			<!-- Recent Activity -->
 			<Card class="md:col-span-2">

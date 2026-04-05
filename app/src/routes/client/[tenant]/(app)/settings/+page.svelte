@@ -21,6 +21,8 @@
 	import UserIcon from '@lucide/svelte/icons/user';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import FileBarChartIcon from '@lucide/svelte/icons/file-bar-chart';
+	import CompassIcon from '@lucide/svelte/icons/compass';
+	import { tourActions } from '$lib/stores/onboarding-store.svelte';
 
 	const client = $derived((page.data as any)?.client);
 	const userData = $derived((page.data as any)?.user);
@@ -809,6 +811,32 @@
 					</form>
 				</div>
 			{/if}
+		</CardContent>
+	</Card>
+
+	<!-- Section 6: Onboarding -->
+	<Card>
+		<CardHeader>
+			<CardTitle class="flex items-center gap-2">
+				<CompassIcon class="h-5 w-5" />
+				Onboarding
+			</CardTitle>
+			<CardDescription>Reia turul ghidat al portalului pentru a redescoperi funcționalitățile.</CardDescription>
+		</CardHeader>
+		<CardContent>
+			<Button variant="outline" onclick={async () => {
+				try {
+					await updateClientUserPreferences({
+						onboardingTourCompleted: false,
+						onboardingChecklist: null
+					}).updates(prefsQuery);
+					tourActions.reset();
+				} catch (e) {
+					toast.error('Eroare la resetarea turului.');
+				}
+			}}>
+				Reia turul ghidat
+			</Button>
 		</CardContent>
 	</Card>
 </div>
