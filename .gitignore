@@ -1,2 +1,4 @@
 app-config.json
-app-config.json
+.agents/
+.claude/skills/
+skills-lock.json
