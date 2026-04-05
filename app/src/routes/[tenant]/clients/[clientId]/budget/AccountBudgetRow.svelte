@@ -8,6 +8,8 @@
 	import PiggyBankIcon from '@lucide/svelte/icons/piggy-bank';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import AlertTriangleIcon from '@lucide/svelte/icons/triangle-alert';
+	import CheckCircleIcon from '@lucide/svelte/icons/circle-check';
 
 	interface Props {
 		account: any;
@@ -52,7 +54,12 @@
 		const expectedSpend = dailyBudget * dayOfMonth;
 		const remainingBudget = Math.max(b - account.spendAmount, 0);
 		const dailyRemaining = daysRemaining > 0 ? remainingBudget / daysRemaining : 0;
-		return { dailyBudget, expectedSpend, remainingBudget, dailyRemaining };
+		const currentDailyAvg = dayOfMonth > 0 ? account.spendAmount / dayOfMonth : 0;
+		const projectedSpend = account.spendAmount + (currentDailyAvg * daysRemaining);
+		const projectedPct = b > 0 ? Math.round((projectedSpend / b) * 100) : 0;
+		const overBudget = projectedSpend > b;
+		const reduction = overBudget && daysRemaining > 0 ? currentDailyAvg - dailyRemaining : 0;
+		return { dailyBudget, expectedSpend, remainingBudget, dailyRemaining, currentDailyAvg, projectedSpend, projectedPct, overBudget, reduction };
 	});
 
 	async function handleSave() {
@@ -128,6 +135,29 @@
 						<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TrendingUpIcon class="h-3 w-3" />{d.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 						<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 					</Tooltip.Root>
+				</div>
+				<!-- Proiecție & Recomandare -->
+				<div class="mt-2 rounded-md p-2 text-xs {d.overBudget ? 'bg-destructive/10 border border-destructive/20' : 'bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800'}">
+					<div class="flex items-start gap-2">
+						{#if d.overBudget}
+							<AlertTriangleIcon class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+							<div>
+								<p class="font-medium text-destructive">
+									Proiecție: {d.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({d.projectedPct}% din buget)
+								</p>
+								<p class="text-muted-foreground mt-0.5">
+									Media curentă: {d.currentDailyAvg.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi.
+									Reduce la {d.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi
+									(−{d.reduction.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi) pentru a te încadra în buget.
+								</p>
+							</div>
+						{:else}
+							<CheckCircleIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+							<p class="font-medium text-green-700 dark:text-green-300">
+								Proiecție: {d.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({d.projectedPct}% din buget) — Pe drumul bun
+							</p>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</div>
