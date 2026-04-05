@@ -6,7 +6,8 @@
 		getJobStats,
 		updateJobSchedule,
 		removeSchedulerJob,
-		triggerJobNow
+		triggerJobNow,
+		deleteSchedulerLogsByLevel
 	} from '$lib/remotes/scheduler.remote';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -292,6 +293,23 @@
 		}
 		historyPage = 1;
 	}
+
+	let deletingLevel = $state<string | null>(null);
+
+	async function handleDeleteByLevel(level: 'info' | 'warning' | 'error', label: string) {
+		if (!confirm(`Sigur doriti sa stergeti toate logurile de tip "${label}"?`)) return;
+		deletingLevel = level;
+		try {
+			await deleteSchedulerLogsByLevel(level);
+			toast.success(`Loguri "${label}" sterse`);
+			await Promise.all([historyQuery.refresh(), statsQuery.refresh(), jobStatsQuery.refresh()]);
+		} catch (e: any) {
+			clientLogger.apiError('scheduler_delete_logs', e);
+			toast.error(e?.message || 'Eroare la stergerea logurilor');
+		} finally {
+			deletingLevel = null;
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -314,39 +332,78 @@
 				<p class="text-xs text-muted-foreground">Job-uri Active</p>
 			</CardContent>
 		</Card>
-		<button type="button" class="text-left" onclick={() => toggleStatFilter('info')}>
-			<Card class="cursor-pointer transition-colors hover:border-green-500/50 {historyLevelFilter === 'info' ? 'border-green-500' : ''}">
-				<CardContent class="pt-6">
-					<div class="flex items-center gap-2">
-						<CheckCircleIcon class="size-5 text-green-500" />
-						<span class="text-2xl font-bold text-green-600">{stats.info}</span>
-					</div>
-					<p class="text-xs text-muted-foreground">Completate (total)</p>
-				</CardContent>
-			</Card>
-		</button>
-		<button type="button" class="text-left" onclick={() => toggleStatFilter('warning')}>
-			<Card class="cursor-pointer transition-colors hover:border-amber-500/50 {historyLevelFilter === 'warning' ? 'border-amber-500' : ''}">
-				<CardContent class="pt-6">
-					<div class="flex items-center gap-2">
-						<TriangleAlertIcon class="size-5 text-amber-500" />
-						<span class="text-2xl font-bold text-amber-600">{stats.warning}</span>
-					</div>
-					<p class="text-xs text-muted-foreground">Avertismente (total)</p>
-				</CardContent>
-			</Card>
-		</button>
-		<button type="button" class="text-left" onclick={() => toggleStatFilter('error')}>
-			<Card class="cursor-pointer transition-colors hover:border-red-500/50 {historyLevelFilter === 'error' ? 'border-red-500' : ''}">
-				<CardContent class="pt-6">
-					<div class="flex items-center gap-2">
-						<XCircleIcon class="size-5 text-red-500" />
-						<span class="text-2xl font-bold text-red-600">{stats.error}</span>
-					</div>
-					<p class="text-xs text-muted-foreground">Esuate (total)</p>
-				</CardContent>
-			</Card>
-		</button>
+		<Card
+			class="cursor-pointer transition-colors hover:border-green-500/50 {historyLevelFilter === 'info' ? 'border-green-500' : ''}"
+			onclick={() => toggleStatFilter('info')}
+		>
+			<CardContent class="pt-4 pb-4">
+				<div class="flex items-center justify-between">
+					<p class="text-sm text-muted-foreground">Completate</p>
+					<Button
+						variant="ghost"
+						size="icon"
+						class="h-6 w-6 p-0"
+						disabled={deletingLevel === 'info'}
+						onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteByLevel('info', 'Completate'); }}
+					>
+						{#if deletingLevel === 'info'}
+							<RefreshCwIcon class="h-3 w-3 animate-spin text-muted-foreground" />
+						{:else}
+							<Trash2Icon class="h-3 w-3 text-muted-foreground" />
+						{/if}
+					</Button>
+				</div>
+				<p class="text-2xl font-bold text-green-600">{stats.info}</p>
+			</CardContent>
+		</Card>
+		<Card
+			class="cursor-pointer transition-colors hover:border-amber-500/50 {historyLevelFilter === 'warning' ? 'border-amber-500' : ''}"
+			onclick={() => toggleStatFilter('warning')}
+		>
+			<CardContent class="pt-4 pb-4">
+				<div class="flex items-center justify-between">
+					<p class="text-sm text-muted-foreground">Avertismente</p>
+					<Button
+						variant="ghost"
+						size="icon"
+						class="h-6 w-6 p-0"
+						disabled={deletingLevel === 'warning'}
+						onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteByLevel('warning', 'Avertismente'); }}
+					>
+						{#if deletingLevel === 'warning'}
+							<RefreshCwIcon class="h-3 w-3 animate-spin text-muted-foreground" />
+						{:else}
+							<Trash2Icon class="h-3 w-3 text-muted-foreground" />
+						{/if}
+					</Button>
+				</div>
+				<p class="text-2xl font-bold text-amber-600">{stats.warning}</p>
+			</CardContent>
+		</Card>
+		<Card
+			class="cursor-pointer transition-colors hover:border-red-500/50 {historyLevelFilter === 'error' ? 'border-red-500' : ''}"
+			onclick={() => toggleStatFilter('error')}
+		>
+			<CardContent class="pt-4 pb-4">
+				<div class="flex items-center justify-between">
+					<p class="text-sm text-muted-foreground">Esuate</p>
+					<Button
+						variant="ghost"
+						size="icon"
+						class="h-6 w-6 p-0"
+						disabled={deletingLevel === 'error'}
+						onclick={(e: MouseEvent) => { e.stopPropagation(); handleDeleteByLevel('error', 'Esuate'); }}
+					>
+						{#if deletingLevel === 'error'}
+							<RefreshCwIcon class="h-3 w-3 animate-spin text-muted-foreground" />
+						{:else}
+							<Trash2Icon class="h-3 w-3 text-muted-foreground" />
+						{/if}
+					</Button>
+				</div>
+				<p class="text-2xl font-bold text-red-600">{stats.error}</p>
+			</CardContent>
+		</Card>
 	</div>
 
 	<!-- Scheduled Jobs -->

@@ -249,3 +249,20 @@ export const triggerJobNow = command(
 		return { success: true };
 	}
 );
+
+export const deleteSchedulerLogsByLevel = command(
+	v.picklist(['info', 'warning', 'error']),
+	async (level) => {
+		requireAdmin();
+
+		await db
+			.delete(table.debugLog)
+			.where(
+				and(
+					eq(table.debugLog.source, 'scheduler'),
+					eq(table.debugLog.level, level)
+				)
+			);
+		return { success: true };
+	}
+);
