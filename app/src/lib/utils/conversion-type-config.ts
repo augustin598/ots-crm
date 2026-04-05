@@ -77,3 +77,9 @@ export function getConversionTypeConfig(resultType: string): ConversionTypeConfi
 
 	return { ...DEFAULT_CONFIG, label: resultType };
 }
+
+/** Normalize and localize a raw result type from Meta API to Romanian display label */
+export function localizeResultType(resultType: string): string {
+	const config = getConversionTypeConfig(resultType);
+	return config.label || resultType;
+}

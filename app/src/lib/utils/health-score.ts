@@ -53,23 +53,23 @@ const BENCHMARKS: Record<string, MetricCheck[]> = {
 		{ metric: 'computed:lpvRatio', threshold: 0.5, direction: 'above', weight: 20, issue: 'Rată landing page views scăzută — verifică viteza site-ului' }
 	],
 	OUTCOME_LEADS: [
-		{ metric: 'costPerConversion', threshold: 50, direction: 'below', weight: 25, issue: 'CPL prea mare — optimizează formularul sau audiența' },
-		{ metric: 'ctr', threshold: 0.8, direction: 'above', weight: 25, issue: 'CTR sub medie — testează creative-uri noi' },
-		{ metric: 'cpc', threshold: 3, direction: 'below', weight: 15, issue: 'CPC prea mare — ajustează licitarea' },
+		{ metric: 'costPerConversion', threshold: 30, direction: 'below', weight: 25, issue: 'CPL prea mare — optimizează formularul sau audiența' },
+		{ metric: 'computed:conversionRate', threshold: 5, direction: 'above', weight: 25, issue: 'Rată de conversie scăzută — optimizează landing page sau formularul' },
+		{ metric: 'ctr', threshold: 0.8, direction: 'above', weight: 15, issue: 'CTR sub medie — testează creative-uri noi' },
 		{ metric: 'frequency', threshold: 3, direction: 'below', weight: 15, issue: 'Frecvență prea mare — extinde audiența sau rotește creative-urile' },
 		{ metric: 'cpm', threshold: 40, direction: 'below', weight: 20, issue: 'CPM ridicat — verifică targetarea și plasamentele' }
 	],
 	OUTCOME_SALES: [
-		{ metric: 'roas', threshold: 3, direction: 'above', weight: 25, issue: 'ROAS slab — optimizează funnel-ul sau ajustează bugetul' },
-		{ metric: 'costPerConversion', threshold: 100, direction: 'below', weight: 25, issue: 'CPA prea mare — îmbunătățește rata de conversie' },
-		{ metric: 'ctr', threshold: 0.8, direction: 'above', weight: 15, issue: 'CTR sub medie — testează creative-uri noi' },
-		{ metric: 'cpc', threshold: 3, direction: 'below', weight: 15, issue: 'CPC prea mare — ajustează licitarea' },
-		{ metric: 'frequency', threshold: 3, direction: 'below', weight: 20, issue: 'Frecvență prea mare — extinde audiența sau rotește creative-urile' }
+		{ metric: 'roas', threshold: 3, direction: 'above', weight: 30, issue: 'ROAS slab — optimizează funnel-ul sau ajustează bugetul' },
+		{ metric: 'costPerConversion', threshold: 100, direction: 'below', weight: 25, issue: 'Cost per conversie prea mare — îmbunătățește rata de conversie' },
+		{ metric: 'ctr', threshold: 0.8, direction: 'above', weight: 10, issue: 'CTR sub medie — testează creative-uri noi' },
+		{ metric: 'frequency', threshold: 3, direction: 'below', weight: 15, issue: 'Frecvență prea mare — extinde audiența sau rotește creative-urile' },
+		{ metric: 'computed:conversionRate', threshold: 3, direction: 'above', weight: 20, issue: 'Rată de conversie scăzută — optimizează checkout-ul' }
 	],
 	OUTCOME_ENGAGEMENT: [
-		{ metric: 'costPerConversion', threshold: 0.5, direction: 'below', weight: 25, issue: 'Cost per engagement prea mare — testează conținut mai atractiv' },
+		{ metric: 'costPerConversion', threshold: 0.3, direction: 'below', weight: 25, issue: 'Cost per engagement prea mare — testează conținut mai atractiv' },
 		{ metric: 'ctr', threshold: 2, direction: 'above', weight: 25, issue: 'CTR sub medie — creative-urile nu atrag atenția' },
-		{ metric: 'cpc', threshold: 1, direction: 'below', weight: 15, issue: 'CPC prea mare — ajustează licitarea' },
+		{ metric: 'computed:engagementQuality', threshold: 15, direction: 'above', weight: 15, issue: 'Calitate engagement scăzută — puține share-uri și comentarii' },
 		{ metric: 'frequency', threshold: 3, direction: 'below', weight: 15, issue: 'Frecvență prea mare — extinde audiența' },
 		{ metric: 'cpm', threshold: 25, direction: 'below', weight: 20, issue: 'CPM ridicat — verifică plasamentele' }
 	],
@@ -100,6 +100,15 @@ function getMetricValue(campaign: CampaignAggregate, metric: string): number | n
 		if (campaign.impressions <= 0) return null;
 		return campaign.reach / campaign.impressions;
 	}
+	if (metric === 'computed:conversionRate') {
+		if (campaign.clicks <= 0) return null;
+		return (campaign.conversions / campaign.clicks) * 100; // as percentage
+	}
+	if (metric === 'computed:engagementQuality') {
+		const total = campaign.conversions || (campaign.pageEngagement || 0);
+		if (total <= 0) return null;
+		return ((campaign.postShares + campaign.postComments) / total) * 100; // shares+comments as % of total engagement
+	}
 	const val = (campaign as unknown as Record<string, unknown>)[metric];
 	if (typeof val !== 'number' || !isFinite(val)) return null;
 	return val;
@@ -128,6 +137,7 @@ function formatMetricValue(metric: string, value: number): string {
 	if (metric === 'frequency') return value.toFixed(2);
 	if (metric === 'impressions') return new Intl.NumberFormat('ro-RO').format(Math.round(value));
 	if (metric === 'computed:lpvRatio' || metric === 'computed:reachRatio') return `${(value * 100).toFixed(1)}%`;
+	if (metric === 'computed:conversionRate' || metric === 'computed:engagementQuality') return `${value.toFixed(2)}%`;
 	if (['cpc', 'cpm', 'costPerConversion'].includes(metric)) return `${value.toFixed(2)} RON`;
 	return value.toFixed(2);
 }

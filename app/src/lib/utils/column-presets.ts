@@ -1,5 +1,6 @@
 import type { CampaignAggregate } from './report-helpers';
 import { formatCurrency, formatPercent, formatNumber, formatDecimal, formatROAS } from './report-helpers';
+import { localizeResultType } from './conversion-type-config';
 
 export interface ColumnDef {
 	key: string;
@@ -22,7 +23,7 @@ const COL = {
 	results: {
 		key: 'results', label: 'Rezultate', align: 'right' as const, sortKey: 'conversions' as const,
 		getValue: (c: any) => c.conversions > 0 ? formatNumber(c.conversions) : '-',
-		getSubtext: (c: any) => c.resultType || '',
+		getSubtext: (c: any) => c.resultType ? localizeResultType(c.resultType) : '',
 		getTotalValue: (campaigns: any[]) => {
 			const types = new Set(campaigns.filter(c => c.conversions > 0 && c.resultType).map(c => c.resultType));
 			if (types.size > 1) return '-';
@@ -111,7 +112,7 @@ const COL = {
 		}
 	},
 	linkClicks: {
-		key: 'linkClicks', label: 'Link clicks', align: 'right' as const, sortKey: 'linkClicks' as const,
+		key: 'linkClicks', label: 'Click-uri link', align: 'right' as const, sortKey: 'linkClicks' as const,
 		getValue: (c: any) => c.linkClicks > 0 ? formatNumber(c.linkClicks) : '-',
 		getTotalValue: (campaigns: any[]) => {
 			const total = campaigns.reduce((s: number, c: any) => s + c.linkClicks, 0);
@@ -137,7 +138,7 @@ const COL = {
 		}
 	},
 	landingPageViews: {
-		key: 'landingPageViews', label: 'Landing page views', align: 'right' as const, sortKey: 'landingPageViews' as const,
+		key: 'landingPageViews', label: 'Vizualizări pagină', align: 'right' as const, sortKey: 'landingPageViews' as const,
 		getValue: (c: any) => c.landingPageViews > 0 ? formatNumber(c.landingPageViews) : '-',
 		getTotalValue: (campaigns: any[]) => formatNumber(campaigns.reduce((s: number, c: any) => s + c.landingPageViews, 0))
 	},
@@ -208,7 +209,7 @@ const COL = {
 		}
 	},
 	costPerLPV: {
-		key: 'costPerLPV', label: 'Cost/landing page view', align: 'right' as const,
+		key: 'costPerLPV', label: 'Cost/vizualizare pagină', align: 'right' as const,
 		getValue: (c: any, cur: string) => c.landingPageViews > 0 ? formatCurrency(c.spend / c.landingPageViews, cur) : '-',
 		getTotalValue: (campaigns: any[], cur: string) => {
 			const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
@@ -221,13 +222,13 @@ const COL = {
 export const COLUMN_PRESETS: ColumnPreset[] = [
 	{
 		key: 'performance_clicks',
-		label: 'Performance and clicks',
+		label: 'Performanță și click-uri',
 		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.linkClicks, COL.cpc, COL.ctrLink, COL.clicks, COL.ctr, COL.cpcAll, COL.landingPageViews, COL.costPerLPV]
 	},
 	{
 		key: 'performance',
-		label: 'Performance',
-		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.reach, COL.roas]
+		label: 'Performanță',
+		columns: [COL.results, COL.costPerResult, COL.budget, COL.spend, COL.impressions, COL.ctr, COL.linkClicks]
 	},
 	{
 		key: 'awareness',
@@ -242,21 +243,21 @@ export const COLUMN_PRESETS: ColumnPreset[] = [
 	{
 		key: 'leads',
 		label: 'Leads',
-		columns: [COL.results, COL.costPerResult, COL.linkClicks, COL.landingPageViews, COL.spend, COL.impressions, COL.budget]
+		columns: [COL.results, COL.costPerResult, COL.linkClicks, COL.ctrLink, COL.landingPageViews, COL.costPerLPV, COL.spend, COL.budget]
 	},
 	{
 		key: 'sales',
-		label: 'Sales',
+		label: 'Vânzări',
 		columns: [COL.results, COL.costPerResult, COL.roas, COL.spend, COL.linkClicks, COL.landingPageViews, COL.budget]
 	},
 	{
 		key: 'engagement',
 		label: 'Engagement',
-		columns: [COL.pageEngagement, COL.postReactions, COL.postComments, COL.postSaves, COL.postShares, COL.videoViews, COL.linkClicks, COL.cpc, COL.spend, COL.budget]
+		columns: [COL.pageEngagement, COL.costPerResult, COL.postReactions, COL.postComments, COL.postSaves, COL.postShares, COL.videoViews, COL.spend, COL.budget]
 	},
 	{
 		key: 'delivery',
-		label: 'Delivery',
+		label: 'Livrare',
 		columns: [COL.reach, COL.frequency, COL.impressions, COL.cpm, COL.spend]
 	},
 	{

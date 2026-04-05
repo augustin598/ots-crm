@@ -82,10 +82,10 @@ export const OBJECTIVE_CHARTS: Record<string, ChartSpec[]> = {
 			title: 'CPC & CTR în timp',
 			datasets: [
 				{ label: 'CPC (link)', key: 'cpc', type: 'line', yAxisID: 'y', color: COLORS.orange.border, order: 1 },
-				{ label: 'CTR', key: 'ctr', type: 'line', yAxisID: 'y1', color: COLORS.purple.border, order: 2 }
+				{ label: 'CTR (link)', key: 'ctrLink', type: 'line', yAxisID: 'y1', color: COLORS.purple.border, order: 2 }
 			],
 			yAxis: { label: 'CPC', formatter: fmtCur },
-			y1Axis: { label: 'CTR (%)', formatter: fmtPct }
+			y1Axis: { label: 'CTR link (%)', formatter: fmtPct }
 		}
 	],
 
@@ -93,19 +93,18 @@ export const OBJECTIVE_CHARTS: Record<string, ChartSpec[]> = {
 		{
 			title: 'Engagement în timp',
 			datasets: [
-				{ label: 'Post engagement', key: 'pageEngagement', type: 'bar', yAxisID: 'y', color: COLORS.pink.border, fillColor: COLORS.pink.fill, order: 2 },
+				{ label: 'Engagement total', key: 'pageEngagement', type: 'bar', yAxisID: 'y', color: COLORS.pink.border, fillColor: COLORS.pink.fill, order: 2 },
 				{ label: 'Reacții', key: 'postReactions', type: 'line', yAxisID: 'y', color: COLORS.amber.border, order: 1 }
 			],
 			yAxis: { label: 'Engagement', formatter: fmtNum }
 		},
 		{
-			title: 'Video Views & Cost/engagement în timp',
+			title: 'Shares & Comentarii în timp',
 			datasets: [
-				{ label: 'Video views', key: 'videoViews', type: 'bar', yAxisID: 'y', color: COLORS.purple.border, fillColor: COLORS.purple.fill, order: 2 },
-				{ label: 'Cheltuieli', key: 'spend', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
+				{ label: 'Shares', key: 'postShares', type: 'bar', yAxisID: 'y', color: COLORS.purple.border, fillColor: COLORS.purple.fill, order: 2 },
+				{ label: 'Comentarii', key: 'postComments', type: 'line', yAxisID: 'y', color: COLORS.amber.border, order: 1 }
 			],
-			yAxis: { label: 'Video views', formatter: fmtNum },
-			y1Axis: { label: 'Cheltuieli', formatter: fmtCur }
+			yAxis: { label: 'Interacțiuni', formatter: fmtNum }
 		}
 	],
 
@@ -113,7 +112,7 @@ export const OBJECTIVE_CHARTS: Record<string, ChartSpec[]> = {
 		{
 			title: 'Leads & Cost per lead în timp',
 			datasets: [
-				{ label: 'Leads', key: 'leads', type: 'bar', yAxisID: 'y', color: COLORS.blue.border, fillColor: COLORS.blue.fill, order: 2 },
+				{ label: 'Leads', key: 'conversions', type: 'bar', yAxisID: 'y', color: COLORS.blue.border, fillColor: COLORS.blue.fill, order: 2 },
 				{ label: 'Cost/lead', key: 'costPerConversion', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
 			],
 			yAxis: { label: 'Leads', formatter: fmtNum },
@@ -131,41 +130,43 @@ export const OBJECTIVE_CHARTS: Record<string, ChartSpec[]> = {
 
 	OUTCOME_SALES: [
 		{
-			title: 'Achiziții & ROAS în timp',
+			title: 'Vânzări & ROAS în timp',
 			datasets: [
-				{ label: 'Achiziții', key: 'purchases', type: 'bar', yAxisID: 'y', color: COLORS.green.border, fillColor: COLORS.green.fill, order: 2 },
+				{ label: 'Vânzări', key: 'conversions', type: 'bar', yAxisID: 'y', color: COLORS.green.border, fillColor: COLORS.green.fill, order: 2 },
 				{ label: 'ROAS', key: 'roas', type: 'line', yAxisID: 'y1', color: COLORS.amber.border, order: 1 }
 			],
-			yAxis: { label: 'Achiziții', formatter: fmtNum },
+			yAxis: { label: 'Vânzări', formatter: fmtNum },
 			y1Axis: { label: 'ROAS', formatter: fmtRoas }
 		},
 		{
-			title: 'Venituri & CPA în timp',
+			title: 'Venituri & Cost per conversie în timp',
 			datasets: [
 				{ label: 'Venituri', key: 'conversionValue', type: 'bar', yAxisID: 'y', color: COLORS.blue.border, fillColor: COLORS.blue.fill, order: 2 },
-				{ label: 'Cost/achiziție', key: 'costPerConversion', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
+				{ label: 'Cost/conversie', key: 'costPerConversion', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
 			],
 			yAxis: { label: 'Venituri', formatter: fmtCur },
-			y1Axis: { label: 'CPA', formatter: fmtCur }
+			y1Axis: { label: 'Cost/conversie', formatter: fmtCur }
 		}
 	],
 
 	OUTCOME_APP_PROMOTION: [
 		{
-			title: 'Cheltuieli în timp',
+			title: 'Installs & Cost/install în timp',
 			datasets: [
-				{ label: 'Cheltuieli', key: 'spend', type: 'line', yAxisID: 'y', color: COLORS.blue.border, fillColor: COLORS.blue.fill, order: 1 }
+				{ label: 'Installs', key: 'conversions', type: 'bar', yAxisID: 'y', color: COLORS.green.border, fillColor: COLORS.green.fill, order: 2 },
+				{ label: 'Cost/install', key: 'costPerConversion', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
 			],
-			yAxis: { label: 'Cheltuieli', formatter: fmtCur }
+			yAxis: { label: 'Installs', formatter: fmtNum },
+			y1Axis: { label: 'Cost/install', formatter: fmtCur }
 		},
 		{
-			title: 'Conversii & Cost/conversie în timp',
+			title: 'Cheltuieli & CTR în timp',
 			datasets: [
-				{ label: 'Conversii', key: 'conversions', type: 'bar', yAxisID: 'y', color: COLORS.green.border, fillColor: COLORS.green.fill, order: 2 },
-				{ label: 'Cost/conversie', key: 'costPerConversion', type: 'line', yAxisID: 'y1', color: COLORS.orange.border, order: 1 }
+				{ label: 'Cheltuieli', key: 'spend', type: 'line', yAxisID: 'y', color: COLORS.blue.border, fillColor: COLORS.blue.fill, order: 1 },
+				{ label: 'CTR', key: 'ctr', type: 'line', yAxisID: 'y1', color: COLORS.purple.border, order: 2 }
 			],
-			yAxis: { label: 'Conversii', formatter: fmtNum },
-			y1Axis: { label: 'Cost/conversie', formatter: fmtCur }
+			yAxis: { label: 'Cheltuieli', formatter: fmtCur },
+			y1Axis: { label: 'CTR (%)', formatter: fmtPct }
 		}
 	]
 };

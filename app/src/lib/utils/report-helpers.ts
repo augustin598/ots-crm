@@ -11,6 +11,7 @@ export interface DailyAggregate {
 	cpc: number;
 	cpm: number;
 	ctr: number;
+	ctrLink: number;
 	costPerConversion: number;
 	roas: number;
 	frequency: number;
@@ -116,6 +117,7 @@ export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): Dai
 			cpc: d.clicks > 0 ? d.spend / d.clicks : 0,
 			cpm: d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0,
 			ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+			ctrLink: d.impressions > 0 ? (d.linkClicks / d.impressions) * 100 : 0,
 			costPerConversion: d.conversions > 0 ? d.spend / d.conversions : 0,
 			roas: calculateROAS(d.conversionValue, d.spend),
 			frequency: d.reach > 0 ? d.impressions / d.reach : 0,
@@ -308,10 +310,10 @@ export function getObjectiveKpiCards(
 		case 'OUTCOME_ENGAGEMENT':
 		case 'POST_ENGAGEMENT':
 			return [
-				{ key: 'engagement', label: 'Post engagement', icon: 'heart', value: formatNumber(totalEngagement), subtext: formatCurrency(cpe, currency) + ' per engagement' },
+				{ key: 'engagement', label: 'Engagement total', icon: 'heart', value: formatNumber(totalEngagement), subtext: formatCurrency(cpe, currency) + ' per engagement' },
+				{ key: 'cpe', label: 'Cost/engagement', icon: 'dollar-sign', value: totalEngagement > 0 ? formatCurrency(cpe, currency) : '-', subtext: `${formatNumber(totalEngagement)} interacțiuni` },
 				{ key: 'reactions', label: 'Reacții', icon: 'thumbs-up', value: formatNumber(totalReactions), subtext: `${formatNumber(totalComments)} comentarii` },
 				{ key: 'videoViews', label: 'Video views', icon: 'play', value: formatNumber(totalVideoViews), subtext: totalVideoViews > 0 ? formatCurrency(totals.totalSpend / totalVideoViews, currency) + '/view' : 'Fără date' },
-				{ key: 'cpe', label: 'Cost/engagement', icon: 'dollar-sign', value: totalEngagement > 0 ? formatCurrency(cpe, currency) : '-', subtext: `${formatNumber(totalEngagement)} interacțiuni` },
 				{ key: 'spend', label: 'Cheltuieli', icon: 'dollar-sign', value: formatCurrency(totals.totalSpend, currency), subtext: `${formatNumber(totals.totalImpressions)} impresii` }
 			];
 
@@ -328,10 +330,10 @@ export function getObjectiveKpiCards(
 		case 'OUTCOME_SALES':
 		case 'CONVERSIONS':
 			return [
-				{ key: 'purchases', label: 'Achiziții', icon: 'shopping-cart', value: formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions), subtext: totalPurchases > 0 ? formatCurrency(cpa, currency) + ' per achiziție' : resultKpi.subtext },
+				{ key: 'purchases', label: 'Vânzări', icon: 'shopping-cart', value: formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions), subtext: totalPurchases > 0 ? formatCurrency(cpa, currency) + ' per vânzare' : resultKpi.subtext },
 				{ key: 'roas', label: 'ROAS', icon: 'trending-up', value: roas > 0 ? formatROAS(roas) : '-', subtext: roas > 0 ? formatCurrency(totalConvValue, currency) + ' venituri' : 'Fără date' },
 				{ key: 'revenue', label: 'Venituri', icon: 'dollar-sign', value: totalConvValue > 0 ? formatCurrency(totalConvValue, currency) : '-', subtext: `din ${formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions)} conversii` },
-				{ key: 'cpa', label: 'Cost per achiziție', icon: 'dollar-sign', value: totalPurchases > 0 ? formatCurrency(cpa, currency) : formatCurrency(totals.avgCostPerConversion, currency), subtext: `${formatNumber(totals.totalClicks)} click-uri totale` },
+				{ key: 'cpa', label: 'Cost per conversie', icon: 'dollar-sign', value: totalPurchases > 0 ? formatCurrency(cpa, currency) : formatCurrency(totals.avgCostPerConversion, currency), subtext: `din ${formatNumber(totalPurchases > 0 ? totalPurchases : totals.totalConversions)} vânzări` },
 				{ key: 'linkClicks', label: 'Link clicks', icon: 'mouse-pointer-click', value: formatNumber(totalLinkClicks), subtext: formatCurrency(cpcLink, currency) + ' CPC' }
 			];
 

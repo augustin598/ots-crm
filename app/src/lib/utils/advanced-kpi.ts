@@ -135,7 +135,7 @@ export function calculateBudgetBurnForecast(
 }
 
 // ============================================================
-// 3. CPA Momentum
+// 3. Cost per Result Momentum
 // ============================================================
 
 export interface CpaMomentum {
@@ -151,7 +151,7 @@ export function calculateCpaMomentum(dailyData: DailyAggregate[]): CpaMomentum {
 		return { cpa1d: null, cpa7d: null, cpa30d: null, trend: 'stable', message: 'Fără date' };
 	}
 
-	const cpaWindow = (days: number): number | null => {
+	const costPerResultWindow = (days: number): number | null => {
 		const slice = dailyData.slice(-days);
 		const spend = slice.reduce((s, d) => s + d.spend, 0);
 		const conv = slice.reduce((s, d) => s + d.conversions, 0);
@@ -159,21 +159,21 @@ export function calculateCpaMomentum(dailyData: DailyAggregate[]): CpaMomentum {
 		return spend / conv;
 	};
 
-	const cpa1d = cpaWindow(1);
-	const cpa7d = cpaWindow(7);
-	const cpa30d = cpaWindow(Math.min(30, dailyData.length));
+	const cpa1d = costPerResultWindow(1);
+	const cpa7d = costPerResultWindow(7);
+	const cpa30d = costPerResultWindow(Math.min(30, dailyData.length));
 
 	let trend: CpaMomentum['trend'] = 'stable';
-	let message = 'CPA stabil';
+	let message = 'Cost per rezultat stabil';
 
 	if (cpa7d !== null && cpa30d !== null && cpa30d > 0) {
 		const change = ((cpa7d - cpa30d) / cpa30d) * 100;
 		if (change < -10) {
 			trend = 'improving';
-			message = `CPA în scădere cu ${Math.abs(change).toFixed(0)}% (7d vs 30d)`;
+			message = `Cost per rezultat în scădere cu ${Math.abs(change).toFixed(0)}% (7d vs 30d)`;
 		} else if (change > 15) {
 			trend = 'degrading';
-			message = `CPA în creștere cu ${change.toFixed(0)}% (7d vs 30d)`;
+			message = `Cost per rezultat în creștere cu ${change.toFixed(0)}% (7d vs 30d)`;
 		}
 	}
 
@@ -253,6 +253,7 @@ export type SaturationQuadrant = 'scale' | 'optimize' | 'refresh' | 'pause';
 export interface SaturationPoint {
 	campaignId: string;
 	campaignName: string;
+	objective: string;
 	frequency: number;
 	ctr: number;
 	spend: number;
@@ -308,8 +309,8 @@ const OBJECTIVE_CATEGORY: Record<string, ObjectiveCategory> = {
 	REACH: 'awareness',
 	BRAND_AWARENESS: 'awareness',
 	VIDEO_VIEWS: 'awareness',
-	OUTCOME_APP_PROMOTION: 'traffic',
-	APP_INSTALLS: 'traffic'
+	OUTCOME_APP_PROMOTION: 'sales',
+	APP_INSTALLS: 'sales'
 };
 
 function getObjectiveCategory(objective: string): ObjectiveCategory {
@@ -350,21 +351,23 @@ export function calculateSaturationMatrix(campaigns: CampaignAggregate[]): Satur
 		let ipe: number;
 		switch (category) {
 			case 'sales':
-				// Sales: ROAS (40%) + CPA invers (30%) + CTR (30%)
+				// Sales: ROAS (50%) + cost per conversie invers (30%) + CTR (20%)
 				ipe = (
-					normalize(c.roas, bounds.roas.min, bounds.roas.max) * 0.4 +
+					normalize(c.roas, bounds.roas.min, bounds.roas.max) * 0.5 +
 					(c.costPerConversion > 0 ? normalizeInv(c.costPerConversion, bounds.cpa.min, bounds.cpa.max) : 0.5) * 0.3 +
-					normalize(c.ctr, bounds.ctr.min, bounds.ctr.max) * 0.3
+					normalize(c.ctr, bounds.ctr.min, bounds.ctr.max) * 0.2
 				) * 100;
 				break;
-			case 'leads':
-				// Leads: CPL invers (40%) + volum conversii (30%) + CTR (30%) — fără ROAS
+			case 'leads': {
+				// Leads: CPL invers (40%) + conversion rate (30%) + volum leads (30%) — fără ROAS
+				const convRate = c.clicks > 0 ? (c.conversions / c.clicks) * 100 : 0;
 				ipe = (
 					(c.costPerConversion > 0 ? normalizeInv(c.costPerConversion, bounds.cpa.min, bounds.cpa.max) : 0.5) * 0.4 +
-					normalize(c.conversions, bounds.conversions.min, bounds.conversions.max) * 0.3 +
-					normalize(c.ctr, bounds.ctr.min, bounds.ctr.max) * 0.3
+					normalize(convRate, 0, 10) * 0.3 +
+					normalize(c.conversions, bounds.conversions.min, bounds.conversions.max) * 0.3
 				) * 100;
 				break;
+			}
 			case 'traffic': {
 				// Traffic: CPC invers (40%) + LPV ratio (30%) + CTR (30%)
 				const lpvRatio = c.clicks > 0 ? c.landingPageViews / c.clicks : 0;
@@ -375,14 +378,18 @@ export function calculateSaturationMatrix(campaigns: CampaignAggregate[]): Satur
 				) * 100;
 				break;
 			}
-			case 'engagement':
-				// Engagement: CPE invers (40%) + CTR (35%) + volum engagement (25%)
+			case 'engagement': {
+				// Engagement: CPE invers (35%) + CTR (30%) + engagement quality (20%) + volum (15%)
+				const totalEng = c.conversions || c.pageEngagement || 1;
+				const engQuality = (c.postShares + c.postComments) / totalEng;
 				ipe = (
-					(c.costPerConversion > 0 ? normalizeInv(c.costPerConversion, bounds.cpa.min, bounds.cpa.max) : 0.5) * 0.4 +
-					normalize(c.ctr, bounds.ctr.min, bounds.ctr.max) * 0.35 +
-					normalize(c.conversions, bounds.conversions.min, bounds.conversions.max) * 0.25
+					(c.costPerConversion > 0 ? normalizeInv(c.costPerConversion, bounds.cpa.min, bounds.cpa.max) : 0.5) * 0.35 +
+					normalize(c.ctr, bounds.ctr.min, bounds.ctr.max) * 0.3 +
+					normalize(engQuality, 0, 0.5) * 0.2 +
+					normalize(c.conversions, bounds.conversions.min, bounds.conversions.max) * 0.15
 				) * 100;
 				break;
+			}
 			case 'awareness': {
 				// Awareness: reach ratio (40%) + CTR (30%) + CPM invers (30%)
 				const reachRatio = c.impressions > 0 ? c.reach / c.impressions : 0;
@@ -421,7 +428,7 @@ export function calculateSaturationMatrix(campaigns: CampaignAggregate[]): Satur
 	/** Build the key metric string based on objective category */
 	function perfMetrics(c: CampaignAggregate, cat: ObjectiveCategory): string {
 		switch (cat) {
-			case 'sales': return `ROAS ${fmtRoas(c.roas)}, CPA ${fmtCur(c.costPerConversion)}`;
+			case 'sales': return `ROAS ${fmtRoas(c.roas)}, cost/conversie ${fmtCur(c.costPerConversion)}`;
 			case 'leads': return `CPL ${fmtCur(c.costPerConversion)}, ${fmtNum(c.conversions)} leads`;
 			case 'traffic': return `CPC ${fmtCur(c.cpc)}, CTR ${fmtPct(c.ctr)}`;
 			case 'engagement': return `CPE ${fmtCur(c.costPerConversion)}, CTR ${fmtPct(c.ctr)}`;
@@ -457,6 +464,7 @@ export function calculateSaturationMatrix(campaigns: CampaignAggregate[]): Satur
 		return {
 			campaignId: c.campaignId,
 			campaignName: c.campaignName,
+			objective: c.objective,
 			frequency: c.frequency,
 			ctr: c.ctr,
 			spend: c.spend,
@@ -644,7 +652,7 @@ export function generateExecutiveSummary(
 		recommendation = 'Performanță critică — revizuiește bugetele și audiențele pe campaniile cu scor scăzut.';
 	} else if (healthScore < 80) {
 		if (fatiguedCount > 0) {
-			recommendation = `Pregătește creative-uri noi pentru ${fatiguedCount} campanii obosite și optimizează CPA-ul.`;
+			recommendation = `Pregătește creative-uri noi pentru ${fatiguedCount} campanii obosite și optimizează costurile.`;
 		} else {
 			recommendation = 'Performanță medie — focus pe optimizarea campaniilor cu Health Score sub 50.';
 		}
