@@ -231,9 +231,24 @@ async function refreshTiktokAdsTokens(results: RefreshResults) {
 				continue;
 			}
 			if (result === null) {
-				results.deactivated++;
-				await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, false, 'Token revoked');
-				await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'invoices/tiktok-ads');
+				// null = refresh failed (permanent or transient + expired token)
+				// Don't deactivate immediately — use consecutiveRefreshFailures threshold
+				const failures = await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, false, 'Refresh failed');
+				if (failures >= 5) {
+					results.deactivated++;
+					// Deactivate only after 5 consecutive failures (≈30h at 6h intervals)
+					await db
+						.update(table.tiktokAdsIntegration)
+						.set({ isActive: false, updatedAt: new Date() })
+						.where(eq(table.tiktokAdsIntegration.id, integration.id));
+					await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'settings/tiktok-ads');
+				} else if (failures >= 3) {
+					results.failed++;
+					// Warn admins early so they can reconnect proactively
+					await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'settings/tiktok-ads');
+				} else {
+					results.failed++;
+				}
 			} else {
 				results.refreshed++;
 				await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, true);
@@ -245,8 +260,14 @@ async function refreshTiktokAdsTokens(results: RefreshResults) {
 				metadata: { error: msg }
 			});
 			const failures = await updateRefreshStatus(table.tiktokAdsIntegration, integration.id, false, msg);
-			if (failures >= 3) {
-				await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'invoices/tiktok-ads');
+			if (failures >= 5) {
+				await db
+					.update(table.tiktokAdsIntegration)
+					.set({ isActive: false, updatedAt: new Date() })
+					.where(eq(table.tiktokAdsIntegration.id, integration.id));
+				await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'settings/tiktok-ads');
+			} else if (failures >= 3) {
+				await notifyTenantAdmins(integration.tenantId, 'TikTok Ads', 'settings/tiktok-ads');
 			}
 		}
 	}

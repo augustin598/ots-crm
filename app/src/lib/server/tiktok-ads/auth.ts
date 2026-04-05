@@ -8,6 +8,37 @@ const TIKTOK_AUTH_URL = 'https://business-api.tiktok.com/portal/auth';
 const TIKTOK_API_URL = 'https://business-api.tiktok.com/open_api/v1.3';
 
 /**
+ * Classify a TikTok API error as transient (retry-able) or permanent (stop retrying).
+ * Defaults to transient to avoid premature deactivation.
+ */
+function classifyRefreshError(err: unknown): 'transient' | 'permanent' {
+	const message = err instanceof Error ? err.message : String(err);
+
+	const permanentPatterns = [
+		/invalid_grant/i,
+		/unauthorized|401/i,
+		/invalid_request|400/i,
+		/forbidden|403/i,
+		/revoked/i,
+		/client_id.*not.*exist/i
+	];
+
+	if (permanentPatterns.some((p) => p.test(message))) {
+		return 'permanent';
+	}
+
+	return 'transient';
+}
+
+/**
+ * Sleep with jitter to avoid thundering herd on concurrent refresh attempts.
+ */
+function sleepWithJitter(baseMs: number): Promise<void> {
+	const jitter = Math.floor(Math.random() * 500);
+	return new Promise((r) => setTimeout(r, baseMs + jitter));
+}
+
+/**
  * Generate TikTok OAuth2 authorization URL
  */
 export function getOAuthUrl(state: string): string {
@@ -57,7 +88,9 @@ async function exchangeCodeForTokens(authCode: string): Promise<{
 }
 
 /**
- * Refresh an expired access_token using a refresh_token
+ * Refresh an expired access_token using a refresh_token.
+ * Retries up to 3 times with exponential backoff (1s, 2s, 4s + jitter)
+ * for transient errors. Permanent errors (token revoked) fail immediately.
  */
 async function refreshAccessToken(refreshToken: string): Promise<{
 	accessToken: string;
@@ -65,30 +98,55 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 	accessTokenExpiresIn: number;
 	refreshTokenExpiresIn: number;
 }> {
-	const res = await fetch(`${TIKTOK_API_URL}/oauth2/access_token/`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			app_id: env.TIKTOK_APP_ID!,
-			secret: env.TIKTOK_APP_SECRET!,
-			grant_type: 'refresh_token',
-			refresh_token: refreshToken
-		})
-	});
+	const MAX_RETRIES = 3;
+	let lastError: Error | null = null;
 
-	const json = await res.json();
-	const data = json.data;
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			const res = await fetch(`${TIKTOK_API_URL}/oauth2/access_token/`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				signal: AbortSignal.timeout(10_000),
+				body: JSON.stringify({
+					app_id: env.TIKTOK_APP_ID!,
+					secret: env.TIKTOK_APP_SECRET!,
+					grant_type: 'refresh_token',
+					refresh_token: refreshToken
+				})
+			});
 
-	if (json.code !== 0 || !data?.access_token) {
-		throw new Error(`TikTok token refresh failed: ${json.message || 'Unknown error'}`);
+			const json = await res.json();
+			const data = json.data;
+
+			if (json.code !== 0 || !data?.access_token) {
+				const error = new Error(`TikTok token refresh failed: ${json.message || 'Unknown error'}`);
+				if (classifyRefreshError(error) === 'permanent') throw error;
+				lastError = error;
+				if (attempt < MAX_RETRIES) {
+					await sleepWithJitter(1000 * Math.pow(2, attempt));
+					continue;
+				}
+				throw error;
+			}
+
+			return {
+				accessToken: data.access_token,
+				refreshToken: data.refresh_token || refreshToken,
+				accessTokenExpiresIn: data.access_token_expires_in || 86400,
+				refreshTokenExpiresIn: data.refresh_token_expires_in || 31536000
+			};
+		} catch (err) {
+			lastError = err instanceof Error ? err : new Error(String(err));
+			if (classifyRefreshError(err) === 'permanent') throw lastError;
+			if (attempt < MAX_RETRIES) {
+				await sleepWithJitter(1000 * Math.pow(2, attempt));
+				continue;
+			}
+			throw lastError;
+		}
 	}
 
-	return {
-		accessToken: data.access_token,
-		refreshToken: data.refresh_token || refreshToken,
-		accessTokenExpiresIn: data.access_token_expires_in || 86400,
-		refreshTokenExpiresIn: data.refresh_token_expires_in || 31536000
-	};
+	throw lastError || new Error('Token refresh failed after all retries');
 }
 
 /**
@@ -146,14 +204,10 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 			return null;
 		}
 
-		// Check if refresh token itself is still valid
+		// Warn if refresh token looks expired, but still attempt refresh —
+		// TikTok API is the source of truth (user may have re-authorized externally)
 		if (integration.refreshTokenExpiresAt && integration.refreshTokenExpiresAt.getTime() < Date.now()) {
-			logWarning('tiktok-ads', 'Refresh token also expired', { metadata: { integrationId } });
-			await db
-				.update(table.tiktokAdsIntegration)
-				.set({ isActive: false, updatedAt: new Date() })
-				.where(eq(table.tiktokAdsIntegration.id, integrationId));
-			return null;
+			logWarning('tiktok-ads', 'Refresh token appears expired — attempting refresh anyway', { metadata: { integrationId } });
 		}
 
 		try {
@@ -168,6 +222,9 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 					refreshToken: tokens.refreshToken,
 					tokenExpiresAt,
 					refreshTokenExpiresAt,
+					consecutiveRefreshFailures: 0,
+					lastRefreshError: null,
+					lastRefreshAttemptAt: new Date(),
 					updatedAt: new Date()
 				})
 				.where(eq(table.tiktokAdsIntegration.id, integrationId));
@@ -185,18 +242,30 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 			};
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
+			const errorType = classifyRefreshError(err);
 			const isExpired = integration.tokenExpiresAt && integration.tokenExpiresAt.getTime() < Date.now();
 
-			if (isExpired) {
-				logWarning('tiktok-ads', 'Token refresh failed and token already expired', {
+			// Permanent error (token revoked) — return null, scheduler handles deactivation via consecutiveRefreshFailures
+			if (errorType === 'permanent') {
+				logWarning('tiktok-ads', 'Permanent refresh failure — token likely revoked', {
 					metadata: { integrationId, error: message }
 				});
 				return null;
 			}
 
-			logWarning('tiktok-ads', 'Token refresh failed, using existing token (still valid)', {
+			// Transient error — use old token if still valid
+			if (!isExpired) {
+				logWarning('tiktok-ads', 'Token refresh failed (transient), using existing token', {
+					metadata: { integrationId, error: message }
+				});
+				return { accessToken: integration.accessToken, integration };
+			}
+
+			// Transient error + token expired — return null, scheduler will retry next cycle
+			logWarning('tiktok-ads', 'Token refresh failed (transient) and access token already expired', {
 				metadata: { integrationId, error: message }
 			});
+			return null;
 		}
 	}
 
