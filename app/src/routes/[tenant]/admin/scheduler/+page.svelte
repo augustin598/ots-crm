@@ -419,12 +419,13 @@
 				<p class="text-muted-foreground text-sm">Nu exista job-uri programate.</p>
 			{:else}
 				<div class="divide-y">
-					{#each jobs as job (job.key)}
+					{#each jobs as job, i (job.key)}
 						{@const stat = jobStats[job.handlerType]}
 						{@const isTriggering = triggeringJob === job.key}
 						{@const isSaving = savingJob === job.key}
 						{@const isRemoving = removingJob === job.key}
 						<div class="py-3 flex items-center gap-4">
+							<span class="text-xs text-muted-foreground font-mono w-5 text-right shrink-0">{i + 1}</span>
 							<div class="flex-1 min-w-0">
 								<div class="font-medium">{job.label}</div>
 								<div class="text-xs text-muted-foreground mt-0.5">
