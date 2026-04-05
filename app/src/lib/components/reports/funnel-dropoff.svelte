@@ -16,7 +16,7 @@
 		<p class="text-sm text-muted-foreground">Fără date</p>
 	{:else}
 		<div class="space-y-2">
-			{#each analysis.steps as step, i}
+			{#each analysis.steps as step, i (step.label)}
 				{@const widthPct = maxValue > 0 ? Math.max(5, (step.value / maxValue) * 100) : 5}
 				{@const isWorst = i > 0 && step.label === analysis.worstStep}
 				<div>

@@ -27,7 +27,7 @@
 	});
 
 	const isPositive = $derived(change !== undefined && change > 0);
-	// For cost metrics (CPC, CPM, CPA), increase is bad → invertChange=true
+	// For cost metrics (CPC, CPM, cost/conversie), increase is bad → invertChange=true
 	const isGood = $derived(invertChange ? !isPositive : isPositive);
 </script>
 

@@ -39,7 +39,7 @@
 				<thead>
 					<tr>
 						<th class="text-left pb-1 pr-2 font-medium text-muted-foreground"></th>
-						{#each data as day}
+						{#each data as day (day.day)}
 							<th class="text-center pb-1 px-1 font-medium text-muted-foreground">
 								<div>{day.dayLabel}</div>
 								{#if day.lastDate}
@@ -50,10 +50,10 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each metrics as metric}
+					{#each metrics as metric (metric.key)}
 						<tr>
 							<td class="pr-2 py-0.5 font-medium text-muted-foreground whitespace-nowrap">{metric.label}</td>
-							{#each data as day}
+							{#each data as day (day.day)}
 								{@const score = day[metric.key]}
 								<td class="text-center px-1 py-0.5">
 									<div class="rounded px-1 py-0.5 {heatColor(score)}" title="{metric.label}: {metric.format(day)}">

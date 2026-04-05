@@ -63,7 +63,7 @@
 			</div>
 
 			<!-- Data points positioned by ISC (x) and IPE (y) -->
-			{#each matrix.points as point}
+			{#each matrix.points as point (point.campaignId)}
 				{@const x = Math.min(92, Math.max(8, point.isc * 0.84 + 8))}
 				{@const y = Math.min(92, Math.max(8, 92 - point.ipe * 0.84))}
 				<Tooltip.Root>

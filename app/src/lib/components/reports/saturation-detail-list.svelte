@@ -26,6 +26,37 @@
 	};
 
 	const sorted = $derived([...matrix.points].sort((a, b) => b.spend - a.spend));
+
+	const OBJECTIVE_CATEGORY: Record<string, string> = {
+		OUTCOME_SALES: 'sales', CONVERSIONS: 'sales',
+		OUTCOME_LEADS: 'leads', LEAD_GENERATION: 'leads',
+		OUTCOME_TRAFFIC: 'traffic', LINK_CLICKS: 'traffic',
+		OUTCOME_ENGAGEMENT: 'engagement', POST_ENGAGEMENT: 'engagement', MESSAGES: 'engagement',
+		OUTCOME_AWARENESS: 'awareness', REACH: 'awareness', BRAND_AWARENESS: 'awareness', VIDEO_VIEWS: 'awareness',
+		OUTCOME_APP_PROMOTION: 'traffic', APP_INSTALLS: 'traffic'
+	};
+
+	function ipeExplanation(point: typeof matrix.points[0], good: boolean): string {
+		const cat = OBJECTIVE_CATEGORY[point.objective] || 'traffic';
+		if (good) {
+			switch (cat) {
+				case 'sales': return `ROAS ${point.roas.toFixed(1)}x bun, CPM eficient`;
+				case 'leads': return `CPL ${point.costPerConversion.toFixed(0)} RON eficient, volum bun`;
+				case 'traffic': return `CPC și CTR ${point.ctr.toFixed(2)}% bune`;
+				case 'engagement': return `cost per engagement ok, CTR ${point.ctr.toFixed(2)}% bun`;
+				case 'awareness': return `CPM ${point.cpm.toFixed(0)} RON eficient, reach bun`;
+				default: return 'metrici bune';
+			}
+		}
+		switch (cat) {
+			case 'sales': return `ROAS ${point.roas.toFixed(1)}x și CPM necesită optimizare`;
+			case 'leads': return `CPL ${point.costPerConversion.toFixed(0)} RON — optimizează formularul sau audiența`;
+			case 'traffic': return `CTR ${point.ctr.toFixed(2)}% și CPM ${point.cpm.toFixed(0)} RON necesită optimizare`;
+			case 'engagement': return `CTR ${point.ctr.toFixed(2)}% și CPM necesită optimizare`;
+			case 'awareness': return `CPM ${point.cpm.toFixed(0)} RON — verifică targetarea`;
+			default: return `CTR ${point.ctr.toFixed(2)}% și CPM necesită optimizare`;
+		}
+	}
 </script>
 
 <Card class="p-4">
@@ -36,7 +67,7 @@
 		<p class="text-sm text-muted-foreground">Fără date suficiente</p>
 	{:else}
 		<div class="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
-			{#each sorted as point}
+			{#each sorted as point (point.campaignId)}
 				{@const ipeLabel = point.ipe >= 50 ? 'bună' : 'sub medie'}
 				{@const iscLabel = point.isc >= 50 ? 'saturată' : 'fresh'}
 				<div class="rounded-lg border {QUADRANT_BG[point.quadrant]} p-3 space-y-2">
@@ -57,7 +88,7 @@
 								<span class="text-sm font-bold {point.ipe >= 50 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">{point.ipe.toFixed(0)}</span>
 							</div>
 							<p class="text-[10px] text-muted-foreground leading-snug mt-0.5">
-								Performanță {ipeLabel} — {point.ipe >= 50 ? 'livrează rezultate bune' : 'CTR/CPA necesită optimizare'}
+								Performanță {ipeLabel} — {ipeExplanation(point, point.ipe >= 50)}
 							</p>
 						</div>
 						<div class="rounded-md bg-background/80 px-2.5 py-1.5">

@@ -59,7 +59,7 @@
 		<div class="mb-4">
 			<p class="text-xs font-medium text-muted-foreground mb-1.5">Top campanii (spend)</p>
 			<div class="space-y-1">
-				{#each summary.topCampaigns as camp, i}
+				{#each summary.topCampaigns as camp, i (camp.name)}
 					<div class="flex items-center justify-between text-xs">
 						<span class="truncate flex-1 mr-2">
 							<span class="text-muted-foreground">{i + 1}.</span> {camp.name}

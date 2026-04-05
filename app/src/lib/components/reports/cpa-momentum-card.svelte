@@ -39,7 +39,7 @@
 			<ActivityIcon class="h-6 w-6 text-primary" />
 		</div>
 		<div class="min-w-0">
-			<p class="text-sm text-muted-foreground">CPA Momentum</p>
+			<p class="text-sm text-muted-foreground">Cost per Rezultat</p>
 			<div class="flex items-center gap-3 mt-1">
 				<div class="text-center">
 					<p class="text-lg font-bold">{fmt(momentum.cpa1d)}</p>

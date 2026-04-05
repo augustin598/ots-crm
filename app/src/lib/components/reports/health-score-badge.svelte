@@ -33,7 +33,7 @@
 			</p>
 			{#if issues.length > 0}
 				<ul class="space-y-0.5 list-disc pl-3">
-					{#each issues as issue}
+					{#each issues as issue, i (i)}
 						<li>{issue}</li>
 					{/each}
 				</ul>
