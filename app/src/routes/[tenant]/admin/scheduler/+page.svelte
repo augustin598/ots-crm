@@ -44,6 +44,11 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import ReceiptTextIcon from '@lucide/svelte/icons/receipt-text';
+	import LandmarkIcon from '@lucide/svelte/icons/landmark';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import type { Component } from 'svelte';
 
 	// ---- Data Queries ----
 	const jobsQuery = getSchedulerJobs();
@@ -72,45 +77,52 @@
 	let removingJob = $state<string | null>(null);
 
 	// ---- Job Categories ----
-	const JOB_CATEGORIES: Record<string, { label: string; jobs: string[] }> = {
+	const JOB_CATEGORIES: Record<string, { label: string; icon: Component; jobs: string[] }> = {
 		facturare: {
 			label: 'Facturare',
+			icon: ReceiptTextIcon,
 			jobs: ['recurring_invoices', 'invoice_overdue_reminders']
 		},
 		financiar: {
 			label: 'Integrari Financiare',
+			icon: LandmarkIcon,
 			jobs: ['spv_invoice_sync', 'keez_invoice_sync', 'revolut_transaction_sync', 'bnr_rate_sync']
 		},
 		google: {
 			label: 'Google Ads',
+			icon: SearchIcon,
 			jobs: ['google_ads_invoice_sync', 'token_refresh_frequent']
 		},
 		meta: {
 			label: 'Meta Ads',
+			icon: PlayIcon,
 			jobs: ['meta_ads_invoice_sync', 'meta_ads_leads_sync']
 		},
 		tiktok: {
 			label: 'TikTok Ads',
+			icon: PlayIcon,
 			jobs: ['tiktok_ads_spending_sync']
 		},
 		email: {
 			label: 'Email & Rapoarte',
+			icon: MailIcon,
 			jobs: ['gmail_invoice_sync', 'gmail_invoice_sync_evening', 'pdf_report_send']
 		},
 		sistem: {
 			label: 'Sistem',
+			icon: SettingsIcon,
 			jobs: ['task_reminders', 'daily_work_reminders', 'contract_lifecycle', 'token_refresh_daily', 'db_write_health_check', 'debug_log_cleanup']
 		}
 	};
 
 	const groupedJobs = $derived.by(() => {
-		const groups: Array<{ key: string; label: string; jobs: typeof jobs }> = [];
+		const groups: Array<{ key: string; label: string; icon: Component; jobs: typeof jobs }> = [];
 		const assigned = new Set<string>();
 
 		for (const [key, cat] of Object.entries(JOB_CATEGORIES)) {
 			const catJobs = jobs.filter((j) => cat.jobs.includes(j.typeKey));
 			if (catJobs.length > 0) {
-				groups.push({ key, label: cat.label, jobs: catJobs });
+				groups.push({ key, label: cat.label, icon: cat.icon, jobs: catJobs });
 				catJobs.forEach((j) => assigned.add(j.key));
 			}
 		}
@@ -118,7 +130,7 @@
 		// Uncategorized jobs (safety net)
 		const uncategorized = jobs.filter((j) => !assigned.has(j.key));
 		if (uncategorized.length > 0) {
-			groups.push({ key: 'other', label: 'Altele', jobs: uncategorized });
+			groups.push({ key: 'other', label: 'Altele', icon: SettingsIcon, jobs: uncategorized });
 		}
 
 		return groups;
@@ -472,10 +484,12 @@
 	{:else}
 		{#each groupedJobs as group, gi (group.key)}
 			<Card>
-				<CardHeader>
-					<CardTitle class="text-base">{group.label} <span class="text-muted-foreground font-normal text-sm">({group.jobs.length})</span></CardTitle>
-				</CardHeader>
-				<CardContent>
+				<CardContent class="pt-4">
+					<div class="flex items-center gap-2 mb-3">
+						<group.icon class="size-4 text-muted-foreground" />
+						<h3 class="font-semibold text-sm">{group.label}</h3>
+						<span class="text-xs text-muted-foreground">({group.jobs.length})</span>
+					</div>
 					<div class="divide-y">
 						{#each group.jobs as job, i (job.key)}
 							{@const stat = jobStats[job.handlerType]}
