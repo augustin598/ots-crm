@@ -189,9 +189,6 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 				.set({
 					accessToken,
 					tokenExpiresAt,
-					consecutiveRefreshFailures: 0,
-					lastRefreshError: null,
-					lastRefreshAttemptAt: new Date(),
 					updatedAt: new Date()
 				})
 				.where(eq(table.metaAdsIntegration.id, integrationId));

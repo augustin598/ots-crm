@@ -152,9 +152,6 @@ export async function getAuthenticatedClient(tenantId: string) {
 					.set({
 						accessToken: credentials.access_token!,
 						tokenExpiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
-						consecutiveRefreshFailures: 0,
-						lastRefreshError: null,
-						lastRefreshAttemptAt: new Date(),
 						updatedAt: new Date()
 					})
 					.where(eq(table.googleAdsIntegration.id, integration.id));

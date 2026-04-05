@@ -222,9 +222,6 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 					refreshToken: tokens.refreshToken,
 					tokenExpiresAt,
 					refreshTokenExpiresAt,
-					consecutiveRefreshFailures: 0,
-					lastRefreshError: null,
-					lastRefreshAttemptAt: new Date(),
 					updatedAt: new Date()
 				})
 				.where(eq(table.tiktokAdsIntegration.id, integrationId));
