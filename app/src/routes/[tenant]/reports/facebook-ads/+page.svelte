@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getReportAdAccounts, getMetaCampaignInsights, getMetaActiveCampaigns, getMetaAdsetInsights, getMetaAdInsights, updateBudget, toggleCampaignStatus } from '$lib/remotes/reports.remote';
+	import { getClientBudget } from '$lib/remotes/clients.remote';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -73,6 +74,25 @@
 	import { calculateHealthScore, calculateAverageHealthScore, type HealthScoreResult } from '$lib/utils/health-score';
 	import HealthScoreBadge from '$lib/components/reports/health-score-badge.svelte';
 	import HeartPulseIcon from '@lucide/svelte/icons/heart-pulse';
+	import {
+		calculateCampaignFatigue,
+		calculateBudgetBurnForecast,
+		calculateCpaMomentum,
+		calculateFunnelAnalysis,
+		calculateSaturationMatrix,
+		calculateDayOfWeekPerformance,
+		generateExecutiveSummary
+	} from '$lib/utils/advanced-kpi';
+	import CreativeFatigueBadge from '$lib/components/reports/creative-fatigue-badge.svelte';
+	import BudgetBurnCard from '$lib/components/reports/budget-burn-card.svelte';
+	import CpaMomentumCard from '$lib/components/reports/cpa-momentum-card.svelte';
+	import FunnelDropoff from '$lib/components/reports/funnel-dropoff.svelte';
+	import SaturationMatrixChart from '$lib/components/reports/saturation-matrix.svelte';
+	import DayOfWeekHeatmap from '$lib/components/reports/day-of-week-heatmap.svelte';
+	import ExecutiveSummaryCard from '$lib/components/reports/executive-summary.svelte';
+	import SaturationDetailList from '$lib/components/reports/saturation-detail-list.svelte';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import * as Collapsible from '$lib/components/ui/collapsible';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -100,11 +120,14 @@
 		}
 	});
 
-	// Get currency from selected account
-	const selectedCurrency = $derived.by(() => {
-		const account = accounts.find((a: any) => a.metaAdAccountId === selectedAccountId);
-		return account?.currency || 'RON';
-	});
+	// Get currency + clientId from selected account
+	const selectedAccount = $derived(accounts.find((a: any) => a.metaAdAccountId === selectedAccountId));
+	const selectedCurrency = $derived(selectedAccount?.currency || 'RON');
+	const selectedClientId = $derived(selectedAccount?.clientId as string | undefined);
+
+	// Monthly budget for selected client
+	const budgetQuery = $derived(selectedClientId ? getClientBudget({ clientId: selectedClientId }) : null);
+	const monthlyBudget = $derived(budgetQuery?.current?.monthlyBudget ?? undefined);
 
 	// Payment warning (unpaid balance, grace period, account stopped for payment issues)
 	const paymentWarning = $derived.by(() => {
@@ -243,9 +266,30 @@
 	));
 	const avgHealth = $derived(calculateAverageHealthScore(campaignData));
 
+	// Advanced KPIs — per-campaign daily data for fatigue detection
+	const campaignDailyMap = $derived.by(() => {
+		const map = new Map<string, import('$lib/utils/report-helpers').DailyAggregate[]>();
+		for (const campaign of campaignData) {
+			const campaignInsights = insights.filter((i: any) => i.campaignId === campaign.campaignId);
+			if (campaignInsights.length > 0) {
+				map.set(campaign.campaignId, aggregateInsightsByDate(campaignInsights));
+			}
+		}
+		return map;
+	});
+	const campaignFatigue = $derived(calculateCampaignFatigue(campaignDailyMap));
+
 	// KPI cards, charts, demographics use filtered insights when campaigns are selected
 	const dailyData = $derived(aggregateInsightsByDate(filteredInsights));
 	const totals = $derived(computeTotals(dailyData));
+
+	// Advanced KPI derived values
+	const budgetForecast = $derived(calculateBudgetBurnForecast(dailyData, monthlyBudget));
+	const cpaMomentum = $derived(calculateCpaMomentum(dailyData));
+	const funnelAnalysis = $derived(calculateFunnelAnalysis(campaignData));
+	const saturationMatrix = $derived(calculateSaturationMatrix(campaignData));
+	const dayOfWeekData = $derived(calculateDayOfWeekPerformance(dailyData));
+	const executiveSummary = $derived(generateExecutiveSummary(campaignData, healthScores, campaignFatigue));
 
 	// Previous period totals for comparison
 	const prevFilteredInsights = $derived.by(() => {
@@ -548,6 +592,7 @@
 
 	// Pagination
 	let pageSize = $state(25);
+	let advancedKpiOpen = $state(true);
 	let currentPage = $state(1);
 	const totalEntries = $derived(sortedCampaigns.length);
 	const totalPages = $derived(Math.max(1, Math.ceil(totalEntries / pageSize)));
@@ -1077,14 +1122,6 @@
 						change={pctChange(totals.totalConversions, prevTotals.totalConversions)}
 					/>
 				{/if}
-				{#if avgHealth.score > 0}
-					<KpiCard
-						label="Health Score"
-						value={String(avgHealth.score)}
-						icon={HeartPulseIcon}
-						subtext={avgHealth.level === 'good' ? 'Performanță bună' : avgHealth.level === 'warning' ? 'Necesită atenție' : 'Performanță critică'}
-					/>
-				{/if}
 				</div>
 		{/if}
 
@@ -1129,6 +1166,62 @@
 		<!-- Creative Performance Ranking -->
 		{#if !insightsLoading && allLoadedAds.length > 0}
 			<CreativeRanking ads={allLoadedAds} currency={selectedCurrency} />
+		{/if}
+
+		<!-- Advanced KPI Section (Collapsible) -->
+		{#if !insightsLoading && campaignData.length > 0}
+			<Card class="p-5">
+			<Collapsible.Root bind:open={advancedKpiOpen}>
+				<Collapsible.Trigger class="flex w-full items-center justify-between text-left cursor-pointer rounded-lg -m-1 p-1 hover:bg-accent/50 transition-colors">
+					<div>
+						<h3 class="text-lg font-semibold">KPI Avansat & Optimizare in Timp Real</h3>
+						<p class="text-sm text-muted-foreground mt-1">
+							Analiza inteligenta a campaniilor tale: detectie automata a problemelor, proiectii de buget,
+							recomandari de optimizare si clasificarea campaniilor pentru decizii rapide de scaling.
+						</p>
+					</div>
+					<div class="flex items-center gap-3 shrink-0 ml-4">
+						{#if avgHealth.score > 0}
+							<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+								<span class="text-xs text-muted-foreground">Health Score</span>
+								<span class="text-xl font-bold {avgHealth.level === 'good' ? 'text-green-600 dark:text-green-400' : avgHealth.level === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}">
+									{avgHealth.score}
+								</span>
+								<span class="text-xs {avgHealth.level === 'good' ? 'text-green-600 dark:text-green-400' : avgHealth.level === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}">
+									{avgHealth.level === 'good' ? 'Performanță bună' : avgHealth.level === 'warning' ? 'Necesită atenție' : 'Performanță critică'}
+								</span>
+							</div>
+						{/if}
+						<ChevronDownIcon class="h-5 w-5 text-muted-foreground transition-transform {advancedKpiOpen ? 'rotate-180' : ''}" />
+					</div>
+				</Collapsible.Trigger>
+				<Collapsible.Content class="mt-4">
+					<div class="grid gap-3 lg:grid-cols-12">
+						<!-- Left column: Executive Summary + Budget/CPA -->
+						<div class="lg:col-span-5 space-y-3">
+							<ExecutiveSummaryCard summary={executiveSummary} currency={selectedCurrency} />
+							<BudgetBurnCard forecast={budgetForecast} currency={selectedCurrency} icon={WalletIcon} />
+							<CpaMomentumCard momentum={cpaMomentum} currency={selectedCurrency} />
+						</div>
+						<!-- Right column: Funnel + Saturation -->
+						<div class="lg:col-span-7">
+							<div class="grid gap-3 grid-cols-2 h-full">
+								<FunnelDropoff analysis={funnelAnalysis} />
+								<SaturationMatrixChart matrix={saturationMatrix} />
+							</div>
+						</div>
+						<!-- Full width: Campaign Detail List -->
+						<div class="lg:col-span-12">
+							<SaturationDetailList matrix={saturationMatrix} />
+						</div>
+						<!-- Full width: Day of Week Heatmap -->
+						<div class="lg:col-span-12">
+							<DayOfWeekHeatmap data={dayOfWeekData} />
+						</div>
+					</div>
+				</Collapsible.Content>
+			</Collapsible.Root>
+			</Card>
 		{/if}
 
 		<!-- Demographics -->
@@ -1287,6 +1380,9 @@
 												{#if healthScores.has(campaign.campaignId)}
 													{@const hs = healthScores.get(campaign.campaignId)!}
 													<HealthScoreBadge score={hs.score} level={hs.level} issues={hs.issues} />
+												{/if}
+												{#if campaignFatigue.has(campaign.campaignId) && campaignFatigue.get(campaign.campaignId)!.level !== 'fresh'}
+													<CreativeFatigueBadge result={campaignFatigue.get(campaign.campaignId)!} />
 												{/if}
 												{#if campaignAnomalies.has(campaign.campaignId)}
 													{@const issues = campaignAnomalies.get(campaign.campaignId) || []}
