@@ -71,6 +71,59 @@
 	let savingJob = $state<string | null>(null);
 	let removingJob = $state<string | null>(null);
 
+	// ---- Job Categories ----
+	const JOB_CATEGORIES: Record<string, { label: string; jobs: string[] }> = {
+		facturare: {
+			label: 'Facturare',
+			jobs: ['recurring_invoices', 'invoice_overdue_reminders']
+		},
+		financiar: {
+			label: 'Integrari Financiare',
+			jobs: ['spv_invoice_sync', 'keez_invoice_sync', 'revolut_transaction_sync', 'bnr_rate_sync']
+		},
+		google: {
+			label: 'Google Ads',
+			jobs: ['google_ads_invoice_sync', 'token_refresh_frequent']
+		},
+		meta: {
+			label: 'Meta Ads',
+			jobs: ['meta_ads_invoice_sync', 'meta_ads_leads_sync']
+		},
+		tiktok: {
+			label: 'TikTok Ads',
+			jobs: ['tiktok_ads_spending_sync']
+		},
+		email: {
+			label: 'Email & Rapoarte',
+			jobs: ['gmail_invoice_sync', 'gmail_invoice_sync_evening', 'pdf_report_send']
+		},
+		sistem: {
+			label: 'Sistem',
+			jobs: ['task_reminders', 'daily_work_reminders', 'contract_lifecycle', 'token_refresh_daily', 'db_write_health_check', 'debug_log_cleanup']
+		}
+	};
+
+	const groupedJobs = $derived.by(() => {
+		const groups: Array<{ key: string; label: string; jobs: typeof jobs }> = [];
+		const assigned = new Set<string>();
+
+		for (const [key, cat] of Object.entries(JOB_CATEGORIES)) {
+			const catJobs = jobs.filter((j) => cat.jobs.includes(j.typeKey));
+			if (catJobs.length > 0) {
+				groups.push({ key, label: cat.label, jobs: catJobs });
+				catJobs.forEach((j) => assigned.add(j.key));
+			}
+		}
+
+		// Uncategorized jobs (safety net)
+		const uncategorized = jobs.filter((j) => !assigned.has(j.key));
+		if (uncategorized.length > 0) {
+			groups.push({ key: 'other', label: 'Altele', jobs: uncategorized });
+		}
+
+		return groups;
+	});
+
 	// ---- History Filters ----
 	let historyFilter = $state<string>('all');
 	let historyLevelFilter = $state<string>('');
@@ -409,106 +462,112 @@
 		</Card>
 	</div>
 
-	<!-- Scheduled Jobs -->
-	<Card>
-		<CardHeader>
-			<CardTitle>Job-uri Programate</CardTitle>
-		</CardHeader>
-		<CardContent>
-			{#if jobs.length === 0}
+	<!-- Scheduled Jobs (grouped by category) -->
+	{#if jobs.length === 0}
+		<Card>
+			<CardContent class="pt-6">
 				<p class="text-muted-foreground text-sm">Nu exista job-uri programate.</p>
-			{:else}
-				<div class="divide-y">
-					{#each jobs as job, i (job.key)}
-						{@const stat = jobStats[job.handlerType]}
-						{@const isTriggering = triggeringJob === job.key}
-						{@const isSaving = savingJob === job.key}
-						{@const isRemoving = removingJob === job.key}
-						<div class="py-3 flex items-center gap-4">
-							<span class="text-xs text-muted-foreground font-mono w-5 text-right shrink-0">{i + 1}</span>
-							<div class="flex-1 min-w-0">
-								<div class="font-medium">{job.label}</div>
-								<div class="text-xs text-muted-foreground mt-0.5">
-									{job.name} &middot; {job.tz}
-								</div>
-							</div>
-							<!-- Per-job stats -->
-							<div class="text-xs min-w-[100px] text-center">
-								{#if stat}
-									<div class="flex items-center justify-center gap-1.5">
-										<span class="text-green-600 font-medium">{stat.successCount}</span>
-										<span class="text-muted-foreground">/</span>
-										<span class="text-red-600 font-medium">{stat.failCount}</span>
+			</CardContent>
+		</Card>
+	{:else}
+		{#each groupedJobs as group, gi (group.key)}
+			<Card>
+				<CardHeader>
+					<CardTitle class="text-base">{group.label} <span class="text-muted-foreground font-normal text-sm">({group.jobs.length})</span></CardTitle>
+				</CardHeader>
+				<CardContent>
+					<div class="divide-y">
+						{#each group.jobs as job, i (job.key)}
+							{@const stat = jobStats[job.handlerType]}
+							{@const isTriggering = triggeringJob === job.key}
+							{@const isSaving = savingJob === job.key}
+							{@const isRemoving = removingJob === job.key}
+							<div class="py-3 flex items-center gap-4">
+								<span class="text-xs text-muted-foreground font-mono w-5 text-right shrink-0">{i + 1}</span>
+								<div class="flex-1 min-w-0">
+									<div class="font-medium">{job.label}</div>
+									<div class="text-xs text-muted-foreground mt-0.5">
+										{job.name} &middot; {job.tz}
 									</div>
-									{#if stat.lastRun}
-										<div class="text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-											{#if stat.lastStatus === 'error'}
-												<XCircleIcon class="size-3 text-red-500" />
-											{:else}
-												<CheckCircleIcon class="size-3 text-green-500" />
-											{/if}
-											{formatDateShort(stat.lastRun)}
+								</div>
+								<!-- Per-job stats -->
+								<div class="text-xs min-w-[100px] text-center">
+									{#if stat}
+										<div class="flex items-center justify-center gap-1.5">
+											<span class="text-green-600 font-medium">{stat.successCount}</span>
+											<span class="text-muted-foreground">/</span>
+											<span class="text-red-600 font-medium">{stat.failCount}</span>
+										</div>
+										{#if stat.lastRun}
+											<div class="text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+												{#if stat.lastStatus === 'error'}
+													<XCircleIcon class="size-3 text-red-500" />
+												{:else}
+													<CheckCircleIcon class="size-3 text-green-500" />
+												{/if}
+												{formatDateShort(stat.lastRun)}
+											</div>
+										{:else}
+											<div class="text-muted-foreground mt-0.5">Nicio executie</div>
+										{/if}
+									{/if}
+								</div>
+								<div class="text-sm text-center min-w-[140px]">
+									{#if editingJobKey === job.key}
+										<div class="flex items-center gap-1">
+											<Input
+												bind:value={editPattern}
+												class="h-7 text-xs w-[130px] font-mono"
+												placeholder="0 2 * * *"
+											/>
+											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)} disabled={isSaving}>
+												{#if isSaving}
+													<RefreshCwIcon class="size-3.5 animate-spin" />
+												{:else}
+													<CheckIcon class="size-3.5 text-green-600" />
+												{/if}
+											</Button>
+											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit} disabled={isSaving}>
+												<XIcon class="size-3.5 text-red-600" />
+											</Button>
 										</div>
 									{:else}
-										<div class="text-muted-foreground mt-0.5">Nicio executie</div>
+										<Badge variant="secondary" class="font-mono text-xs">{job.pattern}</Badge>
+										<div class="text-xs text-muted-foreground mt-0.5">{cronToHuman(job.pattern || '')}</div>
 									{/if}
-								{/if}
-							</div>
-							<div class="text-sm text-center min-w-[140px]">
-								{#if editingJobKey === job.key}
-									<div class="flex items-center gap-1">
-										<Input
-											bind:value={editPattern}
-											class="h-7 text-xs w-[130px] font-mono"
-											placeholder="0 2 * * *"
-										/>
-										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)} disabled={isSaving}>
-											{#if isSaving}
-												<RefreshCwIcon class="size-3.5 animate-spin" />
-											{:else}
-												<CheckIcon class="size-3.5 text-green-600" />
-											{/if}
-										</Button>
-										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit} disabled={isSaving}>
-											<XIcon class="size-3.5 text-red-600" />
-										</Button>
-									</div>
-								{:else}
-									<Badge variant="secondary" class="font-mono text-xs">{job.pattern}</Badge>
-									<div class="text-xs text-muted-foreground mt-0.5">{cronToHuman(job.pattern || '')}</div>
-								{/if}
-							</div>
-							<div class="text-xs text-muted-foreground min-w-[130px] text-right">
-								{#if job.next}
-									<ClockIcon class="size-3 inline mr-1" />
-									{formatDate(job.next)}
-								{/if}
-							</div>
-							<div class="flex items-center gap-1">
-								<Button variant="ghost" size="icon" class="h-7 w-7" title="Ruleaza acum" onclick={() => handleTriggerNow(job)} disabled={isTriggering}>
-									{#if isTriggering}
-										<RefreshCwIcon class="size-3.5 animate-spin" />
-									{:else}
-										<PlayIcon class="size-3.5" />
+								</div>
+								<div class="text-xs text-muted-foreground min-w-[130px] text-right">
+									{#if job.next}
+										<ClockIcon class="size-3 inline mr-1" />
+										{formatDate(job.next)}
 									{/if}
-								</Button>
-								<Button variant="ghost" size="icon" class="h-7 w-7" title="Editeaza schedule" onclick={() => startEdit(job)}>
-									<PencilIcon class="size-3.5" />
-								</Button>
-								<Button variant="ghost" size="icon" class="h-7 w-7" title="Sterge job" onclick={() => handleRemoveJob(job)} disabled={isRemoving}>
-									{#if isRemoving}
-										<RefreshCwIcon class="size-3.5 animate-spin text-red-500" />
-									{:else}
-										<Trash2Icon class="size-3.5 text-red-500" />
-									{/if}
-								</Button>
+								</div>
+								<div class="flex items-center gap-1">
+									<Button variant="ghost" size="icon" class="h-7 w-7" title="Ruleaza acum" onclick={() => handleTriggerNow(job)} disabled={isTriggering}>
+										{#if isTriggering}
+											<RefreshCwIcon class="size-3.5 animate-spin" />
+										{:else}
+											<PlayIcon class="size-3.5" />
+										{/if}
+									</Button>
+									<Button variant="ghost" size="icon" class="h-7 w-7" title="Editeaza schedule" onclick={() => startEdit(job)}>
+										<PencilIcon class="size-3.5" />
+									</Button>
+									<Button variant="ghost" size="icon" class="h-7 w-7" title="Sterge job" onclick={() => handleRemoveJob(job)} disabled={isRemoving}>
+										{#if isRemoving}
+											<RefreshCwIcon class="size-3.5 animate-spin text-red-500" />
+										{:else}
+											<Trash2Icon class="size-3.5 text-red-500" />
+										{/if}
+									</Button>
+								</div>
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</CardContent>
-	</Card>
+						{/each}
+					</div>
+				</CardContent>
+			</Card>
+		{/each}
+	{/if}
 
 	<!-- History -->
 	<Card>
