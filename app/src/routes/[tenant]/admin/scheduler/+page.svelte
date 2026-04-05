@@ -354,6 +354,7 @@
 					</Button>
 				</div>
 				<p class="text-2xl font-bold text-green-600">{stats.info}</p>
+				<p class="text-xs text-muted-foreground">total loguri</p>
 			</CardContent>
 		</Card>
 		<Card
@@ -378,6 +379,7 @@
 					</Button>
 				</div>
 				<p class="text-2xl font-bold text-amber-600">{stats.warning}</p>
+				<p class="text-xs text-muted-foreground">total loguri</p>
 			</CardContent>
 		</Card>
 		<Card
@@ -402,6 +404,7 @@
 					</Button>
 				</div>
 				<p class="text-2xl font-bold text-red-600">{stats.error}</p>
+				<p class="text-xs text-muted-foreground">total loguri</p>
 			</CardContent>
 		</Card>
 	</div>
@@ -588,7 +591,10 @@
 						Reset
 					</Button>
 				{/if}
-				<span class="text-sm text-muted-foreground ml-auto">{filteredHistory.length} inregistrari</span>
+				<span class="text-sm text-muted-foreground ml-auto">
+					{filteredHistory.length} din {history.length} inregistrari
+					{#if history.length >= 1000}<span class="text-xs opacity-60">(limita 1000)</span>{/if}
+				</span>
 			</div>
 
 			<!-- History List -->
