@@ -20,7 +20,7 @@ export async function processRevolutTransactionSync(params: Record<string, any> 
 			.where(and(eq(table.bankAccount.bankName, 'revolut'), eq(table.bankAccount.isActive, true)));
 
 		if (accounts.length === 0) {
-			logInfo('scheduler', 'Revolut transaction sync: no active accounts found, skipping');
+			logInfo('scheduler', 'Revolut transaction sync: no active accounts found, skipping', { metadata: { activeAccounts: 0 } });
 			return {
 				success: true,
 				accountsProcessed: 0,

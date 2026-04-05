@@ -2,6 +2,8 @@
 	import {
 		getSchedulerJobs,
 		getSchedulerHistory,
+		getSchedulerStats,
+		getJobStats,
 		updateJobSchedule,
 		removeSchedulerJob,
 		triggerJobNow
@@ -11,10 +13,20 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import {
+		Select,
+		SelectContent,
+		SelectItem,
+		SelectTrigger
+	} from '$lib/components/ui/select';
+	import {
 		Collapsible,
 		CollapsibleContent,
 		CollapsibleTrigger
 	} from '$lib/components/ui/collapsible';
+	import * as Popover from '$lib/components/ui/popover';
+	import { RangeCalendar } from '$lib/components/ui/range-calendar';
+	import { type DateValue } from '@internationalized/date';
+	import type { DateRange } from 'bits-ui';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -28,80 +40,139 @@
 	import XCircleIcon from '@lucide/svelte/icons/x-circle';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 
+	// ---- Data Queries ----
 	const jobsQuery = getSchedulerJobs();
-	const jobs = $derived(jobsQuery.current || []);
+	const jobsData = $derived(jobsQuery.current || { jobs: [], allJobLabels: {} });
+	const jobs = $derived(jobsData.jobs);
+	const allJobLabels = $derived(jobsData.allJobLabels as Record<string, string>);
 
 	const historyQuery = getSchedulerHistory();
 	const history = $derived(historyQuery.current || []);
 
+	const statsQuery = getSchedulerStats();
+	const stats = $derived(statsQuery.current || { total: 0, info: 0, warning: 0, error: 0 });
+
+	// Per-job stats from server (not limited by history cap)
+	const jobStatsQuery = getJobStats();
+	const jobStats = $derived(jobStatsQuery.current || {} as Record<string, { successCount: number; failCount: number; lastRun: string | null; lastStatus: 'success' | 'error' | null }>);
+
+	// ---- UI State ----
 	let refreshing = $state(false);
 	let editingJobKey = $state<string | null>(null);
 	let editPattern = $state('');
 
-	// Fix BUG 1: Use startsWith for accurate matching of worker-level logs
-	const completedLogs = $derived(history.filter((l) => l.level === 'info' && l.message.startsWith('Job completed:')));
-	const failedLogs = $derived(history.filter((l) => l.level === 'error' && l.message.startsWith('Job failed:')));
+	// Loading states for actions
+	let triggeringJob = $state<string | null>(null);
+	let savingJob = $state<string | null>(null);
+	let removingJob = $state<string | null>(null);
 
-	// Per-job last run stats from history
-	const jobStats = $derived.by(() => {
-		const map: Record<string, { time: string | Date | null; status: 'success' | 'error' | null; successCount: number; failCount: number }> = {};
-		for (const job of jobs) {
-			const ht = job.handlerType;
-			let lastTime: string | Date | null = null;
-			let lastStatus: 'success' | 'error' | null = null;
-			let successCount = 0;
-			let failCount = 0;
+	// ---- History Filters ----
+	let historyFilter = $state<string>('all');
+	let historyLevelFilter = $state<string>('');
+	let historySearchText = $state('');
+	let historyDateRange = $state<DateRange>({ start: undefined, end: undefined });
+	let historyDateOpen = $state(false);
 
-			for (const log of history) {
-				const isCompleted = log.level === 'info' && log.message === `Job completed: ${ht}`;
-				const isFailed = log.level === 'error' && log.message.startsWith(`Job failed: ${ht}`);
-
-				if (isCompleted || isFailed) {
-					if (!lastTime) {
-						lastTime = log.createdAt;
-						lastStatus = isFailed ? 'error' : 'success';
-					}
-					if (isFailed) failCount++;
-					else successCount++;
-				}
-			}
-
-			map[job.typeKey] = { time: lastTime, status: lastStatus, successCount, failCount };
-		}
-		return map;
+	const historyDateRangeLabel = $derived.by(() => {
+		const { start, end } = historyDateRange;
+		if (!start) return 'Selecteaza perioada';
+		const fmt = (d: DateValue) =>
+			new Date(d.year, d.month - 1, d.day).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+		if (!end) return fmt(start);
+		return `${fmt(start)} - ${fmt(end)}`;
 	});
 
-	// History filter by job type
-	let historyFilter = $state<string>('all');
+	// Derive unique handler types for dropdown (deduplicated by handlerType)
+	const jobTypeOptions = $derived.by(() => {
+		const seen = new Map<string, string>();
+		for (const job of jobs) {
+			if (!seen.has(job.handlerType)) {
+				seen.set(job.handlerType, job.label);
+			}
+		}
+		// Add any labels not represented by current jobs (e.g. removed jobs still in logs)
+		for (const [key, label] of Object.entries(allJobLabels)) {
+			const ht = key.replace(/_(?:frequent|daily|evening)$/, '');
+			if (!seen.has(ht) && !seen.has(key)) {
+				seen.set(key, label);
+			}
+		}
+		return Array.from(seen, ([key, label]) => ({ key, label }));
+	});
 
-	const JOB_LOG_FILTERS: Record<string, string[]> = {
-		recurring_invoices: ['Recurring invoices', 'recurring_invoices'],
-		task_reminders: ['Task reminders', 'task_reminders'],
-		daily_work_reminders: ['Daily work reminders', 'daily_work_reminders'],
-		spv_invoice_sync: ['SPV invoice sync', 'spv_invoice_sync'],
-		revolut_transaction_sync: ['Revolut transaction sync', 'revolut_transaction_sync'],
-		keez_invoice_sync: ['Keez invoice sync', 'keez_invoice_sync'],
-		gmail_invoice_sync: ['Gmail invoice sync', 'gmail_invoice_sync'],
-		bnr_rate_sync: ['BNR rate sync', 'bnr_rate_sync'],
-		invoice_overdue_reminders: ['Invoice overdue reminders', 'invoice_overdue_reminders', 'overdue reminder'],
-		contract_lifecycle: ['Contract lifecycle', 'contract_lifecycle']
-	};
+	// Extract handler type from "Job completed: TYPE" or "Job failed: TYPE - error"
+	function extractLogHandlerType(message: string): string | null {
+		const m = message.match(/^Job (?:completed|failed): (\S+)/);
+		return m ? m[1] : null;
+	}
 
 	const filteredHistory = $derived(
-		historyFilter === 'all'
-			? history
-			: history.filter((l) => {
-					const markers = JOB_LOG_FILTERS[historyFilter] || [];
-					return markers.some((m) => l.message.includes(m));
-				})
+		history.filter((l) => {
+			// Job type filter — exact match on handler type extracted from message
+			if (historyFilter !== 'all') {
+				const logHt = extractLogHandlerType(l.message);
+				const matchesJobType = logHt === historyFilter;
+				const matchesInMessage = l.message.includes(historyFilter) && !logHt;
+				if (!matchesJobType && !matchesInMessage) return false;
+			}
+			// Level filter
+			if (historyLevelFilter && l.level !== historyLevelFilter) return false;
+			// Text search
+			if (historySearchText) {
+				const s = historySearchText.toLowerCase();
+				const meta = typeof l.metadata === 'string' ? l.metadata : JSON.stringify(l.metadata || '');
+				if (
+					!l.message?.toLowerCase().includes(s) &&
+					!meta.toLowerCase().includes(s) &&
+					!(l.stackTrace || '').toLowerCase().includes(s)
+				) return false;
+			}
+			// Date range filter
+			if (historyDateRange.start) {
+				const logDate = new Date(l.createdAt);
+				const startDate = new Date(historyDateRange.start.year, historyDateRange.start.month - 1, historyDateRange.start.day);
+				if (logDate < startDate) return false;
+				if (historyDateRange.end) {
+					const endDate = new Date(historyDateRange.end.year, historyDateRange.end.month - 1, historyDateRange.end.day + 1);
+					if (logDate >= endDate) return false;
+				}
+			}
+			return true;
+		})
 	);
 
+	const hasActiveFilters = $derived(
+		historyFilter !== 'all' || historyLevelFilter !== '' || historySearchText !== '' || !!historyDateRange.start
+	);
+
+	function resetHistoryFilters() {
+		historyFilter = 'all';
+		historyLevelFilter = '';
+		historySearchText = '';
+		historyDateRange = { start: undefined, end: undefined };
+		historyPage = 1;
+	}
+
+	// ---- Pagination (1-based) ----
+	let historyPage = $state(1);
+	const historyPerPage = 20;
+	// Clamp page to valid range when filters reduce result count
+	const safeHistoryPage = $derived(Math.max(1, Math.min(historyPage, Math.ceil(filteredHistory.length / historyPerPage) || 1)));
+	const paginatedHistory = $derived(filteredHistory.slice((safeHistoryPage - 1) * historyPerPage, safeHistoryPage * historyPerPage));
+	const totalHistoryPages = $derived(Math.ceil(filteredHistory.length / historyPerPage));
+
+	// ---- Actions ----
 	async function refresh() {
 		refreshing = true;
-		jobsQuery.refresh();
-		historyQuery.refresh();
-		setTimeout(() => (refreshing = false), 500);
+		try {
+			await Promise.all([jobsQuery.refresh(), historyQuery.refresh(), statsQuery.refresh(), jobStatsQuery.refresh()]);
+		} finally {
+			refreshing = false;
+		}
 	}
 
 	function startEdit(job: (typeof jobs)[0]) {
@@ -115,6 +186,7 @@
 	}
 
 	async function saveSchedule(job: (typeof jobs)[0]) {
+		savingJob = job.key;
 		try {
 			await updateJobSchedule({ jobId: job.key, name: job.name, pattern: editPattern });
 			toast.success(`Schedule actualizat: ${job.label}`);
@@ -122,30 +194,42 @@
 			jobsQuery.refresh();
 		} catch (e: any) {
 			clientLogger.apiError('scheduler_save_schedule', e);
+			toast.error(e?.message || 'Eroare la salvarea schedule-ului');
+		} finally {
+			savingJob = null;
 		}
 	}
 
 	async function handleRemoveJob(job: (typeof jobs)[0]) {
 		if (!confirm(`Sigur doriti sa stergeti job-ul "${job.label}"?`)) return;
+		removingJob = job.key;
 		try {
 			await removeSchedulerJob(job.key);
 			toast.success(`Job sters: ${job.label}`);
 			jobsQuery.refresh();
 		} catch (e: any) {
 			clientLogger.apiError('scheduler_remove_job', e);
+			toast.error(e?.message || 'Eroare la stergerea job-ului');
+		} finally {
+			removingJob = null;
 		}
 	}
 
 	async function handleTriggerNow(job: (typeof jobs)[0]) {
+		triggeringJob = job.key;
 		try {
 			await triggerJobNow({ name: job.name, typeKey: job.typeKey, params: job.params });
 			toast.success(`Job lansat manual: ${job.label}`);
 			setTimeout(() => historyQuery.refresh(), 2000);
 		} catch (e: any) {
 			clientLogger.apiError('scheduler_trigger_now', e);
+			toast.error(e?.message || 'Eroare la lansarea job-ului');
+		} finally {
+			triggeringJob = null;
 		}
 	}
 
+	// ---- Helpers ----
 	function formatDate(date: Date | string | null) {
 		if (!date) return '-';
 		const d = typeof date === 'string' ? new Date(date) : date;
@@ -174,23 +258,40 @@
 		const parts = pattern.split(' ');
 		if (parts.length !== 5) return pattern;
 		const [min, hour, dom, mon, dow] = parts;
-		if (min === '0' && hour === '*') return 'La fiecare ora';
+
+		// Every N minutes: */N * * * *
+		if (min.startsWith('*/') && hour === '*' && dom === '*') {
+			return `La fiecare ${min.slice(2)} minute`;
+		}
+		// Every hour at :00
+		if (min === '0' && hour === '*' && dom === '*') return 'La fiecare ora';
+		// Every N hours at :00
+		if (min === '0' && hour.startsWith('*/') && dom === '*') {
+			return `La fiecare ${hour.slice(2)} ore`;
+		}
+		// Every N hours at :MM offset
+		if (min !== '*' && !min.startsWith('*/') && hour.startsWith('*/') && dom === '*') {
+			return `La fiecare ${hour.slice(2)} ore, la :${min.padStart(2, '0')}`;
+		}
+		// Monthly on specific day: 0 H D * *
+		if (dom !== '*' && mon === '*' && dow === '*') {
+			return `Lunar pe ${dom} la ${hour}:${min.padStart(2, '0')}`;
+		}
+		// Weekdays
 		if (dow === '1-5') return `L-V la ${hour}:${min.padStart(2, '0')}`;
+		// Daily
 		if (dom === '*' && mon === '*' && dow === '*') return `Zilnic la ${hour}:${min.padStart(2, '0')}`;
 		return pattern;
 	}
 
-	// Pagination for filtered history
-	let historyPage = $state(0);
-	const historyPerPage = 20;
-	const paginatedHistory = $derived(filteredHistory.slice(historyPage * historyPerPage, (historyPage + 1) * historyPerPage));
-	const totalHistoryPages = $derived(Math.ceil(filteredHistory.length / historyPerPage));
-
-	// Reset page when filter changes
-	$effect(() => {
-		historyFilter;
-		historyPage = 0;
-	});
+	function toggleStatFilter(level: string) {
+		if (historyLevelFilter === level) {
+			historyLevelFilter = '';
+		} else {
+			historyLevelFilter = level;
+		}
+		historyPage = 1;
+	}
 </script>
 
 <div class="space-y-6">
@@ -199,32 +300,53 @@
 			<h1 class="text-2xl font-bold">Scheduler</h1>
 			<p class="text-muted-foreground">Gestionati job-urile programate si vizualizati istoricul executiilor</p>
 		</div>
-		<Button variant="outline" size="sm" onclick={refresh}>
+		<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
 			<RefreshCwIcon class="size-4 {refreshing ? 'animate-spin' : ''}" />
 			Refresh
 		</Button>
 	</div>
 
-	<!-- Stats -->
-	<div class="grid grid-cols-3 gap-4">
+	<!-- Stats Cards (clickable, toggle level filter) -->
+	<div class="grid grid-cols-4 gap-4">
 		<Card>
 			<CardContent class="pt-6">
 				<div class="text-2xl font-bold">{jobs.length}</div>
 				<p class="text-xs text-muted-foreground">Job-uri Active</p>
 			</CardContent>
 		</Card>
-		<Card>
-			<CardContent class="pt-6">
-				<div class="text-2xl font-bold text-green-600">{completedLogs.length}</div>
-				<p class="text-xs text-muted-foreground">Completate (recent)</p>
-			</CardContent>
-		</Card>
-		<Card>
-			<CardContent class="pt-6">
-				<div class="text-2xl font-bold text-red-600">{failedLogs.length}</div>
-				<p class="text-xs text-muted-foreground">Esuate (recent)</p>
-			</CardContent>
-		</Card>
+		<button type="button" class="text-left" onclick={() => toggleStatFilter('info')}>
+			<Card class="cursor-pointer transition-colors hover:border-green-500/50 {historyLevelFilter === 'info' ? 'border-green-500' : ''}">
+				<CardContent class="pt-6">
+					<div class="flex items-center gap-2">
+						<CheckCircleIcon class="size-5 text-green-500" />
+						<span class="text-2xl font-bold text-green-600">{stats.info}</span>
+					</div>
+					<p class="text-xs text-muted-foreground">Completate (total)</p>
+				</CardContent>
+			</Card>
+		</button>
+		<button type="button" class="text-left" onclick={() => toggleStatFilter('warning')}>
+			<Card class="cursor-pointer transition-colors hover:border-amber-500/50 {historyLevelFilter === 'warning' ? 'border-amber-500' : ''}">
+				<CardContent class="pt-6">
+					<div class="flex items-center gap-2">
+						<TriangleAlertIcon class="size-5 text-amber-500" />
+						<span class="text-2xl font-bold text-amber-600">{stats.warning}</span>
+					</div>
+					<p class="text-xs text-muted-foreground">Avertismente (total)</p>
+				</CardContent>
+			</Card>
+		</button>
+		<button type="button" class="text-left" onclick={() => toggleStatFilter('error')}>
+			<Card class="cursor-pointer transition-colors hover:border-red-500/50 {historyLevelFilter === 'error' ? 'border-red-500' : ''}">
+				<CardContent class="pt-6">
+					<div class="flex items-center gap-2">
+						<XCircleIcon class="size-5 text-red-500" />
+						<span class="text-2xl font-bold text-red-600">{stats.error}</span>
+					</div>
+					<p class="text-xs text-muted-foreground">Esuate (total)</p>
+				</CardContent>
+			</Card>
+		</button>
 	</div>
 
 	<!-- Scheduled Jobs -->
@@ -238,7 +360,10 @@
 			{:else}
 				<div class="divide-y">
 					{#each jobs as job (job.key)}
-						{@const stats = jobStats[job.typeKey]}
+						{@const stat = jobStats[job.handlerType]}
+						{@const isTriggering = triggeringJob === job.key}
+						{@const isSaving = savingJob === job.key}
+						{@const isRemoving = removingJob === job.key}
 						<div class="py-3 flex items-center gap-4">
 							<div class="flex-1 min-w-0">
 								<div class="font-medium">{job.label}</div>
@@ -248,20 +373,20 @@
 							</div>
 							<!-- Per-job stats -->
 							<div class="text-xs min-w-[100px] text-center">
-								{#if stats}
+								{#if stat}
 									<div class="flex items-center justify-center gap-1.5">
-										<span class="text-green-600 font-medium">{stats.successCount}</span>
+										<span class="text-green-600 font-medium">{stat.successCount}</span>
 										<span class="text-muted-foreground">/</span>
-										<span class="text-red-600 font-medium">{stats.failCount}</span>
+										<span class="text-red-600 font-medium">{stat.failCount}</span>
 									</div>
-									{#if stats.time}
+									{#if stat.lastRun}
 										<div class="text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-											{#if stats.status === 'error'}
+											{#if stat.lastStatus === 'error'}
 												<XCircleIcon class="size-3 text-red-500" />
 											{:else}
 												<CheckCircleIcon class="size-3 text-green-500" />
 											{/if}
-											{formatDateShort(stats.time)}
+											{formatDateShort(stat.lastRun)}
 										</div>
 									{:else}
 										<div class="text-muted-foreground mt-0.5">Nicio executie</div>
@@ -276,10 +401,14 @@
 											class="h-7 text-xs w-[130px] font-mono"
 											placeholder="0 2 * * *"
 										/>
-										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)}>
-											<CheckIcon class="size-3.5 text-green-600" />
+										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)} disabled={isSaving}>
+											{#if isSaving}
+												<RefreshCwIcon class="size-3.5 animate-spin" />
+											{:else}
+												<CheckIcon class="size-3.5 text-green-600" />
+											{/if}
 										</Button>
-										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit}>
+										<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit} disabled={isSaving}>
 											<XIcon class="size-3.5 text-red-600" />
 										</Button>
 									</div>
@@ -295,14 +424,22 @@
 								{/if}
 							</div>
 							<div class="flex items-center gap-1">
-								<Button variant="ghost" size="icon" class="h-7 w-7" title="Ruleaza acum" onclick={() => handleTriggerNow(job)}>
-									<PlayIcon class="size-3.5" />
+								<Button variant="ghost" size="icon" class="h-7 w-7" title="Ruleaza acum" onclick={() => handleTriggerNow(job)} disabled={isTriggering}>
+									{#if isTriggering}
+										<RefreshCwIcon class="size-3.5 animate-spin" />
+									{:else}
+										<PlayIcon class="size-3.5" />
+									{/if}
 								</Button>
 								<Button variant="ghost" size="icon" class="h-7 w-7" title="Editeaza schedule" onclick={() => startEdit(job)}>
 									<PencilIcon class="size-3.5" />
 								</Button>
-								<Button variant="ghost" size="icon" class="h-7 w-7" title="Sterge job" onclick={() => handleRemoveJob(job)}>
-									<Trash2Icon class="size-3.5 text-red-500" />
+								<Button variant="ghost" size="icon" class="h-7 w-7" title="Sterge job" onclick={() => handleRemoveJob(job)} disabled={isRemoving}>
+									{#if isRemoving}
+										<RefreshCwIcon class="size-3.5 animate-spin text-red-500" />
+									{:else}
+										<Trash2Icon class="size-3.5 text-red-500" />
+									{/if}
 								</Button>
 							</div>
 						</div>
@@ -315,66 +452,149 @@
 	<!-- History -->
 	<Card>
 		<CardHeader>
-			<div class="flex items-center justify-between">
-				<CardTitle>Istoric Executii</CardTitle>
-				<div class="flex items-center gap-3">
-					<!-- Job type filter -->
-					<select
-						bind:value={historyFilter}
-						class="h-8 rounded-md border border-input bg-background px-2 text-sm"
-					>
-						<option value="all">Toate ({history.length})</option>
-						{#each Object.entries(JOB_LOG_FILTERS) as [key, _]}
-							{@const jobLabel = jobs.find((j) => j.handlerType === key)?.label || key}
-							<option value={key}>{jobLabel}</option>
-						{/each}
-					</select>
-					<span class="text-sm text-muted-foreground">{filteredHistory.length} inregistrari</span>
-				</div>
-			</div>
+			<CardTitle>Istoric Executii</CardTitle>
 		</CardHeader>
-		<CardContent>
+		<CardContent class="space-y-4">
+			<!-- Filter Bar -->
+			<div class="flex flex-wrap gap-3 items-center">
+				<div class="relative flex-1 min-w-[200px]">
+					<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+					<Input
+						placeholder="Cauta in mesaje, metadata, stack trace..."
+						bind:value={historySearchText}
+						oninput={() => { historyPage = 1; }}
+						class="pl-9"
+					/>
+				</div>
+				<Popover.Root bind:open={historyDateOpen}>
+					<Popover.Trigger>
+						{#snippet child({ props })}
+							<Button {...props} variant="outline" class="h-9 justify-start text-start font-normal text-sm {historyDateRange.start ? '' : 'text-muted-foreground'}">
+								<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+								{historyDateRangeLabel}
+							</Button>
+						{/snippet}
+					</Popover.Trigger>
+					<Popover.Content class="w-auto p-0" align="start">
+						<div class="flex flex-col">
+							<RangeCalendar
+								bind:value={historyDateRange}
+								locale="ro-RO"
+								weekStartsOn={1}
+								onValueChange={() => {
+									if (historyDateRange.start && historyDateRange.end) {
+										historyDateOpen = false;
+										historyPage = 1;
+									}
+								}}
+							/>
+							<Button
+								variant="ghost"
+								class="rounded-t-none border-t text-muted-foreground text-sm"
+								onclick={() => { historyDateRange = { start: undefined, end: undefined }; historyDateOpen = false; historyPage = 1; }}
+							>
+								Sterge filtru
+							</Button>
+						</div>
+					</Popover.Content>
+				</Popover.Root>
+				{#if historyDateRange.start}
+					<Button variant="ghost" size="sm" class="h-9 px-2" onclick={() => { historyDateRange = { start: undefined, end: undefined }; historyPage = 1; }}>
+						<XIcon class="h-3.5 w-3.5" />
+					</Button>
+				{/if}
+				<Select type="single" value={historyFilter} onValueChange={(v) => { historyFilter = v ?? 'all'; historyPage = 1; }}>
+					<SelectTrigger class="w-[200px]">
+						{historyFilter === 'all' ? 'Toate job-urile' : (allJobLabels[historyFilter] || historyFilter)}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="all">Toate job-urile ({history.length})</SelectItem>
+						{#each jobTypeOptions as opt (opt.key)}
+							<SelectItem value={opt.key}>{opt.label}</SelectItem>
+						{/each}
+					</SelectContent>
+				</Select>
+				<Select type="single" value={historyLevelFilter} onValueChange={(v) => { historyLevelFilter = v ?? ''; historyPage = 1; }}>
+					<SelectTrigger class="w-[160px]">
+						{historyLevelFilter === 'info' ? 'Informatie' : historyLevelFilter === 'warning' ? 'Avertisment' : historyLevelFilter === 'error' ? 'Eroare' : 'Toate nivelurile'}
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="">Toate nivelurile</SelectItem>
+						<SelectItem value="info">Informatie</SelectItem>
+						<SelectItem value="warning">Avertisment</SelectItem>
+						<SelectItem value="error">Eroare</SelectItem>
+					</SelectContent>
+				</Select>
+				{#if hasActiveFilters}
+					<Button variant="ghost" size="sm" class="h-9" onclick={resetHistoryFilters}>
+						<RotateCcwIcon class="size-3.5 mr-1" />
+						Reset
+					</Button>
+				{/if}
+				<span class="text-sm text-muted-foreground ml-auto">{filteredHistory.length} inregistrari</span>
+			</div>
+
+			<!-- History List -->
 			{#if filteredHistory.length === 0}
-				<p class="text-muted-foreground text-sm">Nu exista inregistrari.</p>
+				<p class="text-muted-foreground text-sm">Nu exista inregistrari{hasActiveFilters ? ' care corespund filtrelor' : ''}.</p>
 			{:else}
 				<div class="space-y-2">
 					{#each paginatedHistory as log (log.id)}
-						<Collapsible>
-							<CollapsibleTrigger class="w-full">
-								<div class="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 text-left w-full">
-									{#if log.level === 'error'}
-										<XCircleIcon class="size-4 text-red-500 shrink-0" />
-									{:else if log.level === 'warning'}
-										<TriangleAlertIcon class="size-4 text-amber-500 shrink-0" />
-									{:else}
-										<CheckCircleIcon class="size-4 text-green-500 shrink-0" />
-									{/if}
-									<div class="flex-1 min-w-0 truncate text-sm">
-										{log.message}
-									</div>
-									<div class="text-xs text-muted-foreground shrink-0">
-										{formatDate(log.createdAt)}
-									</div>
-									<ChevronDownIcon class="size-4 text-muted-foreground shrink-0" />
-								</div>
-							</CollapsibleTrigger>
-							<CollapsibleContent>
-								<div class="ml-7 p-3 bg-muted/30 rounded-md text-xs space-y-2">
-									{#if log.metadata}
-										<div>
-											<span class="font-semibold">Metadata:</span>
-											<pre class="mt-1 whitespace-pre-wrap text-muted-foreground">{typeof log.metadata === 'string' ? log.metadata : JSON.stringify(log.metadata, null, 2)}</pre>
+						{@const hasDetails = !!(log.metadata || log.stackTrace)}
+						{#if hasDetails}
+							<Collapsible>
+								<CollapsibleTrigger class="w-full">
+									<div class="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 text-left w-full">
+										{#if log.level === 'error'}
+											<XCircleIcon class="size-4 text-red-500 shrink-0" />
+										{:else if log.level === 'warning'}
+											<TriangleAlertIcon class="size-4 text-amber-500 shrink-0" />
+										{:else}
+											<CheckCircleIcon class="size-4 text-green-500 shrink-0" />
+										{/if}
+										<div class="flex-1 min-w-0 truncate text-sm">
+											{log.message}
 										</div>
-									{/if}
-									{#if log.stackTrace}
-										<div>
-											<span class="font-semibold text-red-500">Stack Trace:</span>
-											<pre class="mt-1 whitespace-pre-wrap text-red-400/80">{log.stackTrace}</pre>
+										<div class="text-xs text-muted-foreground shrink-0">
+											{formatDate(log.createdAt)}
 										</div>
-									{/if}
+										<ChevronDownIcon class="size-4 text-muted-foreground shrink-0" />
+									</div>
+								</CollapsibleTrigger>
+								<CollapsibleContent>
+									<div class="ml-7 p-3 bg-muted/30 rounded-md text-xs space-y-2 overflow-hidden">
+										{#if log.metadata}
+											<div class="overflow-x-auto">
+												<span class="font-semibold">Metadata:</span>
+												<pre class="mt-1 whitespace-pre-wrap break-all text-muted-foreground">{typeof log.metadata === 'string' ? log.metadata : JSON.stringify(log.metadata, null, 2)}</pre>
+											</div>
+										{/if}
+										{#if log.stackTrace}
+											<div class="overflow-x-auto">
+												<span class="font-semibold text-red-500">Stack Trace:</span>
+												<pre class="mt-1 whitespace-pre-wrap break-all text-red-400/80">{log.stackTrace}</pre>
+											</div>
+										{/if}
+									</div>
+								</CollapsibleContent>
+							</Collapsible>
+						{:else}
+							<div class="flex items-center gap-3 p-2 rounded-md text-left w-full">
+								{#if log.level === 'error'}
+									<XCircleIcon class="size-4 text-red-500 shrink-0" />
+								{:else if log.level === 'warning'}
+									<TriangleAlertIcon class="size-4 text-amber-500 shrink-0" />
+								{:else}
+									<CheckCircleIcon class="size-4 text-green-500 shrink-0" />
+								{/if}
+								<div class="flex-1 min-w-0 truncate text-sm">
+									{log.message}
 								</div>
-							</CollapsibleContent>
-						</Collapsible>
+								<div class="text-xs text-muted-foreground shrink-0">
+									{formatDate(log.createdAt)}
+								</div>
+							</div>
+						{/if}
 					{/each}
 				</div>
 
@@ -382,13 +602,13 @@
 				{#if totalHistoryPages > 1}
 					<div class="flex items-center justify-between mt-4 pt-4 border-t">
 						<span class="text-sm text-muted-foreground">
-							Pagina {historyPage + 1} din {totalHistoryPages}
+							Pagina {safeHistoryPage} din {totalHistoryPages}
 						</span>
 						<div class="flex gap-2">
 							<Button
 								variant="outline"
 								size="sm"
-								disabled={historyPage === 0}
+								disabled={historyPage <= 1}
 								onclick={() => historyPage--}
 							>
 								Anterior
@@ -396,7 +616,7 @@
 							<Button
 								variant="outline"
 								size="sm"
-								disabled={historyPage >= totalHistoryPages - 1}
+								disabled={historyPage >= totalHistoryPages}
 								onclick={() => historyPage++}
 							>
 								Urmator

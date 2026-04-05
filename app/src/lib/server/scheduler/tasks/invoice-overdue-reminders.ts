@@ -28,7 +28,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 			);
 
 		if (enabledSettings.length === 0) {
-			logInfo('scheduler', 'Invoice overdue reminders: no tenants have reminders enabled, skipping');
+			logInfo('scheduler', 'Invoice overdue reminders: no tenants have reminders enabled, skipping', { metadata: { tenantsChecked: 0 } });
 			return { success: true, remindersSent: 0 };
 		}
 

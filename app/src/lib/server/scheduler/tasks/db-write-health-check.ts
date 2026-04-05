@@ -35,7 +35,7 @@ export async function processDbWriteHealthCheck(): Promise<{
 		const latencyMs = Date.now() - start;
 
 		if (consecutiveFailures > 0) {
-			logInfo('scheduler', `DB write health check recovered after ${consecutiveFailures} failures (${latencyMs}ms)`);
+			logInfo('scheduler', `DB write health check recovered after ${consecutiveFailures} failures (${latencyMs}ms)`, { metadata: { previousFailures: consecutiveFailures, latencyMs } });
 		}
 		consecutiveFailures = 0;
 

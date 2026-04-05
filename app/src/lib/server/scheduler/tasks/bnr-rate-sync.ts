@@ -10,7 +10,7 @@ export async function processBnrRateSync(): Promise<{
 	synced: number;
 	date: string;
 }> {
-	logInfo('scheduler', 'BNR rate sync starting');
+	logInfo('scheduler', 'BNR rate sync starting', { metadata: { source: 'bnr.ro' } });
 
 	try {
 		const result = await syncBnrRates();

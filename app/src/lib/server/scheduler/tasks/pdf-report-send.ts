@@ -16,7 +16,7 @@ export async function processPdfReportSend() {
 	const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon, 7=Sun
 	const dayOfMonth = now.getDate();
 
-	logInfo('scheduler', `PDF Report Send: checking schedules (dayOfWeek=${dayOfWeek}, dayOfMonth=${dayOfMonth})`);
+	logInfo('scheduler', `PDF Report Send: checking schedules (dayOfWeek=${dayOfWeek}, dayOfMonth=${dayOfMonth})`, { metadata: { dayOfWeek, dayOfMonth } });
 
 	let reportsSent = 0;
 	const errors: { clientId: string; error: string }[] = [];
@@ -74,7 +74,7 @@ export async function processPdfReportSend() {
 				}
 
 				if (platforms.length === 0) {
-					logInfo('scheduler', `No spending data for client ${schedule.clientName}, skipping`, { tenantId: schedule.tenantId });
+					logInfo('scheduler', `No spending data for client ${schedule.clientName}, skipping`, { tenantId: schedule.tenantId, metadata: { clientName: schedule.clientName } });
 					continue;
 				}
 

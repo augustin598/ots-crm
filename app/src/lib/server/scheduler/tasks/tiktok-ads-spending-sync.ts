@@ -14,7 +14,7 @@ import { createNotification } from '$lib/server/notifications';
  * Step 2: Download billing PDF invoices via cookie-based flow
  */
 export async function processTiktokAdsSpendingSync() {
-	logInfo('scheduler', 'Starting TikTok Ads sync (spending + invoice downloads)');
+	logInfo('scheduler', 'Starting TikTok Ads sync (spending + invoice downloads)', { metadata: { trigger: 'scheduled' } });
 
 	const integrations = await db
 		.select({
@@ -30,7 +30,7 @@ export async function processTiktokAdsSpendingSync() {
 
 	const tenantIds = [...new Set(integrations.map(i => i.tenantId))];
 
-	logInfo('scheduler', `Found ${tenantIds.length} tenants with active TikTok Ads integrations`);
+	logInfo('scheduler', `Found ${tenantIds.length} tenants with active TikTok Ads integrations`, { metadata: { tenantCount: tenantIds.length } });
 
 	let totalImported = 0;
 	let totalUpdated = 0;

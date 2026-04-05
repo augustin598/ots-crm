@@ -155,9 +155,20 @@ async function refreshGoogleAdsTokens(results: RefreshResults) {
 				continue;
 			}
 			if (result === null) {
-				results.deactivated++;
-				await updateRefreshStatus(table.googleAdsIntegration, integration.id, false, 'Token revoked');
-				await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'invoices/google-ads');
+				const failures = await updateRefreshStatus(table.googleAdsIntegration, integration.id, false, 'Refresh failed');
+				if (failures >= 5) {
+					results.deactivated++;
+					await db
+						.update(table.googleAdsIntegration)
+						.set({ isActive: false, updatedAt: new Date() })
+						.where(eq(table.googleAdsIntegration.id, integration.id));
+					await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'settings/google-ads');
+				} else if (failures >= 3) {
+					results.failed++;
+					await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'settings/google-ads');
+				} else {
+					results.failed++;
+				}
 			} else {
 				results.refreshed++;
 				await updateRefreshStatus(table.googleAdsIntegration, integration.id, true);
@@ -169,8 +180,14 @@ async function refreshGoogleAdsTokens(results: RefreshResults) {
 				metadata: { error: msg }
 			});
 			const failures = await updateRefreshStatus(table.googleAdsIntegration, integration.id, false, msg);
-			if (failures >= 3) {
-				await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'invoices/google-ads');
+			if (failures >= 5) {
+				await db
+					.update(table.googleAdsIntegration)
+					.set({ isActive: false, updatedAt: new Date() })
+					.where(eq(table.googleAdsIntegration.id, integration.id));
+				await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'settings/google-ads');
+			} else if (failures >= 3) {
+				await notifyTenantAdmins(integration.tenantId, 'Google Ads', 'settings/google-ads');
 			}
 		}
 	}
@@ -192,16 +209,25 @@ async function refreshMetaAdsTokens(results: RefreshResults) {
 				continue;
 			}
 			if (result === null) {
-				// null = permanent failure (token revoked/invalid), notify immediately
-				results.deactivated++;
-				await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, 'Token exchange failed');
-				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'invoices/meta-ads');
+				const failures = await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, 'Token exchange failed');
+				if (failures >= 5) {
+					results.deactivated++;
+					await db
+						.update(table.metaAdsIntegration)
+						.set({ isActive: false, updatedAt: new Date() })
+						.where(eq(table.metaAdsIntegration.id, integration.id));
+					await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'settings/meta-ads');
+				} else if (failures >= 3) {
+					results.failed++;
+					await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'settings/meta-ads');
+				} else {
+					results.failed++;
+				}
 			} else {
 				results.refreshed++;
 				await updateRefreshStatus(table.metaAdsIntegration, integration.id, true);
 			}
 		} catch (err) {
-			// Transient error — notify only after 5+ consecutive failures (Meta has no refresh token)
 			results.failed++;
 			const msg = err instanceof Error ? err.message : String(err);
 			logError('token-refresh', `Meta Ads refresh failed for ${integration.tenantId}`, {
@@ -209,7 +235,13 @@ async function refreshMetaAdsTokens(results: RefreshResults) {
 			});
 			const failures = await updateRefreshStatus(table.metaAdsIntegration, integration.id, false, msg);
 			if (failures >= 5) {
-				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'invoices/meta-ads');
+				await db
+					.update(table.metaAdsIntegration)
+					.set({ isActive: false, updatedAt: new Date() })
+					.where(eq(table.metaAdsIntegration.id, integration.id));
+				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'settings/meta-ads');
+			} else if (failures >= 3) {
+				await notifyTenantAdmins(integration.tenantId, 'Meta Ads', 'settings/meta-ads');
 			}
 		}
 	}
@@ -292,7 +324,7 @@ const PLATFORM_HANDLERS: Record<string, (results: RefreshResults) => Promise<voi
  */
 export async function processTokenRefresh(params: Record<string, any> = {}) {
 	const platforms: string[] = params.platforms || Object.keys(PLATFORM_HANDLERS);
-	logInfo('scheduler', `Starting proactive token refresh for: ${platforms.join(', ')}`);
+	logInfo('scheduler', `Starting proactive token refresh for: ${platforms.join(', ')}`, { metadata: { platforms } });
 
 	const results: RefreshResults = { refreshed: 0, failed: 0, deactivated: 0, skipped: 0 };
 

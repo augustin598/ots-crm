@@ -19,7 +19,7 @@ export async function processSpvInvoiceSync(params: Record<string, any> = {}) {
 			.where(eq(table.anafSpvIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			logInfo('scheduler', 'SPV invoice sync: no tenants with active integrations, skipping');
+			logInfo('scheduler', 'SPV invoice sync: no tenants with active integrations, skipping', { metadata: { activeIntegrations: 0 } });
 			return {
 				success: true,
 				tenantsProcessed: 0,

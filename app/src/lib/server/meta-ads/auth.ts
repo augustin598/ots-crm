@@ -26,7 +26,24 @@ export function getOAuthUrl(state: string): string {
 }
 
 /**
- * Exchange short-lived token for long-lived token (60 days)
+ * Classify a Meta API error as transient (retry-able) or permanent (stop retrying).
+ */
+function classifyMetaError(err: unknown): 'transient' | 'permanent' {
+	const message = err instanceof Error ? err.message : String(err);
+	const permanentPatterns = [
+		/Error validating access token/i,
+		/has not authorized application/i,
+		/Session has expired/i,
+		/Invalid OAuth/i,
+		/invalid_grant/i
+	];
+	if (permanentPatterns.some((p) => p.test(message))) return 'permanent';
+	return 'transient';
+}
+
+/**
+ * Exchange short-lived token for long-lived token (60 days).
+ * Retries up to 3 times with exponential backoff for transient errors.
  */
 async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresIn: number }> {
 	const params = new URLSearchParams({
@@ -36,18 +53,48 @@ async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ acc
 		fb_exchange_token: shortLivedToken
 	});
 
-	const res = await fetch(`${META_GRAPH_URL}/oauth/access_token?${params.toString()}`);
-	const data = await res.json();
+	const MAX_RETRIES = 3;
+	let lastError: Error | null = null;
 
-	if (data.error) {
-		logError('meta-ads', 'OAuth: Token exchange failed', { metadata: { error: data.error.message } });
-		throw new Error(`Meta token exchange failed: ${data.error.message}`);
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			const res = await fetch(`${META_GRAPH_URL}/oauth/access_token?${params.toString()}`, {
+				signal: AbortSignal.timeout(10_000)
+			});
+			const data = await res.json();
+
+			if (data.error) {
+				const error = new Error(`Meta token exchange failed: ${data.error.message}`);
+				if (classifyMetaError(error) === 'permanent') {
+					logError('meta-ads', 'OAuth: Token exchange failed (permanent)', { metadata: { error: data.error.message } });
+					throw error;
+				}
+				lastError = error;
+				if (attempt < MAX_RETRIES) {
+					const jitter = Math.floor(Math.random() * 500);
+					await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
+					continue;
+				}
+				throw error;
+			}
+
+			return {
+				accessToken: data.access_token,
+				expiresIn: data.expires_in || 5184000 // Default 60 days
+			};
+		} catch (err) {
+			lastError = err instanceof Error ? err : new Error(String(err));
+			if (classifyMetaError(err) === 'permanent') throw lastError;
+			if (attempt < MAX_RETRIES) {
+				const jitter = Math.floor(Math.random() * 500);
+				await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
+				continue;
+			}
+			throw lastError;
+		}
 	}
 
-	return {
-		accessToken: data.access_token,
-		expiresIn: data.expires_in || 5184000 // Default 60 days
-	};
+	throw lastError || new Error('Meta token exchange failed after all retries');
 }
 
 /**
@@ -139,29 +186,40 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 
 			await db
 				.update(table.metaAdsIntegration)
-				.set({ accessToken, tokenExpiresAt, updatedAt: new Date() })
+				.set({
+					accessToken,
+					tokenExpiresAt,
+					consecutiveRefreshFailures: 0,
+					lastRefreshError: null,
+					lastRefreshAttemptAt: new Date(),
+					updatedAt: new Date()
+				})
 				.where(eq(table.metaAdsIntegration.id, integrationId));
 
 			logInfo('meta-ads', 'Token refreshed', { metadata: { integrationId } });
 			return { accessToken, integration: { ...integration, accessToken, tokenExpiresAt } };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			const isPermanent = message.includes('Error validating access token') ||
-				message.includes('has not authorized application') ||
-				message.includes('Session has expired');
+			const errorType = classifyMetaError(err);
 
-			if (isPermanent) {
-				logWarning('meta-ads', 'Token permanently invalid — deactivating integration', {
+			if (errorType === 'permanent') {
+				// Return null — scheduler handles deactivation via consecutiveRefreshFailures threshold
+				logWarning('meta-ads', 'Token permanently invalid', {
 					metadata: { integrationId, error: message }
 				});
-				await db
-					.update(table.metaAdsIntegration)
-					.set({ isActive: false, updatedAt: new Date() })
-					.where(eq(table.metaAdsIntegration.id, integrationId));
 				return null;
 			}
 
-			logWarning('meta-ads', 'Token refresh failed, using existing token', {
+			// Transient error — use existing token if still valid
+			const isExpired = integration.tokenExpiresAt && integration.tokenExpiresAt.getTime() < Date.now();
+			if (isExpired) {
+				logWarning('meta-ads', 'Token refresh failed (transient) and token already expired', {
+					metadata: { integrationId, error: message }
+				});
+				return null;
+			}
+
+			logWarning('meta-ads', 'Token refresh failed (transient), using existing token', {
 				metadata: { integrationId, error: message }
 			});
 		}

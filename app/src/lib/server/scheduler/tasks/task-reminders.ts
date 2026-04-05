@@ -22,7 +22,7 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			.where(eq(table.taskSettings.taskRemindersEnabled, true));
 
 		if (tenantsWithRemindersEnabled.length === 0) {
-			logInfo('scheduler', 'Task reminders: no tenants have reminders enabled, skipping');
+			logInfo('scheduler', 'Task reminders: no tenants have reminders enabled, skipping', { metadata: { tenantsChecked: 0 } });
 			return {
 				success: true,
 				remindersSent: 0

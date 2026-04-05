@@ -17,7 +17,7 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 			.where(eq(table.keezIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			logInfo('scheduler', 'Keez invoice sync: no tenants with active integrations, skipping');
+			logInfo('scheduler', 'Keez invoice sync: no tenants with active integrations, skipping', { metadata: { activeIntegrations: 0 } });
 			return {
 				success: true,
 				tenantsProcessed: 0,

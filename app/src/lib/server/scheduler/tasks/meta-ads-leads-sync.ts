@@ -9,7 +9,7 @@ import { syncMetaAdsLeadsForTenant } from '$lib/server/meta-ads/leads-sync';
  * Runs every 4 hours via scheduler.
  */
 export async function processMetaAdsLeadsSync() {
-	logInfo('scheduler', 'Starting Meta Ads lead sync (scheduled)');
+	logInfo('scheduler', 'Starting Meta Ads lead sync (scheduled)', { metadata: { trigger: 'scheduled' } });
 
 	const integrations = await db
 		.select({
@@ -25,7 +25,7 @@ export async function processMetaAdsLeadsSync() {
 
 	const tenantIds = [...new Set(integrations.map((i) => i.tenantId))];
 
-	logInfo('scheduler', `Found ${tenantIds.length} tenants with active Meta Ads integrations for lead sync`);
+	logInfo('scheduler', `Found ${tenantIds.length} tenants with active Meta Ads integrations for lead sync`, { metadata: { tenantCount: tenantIds.length } });
 
 	let totalImported = 0;
 	let totalSkipped = 0;

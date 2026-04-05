@@ -26,7 +26,7 @@ export async function processGmailInvoiceSync(params: Record<string, any> = {}) 
 			.where(eq(table.gmailIntegration.isActive, true));
 
 		if (integrations.length === 0) {
-			logInfo('scheduler', 'Gmail invoice sync: no active integrations found, skipping');
+			logInfo('scheduler', 'Gmail invoice sync: no active integrations found, skipping', { metadata: { activeIntegrations: 0 } });
 			return { success: true, tenantsProcessed: 0, totalImported: 0 };
 		}
 

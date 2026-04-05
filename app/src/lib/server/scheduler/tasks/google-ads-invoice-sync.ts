@@ -10,7 +10,7 @@ import { createNotification } from '$lib/server/notifications';
  * Runs monthly (1st of each month at 6AM)
  */
 export async function processGoogleAdsInvoiceSync() {
-	logInfo('scheduler', 'Starting Google Ads invoice sync');
+	logInfo('scheduler', 'Starting Google Ads invoice sync', { metadata: { trigger: 'scheduled' } });
 
 	const integrations = await db
 		.select({
@@ -24,7 +24,7 @@ export async function processGoogleAdsInvoiceSync() {
 			)
 		);
 
-	logInfo('scheduler', `Found ${integrations.length} active Google Ads integrations`);
+	logInfo('scheduler', `Found ${integrations.length} active Google Ads integrations`, { metadata: { integrationCount: integrations.length } });
 
 	let totalImported = 0;
 	let totalErrors = 0;

@@ -25,10 +25,15 @@ async function ensurePluginsInitialized() {
 
 // Initialize scheduler once
 let schedulerInitialized = false;
-function ensureSchedulerInitialized() {
+async function ensureSchedulerInitialized() {
 	if (!schedulerInitialized) {
-		startScheduler();
 		schedulerInitialized = true;
+		try {
+			await startScheduler();
+		} catch (e) {
+			schedulerInitialized = false;
+			console.error('[scheduler] Failed to initialize:', e);
+		}
 	}
 }
 

@@ -15,7 +15,7 @@ export async function processDebugLogCleanup(): Promise<{
 	success: boolean;
 	deleted: { info: number; warning: number; error: number };
 }> {
-	logInfo('scheduler', 'Debug log cleanup starting');
+	logInfo('scheduler', 'Debug log cleanup starting', { metadata: { retentionDays: { info: 7, warning: 30, error: 90 } } });
 
 	const now = Date.now();
 	const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);

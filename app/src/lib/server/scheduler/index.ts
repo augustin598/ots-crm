@@ -141,12 +141,12 @@ export function registerTask(type: string, handler: TaskHandler) {
  * Start the scheduler - sets up recurring jobs and starts the worker
  */
 export const startScheduler = async () => {
-	logInfo('scheduler', 'Starting scheduler...');
+	logInfo('scheduler', 'Starting scheduler...', { metadata: { taskTypes: Object.keys(taskHandlers).length, redisUrl: REDIS_URL.replace(/\/\/.*@/, '//***@') } });
 
 	// DB health check
 	try {
 		const [result] = await db.select({ count: sql<number>`count(*)` }).from(table.recurringInvoice);
-		logInfo('scheduler', `DB health check OK: ${result?.count ?? 0} recurring invoice templates`);
+		logInfo('scheduler', `DB health check OK: ${result?.count ?? 0} recurring invoice templates`, { metadata: { recurringTemplates: result?.count ?? 0 } });
 	} catch (e) {
 		const { message, stack } = serializeError(e);
 		logError('scheduler', `DB health check FAILED — scheduler may not work correctly: ${message}`, { stackTrace: stack });
@@ -154,10 +154,34 @@ export const startScheduler = async () => {
 
 	// Create scheduler worker
 	const worker = createSchedulerWorker();
-	logInfo('scheduler', 'Scheduler worker created');
+	logInfo('scheduler', 'Scheduler worker created', { metadata: { queueName: 'scheduler', concurrency: 1 } });
+
+	// Clean up stale repeatable jobs from Redis (from old code deployments with different patterns)
+	const expectedJobIds = new Set([
+		'recurring-invoices', 'task-reminders', 'daily-work-reminders',
+		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
+		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
+		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
+		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
+		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup',
+		'db-write-health-check', 'pdf-report-send'
+	]);
+
+	try {
+		const existingJobs = await schedulerQueue.getRepeatableJobs();
+		for (const job of existingJobs) {
+			if (!expectedJobIds.has(job.name)) {
+				await schedulerQueue.removeRepeatableByKey(job.key);
+				logWarning('scheduler', `Removed stale repeatable job: ${job.name} (pattern: ${job.pattern})`, { metadata: { jobName: job.name, pattern: job.pattern, key: job.key } });
+			}
+		}
+	} catch (e) {
+		const { message } = serializeError(e);
+		logWarning('scheduler', `Failed to clean stale jobs: ${message}`);
+	}
 
 	// Schedule recurring invoice job to run daily at 9:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'recurring-invoices',
 		{
 			type: 'recurring_invoices',
@@ -173,7 +197,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule task reminders job to run daily at 9:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'task-reminders',
 		{
 			type: 'task_reminders',
@@ -189,7 +213,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule daily work reminders job to run every hour
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'daily-work-reminders',
 		{
 			type: 'daily_work_reminders',
@@ -205,7 +229,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule SPV invoice sync job to run daily at 3:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'spv-invoice-sync',
 		{
 			type: 'spv_invoice_sync',
@@ -221,7 +245,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Revolut transaction sync job to run daily at 3:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'revolut-transaction-sync',
 		{
 			type: 'revolut_transaction_sync',
@@ -237,7 +261,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Keez invoice sync job to run daily at 4:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'keez-invoice-sync',
 		{
 			type: 'keez_invoice_sync',
@@ -253,7 +277,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Gmail invoice sync job to run daily at 5:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'gmail-invoice-sync',
 		{
 			type: 'gmail_invoice_sync',
@@ -269,7 +293,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Gmail invoice sync evening run for twice_daily tenants
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'gmail-invoice-sync-evening',
 		{
 			type: 'gmail_invoice_sync',
@@ -285,7 +309,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule BNR exchange rate sync daily at 10:00 AM (BNR publishes around 10:00)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'bnr-rate-sync',
 		{
 			type: 'bnr_rate_sync',
@@ -301,7 +325,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule invoice overdue reminders weekdays at 9:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'invoice-overdue-reminders',
 		{
 			type: 'invoice_overdue_reminders',
@@ -317,7 +341,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule contract lifecycle (auto-activate, auto-expire) daily at 1:00 AM
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'contract-lifecycle',
 		{
 			type: 'contract_lifecycle',
@@ -333,7 +357,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Google Ads invoice sync monthly (1st of each month at 6:00 AM)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'google-ads-invoice-sync',
 		{
 			type: 'google_ads_invoice_sync',
@@ -349,7 +373,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Meta Ads invoice sync monthly (1st of each month at 7:00 AM)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'meta-ads-invoice-sync',
 		{
 			type: 'meta_ads_invoice_sync',
@@ -365,7 +389,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule TikTok Ads spending sync monthly (2nd of each month at 8:00 AM)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'tiktok-ads-spending-sync',
 		{
 			type: 'tiktok_ads_spending_sync',
@@ -381,7 +405,7 @@ export const startScheduler = async () => {
 	);
 
 	// Schedule Meta Ads lead sync every 4 hours
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'meta-ads-leads-sync',
 		{
 			type: 'meta_ads_leads_sync',
@@ -397,7 +421,7 @@ export const startScheduler = async () => {
 	);
 
 	// Token refresh — frequent (every 45 min) for Google/Gmail (1h token lifetime)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'token-refresh-frequent',
 		{
 			type: 'token_refresh',
@@ -413,7 +437,7 @@ export const startScheduler = async () => {
 	);
 
 	// Token refresh — every 6 hours for Meta/TikTok (24h-60d token lifetime)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'token-refresh-daily',
 		{
 			type: 'token_refresh',
@@ -429,7 +453,7 @@ export const startScheduler = async () => {
 	);
 
 	// Debug log cleanup — daily at 2:00 AM (info 7d, warning 30d, error 90d)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'debug-log-cleanup',
 		{
 			type: 'debug_log_cleanup',
@@ -445,7 +469,7 @@ export const startScheduler = async () => {
 	);
 
 	// DB write health check — every 5 minutes (no retries — next scheduled run is sufficient)
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'db-write-health-check',
 		{
 			type: 'db_write_health_check',
@@ -462,7 +486,7 @@ export const startScheduler = async () => {
 	);
 
 	// PDF report send — daily at 08:00
-	schedulerQueue.add(
+	await schedulerQueue.add(
 		'pdf-report-send',
 		{
 			type: 'pdf_report_send',
@@ -477,7 +501,8 @@ export const startScheduler = async () => {
 		}
 	);
 
-	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, 20 jobs registered`);
+	const registeredJobs = await schedulerQueue.getRepeatableJobs();
+	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
 	return { queue: schedulerQueue, worker };
 };
@@ -505,6 +530,8 @@ export const JOB_LABELS: Record<string, string> = {
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
 	token_refresh: 'Refresh Token-uri Integrări',
+	token_refresh_frequent: 'Refresh Token-uri (Gmail/Google Ads)',
+	token_refresh_daily: 'Refresh Token-uri (Meta/TikTok)',
 	debug_log_cleanup: 'Cleanup Loguri Debug',
 	db_write_health_check: 'Health Check Scriere DB',
 	pdf_report_send: 'Trimitere Rapoarte PDF'
@@ -513,4 +540,12 @@ export const JOB_LABELS: Record<string, string> = {
 /** Default params for jobs that need specific parameters */
 export const JOB_PARAMS: Record<string, Record<string, any>> = {
 	gmail_invoice_sync_evening: { timeSlot: 'evening' }
+};
+
+/** Maps job name (kebab-to-snake typeKey) → actual handler type used in job.data.type
+ *  Only needed for jobs where typeKey !== handlerType (e.g. token-refresh-frequent → token_refresh) */
+export const JOB_HANDLER_TYPES: Record<string, string> = {
+	token_refresh_frequent: 'token_refresh',
+	token_refresh_daily: 'token_refresh',
+	gmail_invoice_sync_evening: 'gmail_invoice_sync'
 };

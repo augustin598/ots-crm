@@ -14,7 +14,7 @@ import { createNotification } from '$lib/server/notifications';
  * Step 2: Download billing PDF receipts from invoices_generator
  */
 export async function processMetaAdsInvoiceSync() {
-	logInfo('scheduler', 'Starting Meta Ads sync (spending + invoice downloads)');
+	logInfo('scheduler', 'Starting Meta Ads sync (spending + invoice downloads)', { metadata: { trigger: 'scheduled' } });
 
 	const integrations = await db
 		.select({
@@ -30,7 +30,7 @@ export async function processMetaAdsInvoiceSync() {
 
 	const tenantIds = [...new Set(integrations.map(i => i.tenantId))];
 
-	logInfo('scheduler', `Found ${tenantIds.length} tenants with active Meta Ads integrations`);
+	logInfo('scheduler', `Found ${tenantIds.length} tenants with active Meta Ads integrations`, { metadata: { tenantCount: tenantIds.length } });
 
 	let totalImported = 0;
 	let totalUpdated = 0;
