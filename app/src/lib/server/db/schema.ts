@@ -1818,7 +1818,8 @@ export const adsAccountBudget = sqliteTable('ads_account_budget', {
 		.references(() => client.id),
 	platform: text('platform').notNull(), // 'google', 'meta', 'tiktok'
 	adsAccountId: text('ads_account_id').notNull(), // Platform-specific account ID
-	monthlyBudget: integer('monthly_budget'), // in cents
+	monthlyBudget: integer('monthly_budget'), // in cents of the account's currency
+	currencyCode: text('currency_code').notNull().default('RON'), // RON, USD, EUR
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()

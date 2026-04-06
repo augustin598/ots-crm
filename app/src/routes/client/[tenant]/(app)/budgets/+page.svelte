@@ -73,6 +73,11 @@
 		return { bar: '', text: '' };
 	}
 
+	// Currency formatter
+	function fmtC(amount: number, cc: string = 'RON') {
+		return `${amount.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} ${cc}`;
+	}
+
 	// Totals — computed once, not as a function called multiple times
 	const allAccounts = $derived.by(() => {
 		if (!data) return [];
@@ -82,9 +87,26 @@
 			...data.google.map(a => ({ ...a, platform: 'google' as const }))
 		];
 	});
-	const totalBudget = $derived(allAccounts.reduce((s, a) => s + (a.monthlyBudget || 0), 0));
-	const totalSpend = $derived(allAccounts.reduce((s, a) => s + a.spendAmount, 0));
-	const totalActiveDailyBudget = $derived(allAccounts.reduce((s, a) => s + (a.activeDailyBudget || 0), 0));
+	// Check if all accounts have the same currency
+	const currencies = $derived([...new Set(allAccounts.map(a => a.currencyCode || 'RON'))]);
+	const isMixedCurrency = $derived(currencies.length > 1);
+	const singleCurrency = $derived(currencies.length === 1 ? currencies[0] : 'RON');
+	const rates = $derived(data?.exchangeRates || {});
+
+	// Convert amount to RON using BNR rates
+	function toRon(amount: number, cc: string): number {
+		if (cc === 'RON') return amount;
+		const r = rates[cc];
+		return r ? amount * r.rate : amount;
+	}
+
+	// Totals in RON (converted if mixed)
+	const totalBudgetRon = $derived(allAccounts.reduce((s, a) => s + toRon(a.monthlyBudget || 0, a.currencyCode || 'RON'), 0));
+	const totalSpendRon = $derived(allAccounts.reduce((s, a) => s + toRon(a.spendAmount, a.currencyCode || 'RON'), 0));
+	// Native totals (only meaningful when single currency)
+	const totalBudget = $derived(isMixedCurrency ? totalBudgetRon : allAccounts.reduce((s, a) => s + (a.monthlyBudget || 0), 0));
+	const totalSpend = $derived(isMixedCurrency ? totalSpendRon : allAccounts.reduce((s, a) => s + a.spendAmount, 0));
+	const totalActiveDailyBudget = $derived(allAccounts.reduce((s, a) => s + toRon(a.activeDailyBudget || 0, a.currencyCode || 'RON'), 0));
 
 	// Daily pacing — constants computed once
 	const now = new Date();
@@ -127,8 +149,8 @@
 		<Card>
 			<CardContent class="pt-6 space-y-3">
 				<div class="flex justify-between text-sm font-medium">
-					<span>Total buget luna curentă</span>
-					<span class={colors.text}>{totalSpend.toLocaleString('ro-RO')} / {totalBudget.toLocaleString('ro-RO')} RON ({totalPct}%)</span>
+					<span>Total buget luna curentă {isMixedCurrency ? '(convertit în RON)' : ''}</span>
+					<span class={colors.text}>{fmtC(totalSpend, isMixedCurrency ? 'RON' : singleCurrency)} / {fmtC(totalBudget, isMixedCurrency ? 'RON' : singleCurrency)} ({totalPct}%)</span>
 				</div>
 				<div class="relative h-3 rounded-full overflow-hidden bg-muted {colors.bar}">
 					<div
@@ -144,7 +166,7 @@
 									<CalendarIcon class="h-4 w-4 text-primary shrink-0" />
 									<div>
 										<p class="text-xs text-muted-foreground">Buget activ/zi</p>
-										<p class="text-sm font-semibold">{totalActiveDailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
+										<p class="text-sm font-semibold">{fmtC(totalActiveDailyBudget, isMixedCurrency ? 'RON' : singleCurrency)}</p>
 									</div>
 								</div>
 							</Tooltip.Trigger>
@@ -156,7 +178,7 @@
 									<TargetIcon class="h-4 w-4 text-blue-500 shrink-0" />
 									<div>
 										<p class="text-xs text-muted-foreground">Așteptat (ziua {dayOfMonth})</p>
-										<p class="text-sm font-semibold">{totalDaily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
+										<p class="text-sm font-semibold">{fmtC(totalDaily.expectedSpend, isMixedCurrency ? 'RON' : singleCurrency)}</p>
 									</div>
 								</div>
 							</Tooltip.Trigger>
@@ -168,7 +190,7 @@
 									<PiggyBankIcon class="h-4 w-4 text-green-500 shrink-0" />
 									<div>
 										<p class="text-xs text-muted-foreground">Rămas de cheltuit</p>
-										<p class="text-sm font-semibold">{totalDaily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
+										<p class="text-sm font-semibold">{fmtC(totalDaily.remainingBudget, isMixedCurrency ? 'RON' : singleCurrency)}</p>
 									</div>
 								</div>
 							</Tooltip.Trigger>
@@ -180,7 +202,7 @@
 									<TrendingUpIcon class="h-4 w-4 text-orange-500 shrink-0" />
 									<div>
 										<p class="text-xs text-muted-foreground">Necesar/zi ({daysRemaining} zile)</p>
-										<p class="text-sm font-semibold">{totalDaily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
+										<p class="text-sm font-semibold">{fmtC(totalDaily.dailyRemaining, isMixedCurrency ? 'RON' : singleCurrency)}</p>
 									</div>
 								</div>
 							</Tooltip.Trigger>
@@ -196,18 +218,18 @@
 								<AlertTriangleIcon class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
 								<div>
 									<p class="font-medium text-destructive">
-										Proiecție totală: {td.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({td.projectedPct}% din buget)
+										Proiecție totală: {fmtC(td.projectedSpend, isMixedCurrency ? 'RON' : singleCurrency)} ({td.projectedPct}% din buget)
 									</p>
 									<p class="text-muted-foreground mt-0.5">
-										Media curentă: {Math.round(td.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
-										Țintă: {Math.round(td.dailyRemaining).toLocaleString('ro-RO')} RON/zi
-										(reduce cu {Math.round(td.currentDailyAvg - td.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
+										Media curentă: {fmtC(Math.round(td.currentDailyAvg), isMixedCurrency ? 'RON' : singleCurrency)}/zi →
+										Țintă: {fmtC(Math.round(td.dailyRemaining), isMixedCurrency ? 'RON' : singleCurrency)}/zi
+										(reduce cu {fmtC(Math.round(td.currentDailyAvg - td.dailyRemaining), isMixedCurrency ? 'RON' : singleCurrency)}/zi)
 									</p>
 								</div>
 							{:else}
 								<CheckCircleIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
 								<p class="font-medium text-green-700 dark:text-green-300">
-									Proiecție totală: {td.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({td.projectedPct}% din buget) — Pe drumul bun
+									Proiecție totală: {fmtC(td.projectedSpend, isMixedCurrency ? 'RON' : singleCurrency)} ({td.projectedPct}% din buget) — Pe drumul bun
 								</p>
 							{/if}
 						</div>
@@ -252,7 +274,7 @@
 											type="number"
 											min="0"
 											step="100"
-											placeholder="Buget (RON)"
+											placeholder="Buget ({account.currencyCode || 'RON'})"
 											bind:value={editValue}
 											class="h-8 w-32"
 										/>
@@ -267,7 +289,7 @@
 											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
 												<span class="text-xs text-muted-foreground">Buget</span>
 												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
-												<span class="text-xs text-muted-foreground">RON/lună</span>
+												<span class="text-xs text-muted-foreground">{account.currencyCode || 'RON'}/lună</span>
 											</div>
 										{/if}
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
@@ -280,7 +302,7 @@
 								<div class="space-y-1.5">
 									<div class="flex justify-between text-xs">
 										<span class={colors.text}>
-											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} RON
+											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} {account.currencyCode || 'RON'}
 										</span>
 										<span class={colors.text}>{pct}%</span>
 									</div>
@@ -294,19 +316,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
@@ -317,19 +339,19 @@
 												<AlertTriangleIcon class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-destructive">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
-														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
-														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi)
 													</p>
 												</div>
 											{:else}
 												<CheckCircleIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-green-700 dark:text-green-300">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget) — Pe drumul bun
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget) — Pe drumul bun
 													</p>
 												</div>
 											{/if}
@@ -371,7 +393,7 @@
 											type="number"
 											min="0"
 											step="100"
-											placeholder="Buget (RON)"
+											placeholder="Buget ({account.currencyCode || 'RON'})"
 											bind:value={editValue}
 											class="h-8 w-32"
 										/>
@@ -386,7 +408,7 @@
 											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
 												<span class="text-xs text-muted-foreground">Buget</span>
 												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
-												<span class="text-xs text-muted-foreground">RON/lună</span>
+												<span class="text-xs text-muted-foreground">{account.currencyCode || 'RON'}/lună</span>
 											</div>
 										{/if}
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
@@ -399,7 +421,7 @@
 								<div class="space-y-1.5">
 									<div class="flex justify-between text-xs">
 										<span class={colors.text}>
-											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} RON
+											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} {account.currencyCode || 'RON'}
 										</span>
 										<span class={colors.text}>{pct}%</span>
 									</div>
@@ -413,19 +435,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
@@ -436,19 +458,19 @@
 												<AlertTriangleIcon class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-destructive">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
-														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
-														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi)
 													</p>
 												</div>
 											{:else}
 												<CheckCircleIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-green-700 dark:text-green-300">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget) — Pe drumul bun
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget) — Pe drumul bun
 													</p>
 												</div>
 											{/if}
@@ -490,7 +512,7 @@
 											type="number"
 											min="0"
 											step="100"
-											placeholder="Buget (RON)"
+											placeholder="Buget ({account.currencyCode || 'RON'})"
 											bind:value={editValue}
 											class="h-8 w-32"
 										/>
@@ -505,7 +527,7 @@
 											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
 												<span class="text-xs text-muted-foreground">Buget</span>
 												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
-												<span class="text-xs text-muted-foreground">RON/lună</span>
+												<span class="text-xs text-muted-foreground">{account.currencyCode || 'RON'}/lună</span>
 											</div>
 										{/if}
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
@@ -518,7 +540,7 @@
 								<div class="space-y-1.5">
 									<div class="flex justify-between text-xs">
 										<span class={colors.text}>
-											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} RON
+											Consumat: {account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget.toLocaleString('ro-RO')} {account.currencyCode || 'RON'}
 										</span>
 										<span class={colors.text}>{pct}%</span>
 									</div>
@@ -532,19 +554,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'}/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
@@ -555,19 +577,19 @@
 												<AlertTriangleIcon class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-destructive">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget)
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget)
 													</p>
 													<p class="text-muted-foreground mt-0.5">
-														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} RON/zi →
-														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi
-														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} RON/zi)
+														Media curentă: {Math.round(daily.currentDailyAvg).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi →
+														Țintă: {Math.round(daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi
+														(reduce cu {Math.round(daily.currentDailyAvg - daily.dailyRemaining).toLocaleString('ro-RO')} {account.currencyCode || 'RON'}/zi)
 													</p>
 												</div>
 											{:else}
 												<CheckCircleIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
 												<div>
 													<p class="font-medium text-green-700 dark:text-green-300">
-														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON ({daily.projectedPct}% din buget) — Pe drumul bun
+														Proiecție: {daily.projectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} {account.currencyCode || 'RON'} ({daily.projectedPct}% din buget) — Pe drumul bun
 													</p>
 												</div>
 											{/if}

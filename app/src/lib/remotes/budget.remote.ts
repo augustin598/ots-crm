@@ -12,6 +12,41 @@ import { getAuthenticatedToken as getTiktokAuthToken } from '$lib/server/tiktok-
 import { listAdvertiserInsights, listCampaigns as listTiktokCampaigns } from '$lib/server/tiktok-ads/client';
 import { env } from '$env/dynamic/private';
 import { logWarning, logInfo } from '$lib/server/logger';
+import { desc } from 'drizzle-orm';
+
+/** Get latest BNR exchange rate for a currency → RON */
+async function getExchangeRate(currencyCode: string): Promise<{ rate: number; date: string } | null> {
+	if (currencyCode === 'RON') return { rate: 1, date: '' };
+	const [row] = await db.select({ rate: table.bnrExchangeRate.rate, rateDate: table.bnrExchangeRate.rateDate })
+		.from(table.bnrExchangeRate)
+		.where(eq(table.bnrExchangeRate.currency, currencyCode))
+		.orderBy(desc(table.bnrExchangeRate.rateDate))
+		.limit(1);
+	return row ? { rate: row.rate, date: row.rateDate } : null;
+}
+
+/** Detect currency for an ad account */
+async function detectAccountCurrency(platform: string, acc: any, tenantId: string): Promise<string> {
+	if (platform === 'google' && acc.currencyCode) return acc.currencyCode;
+	// For Meta/TikTok — check latest spending record
+	if (platform === 'meta') {
+		const [row] = await db.select({ cc: table.metaAdsSpending.currencyCode })
+			.from(table.metaAdsSpending)
+			.where(and(eq(table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId), eq(table.metaAdsSpending.tenantId, tenantId)))
+			.orderBy(desc(table.metaAdsSpending.periodStart))
+			.limit(1);
+		return row?.cc || 'RON';
+	}
+	if (platform === 'tiktok') {
+		const [row] = await db.select({ cc: table.tiktokAdsSpending.currencyCode })
+			.from(table.tiktokAdsSpending)
+			.where(and(eq(table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId), eq(table.tiktokAdsSpending.tenantId, tenantId)))
+			.orderBy(desc(table.tiktokAdsSpending.periodStart))
+			.limit(1);
+		return row?.cc || 'RON';
+	}
+	return 'RON';
+}
 
 function generateBudgetId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -129,14 +164,16 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] Meta ${acc.metaAdAccountId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
+			const currencyCode = budget?.currencyCode || await detectAccountCurrency('meta', acc, tenantId);
+			console.log(`[budget] Meta ${acc.metaAdAccountId} (${acc.accountName}): spend=${spendAmount} currency=${currencyCode} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
 				spendAmount,
-				activeDailyBudget
+				activeDailyBudget,
+				currencyCode
 			};
 		}));
 
@@ -191,14 +228,16 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] Google ${acc.googleAdsCustomerId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
+			const currencyCode = budget?.currencyCode || acc.currencyCode || 'USD';
+			console.log(`[budget] Google ${acc.googleAdsCustomerId} (${acc.accountName}): spend=${spendAmount} currency=${currencyCode} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
 				spendAmount,
-				activeDailyBudget
+				activeDailyBudget,
+				currencyCode
 			};
 		}));
 
@@ -250,24 +289,40 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
+			const currencyCode = budget?.currencyCode || await detectAccountCurrency('tiktok', acc, tenantId);
+			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendAmount} currency=${currencyCode} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
 				spendAmount,
-				activeDailyBudget
+				activeDailyBudget,
+				currencyCode
 			};
 		}));
 
+		// 6. Get exchange rates for non-RON currencies
+		const allCurrencies = new Set([
+			...metaWithBudgets.map(a => a.currencyCode),
+			...googleWithBudgets.map(a => a.currencyCode),
+			...tiktokWithBudgets.map(a => a.currencyCode)
+		]);
+		const exchangeRates: Record<string, { rate: number; date: string }> = {};
+		for (const cc of allCurrencies) {
+			if (cc === 'RON') { exchangeRates['RON'] = { rate: 1, date: '' }; continue; }
+			const rateInfo = await getExchangeRate(cc);
+			if (rateInfo) exchangeRates[cc] = rateInfo;
+		}
+
 		const elapsed = Date.now() - startTime;
-		console.log(`[budget] Done in ${elapsed}ms — meta=${metaWithBudgets.length} google=${googleWithBudgets.length} tiktok=${tiktokWithBudgets.length}`);
+		console.log(`[budget] Done in ${elapsed}ms — meta=${metaWithBudgets.length} google=${googleWithBudgets.length} tiktok=${tiktokWithBudgets.length} currencies=${JSON.stringify(exchangeRates)}`);
 
 		return {
 			meta: metaWithBudgets,
 			tiktok: tiktokWithBudgets,
-			google: googleWithBudgets
+			google: googleWithBudgets,
+			exchangeRates
 		};
 	}
 );
@@ -325,6 +380,22 @@ export const updateAccountBudget = command(
 
 		const budgetCents = data.monthlyBudget !== null ? Math.round(data.monthlyBudget * 100) : null;
 
+		// Detect currency for this account
+		let detectedCurrency = 'RON';
+		if (data.platform === 'google') {
+			const [gAcc] = await db.select({ cc: table.googleAdsAccount.currencyCode })
+				.from(table.googleAdsAccount).where(eq(table.googleAdsAccount.id, data.adsAccountId)).limit(1);
+			detectedCurrency = gAcc?.cc || 'USD';
+		} else if (data.platform === 'meta') {
+			const [mAcc] = await db.select({ metaAdAccountId: table.metaAdsAccount.metaAdAccountId })
+				.from(table.metaAdsAccount).where(eq(table.metaAdsAccount.id, data.adsAccountId)).limit(1);
+			if (mAcc) detectedCurrency = await detectAccountCurrency('meta', mAcc, tenantId);
+		} else if (data.platform === 'tiktok') {
+			const [tAcc] = await db.select({ tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId })
+				.from(table.tiktokAdsAccount).where(eq(table.tiktokAdsAccount.id, data.adsAccountId)).limit(1);
+			if (tAcc) detectedCurrency = await detectAccountCurrency('tiktok', tAcc, tenantId);
+		}
+
 		// Upsert: use adsAccountId + tenantId as unique key
 		const [existing] = await db.select({ id: table.adsAccountBudget.id })
 			.from(table.adsAccountBudget)
@@ -338,10 +409,11 @@ export const updateAccountBudget = command(
 			await db.update(table.adsAccountBudget)
 				.set({
 					monthlyBudget: budgetCents,
+					currencyCode: detectedCurrency,
 					updatedAt: new Date()
 				})
 				.where(eq(table.adsAccountBudget.id, existing.id));
-			console.log(`[budget] Updated budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents`);
+			console.log(`[budget] Updated budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents ${detectedCurrency}`);
 		} else {
 			await db.insert(table.adsAccountBudget).values({
 				id: generateBudgetId(),
@@ -349,9 +421,10 @@ export const updateAccountBudget = command(
 				clientId: data.clientId,
 				platform: data.platform,
 				adsAccountId: data.adsAccountId,
-				monthlyBudget: budgetCents
+				monthlyBudget: budgetCents,
+				currencyCode: detectedCurrency
 			});
-			console.log(`[budget] Created budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents`);
+			console.log(`[budget] Created budget for ${data.platform}/${data.adsAccountId}: ${budgetCents} cents ${detectedCurrency}`);
 		}
 
 		logInfo('server', `Budget updated: ${data.platform}/${data.adsAccountId} = ${data.monthlyBudget} RON`, {
