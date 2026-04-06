@@ -8,6 +8,8 @@ import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listAdAccountInsights } from '$lib/server/meta-ads/client';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import { listMonthlySpend, formatCustomerId } from '$lib/server/google-ads/client';
+import { getAuthenticatedToken as getTiktokAuthToken } from '$lib/server/tiktok-ads/auth';
+import { listAdvertiserInsights } from '$lib/server/tiktok-ads/client';
 import { env } from '$env/dynamic/private';
 import { logWarning, logInfo } from '$lib/server/logger';
 
@@ -181,18 +183,54 @@ export const getClientAccountBudgets = query(
 			};
 		}));
 
-		// 5. TIKTOK — DB only (no real-time API available)
+		// 5. TIKTOK — real-time API with DB fallback
+		const tiktokIntegrationIds = [...new Set(ttAccounts.map(a => a.integrationId))];
+		const tiktokTokenCache = new Map<string, { accessToken: string } | null>();
+
+		for (const integrationId of tiktokIntegrationIds) {
+			try {
+				const authResult = await getTiktokAuthToken(integrationId);
+				tiktokTokenCache.set(integrationId, authResult ? { accessToken: authResult.accessToken } : null);
+			} catch {
+				tiktokTokenCache.set(integrationId, null);
+			}
+		}
+
 		const tiktokWithBudgets = await Promise.all(ttAccounts.map(async acc => {
 			const budget = budgets.find(b => b.platform === 'tiktok' && b.adsAccountId === acc.id);
-			const spendCents = await getDbSpend(table.tiktokAdsSpending, table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId);
+			let spendAmount = 0;
+			let source = 'db';
 
-			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendCents / 100} source=db budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+			try {
+				const authResult = tiktokTokenCache.get(acc.integrationId);
+				if (authResult) {
+					const insights = await listAdvertiserInsights(
+						acc.tiktokAdvertiserId, authResult.accessToken, monthStart, monthEnd
+					) ?? [];
+					const currentMonth = `${y}-${pad(m + 1)}`;
+					const match = insights.find(i => i.dateStart?.startsWith(currentMonth));
+					spendAmount = match ? parseFloat(match.spend || '0') : 0;
+					source = 'api';
+				} else {
+					const spendCents = await getDbSpend(table.tiktokAdsSpending, table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId);
+					spendAmount = spendCents / 100;
+				}
+			} catch (err) {
+				logWarning('tiktok-ads', `Budget: API fallback to DB for ${acc.tiktokAdvertiserId}`, {
+					tenantId, metadata: { error: err instanceof Error ? err.message : String(err) }
+				});
+				console.warn(`[budget] TikTok API failed for ${acc.tiktokAdvertiserId}, using DB fallback:`, err instanceof Error ? err.message : err);
+				const spendCents = await getDbSpend(table.tiktokAdsSpending, table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId);
+				spendAmount = spendCents / 100;
+			}
+
+			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
-				spendCents,
-				spendAmount: spendCents / 100
+				spendCents: Math.round(spendAmount * 100),
+				spendAmount
 			};
 		}));
 

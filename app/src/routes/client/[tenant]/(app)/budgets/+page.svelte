@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { page } from '$app/state';
+	import { invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import CalendarIcon from '@lucide/svelte/icons/calendar-days';
@@ -56,7 +57,8 @@
 			toast.success(`Bugetul pentru ${accountName} a fost salvat.`);
 			editingId = null;
 			editValue = null;
-			// Re-fetch only budget data, not the entire page
+			// Re-fetch budget data + invalidate server cache
+			await invalidateAll();
 			budgetQuery = getClientAccountBudgets({ clientId });
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare.');
