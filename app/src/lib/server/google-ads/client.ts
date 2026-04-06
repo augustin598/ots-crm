@@ -374,6 +374,62 @@ export async function listConversionActions(
 	}
 }
 
+/** Per-campaign conversion action breakdown */
+export interface GoogleAdsCampaignConversionAction {
+	campaignId: string;
+	name: string;
+	conversions: number;
+	conversionValue: number;
+}
+
+export async function listCampaignConversionActions(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string,
+	startDate: string,
+	endDate: string
+): Promise<Map<string, GoogleAdsConversionAction[]>> {
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+
+		const results = await customer.query(`
+			SELECT
+				campaign.id,
+				segments.conversion_action_name,
+				metrics.conversions,
+				metrics.conversions_value
+			FROM campaign
+			WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+				AND campaign.status != 'REMOVED'
+				AND metrics.conversions > 0
+		`);
+
+		const byCampaign = new Map<string, Map<string, { conversions: number; conversionValue: number }>>();
+		for (const row of results as any[]) {
+			const campaignId = String(row.campaign?.id || '');
+			const name = row.segments?.conversion_action_name || 'Unknown';
+			if (!byCampaign.has(campaignId)) byCampaign.set(campaignId, new Map());
+			const actionMap = byCampaign.get(campaignId)!;
+			const existing = actionMap.get(name) || { conversions: 0, conversionValue: 0 };
+			existing.conversions += Number(row.metrics?.conversions || 0);
+			existing.conversionValue += Number(row.metrics?.conversions_value || 0);
+			actionMap.set(name, existing);
+		}
+
+		const result = new Map<string, GoogleAdsConversionAction[]>();
+		for (const [campaignId, actionMap] of byCampaign) {
+			result.set(campaignId, Array.from(actionMap.entries())
+				.map(([name, data]) => ({ name, conversions: Math.round(data.conversions), conversionValue: data.conversionValue }))
+				.sort((a, b) => b.conversions - a.conversions)
+			);
+		}
+		return result;
+	} catch {
+		return new Map();
+	}
+}
+
 // ---- Campaign reporting types ----
 
 export interface GoogleAdsCampaignInsight {

@@ -57,6 +57,8 @@ export interface CampaignAggregate {
 	postShares: number;
 	videoViews: number;
 	callsPlaced: number;
+	/** Aggregated raw actions from Meta API for conversion breakdown */
+	rawActions: Array<{ action_type: string; value: number }>;
 }
 
 export function calculateROAS(revenue: number, spend: number): number {
@@ -137,7 +139,7 @@ export function aggregateInsightsByDate(insights: MetaAdsCampaignInsight[]): Dai
 
 /** Aggregate campaign insights by campaign for the table */
 export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]): CampaignAggregate[] {
-	type Acc = { name: string; objective: string; spend: number; impressions: number; reach: number; frequency: number; clicks: number; conversions: number; conversionValue: number; resultType: string; cpaLabel: string; purchases: number; leads: number; linkClicks: number; landingPageViews: number; pageEngagement: number; postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number };
+	type Acc = { name: string; objective: string; spend: number; impressions: number; reach: number; frequency: number; clicks: number; conversions: number; conversionValue: number; resultType: string; cpaLabel: string; purchases: number; leads: number; linkClicks: number; landingPageViews: number; pageEngagement: number; postReactions: number; postComments: number; postSaves: number; postShares: number; videoViews: number; callsPlaced: number; rawActionsMap: Map<string, number> };
 	const byCampaign = new Map<string, Acc>();
 
 	for (const row of insights) {
@@ -145,7 +147,8 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 			name: row.campaignName, objective: row.objective,
 			spend: 0, impressions: 0, reach: 0, frequency: 0, clicks: 0, conversions: 0, conversionValue: 0,
 			resultType: row.resultType || '', cpaLabel: row.cpaLabel || 'CPA',
-			purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0, postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0
+			purchases: 0, leads: 0, linkClicks: 0, landingPageViews: 0, pageEngagement: 0, postReactions: 0, postComments: 0, postSaves: 0, postShares: 0, videoViews: 0, callsPlaced: 0,
+			rawActionsMap: new Map<string, number>()
 		};
 		existing.spend += parseFloat(row.spend);
 		existing.impressions += parseInt(row.impressions);
@@ -166,6 +169,10 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 		existing.callsPlaced += row.callsPlaced;
 		if (row.resultType && !existing.resultType) existing.resultType = row.resultType;
 		if (row.cpaLabel && existing.cpaLabel === 'CPA') existing.cpaLabel = row.cpaLabel;
+		// Aggregate raw actions
+		for (const a of row.rawActions || []) {
+			existing.rawActionsMap.set(a.action_type, (existing.rawActionsMap.get(a.action_type) || 0) + parseFloat(a.value));
+		}
 		byCampaign.set(row.campaignId, existing);
 	}
 
@@ -197,7 +204,11 @@ export function aggregateInsightsByCampaign(insights: MetaAdsCampaignInsight[]):
 		postSaves: d.postSaves,
 		postShares: d.postShares,
 		videoViews: d.videoViews,
-		callsPlaced: d.callsPlaced
+		callsPlaced: d.callsPlaced,
+		rawActions: Array.from(d.rawActionsMap.entries())
+			.map(([action_type, value]) => ({ action_type, value: Math.round(value) }))
+			.filter(a => a.value > 0)
+			.sort((a, b) => b.value - a.value)
 	}));
 }
 

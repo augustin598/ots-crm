@@ -83,3 +83,111 @@ export function localizeResultType(resultType: string): string {
 	const config = getConversionTypeConfig(resultType);
 	return config.label || resultType;
 }
+
+/** Map Meta API action_type to display config (label + lucide icon name) */
+const ACTION_TYPE_DISPLAY: Record<string, { label: string; icon: string }> = {
+	'offsite_conversion.fb_pixel_purchase': { label: 'Website purchases', icon: 'shopping-cart' },
+	'offsite_conversion.fb_pixel_lead': { label: 'Website leads', icon: 'users' },
+	'offsite_conversion.fb_pixel_complete_registration': { label: 'Website registrations', icon: 'user-plus' },
+	'offsite_conversion.fb_pixel_add_to_cart': { label: 'Website adds to cart', icon: 'shopping-bag' },
+	'offsite_conversion.fb_pixel_add_to_wishlist': { label: 'Website adds to wishlist', icon: 'heart' },
+	'offsite_conversion.fb_pixel_initiate_checkout': { label: 'Website checkouts initiated', icon: 'credit-card' },
+	'offsite_conversion.fb_pixel_search': { label: 'Website searches', icon: 'search' },
+	'offsite_conversion.fb_pixel_view_content': { label: 'Website content views', icon: 'eye' },
+	'offsite_conversion.fb_pixel_add_payment_info': { label: 'Website payment info added', icon: 'credit-card' },
+	'offsite_conversion.fb_pixel_custom': { label: 'Website custom conversions', icon: 'target' },
+	// Skipped: 'purchase', 'lead', 'complete_registration' — duplicates of offsite_conversion.fb_pixel_* versions
+
+	'link_click': { label: 'Link clicks', icon: 'mouse-pointer-click' },
+	'landing_page_view': { label: 'Landing page views', icon: 'file-text' },
+	'page_engagement': { label: 'Page engagement', icon: 'thumbs-up' },
+	'post_engagement': { label: 'Post engagement', icon: 'heart' },
+	'post_reaction': { label: 'Post reactions', icon: 'smile' },
+	'comment': { label: 'Comments', icon: 'message-circle' },
+	'onsite_conversion.post_save': { label: 'Post saves', icon: 'bookmark' },
+	'post_share': { label: 'Post shares', icon: 'share-2' },
+	'video_view': { label: 'Video views', icon: 'play' },
+	'app_install': { label: 'App installs', icon: 'download' },
+	'onsite_conversion.messaging_conversation_started_7d': { label: 'Messaging conversations', icon: 'message-circle' },
+	'click_to_call_native_call_placed': { label: 'Calls placed', icon: 'phone' },
+	'contact_total': { label: 'Contacts', icon: 'contact' },
+};
+
+/** Get display label for a Meta API action_type. Returns null if not a recognized type. */
+export function getActionTypeLabel(actionType: string): string | null {
+	return ACTION_TYPE_DISPLAY[actionType]?.label || null;
+}
+
+/** Action types relevant per Meta objective (matches Meta Ads Manager breakdown) */
+const OBJECTIVE_ACTION_TYPES: Record<string, Set<string>> = {
+	OUTCOME_SALES: new Set([
+		'offsite_conversion.fb_pixel_purchase', 'purchase',
+		'offsite_conversion.fb_pixel_add_to_cart',
+		'offsite_conversion.fb_pixel_initiate_checkout',
+		'offsite_conversion.fb_pixel_view_content',
+		'offsite_conversion.fb_pixel_search',
+		'offsite_conversion.fb_pixel_add_to_wishlist',
+		'offsite_conversion.fb_pixel_add_payment_info'
+	]),
+	CONVERSIONS: new Set([
+		'offsite_conversion.fb_pixel_purchase', 'purchase',
+		'offsite_conversion.fb_pixel_add_to_cart',
+		'offsite_conversion.fb_pixel_initiate_checkout',
+		'offsite_conversion.fb_pixel_view_content',
+		'offsite_conversion.fb_pixel_search'
+	]),
+	OUTCOME_LEADS: new Set([
+		'offsite_conversion.fb_pixel_lead', 'lead',
+		'offsite_conversion.fb_pixel_complete_registration', 'complete_registration',
+		'landing_page_view', 'link_click'
+	]),
+	LEAD_GENERATION: new Set([
+		'offsite_conversion.fb_pixel_lead', 'lead',
+		'offsite_conversion.fb_pixel_complete_registration', 'complete_registration',
+		'landing_page_view', 'link_click'
+	]),
+	OUTCOME_ENGAGEMENT: new Set([
+		'page_engagement', 'post_engagement', 'post_reaction',
+		'comment', 'onsite_conversion.post_save', 'post_share', 'video_view', 'like'
+	]),
+	POST_ENGAGEMENT: new Set([
+		'page_engagement', 'post_engagement', 'post_reaction',
+		'comment', 'onsite_conversion.post_save', 'post_share', 'video_view'
+	]),
+	OUTCOME_TRAFFIC: new Set([
+		'link_click', 'landing_page_view',
+		'offsite_conversion.fb_pixel_view_content'
+	]),
+	LINK_CLICKS: new Set([
+		'link_click', 'landing_page_view'
+	]),
+	OUTCOME_AWARENESS: new Set([
+		'video_view', 'link_click', 'page_engagement', 'post_engagement'
+	]),
+	REACH: new Set([
+		'video_view', 'link_click', 'page_engagement'
+	]),
+	OUTCOME_APP_PROMOTION: new Set([
+		'app_install', 'link_click'
+	]),
+	APP_INSTALLS: new Set([
+		'app_install', 'link_click'
+	])
+};
+
+/** Filter raw Meta actions to only relevant types for the campaign objective */
+export function filterDisplayableActions(
+	rawActions: Array<{ action_type: string; value: number }>,
+	objective?: string
+): Array<{ label: string; icon: string; value: number }> {
+	const allowedTypes = objective ? OBJECTIVE_ACTION_TYPES[objective] : null;
+
+	return rawActions
+		.filter(a => {
+			if (!ACTION_TYPE_DISPLAY[a.action_type]) return false;
+			if (allowedTypes) return allowedTypes.has(a.action_type);
+			return true;
+		})
+		.map(a => ({ label: ACTION_TYPE_DISPLAY[a.action_type].label, icon: ACTION_TYPE_DISPLAY[a.action_type].icon, value: a.value }))
+		.sort((a, b) => b.value - a.value);
+}

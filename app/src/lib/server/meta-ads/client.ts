@@ -48,6 +48,8 @@ export interface MetaAdsCampaignInsight {
 	postShares: number;
 	videoViews: number;
 	callsPlaced: number;
+	/** Raw actions array from Meta API for conversion breakdown popover */
+	rawActions: Array<{ action_type: string; value: string }>;
 	dateStart: string;
 	dateStop: string;
 }
@@ -425,6 +427,7 @@ export async function listCampaignInsights(
 					postShares: getActionCount(row.actions, 'post_share'),
 					videoViews: getActionCount(row.actions, 'video_view'),
 					callsPlaced: getActionCount(row.actions, 'click_to_call_native_call_placed'),
+					rawActions: (row.actions || []).map((a: any) => ({ action_type: a.action_type, value: a.value })),
 					dateStart: row.date_start,
 					dateStop: row.date_stop
 				});

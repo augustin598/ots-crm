@@ -9,7 +9,7 @@
 		spec,
 		currency = 'RON'
 	}: {
-		data: DailyAggregate[];
+		data: Array<Record<string, any> & { date: string }>;
 		spec: ChartSpec;
 		currency?: string;
 	} = $props();

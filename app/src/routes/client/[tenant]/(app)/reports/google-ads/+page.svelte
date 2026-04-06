@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { getMyGoogleAdAccount, getGoogleCampaignInsights, getGoogleActiveCampaigns, getGoogleAdGroupInsights, getGoogleConversionActions } from '$lib/remotes/google-reports.remote';
+	import { getMyGoogleAdAccount, getGoogleCampaignInsights, getGoogleActiveCampaigns, getGoogleAdGroupInsights, getGoogleConversionActions, getGoogleCampaignConversionActions } from '$lib/remotes/google-reports.remote';
+	import * as Popover from '$lib/components/ui/popover';
 	import { page } from '$app/state';
 	import {
 		Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -39,9 +40,12 @@
 	} from '$lib/utils/report-helpers';
 	import {
 		aggregateGoogleInsightsByDate, aggregateGoogleInsightsByCampaign, aggregateGoogleInsightsByAdGroup,
+		computeGoogleTotals, getGoogleChannelKpiCards,
 		type GoogleCampaignAggregate, type GoogleAdGroupAggregate
 	} from '$lib/utils/google-report-helpers';
-	import { GOOGLE_COLUMN_PRESETS, GOOGLE_DEFAULT_PRESET, getGooglePreset } from '$lib/utils/google-column-presets';
+	import { GOOGLE_COLUMN_PRESETS, GOOGLE_DEFAULT_PRESET, getGooglePreset, GOOGLE_CHANNEL_PRESET_MAP } from '$lib/utils/google-column-presets';
+	import { getGoogleChartsForChannel } from '$lib/utils/google-chart-config';
+	import DynamicChart from '$lib/components/reports/dynamic-chart.svelte';
 
 	const defaults = getDefaultDateRange();
 	let since = $state(defaults.since);
@@ -74,12 +78,14 @@
 	let insightsQuery = $state<ReturnType<typeof getGoogleCampaignInsights> | null>(null);
 	let campaignsQuery = $state<ReturnType<typeof getGoogleActiveCampaigns> | null>(null);
 	let convActionsQuery = $state<ReturnType<typeof getGoogleConversionActions> | null>(null);
+	let campaignConvQuery = $state<ReturnType<typeof getGoogleCampaignConversionActions> | null>(null);
 
 	$effect(() => {
 		if (selectedCustomerId && since && until) {
 			insightsQuery = getGoogleCampaignInsights({ customerId: selectedCustomerId, since, until });
 			campaignsQuery = getGoogleActiveCampaigns({ customerId: selectedCustomerId });
 			convActionsQuery = getGoogleConversionActions({ customerId: selectedCustomerId, since, until });
+			campaignConvQuery = getGoogleCampaignConversionActions({ customerId: selectedCustomerId, since, until });
 		}
 	});
 
@@ -88,14 +94,47 @@
 	const insightsError = $derived(insightsQuery?.error);
 	const campaigns = $derived(campaignsQuery?.current || []);
 	const conversionActions = $derived(convActionsQuery?.current || []);
+	const campaignConversions = $derived(campaignConvQuery?.current || {} as Record<string, Array<{ name: string; conversions: number; conversionValue: number }>>);
 
 	let selectedCampaigns = $state<Set<string>>(new Set());
-	const filteredInsights = $derived(
-		selectedCampaigns.size > 0 ? insights.filter((i: any) => selectedCampaigns.has(i.campaignId)) : insights
-	);
+	// Channel type filter
+	let channelFilter = $state<string>('all');
+	const CHANNEL_TYPES = [
+		{ key: 'all', label: 'Toate' },
+		{ key: 'SEARCH', label: 'Search' },
+		{ key: 'SHOPPING', label: 'Shopping' },
+		{ key: 'DISPLAY', label: 'Display' },
+		{ key: 'PERFORMANCE_MAX', label: 'PMax' },
+		{ key: 'VIDEO', label: 'Video' },
+		{ key: 'DEMAND_GEN', label: 'Demand Gen' }
+	];
+
+	const filteredInsights = $derived.by(() => {
+		let result = insights;
+		if (channelFilter !== 'all') {
+			result = result.filter((i: any) => i.channelType === channelFilter);
+		}
+		if (selectedCampaigns.size > 0) {
+			result = result.filter((i: any) => selectedCampaigns.has(i.campaignId));
+		}
+		return result;
+	});
 	const campaignData = $derived(aggregateGoogleInsightsByCampaign(insights));
 	const dailyData = $derived(aggregateGoogleInsightsByDate(filteredInsights));
-	const totals = $derived(computeTotals(dailyData));
+	const totals = $derived(computeGoogleTotals(dailyData));
+
+	const availableChannels = $derived(
+		CHANNEL_TYPES.filter(ct => ct.key === 'all' || campaignData.some(c => c.channelType === ct.key))
+	);
+	const dominantChannel = $derived(channelFilter !== 'all' ? channelFilter : '');
+	const channelKpis = $derived(getGoogleChannelKpiCards(dominantChannel, totals, selectedCurrency));
+	const chartSpecs = $derived(getGoogleChartsForChannel(dominantChannel));
+
+	const KPI_ICON_MAP: Record<string, any> = {
+		'target': TargetIcon, 'dollar-sign': DollarSignIcon, 'percent': PercentIcon,
+		'mouse-pointer-click': MousePointerClickIcon, 'eye': EyeIcon, 'trending-up': TrendingUpIcon,
+		'shopping-cart': ShoppingCartIcon
+	};
 
 	const resultKpi = $derived.by(() => {
 		const withResults = campaignData.filter(c => c.conversions > 0);
@@ -142,10 +181,13 @@
 		{ key: 'paused', label: 'Paused', activeClass: 'bg-amber-500 text-white' },
 	];
 	const filteredCampaigns = $derived.by(() => {
-		if (statusFilter === 'all') return campaignTableData;
-		if (statusFilter === 'active') return campaignTableData.filter(c => c.status === 'ACTIVE');
-		if (statusFilter === 'paused') return campaignTableData.filter(c => c.status === 'PAUSED');
-		return campaignTableData;
+		let result = campaignTableData;
+		if (channelFilter !== 'all') {
+			result = result.filter(c => c.channelType === channelFilter);
+		}
+		if (statusFilter === 'active') return result.filter(c => c.status === 'ACTIVE');
+		if (statusFilter === 'paused') return result.filter(c => c.status === 'PAUSED');
+		return result;
 	});
 
 	let sortColumn = $state<keyof GoogleCampaignAggregate | 'status'>('status');
@@ -171,6 +213,12 @@
 
 	let selectedPresetKey = $state(GOOGLE_DEFAULT_PRESET);
 	const activePreset = $derived(getGooglePreset(selectedPresetKey));
+
+	$effect(() => {
+		if (channelFilter !== 'all' && GOOGLE_CHANNEL_PRESET_MAP[channelFilter]) {
+			selectedPresetKey = GOOGLE_CHANNEL_PRESET_MAP[channelFilter];
+		}
+	});
 
 	let pageSize = $state(25);
 	let currentPage = $state(1);
@@ -289,16 +337,41 @@
 			</div>
 		</Card>
 	{:else}
+		<!-- Channel type filter -->
+		{#if availableChannels.length > 2}
+			<div class="flex items-center gap-1.5 rounded-lg border p-0.5 w-fit">
+				{#each availableChannels as ct (ct.key)}
+					<button
+						class="px-3 py-1 text-xs rounded-md transition-colors {channelFilter === ct.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+						onclick={() => { channelFilter = ct.key; currentPage = 1; selectedCampaigns = new Set(); }}
+					>{ct.label}</button>
+				{/each}
+			</div>
+		{/if}
+
 		{#if insightsLoading}
 			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 				{#each Array(5) as _}<Card class="p-4"><div class="flex items-center gap-3"><Skeleton class="h-12 w-12 rounded-lg" /><div class="space-y-2"><Skeleton class="h-3 w-20" /><Skeleton class="h-6 w-24" /></div></div></Card>{/each}
 			</div>
 		{:else}
-			<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-				<KpiCard label="Cheltuieli totale" value={formatCurrency(totals.totalSpend, selectedCurrency)} icon={DollarSignIcon} subtext="{formatNumber(totals.totalImpressions)} impresii" />
-				<KpiCard label="CPM" value={formatCurrency(totals.avgCpm, selectedCurrency)} icon={EyeIcon} subtext="Cost per 1000 impresii" />
-				<KpiCard label="CPC" value={formatCurrency(totals.avgCpc, selectedCurrency)} icon={MousePointerClickIcon} subtext="{formatNumber(totals.totalClicks)} click-uri" />
-				<KpiCard label="CTR" value={formatPercent(totals.avgCtr)} icon={PercentIcon} subtext="Click-through rate" />
+			<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+				{#if channelKpis.length > 0}
+					{#each channelKpis as kpi (kpi.key)}
+						<KpiCard
+							label={kpi.label}
+							value={kpi.value}
+							icon={KPI_ICON_MAP[kpi.icon] || TrendingUpIcon}
+							subtext={kpi.subtext}
+							change={kpi.change}
+							invertChange={kpi.invertChange}
+						/>
+					{/each}
+				{:else}
+					<KpiCard label="Cheltuieli totale" value={formatCurrency(totals.totalSpend, selectedCurrency)} icon={DollarSignIcon} subtext="{formatNumber(totals.totalImpressions)} impresii" />
+					<KpiCard label="CPM" value={formatCurrency(totals.avgCpm, selectedCurrency)} icon={EyeIcon} subtext="Cost per 1000 impresii" />
+					<KpiCard label="CPC" value={formatCurrency(totals.avgCpc, selectedCurrency)} icon={MousePointerClickIcon} subtext="{formatNumber(totals.totalClicks)} click-uri" />
+					<KpiCard label="CTR" value={formatPercent(totals.avgCtr)} icon={PercentIcon} subtext="Click-through rate" />
+				{/if}
 			</div>
 		{/if}
 
@@ -349,8 +422,14 @@
 
 		{#if !insightsLoading && dailyData.length > 0}
 			<div class="grid gap-6 xl:grid-cols-2">
-				<Card class="p-4"><h3 class="mb-4 text-lg font-semibold">Cheltuieli în timp</h3><SpendChart data={dailyData.map(d => ({ date: d.date, spend: d.spend }))} currency={selectedCurrency} /></Card>
-				<Card class="p-4"><h3 class="mb-4 text-lg font-semibold">Conversii & Cost per conversie</h3><ConversionsChart data={dailyData.map(d => ({ date: d.date, conversions: d.conversions, costPerConversion: d.costPerConversion }))} currency={selectedCurrency} /></Card>
+				{#each chartSpecs as spec (spec.title + dominantChannel)}
+					<Card class="p-4">
+						{#key channelFilter}
+							<h3 class="mb-4 text-lg font-semibold">{spec.title}</h3>
+							<DynamicChart data={dailyData} {spec} currency={selectedCurrency} />
+						{/key}
+					</Card>
+				{/each}
 			</div>
 		{/if}
 
@@ -427,9 +506,45 @@
 										</TableCell>
 										<TableCell><Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge></TableCell>
 										{#each activePreset.columns as col}
-											<TableCell class={col.align === 'right' ? 'text-right' : ''}>
-												<div>{col.getValue(campaign, selectedCurrency)}</div>
-												{#if col.getSubtext}{@const sub = col.getSubtext(campaign)}{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}{/if}
+											<TableCell class={col.align === 'right' ? 'text-right' : ''} onclick={(e) => col.key === 'results' ? e.stopPropagation() : null}>
+												{#if col.key === 'results' && campaign.conversions > 0 && campaignConversions[campaign.campaignId]?.length}
+													<Popover.Root>
+														<Popover.Trigger class="text-right cursor-pointer hover:underline decoration-dotted underline-offset-2">
+															<div>{col.getValue(campaign, selectedCurrency)}</div>
+															{#if col.getSubtext}{@const sub = col.getSubtext(campaign)}{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}{/if}
+														</Popover.Trigger>
+														<Popover.Content side="top" align="end" class="w-72 p-3">
+															<p class="mb-2 text-xs font-semibold text-muted-foreground">Tipuri de conversie</p>
+															{@const actions = campaignConversions[campaign.campaignId]}
+															{@const totalConv = actions.reduce((s: number, a: any) => s + a.conversions, 0)}
+															<div class="space-y-1.5 text-xs">
+																{#each actions as action, i (action.name)}
+																	{@const pct = totalConv > 0 ? (action.conversions / totalConv) * 100 : 0}
+																	<div class="flex items-center justify-between">
+																		<span class="text-muted-foreground truncate mr-2">
+																			{action.name}
+																		</span>
+																		<div class="text-right shrink-0">
+																			<span class="font-medium">{action.conversions}</span>
+																			<span class="text-muted-foreground ml-1">{pct.toFixed(1)}%</span>
+																		</div>
+																	</div>
+																{/each}
+																{#if actions.some((a: any) => a.conversionValue > 0)}
+																	<div class="border-t pt-1.5 mt-1.5">
+																		<div class="flex items-center justify-between text-muted-foreground">
+																			<span>Valoare totală</span>
+																			<span class="font-medium">{formatCurrency(actions.reduce((s: number, a: any) => s + a.conversionValue, 0), selectedCurrency)}</span>
+																		</div>
+																	</div>
+																{/if}
+															</div>
+														</Popover.Content>
+													</Popover.Root>
+												{:else}
+													<div>{col.getValue(campaign, selectedCurrency)}</div>
+													{#if col.getSubtext}{@const sub = col.getSubtext(campaign)}{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}{/if}
+												{/if}
 											</TableCell>
 										{/each}
 									</TableRow>

@@ -93,6 +93,39 @@
 	import SaturationDetailList from '$lib/components/reports/saturation-detail-list.svelte';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import * as Collapsible from '$lib/components/ui/collapsible';
+	import * as Popover from '$lib/components/ui/popover';
+	import { getConversionTypeConfig, filterDisplayableActions } from '$lib/utils/conversion-type-config';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import SmileIcon from '@lucide/svelte/icons/smile';
+	import BookmarkIcon from '@lucide/svelte/icons/bookmark';
+	import Share2Icon from '@lucide/svelte/icons/share-2';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
+	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
+	import ContactIcon from '@lucide/svelte/icons/contact';
+
+	const POPOVER_ICON_MAP: Record<string, any> = {
+		'shopping-cart': ShoppingCartIcon,
+		'shopping-bag': ShoppingBagIcon,
+		'users': UsersIcon,
+		'user-plus': UserPlusIcon,
+		'credit-card': CreditCardIcon,
+		'search': SearchIcon,
+		'eye': EyeIcon,
+		'target': TargetIcon,
+		'mouse-pointer-click': MousePointerClickIcon,
+		'file-text': FileTextIcon,
+		'thumbs-up': ThumbsUpIcon,
+		'heart': HeartIcon,
+		'smile': SmileIcon,
+		'message-circle': MessageCircleIcon,
+		'bookmark': BookmarkIcon,
+		'share-2': Share2Icon,
+		'play': PlayIcon,
+		'download': DownloadIcon,
+		'phone': PhoneIcon,
+		'contact': ContactIcon
+	};
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -496,7 +529,8 @@
 					adsetId: ci.adsetId || null,
 					previewUrl: ci.previewUrl || null,
 					startTime: ci.startTime || null,
-					stopTime: ci.stopTime || null
+					stopTime: ci.stopTime || null,
+				rawActions: []
 				});
 			}
 		}
@@ -925,6 +959,23 @@
 				adsLoading = loadDone;
 			}
 		}
+	}
+
+	/** Build conversion breakdown from campaign action fields */
+	function getMetaConversionBreakdown(campaign: any): Array<{ name: string; count: number; value: number }> {
+		const items: Array<{ name: string; count: number; value: number }> = [];
+		if (campaign.purchases > 0) items.push({ name: 'Achiziții', count: campaign.purchases, value: campaign.conversionValue || 0 });
+		if (campaign.leads > 0) items.push({ name: 'Leads', count: campaign.leads, value: 0 });
+		if (campaign.linkClicks > 0) items.push({ name: 'Link clicks', count: campaign.linkClicks, value: 0 });
+		if (campaign.landingPageViews > 0) items.push({ name: 'Landing page views', count: campaign.landingPageViews, value: 0 });
+		if (campaign.pageEngagement > 0) items.push({ name: 'Page engagement', count: campaign.pageEngagement, value: 0 });
+		if (campaign.postReactions > 0) items.push({ name: 'Reacții', count: campaign.postReactions, value: 0 });
+		if (campaign.postComments > 0) items.push({ name: 'Comentarii', count: campaign.postComments, value: 0 });
+		if (campaign.postSaves > 0) items.push({ name: 'Salvări', count: campaign.postSaves, value: 0 });
+		if (campaign.postShares > 0) items.push({ name: 'Share-uri', count: campaign.postShares, value: 0 });
+		if (campaign.videoViews > 0) items.push({ name: 'Video views', count: campaign.videoViews, value: 0 });
+		if (campaign.callsPlaced > 0) items.push({ name: 'Apeluri', count: campaign.callsPlaced, value: 0 });
+		return items.sort((a, b) => b.count - a.count);
 	}
 
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
@@ -1400,8 +1451,36 @@
 											</div>
 										</TableCell>
 										{#each activePreset.columns as col}
-											<TableCell class={col.align === 'right' ? 'text-right' : ''} onclick={(e) => col.key === 'budget' ? e.stopPropagation() : null}>
-												{#if col.key === 'budget'}
+											<TableCell class={col.align === 'right' ? 'text-right' : ''} onclick={(e) => (col.key === 'budget' || col.key === 'results') ? e.stopPropagation() : null}>
+												{#if col.key === 'results' && campaign.rawActions?.length > 0}
+													{@const displayActions = filterDisplayableActions(campaign.rawActions, campaign.objective)}
+													{#if displayActions.length > 0}
+													<Popover.Root>
+														<Popover.Trigger class="text-right cursor-pointer hover:underline decoration-dotted underline-offset-2">
+															<div>{col.getValue(campaign, selectedCurrency)}</div>
+															{#if col.getSubtext}{@const sub = col.getSubtext(campaign)}{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}{/if}
+														</Popover.Trigger>
+														<Popover.Content side="top" align="end" class="w-80 p-3">
+															<p class="mb-2 text-xs font-semibold text-muted-foreground">Rezultate Meta Ads</p>
+															<div class="space-y-1.5 text-xs">
+																{#each displayActions as action (action.label)}
+																	{@const ActionIcon = POPOVER_ICON_MAP[action.icon]}
+																	<div class="flex items-center justify-between">
+																		<span class="inline-flex items-center gap-1.5 text-muted-foreground truncate mr-2">
+																			{#if ActionIcon}<ActionIcon class="h-3 w-3 shrink-0" />{/if}
+																			{action.label}
+																		</span>
+																		<span class="font-medium shrink-0">{new Intl.NumberFormat('ro-RO').format(action.value)}</span>
+																	</div>
+																{/each}
+															</div>
+														</Popover.Content>
+													</Popover.Root>
+													{:else}
+														<div>{col.getValue(campaign, selectedCurrency)}</div>
+														{#if col.getSubtext}{@const sub = col.getSubtext(campaign)}{#if sub}<div class="text-xs text-muted-foreground">{sub}</div>{/if}{/if}
+													{/if}
+												{:else if col.key === 'budget'}
 													<div class="flex items-center justify-end gap-1">
 														<span>{col.getValue(campaign, selectedCurrency)}</span>
 														{#if campaign.dailyBudget || campaign.lifetimeBudget}

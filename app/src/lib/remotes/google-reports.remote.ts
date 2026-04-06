@@ -7,7 +7,7 @@ import { eq, and, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import {
 	listCampaignInsights, listCampaigns, listAdGroupInsights, listDemographicInsights,
-	listConversionActions, listGeographicInsights, GOOGLE_CHANNEL_MAP
+	listConversionActions, listCampaignConversionActions, listGeographicInsights, GOOGLE_CHANNEL_MAP
 } from '$lib/server/google-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -330,5 +330,39 @@ export const getGoogleConversionActions = query(
 		} catch (err) {
 			throw error(500, err instanceof Error ? err.message : JSON.stringify(err).slice(0, 300));
 		}
+	}
+);
+
+/** Get conversion actions breakdown per campaign */
+export const getGoogleCampaignConversionActions = query(
+	v.object({
+		customerId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const cacheKey = `google-campaign-conv:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
+		const cached = getCached<Record<string, any[]>>(cacheKey);
+		if (cached) return cached;
+
+		const authResult = await getAuthenticatedClient(tenantId);
+		if (!authResult) throw error(500, 'Nu s-a putut obține token-ul Google Ads.');
+		const { integration } = authResult;
+
+		const result = await listCampaignConversionActions(
+			integration.mccAccountId, params.customerId,
+			integration.developerToken, integration.refreshToken!,
+			params.since, params.until
+		);
+		const obj: Record<string, Array<{ name: string; conversions: number; conversionValue: number }>> = {};
+		for (const [campaignId, actions] of result) {
+			obj[campaignId] = actions;
+		}
+		setCache(cacheKey, obj);
+		return obj;
 	}
 );

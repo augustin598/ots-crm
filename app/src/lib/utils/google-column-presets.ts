@@ -134,7 +134,7 @@ export const GOOGLE_COLUMN_PRESETS: GoogleColumnPreset[] = [
 	{
 		key: 'performance',
 		label: 'Performanță',
-		columns: [COL.results, COL.costPerResult, COL.conversionRate, COL.budget, COL.spend, COL.impressions]
+		columns: [COL.results, COL.costPerResult, COL.roas, COL.conversionRate, COL.budget, COL.spend, COL.impressions]
 	},
 	{
 		key: 'conversions',
@@ -144,12 +144,12 @@ export const GOOGLE_COLUMN_PRESETS: GoogleColumnPreset[] = [
 	{
 		key: 'delivery',
 		label: 'Livrare',
-		columns: [COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr, COL.spend]
+		columns: [COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr, COL.results, COL.costPerResult, COL.spend]
 	},
 	{
 		key: 'video',
 		label: 'Video',
-		columns: [COL.videoViews, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.spend]
+		columns: [COL.videoViews, COL.impressions, COL.cpm, COL.clicks, COL.cpc, COL.ctr, COL.spend]
 	}
 ];
 
@@ -157,4 +157,25 @@ export const GOOGLE_DEFAULT_PRESET = 'performance_clicks';
 
 export function getGooglePreset(key: string): GoogleColumnPreset {
 	return GOOGLE_COLUMN_PRESETS.find(p => p.key === key) || GOOGLE_COLUMN_PRESETS[0];
+}
+
+/** Map Google Ads channel type → recommended column preset */
+export const GOOGLE_CHANNEL_PRESET_MAP: Record<string, string> = {
+	SEARCH: 'performance_clicks',
+	SHOPPING: 'conversions',
+	DISPLAY: 'delivery',
+	VIDEO: 'video',
+	PERFORMANCE_MAX: 'performance',
+	DEMAND_GEN: 'performance'
+};
+
+/** Get recommended preset based on dominant channel type */
+export function getGoogleRecommendedPreset(campaigns: Array<{ channelType: string }>): string {
+	if (campaigns.length === 0) return GOOGLE_DEFAULT_PRESET;
+	const types = new Set(campaigns.map(c => c.channelType));
+	if (types.size === 1) {
+		const type = [...types][0];
+		return GOOGLE_CHANNEL_PRESET_MAP[type] || GOOGLE_DEFAULT_PRESET;
+	}
+	return GOOGLE_DEFAULT_PRESET;
 }
