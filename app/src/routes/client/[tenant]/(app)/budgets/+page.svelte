@@ -262,9 +262,18 @@
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={cancelEdit}>Anulează</Button>
 									</div>
 								{:else}
-									<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
-										{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
-									</Button>
+									<div class="flex items-center gap-2 shrink-0">
+										{#if account.monthlyBudget && account.monthlyBudget > 0}
+											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+												<span class="text-xs text-muted-foreground">Buget</span>
+												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
+												<span class="text-xs text-muted-foreground">RON/lună</span>
+											</div>
+										{/if}
+										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
+											{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
+										</Button>
+									</div>
 								{/if}
 							</div>
 							{#if account.monthlyBudget && account.monthlyBudget > 0}
@@ -372,9 +381,18 @@
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={cancelEdit}>Anulează</Button>
 									</div>
 								{:else}
-									<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
-										{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
-									</Button>
+									<div class="flex items-center gap-2 shrink-0">
+										{#if account.monthlyBudget && account.monthlyBudget > 0}
+											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+												<span class="text-xs text-muted-foreground">Buget</span>
+												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
+												<span class="text-xs text-muted-foreground">RON/lună</span>
+											</div>
+										{/if}
+										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
+											{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
+										</Button>
+									</div>
 								{/if}
 							</div>
 							{#if account.monthlyBudget && account.monthlyBudget > 0}
@@ -482,9 +500,18 @@
 										<Button size="sm" variant="outline" class="cursor-pointer" onclick={cancelEdit}>Anulează</Button>
 									</div>
 								{:else}
-									<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
-										{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
-									</Button>
+									<div class="flex items-center gap-2 shrink-0">
+										{#if account.monthlyBudget && account.monthlyBudget > 0}
+											<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+												<span class="text-xs text-muted-foreground">Buget</span>
+												<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
+												<span class="text-xs text-muted-foreground">RON/lună</span>
+											</div>
+										{/if}
+										<Button size="sm" variant="outline" class="cursor-pointer" onclick={() => startEdit(account.id, account.monthlyBudget)}>
+											{account.monthlyBudget ? 'Modifică' : 'Setează buget'}
+										</Button>
+									</div>
 								{/if}
 							</div>
 							{#if account.monthlyBudget && account.monthlyBudget > 0}

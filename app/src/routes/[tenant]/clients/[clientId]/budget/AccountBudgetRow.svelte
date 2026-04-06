@@ -88,6 +88,13 @@
 			<p class="text-xs text-muted-foreground">ID: {account.metaAdAccountId || account.tiktokAdvertiserId || account.googleAdsCustomerId}</p>
 		</div>
 		<div class="flex items-center gap-2">
+			{#if account.monthlyBudget && account.monthlyBudget > 0}
+				<div class="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+					<span class="text-xs text-muted-foreground">Buget</span>
+					<span class="text-xl font-bold">{account.monthlyBudget.toLocaleString('ro-RO')}</span>
+					<span class="text-xs text-muted-foreground">RON/lună</span>
+				</div>
+			{/if}
 			<div class="w-32">
 				<Input
 					type="number"
