@@ -340,7 +340,7 @@
 		{#if data.tiktok.length > 0}
 			<Card>
 				<CardHeader>
-					<CardTitle class="flex items-center gap-2 text-pink-600">
+					<CardTitle class="flex items-center gap-2">
 						<IconTiktok class="h-5 w-5" />
 						TikTok Ads
 					</CardTitle>

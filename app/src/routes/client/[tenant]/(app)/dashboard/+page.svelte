@@ -176,7 +176,7 @@
 								{#if account.platform === 'meta'}
 									<IconFacebook class="h-4 w-4 text-blue-600 shrink-0" />
 								{:else if account.platform === 'tiktok'}
-									<IconTiktok class="h-4 w-4 text-pink-600 shrink-0" />
+									<IconTiktok class="h-4 w-4 shrink-0" />
 								{:else}
 									<IconGoogleAds class="h-4 w-4 text-yellow-600 shrink-0" />
 								{/if}
