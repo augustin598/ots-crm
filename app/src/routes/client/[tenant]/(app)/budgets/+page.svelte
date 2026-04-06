@@ -84,6 +84,7 @@
 	});
 	const totalBudget = $derived(allAccounts.reduce((s, a) => s + (a.monthlyBudget || 0), 0));
 	const totalSpend = $derived(allAccounts.reduce((s, a) => s + a.spendAmount, 0));
+	const totalActiveDailyBudget = $derived(allAccounts.reduce((s, a) => s + (a.activeDailyBudget || 0), 0));
 
 	// Daily pacing — constants computed once
 	const now = new Date();
@@ -142,12 +143,12 @@
 								<div class="flex items-center gap-2 p-2 rounded-md bg-muted/50">
 									<CalendarIcon class="h-4 w-4 text-primary shrink-0" />
 									<div>
-										<p class="text-xs text-muted-foreground">Buget/zi</p>
-										<p class="text-sm font-semibold">{totalDaily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
+										<p class="text-xs text-muted-foreground">Buget activ/zi</p>
+										<p class="text-sm font-semibold">{totalActiveDailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</p>
 									</div>
 								</div>
 							</Tooltip.Trigger>
-							<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile ale lunii curente</Tooltip.Content>
+							<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din toate conturile</Tooltip.Content>
 						</Tooltip.Root>
 						<Tooltip.Root>
 							<Tooltip.Trigger class="w-full text-left cursor-pointer">
@@ -284,8 +285,8 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
-											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
 											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
@@ -394,8 +395,8 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
-											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
 											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
@@ -504,8 +505,8 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
-											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{(account.activeDailyBudget || 0).toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Content>Suma bugetelor zilnice ale campaniilor active din acest cont</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
 											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>

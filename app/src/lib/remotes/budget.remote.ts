@@ -5,11 +5,11 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, sql, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
-import { listAdAccountInsights } from '$lib/server/meta-ads/client';
+import { listAdAccountInsights, listActiveCampaigns as listMetaCampaigns } from '$lib/server/meta-ads/client';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
-import { listMonthlySpend, formatCustomerId } from '$lib/server/google-ads/client';
+import { listMonthlySpend, formatCustomerId, listCampaigns as listGoogleCampaigns } from '$lib/server/google-ads/client';
 import { getAuthenticatedToken as getTiktokAuthToken } from '$lib/server/tiktok-ads/auth';
-import { listAdvertiserInsights } from '$lib/server/tiktok-ads/client';
+import { listAdvertiserInsights, listCampaigns as listTiktokCampaigns } from '$lib/server/tiktok-ads/client';
 import { env } from '$env/dynamic/private';
 import { logWarning, logInfo } from '$lib/server/logger';
 
@@ -99,15 +99,22 @@ export const getClientAccountBudgets = query(
 		const metaWithBudgets = await Promise.all(metaAccounts.map(async acc => {
 			const budget = budgets.find(b => b.platform === 'meta' && b.adsAccountId === acc.id);
 			let spendAmount = 0;
+			let activeDailyBudget = 0;
 			let source = 'db';
 
 			try {
 				const authResult = metaTokenCache.get(acc.integrationId);
 				if (authResult && appSecret) {
-					const insights = await listAdAccountInsights(
-						acc.metaAdAccountId, authResult.accessToken, appSecret, monthStart, monthEnd
-					) ?? [];
-					spendAmount = insights.reduce((sum, i) => sum + (parseFloat(i.spend) || 0), 0);
+					// Fetch spend + active campaigns in parallel
+					const [insights, campaigns] = await Promise.all([
+						listAdAccountInsights(acc.metaAdAccountId, authResult.accessToken, appSecret, monthStart, monthEnd).catch(() => []),
+						listMetaCampaigns(acc.metaAdAccountId, authResult.accessToken, appSecret).catch(() => [])
+					]);
+					spendAmount = (insights ?? []).reduce((sum, i) => sum + (parseFloat(i.spend) || 0), 0);
+					// Sum daily budgets from active campaigns (Meta returns in cents)
+					activeDailyBudget = (campaigns ?? [])
+						.filter(c => c.status === 'ACTIVE')
+						.reduce((sum, c) => sum + (parseFloat(c.dailyBudget || '0') / 100), 0);
 					source = 'api';
 				} else {
 					const spendCents = await getDbSpend(table.metaAdsSpending, table.metaAdsSpending.metaAdAccountId, acc.metaAdAccountId);
@@ -122,13 +129,14 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] Meta ${acc.metaAdAccountId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+			console.log(`[budget] Meta ${acc.metaAdAccountId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
-				spendAmount
+				spendAmount,
+				activeDailyBudget
 			};
 		}));
 
@@ -145,20 +153,30 @@ export const getClientAccountBudgets = query(
 		const googleWithBudgets = await Promise.all(googleAccounts.map(async acc => {
 			const budget = budgets.find(b => b.platform === 'google' && b.adsAccountId === acc.id);
 			let spendAmount = 0;
+			let activeDailyBudget = 0;
 			let source = 'db';
 
 			try {
 				if (googleAuth) {
 					const { integration } = googleAuth;
 					const cleanId = formatCustomerId(acc.googleAdsCustomerId);
-					const monthlySpend = await listMonthlySpend(
-						integration.mccAccountId, cleanId,
-						integration.developerToken, integration.refreshToken,
-						monthStart, monthEnd
-					) ?? [];
+					const [monthlySpend, campaigns] = await Promise.all([
+						listMonthlySpend(
+							integration.mccAccountId, cleanId,
+							integration.developerToken, integration.refreshToken,
+							monthStart, monthEnd
+						).catch(() => []),
+						listGoogleCampaigns(
+							integration.mccAccountId, cleanId,
+							integration.developerToken, integration.refreshToken
+						).catch(() => [])
+					]);
 					const currentMonth = `${y}-${pad(m + 1)}`;
-					const match = monthlySpend.find(ms => ms.month?.startsWith(currentMonth));
+					const match = (monthlySpend ?? []).find(ms => ms.month?.startsWith(currentMonth));
 					spendAmount = typeof match?.spend === 'number' ? match.spend : 0;
+					activeDailyBudget = (campaigns ?? [])
+						.filter(c => c.status === 'ACTIVE')
+						.reduce((sum, c) => sum + (parseFloat(c.dailyBudget || '0')), 0);
 					source = 'api';
 				} else {
 					const spendCents = await getDbSpend(table.googleAdsSpending, table.googleAdsSpending.googleAdsCustomerId, acc.googleAdsCustomerId);
@@ -173,13 +191,14 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] Google ${acc.googleAdsCustomerId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+			console.log(`[budget] Google ${acc.googleAdsCustomerId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
-				spendAmount
+				spendAmount,
+				activeDailyBudget
 			};
 		}));
 
@@ -199,17 +218,24 @@ export const getClientAccountBudgets = query(
 		const tiktokWithBudgets = await Promise.all(ttAccounts.map(async acc => {
 			const budget = budgets.find(b => b.platform === 'tiktok' && b.adsAccountId === acc.id);
 			let spendAmount = 0;
+			let activeDailyBudget = 0;
 			let source = 'db';
 
 			try {
 				const authResult = tiktokTokenCache.get(acc.integrationId);
 				if (authResult) {
-					const insights = await listAdvertiserInsights(
-						acc.tiktokAdvertiserId, authResult.accessToken, monthStart, monthEnd
-					) ?? [];
+					const [insights, campaigns] = await Promise.all([
+						listAdvertiserInsights(
+							acc.tiktokAdvertiserId, authResult.accessToken, monthStart, monthEnd
+						).catch(() => []),
+						listTiktokCampaigns(acc.tiktokAdvertiserId, authResult.accessToken).catch(() => [])
+					]);
 					const currentMonth = `${y}-${pad(m + 1)}`;
-					const match = insights.find(i => i.dateStart?.startsWith(currentMonth));
+					const match = (insights ?? []).find(i => i.dateStart?.startsWith(currentMonth));
 					spendAmount = match ? parseFloat(match.spend || '0') : 0;
+					activeDailyBudget = (campaigns ?? [])
+						.filter(c => c.status === 'ACTIVE')
+						.reduce((sum, c) => sum + (parseFloat(c.dailyBudget || '0')), 0);
 					source = 'api';
 				} else {
 					const spendCents = await getDbSpend(table.tiktokAdsSpending, table.tiktokAdsSpending.tiktokAdvertiserId, acc.tiktokAdvertiserId);
@@ -224,13 +250,14 @@ export const getClientAccountBudgets = query(
 				spendAmount = spendCents / 100;
 			}
 
-			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendAmount} source=${source} budget=${budget?.monthlyBudget ? budget.monthlyBudget / 100 : 'none'}`);
+			console.log(`[budget] TikTok ${acc.tiktokAdvertiserId} (${acc.accountName}): spend=${spendAmount} activeDailyBudget=${activeDailyBudget} source=${source}`);
 
 			return {
 				...acc,
 				monthlyBudget: budget?.monthlyBudget ? budget.monthlyBudget / 100 : null,
 				spendCents: Math.round(spendAmount * 100),
-				spendAmount
+				spendAmount,
+				activeDailyBudget
 			};
 		}));
 
