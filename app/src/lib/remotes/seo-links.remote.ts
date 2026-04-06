@@ -1454,12 +1454,12 @@ export const checkSeoLink = command(
 						const extractedLinks = extractLinksToRootFromHtml(html, clientDomain);
 						const best = pickBestTargetUrl(extractedLinks);
 						if (best.keyword && needsKeyword) extractedKeyword = best.keyword;
-						if (best.url && !link.targetUrl) extractedTargetUrl = best.url;
+						if (best.url) extractedTargetUrl = best.url;
 						if (extractedKeyword || extractedTargetUrl) {
 							console.log(`[SEO-CHECK] Extracted keyword: ${extractedKeyword}, targetUrl: ${extractedTargetUrl}`);
 						}
-						// Verifică dofollow pe noul targetUrl extras
-						if (extractedTargetUrl && !lastCheckDofollow) {
+						// Verifică dofollow pe targetUrl-ul extras (actualizat sau nou)
+						if (extractedTargetUrl && (extractedTargetUrl !== link.targetUrl || !lastCheckDofollow)) {
 							lastCheckDofollow = extractDofollowFromHtml(html, extractedTargetUrl, link.articleUrl);
 							console.log(`[SEO-CHECK] Dofollow for ${link.articleUrl} → ${extractedTargetUrl}: ${lastCheckDofollow}`);
 						}
@@ -1497,10 +1497,11 @@ export const checkSeoLink = command(
 		// Recalculează pressTrust din URL-ul articolului
 		const extractedPressTrust = extractPressTrustFromUrl(link.articleUrl);
 
-		// Auto-assign websiteId dacă lipsește dar avem targetUrl
+		// Auto-assign websiteId dacă lipsește sau targetUrl s-a schimbat
 		let extractedWebsiteId: string | null = null;
 		const finalTargetUrl = extractedTargetUrl || link.targetUrl;
-		if (!link.websiteId && finalTargetUrl) {
+		const targetUrlChanged = extractedTargetUrl && extractedTargetUrl !== link.targetUrl;
+		if ((!link.websiteId || targetUrlChanged) && finalTargetUrl) {
 			const websites = await db
 				.select()
 				.from(table.clientWebsite)

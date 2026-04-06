@@ -39,6 +39,14 @@ const ALL_STEPS: TourStep[] = [
 		primaryOnly: true
 	},
 	{
+		id: 'budgets',
+		path: 'budgets',
+		sidebarKey: 'budgets',
+		title: 'Bugete Ads',
+		description: 'Monitorizează bugetele lunare de publicitate per platformă și cont.',
+		primaryOnly: true
+	},
+	{
 		id: 'marketing',
 		path: 'marketing',
 		sidebarKey: 'marketing',
