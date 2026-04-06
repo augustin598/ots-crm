@@ -64,13 +64,21 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	const toggleTheme = () => {
 		document.documentElement.classList.toggle('dark');
 	}
+
+	// Update favicon dynamically per-tenant
+	$effect(() => {
+		const el = document.getElementById('app-favicon') as HTMLLinkElement | null;
+		if (!el) return;
+		if (data.tenant?.favicon) {
+			el.href = `/api/tenant-favicon?slug=${data.tenant.slug}&v=${Date.now()}`;
+		} else {
+			el.href = '/favicon.png';
+		}
+	});
 </script>
 
 <svelte:head>
 	{@html `<style>:root{--theme-hue:${themeHue}}</style>`}
-	{#if data.tenant?.favicon}
-		<link rel="icon" href="/api/tenant-favicon?slug={data.tenant.slug}" />
-	{/if}
 </svelte:head>
 
 <SidebarProvider>

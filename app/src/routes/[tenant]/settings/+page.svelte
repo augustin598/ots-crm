@@ -29,7 +29,7 @@
 	import { getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
 	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { THEME_PRESETS, DEFAULT_THEME_COLOR, hexToOklchHue, isValidHex } from '$lib/theme-utils';
@@ -268,6 +268,7 @@
 				slug,
 				favicon
 			});
+			await invalidateAll();
 			toast.success('Favicon-ul a fost actualizat');
 		} catch (e) {
 			faviconError = e instanceof Error ? e.message : 'Eroare la salvarea favicon-ului';
