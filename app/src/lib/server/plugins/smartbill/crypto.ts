@@ -33,7 +33,9 @@ function getEncryptionSecret(): string {
 		throw new Error('ENCRYPTION_SECRET environment variable is not set');
 	}
 	const fingerprint = createHash('sha256').update(secret).digest('hex').slice(0, 8);
-	if (cachedSecretFingerprint && cachedSecretFingerprint !== fingerprint) {
+	if (!cachedSecretFingerprint) {
+		console.info(`[CRYPTO] ENCRYPTION_SECRET loaded — fingerprint: ${fingerprint}, length: ${secret.length}`);
+	} else if (cachedSecretFingerprint !== fingerprint) {
 		console.error(
 			`[CRYPTO] ENCRYPTION_SECRET changed at runtime! Old fingerprint: ${cachedSecretFingerprint}, New: ${fingerprint}. All previously encrypted data is now unreadable.`
 		);
