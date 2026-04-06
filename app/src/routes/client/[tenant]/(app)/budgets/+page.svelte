@@ -284,19 +284,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
@@ -394,19 +394,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
@@ -504,19 +504,19 @@
 									{@const daily = dailyInfo(account.monthlyBudget, account.spendAmount)!}
 									<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><CalendarIcon class="h-3 w-3" />{daily.dailyBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Bugetul lunar împărțit la {daysInMonth} zile</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TargetIcon class="h-3 w-3" />Așteptat: {daily.expectedSpend.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Consumul așteptat până în ziua {dayOfMonth} la ritm constant</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><PiggyBankIcon class="h-3 w-3" />Rămas: {daily.remainingBudget.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON</span></Tooltip.Trigger>
 											<Tooltip.Content>Diferența dintre buget și suma consumată</Tooltip.Content>
 										</Tooltip.Root>
 										<Tooltip.Root>
-											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
+											<Tooltip.Trigger><span class="inline-flex items-center gap-1 cursor-pointer rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5"><TrendingUpIcon class="h-3 w-3" />{daily.dailyRemaining.toLocaleString('ro-RO', { maximumFractionDigits: 0 })} RON/zi</span></Tooltip.Trigger>
 											<Tooltip.Content>Necesar pe zi în cele {daysRemaining} zile rămase</Tooltip.Content>
 										</Tooltip.Root>
 									</div>
