@@ -1,4 +1,4 @@
-CREATE TABLE `ads_account_budget` (
+CREATE TABLE IF NOT EXISTS `ads_account_budget` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`client_id` text NOT NULL REFERENCES `client`(`id`),
@@ -9,4 +9,4 @@ CREATE TABLE `ads_account_budget` (
 	`created_at` text NOT NULL DEFAULT (current_date),
 	`updated_at` text NOT NULL DEFAULT (current_date)
 );--> statement-breakpoint
-CREATE UNIQUE INDEX `ads_account_budget_acc_idx` ON `ads_account_budget` (`ads_account_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `ads_account_budget_acc_idx` ON `ads_account_budget` (`ads_account_id`);

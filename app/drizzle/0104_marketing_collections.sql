@@ -1,4 +1,4 @@
-CREATE TABLE `marketing_collection` (
+CREATE TABLE IF NOT EXISTS `marketing_collection` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`client_id` text NOT NULL REFERENCES `client`(`id`),

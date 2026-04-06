@@ -68,6 +68,9 @@ import LinkIcon from '@lucide/svelte/icons/link';
 
 <svelte:head>
 	{@html `<style>:root{--theme-hue:${themeHue}}</style>`}
+	{#if data.tenant?.favicon}
+		<link rel="icon" href="/api/tenant-favicon?slug={data.tenant.slug}" />
+	{/if}
 </svelte:head>
 
 <SidebarProvider>

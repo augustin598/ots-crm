@@ -28,7 +28,8 @@ const tenantSettingsSchema = v.object({
 	themeColor: v.optional(v.pipe(
 		v.string(),
 		v.regex(/^#[0-9A-Fa-f]{6}$/, 'Format culoare invalid')
-	))
+	)),
+	favicon: v.optional(v.nullable(v.string()))
 });
 
 export const updateTenantSettings = command(tenantSettingsSchema, async (data) => {

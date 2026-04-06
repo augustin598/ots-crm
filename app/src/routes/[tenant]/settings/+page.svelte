@@ -35,6 +35,9 @@
 	import { THEME_PRESETS, DEFAULT_THEME_COLOR, hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import ImageIcon from '@lucide/svelte/icons/image';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { getClientsRestrictionStatus, setClientRestriction } from '$lib/remotes/client-restrictions.remote';
@@ -71,6 +74,10 @@
 	let email = $state('');
 	let contractPrefix = $state('CTR');
 	let themeColor = $state(DEFAULT_THEME_COLOR);
+	let favicon = $state<string | null>(null);
+	let faviconPreview = $state<string | null>(null);
+	let faviconSaving = $state(false);
+	let faviconError = $state<string | null>(null);
 
 	// Sync from page data
 	$effect(() => {
@@ -97,6 +104,8 @@
 		email = t.email || '';
 		contractPrefix = t.contractPrefix || 'CTR';
 		themeColor = t.themeColor || DEFAULT_THEME_COLOR;
+		favicon = t.favicon || null;
+		faviconPreview = t.favicon || null;
 	});
 
 	// Live preview: update CSS variable immediately on color change
@@ -221,6 +230,55 @@
 		} finally {
 			loadingAnaf = false;
 		}
+	}
+
+	function handleFaviconSelect(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		faviconError = null;
+
+		const validTypes = ['image/png', 'image/x-icon', 'image/svg+xml', 'image/ico', 'image/jpeg', 'image/gif', 'image/webp'];
+		if (!validTypes.includes(file.type)) {
+			faviconError = 'Formatul trebuie să fie PNG, ICO, SVG, JPEG, GIF sau WebP';
+			return;
+		}
+
+		if (file.size > 512 * 1024) {
+			faviconError = 'Favicon-ul trebuie să fie mai mic de 512KB';
+			return;
+		}
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			const base64 = reader.result as string;
+			favicon = base64;
+			faviconPreview = base64;
+		};
+		reader.readAsDataURL(file);
+	}
+
+	async function handleFaviconSave() {
+		faviconSaving = true;
+		faviconError = null;
+		try {
+			await updateTenantSettings({
+				name,
+				slug,
+				favicon
+			});
+			toast.success('Favicon-ul a fost actualizat');
+		} catch (e) {
+			faviconError = e instanceof Error ? e.message : 'Eroare la salvarea favicon-ului';
+		} finally {
+			faviconSaving = false;
+		}
+	}
+
+	function removeFavicon() {
+		favicon = null;
+		faviconPreview = null;
 	}
 
 	async function handleSubmit() {
@@ -507,6 +565,65 @@
 				/>
 				<span class="text-xs text-muted-foreground">Culoare custom</span>
 			</div>
+		</CardContent>
+	</Card>
+
+	<Card>
+		<CardHeader>
+			<div class="flex items-center gap-3">
+				<ImageIcon class="h-5 w-5 text-muted-foreground" />
+				<div>
+					<CardTitle>Favicon</CardTitle>
+					<CardDescription>Iconița afișată în tab-ul browserului. Format recomandat: PNG sau ICO, 32x32px.</CardDescription>
+				</div>
+			</div>
+		</CardHeader>
+		<CardContent class="space-y-4">
+			<div class="flex items-center gap-4">
+				<div class="h-16 w-16 shrink-0 flex items-center justify-center rounded-lg border-2 border-dashed bg-muted/30 overflow-hidden">
+					{#if faviconPreview}
+						<img src={faviconPreview} alt="Favicon preview" class="h-10 w-10 object-contain" />
+					{:else}
+						<ImageIcon class="h-6 w-6 text-muted-foreground" />
+					{/if}
+				</div>
+				<div class="flex flex-col gap-2">
+					<div class="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => { document.getElementById('favicon-input')?.click(); }}
+						>
+							<UploadIcon class="h-3.5 w-3.5 mr-1.5" />
+							{faviconPreview ? 'Schimbă' : 'Încarcă'}
+						</Button>
+						{#if faviconPreview}
+							<Button variant="ghost" size="sm" onclick={removeFavicon}>
+								<TrashIcon class="h-3.5 w-3.5 mr-1.5" />
+								Șterge
+							</Button>
+						{/if}
+					</div>
+					<p class="text-xs text-muted-foreground">PNG, ICO, SVG, max 512KB</p>
+				</div>
+				<input
+					id="favicon-input"
+					type="file"
+					accept="image/png,image/x-icon,image/svg+xml,image/ico,image/jpeg,image/gif,image/webp"
+					class="hidden"
+					onchange={handleFaviconSelect}
+				/>
+			</div>
+			{#if faviconError}
+				<div class="rounded-md bg-red-50 p-3">
+					<p class="text-sm text-red-800">{faviconError}</p>
+				</div>
+			{/if}
+			{#if favicon !== (data.tenant?.favicon || null)}
+				<Button size="sm" onclick={handleFaviconSave} disabled={faviconSaving}>
+					{faviconSaving ? 'Se salvează...' : 'Salvează Favicon'}
+				</Button>
+			{/if}
 		</CardContent>
 	</Card>
 
