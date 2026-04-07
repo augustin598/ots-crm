@@ -2,7 +2,8 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { syncKeezInvoicesForTenant } from '../../plugins/keez/sync';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { KeezCredentialsCorruptError } from '../../plugins/keez/factory';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
  * Process Keez invoice sync - finds all tenants with active Keez integrations
@@ -49,6 +50,20 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 
 				logInfo('scheduler', `Keez invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors } });
 			} catch (error) {
+				// Credentials corrupt — deactivate integration to stop spamming logs.
+				// User will see "reconnect" prompt in Settings and can re-save credentials.
+				if (error instanceof KeezCredentialsCorruptError) {
+					logWarning('scheduler', `Keez invoice sync: credentials corrupt — deactivating integration until user re-saves`, {
+						tenantId: integration.tenantId,
+						metadata: { action: 'auto_deactivate_corrupt_credentials' }
+					});
+					await db
+						.update(table.keezIntegration)
+						.set({ isActive: false, updatedAt: new Date() })
+						.where(eq(table.keezIntegration.tenantId, integration.tenantId));
+					continue;
+				}
+
 				const { message, stack } = serializeError(error);
 				logError('scheduler', `Keez invoice sync: error syncing invoices: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
 				errors.push({ tenantId: integration.tenantId, error: message });
