@@ -391,7 +391,9 @@ export const deleteMarketingMaterial = command(
 	}
 );
 
-export const getMaterialDownloadUrl = query(
+// NOTE: command() (not query()) — presigned URLs must NEVER be cached.
+// query() caches per-argument and would return expired URLs on subsequent clicks.
+export const getMaterialDownloadUrl = command(
 	v.pipe(v.string(), v.minLength(1)),
 	async (materialId) => {
 		const event = getRequestEvent();
@@ -431,7 +433,8 @@ export const getMaterialDownloadUrl = query(
 	}
 );
 
-export const getMaterialPreviewUrl = query(
+// NOTE: command() (not query()) — presigned URLs must NEVER be cached.
+export const getMaterialPreviewUrl = command(
 	v.pipe(v.string(), v.minLength(1)),
 	async (materialId) => {
 		const event = getRequestEvent();
@@ -531,7 +534,8 @@ export const getMaterialTextContent = query(
 	}
 );
 
-export const getMaterialAttachedImageUrl = query(
+// NOTE: command() (not query()) — presigned URLs must NEVER be cached.
+export const getMaterialAttachedImageUrl = command(
 	v.object({
 		materialId: v.pipe(v.string(), v.minLength(1)),
 		imageIndex: v.pipe(v.number(), v.minValue(0), v.maxValue(2))
