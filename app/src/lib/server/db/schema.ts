@@ -2899,6 +2899,7 @@ export const emailLog = sqliteTable('email_log', {
 	completedAt: timestamp('completed_at'),
 	metadata: text('metadata'), // JSON string
 	htmlBody: text('html_body'),
+	payload: text('payload'), // JSON: { sendFn: string; args: unknown[] } — used to replay the original send call on retry
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
 });

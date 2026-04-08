@@ -18,6 +18,7 @@ import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
+import { processEmailRetry } from './tasks/email-retry';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -25,10 +26,21 @@ import { sql } from 'drizzle-orm';
 
 const REDIS_URL = env.REDIS_URL || 'redis://localhost:6379';
 
+const parsedRedisUrl = new URL(REDIS_URL);
+// Guard: 0.0.0.0 is a listen-wildcard, not a connection address. Rewrite to 127.0.0.1
+// to prevent ECONNREFUSED loops if a stale env var leaks into a deployment.
+let redisHost = parsedRedisUrl.hostname;
+if (redisHost === '0.0.0.0') {
+	logWarning('scheduler', 'REDIS_URL contained 0.0.0.0, rewriting to 127.0.0.1', {
+		metadata: { original: REDIS_URL }
+	});
+	redisHost = '127.0.0.1';
+}
+
 const connection = {
-	host: new URL(REDIS_URL).hostname,
-	port: parseInt(new URL(REDIS_URL).port, 10),
-	password: new URL(REDIS_URL).password || undefined
+	host: redisHost,
+	port: parseInt(parsedRedisUrl.port, 10),
+	password: parsedRedisUrl.password || undefined
 };
 
 // Use a global symbol to store the scheduler queue instance
@@ -88,7 +100,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
-	pdf_report_send: processPdfReportSend
+	pdf_report_send: processPdfReportSend,
+	email_retry: processEmailRetry
 };
 
 /**
@@ -164,7 +177,7 @@ export const startScheduler = async () => {
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup',
-		'db-write-health-check', 'pdf-report-send'
+		'db-write-health-check', 'pdf-report-send', 'email-retry'
 	]);
 
 	try {
@@ -501,6 +514,24 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Email retry — every 15 minutes. Drains failed email_log rows that have a payload
+	// (set by sendWithPersistence) and replays them via the original send function.
+	// After admin re-saves SMTP password, this is what auto-recovers vanished emails.
+	await schedulerQueue.add(
+		'email-retry',
+		{
+			type: 'email_retry',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '*/15 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'email-retry'
+		}
+	);
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -534,7 +565,8 @@ export const JOB_LABELS: Record<string, string> = {
 	token_refresh_daily: 'Refresh Token-uri (Meta/TikTok)',
 	debug_log_cleanup: 'Cleanup Loguri Debug',
 	db_write_health_check: 'Health Check Scriere DB',
-	pdf_report_send: 'Trimitere Rapoarte PDF'
+	pdf_report_send: 'Trimitere Rapoarte PDF',
+	email_retry: 'Retry Emailuri Eșuate'
 };
 
 /** Default params for jobs that need specific parameters */

@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNotNull } from 'drizzle-orm';
 import {
 	sendInvoiceEmail,
 	sendInvoicePaidEmail,
@@ -10,7 +10,9 @@ import {
 	sendTaskAssignmentEmail,
 	sendTaskUpdateEmail,
 	sendTaskClientNotificationEmail,
-	sendTaskReminderEmail
+	sendTaskReminderEmail,
+	EMAIL_SEND_REGISTRY,
+	clearTenantTransporterCache
 } from '$lib/server/email';
 
 export const getEmailLogs = query(async () => {
@@ -40,7 +42,8 @@ export const getEmailLogs = query(async () => {
 			metadata: table.emailLog.metadata,
 			createdAt: table.emailLog.createdAt,
 			updatedAt: table.emailLog.updatedAt,
-			hasHtmlBody: sql<boolean>`(${table.emailLog.htmlBody} IS NOT NULL)`.as('has_html_body')
+			hasHtmlBody: sql<boolean>`(${table.emailLog.htmlBody} IS NOT NULL)`.as('has_html_body'),
+			hasPayload: sql<boolean>`(${table.emailLog.payload} IS NOT NULL)`.as('has_payload')
 		})
 		.from(table.emailLog)
 		.where(eq(table.emailLog.tenantId, event.locals.tenant.id))
@@ -109,7 +112,11 @@ export const deleteAllEmailLogs = command(async () => {
 	return { success: true };
 });
 
-const RETRYABLE_EMAIL_TYPES = new Set([
+/**
+ * Legacy retry path for `email_log` rows created before the `payload` column existed.
+ * New rows use the payload-based dispatcher (see `dispatchPayloadRetry`).
+ */
+const LEGACY_RETRYABLE_EMAIL_TYPES = new Set([
 	'invoice',
 	'invoice-paid',
 	'invoice-overdue-reminder',
@@ -119,32 +126,11 @@ const RETRYABLE_EMAIL_TYPES = new Set([
 	'task-reminder'
 ]);
 
-export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (logId) => {
-	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+async function dispatchLegacyRetry(log: typeof table.emailLog.$inferSelect): Promise<void> {
+	if (!LEGACY_RETRYABLE_EMAIL_TYPES.has(log.emailType)) {
+		throw new Error('Acest tip de email nu poate fi retrimis automat (rând legacy fără payload)');
 	}
-	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
-		throw new Error('Forbidden: Admin access required');
-	}
-
-	const [log] = await db
-		.select()
-		.from(table.emailLog)
-		.where(and(eq(table.emailLog.id, logId), eq(table.emailLog.tenantId, event.locals.tenant.id)))
-		.limit(1);
-
-	if (!log) throw new Error('Log not found');
-	if (log.status !== 'failed') throw new Error('Doar emailurile esuate pot fi retrimise');
-	if (!RETRYABLE_EMAIL_TYPES.has(log.emailType)) {
-		throw new Error('Acest tip de email nu poate fi retrimis automat');
-	}
-
 	const metadata = log.metadata ? JSON.parse(log.metadata) : {};
-
-	// Delete the old failed log entry before retrying — the send function creates a new log
-	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
-
 	switch (log.emailType) {
 		case 'invoice':
 			await sendInvoiceEmail(metadata.invoiceId, log.toEmail);
@@ -183,6 +169,99 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 			await sendTaskReminderEmail(metadata.taskId, log.toEmail);
 			break;
 	}
+}
+
+/**
+ * Payload-based retry — works for any email type that uses `sendWithPersistence` with
+ * a non-null payload. Auto-covers new email types without needing changes here.
+ */
+async function dispatchPayloadRetry(log: typeof table.emailLog.$inferSelect): Promise<void> {
+	const parsed = JSON.parse(log.payload!) as { sendFn: string; args: unknown[] };
+	const handler = EMAIL_SEND_REGISTRY[parsed.sendFn];
+	if (!handler) {
+		throw new Error(`Handler necunoscut: ${parsed.sendFn}`);
+	}
+	await handler(...parsed.args);
+}
+
+export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (logId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+		throw new Error('Forbidden: Admin access required');
+	}
+
+	const [log] = await db
+		.select()
+		.from(table.emailLog)
+		.where(and(eq(table.emailLog.id, logId), eq(table.emailLog.tenantId, event.locals.tenant.id)))
+		.limit(1);
+
+	if (!log) throw new Error('Log not found');
+	if (log.status !== 'failed') throw new Error('Doar emailurile esuate pot fi retrimise');
+
+	// Force fresh decryption — admin may have just re-saved SMTP password.
+	if (log.tenantId) {
+		clearTenantTransporterCache(log.tenantId);
+	}
+
+	// Delete the old failed log entry first — the send function creates a new log via
+	// sendWithPersistence (or via the legacy code path).
+	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
+
+	if (log.payload) {
+		await dispatchPayloadRetry(log);
+	} else {
+		await dispatchLegacyRetry(log);
+	}
 
 	return { success: true };
+});
+
+/**
+ * Bulk retry: replay every failed email for the current tenant that has a payload.
+ * Useful after re-saving SMTP password to recover all vanished emails in one click.
+ */
+export const retryAllFailedEmails = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+		throw new Error('Forbidden: Admin access required');
+	}
+
+	const tenantId = event.locals.tenant.id;
+
+	// Force fresh decryption once for the tenant.
+	clearTenantTransporterCache(tenantId);
+
+	const rows = await db
+		.select()
+		.from(table.emailLog)
+		.where(
+			and(
+				eq(table.emailLog.tenantId, tenantId),
+				eq(table.emailLog.status, 'failed'),
+				isNotNull(table.emailLog.payload)
+			)
+		);
+
+	let processed = 0;
+	let recovered = 0;
+
+	for (const row of rows) {
+		processed++;
+		try {
+			await db.delete(table.emailLog).where(eq(table.emailLog.id, row.id));
+			await dispatchPayloadRetry(row);
+			recovered++;
+		} catch {
+			// New row already records the new failure; nothing else to do.
+		}
+	}
+
+	return { processed, recovered };
 });

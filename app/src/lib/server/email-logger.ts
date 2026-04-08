@@ -29,6 +29,7 @@ export async function logEmailAttempt(params: {
 	emailType: EmailType;
 	metadata?: Record<string, unknown>;
 	htmlBody?: string;
+	payload?: { sendFn: string; args: unknown[] } | null;
 }): Promise<string> {
 	const id = generateId();
 	try {
@@ -43,6 +44,7 @@ export async function logEmailAttempt(params: {
 			maxAttempts: 3,
 			metadata: params.metadata ? JSON.stringify(params.metadata) : null,
 			htmlBody: params.htmlBody ?? null,
+			payload: params.payload ? JSON.stringify(params.payload) : null,
 			createdAt: new Date(),
 			updatedAt: new Date()
 		});

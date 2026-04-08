@@ -4,7 +4,8 @@
 		getEmailLogStats,
 		deleteEmailLog,
 		deleteAllEmailLogs,
-		retryEmailLog
+		retryEmailLog,
+		retryAllFailedEmails
 	} from '$lib/remotes/email-logs.remote';
 	import {
 		getDebugLogs,
@@ -350,6 +351,31 @@
 		}
 	}
 
+	let retryingAll = $state(false);
+
+	async function handleRetryAllFailedEmails() {
+		if (
+			!confirm(
+				'Reincearca trimiterea pentru toate emailurile esuate? (Ruleaza dupa ce ai re-salvat parola SMTP)'
+			)
+		)
+			return;
+		retryingAll = true;
+		try {
+			const result = await retryAllFailedEmails().updates(emailLogsQuery, emailStatsQuery);
+			toast.success(
+				`Procesate ${result.processed}, recuperate ${result.recovered}` +
+					(result.processed > result.recovered
+						? ` (${result.processed - result.recovered} esuate din nou — vezi loguri)`
+						: '')
+			);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la retrimitere');
+		} finally {
+			retryingAll = false;
+		}
+	}
+
 	async function handleDeleteDebugLog(id: string) {
 		if (!confirm('Sigur doriti sa stergeti acest log?')) return;
 		try {
@@ -595,6 +621,16 @@
 						<span class="text-sm text-muted-foreground">
 							{filteredEmailLogs.length} log-uri{emailStatusFilter ? ` (${emailStatusLabel(emailStatusFilter).toLowerCase()})` : ''}
 						</span>
+						<Button
+							variant="outline"
+							size="sm"
+							title="Reincearca toate emailurile esuate"
+							onclick={handleRetryAllFailedEmails}
+							disabled={retryingAll || emailStats.failed === 0}
+						>
+							<RotateCcwIcon class="h-4 w-4 {retryingAll ? 'animate-spin' : ''}" />
+							<span class="ml-1 hidden sm:inline">Reincearca toate ({emailStats.failed})</span>
+						</Button>
 						<Button variant="outline" size="sm" onclick={handleDeleteAllEmailLogs} disabled={allEmailLogs.length === 0}>
 							<Trash2Icon class="h-4 w-4" />
 						</Button>

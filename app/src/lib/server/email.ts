@@ -298,9 +298,17 @@ async function sendMailWithRetry(
 
 			if (attempt < maxAttempts) {
 				// Clear cached transporter and get fresh one
-				clearTenantTransporterCache(tenantId);
-				const freshTransporter = await getTenantTransporter(tenantId);
-				if (freshTransporter) {
+				if (tenantId) {
+					clearTenantTransporterCache(tenantId);
+					const freshTransporter = await getTenantTransporter(tenantId);
+					if (!freshTransporter) {
+						// Transporter became unavailable mid-retry (e.g. SMTP password rotated or
+						// decryption now fails). Don't keep using the stale one — surface the failure.
+						lastError = new Error(
+							'Transporter SMTP indisponibil pe retry — decriptarea parolei SMTP a eșuat. Re-salvează parola SMTP în Setări.'
+						);
+						break;
+					}
 					transporter = freshTransporter;
 				}
 				await logEmailRetry(logId, attempt, lastError.message);
@@ -321,6 +329,114 @@ function getTransporter(): nodemailer.Transporter {
 	return getDefaultTransporter();
 }
 
+// ---------------------------------------------------------------------------
+// Persistent send helper — DB-backed outbox pattern
+// ---------------------------------------------------------------------------
+
+type EmailType =
+	| 'invitation'
+	| 'invoice'
+	| 'magic-link'
+	| 'admin-magic-link'
+	| 'password-reset'
+	| 'task-assignment'
+	| 'task-update'
+	| 'task-reminder'
+	| 'task-client-notification'
+	| 'daily-reminder'
+	| 'contract-signing'
+	| 'invoice-paid'
+	| 'invoice-overdue-reminder';
+
+export type EmailSendContext = {
+	tenantId: string | null;
+	toEmail: string;
+	subject: string;
+	emailType: EmailType;
+	metadata: Record<string, unknown>;
+	htmlBody: string;
+	payload: { sendFn: string; args: unknown[] } | null;
+};
+
+/**
+ * Send an email with full DB-backed persistence.
+ *
+ * Critical invariant: **log first, send later**. The previous architecture checked the
+ * transporter before calling logEmailAttempt, so when SMTP password decryption failed
+ * the email vanished completely (no DB row, nothing to retry). This helper guarantees
+ * a row in `email_log` exists no matter what fails downstream.
+ *
+ * Failure modes captured by this helper:
+ *   1. getTenantTransporter returns null (decryption failed / SMTP disabled) → status='failed'
+ *   2. buildMail() throws (template/data error) → status='failed'
+ *   3. SMTP transport error after retries → status='failed'
+ *
+ * On success → status='completed' with smtpMessageId/smtpResponse persisted.
+ *
+ * The optional `payload` field captures (sendFn, args) so the admin retry UI and the
+ * background `email_retry` scheduler task can replay the original send call after the
+ * underlying issue (e.g. SMTP password) is fixed.
+ */
+export async function sendWithPersistence(
+	ctx: EmailSendContext,
+	buildMail: () => Promise<nodemailer.SendMailOptions>
+): Promise<void> {
+	// STEP 1: Log BEFORE anything else can fail. Guarantees a DB row exists.
+	const logId = await logEmailAttempt({
+		tenantId: ctx.tenantId,
+		toEmail: ctx.toEmail,
+		subject: ctx.subject,
+		emailType: ctx.emailType,
+		metadata: ctx.metadata,
+		htmlBody: ctx.htmlBody,
+		payload: ctx.payload
+	});
+
+	// STEP 2: Get transporter. If null (decryption failed / SMTP disabled), mark failed.
+	const transporter = ctx.tenantId
+		? await getTenantTransporter(ctx.tenantId)
+		: getDefaultTransporter();
+	if (!transporter) {
+		const msg =
+			'Transporter SMTP indisponibil — decriptarea parolei SMTP a eșuat sau SMTP e dezactivat. Re-salvează parola SMTP în Setări.';
+		await logEmailFailure(logId, msg);
+		logError('email', msg, { tenantId: ctx.tenantId ?? undefined });
+		throw new Error(msg);
+	}
+
+	// STEP 3: Build mail options (may throw if template building fails).
+	let mailOptions: nodemailer.SendMailOptions;
+	try {
+		mailOptions = await buildMail();
+	} catch (err) {
+		const msg = `Eroare la construirea emailului: ${(err as Error).message}`;
+		await logEmailFailure(logId, msg);
+		logError('email', msg, {
+			tenantId: ctx.tenantId ?? undefined,
+			stackTrace: serializeError(err).stack
+		});
+		throw err;
+	}
+
+	// STEP 4: Mark processing, send with retry, record outcome.
+	try {
+		await logEmailProcessing(logId);
+		const info = await sendMailWithRetry(transporter, mailOptions, ctx.tenantId ?? '', logId);
+		await logEmailSuccess(logId, info);
+		logInfo('email', `Sent ${ctx.emailType}`, {
+			tenantId: ctx.tenantId ?? undefined,
+			metadata: { email: ctx.toEmail }
+		});
+	} catch (err) {
+		await logEmailFailure(logId, (err as Error).message);
+		logError('email', `Failed to send ${ctx.emailType}`, {
+			tenantId: ctx.tenantId ?? undefined,
+			stackTrace: serializeError(err).stack
+		});
+		throw err;
+	}
+}
+
 export async function sendInvitationEmail(
 	email: string,
 	invitationToken: string,
@@ -328,32 +444,10 @@ export async function sendInvitationEmail(
 	inviterName: string,
 	tenantId: string
 ): Promise<void> {
-	const transporter = await getTenantTransporter(tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
-
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, tenantId))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: email,
-		subject: `You've been invited to join ${tenantName}`,
-		html: `
+	const subject = `You've been invited to join ${tenantName}`;
+	const html = `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -377,40 +471,56 @@ export async function sendInvitationEmail(
 				</div>
 			</body>
 			</html>
-		`,
-		text: `
+		`;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: email,
+			subject,
+			emailType: 'invitation',
+			metadata: { invitationToken, tenantName, inviterName },
+			htmlBody: html,
+			payload: {
+				sendFn: 'sendInvitationEmail',
+				args: [email, invitationToken, tenantName, inviterName, tenantId]
+			}
+		},
+		async () => {
+			// Get tenant email settings to determine from email
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: email,
+				subject,
+				html,
+				text: `
 			You've been invited!
-			
+
 			${inviterName} has invited you to join ${tenantName} on the CRM platform.
-			
+
 			Accept the invitation by visiting this link:
 			${invitationUrl}
-			
+
 			This invitation will expire in 7 days.
-			
+
 			If you didn't expect this invitation, you can safely ignore this email.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId,
-		toEmail: email,
-		subject: mailOptions.subject,
-		emailType: 'invitation',
-		metadata: { invitationToken, tenantName },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Invitation email sent', { tenantId, metadata: { email } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send invitation email', { tenantId, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send invitation email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -419,7 +529,7 @@ export async function sendInvitationEmail(
 export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get invoice details
+	// Get invoice details (needed up-front for tenantId & subject)
 	const [invoice] = await db
 		.select()
 		.from(table.invoice)
@@ -430,113 +540,121 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		throw new Error('Invoice not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(invoice.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	// Get client details
-	const [client] = await db
-		.select()
-		.from(table.client)
-		.where(eq(table.client.id, invoice.clientId))
-		.limit(1);
-
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, invoice.tenantId))
-		.limit(1);
-
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-
-	// Generate public view token and URL (accessible without authentication)
-	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
-	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
-
-	// Get invoice settings for logo and PDF
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
-		.limit(1);
-
-	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
-
-	// Generate PDF attachment
-	const lineItems = await db
-		.select()
-		.from(table.invoiceLineItem)
-		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
-
-	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
-
-	let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
-	try {
-		const pdfBuffer = await generateInvoicePDF({
-			invoice,
-			lineItems,
-			tenant: tenant!,
-			client: client!,
-			displayInvoiceNumber,
-			invoiceLogo: invoiceSettings?.invoiceLogo || null
-		});
-		const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
-		pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
-	} catch (pdfError) {
-		logWarning('email', 'Could not generate PDF attachment for invoice email', {
+	await sendWithPersistence(
+		{
 			tenantId: invoice.tenantId,
-			metadata: { invoiceId, error: (pdfError as Error).message }
-		});
-	}
+			toEmail: clientEmail,
+			subject: `Factura ${invoice.invoiceNumber}`,
+			emailType: 'invoice',
+			metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendInvoiceEmail',
+				args: [invoiceId, clientEmail]
+			}
+		},
+		async () => {
+			// Get client details
+			const [client] = await db
+				.select()
+				.from(table.client)
+				.where(eq(table.client.id, invoice.clientId))
+				.limit(1);
 
-	// Format amounts
-	const formatAmount = (cents: number | null | undefined, currency: string) => {
-		if (cents === null || cents === undefined) return 'N/A';
-		const amount = (cents / 100).toFixed(2);
-		return `${amount} ${currency}`;
-	};
+			// Get tenant details
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, invoice.tenantId))
+				.limit(1);
 
-	// IBAN payment details
-	const ibanHtml = tenant?.iban
-		? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
+			// Get tenant email settings to determine from email
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+				.limit(1);
+
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+
+			// Generate public view token and URL (accessible without authentication)
+			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
+
+			// Get invoice settings for logo and PDF
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+				.limit(1);
+
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
+			// Generate PDF attachment
+			const lineItems = await db
+				.select()
+				.from(table.invoiceLineItem)
+				.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+			const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
+
+			let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
+			try {
+				const pdfBuffer = await generateInvoicePDF({
+					invoice,
+					lineItems,
+					tenant: tenant!,
+					client: client!,
+					displayInvoiceNumber,
+					invoiceLogo: invoiceSettings?.invoiceLogo || null
+				});
+				const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+				pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
+			} catch (pdfError) {
+				logWarning('email', 'Could not generate PDF attachment for invoice email', {
+					tenantId: invoice.tenantId,
+					metadata: { invoiceId, error: (pdfError as Error).message }
+				});
+			}
+
+			// Format amounts
+			const formatAmount = (cents: number | null | undefined, currency: string) => {
+				if (cents === null || cents === undefined) return 'N/A';
+				const amount = (cents / 100).toFixed(2);
+				return `${amount} ${currency}`;
+			};
+
+			// IBAN payment details
+			const ibanHtml = tenant?.iban
+				? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
 				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
 				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
 				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
 				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
 			</div>`
-		: '';
+				: '';
 
-	const ibanText = tenant?.iban
-		? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
-		: '';
+			const ibanText = tenant?.iban
+				? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
+				: '';
 
-	const attachments = [
-		...(pdfAttachment ? [pdfAttachment] : []),
-		...(logoAttachment ? [logoAttachment] : [])
-	];
+			const attachments = [
+				...(pdfAttachment ? [pdfAttachment] : []),
+				...(logoAttachment ? [logoAttachment] : [])
+			];
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: clientEmail,
-		subject: `Factura ${invoice.invoiceNumber} de la ${tenantName}`,
-		...(attachments.length > 0 ? { attachments } : {}),
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: clientEmail,
+				subject: `Factura ${invoice.invoiceNumber} de la ${tenantName}`,
+				...(attachments.length > 0 ? { attachments } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -568,7 +686,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Factura ${invoice.invoiceNumber}
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -586,27 +704,9 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 			Pentru intrebari, nu ezitati sa ne contactati.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: invoice.tenantId,
-		toEmail: clientEmail,
-		subject: mailOptions.subject,
-		emailType: 'invoice',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Invoice email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send invoice email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send invoice email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -631,33 +731,41 @@ export async function sendMagicLinkEmail(
 		throw new Error('Tenant not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(tenant.id);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, tenant.id))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
 	const tenantName = tenant.name || 'CRM';
 	const loginUrl = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(token)}`;
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: email,
-		subject: `Login to ${tenantName} Client Portal`,
-		html: `
+	await sendWithPersistence(
+		{
+			tenantId: tenant.id,
+			toEmail: email,
+			subject: `Login to ${tenantName} Client Portal`,
+			emailType: 'magic-link',
+			metadata: { tenantSlug, clientName },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendMagicLinkEmail',
+				args: [email, token, tenantSlug, clientName]
+			}
+		},
+		async () => {
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenant.id))
+				.limit(1);
+
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: email,
+				subject: `Login to ${tenantName} Client Portal`,
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -686,7 +794,7 @@ export async function sendMagicLinkEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Welcome to ${tenantName}
 
 			Dear ${clientName},
@@ -701,27 +809,9 @@ export async function sendMagicLinkEmail(
 
 			If you have any questions, please contact your administrator.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: tenant.id,
-		toEmail: email,
-		subject: mailOptions.subject,
-		emailType: 'magic-link',
-		metadata: { tenantSlug, clientName },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Magic link email sent', { tenantId: tenant.id, metadata: { email } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send magic link email', { tenantId: tenant.id, metadata: { email }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send magic link email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -733,19 +823,29 @@ export async function sendAdminMagicLinkEmail(
 	userName: string
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
-
-	// Use default transporter (not tenant-specific for admin login)
-	const transporter = getDefaultTransporter();
-
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
 	const appName = 'CRM Admin';
 	const loginUrl = `${baseUrl}/login/verify?token=${encodeURIComponent(token)}`;
 
-	const mailOptions = {
-		from: `"${appName}" <${fromEmail}>`,
-		to: email,
-		subject: `Login to ${appName}`,
-		html: `
+	await sendWithPersistence(
+		{
+			tenantId: null,
+			toEmail: email,
+			subject: `Login to ${appName}`,
+			emailType: 'admin-magic-link',
+			metadata: { userName },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendAdminMagicLinkEmail',
+				args: [email, token, userName]
+			}
+		},
+		async () => {
+			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+			return {
+				from: `"${appName}" <${fromEmail}>`,
+				to: email,
+				subject: `Login to ${appName}`,
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -774,7 +874,7 @@ export async function sendAdminMagicLinkEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Welcome to ${appName}
 
 			Dear ${userName},
@@ -789,27 +889,9 @@ export async function sendAdminMagicLinkEmail(
 
 			If you have any questions, please contact your administrator.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: null,
-		toEmail: email,
-		subject: mailOptions.subject,
-		emailType: 'admin-magic-link',
-		metadata: { userName },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Admin magic link email sent', { metadata: { email } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send admin magic link email', { metadata: { email }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send magic link email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -821,18 +903,29 @@ export async function sendPasswordResetEmail(
 	userName: string
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
-
-	const transporter = getDefaultTransporter();
-
-	const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
 	const appName = 'CRM Admin';
 	const resetUrl = `${baseUrl}/login/reset-password/${encodeURIComponent(token)}`;
 
-	const mailOptions = {
-		from: `"${appName}" <${fromEmail}>`,
-		to: email,
-		subject: `Reset your password - ${appName}`,
-		html: `
+	await sendWithPersistence(
+		{
+			tenantId: null,
+			toEmail: email,
+			subject: `Reset your password - ${appName}`,
+			emailType: 'password-reset',
+			metadata: { userName },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendPasswordResetEmail',
+				args: [email, token, userName]
+			}
+		},
+		async () => {
+			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+			return {
+				from: `"${appName}" <${fromEmail}>`,
+				to: email,
+				subject: `Reset your password - ${appName}`,
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -861,7 +954,7 @@ export async function sendPasswordResetEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Reset your password
 
 			Dear ${userName},
@@ -876,27 +969,9 @@ export async function sendPasswordResetEmail(
 
 			If you have any questions, please contact your administrator.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: null,
-		toEmail: email,
-		subject: mailOptions.subject,
-		emailType: 'password-reset',
-		metadata: { userName },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Password reset email sent', { metadata: { email } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send password reset email', { metadata: { email }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send password reset email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -909,64 +984,73 @@ export async function sendTaskAssignmentEmail(
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get task details
+	// Get task details (needed up-front for tenantId & subject)
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task) {
 		throw new Error('Task not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(task.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
+	await sendWithPersistence(
+		{
+			tenantId: task.tenantId,
+			toEmail: assigneeEmail,
+			subject: `New Task Assigned: ${task.title}`,
+			emailType: 'task-assignment',
+			metadata: { taskId, taskTitle: task.title },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendTaskAssignmentEmail',
+				args: [taskId, assigneeEmail, assigneeName]
+			}
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, task.tenantId))
+				.limit(1);
 
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, task.tenantId))
-		.limit(1);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, task.tenantId))
+				.limit(1);
 
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, task.tenantId))
-		.limit(1);
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+				.limit(1);
+			const { logoAttachment: assignLogoAttachment, logoHtml: assignLogoHtml } =
+				prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
-		.limit(1);
-	const { logoAttachment: assignLogoAttachment, logoHtml: assignLogoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+			const assignStatusColors = getEmailStatusColors(task.status);
+			const assignPriorityColors = getEmailPriorityColors(task.priority);
+			const assignStatusLabel = formatStatusLabel(task.status || 'todo');
+			const assignPriorityLabel = formatPriorityLabel(task.priority || 'medium');
+			const assignBadgeStyle =
+				'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+			const assignDotStyle = (color: string) =>
+				`display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+			const assignStatusBadge = `<span style="${assignBadgeStyle} background:${assignStatusColors.bg}; color:${assignStatusColors.text};"><span style="${assignDotStyle(assignStatusColors.dot)}"></span>${assignStatusLabel}</span>`;
+			const assignPriorityBadge = `<span style="${assignBadgeStyle} background:${assignPriorityColors.bg}; color:${assignPriorityColors.text};">${assignPriorityLabel}</span>`;
 
-	const assignStatusColors = getEmailStatusColors(task.status);
-	const assignPriorityColors = getEmailPriorityColors(task.priority);
-	const assignStatusLabel = formatStatusLabel(task.status || 'todo');
-	const assignPriorityLabel = formatPriorityLabel(task.priority || 'medium');
-	const assignBadgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
-	const assignDotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
-	const assignStatusBadge = `<span style="${assignBadgeStyle} background:${assignStatusColors.bg}; color:${assignStatusColors.text};"><span style="${assignDotStyle(assignStatusColors.dot)}"></span>${assignStatusLabel}</span>`;
-	const assignPriorityBadge = `<span style="${assignBadgeStyle} background:${assignPriorityColors.bg}; color:${assignPriorityColors.text};">${assignPriorityLabel}</span>`;
-
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: assigneeEmail,
-		subject: `New Task Assigned: ${task.title}`,
-		...(assignLogoAttachment ? { attachments: [assignLogoAttachment] } : {}),
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: assigneeEmail,
+				subject: `New Task Assigned: ${task.title}`,
+				...(assignLogoAttachment ? { attachments: [assignLogoAttachment] } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -995,7 +1079,7 @@ export async function sendTaskAssignmentEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Task Assigned to You
 
 			Hello ${assigneeName || 'there'},
@@ -1010,27 +1094,9 @@ export async function sendTaskAssignmentEmail(
 
 			View task: ${taskUrl}
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: task.tenantId,
-		toEmail: assigneeEmail,
-		subject: mailOptions.subject,
-		emailType: 'task-assignment',
-		metadata: { taskId, taskTitle: task.title },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Task assignment email sent', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send task assignment email', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send task assignment email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1044,73 +1110,81 @@ export async function sendTaskUpdateEmail(
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get task details
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task) {
 		throw new Error('Task not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(task.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
+	await sendWithPersistence(
+		{
+			tenantId: task.tenantId,
+			toEmail: watcherEmail,
+			subject: `Task Updated: ${task.title}`,
+			emailType: 'task-update',
+			metadata: { taskId, taskTitle: task.title, changeType },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendTaskUpdateEmail',
+				args: [taskId, watcherEmail, watcherName, changeType]
+			}
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, task.tenantId))
+				.limit(1);
 
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, task.tenantId))
-		.limit(1);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, task.tenantId))
+				.limit(1);
 
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, task.tenantId))
-		.limit(1);
+			const [updInvoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+				.limit(1);
+			const { logoAttachment: updLogoAttachment, logoHtml: updLogoHtml } =
+				prepareLogoAttachment(updInvoiceSettings?.invoiceLogo);
 
-	const [updInvoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
-		.limit(1);
-	const { logoAttachment: updLogoAttachment, logoHtml: updLogoHtml } = prepareLogoAttachment(updInvoiceSettings?.invoiceLogo);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+			const changeDescription =
+				changeType === 'status'
+					? 'status was updated'
+					: changeType === 'assigned'
+						? 'assignment was changed'
+						: changeType === 'dueDate'
+							? 'due date was updated'
+							: 'task was updated';
 
-	const changeDescription =
-		changeType === 'status'
-			? 'status was updated'
-			: changeType === 'assigned'
-				? 'assignment was changed'
-				: changeType === 'dueDate'
-					? 'due date was updated'
-					: 'task was updated';
+			const updStatusColors = getEmailStatusColors(task.status);
+			const updPriorityColors = getEmailPriorityColors(task.priority);
+			const updStatusLabel = formatStatusLabel(task.status || 'todo');
+			const updPriorityLabel = formatPriorityLabel(task.priority || 'medium');
+			const updBadgeStyle =
+				'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+			const updDotStyle = (color: string) =>
+				`display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+			const updStatusBadge = `<span style="${updBadgeStyle} background:${updStatusColors.bg}; color:${updStatusColors.text};"><span style="${updDotStyle(updStatusColors.dot)}"></span>${updStatusLabel}</span>`;
+			const updPriorityBadge = `<span style="${updBadgeStyle} background:${updPriorityColors.bg}; color:${updPriorityColors.text};">${updPriorityLabel}</span>`;
 
-	const updStatusColors = getEmailStatusColors(task.status);
-	const updPriorityColors = getEmailPriorityColors(task.priority);
-	const updStatusLabel = formatStatusLabel(task.status || 'todo');
-	const updPriorityLabel = formatPriorityLabel(task.priority || 'medium');
-	const updBadgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
-	const updDotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
-	const updStatusBadge = `<span style="${updBadgeStyle} background:${updStatusColors.bg}; color:${updStatusColors.text};"><span style="${updDotStyle(updStatusColors.dot)}"></span>${updStatusLabel}</span>`;
-	const updPriorityBadge = `<span style="${updBadgeStyle} background:${updPriorityColors.bg}; color:${updPriorityColors.text};">${updPriorityLabel}</span>`;
-
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: watcherEmail,
-		subject: `Task Updated: ${task.title}`,
-		...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: watcherEmail,
+				subject: `Task Updated: ${task.title}`,
+				...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1140,7 +1214,7 @@ export async function sendTaskUpdateEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Task Updated
 
 			Hello ${watcherName || 'there'},
@@ -1157,27 +1231,9 @@ export async function sendTaskUpdateEmail(
 
 			View task: ${taskUrl}
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: task.tenantId,
-		toEmail: watcherEmail,
-		subject: mailOptions.subject,
-		emailType: 'task-update',
-		metadata: { taskId, taskTitle: task.title, changeType },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Task update email sent', { tenantId: task.tenantId, metadata: { email: watcherEmail, taskId } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send task update email', { tenantId: task.tenantId, metadata: { email: watcherEmail, taskId }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send task update email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1197,96 +1253,125 @@ export async function sendTaskClientNotificationEmail(
 		throw new Error('Task not found');
 	}
 
-	const transporter = await getTenantTransporter(task.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, task.tenantId))
-		.limit(1);
-
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, task.tenantId))
-		.limit(1);
-
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, task.tenantId))
-		.limit(1);
-	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
-
-	// Subject and description based on notification type
-	let subject: string;
-	let changeDescription: string;
-	let headerColor = '#2563eb';
-
+	// Pre-compute the log subject (one of 4 forms based on notificationType)
+	let logSubject: string;
 	switch (notificationType) {
 		case 'created':
-			subject = `Task nou: ${task.title}`;
-			changeDescription = 'Un task nou a fost creat pentru dumneavoastră.';
+			logSubject = `Task nou: ${task.title}`;
 			break;
-		case 'status-change': {
-			const statusLabels: Record<string, string> = {
-				'todo': 'De făcut',
-				'in-progress': 'În lucru',
-				'review': 'În review',
-				'done': 'Finalizat',
-				'cancelled': 'Anulat',
-				'pending-approval': 'Așteaptă aprobare'
-			};
-			const statusLabel = statusLabels[extra?.newStatus || task.status] || extra?.newStatus || task.status;
-			subject = `Task actualizat: ${task.title} — ${statusLabel}`;
-			changeDescription = `Statusul taskului a fost schimbat în: <strong>${statusLabel}</strong>.`;
-			if (extra?.newStatus === 'done') headerColor = '#16a34a';
-			if (extra?.newStatus === 'cancelled') headerColor = '#dc2626';
+		case 'status-change':
+			logSubject = `Task actualizat: ${task.title}`;
 			break;
-		}
 		case 'comment':
-			subject = `Comentariu nou pe task: ${task.title}`;
-			changeDescription = extra?.commentPreview
-				? `Un comentariu nou a fost adăugat: "${extra.commentPreview.substring(0, 200)}${extra.commentPreview.length > 200 ? '...' : ''}"`
-				: 'Un comentariu nou a fost adăugat pe task.';
+			logSubject = `Comentariu nou pe task: ${task.title}`;
 			break;
 		case 'modified':
-			subject = `Task modificat: ${task.title}`;
-			changeDescription = extra?.changedFields
-				? `Următoarele câmpuri au fost modificate: ${extra.changedFields}.`
-				: 'Taskul a fost modificat.';
+			logSubject = `Task modificat: ${task.title}`;
 			break;
 	}
 
-	const statusColors = getEmailStatusColors(task.status);
-	const priorityColors = getEmailPriorityColors(task.priority);
-	const statusLabel = formatStatusLabel(task.status || 'todo');
-	const priorityLabel = formatPriorityLabel(task.priority || 'medium');
+	await sendWithPersistence(
+		{
+			tenantId: task.tenantId,
+			toEmail: clientEmail,
+			subject: logSubject,
+			emailType: 'task-client-notification',
+			metadata: { taskId, taskTitle: task.title, notificationType, ...extra },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendTaskClientNotificationEmail',
+				args: [taskId, clientEmail, clientName, notificationType, extra]
+			}
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, task.tenantId))
+				.limit(1);
 
-	const badgeStyle = 'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
-	const dotStyle = (color: string) => `display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, task.tenantId))
+				.limit(1);
 
-	const statusBadge = `<span style="${badgeStyle} background:${statusColors.bg}; color:${statusColors.text};"><span style="${dotStyle(statusColors.dot)}"></span>${statusLabel}</span>`;
-	const priorityBadge = `<span style="${badgeStyle} background:${priorityColors.bg}; color:${priorityColors.text};">${priorityLabel}</span>`;
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
+				.limit(1);
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: clientEmail,
-		subject,
-		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-		html: `
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+
+			// Full subject + description based on notification type
+			let subject: string;
+			let changeDescription: string;
+			let headerColor = '#2563eb';
+
+			switch (notificationType) {
+				case 'created':
+					subject = `Task nou: ${task.title}`;
+					changeDescription = 'Un task nou a fost creat pentru dumneavoastră.';
+					break;
+				case 'status-change': {
+					const statusLabels: Record<string, string> = {
+						todo: 'De făcut',
+						'in-progress': 'În lucru',
+						review: 'În review',
+						done: 'Finalizat',
+						cancelled: 'Anulat',
+						'pending-approval': 'Așteaptă aprobare'
+					};
+					const statusLabel =
+						statusLabels[extra?.newStatus || task.status] || extra?.newStatus || task.status;
+					subject = `Task actualizat: ${task.title} — ${statusLabel}`;
+					changeDescription = `Statusul taskului a fost schimbat în: <strong>${statusLabel}</strong>.`;
+					if (extra?.newStatus === 'done') headerColor = '#16a34a';
+					if (extra?.newStatus === 'cancelled') headerColor = '#dc2626';
+					break;
+				}
+				case 'comment':
+					subject = `Comentariu nou pe task: ${task.title}`;
+					changeDescription = extra?.commentPreview
+						? `Un comentariu nou a fost adăugat: "${extra.commentPreview.substring(0, 200)}${extra.commentPreview.length > 200 ? '...' : ''}"`
+						: 'Un comentariu nou a fost adăugat pe task.';
+					break;
+				case 'modified':
+					subject = `Task modificat: ${task.title}`;
+					changeDescription = extra?.changedFields
+						? `Următoarele câmpuri au fost modificate: ${extra.changedFields}.`
+						: 'Taskul a fost modificat.';
+					break;
+			}
+
+			const statusColors = getEmailStatusColors(task.status);
+			const priorityColors = getEmailPriorityColors(task.priority);
+			const statusLabel = formatStatusLabel(task.status || 'todo');
+			const priorityLabel = formatPriorityLabel(task.priority || 'medium');
+
+			const badgeStyle =
+				'display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600;';
+			const dotStyle = (color: string) =>
+				`display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:6px; vertical-align:middle;`;
+
+			const statusBadge = `<span style="${badgeStyle} background:${statusColors.bg}; color:${statusColors.text};"><span style="${dotStyle(statusColors.dot)}"></span>${statusLabel}</span>`;
+			const priorityBadge = `<span style="${badgeStyle} background:${priorityColors.bg}; color:${priorityColors.text};">${priorityLabel}</span>`;
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: clientEmail,
+				subject,
+				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1315,7 +1400,7 @@ export async function sendTaskClientNotificationEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 ${subject}
 
 Bună ${clientName || 'ziua'},
@@ -1330,28 +1415,9 @@ ${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
 
 Vezi task: ${taskUrl}
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: task.tenantId,
-		toEmail: clientEmail,
-		subject: mailOptions.subject,
-		emailType: 'task-client-notification',
-		metadata: { taskId, taskTitle: task.title, notificationType, ...extra },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		logInfo('email', `Sending task client ${notificationType} notification`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId } });
-		const info = await sendMailWithRetry(transporter, mailOptions, task.tenantId, logId);
-		await logEmailSuccess(logId, info);
-		logInfo('email', `Task client ${notificationType} notification sent`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', `Failed to send task client ${notificationType} notification`, { tenantId: task.tenantId, metadata: { email: clientEmail, taskId }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send task client notification email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1360,7 +1426,6 @@ Vezi task: ${taskUrl}
 export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: string): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get invoice details
 	const [invoice] = await db
 		.select()
 		.from(table.invoice)
@@ -1371,67 +1436,69 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 		throw new Error('Invoice not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(invoice.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
+	await sendWithPersistence(
+		{
+			tenantId: invoice.tenantId,
+			toEmail: clientEmail,
+			subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
+			emailType: 'invoice-paid',
+			metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendInvoicePaidEmail',
+				args: [invoiceId, clientEmail]
+			}
+		},
+		async () => {
+			const [client] = await db
+				.select()
+				.from(table.client)
+				.where(eq(table.client.id, invoice.clientId))
+				.limit(1);
 
-	// Get client details
-	const [client] = await db
-		.select()
-		.from(table.client)
-		.where(eq(table.client.id, invoice.clientId))
-		.limit(1);
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, invoice.tenantId))
+				.limit(1);
 
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, invoice.tenantId))
-		.limit(1);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+				.limit(1);
 
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
-		.limit(1);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
 
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
+			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
 
-	// Generate public view token and URL (accessible without authentication)
-	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
-	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+				.limit(1);
 
-	// Get invoice settings for logo
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
-		.limit(1);
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
-	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const formatAmount = (cents: number | null | undefined, currency: string) => {
+				if (cents === null || cents === undefined) return 'N/A';
+				const amount = (cents / 100).toFixed(2);
+				return `${amount} ${currency}`;
+			};
 
-	// Format amounts
-	const formatAmount = (cents: number | null | undefined, currency: string) => {
-		if (cents === null || cents === undefined) return 'N/A';
-		const amount = (cents / 100).toFixed(2);
-		return `${amount} ${currency}`;
-	};
-
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: clientEmail,
-		subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
-		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: clientEmail,
+				subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
+				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1460,7 +1527,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Plata primita
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -1478,27 +1545,9 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 
 			Pentru intrebari, nu ezitati sa ne contactati.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: invoice.tenantId,
-		toEmail: clientEmail,
-		subject: mailOptions.subject,
-		emailType: 'invoice-paid',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Invoice paid email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send invoice paid email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send invoice paid email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1512,7 +1561,6 @@ export async function sendOverdueReminderEmail(
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get invoice details
 	const [invoice] = await db
 		.select()
 		.from(table.invoice)
@@ -1523,116 +1571,115 @@ export async function sendOverdueReminderEmail(
 		throw new Error('Invoice not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(invoice.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	// Get client details
-	const [client] = await db
-		.select()
-		.from(table.client)
-		.where(eq(table.client.id, invoice.clientId))
-		.limit(1);
-
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, invoice.tenantId))
-		.limit(1);
-
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, invoice.tenantId))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-
-	// Generate public view token and URL
-	const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
-	const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
-
-	// Get invoice settings for PDF generation
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
-		.limit(1);
-
-	// Generate PDF attachment
-	const lineItems = await db
-		.select()
-		.from(table.invoiceLineItem)
-		.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
-
-	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
-
-	let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
-	try {
-		const pdfBuffer = await generateInvoicePDF({
-			invoice,
-			lineItems,
-			tenant: tenant!,
-			client: client!,
-			displayInvoiceNumber,
-			invoiceLogo: invoiceSettings?.invoiceLogo || null
-		});
-		const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
-		pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
-	} catch (pdfError) {
-		logWarning('email', 'Could not generate PDF attachment for overdue reminder', {
+	await sendWithPersistence(
+		{
 			tenantId: invoice.tenantId,
-			metadata: { invoiceId, error: (pdfError as Error).message }
-		});
-	}
+			toEmail: clientEmail,
+			subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
+			emailType: 'invoice-overdue-reminder',
+			metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendOverdueReminderEmail',
+				args: [invoiceId, clientEmail, daysOverdue, reminderNumber]
+			}
+		},
+		async () => {
+			const [client] = await db
+				.select()
+				.from(table.client)
+				.where(eq(table.client.id, invoice.clientId))
+				.limit(1);
 
-	// Format amounts
-	const formatAmount = (cents: number | null | undefined, currency: string) => {
-		if (cents === null || cents === undefined) return 'N/A';
-		const amount = (cents / 100).toFixed(2);
-		return `${amount} ${currency}`;
-	};
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, invoice.tenantId))
+				.limit(1);
 
-	const dueDateStr = formatDateRo(invoice.dueDate);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
+				.limit(1);
 
-	// Prepare logo
-	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
 
-	// IBAN payment details
-	const ibanHtml = tenant?.iban
-		? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
+			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
+			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
+
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
+				.limit(1);
+
+			const lineItems = await db
+				.select()
+				.from(table.invoiceLineItem)
+				.where(eq(table.invoiceLineItem.invoiceId, invoiceId));
+
+			const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
+
+			let pdfAttachment: { filename: string; content: Buffer; contentType: string } | undefined;
+			try {
+				const pdfBuffer = await generateInvoicePDF({
+					invoice,
+					lineItems,
+					tenant: tenant!,
+					client: client!,
+					displayInvoiceNumber,
+					invoiceLogo: invoiceSettings?.invoiceLogo || null
+				});
+				const safeFilename = `Factura-${displayInvoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+				pdfAttachment = { filename: safeFilename, content: pdfBuffer, contentType: 'application/pdf' };
+			} catch (pdfError) {
+				logWarning('email', 'Could not generate PDF attachment for overdue reminder', {
+					tenantId: invoice.tenantId,
+					metadata: { invoiceId, error: (pdfError as Error).message }
+				});
+			}
+
+			const formatAmount = (cents: number | null | undefined, currency: string) => {
+				if (cents === null || cents === undefined) return 'N/A';
+				const amount = (cents / 100).toFixed(2);
+				return `${amount} ${currency}`;
+			};
+
+			const dueDateStr = formatDateRo(invoice.dueDate);
+
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
+			const ibanHtml = tenant?.iban
+				? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
 				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
 				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
 				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
 				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
 			</div>`
-		: '';
+				: '';
 
-	const ibanText = tenant?.iban
-		? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
-		: '';
+			const ibanText = tenant?.iban
+				? `\n\t\t\tDate pentru plata:${tenant.bankName ? `\n\t\t\tBanca: ${tenant.bankName}` : ''}\n\t\t\tIBAN (LEI): ${tenant.iban}${tenant.ibanEuro ? `\n\t\t\tIBAN (EUR): ${tenant.ibanEuro}` : ''}\n`
+				: '';
 
-	const attachments = [
-		...(pdfAttachment ? [pdfAttachment] : []),
-		...(logoAttachment ? [logoAttachment] : [])
-	];
+			const attachments = [
+				...(pdfAttachment ? [pdfAttachment] : []),
+				...(logoAttachment ? [logoAttachment] : [])
+			];
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: clientEmail,
-		subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
-		...(attachments.length > 0 ? { attachments } : {}),
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: clientEmail,
+				subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
+				...(attachments.length > 0 ? { attachments } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1664,7 +1711,7 @@ export async function sendOverdueReminderEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Reminder plata factura
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -1684,27 +1731,9 @@ export async function sendOverdueReminderEmail(
 
 			Daca ati efectuat deja plata, va rugam sa ignorati acest email.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: invoice.tenantId,
-		toEmail: clientEmail,
-		subject: mailOptions.subject,
-		emailType: 'invoice-overdue-reminder',
-		metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await sendMailWithRetry(transporter, mailOptions, invoice.tenantId, logId);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Overdue reminder email sent', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber, daysOverdue, reminderNumber } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send overdue reminder email', { tenantId: invoice.tenantId, metadata: { email: clientEmail, invoiceNumber: invoice.invoiceNumber }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send overdue reminder email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1717,54 +1746,61 @@ export async function sendTaskReminderEmail(
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get task details
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
 	if (!task || !task.dueDate) {
 		throw new Error('Task not found or has no due date');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(task.tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, task.tenantId))
-		.limit(1);
-
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, task.tenantId))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-	const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
-
 	const dueDate = new Date(task.dueDate);
 	const now = new Date();
 	const isOverdue = dueDate < now;
 	const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: assigneeEmail,
-		subject: isOverdue
-			? `Overdue Task Reminder: ${task.title}`
-			: `Task Reminder: ${task.title} - Due ${daysUntilDue === 0 ? 'Today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}`,
-		html: `
+	await sendWithPersistence(
+		{
+			tenantId: task.tenantId,
+			toEmail: assigneeEmail,
+			subject: isOverdue
+				? `Overdue Task Reminder: ${task.title}`
+				: `Task Reminder: ${task.title} - Due ${daysUntilDue === 0 ? 'Today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}`,
+			emailType: 'task-reminder',
+			metadata: { taskId, taskTitle: task.title, isOverdue },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendTaskReminderEmail',
+				args: [taskId, assigneeEmail, assigneeName]
+			}
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, task.tenantId))
+				.limit(1);
+
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, task.tenantId))
+				.limit(1);
+
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: assigneeEmail,
+				subject: isOverdue
+					? `Overdue Task Reminder: ${task.title}`
+					: `Task Reminder: ${task.title} - Due ${daysUntilDue === 0 ? 'Today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}`,
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1791,7 +1827,7 @@ export async function sendTaskReminderEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			${isOverdue ? 'Overdue Task Reminder' : 'Task Reminder'}
 
 			Hello ${assigneeName || 'there'},
@@ -1806,27 +1842,9 @@ export async function sendTaskReminderEmail(
 
 			View task: ${taskUrl}
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: task.tenantId,
-		toEmail: assigneeEmail,
-		subject: mailOptions.subject,
-		emailType: 'task-reminder',
-		metadata: { taskId, taskTitle: task.title, isOverdue },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Task reminder email sent', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send task reminder email', { tenantId: task.tenantId, metadata: { email: assigneeEmail, taskId }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send task reminder email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -1840,65 +1858,68 @@ export async function sendDailyWorkReminderEmail(
 ): Promise<void> {
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
-	// Get user details
 	const [user] = await db.select().from(table.user).where(eq(table.user.id, userId)).limit(1);
 
 	if (!user?.email) {
 		throw new Error('User email not found');
 	}
 
-	// Get tenant-specific transporter
-	const transporter = await getTenantTransporter(tenantId);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: user.email,
+			subject: `Your Daily Work Plan - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} for today`,
+			emailType: 'daily-reminder',
+			metadata: { userName, taskCount: tasks.length },
+			htmlBody: '',
+			// payload: null — daily reminders are regenerated by the daily_work_reminders
+			// scheduler task on its next run, so retrying a stale one would re-email yesterday's
+			// list of tasks. Skip auto-retry; failure will be re-tried tomorrow morning.
+			payload: null
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, tenantId))
+				.limit(1);
 
-	// Get tenant details
-	const [tenant] = await db
-		.select()
-		.from(table.tenant)
-		.where(eq(table.tenant.id, tenantId))
-		.limit(1);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
 
-	// Get tenant email settings to determine from email
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, tenantId))
-		.limit(1);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
+			const tenantName = tenant?.name || 'CRM';
+			const myPlansUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/my-plans`;
 
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
-	const tenantName = tenant?.name || 'CRM';
-	const myPlansUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/my-plans`;
+			const getPriorityColor = (priority: string | null) => {
+				switch (priority) {
+					case 'urgent':
+						return '#dc2626';
+					case 'high':
+						return '#f59e0b';
+					case 'medium':
+						return '#2563eb';
+					case 'low':
+						return '#10b981';
+					default:
+						return '#6b7280';
+				}
+			};
 
-	// Format priority badge color
-	const getPriorityColor = (priority: string | null) => {
-		switch (priority) {
-			case 'urgent':
-				return '#dc2626';
-			case 'high':
-				return '#f59e0b';
-			case 'medium':
-				return '#2563eb';
-			case 'low':
-				return '#10b981';
-			default:
-				return '#6b7280';
-		}
-	};
-
-	// Format tasks list HTML
-	const tasksListHtml = tasks
-		.map((task) => {
-			const priorityColor = getPriorityColor(task.priority);
-			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
-			const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
-			return `
+			const tasksListHtml = tasks
+				.map((task) => {
+					const priorityColor = getPriorityColor(task.priority);
+					const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
+					const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
+					return `
 				<div style="background-color: white; padding: 16px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid ${priorityColor};">
 					<h3 style="margin: 0 0 8px 0; color: #2563eb;">
 						<a href="${taskUrl}" style="color: #2563eb; text-decoration: none;">${task.title}</a>
@@ -1911,36 +1932,35 @@ export async function sendDailyWorkReminderEmail(
 					</div>
 				</div>
 			`;
-		})
-		.join('');
+				})
+				.join('');
 
-	// Format tasks list text
-	const tasksListText = tasks
-		.map((task) => {
-			const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
-			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
-			return `
+			const tasksListText = tasks
+				.map((task) => {
+					const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
+					const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
+					return `
 ${task.title}
 ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority || 'Medium'}
   Status: ${task.status || 'Todo'}
   Due: ${dueDate}
   View: ${taskUrl}
 `;
-		})
-		.join('\n---\n');
+				})
+				.join('\n---\n');
 
-	const today = new Date().toLocaleDateString('ro-RO', {
-		weekday: 'long',
-		year: 'numeric',
-		month: 'long',
-		day: 'numeric'
-	});
+			const today = new Date().toLocaleDateString('ro-RO', {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric'
+			});
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: user.email,
-		subject: `Your Daily Work Plan - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} for today`,
-		html: `
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: user.email!,
+				subject: `Your Daily Work Plan - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} for today`,
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -1964,7 +1984,7 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			Good Morning, ${userName}!
 
 			Here's your work plan for ${today}:
@@ -1977,27 +1997,9 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 
 			Have a productive day!
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId,
-		toEmail: user.email,
-		subject: mailOptions.subject,
-		emailType: 'daily-reminder',
-		metadata: { userName, taskCount: tasks.length },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Daily work reminder email sent', { tenantId, metadata: { email: user.email, taskCount: tasks.length } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send daily work reminder email', { tenantId, metadata: { email: user.email }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send daily work reminder email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -2022,41 +2024,50 @@ export async function sendContractSigningEmail(
 		throw new Error('Tenant not found');
 	}
 
-	const transporter = await getTenantTransporter(tenant.id);
-	if (!transporter) {
-		throw new Error('Email transporter not available');
-	}
-
-	const [emailSettings] = await db
-		.select()
-		.from(table.emailSettings)
-		.where(eq(table.emailSettings.tenantId, tenant.id))
-		.limit(1);
-
-	const fromEmail =
-		emailSettings?.smtpFrom ||
-		emailSettings?.smtpUser ||
-		env.SMTP_FROM ||
-		env.SMTP_USER ||
-		'noreply@example.com';
 	const tenantName = tenant.name || 'CRM';
 	const signingUrl = `${baseUrl}/sign/${tenantSlug}/${encodeURIComponent(rawToken)}`;
 
-	// Get invoice settings for logo
-	const [invoiceSettings] = await db
-		.select()
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, tenant.id))
-		.limit(1);
+	await sendWithPersistence(
+		{
+			tenantId: tenant.id,
+			toEmail: email,
+			subject: `Semnare contract ${contractNumber} - ${tenantName}`,
+			emailType: 'contract-signing',
+			metadata: { contractNumber, clientName, tenantSlug },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendContractSigningEmail',
+				args: [email, rawToken, tenantSlug, contractNumber, clientName]
+			}
+		},
+		async () => {
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenant.id))
+				.limit(1);
 
-	const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const fromEmail =
+				emailSettings?.smtpFrom ||
+				emailSettings?.smtpUser ||
+				env.SMTP_FROM ||
+				env.SMTP_USER ||
+				'noreply@example.com';
 
-	const mailOptions = {
-		from: `"${tenantName}" <${fromEmail}>`,
-		to: email,
-		subject: `Semnare contract ${contractNumber} - ${tenantName}`,
-		...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-		html: `
+			const [invoiceSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, tenant.id))
+				.limit(1);
+
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: email,
+				subject: `Semnare contract ${contractNumber} - ${tenantName}`,
+				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+				html: `
 			<!DOCTYPE html>
 			<html>
 			<head>
@@ -2086,7 +2097,7 @@ export async function sendContractSigningEmail(
 			</body>
 			</html>
 		`,
-		text: `
+				text: `
 			${tenantName}
 
 			Stimate/Stimată ${clientName},
@@ -2101,27 +2112,9 @@ export async function sendContractSigningEmail(
 
 			Pentru orice întrebări, contactați ${tenantName}.
 		`
-	};
-
-	const logId = await logEmailAttempt({
-		tenantId: tenant.id,
-		toEmail: email,
-		subject: mailOptions.subject,
-		emailType: 'contract-signing',
-		metadata: { contractNumber, clientName, tenantSlug },
-		htmlBody: mailOptions.html as string
-	});
-
-	try {
-		await logEmailProcessing(logId);
-		const info = await transporter.sendMail(mailOptions);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', 'Contract signing email sent', { tenantId: tenant.id, metadata: { email, contractNumber } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send contract signing email', { tenantId: tenant.id, metadata: { email, contractNumber }, stackTrace: serializeError(error).stack });
-		throw new Error('Failed to send contract signing email');
-	}
+			};
+		}
+	);
 }
 
 /**
@@ -2135,16 +2128,30 @@ export async function sendReportEmail(
 	periodLabel: string,
 	pdfBuffer: Buffer
 ): Promise<void> {
-	const transporter = await getTenantTransporter(tenantId);
-	if (!transporter) throw new Error('SMTP transporter not configured');
-
-	const [tenant] = await db.select({ name: table.tenant.name }).from(table.tenant).where(eq(table.tenant.id, tenantId)).limit(1);
-	const tenantName = tenant?.name || 'CRM';
-
 	const subject = `Raport Marketing — ${clientName} — ${periodLabel}`;
 	const filename = `raport-${clientName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${periodLabel.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`;
 
-	const html = `
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'report' as any,
+			metadata: { clientId, clientName, periodLabel },
+			htmlBody: '',
+			// payload: null — pdfBuffer is non-serializable, and the pdf_report_send scheduler
+			// task regenerates and re-sends scheduled reports on its next run.
+			payload: null
+		},
+		async () => {
+			const [tenant] = await db
+				.select({ name: table.tenant.name })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, tenantId))
+				.limit(1);
+			const tenantName = tenant?.name || 'CRM';
+
+			const html = `
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
 			<h2 style="color: #1E293B;">Raport Marketing</h2>
 			<p>Bună ziua,</p>
@@ -2155,35 +2162,43 @@ export async function sendReportEmail(
 		</div>
 	`;
 
-	const logId = await logEmailAttempt({
-		tenantId,
-		toEmail: recipientEmail,
-		subject,
-		emailType: 'report' as any,
-		metadata: { clientId, clientName, periodLabel },
-		htmlBody: html
-	});
-
-	try {
-		await logEmailProcessing(logId);
-
-		const mailOptions: nodemailer.SendMailOptions = {
-			to: recipientEmail,
-			subject,
-			html,
-			attachments: [{
-				filename,
-				content: pdfBuffer,
-				contentType: 'application/pdf'
-			}]
-		};
-
-		const info = await sendMailWithRetry(transporter, mailOptions, tenantId, logId);
-		await logEmailSuccess(logId, { messageId: info.messageId, response: info.response });
-		logInfo('email', `Report email sent to ${recipientEmail}`, { tenantId, metadata: { clientId, clientName, periodLabel } });
-	} catch (error) {
-		await logEmailFailure(logId, (error as Error).message);
-		logError('email', 'Failed to send report email', { tenantId, metadata: { recipientEmail, clientName, periodLabel }, stackTrace: serializeError(error).stack });
-		throw error;
-	}
+			return {
+				to: recipientEmail,
+				subject,
+				html,
+				attachments: [
+					{
+						filename,
+						content: pdfBuffer,
+						contentType: 'application/pdf'
+					}
+				]
+			};
+		}
+	);
 }
+
+// ---------------------------------------------------------------------------
+// Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
+// and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
+//
+// Add the corresponding entry whenever you add a new send function that uses
+// `sendWithPersistence` with a non-null payload.
+// ---------------------------------------------------------------------------
+export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
+	sendInvitationEmail,
+	sendInvoiceEmail,
+	sendMagicLinkEmail,
+	sendAdminMagicLinkEmail,
+	sendPasswordResetEmail,
+	sendTaskAssignmentEmail,
+	sendTaskUpdateEmail,
+	sendTaskClientNotificationEmail,
+	sendInvoicePaidEmail,
+	sendOverdueReminderEmail,
+	sendTaskReminderEmail,
+	sendContractSigningEmail
+	// NOTE: sendDailyWorkReminderEmail and sendReportEmail intentionally omitted —
+	// they use payload: null because their inputs are not safely replay-able
+	// (Buffer attachments, large task arrays). Their scheduled tasks regenerate them.
+};
