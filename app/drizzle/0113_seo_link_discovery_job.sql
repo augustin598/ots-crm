@@ -1,0 +1,23 @@
+CREATE TABLE `seo_link_discovery_job` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`source_domain` text NOT NULL,
+	`config` text NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`phase` text DEFAULT 'preview' NOT NULL,
+	`total_sitemaps` integer DEFAULT 0 NOT NULL,
+	`processed_sitemaps` integer DEFAULT 0 NOT NULL,
+	`total_articles` integer DEFAULT 0 NOT NULL,
+	`processed_articles` integer DEFAULT 0 NOT NULL,
+	`error_count` integer DEFAULT 0 NOT NULL,
+	`match_count` integer DEFAULT 0 NOT NULL,
+	`current_sitemap_url` text,
+	`current_sitemap_index` integer DEFAULT 0 NOT NULL,
+	`error` text,
+	`started_at` timestamp,
+	`finished_at` timestamp,
+	`created_at` timestamp DEFAULT current_date NOT NULL,
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
+);

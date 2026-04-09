@@ -90,6 +90,7 @@
 	} from '$lib/components/ui/collapsible';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import SeoLinkUrlCell from '$lib/components/seo-link-url-cell.svelte';
+	import SeoLinkDiscoveryModal from '$lib/components/seo-link-discovery-modal.svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -341,6 +342,7 @@
 		httpCode: number | null;
 	};
 	let isScanDialogOpen = $state(false);
+	let isDiscoveryDialogOpen = $state(false);
 	let scanClientId = $state('');
 	let scanMode = $state<'all' | 'unchecked' | 'problems'>('unchecked');
 	let scanRunning = $state(false);
@@ -1604,6 +1606,13 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<Button
+				variant="outline"
+				onclick={() => (isDiscoveryDialogOpen = true)}
+			>
+				<SearchIcon class="mr-2 h-4 w-4" />
+				Descoperă Linkuri
+			</Button>
 			<Button
 				variant="outline"
 				onclick={openScanDialog}
@@ -3897,3 +3906,9 @@
 		</DialogFooter>
 	</DialogContent>
 </Dialog>
+
+<SeoLinkDiscoveryModal
+	bind:open={isDiscoveryDialogOpen}
+	clients={clients.map((c) => ({ id: c.id, name: c.name }))}
+	onClose={() => (isDiscoveryDialogOpen = false)}
+/>

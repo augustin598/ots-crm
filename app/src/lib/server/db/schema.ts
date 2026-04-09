@@ -3213,6 +3213,12 @@ export type SeoLink = typeof seoLink.$inferSelect;
 export type NewSeoLink = typeof seoLink.$inferInsert;
 export type SeoLinkCheck = typeof seoLinkCheck.$inferSelect;
 export type NewSeoLinkCheck = typeof seoLinkCheck.$inferInsert;
+export type SeoLinkDiscoveryJob = typeof seoLinkDiscoveryJob.$inferSelect;
+export type NewSeoLinkDiscoveryJob = typeof seoLinkDiscoveryJob.$inferInsert;
+export type SeoLinkDiscoveryResult = typeof seoLinkDiscoveryResult.$inferSelect;
+export type NewSeoLinkDiscoveryResult = typeof seoLinkDiscoveryResult.$inferInsert;
+export type SitemapCache = typeof sitemapCache.$inferSelect;
+export type NewSitemapCache = typeof sitemapCache.$inferInsert;
 export type ContractTemplate = typeof contractTemplate.$inferSelect;
 export type NewContractTemplate = typeof contractTemplate.$inferInsert;
 export type Contract = typeof contract.$inferSelect;
@@ -3284,3 +3290,89 @@ export const invoiceViewToken = sqliteTable('invoice_view_token', {
 		.default(sql`current_date`),
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
 });
+
+// ==================== SEO LINK DISCOVERY ====================
+// Jobs that crawl a source site's sitemap to find articles linking to client domains.
+
+export const seoLinkDiscoveryJob = sqliteTable('seo_link_discovery_job', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	userId: text('user_id').notNull(),
+	sourceDomain: text('source_domain').notNull(),
+	// JSON: { mode, clientIds, extraTargetDomains, selectedGroupKeys, limits, dateRange, forceRescanExisting }
+	config: text('config').notNull(),
+	// 'pending' | 'preview_ready' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
+	status: text('status').notNull().default('pending'),
+	// 'preview' | 'scanning' | 'done'
+	phase: text('phase').notNull().default('preview'),
+	totalSitemaps: integer('total_sitemaps').notNull().default(0),
+	processedSitemaps: integer('processed_sitemaps').notNull().default(0),
+	totalArticles: integer('total_articles').notNull().default(0),
+	processedArticles: integer('processed_articles').notNull().default(0),
+	errorCount: integer('error_count').notNull().default(0),
+	matchCount: integer('match_count').notNull().default(0),
+	currentSitemapUrl: text('current_sitemap_url'),
+	currentSitemapIndex: integer('current_sitemap_index').notNull().default(0),
+	error: text('error'),
+	startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const seoLinkDiscoveryResult = sqliteTable('seo_link_discovery_result', {
+	// Autoincrement for cursor-based polling
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	jobId: text('job_id')
+		.notNull()
+		.references(() => seoLinkDiscoveryJob.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id').notNull(),
+	articleUrl: text('article_url').notNull(),
+	canonicalUrl: text('canonical_url'),
+	articleTitle: text('article_title'),
+	articlePublishedAt: text('article_published_at'),
+	pressTrust: text('press_trust'),
+	targetDomain: text('target_domain').notNull(),
+	targetUrl: text('target_url').notNull(),
+	anchorText: text('anchor_text'),
+	linkAttribute: text('link_attribute'), // 'dofollow' | 'nofollow' | 'sponsored' | 'ugc'
+	matchedClientId: text('matched_client_id'),
+	matchedWebsiteId: text('matched_website_id'),
+	alreadyTracked: boolean('already_tracked').notNull().default(false),
+	savedAsSeoLinkId: text('saved_as_seo_link_id'),
+	foundAt: timestamp('found_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const sitemapCache = sqliteTable('sitemap_cache', {
+	url: text('url').primaryKey(),
+	content: text('content').notNull(), // Base64-encoded gzipped XML
+	contentLastmod: text('content_lastmod'), // lastmod seen in parent sitemap-index, for invalidation
+	byteSize: integer('byte_size').notNull().default(0),
+	fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+});
+
+export const seoLinkDiscoveryJobRelations = relations(seoLinkDiscoveryJob, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [seoLinkDiscoveryJob.tenantId],
+		references: [tenant.id]
+	}),
+	results: many(seoLinkDiscoveryResult)
+}));
+
+export const seoLinkDiscoveryResultRelations = relations(seoLinkDiscoveryResult, ({ one }) => ({
+	job: one(seoLinkDiscoveryJob, {
+		fields: [seoLinkDiscoveryResult.jobId],
+		references: [seoLinkDiscoveryJob.id]
+	})
+}));

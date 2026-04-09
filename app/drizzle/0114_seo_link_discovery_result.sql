@@ -1,0 +1,20 @@
+CREATE TABLE `seo_link_discovery_result` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`job_id` text NOT NULL,
+	`tenant_id` text NOT NULL,
+	`article_url` text NOT NULL,
+	`canonical_url` text,
+	`article_title` text,
+	`article_published_at` text,
+	`press_trust` text,
+	`target_domain` text NOT NULL,
+	`target_url` text NOT NULL,
+	`anchor_text` text,
+	`link_attribute` text,
+	`matched_client_id` text,
+	`matched_website_id` text,
+	`already_tracked` integer DEFAULT 0 NOT NULL,
+	`saved_as_seo_link_id` text,
+	`found_at` timestamp DEFAULT current_date NOT NULL,
+	FOREIGN KEY (`job_id`) REFERENCES `seo_link_discovery_job`(`id`) ON UPDATE no action ON DELETE cascade
+);

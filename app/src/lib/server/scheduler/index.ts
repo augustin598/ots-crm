@@ -165,6 +165,29 @@ export const startScheduler = async () => {
 		logError('scheduler', `DB health check FAILED — scheduler may not work correctly: ${message}`, { stackTrace: stack });
 	}
 
+	// Mark any in-flight SEO link discovery jobs as interrupted — they cannot resume
+	// automatically across a server restart (the in-process pipeline was lost).
+	try {
+		const now = new Date();
+		const res = await db
+			.update(table.seoLinkDiscoveryJob)
+			.set({
+				status: 'interrupted',
+				phase: 'done',
+				error: 'Serverul a repornit în timpul rulării',
+				finishedAt: now,
+				updatedAt: now
+			})
+			.where(sql`${table.seoLinkDiscoveryJob.status} = 'running'`);
+		const count = (res as { rowsAffected?: number })?.rowsAffected ?? 0;
+		if (count > 0) {
+			logWarning('scheduler', `Marked ${count} SEO discovery job(s) as interrupted after restart`);
+		}
+	} catch (e) {
+		const { message } = serializeError(e);
+		logWarning('scheduler', `Failed to mark interrupted discovery jobs: ${message}`);
+	}
+
 	// Create scheduler worker
 	const worker = createSchedulerWorker();
 	logInfo('scheduler', 'Scheduler worker created', { metadata: { queueName: 'scheduler', concurrency: 1 } });

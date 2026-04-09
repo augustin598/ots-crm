@@ -3,14 +3,51 @@ import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, asc, or, isNull, isNotNull, inArray, like, sql, getTableColumns } from 'drizzle-orm';
+import { eq, and, desc, asc, or, isNull, isNotNull, inArray, like, sql, gt, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
 import { fetchWithCloudflareFallback } from '$lib/server/scraper/cloudflare-bypass';
+import {
+	previewDiscovery,
+	launchDiscoveryJob,
+	abortDiscoveryJob,
+	isJobRunning,
+	normalizeUrl,
+	type DiscoveryConfig,
+	type PreviewResult
+} from '$lib/server/scraper/seo-link-discoverer';
+import { toDomain } from '$lib/server/scraper/sitemap-parser';
 
 function generateSeoLinkId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
+}
+
+/**
+ * Load all existing seoLinks for a tenant and return an index keyed by
+ * `${clientId}|${normalizedArticleUrl}`. Used to dedupe before any insert path
+ * (single, bulk, multi, Excel import, discovery). Empty articleUrl entries are
+ * skipped (they can't be deduplicated meaningfully).
+ */
+async function loadExistingSeoLinkIndex(tenantId: string): Promise<Map<string, string>> {
+	const rows = await db
+		.select({
+			id: table.seoLink.id,
+			clientId: table.seoLink.clientId,
+			articleUrl: table.seoLink.articleUrl
+		})
+		.from(table.seoLink)
+		.where(eq(table.seoLink.tenantId, tenantId));
+	const index = new Map<string, string>();
+	for (const r of rows) {
+		if (!r.articleUrl) continue;
+		index.set(`${r.clientId}|${normalizeUrl(r.articleUrl)}`, r.id);
+	}
+	return index;
+}
+
+function seoLinkDedupKey(clientId: string, articleUrl: string): string {
+	return `${clientId}|${normalizeUrl(articleUrl)}`;
 }
 
 function generateSeoLinkCheckId() {
@@ -240,6 +277,26 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		}
 	}
 
+	// Dedup: skip if a seoLink already exists for this (clientId, normalized articleUrl)
+	const normArticleUrl = data.articleUrl ? normalizeUrl(data.articleUrl) : '';
+	if (normArticleUrl) {
+		const sameClient = await db
+			.select({ id: table.seoLink.id, articleUrl: table.seoLink.articleUrl })
+			.from(table.seoLink)
+			.where(
+				and(
+					eq(table.seoLink.tenantId, event.locals.tenant.id),
+					eq(table.seoLink.clientId, data.clientId)
+				)
+			);
+		const duplicate = sameClient.find(
+			(r) => r.articleUrl && normalizeUrl(r.articleUrl) === normArticleUrl
+		);
+		if (duplicate) {
+			return { success: true, seoLinkId: duplicate.id, alreadyExists: true };
+		}
+	}
+
 	await db.insert(table.seoLink).values({
 		id: seoLinkId,
 		tenantId: event.locals.tenant.id,
@@ -251,7 +308,7 @@ export const createSeoLink = command(seoLinkSchema, async (data) => {
 		linkType: data.linkType || null,
 		linkAttribute: data.linkAttribute || 'dofollow',
 		status: data.status || 'pending',
-		articleUrl: data.articleUrl || '',
+		articleUrl: normArticleUrl,
 		articlePublishedAt: data.articlePublishedAt || null,
 		targetUrl: data.targetUrl || null,
 		price: data.price != null ? Math.round(data.price * 100) : null,
@@ -317,30 +374,55 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 		}
 	}
 
-	const values = data.articleUrls.map((articleUrl) => ({
-		id: generateSeoLinkId(),
-		tenantId: event.locals.tenant!.id,
-		clientId: data.clientId,
-		websiteId: resolvedWebsiteId,
-		pressTrust: data.pressTrust || null,
-		month: data.month,
-		keyword: data.keyword,
-		linkType: data.linkType || null,
-		linkAttribute: data.linkAttribute || 'dofollow',
-		status: data.status || 'pending',
-		articleUrl,
-		articlePublishedAt: data.articlePublishedAt || null,
-		targetUrl: data.targetUrl || null,
-		price: data.price != null ? Math.round(data.price * 100) : null,
-		currency,
-		anchorText: data.anchorText || null,
-		projectId: data.projectId || null,
-		notes: data.notes || null
-	}));
+	// Dedup: load existing (clientId, normalized URL) keys
+	const existingIndex = await loadExistingSeoLinkIndex(event.locals.tenant.id);
+	const seenInBatch = new Set<string>();
 
-	await db.insert(table.seoLink).values(values);
+	const values = data.articleUrls
+		.map((articleUrl) => ({
+			articleUrl,
+			normalized: normalizeUrl(articleUrl)
+		}))
+		.filter(({ normalized }) => {
+			if (!normalized) return false;
+			const key = seoLinkDedupKey(data.clientId, normalized);
+			if (existingIndex.has(key) || seenInBatch.has(key)) return false;
+			seenInBatch.add(key);
+			return true;
+		})
+		.map(({ normalized }) => ({
+			id: generateSeoLinkId(),
+			tenantId: event.locals.tenant!.id,
+			clientId: data.clientId,
+			websiteId: resolvedWebsiteId,
+			pressTrust: data.pressTrust || null,
+			month: data.month,
+			keyword: data.keyword,
+			linkType: data.linkType || null,
+			linkAttribute: data.linkAttribute || 'dofollow',
+			status: data.status || 'pending',
+			articleUrl: normalized,
+			articlePublishedAt: data.articlePublishedAt || null,
+			targetUrl: data.targetUrl || null,
+			price: data.price != null ? Math.round(data.price * 100) : null,
+			currency,
+			anchorText: data.anchorText || null,
+			projectId: data.projectId || null,
+			notes: data.notes || null
+		}));
 
-	return { success: true, created: values.length, seoLinkIds: values.map((v) => v.id) };
+	const skipped = data.articleUrls.length - values.length;
+
+	if (values.length > 0) {
+		await db.insert(table.seoLink).values(values);
+	}
+
+	return {
+		success: true,
+		created: values.length,
+		skipped,
+		seoLinkIds: values.map((v) => v.id)
+	};
 });
 
 const createSeoLinksMultiSchema = v.object({
@@ -384,7 +466,11 @@ export const createSeoLinksMulti = command(createSeoLinksMultiSchema, async (dat
 		.from(table.clientWebsite)
 		.where(eq(table.clientWebsite.clientId, data.clientId));
 
-	const values = data.rows.map((row) => {
+	const existingIndex = await loadExistingSeoLinkIndex(event.locals.tenant.id);
+	const seenInBatch = new Set<string>();
+
+	const values: Array<ReturnType<typeof buildRow>> = [];
+	function buildRow(row: typeof data.rows[number], normalizedArticleUrl: string) {
 		const currency = row.currency || defaultCurrency;
 		let websiteId: string | null = null;
 		if (row.targetUrl) {
@@ -394,7 +480,6 @@ export const createSeoLinksMulti = command(createSeoLinksMultiSchema, async (dat
 				if (match) websiteId = match.id;
 			}
 		}
-
 		return {
 			id: generateSeoLinkId(),
 			tenantId: event.locals.tenant!.id,
@@ -406,19 +491,38 @@ export const createSeoLinksMulti = command(createSeoLinksMultiSchema, async (dat
 			linkType: row.linkType || null,
 			linkAttribute: row.linkAttribute || 'dofollow',
 			status: row.status || 'pending',
-			articleUrl: row.articleUrl || '',
+			articleUrl: normalizedArticleUrl,
 			targetUrl: row.targetUrl || null,
 			price: row.price != null ? Math.round(row.price * 100) : null,
 			currency,
 			anchorText: row.keyword || null,
 			articleType: row.articleType || null,
-			gdriveUrl: row.articleType === 'gdrive' ? (row.gdriveUrl || null) : null,
+			gdriveUrl: row.articleType === 'gdrive' ? (row.gdriveUrl || null) : null
 		};
-	});
+	}
 
-	await db.insert(table.seoLink).values(values);
+	for (const row of data.rows) {
+		const normalized = row.articleUrl ? normalizeUrl(row.articleUrl) : '';
+		if (normalized) {
+			const key = seoLinkDedupKey(data.clientId, normalized);
+			if (existingIndex.has(key) || seenInBatch.has(key)) continue;
+			seenInBatch.add(key);
+		}
+		values.push(buildRow(row, normalized));
+	}
 
-	return { success: true, created: values.length, seoLinkIds: values.map((v) => v.id) };
+	const skipped = data.rows.length - values.length;
+
+	if (values.length > 0) {
+		await db.insert(table.seoLink).values(values);
+	}
+
+	return {
+		success: true,
+		created: values.length,
+		skipped,
+		seoLinkIds: values.map((v) => v.id)
+	};
 });
 
 export const getSeoLink = query(
@@ -1740,6 +1844,42 @@ function parseMonth(value: string): string | null {
 	return null;
 }
 
+/**
+ * Extract YYYY-MM from a free-form date string.
+ * Accepts ISO (2024-03-15), DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY.
+ */
+function parseDateToMonth(value: string): string | null {
+	if (!value || typeof value !== 'string') return null;
+	const v = value.trim();
+	// ISO yyyy-mm-dd or yyyy-mm-ddThh:mm:ss
+	let m = v.match(/^(\d{4})-(\d{2})(?:-\d{2})?/);
+	if (m) return `${m[1]}-${m[2]}`;
+	// dd/mm/yyyy or dd.mm.yyyy or dd-mm-yyyy
+	m = v.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+	if (m) {
+		const year = m[3].length === 2 ? '20' + m[3] : m[3];
+		const mon = m[2].padStart(2, '0');
+		return `${year}-${mon}`;
+	}
+	return null;
+}
+
+/** Extract full ISO date (yyyy-mm-dd) from a free-form string. */
+function parseDateToIsoDate(value: string): string | null {
+	if (!value || typeof value !== 'string') return null;
+	const v = value.trim();
+	// ISO yyyy-mm-dd
+	let m = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+	if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+	// dd/mm/yyyy or dd.mm.yyyy or dd-mm-yyyy
+	m = v.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+	if (m) {
+		const year = m[3].length === 2 ? '20' + m[3] : m[3];
+		return `${year}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+	}
+	return null;
+}
+
 function parseStatus(value: string): string {
 	if (!value) return 'pending';
 	const v = value.trim().toLowerCase();
@@ -1788,7 +1928,15 @@ export const importSeoLinksFromFile = command(
 					norm(k).includes('keyword') ||
 					norm(k).includes('link') ||
 					norm(k).includes('pentru') ||
-					norm(k).includes('cuvant')
+					norm(k).includes('cuvant') ||
+					norm(k).includes('url') ||
+					norm(k).includes('articol') ||
+					norm(k).includes('ancora') ||
+					norm(k).includes('backlink') ||
+					norm(k).includes('domeniu') ||
+					norm(k).includes('sursa') ||
+					norm(k).includes('titlu') ||
+					norm(k).includes('data')
 			);
 		};
 
@@ -1841,7 +1989,7 @@ export const importSeoLinksFromFile = command(
 				const headers = rawRows[0];
 				const hasHeaders = headers.some(
 					(h) =>
-						/luna|trust|keyword|link|pentru|cuvant/i.test(
+						/luna|trust|keyword|link|pentru|cuvant|url|articol|ancora|backlink|domeniu|sursa|titlu|data/i.test(
 							h.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 						)
 				);
@@ -1897,6 +2045,8 @@ export const importSeoLinksFromFile = command(
 		let imported = 0;
 		let skipped = 0;
 		let autoDetected = 0;
+		// Dedup index: skip rows whose (clientId, normalized articleUrl) already exists
+		const existingIndex = await loadExistingSeoLinkIndex(event.locals.tenant.id);
 
 		const normalize = (s: string) =>
 			s
@@ -1991,13 +2141,48 @@ export const importSeoLinksFromFile = command(
 		for (const row of rows) {
 			const clientName = usePositional
 				? getVal(row, 'clientName')
-				: findCol(row, ['PENTRU', 'For', 'Client', 'client', 'pentru']);
-			const month = usePositional
-				? parseMonth(getVal(row, 'month'))
-				: parseMonth(findCol(row, ['Luna', 'Lună', 'Month', 'month', 'luna']));
+				: findCol(row, [
+						'PENTRU',
+						'For',
+						'Client',
+						'client',
+						'pentru',
+						'Pentru',
+						// Sursa = brand name, used as fallback when Pentru is empty
+						'Sursa',
+						'SURSA',
+						'sursa',
+						'Sursă',
+						'Source'
+					]);
+			// Parse month from either 'Luna' column or 'Data' (date → YYYY-MM)
+			const rawDateCol = usePositional
+				? getVal(row, 'month')
+				: findCol(row, [
+						'Luna',
+						'Lună',
+						'Month',
+						'month',
+						'luna',
+						'Data',
+						'DATA',
+						'data',
+						'Date'
+					]);
+			const month = parseMonth(rawDateCol) || parseDateToMonth(rawDateCol);
 			const pressTrust = usePositional
 				? getVal(row, 'pressTrust')
-				: findCol(row, ['TRUST', 'Trust', 'trust', 'PRESS', 'Press']);
+				: findCol(row, [
+						'TRUST',
+						'Trust',
+						'trust',
+						'PRESS',
+						'Press',
+						// Domeniu = press site code (BZI, BZV, BZC, BZT)
+						'Domeniu',
+						'DOMENIU',
+						'domeniu'
+					]);
 			const keyword = usePositional
 				? getVal(row, 'keyword')
 				: findCol(row, [
@@ -2006,24 +2191,53 @@ export const importSeoLinksFromFile = command(
 						'Cuvant cheie',
 						'Keyword',
 						'keyword',
-						'CUVANT_CHEIE'
+						'CUVANT_CHEIE',
+						'Text Ancora',
+						'TEXT ANCORA',
+						'text ancora',
+						'Text Ancoră',
+						'Anchor',
+						'Ancora',
+						'anchor'
 					]);
 			const articleUrl = usePositional
 				? getVal(row, 'articleUrl') ||
 					getVal(row, 'articleUrl2') ||
 					getVal(row, 'articleUrl3')
-				: findCol(row, ['LINK ARTICOL', 'Link articol', 'articleUrl', 'LINK_ARTICOL']);
+				: findCol(row, [
+						'LINK ARTICOL',
+						'Link articol',
+						'articleUrl',
+						'LINK_ARTICOL',
+						'URL Articol',
+						'URL ARTICOL',
+						'url articol',
+						'URL_Articol',
+						'URL'
+					]);
 			const rawLinkCatre = usePositional
 				? getVal(row, 'targetUrl')
-				: findCol(row, ['LINK CATRE', 'LINK', 'Link', 'targetUrl', 'URL țină']);
+				: findCol(row, [
+						'LINK CATRE',
+						'LINK',
+						'Link',
+						'targetUrl',
+						'URL țină',
+						'Backlink',
+						'BACKLINK',
+						'backlink'
+					]);
 			// LINK CATRE poate fi text de ancoră (nu URL) — folosim doar dacă e URL real
 			const targetUrl = rawLinkCatre?.startsWith('http') ? rawLinkCatre : null;
 			const linkAttr = usePositional
 				? parseLinkAttribute(getVal(row, 'linkAttr'))
 				: parseLinkAttribute(findCol(row, ['Tip', 'Type', 'tip', 'DoFollow', 'Dofollow']));
-			const status = usePositional
-				? parseStatus(getVal(row, 'status'))
-				: parseStatus(findCol(row, ['STATUS', 'Status', 'status']));
+			const rawStatus = usePositional
+				? getVal(row, 'status')
+				: findCol(row, ['STATUS', 'Status', 'status']);
+			// If no status column (new format), default to 'published' since imports
+			// typically represent confirmed/live backlinks.
+			const status = rawStatus ? parseStatus(rawStatus) : 'published';
 
 			if (!keyword || !articleUrl) {
 				skipped++;
@@ -2077,7 +2291,17 @@ export const importSeoLinksFromFile = command(
 				continue;
 			}
 
+			// Dedup: skip if (clientId, normalized articleUrl) already exists
+			const normArticleUrl = normalizeUrl(articleUrl);
+			const dedupKey = seoLinkDedupKey(clientId, normArticleUrl);
+			if (existingIndex.has(dedupKey)) {
+				skipped++;
+				continue;
+			}
+
 			const monthVal = month || new Date().toISOString().slice(0, 7);
+			// If Data column was a full date, store it as articlePublishedAt
+			const articlePublishedAt = parseDateToIsoDate(rawDateCol);
 
 			const seoLinkId = generateSeoLinkId();
 			await db.insert(table.seoLink).values({
@@ -2091,14 +2315,16 @@ export const importSeoLinksFromFile = command(
 				linkType: null,
 				linkAttribute: linkAttr as 'dofollow' | 'nofollow',
 				status: status as 'pending' | 'submitted' | 'published' | 'rejected',
-				articleUrl,
+				articleUrl: normArticleUrl,
+				articlePublishedAt,
 				targetUrl: resolvedTargetUrl || null,
-				anchorText: resolvedAnchorText || null,
+				anchorText: resolvedAnchorText || keyword || null,
 				price: null,
 				currency: defaultCurrency,
 				projectId: null,
 				notes: null
 			});
+			existingIndex.set(dedupKey, seoLinkId);
 			if (wasAutoDetected) autoDetected++;
 			imported++;
 		}
@@ -2110,5 +2336,346 @@ export const importSeoLinksFromFile = command(
 			autoDetected,
 			columnsFound: imported === 0 && skipped > 0 ? columnsFound : undefined
 		};
+	}
+);
+
+// ============================================================================
+// SEO Link Discovery — sitemap-based backlink scanner
+// ============================================================================
+
+function generateDiscoveryJobId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
+/** Preview: parse the source site's sitemap and return classified groups for user review. */
+export const previewSeoLinkDiscovery = command(
+	v.object({
+		sourceDomain: v.pipe(v.string(), v.minLength(1))
+	}),
+	async ({ sourceDomain }): Promise<PreviewResult> => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Client users cannot run discovery');
+
+		const domain = toDomain(sourceDomain);
+		if (!domain) throw new Error('Domeniu sursă invalid');
+
+		try {
+			return await previewDiscovery(domain);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`Preview eșuat: ${msg}`);
+		}
+	}
+);
+
+const startDiscoverySchema = v.object({
+	sourceDomain: v.pipe(v.string(), v.minLength(1)),
+	config: v.object({
+		mode: v.picklist(['recent', 'date-range', 'full', 'search']),
+		recentSitemapCount: v.optional(v.number()),
+		dateFrom: v.optional(v.string()),
+		dateTo: v.optional(v.string()),
+		searchKeywords: v.optional(v.array(v.string())),
+		maxSearchPages: v.optional(v.number()),
+		maxArticles: v.number(),
+		maxSitemaps: v.number(),
+		articleConcurrency: v.number(),
+		clientIds: v.array(v.string()),
+		extraTargetDomains: v.array(v.string()),
+		selectedGroupKeys: v.optional(v.array(v.string())),
+		forceRescanExisting: v.boolean()
+	})
+});
+
+/** Start a discovery job. Returns the jobId to poll for progress/results. */
+export const startSeoLinkDiscovery = command(startDiscoverySchema, async (input) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	if (event.locals.isClientUser) throw new Error('Client users cannot run discovery');
+
+	const domain = toDomain(input.sourceDomain);
+	if (!domain) throw new Error('Domeniu sursă invalid');
+	if (input.config.clientIds.length === 0 && input.config.extraTargetDomains.length === 0) {
+		throw new Error('Selectează cel puțin un client sau un domeniu țintă');
+	}
+
+	// Hard cap safety
+	const cfg: DiscoveryConfig = {
+		...input.config,
+		maxArticles: Math.min(input.config.maxArticles, 10_000),
+		maxSitemaps: Math.min(input.config.maxSitemaps, 300),
+		// Capped to 5 — RO news sites rate-limit aggressively above this
+		articleConcurrency: Math.min(Math.max(1, input.config.articleConcurrency), 5)
+	};
+
+	const jobId = generateDiscoveryJobId();
+	const now = new Date();
+	await db.insert(table.seoLinkDiscoveryJob).values({
+		id: jobId,
+		tenantId: event.locals.tenant.id,
+		userId: event.locals.user.id,
+		sourceDomain: domain,
+		config: JSON.stringify(cfg),
+		status: 'running',
+		phase: 'scanning',
+		startedAt: now,
+		createdAt: now,
+		updatedAt: now
+	});
+
+	launchDiscoveryJob(jobId);
+	return { jobId };
+});
+
+/** Get current status / progress counters for a job. */
+export const getSeoLinkDiscoveryStatus = query(
+	v.object({ jobId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ jobId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [job] = await db
+			.select()
+			.from(table.seoLinkDiscoveryJob)
+			.where(
+				and(
+					eq(table.seoLinkDiscoveryJob.id, jobId),
+					eq(table.seoLinkDiscoveryJob.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+		if (!job) throw new Error('Job negăsit');
+
+		return {
+			id: job.id,
+			status: job.status,
+			phase: job.phase,
+			sourceDomain: job.sourceDomain,
+			totalSitemaps: job.totalSitemaps,
+			processedSitemaps: job.processedSitemaps,
+			totalArticles: job.totalArticles,
+			processedArticles: job.processedArticles,
+			errorCount: job.errorCount,
+			matchCount: job.matchCount,
+			currentSitemapUrl: job.currentSitemapUrl,
+			error: job.error,
+			startedAt: job.startedAt,
+			finishedAt: job.finishedAt,
+			isRunning: isJobRunning(job.id)
+		};
+	}
+);
+
+/** Cursor-based fetch of new results for a running (or finished) job. */
+export const getSeoLinkDiscoveryResults = query(
+	v.object({
+		jobId: v.pipe(v.string(), v.minLength(1)),
+		afterId: v.optional(v.number()),
+		limit: v.optional(v.number())
+	}),
+	async ({ jobId, afterId = 0, limit = 100 }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		// Verify job belongs to tenant (cheap lookup by pk)
+		const [job] = await db
+			.select({ id: table.seoLinkDiscoveryJob.id })
+			.from(table.seoLinkDiscoveryJob)
+			.where(
+				and(
+					eq(table.seoLinkDiscoveryJob.id, jobId),
+					eq(table.seoLinkDiscoveryJob.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+		if (!job) throw new Error('Job negăsit');
+
+		const cappedLimit = Math.min(Math.max(1, limit), 500);
+		const rows = await db
+			.select()
+			.from(table.seoLinkDiscoveryResult)
+			.where(
+				and(
+					eq(table.seoLinkDiscoveryResult.jobId, jobId),
+					gt(table.seoLinkDiscoveryResult.id, afterId)
+				)
+			)
+			.orderBy(asc(table.seoLinkDiscoveryResult.id))
+			.limit(cappedLimit);
+
+		return {
+			results: rows,
+			nextCursor: rows.length > 0 ? rows[rows.length - 1].id : afterId,
+			hasMore: rows.length === cappedLimit
+		};
+	}
+);
+
+/** Abort a running job. */
+export const stopSeoLinkDiscovery = command(
+	v.object({ jobId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ jobId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+		const [job] = await db
+			.select()
+			.from(table.seoLinkDiscoveryJob)
+			.where(
+				and(
+					eq(table.seoLinkDiscoveryJob.id, jobId),
+					eq(table.seoLinkDiscoveryJob.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+		if (!job) throw new Error('Job negăsit');
+
+		const aborted = abortDiscoveryJob(jobId);
+		if (job.status === 'running') {
+			await db
+				.update(table.seoLinkDiscoveryJob)
+				.set({
+					status: 'cancelled',
+					phase: 'done',
+					finishedAt: new Date(),
+					updatedAt: new Date()
+				})
+				.where(eq(table.seoLinkDiscoveryJob.id, jobId));
+		}
+		return { aborted };
+	}
+);
+
+/** Save selected discovery results as real seoLink rows. */
+export const bulkSaveDiscoveryResults = command(
+	v.object({
+		jobId: v.pipe(v.string(), v.minLength(1)),
+		resultIds: v.pipe(v.array(v.number()), v.minLength(1)),
+		defaultStatus: v.optional(v.picklist(['pending', 'submitted', 'published', 'rejected'])),
+		defaultLinkType: v.optional(
+			v.picklist(['article', 'guest-post', 'press-release', 'directory', 'other'])
+		)
+	}),
+	async ({ jobId, resultIds, defaultStatus = 'published', defaultLinkType = 'article' }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+		const rows = await db
+			.select()
+			.from(table.seoLinkDiscoveryResult)
+			.where(
+				and(
+					eq(table.seoLinkDiscoveryResult.jobId, jobId),
+					eq(table.seoLinkDiscoveryResult.tenantId, event.locals.tenant.id),
+					inArray(table.seoLinkDiscoveryResult.id, resultIds)
+				)
+			);
+
+		// Pre-load existing seoLinks indexed by (clientId, normalizedArticleUrl).
+		// Shared helper — same dedup logic used across all insert paths.
+		const existingIndex = await loadExistingSeoLinkIndex(event.locals.tenant.id);
+		// Also track URLs being created in this same bulk batch to prevent
+		// intra-batch duplicates (two discovery results with same articleUrl).
+		const batchInserted = new Set<string>();
+
+		let created = 0;
+		let skipped = 0;
+		const now = new Date();
+
+		for (const row of rows) {
+			// Need a clientId to create a seoLink — skip rows without a matched client
+			if (!row.matchedClientId) {
+				skipped++;
+				continue;
+			}
+			if (row.savedAsSeoLinkId) {
+				skipped++;
+				continue;
+			}
+
+			const normArticleUrl = normalizeUrl(row.articleUrl);
+			const dedupKey = seoLinkDedupKey(row.matchedClientId, normArticleUrl);
+
+			// Check if already exists in DB (normalized) or already inserted in this batch
+			const existingId = existingIndex.get(dedupKey);
+			if (existingId) {
+				await db
+					.update(table.seoLinkDiscoveryResult)
+					.set({ alreadyTracked: true, savedAsSeoLinkId: existingId })
+					.where(eq(table.seoLinkDiscoveryResult.id, row.id));
+				skipped++;
+				continue;
+			}
+			if (batchInserted.has(dedupKey)) {
+				skipped++;
+				continue;
+			}
+
+			const month = (row.articlePublishedAt ?? now.toISOString()).slice(0, 7);
+			const linkAttribute: 'dofollow' | 'nofollow' =
+				row.linkAttribute === 'nofollow' || row.linkAttribute === 'sponsored' || row.linkAttribute === 'ugc'
+					? 'nofollow'
+					: 'dofollow';
+
+			const seoLinkId = generateSeoLinkId();
+			try {
+				await db.insert(table.seoLink).values({
+					id: seoLinkId,
+					tenantId: event.locals.tenant.id,
+					clientId: row.matchedClientId,
+					websiteId: row.matchedWebsiteId,
+					pressTrust: row.pressTrust,
+					month,
+					keyword: row.anchorText || '—',
+					linkType: defaultLinkType,
+					linkAttribute,
+					status: defaultStatus,
+					articleUrl: normArticleUrl,
+					articlePublishedAt: row.articlePublishedAt,
+					targetUrl: row.targetUrl,
+					anchorText: row.anchorText,
+					lastCheckedAt: now,
+					lastCheckStatus: 'ok',
+					lastCheckDofollow: linkAttribute,
+					createdAt: now,
+					updatedAt: now
+				});
+				await db
+					.update(table.seoLinkDiscoveryResult)
+					.set({ savedAsSeoLinkId: seoLinkId, alreadyTracked: true })
+					.where(eq(table.seoLinkDiscoveryResult.id, row.id));
+				// Register in both dedup maps so subsequent rows in the same batch
+				// (or different resultIds pointing to the same article) skip correctly
+				existingIndex.set(dedupKey, seoLinkId);
+				batchInserted.add(dedupKey);
+				created++;
+			} catch (err) {
+				console.warn('[discover] bulk save insert failed:', err);
+				skipped++;
+			}
+		}
+
+		return { created, skipped };
+	}
+);
+
+/** List recent discovery jobs for the current tenant (for history/resume). */
+export const listSeoLinkDiscoveryJobs = query(
+	v.object({ limit: v.optional(v.number()) }),
+	async ({ limit = 20 }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const rows = await db
+			.select()
+			.from(table.seoLinkDiscoveryJob)
+			.where(eq(table.seoLinkDiscoveryJob.tenantId, event.locals.tenant.id))
+			.orderBy(desc(table.seoLinkDiscoveryJob.createdAt))
+			.limit(Math.min(limit, 100));
+		return rows;
 	}
 );

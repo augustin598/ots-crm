@@ -44,7 +44,10 @@ const COL = {
 			return '-';
 		},
 		getSubtext: (c: any) => c.dailyBudget ? 'Zilnic' : '',
-		getTotalValue: () => '-'
+		getTotalValue: (campaigns: any[], cur: string) => {
+			const total = campaigns.reduce((s: number, c: any) => s + (c.dailyBudget ? parseFloat(c.dailyBudget) : 0), 0);
+			return total > 0 ? `${formatCurrency(total, cur)}/zi` : '-';
+		}
 	},
 	spend: {
 		key: 'spend', label: 'Cheltuieli', align: 'right' as const, sortKey: 'spend' as const,
