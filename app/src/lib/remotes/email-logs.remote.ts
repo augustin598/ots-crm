@@ -42,7 +42,7 @@ export const getEmailLogs = query(async () => {
 			metadata: table.emailLog.metadata,
 			createdAt: table.emailLog.createdAt,
 			updatedAt: table.emailLog.updatedAt,
-			hasHtmlBody: sql<boolean>`(${table.emailLog.htmlBody} IS NOT NULL)`.as('has_html_body'),
+			hasHtmlBody: sql<boolean>`(${table.emailLog.htmlBody} IS NOT NULL AND ${table.emailLog.htmlBody} != '')`.as('has_html_body'),
 			hasPayload: sql<boolean>`(${table.emailLog.payload} IS NOT NULL)`.as('has_payload')
 		})
 		.from(table.emailLog)

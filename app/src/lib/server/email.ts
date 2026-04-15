@@ -418,6 +418,18 @@ export async function sendWithPersistence(
 		throw err;
 	}
 
+	// STEP 3b: Persist HTML body for preview if not already saved.
+	if (!ctx.htmlBody && typeof mailOptions.html === 'string' && mailOptions.html) {
+		try {
+			await db
+				.update(table.emailLog)
+				.set({ htmlBody: mailOptions.html, updatedAt: new Date() })
+				.where(eq(table.emailLog.id, logId));
+		} catch (err) {
+			console.error('[email-logger] Failed to update htmlBody:', err);
+		}
+	}
+
 	// STEP 4: Mark processing, send with retry, record outcome.
 	try {
 		await logEmailProcessing(logId);
