@@ -265,25 +265,25 @@ export class KeezClient {
 	 * Make authenticated API request with retry logic
 	 */
 	private async request<T>(endpoint: string, options: RequestInit = {}, retries = 3): Promise<T> {
-		const token = await this.getAccessToken();
 		const url = `${this.baseUrl}${endpoint}`;
-
-		const headers = {
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
-			Authorization: `Bearer ${token}`,
-			...options.headers
-		};
 
 		for (let attempt = 0; attempt < retries; attempt++) {
 			try {
+				const token = await this.getAccessToken();
+				const headers = {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					Authorization: `Bearer ${token}`,
+					...options.headers
+				};
+
 				const response = await fetch(url, {
 					...options,
 					headers
 				});
 
 				if (response.status === 401) {
-					// Token expired, clear cache and retry
+					// Token expired, clear cache and retry with fresh token
 					this.cachedToken = null;
 					this.tokenExpiresAt = null;
 					if (attempt < retries - 1) {
@@ -559,7 +559,7 @@ export class KeezClient {
 		try {
 			const response = await this.getItems({
 				count: 1000,
-				filter: `code eq '${code}'`
+				filter: `code eq '${code.replace(/'/g, "''")}'`
 			});
 
 			if (response && response.length > 0) {
@@ -617,7 +617,7 @@ export class KeezClient {
 			// Fetch invoices with the specified series, ordered by number descending to get the latest first
 			const response = await this.getInvoices({
 				count: 1000, // Fetch up to 1000 invoices to find max
-				filter: `series eq '${series}'`,
+				filter: `series eq '${series.replace(/'/g, "''")}'`,
 				order: 'number desc' // Order by number descending to get latest first
 			});
 

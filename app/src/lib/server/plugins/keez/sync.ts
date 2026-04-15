@@ -11,6 +11,9 @@ function generateId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+// In-memory lock to prevent concurrent syncs per tenant
+const activeSyncs = new Set<string>();
+
 /**
  * Parse Keez date format (YYYYMMDD as number or string)
  */
@@ -72,6 +75,25 @@ export async function syncKeezInvoicesForTenant(
 ): Promise<SyncKeezInvoicesResult> {
 	const result: SyncKeezInvoicesResult = { imported: 0, updated: 0, skipped: 0, errors: 0 };
 
+	// Prevent concurrent syncs for same tenant
+	if (activeSyncs.has(tenantId)) {
+		logWarning('keez', `Sync already in progress for tenant — skipping`, { tenantId });
+		return result;
+	}
+	activeSyncs.add(tenantId);
+	try {
+		return await _syncKeezInvoicesForTenantInner(tenantId, options, result);
+	} finally {
+		activeSyncs.delete(tenantId);
+	}
+}
+
+async function _syncKeezInvoicesForTenantInner(
+	tenantId: string,
+	options: { offset?: number; count?: number; filter?: string } | undefined,
+	result: SyncKeezInvoicesResult
+): Promise<SyncKeezInvoicesResult> {
+
 	// Get integration
 	const [integration] = await db
 		.select()
@@ -93,7 +115,11 @@ export async function syncKeezInvoicesForTenant(
 		.from(table.tenantUser)
 		.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.tenantUser.role, 'owner')))
 		.limit(1);
-	const systemUserId = tenantOwner?.userId || '';
+	if (!tenantOwner?.userId) {
+		logWarning('keez', `Tenant ${tenantId} has no owner — skipping invoice sync`, { tenantId });
+		return result;
+	}
+	const systemUserId = tenantOwner.userId;
 
 	// Get invoices from Keez
 	const response = await keezClient.getInvoices({
@@ -417,11 +443,13 @@ export async function syncKeezInvoicesForTenant(
 		}
 	}
 
-	// Update integration last sync time
-	await db
-		.update(table.keezIntegration)
-		.set({ lastSyncAt: new Date(), updatedAt: new Date() })
-		.where(eq(table.keezIntegration.tenantId, tenantId));
+	// Update integration last sync time only if at least one invoice was processed successfully
+	if (result.imported > 0 || result.updated > 0 || result.skipped > 0) {
+		await db
+			.update(table.keezIntegration)
+			.set({ lastSyncAt: new Date(), updatedAt: new Date() })
+			.where(eq(table.keezIntegration.tenantId, tenantId));
+	}
 
 	return result;
 }

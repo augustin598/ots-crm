@@ -15,7 +15,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
-	import { CheckCircle2, XCircle, Link as LinkIcon, Download, Upload, AlertTriangle } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Download, AlertTriangle } from '@lucide/svelte';
+	import { extractErrorMessage } from '$lib/utils';
 	import { page } from '$app/state';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -34,6 +35,13 @@
 	let disconnecting = $state(false);
 	let error = $state<string | null>(null);
 	let success = $state(false);
+	let successTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function showSuccess(durationMs = 3000) {
+		success = true;
+		if (successTimer) clearTimeout(successTimer);
+		successTimer = setTimeout(() => { success = false; }, durationMs);
+	}
 
 	const credentialsCorrupt = $derived(
 		status?.connected && status?.credentialsValid === false
@@ -68,19 +76,16 @@
 			clientEid = '';
 			applicationId = '';
 			secret = '';
-			success = true;
-			setTimeout(() => {
-				success = false;
-			}, 3000);
+			showSuccess();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to connect to Keez';
+			error = extractErrorMessage(e, 'Failed to connect to Keez');
 		} finally {
 			connecting = false;
 		}
 	}
 
 	async function handleDisconnect() {
-		if (!confirm('Are you sure you want to disconnect Keez? This will stop automatic syncing.')) {
+		if (!confirm('Sigur doriți să deconectați Keez? Sincronizarea automată va fi oprită.')) {
 			return;
 		}
 
@@ -89,12 +94,9 @@
 
 		try {
 			await disconnectKeez().updates(statusQuery);
-			success = true;
-			setTimeout(() => {
-				success = false;
-			}, 3000);
+			showSuccess();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to disconnect Keez';
+			error = extractErrorMessage(e, 'Failed to disconnect Keez');
 		} finally {
 			disconnecting = false;
 		}
@@ -115,14 +117,10 @@
 
 			if (result.success) {
 				importResult = { imported: result.imported, updated: (result as any).updated || 0, skipped: result.skipped };
-				success = true;
-				setTimeout(() => {
-					success = false;
-					importResult = null;
-				}, 5000);
+				showSuccess(5000);
 			}
 		} catch (e) {
-			importError = e instanceof Error ? e.message : 'Failed to import clients from Keez';
+			importError = extractErrorMessage(e, 'Failed to import clients from Keez');
 		} finally {
 			importingClients = false;
 		}
@@ -140,14 +138,10 @@
 			if (result.success) {
 				importResult = { imported: result.imported, skipped: result.skipped };
 				await invoicesQuery.refresh();
-				success = true;
-				setTimeout(() => {
-					success = false;
-					importResult = null;
-				}, 5000);
+				showSuccess(5000);
 			}
 		} catch (e) {
-			importError = e instanceof Error ? e.message : 'Failed to sync invoices from Keez';
+			importError = extractErrorMessage(e, 'Failed to sync invoices from Keez');
 		} finally {
 			syncingInvoices = false;
 		}
@@ -155,7 +149,7 @@
 </script>
 
 <p class="text-muted-foreground mb-6">
-	Manage your Keez integration. Connect your account for automatic invoice syncing, or import clients and invoices from Keez.
+	Gestionează integrarea Keez. Conectează-ți contul pentru sincronizarea automată a facturilor sau importă clienți și facturi din Keez.
 </p>
 
 {#if loading}
@@ -171,14 +165,14 @@
 	<Card>
 		<CardHeader>
 			<div class="flex items-center gap-2">
-				<CardTitle>Keez Connection</CardTitle>
+				<CardTitle>Conexiune Keez</CardTitle>
 				<Badge variant="destructive" class="gap-1">
 					<AlertTriangle class="h-3 w-3" />
-					Credentials Error
+					Eroare credențiale
 				</Badge>
 			</div>
 			<CardDescription>
-				Your Keez credentials are corrupted and need to be re-saved. Please re-enter your secret below.
+				Credențialele Keez sunt corupte și trebuie re-salvate. Re-introduceți secretul mai jos.
 			</CardDescription>
 		</CardHeader>
 		<CardContent>
@@ -187,11 +181,11 @@
 					<AlertTriangle class="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
 					<div>
 						<p class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-							Keez credentials need to be re-saved
+							Credențialele Keez trebuie re-salvate
 						</p>
 						<p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-							Your stored credentials could not be decrypted. This can happen after a server configuration change.
-							Re-enter your Keez API secret to restore the connection. Your Client EID and Application ID have been pre-filled.
+							Credențialele stocate nu au putut fi decriptate. Acest lucru se poate întâmpla după o modificare a configurației serverului.
+							Re-introduceți secretul API Keez pentru a restabili conexiunea. Client EID și Application ID au fost pre-completate.
 						</p>
 					</div>
 				</div>
@@ -237,7 +231,7 @@
 							required
 						/>
 						<p class="text-xs text-muted-foreground">
-							Re-enter your Keez API secret to restore the connection
+							Re-introduceți secretul API Keez pentru a restabili conexiunea
 						</p>
 					</div>
 				</div>
@@ -250,16 +244,16 @@
 
 				{#if success}
 					<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
-						<p class="text-sm text-green-800 dark:text-green-200">Credentials re-saved successfully!</p>
+						<p class="text-sm text-green-800 dark:text-green-200">Credențiale re-salvate cu succes!</p>
 					</div>
 				{/if}
 
 				<div class="flex gap-2">
 					<Button type="submit" disabled={connecting || !clientEid || !applicationId || !secret}>
-						{connecting ? 'Reconnecting...' : 'Re-save Credentials'}
+						{connecting ? 'Se reconectează...' : 'Re-salvare credențiale'}
 					</Button>
 					<Button variant="outline" onclick={handleDisconnect} disabled={disconnecting}>
-						{disconnecting ? 'Disconnecting...' : 'Disconnect'}
+						{disconnecting ? 'Se deconectează...' : 'Deconectare'}
 					</Button>
 				</div>
 			</form>
@@ -270,14 +264,14 @@
 		<CardHeader>
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2">
-					<CardTitle>Keez Connection</CardTitle>
+					<CardTitle>Conexiune Keez</CardTitle>
 					<Badge variant="default" class="gap-1">
 						<CheckCircle2 class="h-3 w-3" />
-						Connected
+						Conectat
 					</Badge>
 				</div>
 			</div>
-			<CardDescription>Your Keez account is connected and active</CardDescription>
+			<CardDescription>Contul Keez este conectat și activ</CardDescription>
 		</CardHeader>
 		<CardContent class="space-y-6">
 			<div class="space-y-2">
@@ -291,7 +285,7 @@
 			</div>
 
 			<div class="space-y-2">
-				<Label>Last Sync</Label>
+				<Label>Ultima sincronizare</Label>
 				<Input
 					type="text"
 					value={formatDate(status.lastSyncAt ?? null)}
@@ -304,14 +298,14 @@
 
 			<div class="space-y-6">
 				<div class="space-y-4">
-					<h3 class="text-lg font-semibold">Import from Keez</h3>
+					<h3 class="text-lg font-semibold">Import din Keez</h3>
 					<p class="text-sm text-muted-foreground">
-						Import clients and invoices directly from your Keez account.
+						Importă clienți și facturi direct din contul tău Keez.
 					</p>
 
 					<div class="space-y-4">
 						<div class="space-y-2">
-							<Label>Import Clients</Label>
+							<Label>Import clienți</Label>
 							<div class="space-y-2">
 								<Button
 									type="button"
@@ -320,16 +314,16 @@
 									disabled={importingClients || syncingInvoices}
 								>
 									<Download class="h-4 w-4 mr-2" />
-									{importingClients ? 'Importing...' : 'Import Clients from Keez'}
+									{importingClients ? 'Se importă...' : 'Import clienți din Keez'}
 								</Button>
 								<p class="text-xs text-muted-foreground">
-									Import all clients/partners from your Keez account
+									Importă toți clienții/partenerii din contul Keez
 								</p>
 							</div>
 						</div>
 
 						<div class="space-y-2">
-							<Label>Sync Invoices</Label>
+							<Label>Sincronizare facturi</Label>
 							<div class="space-y-2">
 								<Button
 									type="button"
@@ -338,10 +332,10 @@
 									disabled={importingClients || syncingInvoices}
 								>
 									<Download class="h-4 w-4 mr-2" />
-									{syncingInvoices ? 'Syncing...' : 'Sync Invoices from Keez'}
+									{syncingInvoices ? 'Se sincronizează...' : 'Sincronizare facturi din Keez'}
 								</Button>
 								<p class="text-xs text-muted-foreground">
-									Import invoices from your Keez account. Existing invoices will be skipped.
+									Importă facturile din contul Keez. Facturile existente vor fi ignorate.
 								</p>
 							</div>
 						</div>
@@ -352,19 +346,19 @@
 
 				{#if syncHistory.length > 0}
 					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">Sync History (last 20)</h3>
+						<h3 class="text-sm font-semibold">Istoric sincronizare (ultimele 20)</h3>
 						<div class="rounded-md border overflow-hidden">
 							<table class="w-full text-xs">
 								<thead class="bg-muted">
 									<tr>
-										<th class="text-left p-2 font-medium">Invoice</th>
-										<th class="text-left p-2 font-medium">Direction</th>
+										<th class="text-left p-2 font-medium">Factură</th>
+										<th class="text-left p-2 font-medium">Direcție</th>
 										<th class="text-left p-2 font-medium">Status</th>
-										<th class="text-left p-2 font-medium">Last Synced</th>
+										<th class="text-left p-2 font-medium">Ultima sincronizare</th>
 									</tr>
 								</thead>
 								<tbody>
-									{#each syncHistory as record}
+									{#each syncHistory as record (record.id ?? record.invoiceId)}
 										<tr class="border-t">
 											<td class="p-2">{record.invoiceNumber || record.invoiceId}</td>
 											<td class="p-2">
@@ -394,7 +388,7 @@
 
 				<div class="flex gap-2">
 					<Button variant="outline" onclick={handleDisconnect} disabled={disconnecting}>
-						{disconnecting ? 'Disconnecting...' : 'Disconnect'}
+						{disconnecting ? 'Se deconectează...' : 'Deconectare'}
 					</Button>
 					<Button variant="outline" href="/{tenantSlug}/settings/invoices">
 						<LinkIcon class="h-4 w-4 mr-2" />
@@ -417,7 +411,7 @@
 				</div>
 			{:else if success}
 				<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
-					<p class="text-sm text-green-800 dark:text-green-200">Disconnected successfully!</p>
+					<p class="text-sm text-green-800 dark:text-green-200">Deconectat cu succes!</p>
 				</div>
 			{/if}
 		</CardContent>
@@ -426,14 +420,14 @@
 	<Card>
 		<CardHeader>
 			<div class="flex items-center gap-2">
-				<CardTitle>Connect Keez</CardTitle>
+				<CardTitle>Conectare Keez</CardTitle>
 				<Badge variant="outline" class="gap-1">
 					<XCircle class="h-3 w-3" />
-					Not Connected
+					Neconectat
 				</Badge>
 			</div>
 			<CardDescription>
-				Enter your Keez API credentials to connect your account. You can find these in your Keez account settings.
+				Introduceți credențialele API Keez pentru a vă conecta contul. Le puteți găsi în setările contului Keez.
 			</CardDescription>
 		</CardHeader>
 		<CardContent>
@@ -446,44 +440,44 @@
 			>
 				<div class="space-y-4">
 					<div class="space-y-2">
-						<Label for="clientEid">Client EID</Label>
+						<Label for="new-clientEid">Client EID</Label>
 						<Input
-							id="clientEid"
+							id="new-clientEid"
 							type="text"
 							bind:value={clientEid}
 							placeholder="Enter your Client EID"
 							required
 						/>
 						<p class="text-xs text-muted-foreground">
-							The unique identifier for your company in Keez
+							Identificatorul unic al companiei tale în Keez
 						</p>
 					</div>
 
 					<div class="space-y-2">
-						<Label for="applicationId">Application ID</Label>
+						<Label for="new-applicationId">Application ID</Label>
 						<Input
-							id="applicationId"
+							id="new-applicationId"
 							type="text"
 							bind:value={applicationId}
 							placeholder="Enter your Application ID"
 							required
 						/>
 						<p class="text-xs text-muted-foreground">
-							The identifier for your application in Keez
+							Identificatorul aplicației tale în Keez
 						</p>
 					</div>
 
 					<div class="space-y-2">
-						<Label for="secret">Secret</Label>
+						<Label for="new-secret">Secret</Label>
 						<Input
-							id="secret"
+							id="new-secret"
 							type="password"
 							bind:value={secret}
 							placeholder="Enter your Keez API secret"
 							required
 						/>
 						<p class="text-xs text-muted-foreground">
-							Your Keez API secret (password) provided by Keez
+							Secretul API Keez (parola) furnizat de Keez
 						</p>
 					</div>
 				</div>
@@ -496,12 +490,12 @@
 
 				{#if success}
 					<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
-						<p class="text-sm text-green-800 dark:text-green-200">Connected successfully!</p>
+						<p class="text-sm text-green-800 dark:text-green-200">Conectat cu succes!</p>
 					</div>
 				{/if}
 
 				<Button type="submit" disabled={connecting || !clientEid || !applicationId || !secret}>
-					{connecting ? 'Connecting...' : 'Connect Keez'}
+					{connecting ? 'Se conectează...' : 'Conectare Keez'}
 				</Button>
 			</form>
 		</CardContent>

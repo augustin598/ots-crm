@@ -27,6 +27,17 @@ export function getClearbitLogoUrl(websiteUrl: string): string {
 	}
 }
 
+/** Extract error message from SvelteKit HttpError, Error, or unknown */
+export function extractErrorMessage(e: unknown, fallback: string): string {
+	// SvelteKit error() creates HttpError with body.message
+	const bodyMsg = (e as Record<string, unknown>)?.body;
+	if (bodyMsg && typeof bodyMsg === 'object' && 'message' in bodyMsg) {
+		return String((bodyMsg as Record<string, unknown>).message);
+	}
+	if (e instanceof Error) return e.message;
+	return fallback;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

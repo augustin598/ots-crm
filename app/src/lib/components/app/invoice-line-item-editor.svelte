@@ -2,7 +2,6 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
-	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import {
 		Dialog,
@@ -13,6 +12,7 @@
 		DialogTitle
 	} from '$lib/components/ui/dialog';
 	import { X, Plus } from '@lucide/svelte';
+	import { extractErrorMessage } from '$lib/utils';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
 	import { createKeezItem } from '$lib/remotes/keez.remote';
 
@@ -54,9 +54,6 @@
 	let newItemCode = $state('');
 	let newItemDescription = $state('');
 	let newItemVatRate = $state('19');
-	$effect(() => {
-		newItemVatRate = String(defaultTaxRate);
-	});
 	let createItemError = $state<string | null>(null);
 
 	function updateItem(id: string, field: keyof LineItem, value: any) {
@@ -146,7 +143,7 @@
 				createItemDialogOpen = false;
 			}
 		} catch (e) {
-			createItemError = e instanceof Error ? e.message : 'Failed to create item';
+			createItemError = extractErrorMessage(e, 'Failed to create item');
 		} finally {
 			creatingItem = false;
 		}
@@ -159,33 +156,27 @@
 		}))
 	);
 
-	// Track selected Keez item IDs for each line item
-	const keezSelections = $state<Record<string, string>>({});
-
-	// Initialize selections from line items
-	$effect(() => {
+	// Track selected Keez item IDs for each line item (derived from lineItems)
+	const keezSelections = $derived.by<Record<string, string>>(() => {
+		const result: Record<string, string> = {};
 		for (const item of lineItems) {
 			const currentId = item.keezItem?.externalId || '';
-			if (currentId && keezSelections[item.id] !== currentId) {
-				keezSelections[item.id] = currentId;
-			} else if (!currentId && keezSelections[item.id] && keezSelections[item.id] !== '') {
-				// Clear selection if item no longer has keezItem
-				delete keezSelections[item.id];
+			if (currentId) {
+				result[item.id] = currentId;
 			}
 		}
+		return result;
 	});
 
 	// Handle Keez selection change
 	function handleKeezSelectionChange(itemId: string, selectedId: string | number | undefined) {
 		const selectedIdStr = selectedId ? String(selectedId) : undefined;
 		if (selectedIdStr) {
-			keezSelections[itemId] = selectedIdStr;
 			const keezItem = keezItems.find((ki) => ki.externalId === selectedIdStr);
 			if (keezItem) {
 				selectKeezItem(itemId, keezItem);
 			}
 		} else {
-			delete keezSelections[itemId];
 			const item = lineItems.find((i) => i.id === itemId);
 			if (item?.keezItem) {
 				updateItem(itemId, 'description', '');

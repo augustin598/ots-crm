@@ -286,6 +286,7 @@ export const getKeezItems = query(
 		});
 
 		// Normalize and filter items: exclude inactive, missing name, or missing externalId
+		const rawCount = (response || []).length;
 		const items = (response || [])
 			.filter((item) => item.isActive && item.name && item.externalId)
 			.map((item) => ({
@@ -296,7 +297,7 @@ export const getKeezItems = query(
 
 		return {
 			data: items,
-			total: items.length,
+			total: rawCount,
 			recordsCount: items.length
 		};
 	}
@@ -317,6 +318,9 @@ export const createKeezItem = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
 		}
 
 		// Get integration
@@ -362,6 +366,9 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
+	}
+	if (event.locals.tenantUser?.role === 'viewer') {
+		throw new Error('Insufficient permissions');
 	}
 
 	// Get invoice
@@ -775,6 +782,9 @@ export const syncInvoicesFromKeez = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
 		}
 
 		// Get integration
@@ -1310,20 +1320,23 @@ export const importClientsFromKeez = command(
 		// Import each partner
 		for (const partner of partnersToImport) {
 			try {
-				// Check if client already exists by partnerName (KeezPartner uses partnerName, not externalId)
-				if (partner.partnerName) {
+				// Check if client already exists — match on CUI first, then on name
+				if (partner.identificationNumber || partner.partnerName) {
+					const conditions = [eq(table.client.tenantId, event.locals.tenant.id)];
+					if (partner.identificationNumber) {
+						conditions.push(eq(table.client.cui, partner.identificationNumber));
+					} else {
+						conditions.push(
+							or(
+								eq(table.client.name, partner.partnerName!),
+								eq(table.client.businessName, partner.partnerName!)
+							)!
+						);
+					}
 					const [existing] = await db
 						.select()
 						.from(table.client)
-						.where(
-							and(
-								eq(table.client.tenantId, event.locals.tenant.id),
-								or(
-									eq(table.client.name, partner.partnerName),
-									eq(table.client.businessName, partner.partnerName)
-								)
-							)
-						)
+						.where(and(...conditions))
 						.limit(1);
 
 					if (existing) {
@@ -1426,6 +1439,9 @@ export const sendInvoiceEmailFromKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
+		}
 
 		const [invoice] = await db
 			.select()
@@ -1474,6 +1490,9 @@ export const sendInvoiceToEFactura = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
+		}
 
 		const [invoice] = await db
 			.select()
@@ -1517,6 +1536,9 @@ export const cancelInvoiceInKeez = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
 		}
 
 		const [invoice] = await db
@@ -1572,6 +1594,9 @@ export const createStornoInKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
+		}
 
 		// Get invoice and verify it has Keez external ID
 		const [invoice] = await db
@@ -1626,6 +1651,9 @@ export const validateInvoiceInKeez = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
+		}
+		if (event.locals.tenantUser?.role === 'viewer') {
+			throw new Error('Insufficient permissions');
 		}
 
 		// Get invoice and verify it has Keez external ID

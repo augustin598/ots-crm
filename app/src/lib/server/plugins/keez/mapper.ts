@@ -337,7 +337,12 @@ export async function mapInvoiceToKeez(
 		// Try BNR rate from DB before using hardcoded fallback
 		const targetCurrency = referenceCurrencyCode || (isRON ? 'EUR' : currency);
 		const bnrRate = await getLatestBnrRate(targetCurrency);
-		exchangeRate = bnrRate || 4.82;
+		if (bnrRate) {
+			exchangeRate = bnrRate;
+		} else {
+			logWarning('keez', `No BNR exchange rate for ${targetCurrency} — invoice amounts may be inaccurate`, {});
+			exchangeRate = 1;
+		}
 	}
 
 	// Map invoice details from line items - conform to Keez API format
@@ -561,13 +566,13 @@ export async function mapInvoiceToKeez(
 					const fallbackGrossRON = Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100;
 					const fallbackNetCurrency = isRON
 						? fallbackNetRON
-						: Math.round(fallbackNetRON * exchangeRate * 100) / 100;
+						: Math.round((fallbackNetRON / exchangeRate) * 100) / 100;
 					const fallbackVatCurrency = isRON
 						? fallbackVatRON
-						: Math.round(fallbackVatRON * exchangeRate * 100) / 100;
+						: Math.round((fallbackVatRON / exchangeRate) * 100) / 100;
 					const fallbackGrossCurrency = isRON
 						? fallbackGrossRON
-						: Math.round(fallbackGrossRON * exchangeRate * 100) / 100;
+						: Math.round((fallbackGrossRON / exchangeRate) * 100) / 100;
 					return [
 						{
 							itemExternalId: invoice.id,
@@ -780,8 +785,9 @@ export function mapKeezInvoiceToCRM(
 	totalAmount = Math.round(totalAmount * 100);
 
 	// Determine tax rate (use first detail's tax rate or default to 19%)
-	const taxRate = keezInvoice.invoiceDetails[0]?.vatPercent
-		? Math.round(keezInvoice.invoiceDetails[0].vatPercent * 100)
+	const firstVat = keezInvoice.invoiceDetails[0]?.vatPercent;
+	const taxRate = firstVat !== undefined && firstVat !== null
+		? Math.round(firstVat * 100)
 		: 1900;
 
 	// Parse dates
@@ -896,7 +902,9 @@ export function mapKeezInvoiceToCRM(
 	return {
 		tenantId,
 		clientId: clientId || '',
-		invoiceNumber: keezHeader.number ? String(keezHeader.number) : keezHeader.externalId,
+		invoiceNumber: keezHeader.series && keezHeader.number
+			? `${keezHeader.series} ${keezHeader.number}`
+			: keezHeader.number ? String(keezHeader.number) : keezHeader.externalId,
 		status: invoiceStatus,
 		amount,
 		taxRate,
@@ -947,7 +955,9 @@ export function mapKeezPartnerToClient(
 		status: 'active',
 		companyType: keezPartner.isLegalPerson ? 'SRL' : null, // Default to SRL for legal entities
 		cui: keezPartner.identificationNumber || null,
-		vatNumber: keezPartner.taxAttribute || null,
+		vatNumber: keezPartner.taxAttribute && keezPartner.identificationNumber
+			? `${keezPartner.taxAttribute}${keezPartner.identificationNumber}`
+			: keezPartner.taxAttribute || null,
 		registrationNumber: keezPartner.registrationNumber || null,
 		tradeRegister: null,
 		address: keezPartner.addressDetails || null,
@@ -984,7 +994,7 @@ export function mapClientToKeezPartner(client: Client): KeezPartner {
 		countryName: client.country || 'România',
 		email: client.email || undefined,
 		phone: client.phone || undefined,
-		isLegalPerson: client.companyType === 'SRL',
+		isLegalPerson: !!client.companyType && !['PF', 'Persoana Fizica'].includes(client.companyType),
 		legalRepresentative: client.legalRepresentative || undefined,
 		iban: client.iban || undefined,
 		bankName: client.bankName || undefined
@@ -1128,7 +1138,8 @@ export function mapKeezDetailsToLineItems(
 				: detail.unitPriceCurrency || 0;
 
 		// Extract tax rate from vatPercent (convert from percentage to cents: 19 -> 1900)
-		const taxRate = detail.vatPercent ? Math.round(detail.vatPercent * 100) : null;
+		const taxRate = detail.vatPercent !== undefined && detail.vatPercent !== null
+			? Math.round(detail.vatPercent * 100) : null;
 
 		// Extract discount information
 		let discountType: string | null = null;
@@ -1137,7 +1148,7 @@ export function mapKeezDetailsToLineItems(
 			discountType = detail.discountType === 'Percent' ? 'percent' : 'fixed';
 			if (detail.discountPercent !== undefined) {
 				discount = detail.discountPercent;
-			} else if (detail.discountNetValue !== undefined && detail.originalNetAmount) {
+			} else if (detail.discountNetValue !== undefined && detail.originalNetAmount && detail.originalNetAmount > 0) {
 				// Calculate discount percentage from discount value
 				discount = (detail.discountNetValue / detail.originalNetAmount) * 100;
 			}

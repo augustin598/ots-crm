@@ -299,7 +299,11 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		} catch (createError) {
 			lastError = createError;
 			const errMsg = createError instanceof Error ? createError.message : String(createError);
-			const isDuplicateNumber = errMsg.toLowerCase().includes('number') || errMsg.toLowerCase().includes('duplicate') || errMsg.toLowerCase().includes('exists') || errMsg.toLowerCase().includes('already');
+			const errLower = errMsg.toLowerCase();
+			const isDuplicateNumber = (errLower.includes('duplicate') && errLower.includes('number'))
+				|| (errLower.includes('already') && errLower.includes('exists') && errLower.includes('number'))
+				|| errLower.includes('number is already in use')
+				|| errLower.includes('numar deja existent');
 
 			if (isDuplicateNumber && attempt < MAX_RETRY_ATTEMPTS && keezInvoice.number) {
 				// Increment number and retry — likely a race condition with concurrent invoice creation
@@ -526,10 +530,10 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		let keezTaxRate: number | null = null;
 
 		for (const detail of keezInvoiceData.invoiceDetails) {
-			// Use currency amounts if available, otherwise use RON amounts
-			const netAmount = detail.netAmountCurrency ?? detail.netAmount ?? 0;
-			const vatAmount = detail.vatAmountCurrency ?? detail.vatAmount ?? 0;
-			const grossAmount = detail.grossAmountCurrency ?? detail.grossAmount ?? 0;
+			// Always use RON amounts (non-suffixed) — CRM stores in RON cents
+			const netAmount = detail.netAmount ?? detail.netAmountCurrency ?? 0;
+			const vatAmount = detail.vatAmount ?? detail.vatAmountCurrency ?? 0;
+			const grossAmount = detail.grossAmount ?? detail.grossAmountCurrency ?? 0;
 
 			keezNetAmount += netAmount;
 			keezVatAmount += vatAmount;

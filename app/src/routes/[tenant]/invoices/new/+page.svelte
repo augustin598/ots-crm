@@ -16,6 +16,7 @@
 	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { extractErrorMessage } from '$lib/utils';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -70,7 +71,7 @@
 
 	// Determine which plugin series to use based on active plugins
 	// Priority: keez if active, then smartbill if active, otherwise empty
-	const defaultInvoiceSeries = $derived(() => {
+	const defaultInvoiceSeries = $derived.by(() => {
 		if (isKeezActive && invoiceSettings?.keezSeries) {
 			return invoiceSettings.keezSeries;
 		}
@@ -80,7 +81,7 @@
 		return '';
 	});
 
-	const defaultInvoiceNumber = $derived(() => {
+	const defaultInvoiceNumber = $derived.by(() => {
 		if (isKeezActive && invoiceSettings?.keezStartNumber) {
 			return invoiceSettings.keezStartNumber;
 		}
@@ -266,9 +267,6 @@
 
 	// Update form fields when settings load or plugins change
 	$effect(() => {
-		console.log('[invoice/new] invoiceSettings:', invoiceSettings);
-		console.log('[invoice/new] plugins:', { isKeezActive, isSmartbillActive });
-
 		if (isKeezActive) {
 			clientLogger.info({ message: `Keez plugin activ. Setări: serie=${invoiceSettings?.keezSeries}, startNr=${invoiceSettings?.keezStartNumber}, paymentType=${invoiceSettings?.keezDefaultPaymentTypeId}`, action: 'keez_plugin_init' });
 		}
@@ -287,7 +285,7 @@
 		}
 
 		// Set invoice series based on active plugin (only if series is empty to avoid overwriting user input)
-		const series = defaultInvoiceSeries();
+		const series = defaultInvoiceSeries;
 		if (series && !invoiceSeries) {
 			invoiceSeries = series;
 		}
@@ -295,16 +293,15 @@
 		// Set invoice number based on active plugin (only if number is empty to avoid overwriting user input)
 		// For Keez, prefer the live next number from API; fall back to settings start number
 		const keezLiveNumber = keezNextNumber !== null ? String(keezNextNumber) : null;
-		const number = isKeezActive ? (keezLiveNumber || defaultInvoiceNumber()) : defaultInvoiceNumber();
-		if (number) {
+		const number = isKeezActive ? (keezLiveNumber || defaultInvoiceNumber) : defaultInvoiceNumber;
+		if (number && !invoiceNumber) {
 			invoiceNumber = number;
 		}
 
 		if (isKeezActive) {
-			clientLogger.info({ message: `Keez serie=${series}, număr=${number} (live=${keezLiveNumber}, fallback=${defaultInvoiceNumber()})`, action: 'keez_number_resolved' });
+			clientLogger.info({ message: `Keez serie=${series}, număr=${number} (live=${keezLiveNumber}, fallback=${defaultInvoiceNumber})`, action: 'keez_number_resolved' });
 		}
 
-		console.log('[invoice/new] resolved series:', series, '| resolved number:', number, '| keezNextNumber:', keezNextNumber);
 	});
 
 	// Update exchange rate when currencies change — auto-fill from BNR
@@ -551,20 +548,6 @@
 	}
 
 	async function handleSubmit(status: 'draft' | 'sent' = 'draft') {
-		console.log('[invoice/new] handleSubmit', {
-			status,
-			clientId,
-			invoiceSeries,
-			invoiceNumber,
-			currency,
-			invoiceCurrency,
-			issueDate,
-			dueDate,
-			paymentTerms,
-			taxApplicationType,
-			lineItems
-		});
-
 		if (!clientId) {
 			error = 'Please select a client';
 			clientLogger.warn({ message: 'Please select a client', action: 'invoice_create' });
@@ -748,7 +731,7 @@
 				}
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Error creating invoice';
+			error = extractErrorMessage(e, 'Error creating invoice');
 			clientLogger.apiError('invoice_create', e);
 		} finally {
 			loading = false;
@@ -972,7 +955,7 @@
 								bind:value={contractId}
 							>
 								<option value="">— Fără contract —</option>
-								{#each clientContracts as c}
+								{#each clientContracts as c (c.id)}
 									<option value={c.id}>{c.contractNumber} — {c.contractTitle || 'Contract'}</option>
 								{/each}
 							</select>
@@ -1242,7 +1225,7 @@
 								<Select type="single" bind:value={currency}>
 									<SelectTrigger>{currency}</SelectTrigger>
 									<SelectContent>
-										{#each CURRENCIES as curr}
+										{#each CURRENCIES as curr (curr)}
 											<SelectItem value={curr}>{curr}</SelectItem>
 										{/each}
 									</SelectContent>
@@ -1253,7 +1236,7 @@
 								<Select type="single" bind:value={invoiceCurrency}>
 									<SelectTrigger>{invoiceCurrency}</SelectTrigger>
 									<SelectContent>
-										{#each CURRENCIES as curr}
+										{#each CURRENCIES as curr (curr)}
 											<SelectItem value={curr}>{curr}</SelectItem>
 										{/each}
 									</SelectContent>
@@ -1473,7 +1456,7 @@
 												: 'grid-cols-4'}"
 									>
 										<TabsTrigger value="service">{isKeezActive ? 'Din serviciu' : 'From Service'}</TabsTrigger>
-										{#each invoiceProviderPlugins as plugin}
+										{#each invoiceProviderPlugins as plugin (plugin.name)}
 											<TabsTrigger value="plugin-{plugin.name}"
 												>{isKeezActive ? 'Din' : 'From'} {plugin.name.charAt(0).toUpperCase() +
 													plugin.name.slice(1)}</TabsTrigger
@@ -1503,7 +1486,7 @@
 											/>
 										</div>
 									</TabsContent>
-									{#each invoiceProviderPlugins as plugin}
+									{#each invoiceProviderPlugins as plugin (plugin.name)}
 										{#if plugin.name === 'keez'}
 											<TabsContent value="plugin-keez" class="space-y-4">
 												<div class="space-y-2">
@@ -1631,7 +1614,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each lineItems as item}
+								{#each lineItems as item (item.id)}
 									{@const itemSubtotal = item.quantity * item.rate}
 									{@const itemDiscount =
 										item.discountType === 'percent'
@@ -1805,7 +1788,7 @@
 						</div>
 					</div>
 
-					{#each Object.entries(totalsByCurrency) as [curr, currTotals]}
+					{#each Object.entries(totalsByCurrency) as [curr, currTotals] (curr)}
 					<div class="space-y-3">
 						{#if Object.keys(totalsByCurrency).length > 1}
 							<p class="text-xs font-semibold uppercase text-gray-500">{curr}</p>
