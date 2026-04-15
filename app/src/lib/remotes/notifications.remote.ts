@@ -1,8 +1,8 @@
-import { query, getRequestEvent } from '$app/server';
+import { command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, lt, desc, sql } from 'drizzle-orm';
+import { eq, and, or, lt, desc, sql, inArray } from 'drizzle-orm';
 
 /**
  * Build the WHERE condition for notifications.
@@ -27,7 +27,7 @@ function getNotificationConditions(event: ReturnType<typeof getRequestEvent>) {
 /**
  * Get the latest notifications for the current user in the current tenant.
  */
-export const getNotifications = query(
+export const getNotifications = command(
 	v.object({
 		limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(50))),
 		cursor: v.optional(v.string())
@@ -40,19 +40,19 @@ export const getNotifications = query(
 
 		const conditions = [getNotificationConditions(event)];
 		if (cursor) {
-			conditions.push(lt(table.notification.createdAt, new Date(cursor)));
+			conditions.push(lt(table.notification.updatedAt, new Date(cursor)));
 		}
 
 		const items = await db
 			.select()
 			.from(table.notification)
 			.where(and(...conditions))
-			.orderBy(desc(table.notification.createdAt))
+			.orderBy(desc(table.notification.updatedAt))
 			.limit(limit + 1);
 
 		const hasMore = items.length > limit;
 		const results = hasMore ? items.slice(0, limit) : items;
-		const nextCursor = hasMore ? results[results.length - 1].createdAt.toISOString() : null;
+		const nextCursor = hasMore ? results[results.length - 1].updatedAt.toISOString() : null;
 
 		return { items: results, nextCursor };
 	}
@@ -61,7 +61,7 @@ export const getNotifications = query(
 /**
  * Get the count of unread notifications for the current user.
  */
-export const getUnreadCount = query(async () => {
+export const getUnreadCount = command(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
@@ -71,6 +71,27 @@ export const getUnreadCount = query(async () => {
 		.select({ count: sql<number>`count(*)`.as('count') })
 		.from(table.notification)
 		.where(and(getNotificationConditions(event), eq(table.notification.isRead, false)));
+
+	return { count: Number(result?.count) || 0 };
+});
+
+/**
+ * Get count of unread urgent+high priority notifications (for badge).
+ */
+export const getUrgentUnreadCount = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const [result] = await db
+		.select({ count: sql<number>`count(*)`.as('count') })
+		.from(table.notification)
+		.where(and(
+			getNotificationConditions(event),
+			eq(table.notification.isRead, false),
+			inArray(table.notification.priority, ['urgent', 'high'])
+		));
 
 	return { count: Number(result?.count) || 0 };
 });
