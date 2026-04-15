@@ -43,14 +43,20 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 
 		for (const contract of signedContracts) {
 			try {
-				await db
+				// Optimistic lock: only update if version hasn't changed (prevents overwriting concurrent admin edits)
+				const result = await db
 					.update(table.contract)
 					.set({
 						status: 'active',
 						version: contract.version + 1,
 						updatedAt: now
 					})
-					.where(eq(table.contract.id, contract.id));
+					.where(and(eq(table.contract.id, contract.id), eq(table.contract.version, contract.version)));
+
+				if ((result as any)?.rowsAffected === 0) {
+					logInfo('scheduler', `Contract lifecycle: skipped activation for ${contract.id} — concurrent modification`, { tenantId: contract.tenantId });
+					continue;
+				}
 
 				await recordContractActivity({
 					contractId: contract.id,
@@ -101,14 +107,20 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 
 		for (const contract of activeContracts) {
 			try {
-				await db
+				// Optimistic lock: only update if version hasn't changed
+				const result = await db
 					.update(table.contract)
 					.set({
 						status: 'expired',
 						version: contract.version + 1,
 						updatedAt: now
 					})
-					.where(eq(table.contract.id, contract.id));
+					.where(and(eq(table.contract.id, contract.id), eq(table.contract.version, contract.version)));
+
+				if ((result as any)?.rowsAffected === 0) {
+					logInfo('scheduler', `Contract lifecycle: skipped expiration for ${contract.id} — concurrent modification`, { tenantId: contract.tenantId });
+					continue;
+				}
 
 				await recordContractActivity({
 					contractId: contract.id,

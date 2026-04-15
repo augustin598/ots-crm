@@ -48,6 +48,7 @@
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import cronstrue from 'cronstrue/i18n';
 	import type { Component } from 'svelte';
 
 	// ---- Data Queries ----
@@ -286,7 +287,9 @@
 		try {
 			await triggerJobNow({ name: job.name, typeKey: job.typeKey, params: job.params });
 			toast.success(`Job lansat manual: ${job.label}`);
+			// Refresh history after a short delay, then again after a longer one for slow jobs
 			setTimeout(() => historyQuery.refresh(), 2000);
+			setTimeout(() => { historyQuery.refresh(); jobStatsQuery.refresh(); }, 8000);
 		} catch (e: any) {
 			clientLogger.apiError('scheduler_trigger_now', e);
 			toast.error(e?.message || 'Eroare la lansarea job-ului');
@@ -359,6 +362,33 @@
 		historyPage = 1;
 	}
 
+	// Sync historyPage to valid range when filters reduce results
+	$effect(() => {
+		if (historyPage !== safeHistoryPage) {
+			historyPage = safeHistoryPage;
+		}
+	});
+
+	// Cron preview for edit mode
+	const cronPreview = $derived.by(() => {
+		if (!editPattern || editPattern.length < 5) return '';
+		try {
+			return cronstrue.toString(editPattern, { locale: 'ro', use24HourTimeFormat: true });
+		} catch {
+			return '';
+		}
+	});
+
+	const cronError = $derived.by(() => {
+		if (!editPattern || editPattern.length < 5) return '';
+		try {
+			cronstrue.toString(editPattern);
+			return '';
+		} catch {
+			return 'Pattern cron invalid';
+		}
+	});
+
 	let deletingLevel = $state<string | null>(null);
 
 	async function handleDeleteByLevel(level: 'info' | 'warning' | 'error', label: string) {
@@ -390,7 +420,7 @@
 	</div>
 
 	<!-- Stats Cards (clickable, toggle level filter) -->
-	<div class="grid grid-cols-4 gap-4">
+	<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
 		<Card>
 			<CardContent class="pt-6">
 				<div class="text-2xl font-bold">{jobs.length}</div>
@@ -398,8 +428,13 @@
 			</CardContent>
 		</Card>
 		<Card
+			role="button"
+			tabindex={0}
+			aria-pressed={historyLevelFilter === 'info'}
+			aria-label="Filtreaza dupa completate ({stats.info})"
 			class="cursor-pointer transition-colors hover:border-green-500/50 {historyLevelFilter === 'info' ? 'border-green-500' : ''}"
 			onclick={() => toggleStatFilter('info')}
+			onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStatFilter('info'); } }}
 		>
 			<CardContent class="pt-4 pb-4">
 				<div class="flex items-center justify-between">
@@ -423,8 +458,13 @@
 			</CardContent>
 		</Card>
 		<Card
+			role="button"
+			tabindex={0}
+			aria-pressed={historyLevelFilter === 'warning'}
+			aria-label="Filtreaza dupa avertismente ({stats.warning})"
 			class="cursor-pointer transition-colors hover:border-amber-500/50 {historyLevelFilter === 'warning' ? 'border-amber-500' : ''}"
 			onclick={() => toggleStatFilter('warning')}
+			onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStatFilter('warning'); } }}
 		>
 			<CardContent class="pt-4 pb-4">
 				<div class="flex items-center justify-between">
@@ -448,8 +488,13 @@
 			</CardContent>
 		</Card>
 		<Card
+			role="button"
+			tabindex={0}
+			aria-pressed={historyLevelFilter === 'error'}
+			aria-label="Filtreaza dupa erori ({stats.error})"
 			class="cursor-pointer transition-colors hover:border-red-500/50 {historyLevelFilter === 'error' ? 'border-red-500' : ''}"
 			onclick={() => toggleStatFilter('error')}
+			onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStatFilter('error'); } }}
 		>
 			<CardContent class="pt-4 pb-4">
 				<div class="flex items-center justify-between">
@@ -528,22 +573,29 @@
 								</div>
 								<div class="text-sm text-center min-w-[140px]">
 									{#if editingJobKey === job.key}
-										<div class="flex items-center gap-1">
-											<Input
-												bind:value={editPattern}
-												class="h-7 text-xs w-[130px] font-mono"
-												placeholder="0 2 * * *"
-											/>
-											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)} disabled={isSaving}>
-												{#if isSaving}
-													<RefreshCwIcon class="size-3.5 animate-spin" />
-												{:else}
-													<CheckIcon class="size-3.5 text-green-600" />
-												{/if}
-											</Button>
-											<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit} disabled={isSaving}>
-												<XIcon class="size-3.5 text-red-600" />
-											</Button>
+										<div class="flex flex-col gap-0.5">
+											<div class="flex items-center gap-1">
+												<Input
+													bind:value={editPattern}
+													class="h-7 text-xs w-[130px] font-mono"
+													placeholder="0 2 * * *"
+												/>
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => saveSchedule(job)} disabled={isSaving || !!cronError}>
+													{#if isSaving}
+														<RefreshCwIcon class="size-3.5 animate-spin" />
+													{:else}
+														<CheckIcon class="size-3.5 text-green-600" />
+													{/if}
+												</Button>
+												<Button variant="ghost" size="icon" class="h-7 w-7" onclick={cancelEdit} disabled={isSaving}>
+													<XIcon class="size-3.5 text-red-600" />
+												</Button>
+											</div>
+											{#if cronError}
+												<span class="text-[10px] text-red-500">{cronError}</span>
+											{:else if cronPreview}
+												<span class="text-[10px] text-muted-foreground">{cronPreview}</span>
+											{/if}
 										</div>
 									{:else}
 										<Badge variant="secondary" class="font-mono text-xs">{job.pattern}</Badge>

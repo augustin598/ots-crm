@@ -18,7 +18,7 @@ import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
-import { processEmailRetry } from './tasks/email-retry';
+import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retry';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -43,8 +43,9 @@ const connection = {
 	password: parsedRedisUrl.password || undefined
 };
 
-// Use a global symbol to store the scheduler queue instance
+// Use global symbols to store singleton instances (survives HMR)
 const SCHEDULER_QUEUE_SYMBOL = Symbol.for('scheduler_queue');
+const SCHEDULER_WORKER_SYMBOL = Symbol.for('scheduler_worker');
 
 /**
  * Creates a singleton instance of the 'scheduler' queue.
@@ -188,8 +189,21 @@ export const startScheduler = async () => {
 		logWarning('scheduler', `Failed to mark interrupted discovery jobs: ${message}`);
 	}
 
-	// Create scheduler worker
+	// Recover any email retries stuck in 'retrying' state from a crash
+	await recoverInterruptedRetries();
+
+	// Create scheduler worker (singleton — close existing on HMR/restart)
+	const existingWorker = (globalThis as any)[SCHEDULER_WORKER_SYMBOL] as Worker | undefined;
+	if (existingWorker) {
+		try {
+			await existingWorker.close();
+			logInfo('scheduler', 'Closed existing worker before creating new one');
+		} catch {
+			// Worker may already be closed
+		}
+	}
 	const worker = createSchedulerWorker();
+	(globalThis as any)[SCHEDULER_WORKER_SYMBOL] = worker;
 	logInfo('scheduler', 'Scheduler worker created', { metadata: { queueName: 'scheduler', concurrency: 1 } });
 
 	// Clean up stale repeatable jobs from Redis (from old code deployments with different patterns)

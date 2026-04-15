@@ -101,6 +101,7 @@
 		"@xmldom/xmldom": "^0.8.11",
 		"bullmq": "^5.66.4",
 		"chart.js": "^4.5.1",
+		"cronstrue": "^3.14.0",
 		"dotenv": "^17.3.1",
 		"embla-carousel-auto-scroll": "^8.6.0",
 		"embla-carousel-autoplay": "^8.6.0",

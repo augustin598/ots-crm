@@ -1,9 +1,23 @@
 import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
+import { parseExpression } from 'cron-parser';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, desc, sql, count, and, or, like } from 'drizzle-orm';
 import { getSchedulerQueue, JOB_LABELS, JOB_PARAMS, JOB_HANDLER_TYPES } from '$lib/server/scheduler';
+import { logInfo } from '$lib/server/logger';
+
+/** Validates cron pattern syntax and rejects patterns that fire more than 1x/minute */
+function validateCronPattern(pattern: string): boolean {
+	try {
+		const interval = parseExpression(pattern);
+		const next1 = interval.next().getTime();
+		const next2 = interval.next().getTime();
+		return (next2 - next1) >= 60_000; // minimum 1-minute interval
+	} catch {
+		return false;
+	}
+}
 
 function requireAdmin() {
 	const event = getRequestEvent();
@@ -15,6 +29,21 @@ function requireAdmin() {
 	}
 	return event;
 }
+
+function requireOwner() {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.tenantUser?.role !== 'owner') {
+		throw new Error('Forbidden: Owner access required');
+	}
+	return event;
+}
+
+// Rate limit for manual job triggers (30s cooldown per job name)
+const lastTriggerTime = new Map<string, number>();
+const TRIGGER_COOLDOWN_MS = 30_000;
 
 export const getSchedulerJobs = query(async () => {
 	requireAdmin();
@@ -43,7 +72,8 @@ export const getSchedulerJobs = query(async () => {
 });
 
 export const getSchedulerHistory = query(async () => {
-	requireAdmin();
+	const event = requireAdmin();
+	const tenantId = event.locals.tenant!.id;
 
 	const logs = await db
 		.select({
@@ -55,7 +85,10 @@ export const getSchedulerHistory = query(async () => {
 			createdAt: table.debugLog.createdAt
 		})
 		.from(table.debugLog)
-		.where(eq(table.debugLog.source, 'scheduler'))
+		.where(and(
+			eq(table.debugLog.source, 'scheduler'),
+			eq(table.debugLog.tenantId, tenantId)
+		))
 		.orderBy(desc(table.debugLog.createdAt))
 		.limit(1000);
 
@@ -63,7 +96,8 @@ export const getSchedulerHistory = query(async () => {
 });
 
 export const getSchedulerStats = query(async () => {
-	requireAdmin();
+	const event = requireAdmin();
+	const tenantId = event.locals.tenant!.id;
 
 	const [result] = await db
 		.select({
@@ -73,14 +107,18 @@ export const getSchedulerStats = query(async () => {
 			error: count(sql`CASE WHEN ${table.debugLog.level} = 'error' THEN 1 END`)
 		})
 		.from(table.debugLog)
-		.where(eq(table.debugLog.source, 'scheduler'));
+		.where(and(
+			eq(table.debugLog.source, 'scheduler'),
+			eq(table.debugLog.tenantId, tenantId)
+		));
 
 	return result ?? { total: 0, info: 0, warning: 0, error: 0 };
 });
 
-/** Per-job execution stats — computed server-side from ALL logs via 2 batch queries */
+/** Per-job execution stats — computed server-side from tenant-scoped logs */
 export const getJobStats = query(async () => {
-	requireAdmin();
+	const event = requireAdmin();
+	const tenantId = event.locals.tenant!.id;
 
 	// Query 1: Count successes and failures per handler type
 	const countRows = await db
@@ -92,6 +130,7 @@ export const getJobStats = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
+			eq(table.debugLog.tenantId, tenantId),
 			or(
 				like(table.debugLog.message, 'Job completed: %'),
 				like(table.debugLog.message, 'Job failed: %')
@@ -109,13 +148,14 @@ export const getJobStats = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
+			eq(table.debugLog.tenantId, tenantId),
 			or(
 				like(table.debugLog.message, 'Job completed: %'),
 				like(table.debugLog.message, 'Job failed: %')
 			)
 		))
 		.orderBy(desc(table.debugLog.createdAt))
-		.limit(100); // Top 100 most recent — covers all handler types
+		.limit(100);
 
 	// Parse handler type from message
 	function extractHandlerType(msg: string): string | null {
@@ -164,11 +204,17 @@ export const updateJobSchedule = command(
 	v.object({
 		jobId: v.string(),
 		name: v.string(),
-		pattern: v.pipe(v.string(), v.minLength(5)),
+		pattern: v.pipe(
+			v.string(),
+			v.minLength(5),
+			v.check(validateCronPattern, 'Pattern cron invalid sau prea frecvent (minim 1 minut)')
+		),
 		tz: v.optional(v.string(), 'Europe/Bucharest')
 	}),
 	async ({ jobId, name, pattern, tz }) => {
-		requireAdmin();
+		const event = requireOwner();
+		const tenantId = event.locals.tenant!.id;
+		const userId = event.locals.user!.id;
 
 		const queue = getSchedulerQueue();
 
@@ -207,6 +253,14 @@ export const updateJobSchedule = command(
 			throw err;
 		}
 
+		// Audit trail
+		logInfo('scheduler', `Admin action: schedule updated for ${name}`, {
+			tenantId,
+			userId,
+			action: 'scheduler.update_schedule',
+			metadata: { jobId, name, oldPattern: oldJob.pattern, newPattern: pattern }
+		});
+
 		return { success: true };
 	}
 );
@@ -214,10 +268,20 @@ export const updateJobSchedule = command(
 export const removeSchedulerJob = command(
 	v.pipe(v.string(), v.minLength(1)),
 	async (jobKey) => {
-		requireAdmin();
+		const event = requireOwner();
+		const tenantId = event.locals.tenant!.id;
+		const userId = event.locals.user!.id;
 
 		const queue = getSchedulerQueue();
 		await queue.removeRepeatableByKey(jobKey);
+
+		// Audit trail
+		logInfo('scheduler', `Admin action: job removed`, {
+			tenantId,
+			userId,
+			action: 'scheduler.remove_job',
+			metadata: { jobKey }
+		});
 
 		return { success: true };
 	}
@@ -230,7 +294,16 @@ export const triggerJobNow = command(
 		params: v.optional(v.record(v.string(), v.any()), {})
 	}),
 	async ({ name, typeKey, params }) => {
-		requireAdmin();
+		const event = requireOwner();
+		const tenantId = event.locals.tenant!.id;
+		const userId = event.locals.user!.id;
+
+		// Rate limit: 30s cooldown per job name
+		const lastTime = lastTriggerTime.get(name) ?? 0;
+		if (Date.now() - lastTime < TRIGGER_COOLDOWN_MS) {
+			throw new Error('Prea devreme. Așteptați 30 de secunde între execuții manuale.');
+		}
+		lastTriggerTime.set(name, Date.now());
 
 		const queue = getSchedulerQueue();
 		const handlerType = JOB_HANDLER_TYPES[typeKey] || typeKey.replace(/_evening$/, '');
@@ -246,6 +319,14 @@ export const triggerJobNow = command(
 			}
 		);
 
+		// Audit trail
+		logInfo('scheduler', `Admin action: manual trigger for ${name}`, {
+			tenantId,
+			userId,
+			action: 'scheduler.trigger_job',
+			metadata: { name, typeKey, handlerType }
+		});
+
 		return { success: true };
 	}
 );
@@ -253,16 +334,28 @@ export const triggerJobNow = command(
 export const deleteSchedulerLogsByLevel = command(
 	v.picklist(['info', 'warning', 'error']),
 	async (level) => {
-		requireAdmin();
+		const event = requireOwner();
+		const tenantId = event.locals.tenant!.id;
+		const userId = event.locals.user!.id;
 
 		await db
 			.delete(table.debugLog)
 			.where(
 				and(
 					eq(table.debugLog.source, 'scheduler'),
-					eq(table.debugLog.level, level)
+					eq(table.debugLog.level, level),
+					eq(table.debugLog.tenantId, tenantId)
 				)
 			);
+
+		// Audit trail
+		logInfo('scheduler', `Admin action: logs deleted for level ${level}`, {
+			tenantId,
+			userId,
+			action: 'scheduler.delete_logs',
+			metadata: { level }
+		});
+
 		return { success: true };
 	}
 );

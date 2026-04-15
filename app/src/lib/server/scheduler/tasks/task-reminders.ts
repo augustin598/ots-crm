@@ -59,6 +59,13 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 		let remindersSent = 0;
 		const errors: Array<{ id: string; error: string }> = [];
 
+		// Batch-fetch all assignees to avoid N+1 queries
+		const uniqueUserIds = [...new Set(tasks.map((t) => t.assignedToUserId).filter(Boolean))] as string[];
+		const users = uniqueUserIds.length > 0
+			? await db.select().from(table.user).where(inArray(table.user.id, uniqueUserIds))
+			: [];
+		const userMap = new Map(users.map((u) => [u.id, u]));
+
 		// Send reminder emails for each task
 		for (const task of tasks) {
 			if (!task.assignedToUserId || !task.dueDate) {
@@ -66,12 +73,7 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			}
 
 			try {
-				// Get assignee details
-				const [assignee] = await db
-					.select()
-					.from(table.user)
-					.where(eq(table.user.id, task.assignedToUserId))
-					.limit(1);
+				const assignee = userMap.get(task.assignedToUserId);
 
 				if (!assignee?.email) {
 					logWarning('scheduler', `Task reminders: cannot send reminder, assignee email not found`, { tenantId: task.tenantId, metadata: { taskId: task.id } });

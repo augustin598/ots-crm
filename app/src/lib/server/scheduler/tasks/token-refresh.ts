@@ -13,17 +13,38 @@ import { redis } from 'bun';
 
 async function withRefreshLock<T>(integrationId: string, fn: () => Promise<T>): Promise<T | { skipped: true }> {
 	const lockKey = `token-refresh-lock:${integrationId}`;
+	const lockToken = crypto.randomUUID();
 	// Atomic SET NX EX — avoids TOCTOU race between get() and setex()
-	const acquired = await redis.send('SET', [lockKey, 'locked', 'NX', 'EX', '120']);
+	const acquired = await redis.send('SET', [lockKey, lockToken, 'NX', 'EX', '120']);
 	if (!acquired) return { skipped: true };
 	try {
 		return await fn();
 	} finally {
-		await redis.del(lockKey);
+		// Only delete lock if we still own it (prevents deleting another process's lock)
+		try {
+			const currentToken = await redis.get(lockKey);
+			if (currentToken && String(currentToken) === lockToken) {
+				await redis.del(lockKey);
+			}
+		} catch {
+			// Redis error during cleanup — lock will expire via TTL
+		}
 	}
 }
 
+const NOTIFICATION_DEDUP_TTL = 86400; // 24 hours
+
 async function notifyTenantAdmins(tenantId: string, platform: string, link: string): Promise<void> {
+	// Dedup: only notify once per 24h per tenant+platform
+	const dedupKey = `token-refresh-notif:${tenantId}:${platform}`;
+	try {
+		const lastNotif = await redis.get(dedupKey);
+		if (lastNotif) return; // Already notified recently
+		await redis.send('SET', [dedupKey, String(Date.now()), 'EX', String(NOTIFICATION_DEDUP_TTL)]);
+	} catch {
+		// Redis error — proceed with notification to be safe
+	}
+
 	try {
 		const admins = await db
 			.select({ userId: table.tenantUser.userId })

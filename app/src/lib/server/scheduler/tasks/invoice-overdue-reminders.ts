@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lt, lte, notInArray } from 'drizzle-orm';
+import { eq, and, lt, lte, notInArray, inArray } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
@@ -83,6 +83,13 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 					metadata: { invoiceCount: overdueInvoices.length, daysAfterDue, repeatDays, maxCount }
 				});
 
+				// Batch-fetch all clients for this tenant's overdue invoices (N+1 fix)
+				const uniqueClientIds = [...new Set(overdueInvoices.map((inv) => inv.clientId).filter(Boolean))] as string[];
+				const clients = uniqueClientIds.length > 0
+					? await db.select().from(table.client).where(inArray(table.client.id, uniqueClientIds))
+					: [];
+				const clientMap = new Map(clients.map((c) => [c.id, c]));
+
 				for (const invoice of overdueInvoices) {
 					try {
 						if (!invoice.dueDate) continue;
@@ -119,12 +126,8 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							}
 						}
 
-						// Get client email
-						const [client] = await db
-							.select()
-							.from(table.client)
-							.where(eq(table.client.id, invoice.clientId))
-							.limit(1);
+						// Get client from pre-fetched map
+						const client = invoice.clientId ? clientMap.get(invoice.clientId) : undefined;
 
 						if (!client?.email) {
 							logWarning('scheduler', `Invoice overdue reminders: cannot send reminder, client email not found`, { tenantId: settings.tenantId, metadata: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber } });
