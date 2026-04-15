@@ -975,7 +975,8 @@ export function mapKeezPartnerToClient(
 		notes: null,
 		googleAdsCustomerId: null,
 		restrictedAccess: null,
-		monthlyBudget: null
+		monthlyBudget: null,
+		budgetWarningThreshold: null
 	};
 }
 

@@ -92,7 +92,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 	const controller = sseControllers.get(params.userId);
 	if (controller) {
 		try {
-			const notif = { ...newNotification, clientId: newNotification.clientId ?? null, link: newNotification.link ?? null, isRead: newNotification.isRead ?? false, metadata: newNotification.metadata ?? null, createdAt: new Date() } satisfies table.Notification;
+			const notif = { ...newNotification, clientId: newNotification.clientId ?? null, link: newNotification.link ?? null, isRead: newNotification.isRead ?? false, metadata: newNotification.metadata ?? null, createdAt: newNotification.createdAt ?? new Date(), priority: newNotification.priority ?? 'medium', fingerprint: newNotification.fingerprint ?? null, count: newNotification.count ?? 1, updatedAt: newNotification.updatedAt ?? new Date(), lastEmailAt: newNotification.lastEmailAt ?? null } satisfies table.Notification;
 			controller.enqueue(formatSSEEvent('notification', notif));
 		} catch {
 			// Controller may be closed — remove it silently
