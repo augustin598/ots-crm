@@ -1,0 +1,5 @@
+{
+  "name": "ots-crm-skills",
+  "version": "1.0.0",
+  "description": "Custom skills for OTS CRM: migrations, integrations, PDF, multi-tenant, email"
+}
