@@ -88,7 +88,15 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		keezClient = await createKeezClientForTenant(tenantId, integration);
 	} catch (error) {
 		if (error instanceof KeezCredentialsCorruptError) {
-			logWarning('keez', `Skipping invoice sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+			logWarning('keez', `Skipping invoice sync - credentials corrupted. Re-save Keez integration in Settings.`, {
+				tenantId,
+				metadata: {
+					invoiceId: invoice.id,
+					cause: error.cause instanceof Error ? error.cause.message : String(error.cause ?? ''),
+					secretLength: integration.secret?.length ?? 0,
+					secretParts: integration.secret?.split(':').length ?? 0
+				}
+			});
 			// Record sync error instead of crashing invoice creation
 			await db.insert(table.keezInvoiceSync).values({
 				id: generateSyncId(),
@@ -687,7 +695,13 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 			keezClient = await createKeezClientForTenant(tenantId, integration);
 		} catch (error) {
 			if (error instanceof KeezCredentialsCorruptError) {
-				logWarning('keez', `Skipping invoice update sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+				logWarning('keez', `Skipping invoice update sync - credentials corrupted. Re-save Keez integration in Settings.`, {
+					tenantId,
+					metadata: {
+						invoiceId: invoice.id,
+						cause: error.cause instanceof Error ? error.cause.message : String(error.cause ?? '')
+					}
+				});
 				return;
 			}
 			throw error;
@@ -779,7 +793,13 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 			keezClient = await createKeezClientForTenant(tenantId, integration);
 		} catch (error) {
 			if (error instanceof KeezCredentialsCorruptError) {
-				logWarning('keez', `Skipping invoice delete sync - credentials corrupted. Re-save Keez integration in Settings.`, { tenantId, metadata: { invoiceId: invoice.id } });
+				logWarning('keez', `Skipping invoice delete sync - credentials corrupted. Re-save Keez integration in Settings.`, {
+					tenantId,
+					metadata: {
+						invoiceId: invoice.id,
+						cause: error.cause instanceof Error ? error.cause.message : String(error.cause ?? '')
+					}
+				});
 				return;
 			}
 			throw error;

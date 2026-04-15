@@ -50,18 +50,47 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 
 				logInfo('scheduler', `Keez invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors } });
 			} catch (error) {
-				// Credentials corrupt — deactivate integration to stop spamming logs.
-				// User will see "reconnect" prompt in Settings and can re-save credentials.
+				// Credentials corrupt — could be transient Turso read failure.
+				// Retry once with fresh DB read before deactivating.
 				if (error instanceof KeezCredentialsCorruptError) {
-					logWarning('scheduler', `Keez invoice sync: credentials corrupt — deactivating integration until user re-saves`, {
+					logWarning('scheduler', `Keez invoice sync: credentials decrypt failed — retrying with fresh DB read`, {
 						tenantId: integration.tenantId,
-						metadata: { action: 'auto_deactivate_corrupt_credentials' }
+						metadata: { action: 'decrypt_retry', attempt: 1 }
 					});
-					await db
-						.update(table.keezIntegration)
-						.set({ isActive: false, updatedAt: new Date() })
-						.where(eq(table.keezIntegration.tenantId, integration.tenantId));
-					continue;
+
+					// Wait briefly then retry (fresh DB read inside syncKeezInvoicesForTenant)
+					await new Promise(r => setTimeout(r, 2000));
+
+					try {
+						const retryResult = await syncKeezInvoicesForTenant(integration.tenantId);
+						tenantsProcessed++;
+						totalImported += retryResult.imported;
+						totalUpdated += retryResult.updated;
+						totalSkipped += retryResult.skipped;
+						totalErrors += retryResult.errors;
+						logInfo('scheduler', `Keez invoice sync: retry succeeded after transient decrypt failure`, {
+							tenantId: integration.tenantId,
+							metadata: { imported: retryResult.imported, updated: retryResult.updated }
+						});
+						continue;
+					} catch (retryError) {
+						if (retryError instanceof KeezCredentialsCorruptError) {
+							logWarning('scheduler', `Keez invoice sync: credentials corrupt after retry — deactivating integration until user re-saves`, {
+								tenantId: integration.tenantId,
+								metadata: { action: 'auto_deactivate_corrupt_credentials', retriesExhausted: true }
+							});
+							await db
+								.update(table.keezIntegration)
+								.set({ isActive: false, updatedAt: new Date() })
+								.where(eq(table.keezIntegration.tenantId, integration.tenantId));
+							continue;
+						}
+						// Non-credential retry error — fall through to normal error handling
+						const { message, stack } = serializeError(retryError);
+						logError('scheduler', `Keez invoice sync: retry error: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
+						errors.push({ tenantId: integration.tenantId, error: message });
+						continue;
+					}
 				}
 
 				const { message, stack } = serializeError(error);

@@ -36,7 +36,7 @@
 	let success = $state(false);
 
 	const credentialsCorrupt = $derived(
-		status?.connected && status?.isActive && status?.credentialsValid === false
+		status?.connected && status?.credentialsValid === false
 	);
 
 	// Pre-fill fields when credentials are corrupt so user only needs to re-enter secret

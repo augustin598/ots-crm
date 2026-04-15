@@ -87,17 +87,41 @@ export function encryptVerified(tenantId: string, data: string): string {
  * Decrypt data for a specific tenant
  */
 export function decrypt(tenantId: string, encryptedData: string): string {
+	if (!encryptedData || encryptedData.trim().length === 0) {
+		throw new DecryptionError(
+			`Encrypted data is empty or null — possible Turso transient read failure. tenant: ${tenantId.slice(0, 8)}`
+		);
+	}
+
 	const secret = getEncryptionSecret();
 	const key = deriveKey(tenantId, secret);
 
 	const parts = encryptedData.split(':');
 	if (parts.length !== 3) {
-		throw new DecryptionError(`Invalid encrypted data format: expected 3 parts, got ${parts.length}`);
+		throw new DecryptionError(
+			`Invalid encrypted data format: expected 3 parts, got ${parts.length}. ` +
+			`Data length: ${encryptedData.length}, preview: "${encryptedData.slice(0, 40)}..."`
+		);
 	}
 
 	const [ivHex, tagHex, encrypted] = parts;
+
+	if (!ivHex || !tagHex || !encrypted) {
+		throw new DecryptionError(
+			`Partial encrypted data — one or more components empty: ` +
+			`iv=${!!ivHex} tag=${!!tagHex} data=${!!encrypted}. ` +
+			`Possible Turso partial read. tenant: ${tenantId.slice(0, 8)}`
+		);
+	}
+
 	const iv = Buffer.from(ivHex, 'hex');
 	const tag = Buffer.from(tagHex, 'hex');
+
+	if (iv.length !== IV_LENGTH) {
+		throw new DecryptionError(
+			`IV length mismatch: expected ${IV_LENGTH}, got ${iv.length}. ivHex length: ${ivHex.length}`
+		);
+	}
 
 	const decipher = createDecipheriv(ALGORITHM, key, iv);
 	decipher.setAuthTag(tag);
@@ -108,7 +132,8 @@ export function decrypt(tenantId: string, encryptedData: string): string {
 		return decrypted;
 	} catch (error) {
 		throw new DecryptionError(
-			error instanceof Error ? error.message : String(error),
+			`${error instanceof Error ? error.message : String(error)} ` +
+			`[iv:${ivHex.length}c tag:${tagHex.length}c data:${encrypted.length}c tenant:${tenantId.slice(0, 8)}]`,
 			error
 		);
 	}
