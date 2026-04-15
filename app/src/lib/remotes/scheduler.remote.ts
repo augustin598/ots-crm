@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { parseExpression } from 'cron-parser';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, desc, sql, count, and, or, like } from 'drizzle-orm';
+import { eq, desc, sql, count, and, or, like, isNull } from 'drizzle-orm';
 import { getSchedulerQueue, JOB_LABELS, JOB_PARAMS, JOB_HANDLER_TYPES } from '$lib/server/scheduler';
 import { logInfo } from '$lib/server/logger';
 
@@ -75,6 +75,7 @@ export const getSchedulerHistory = query(async () => {
 	const event = requireAdmin();
 	const tenantId = event.locals.tenant!.id;
 
+	// Show logs for this tenant + system-level logs (tenantId IS NULL)
 	const logs = await db
 		.select({
 			id: table.debugLog.id,
@@ -87,7 +88,7 @@ export const getSchedulerHistory = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
-			eq(table.debugLog.tenantId, tenantId)
+			or(eq(table.debugLog.tenantId, tenantId), isNull(table.debugLog.tenantId))
 		))
 		.orderBy(desc(table.debugLog.createdAt))
 		.limit(1000);
@@ -109,7 +110,7 @@ export const getSchedulerStats = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
-			eq(table.debugLog.tenantId, tenantId)
+			or(eq(table.debugLog.tenantId, tenantId), isNull(table.debugLog.tenantId))
 		));
 
 	return result ?? { total: 0, info: 0, warning: 0, error: 0 };
@@ -121,6 +122,7 @@ export const getJobStats = query(async () => {
 	const tenantId = event.locals.tenant!.id;
 
 	// Query 1: Count successes and failures per handler type
+	// Include system-level logs (tenantId IS NULL) since worker logs are global
 	const countRows = await db
 		.select({
 			message: table.debugLog.message,
@@ -130,7 +132,7 @@ export const getJobStats = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
-			eq(table.debugLog.tenantId, tenantId),
+			or(eq(table.debugLog.tenantId, tenantId), isNull(table.debugLog.tenantId)),
 			or(
 				like(table.debugLog.message, 'Job completed: %'),
 				like(table.debugLog.message, 'Job failed: %')
@@ -148,7 +150,7 @@ export const getJobStats = query(async () => {
 		.from(table.debugLog)
 		.where(and(
 			eq(table.debugLog.source, 'scheduler'),
-			eq(table.debugLog.tenantId, tenantId),
+			or(eq(table.debugLog.tenantId, tenantId), isNull(table.debugLog.tenantId)),
 			or(
 				like(table.debugLog.message, 'Job completed: %'),
 				like(table.debugLog.message, 'Job failed: %')
