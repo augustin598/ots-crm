@@ -44,22 +44,38 @@ export async function createGmailTransporter(
 
   // 4. Read fresh tokens (decrypted)
   const credentials = oauth2Client.credentials;
-  if (!credentials.access_token || !credentials.refresh_token) {
+  const accessToken = credentials.access_token as string | undefined;
+  const refreshToken = credentials.refresh_token as string | undefined;
+
+  logInfo('gmail', 'Gmail credentials check', {
+    tenantId,
+    metadata: {
+      hasAccessToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
+      accessTokenLength: accessToken?.length ?? 0,
+      refreshTokenLength: refreshToken?.length ?? 0
+    }
+  });
+
+  if (!accessToken || !refreshToken) {
     logWarning('gmail', 'Gmail credentials incomplete after refresh', { tenantId });
     return null;
   }
 
-  // 5. Create nodemailer transport
+  // 5. Create nodemailer transport — use explicit host/port (not service: 'gmail')
+  //    to ensure OAuth2 XOAUTH2 mechanism is used instead of PLAIN auth
   try {
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
       auth: {
         type: 'OAuth2',
         user: integration.email,
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
-        refreshToken: credentials.refresh_token as string,
-        accessToken: credentials.access_token as string
+        refreshToken,
+        accessToken
       }
     });
 
