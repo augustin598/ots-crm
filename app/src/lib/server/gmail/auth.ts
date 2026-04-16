@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { encryptVerified, decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 
 function getOAuth2Client() {
 	return new google.auth.OAuth2(
@@ -13,7 +14,10 @@ function getOAuth2Client() {
 	);
 }
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
+const SCOPES = [
+	'https://www.googleapis.com/auth/gmail.readonly',
+	'https://www.googleapis.com/auth/gmail.send'
+];
 
 /**
  * Generate Google OAuth2 authorization URL
@@ -24,10 +28,66 @@ export function getOAuthUrl(tenantId: string): string {
 		access_type: 'offline',
 		scope: SCOPES,
 		prompt: 'consent',
-		state: tenantId
+		state: tenantId,
+		include_granted_scopes: true
 	});
 	logInfo('gmail', 'OAuth: Generated auth URL', { tenantId, metadata: { redirectUri: env.GOOGLE_REDIRECT_URI } });
 	return url;
+}
+
+/**
+ * Read Gmail tokens, preferring encrypted columns.
+ * Self-heals: if encrypted column is null but plain text exists, encrypts and backfills.
+ */
+async function readGmailTokens(
+	integration: typeof table.gmailIntegration.$inferSelect
+): Promise<{ accessToken: string; refreshToken: string }> {
+	const tenantId = integration.tenantId;
+	let accessToken: string;
+	let refreshToken: string;
+
+	if (integration.accessTokenEncrypted) {
+		accessToken = decrypt(tenantId, integration.accessTokenEncrypted);
+	} else {
+		accessToken = integration.accessToken;
+		if (accessToken) {
+			try {
+				await db
+					.update(table.gmailIntegration)
+					.set({ accessTokenEncrypted: encryptVerified(tenantId, accessToken) })
+					.where(eq(table.gmailIntegration.id, integration.id));
+			} catch { /* ignore backfill failure */ }
+		}
+	}
+
+	if (integration.refreshTokenEncrypted) {
+		refreshToken = decrypt(tenantId, integration.refreshTokenEncrypted);
+	} else {
+		refreshToken = integration.refreshToken;
+		if (refreshToken) {
+			try {
+				await db
+					.update(table.gmailIntegration)
+					.set({ refreshTokenEncrypted: encryptVerified(tenantId, refreshToken) })
+					.where(eq(table.gmailIntegration.id, integration.id));
+			} catch { /* ignore backfill failure */ }
+		}
+	}
+
+	return { accessToken, refreshToken };
+}
+
+/**
+ * Check if the stored granted scopes include gmail.send
+ */
+export function hasGmailSendScope(grantedScopes: string | null): boolean {
+	if (!grantedScopes) return false;
+	try {
+		const scopes: string[] = JSON.parse(grantedScopes);
+		return scopes.some(s => s.includes('gmail.send'));
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -57,6 +117,11 @@ export async function handleCallback(code: string, tenantId: string): Promise<{ 
 		throw new Error('Failed to get email from Google profile');
 	}
 
+	// Extract granted scopes
+	const grantedScopes = tokens.scope
+		? JSON.stringify(tokens.scope.split(' '))
+		: JSON.stringify(SCOPES);
+
 	// Check if integration already exists for this tenant
 	const [existing] = await db
 		.select()
@@ -74,6 +139,9 @@ export async function handleCallback(code: string, tenantId: string): Promise<{ 
 				email,
 				accessToken: tokens.access_token,
 				refreshToken: tokens.refresh_token,
+				accessTokenEncrypted: encryptVerified(tenantId, tokens.access_token),
+				refreshTokenEncrypted: encryptVerified(tenantId, tokens.refresh_token),
+				grantedScopes,
 				tokenExpiresAt,
 				isActive: true,
 				updatedAt: new Date()
@@ -88,6 +156,9 @@ export async function handleCallback(code: string, tenantId: string): Promise<{ 
 			email,
 			accessToken: tokens.access_token,
 			refreshToken: tokens.refresh_token,
+			accessTokenEncrypted: encryptVerified(tenantId, tokens.access_token),
+			refreshTokenEncrypted: encryptVerified(tenantId, tokens.refresh_token),
+			grantedScopes,
 			tokenExpiresAt,
 			isActive: true,
 			createdAt: new Date(),
@@ -113,10 +184,12 @@ export async function getAuthenticatedClient(tenantId: string) {
 		return null;
 	}
 
+	const { accessToken, refreshToken } = await readGmailTokens(integration);
+
 	const oauth2Client = getOAuth2Client();
 	oauth2Client.setCredentials({
-		access_token: integration.accessToken,
-		refresh_token: integration.refreshToken,
+		access_token: accessToken,
+		refresh_token: refreshToken,
 		expiry_date: integration.tokenExpiresAt.getTime()
 	});
 
@@ -128,6 +201,7 @@ export async function getAuthenticatedClient(tenantId: string) {
 				.update(table.gmailIntegration)
 				.set({
 					accessToken: credentials.access_token!,
+					accessTokenEncrypted: encryptVerified(integration.tenantId, credentials.access_token!),
 					tokenExpiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
 					updatedAt: new Date()
 				})
@@ -166,7 +240,7 @@ export async function getGmailStatus(tenantId: string) {
 
 	if (!integration) {
 		logInfo('gmail', 'No integration found', { tenantId });
-		return { connected: false, email: null, lastSyncAt: null, isActive: false, syncEnabled: false, syncInterval: 'daily', syncParserIds: null, syncDateRangeDays: 7, lastSyncResults: null, customMonitoredEmails: null, monitoredSupplierIds: null, excludeEmails: null };
+		return { connected: false, email: null, lastSyncAt: null, isActive: false, syncEnabled: false, syncInterval: 'daily', syncParserIds: null, syncDateRangeDays: 7, lastSyncResults: null, customMonitoredEmails: null, monitoredSupplierIds: null, excludeEmails: null, hasSendScope: false };
 	}
 
 	logInfo('gmail', 'Integration found', { tenantId, metadata: { isActive: integration.isActive, email: integration.email } });
@@ -182,7 +256,8 @@ export async function getGmailStatus(tenantId: string) {
 		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null,
 		customMonitoredEmails: integration.customMonitoredEmails ? JSON.parse(integration.customMonitoredEmails) : null,
 		monitoredSupplierIds: integration.monitoredSupplierIds ? JSON.parse(integration.monitoredSupplierIds) : null,
-		excludeEmails: integration.excludeEmails ? JSON.parse(integration.excludeEmails) : null
+		excludeEmails: integration.excludeEmails ? JSON.parse(integration.excludeEmails) : null,
+		hasSendScope: hasGmailSendScope(integration.grantedScopes)
 	};
 }
 
@@ -207,7 +282,8 @@ export async function disconnectGmail(tenantId: string): Promise<void> {
 	// Try to revoke the token
 	try {
 		const oauth2Client = getOAuth2Client();
-		oauth2Client.setCredentials({ access_token: integration.accessToken });
+		const { accessToken } = await readGmailTokens(integration);
+		oauth2Client.setCredentials({ access_token: accessToken });
 		await oauth2Client.revokeCredentials();
 		logInfo('gmail', 'Disconnect: Token revoked successfully', { tenantId });
 	} catch (err) {
