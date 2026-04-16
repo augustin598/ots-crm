@@ -14,6 +14,7 @@ import {
 } from './email-logger';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { createNotification } from '$lib/server/notifications';
+import { createGmailTransporter, isGmailOAuthError, isGmailRateLimitError } from '$lib/server/gmail/transporter';
 import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
@@ -133,7 +134,20 @@ export async function getNotificationRecipients(
 }
 
 // Cache tenant-specific transporters
-const tenantTransporters = new Map<string, nodemailer.Transporter>();
+interface CachedTransporter {
+  transporter: nodemailer.Transporter;
+  provider: 'gmail' | 'smtp' | 'default';
+  gmailEmail?: string;
+}
+const tenantTransporters = new Map<string, CachedTransporter>();
+
+/**
+ * Get the Gmail 'from' email for a tenant, if Gmail is the active provider.
+ */
+export function getGmailFromEmail(tenantId: string): string | null {
+  const cached = tenantTransporters.get(tenantId);
+  return cached?.provider === 'gmail' ? (cached.gmailEmail ?? null) : null;
+}
 
 let defaultTransporter: nodemailer.Transporter | null = null;
 
@@ -181,7 +195,7 @@ export async function getTenantTransporter(
 	// Check cache first
 	if (tenantTransporters.has(tenantId)) {
 		logInfo('email', 'Using cached transporter', { tenantId });
-		return tenantTransporters.get(tenantId)!;
+		return tenantTransporters.get(tenantId)!.transporter;
 	}
 
 	// Load email settings from database
@@ -204,6 +218,32 @@ export async function getTenantTransporter(
 			logWarning('email', 'Tenant email settings exist but are disabled, skipping', { tenantId });
 			return null;
 		}
+		// Try Gmail if it's the preferred provider
+		if (emailSettings.emailProvider === 'gmail') {
+			try {
+				const gmailResult = await createGmailTransporter(tenantId);
+				if (gmailResult) {
+					const cached: CachedTransporter = {
+						transporter: gmailResult.transporter,
+						provider: 'gmail',
+						gmailEmail: gmailResult.gmailEmail
+					};
+					tenantTransporters.set(tenantId, cached);
+					logInfo('email', 'Using Gmail transporter (primary)', {
+						tenantId,
+						metadata: { email: gmailResult.gmailEmail }
+					});
+					return gmailResult.transporter;
+				}
+				logWarning('email', 'Gmail transporter unavailable — falling back to SMTP', { tenantId });
+			} catch (error) {
+				logWarning('email', 'Gmail transporter creation failed — falling back to SMTP', {
+					tenantId,
+					stackTrace: serializeError(error).stack
+				});
+			}
+		}
+
 		if (!emailSettings.smtpHost || !emailSettings.smtpUser || !emailSettings.smtpPassword) {
 			logWarning('email', 'Tenant email settings incomplete, falling back to default', {
 				tenantId,
@@ -226,7 +266,7 @@ export async function getTenantTransporter(
 
 			try {
 				const { transporter, port } = tryCreateTransporter(emailSettings.smtpPassword);
-				tenantTransporters.set(tenantId, transporter);
+				tenantTransporters.set(tenantId, { transporter, provider: 'smtp' });
 				logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
 				return transporter;
 			} catch (error) {
@@ -248,7 +288,7 @@ export async function getTenantTransporter(
 
 						if (freshSettings?.smtpPassword) {
 							const { transporter, port } = tryCreateTransporter(freshSettings.smtpPassword);
-							tenantTransporters.set(tenantId, transporter);
+							tenantTransporters.set(tenantId, { transporter, provider: 'smtp' });
 							logInfo('email', 'SMTP decrypt retry succeeded', { tenantId, metadata: { host: freshSettings.smtpHost, port } });
 							return transporter;
 						}
@@ -277,7 +317,11 @@ export async function getTenantTransporter(
  * Clear cached transporter for a tenant (call this when settings are updated)
  */
 export function clearTenantTransporterCache(tenantId: string): void {
-	tenantTransporters.delete(tenantId);
+	const cached = tenantTransporters.get(tenantId);
+	if (cached) {
+		try { cached.transporter.close(); } catch { /* ignore */ }
+		tenantTransporters.delete(tenantId);
+	}
 }
 
 /**
@@ -322,6 +366,19 @@ async function sendMailWithRetry(
 			logError('email', `Attempt ${attempt}/${maxAttempts} failed`, { tenantId, metadata: { email: mailOptions.to as string, error: lastError.message } });
 
 			if (!isRetryableSmtpError(lastError)) {
+				// Gmail OAuth error — fall back to SMTP instead of giving up
+				if (tenantId && isGmailOAuthError(lastError)) {
+					logWarning('email', 'Gmail OAuth error — attempting SMTP fallback', {
+						tenantId,
+						metadata: { error: lastError.message, attempt }
+					});
+					clearTenantTransporterCache(tenantId);
+					const fallbackTransporter = await getTenantTransporter(tenantId);
+					if (fallbackTransporter) {
+						transporter = fallbackTransporter;
+						continue;
+					}
+				}
 				logWarning('email', 'Permanent SMTP error, not retrying', { tenantId, metadata: { error: lastError.message } });
 				break;
 			}
@@ -447,6 +504,16 @@ export async function sendWithPersistence(
 			stackTrace: serializeError(err).stack
 		});
 		throw err;
+	}
+
+	// Override 'from' when using Gmail — Gmail OAuth2 enforces from = authenticated email
+	const gmailFrom = ctx.tenantId ? getGmailFromEmail(ctx.tenantId) : null;
+	if (gmailFrom && mailOptions.from) {
+		const fromStr = String(mailOptions.from);
+		const nameMatch = fromStr.match(/^"?([^"<]+)"?\s*</);
+		mailOptions.from = nameMatch
+			? `"${nameMatch[1].trim()}" <${gmailFrom}>`
+			: gmailFrom;
 	}
 
 	// STEP 3b: Persist HTML body for preview if not already saved.
