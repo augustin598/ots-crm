@@ -61,12 +61,8 @@ export async function createGmailTransporter(
       const info = await originalSendMail(mailOptions);
       const rawMessage = info.message as Buffer;
 
-      // 2. Send via Gmail API
-      const encodedMessage = rawMessage
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+      // 2. Encode to base64url (RFC 4648 §5) as required by Gmail API
+      const encodedMessage = rawMessage.toString('base64url');
 
       const response = await gmailApi.users.messages.send({
         userId: 'me',
