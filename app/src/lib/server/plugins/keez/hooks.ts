@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from './factory';
-import { mapInvoiceToKeez, generateNextInvoiceNumber, mapKeezDetailsToLineItems } from './mapper';
+import { mapInvoiceToKeez, generateNextInvoiceNumber } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
@@ -50,6 +50,12 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	const effectiveSeries = settings?.keezSeries || invoice.invoiceSeries;
 	if (!effectiveSeries) {
 		logWarning('keez', 'Invoice settings not configured: no keezSeries in settings and invoice has no invoiceSeries', { tenantId });
+		return;
+	}
+
+	// Idempotent guard: skip if already synced to Keez
+	if (invoice.keezExternalId) {
+		logInfo('keez', `Invoice ${invoice.id} already synced to Keez (${invoice.keezExternalId}), skipping duplicate`, { tenantId });
 		return;
 	}
 
@@ -556,36 +562,72 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		}
 	}
 
-	// Update invoice with all Keez data
-	await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoice.id));
-
-	// Extract and save invoice line items from Keez (atomic delete+insert)
+	// Update invoice header + per-item financial amounts in a single transaction
+	// to prevent inconsistent state (totals updated but line items not).
+	// On PUSH (CRM → Keez): preserve CRM-owned fields (description, note, keezItemExternalId)
+	// but sync financial amounts from Keez (handles Keez rounding rules).
+	// PDF/UI calculate totals from line items, so per-item amounts must match Keez.
 	if (
 		keezInvoiceData?.invoiceDetails &&
 		Array.isArray(keezInvoiceData.invoiceDetails) &&
 		keezInvoiceData.invoiceDetails.length > 0
 	) {
 		try {
-			const lineItemsData = mapKeezDetailsToLineItems(keezInvoiceData.invoiceDetails, invoice.id);
+			const existingLineItems = await db
+				.select()
+				.from(table.invoiceLineItem)
+				.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
 
-			if (lineItemsData.length > 0) {
-				const lineItemsToInsert = lineItemsData.map((item) => ({
-					...item,
-					id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
-				}));
+			await db.transaction(async (tx) => {
+				// 1. Update invoice-level data (header, totals, dates, currency)
+				await tx.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoice.id));
 
-				// Delete + insert in transaction to avoid leaving invoice without items
-				await db.transaction(async (tx) => {
-					await tx.delete(table.invoiceLineItem).where(eq(table.invoiceLineItem.invoiceId, invoice.id));
-					await tx.insert(table.invoiceLineItem).values(lineItemsToInsert);
-				});
-				logInfo('keez', `Added ${lineItemsToInsert.length} line items from Keez for invoice ${invoice.id}`, { tenantId });
-			}
+				// 2. Update per-item financial amounts, matching by keezItemExternalId (safe)
+				// Falls back to index-based matching only if keezItemExternalId match fails
+				for (const keezDetail of keezInvoiceData.invoiceDetails) {
+					// Try to match by keezItemExternalId first (reliable)
+					let crmItem = existingLineItems.find(
+						li => li.keezItemExternalId && li.keezItemExternalId === keezDetail.itemExternalId
+					);
+
+					// Fallback: match by index if counts are equal and no keezItemExternalId match
+					if (!crmItem && existingLineItems.length === keezInvoiceData.invoiceDetails.length) {
+						const idx = keezInvoiceData.invoiceDetails.indexOf(keezDetail);
+						crmItem = existingLineItems[idx];
+					}
+
+					if (!crmItem) continue;
+
+					// Log name mismatches for debugging
+					const keezItemName = keezDetail.itemName || keezDetail.itemDescription;
+					if (keezItemName && keezItemName !== crmItem.description) {
+						logWarning('keez', `Item name mismatch on push: Keez="${keezItemName}" (externalId=${keezDetail.itemExternalId}) vs CRM="${crmItem.description}" (keezItemExternalId=${crmItem.keezItemExternalId}). CRM description preserved.`, { tenantId, metadata: { invoiceId: invoice.id } });
+					}
+
+					// Update financial amounts from Keez
+					// Preserve: description, note, keezItemExternalId, serviceId, currency, unitOfMeasure
+					const financialUpdate: Record<string, any> = {};
+					if (keezDetail.unitPrice != null) financialUpdate.rate = Math.round(keezDetail.unitPrice * 100);
+					if (keezDetail.netAmount != null) financialUpdate.amount = Math.round(keezDetail.netAmount * 100);
+					if (keezDetail.vatPercent != null) financialUpdate.taxRate = Math.round(keezDetail.vatPercent * 100);
+
+					if (Object.keys(financialUpdate).length > 0) {
+						await tx.update(table.invoiceLineItem)
+							.set(financialUpdate)
+							.where(eq(table.invoiceLineItem.id, crmItem.id));
+					}
+				}
+			});
+			logInfo('keez', `Synced invoice ${invoice.id}: header + ${existingLineItems.length} line items updated (CRM descriptions preserved)`, { tenantId });
 		} catch (error) {
 			const lineErr = serializeError(error);
-			logError('keez', `Failed to save line items for invoice ${invoice.id}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
-			// Don't fail the entire sync if line items fail
+			logError('keez', `Failed to sync invoice ${invoice.id} data from Keez: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
+			// Fallback: update invoice header only (outside transaction)
+			await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoice.id));
 		}
+	} else {
+		// No invoiceDetails from Keez — update invoice header only
+		await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoice.id));
 	}
 
 	// Get updated invoice for sync record

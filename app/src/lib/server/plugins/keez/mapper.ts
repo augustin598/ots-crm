@@ -508,6 +508,10 @@ export async function mapInvoiceToKeez(
 						itemDescription = `${itemDescription}${itemDescription !== item.note ? ` - ${item.note}` : ''}`;
 					}
 
+					// NOTE: When itemExternalId is set, Keez ignores itemName and uses the
+					// article name from its nomenclator. itemName is only used as fallback
+					// when no itemExternalId exists. CRM description is preserved on re-fetch
+					// in hooks.ts to avoid overwriting user's intended item name.
 					const detail: KeezInvoiceDetail = {
 						itemExternalId,
 						itemName: item.description || 'Item',
