@@ -73,12 +73,13 @@ invitation, invoice, magic-link, admin-magic-link, password-reset, task-assignme
 29. **Gmail from override** — Gmail OAuth2 enforces `from` = authenticated email. `sendWithPersistence()` auto-overrides `from` when Gmail is active, preserving display name
 30. **skipGmail flag** — `getTenantTransporter(tenantId, { skipGmail: true })` forces SMTP, used during Gmail→SMTP fallback in `sendMailWithRetry()` to prevent re-creating failed Gmail transporter
 31. **Transporter cache** — `CachedTransporter` interface tracks `provider` ('gmail' | 'smtp' | 'default') + `gmailEmail`. `clearTenantTransporterCache()` calls `transporter.close()` to prevent socket leaks
+32. **Gmail token refresh** — `getAuthenticatedClient()` auto-refreshes tokens 5min before expiry. Transporter factory calls it BEFORE creating transport. On 401 during send, fallback to SMTP automatically
 
 ### SMTP Configuration
-32. **Per-tenant SMTP** — Each tenant can have custom SMTP settings (encrypted in DB)
-33. **Decrypt with retry** — Transient Turso reads may fail → retry decrypt 2-3 times
-34. **Fallback transporter** — If tenant SMTP fails, system may have a default transporter
-35. **Test SMTP** — Use `scripts/test-smtp.ts` to verify credentials before deploying changes
+33. **Per-tenant SMTP** — Each tenant can have custom SMTP settings (encrypted in DB)
+34. **Decrypt with retry** — Transient Turso reads may fail → retry decrypt 2-3 times
+35. **Fallback transporter** — If tenant SMTP fails, system may have a default transporter
+36. **Test SMTP** — Use `scripts/test-smtp.ts` to verify credentials before deploying changes
 
 ### Rate Limiting
 30. **Per-tenant outbound limit** — Prevent one tenant from sending 500 emails in 1 minute and damaging shared IP reputation
