@@ -675,6 +675,7 @@ export const emailSettings = sqliteTable('email_settings', {
 	smtpUser: text('smtp_user'),
 	smtpPassword: text('smtp_password'), // encrypted
 	smtpFrom: text('smtp_from'), // From email address (optional, defaults to smtp_user)
+	emailProvider: text('email_provider').default('smtp'), // 'gmail' | 'smtp'
 	isEnabled: boolean('is_enabled').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -1354,6 +1355,9 @@ export const gmailIntegration = sqliteTable('gmail_integration', {
 	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
 	lastRefreshError: text('last_refresh_error'),
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
+	grantedScopes: text('granted_scopes'), // JSON: string[]
+	accessTokenEncrypted: text('access_token_encrypted'),
+	refreshTokenEncrypted: text('refresh_token_encrypted'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
