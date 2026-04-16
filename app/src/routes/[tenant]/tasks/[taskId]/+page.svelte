@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { getTask, deleteTask, getTasks, approveTask, rejectTask } from '$lib/remotes/tasks.remote';
 	import { getTaskComments, createTaskComment, deleteTaskComment, updateTaskComment } from '$lib/remotes/task-comments.remote';
-	import { getClient } from '$lib/remotes/clients.remote';
-	import { getProject } from '$lib/remotes/projects.remote';
+	import { getClient, getClients } from '$lib/remotes/clients.remote';
+	import { getProject, getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -43,11 +43,23 @@
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
 	const client = $derived(clientQuery?.current);
 
+	const clientsQuery = getClients();
+	const clientMap = $derived(new Map((clientsQuery.current || []).map((c: any) => [c.id, c.name])));
+
 	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
-	const mentionUsers = $derived(clientUsersQuery?.current || users);
+	// Merge tenant users + client users for mentions (deduplicated by id)
+	const mentionUsers = $derived.by(() => {
+		const merged = new Map<string, typeof users[number]>();
+		for (const u of users) merged.set(u.id, u);
+		for (const u of (clientUsersQuery?.current || [])) merged.set(u.id, u);
+		return [...merged.values()];
+	});
 
 	const projectQuery = $derived(task?.projectId ? getProject(task.projectId) : null);
 	const project = $derived(projectQuery?.current);
+
+	const projectsQuery = getProjects(undefined);
+	const projectMap = $derived(new Map((projectsQuery.current || []).map((p: any) => [p.id, p.name])));
 
 	const activitiesQuery = $derived(getTaskActivities(taskId));
 	const activities = $derived(activitiesQuery.current || []);
@@ -75,16 +87,39 @@
 		}, new Map<string, any[]>())
 	);
 
+	const fieldLabels: Record<string, string> = {
+		title: 'titlul',
+		description: 'descrierea',
+		status: 'statusul',
+		priority: 'prioritatea',
+		assignedToUserId: 'responsabilul',
+		dueDate: 'termenul limită',
+		clientId: 'clientul',
+		projectId: 'proiectul',
+		milestoneId: 'milestone-ul'
+	};
+
 	function getActivityVerb(activity: { action: string; field?: string | null }): string {
 		switch (activity.action) {
-			case 'created': return 'created this task';
-			case 'commented': return 'added a comment';
-			case 'approved': return 'approved the task';
-			case 'rejected': return 'rejected the task';
-			case 'status_changed': return 'changed status';
-			case 'assigned': return 'changed assignee';
-			case 'updated': return activity.field ? `updated ${activity.field}` : 'updated the task';
+			case 'created': return 'a creat acest task';
+			case 'commented': return 'a adăugat un comentariu';
+			case 'approved': return 'a aprobat task-ul';
+			case 'rejected': return 'a respins task-ul';
+			case 'status_changed': return 'a schimbat statusul';
+			case 'assigned': return 'a schimbat responsabilul';
+			case 'updated': return activity.field ? `a actualizat ${fieldLabels[activity.field] || activity.field}` : 'a actualizat task-ul';
 			default: return activity.action;
+		}
+	}
+
+	function resolveActivityValue(field: string | null | undefined, value: string | null | undefined): string {
+		if (!value) return '';
+		if (!field) return value;
+		switch (field) {
+			case 'clientId': return clientMap.get(value) || value;
+			case 'assignedToUserId': return userMap.get(value) || value;
+			case 'projectId': return projectMap.get(value) || value;
+			default: return value;
 		}
 	}
 
@@ -505,13 +540,13 @@
 											{#if activity.oldValue || activity.newValue}
 												<div class="flex items-center gap-1.5 mt-1 flex-wrap">
 													{#if activity.oldValue}
-														<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{activity.oldValue}</Badge>
+														<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{resolveActivityValue(activity.field, activity.oldValue)}</Badge>
 													{/if}
 													{#if activity.oldValue && activity.newValue}
 														<ArrowRight class="h-3 w-3 text-muted-foreground shrink-0" />
 													{/if}
 													{#if activity.newValue}
-														<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{activity.newValue}</Badge>
+														<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{resolveActivityValue(activity.field, activity.newValue)}</Badge>
 													{/if}
 												</div>
 											{/if}

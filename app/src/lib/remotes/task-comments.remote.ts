@@ -228,26 +228,30 @@ export const createTaskComment = command(
 			);
 
 			for (const mentionedId of mentionedUserIds) {
-				// Skip self-mentions and users already notified as watchers
+				// Skip self-mentions
 				if (mentionedId === event.locals.user.id) continue;
-				if (watcherUserIds.has(mentionedId)) continue;
 
-				const [mentionedUser] = await db
-					.select()
-					.from(table.user)
-					.where(eq(table.user.id, mentionedId))
-					.limit(1);
+				const isAlreadyWatcher = watcherUserIds.has(mentionedId);
 
-				if (mentionedUser?.email) {
-					try {
-						const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
-						await sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention');
-					} catch (error) {
-						console.error('Failed to send mention notification:', error);
+				// Send mention email only if not already notified as watcher
+				if (!isAlreadyWatcher) {
+					const [mentionedUser] = await db
+						.select()
+						.from(table.user)
+						.where(eq(table.user.id, mentionedId))
+						.limit(1);
+
+					if (mentionedUser?.email) {
+						try {
+							const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
+							await sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention');
+						} catch (error) {
+							console.error('Failed to send mention notification:', error);
+						}
 					}
 				}
 
-				// In-app notification for @mention
+				// In-app notification for @mention — always sent (even if watcher)
 				const authorName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
 				const tenantSlug = event.locals.tenant.slug;
 				await createNotification({
@@ -255,8 +259,8 @@ export const createTaskComment = command(
 					userId: mentionedId,
 					clientId: task.clientId ?? undefined,
 					type: 'comment.mention',
-					title: `${authorName} te-a mentionat`,
-					message: `Te-a mentionat intr-un comentariu la "${task.title}"`,
+					title: `${authorName} te-a menționat`,
+					message: `Te-a menționat într-un comentariu la "${task.title}"`,
 					link: `/${tenantSlug}/tasks/${data.taskId}`,
 					priority: 'high',
 					metadata: { taskId: data.taskId, commentId },
