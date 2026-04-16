@@ -115,7 +115,15 @@ description: Use when working on, debugging, or testing external API integration
 - Invoice sync: bidirectional CRM ↔ SmartBill
 
 ### Gmail
-- OAuth flow: `src/lib/server/google-client-auth.ts`
+- OAuth flow: `src/lib/server/gmail/auth.ts` (scopes: gmail.readonly + gmail.send)
+- **Sending:** Uses Gmail API (`gmail.users.messages.send`), NOT SMTP OAuth2. Google Workspace blocks SMTP XOAUTH2.
+- Transporter factory: `src/lib/server/gmail/transporter.ts` — nodemailer compiles RFC 5322, base64url encodes, sends via Gmail API
+- Token encryption: `accessTokenEncrypted` / `refreshTokenEncrypted` columns, with self-healing backfill for legacy plain-text tokens
+- Scope tracking: `grantedScopes` column (JSON array), `hasGmailSendScope()` helper
+- Provider selection: `email_settings.email_provider` ('gmail' | 'smtp'), Gmail primary with SMTP fallback
+- Disconnect handling: `disconnectGmail()` auto-switches `emailProvider` to 'smtp' + clears transporter cache
+- Settings UI: `src/routes/[tenant]/settings/email/+page.svelte` — Gmail card with 3 states (not connected, needs reauth, active)
+- Invoice sync: `src/lib/server/gmail/client.ts` (read-only), parsers in `src/lib/server/gmail/parsers/`
 - Test utilities: `src/lib/server/gmail/test-pdf.ts`, `test-status.ts`
 
 ### ANAF SPV

@@ -66,11 +66,19 @@ invitation, invoice, magic-link, admin-magic-link, password-reset, task-assignme
 24. **Presigned URLs** — Use `command()` not `query()` for MinIO URLs
 25. **Buffer attachment** — When attaching inline, pass Buffer directly to nodemailer, don't rely on URL fetch
 
+### Email Transport (Gmail API + SMTP)
+26. **Gmail as primary** — When `emailSettings.emailProvider === 'gmail'`, emails are sent via Gmail API (`gmail.users.messages.send`), NOT SMTP. Nodemailer compiles RFC 5322 → base64url encode → Gmail API sends. Works with Google Workspace.
+27. **SMTP as fallback** — If Gmail transporter fails (token revoked, scope missing), automatically falls back to tenant SMTP, then env default SMTP
+28. **Never use SMTP OAuth2 for Gmail** — Google Workspace blocks SMTP XOAUTH2 (535-5.7.8 BadCredentials). Always use Gmail API for sending.
+29. **Gmail from override** — Gmail OAuth2 enforces `from` = authenticated email. `sendWithPersistence()` auto-overrides `from` when Gmail is active, preserving display name
+30. **skipGmail flag** — `getTenantTransporter(tenantId, { skipGmail: true })` forces SMTP, used during Gmail→SMTP fallback in `sendMailWithRetry()` to prevent re-creating failed Gmail transporter
+31. **Transporter cache** — `CachedTransporter` interface tracks `provider` ('gmail' | 'smtp' | 'default') + `gmailEmail`. `clearTenantTransporterCache()` calls `transporter.close()` to prevent socket leaks
+
 ### SMTP Configuration
-26. **Per-tenant SMTP** — Each tenant can have custom SMTP settings (encrypted in DB)
-27. **Decrypt with retry** — Transient Turso reads may fail → retry decrypt 2-3 times
-28. **Fallback transporter** — If tenant SMTP fails, system may have a default transporter
-29. **Test SMTP** — Use `scripts/test-smtp.ts` to verify credentials before deploying changes
+32. **Per-tenant SMTP** — Each tenant can have custom SMTP settings (encrypted in DB)
+33. **Decrypt with retry** — Transient Turso reads may fail → retry decrypt 2-3 times
+34. **Fallback transporter** — If tenant SMTP fails, system may have a default transporter
+35. **Test SMTP** — Use `scripts/test-smtp.ts` to verify credentials before deploying changes
 
 ### Rate Limiting
 30. **Per-tenant outbound limit** — Prevent one tenant from sending 500 emails in 1 minute and damaging shared IP reputation
@@ -153,6 +161,16 @@ invitation, invoice, magic-link, admin-magic-link, password-reset, task-assignme
 1. Transient Turso read → retry
 2. Check encryption key (env `ENCRYPTION_KEY`)
 3. Check if integration was deactivated by previous error
+
+### "Gmail send fails with 535-5.7.8 BadCredentials"
+1. This means SMTP OAuth2 is being used — WRONG. Must use Gmail API
+2. Check `src/lib/server/gmail/transporter.ts` — should use `gmail.users.messages.send`, not `nodemailer.createTransport({ service: 'gmail' })`
+3. Google Workspace blocks SMTP XOAUTH2 mechanism
+
+### "Gmail send fails with 403 or Insufficient Permission"
+1. Check `grantedScopes` in `gmail_integration` table — must include `gmail.send`
+2. User needs to re-authorize: Settings → Email → "Actualizează Permisiuni" button
+3. After re-auth, `handleCallback()` stores new scopes in `grantedScopes` column
 
 ---
 
