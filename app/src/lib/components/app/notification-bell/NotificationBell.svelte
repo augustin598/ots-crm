@@ -315,7 +315,7 @@
 	<div class="fixed inset-0 z-40" onclick={() => (open = false)} onkeydown={() => {}}></div>
 
 	<!-- Notification panel -->
-	<div class="fixed left-[var(--sidebar-width)] top-0 bottom-0 z-50 flex w-80 flex-col border-r bg-background shadow-xl">
+	<div class="notification-panel fixed left-[var(--sidebar-width)] top-0 bottom-0 z-50 flex w-80 flex-col border-r bg-background shadow-xl max-md:left-0 max-md:right-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:h-[70vh] max-md:rounded-t-xl max-md:border-t">
 		<!-- Header with tabs -->
 		<div class="flex shrink-0 items-center justify-between border-b px-4 py-3">
 			<div class="flex items-center gap-2">
@@ -548,3 +548,39 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	/* Panel slide-in animation */
+	.notification-panel {
+		animation: slideIn 200ms ease-out;
+	}
+
+	@keyframes slideIn {
+		from {
+			opacity: 0;
+			transform: translateX(-8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(0);
+		}
+	}
+
+	/* Mobile: slide up from bottom */
+	@media (max-width: 767px) {
+		.notification-panel {
+			animation: slideUp 250ms ease-out;
+		}
+
+		@keyframes slideUp {
+			from {
+				opacity: 0;
+				transform: translateY(100%);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+	}
+</style>
