@@ -264,8 +264,9 @@ export const createTaskComment = command(
 			}
 		}
 
-		// Send client notification (if enabled)
-		if (settings?.clientEmailsEnabled && settings?.clientEmailOnComment !== false) {
+		// Send client notification (if enabled) — skip when the comment author is a client user
+		const isClientUser = event.locals.isClientUser === true;
+		if (!isClientUser && settings?.clientEmailsEnabled && settings?.clientEmailOnComment !== false) {
 			if (task.clientId) {
 				const [client] = await db
 					.select()
