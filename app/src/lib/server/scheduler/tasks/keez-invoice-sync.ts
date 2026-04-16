@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { syncKeezInvoicesForTenant } from '../../plugins/keez/sync';
 import { KeezCredentialsCorruptError } from '../../plugins/keez/factory';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { createNotification } from '../../notifications';
+import { and, or } from 'drizzle-orm';
 
 /**
  * Process Keez invoice sync - finds all tenants with active Keez integrations
@@ -96,6 +98,33 @@ export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
 				const { message, stack } = serializeError(error);
 				logError('scheduler', `Keez invoice sync: error syncing invoices: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
 				errors.push({ tenantId: integration.tenantId, error: message });
+
+				// Notify admins about Keez sync failure
+				try {
+					const admins = await db
+						.select({ userId: table.tenantUser.userId })
+						.from(table.tenantUser)
+						.where(and(
+							eq(table.tenantUser.tenantId, integration.tenantId),
+							or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+						));
+					const [tenant] = await db
+						.select({ slug: table.tenant.slug })
+						.from(table.tenant)
+						.where(eq(table.tenant.id, integration.tenantId))
+						.limit(1);
+					for (const admin of admins) {
+						await createNotification({
+							tenantId: integration.tenantId,
+							userId: admin.userId,
+							type: 'keez.sync_error',
+							title: 'Eroare sincronizare Keez',
+							message: `Sincronizarea facturilor Keez a esuat: ${message.substring(0, 100)}`,
+							link: tenant ? `/${tenant.slug}/settings` : undefined,
+							priority: 'high',
+						}).catch(() => {});
+					}
+				} catch { /* don't break sync for notification errors */ }
 			}
 		}
 

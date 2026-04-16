@@ -13,6 +13,7 @@ import {
 	logEmailRetry
 } from './email-logger';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { createNotification } from '$lib/server/notifications';
 import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
@@ -445,6 +446,34 @@ export async function sendWithPersistence(
 			tenantId: ctx.tenantId ?? undefined,
 			stackTrace: serializeError(err).stack
 		});
+
+		// Notify admins about email delivery failure
+		if (ctx.tenantId) {
+			try {
+				const admins = await db
+					.select({ userId: table.tenantUser.userId })
+					.from(table.tenantUser)
+					.where(
+						and(
+							eq(table.tenantUser.tenantId, ctx.tenantId),
+							eq(table.tenantUser.role, 'owner')
+						)
+					);
+				for (const admin of admins) {
+					await createNotification({
+						tenantId: ctx.tenantId,
+						userId: admin.userId,
+						type: 'email.delivery_failed',
+						title: 'Email netrimis',
+						message: `Email ${ctx.emailType} catre ${ctx.toEmail} a esuat: ${(err as Error).message?.substring(0, 100)}`,
+						priority: 'high',
+					}).catch(() => {});
+				}
+			} catch {
+				// Don't let notification failure mask the original error
+			}
+		}
+
 		throw err;
 	}
 }
