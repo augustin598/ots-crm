@@ -190,7 +190,8 @@ function getDefaultTransporter(): nodemailer.Transporter {
  * Get tenant-specific transporter or fall back to environment variables
  */
 export async function getTenantTransporter(
-	tenantId: string
+	tenantId: string,
+	options?: { skipGmail?: boolean }
 ): Promise<nodemailer.Transporter | null> {
 	// Check cache first
 	if (tenantTransporters.has(tenantId)) {
@@ -218,8 +219,8 @@ export async function getTenantTransporter(
 			logWarning('email', 'Tenant email settings exist but are disabled, skipping', { tenantId });
 			return null;
 		}
-		// Try Gmail if it's the preferred provider
-		if (emailSettings.emailProvider === 'gmail') {
+		// Try Gmail if it's the preferred provider (skip if explicitly told to use SMTP)
+		if (emailSettings.emailProvider === 'gmail' && !options?.skipGmail) {
 			try {
 				const gmailResult = await createGmailTransporter(tenantId);
 				if (gmailResult) {
@@ -373,9 +374,22 @@ async function sendMailWithRetry(
 						metadata: { error: lastError.message, attempt }
 					});
 					clearTenantTransporterCache(tenantId);
-					const fallbackTransporter = await getTenantTransporter(tenantId);
+					// skipGmail: true prevents re-creating Gmail transporter (which would fail again)
+					const fallbackTransporter = await getTenantTransporter(tenantId, { skipGmail: true });
 					if (fallbackTransporter) {
 						transporter = fallbackTransporter;
+						continue;
+					}
+				}
+				// Gmail rate limit — retry with backoff, don't fall back to SMTP
+				if (tenantId && isGmailRateLimitError(lastError)) {
+					logWarning('email', 'Gmail rate limit — retrying with backoff', {
+						tenantId,
+						metadata: { error: lastError.message, attempt }
+					});
+					if (attempt < maxAttempts) {
+						const delay = attempt * 2000;
+						await new Promise(resolve => setTimeout(resolve, delay));
 						continue;
 					}
 				}

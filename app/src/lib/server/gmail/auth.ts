@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
-import { encryptVerified, decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
+import { encryptVerified, decrypt } from '$lib/server/plugins/smartbill/crypto';
 
 function getOAuth2Client() {
 	return new google.auth.OAuth2(
@@ -47,7 +47,13 @@ async function readGmailTokens(
 	let refreshToken: string;
 
 	if (integration.accessTokenEncrypted) {
-		accessToken = decrypt(tenantId, integration.accessTokenEncrypted);
+		try {
+			accessToken = decrypt(tenantId, integration.accessTokenEncrypted);
+		} catch (err) {
+			// Decryption failed (corrupt data, key rotation) — fall back to plain text
+			logWarning('gmail', 'accessToken decrypt failed, falling back to plain text', { tenantId });
+			accessToken = integration.accessToken;
+		}
 	} else {
 		accessToken = integration.accessToken;
 		if (accessToken) {
@@ -61,7 +67,12 @@ async function readGmailTokens(
 	}
 
 	if (integration.refreshTokenEncrypted) {
-		refreshToken = decrypt(tenantId, integration.refreshTokenEncrypted);
+		try {
+			refreshToken = decrypt(tenantId, integration.refreshTokenEncrypted);
+		} catch (err) {
+			logWarning('gmail', 'refreshToken decrypt failed, falling back to plain text', { tenantId });
+			refreshToken = integration.refreshToken;
+		}
 	} else {
 		refreshToken = integration.refreshToken;
 		if (refreshToken) {
