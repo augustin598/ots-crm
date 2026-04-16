@@ -860,7 +860,8 @@ export function mapKeezInvoiceToCRM(
 
 	// Determine status based on Keez status + remainingAmount
 	const keezStatus = keezHeader.status || keezInvoice.status;
-	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = 'sent';
+	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' = 'sent';
+	let remainingAmountCents: number | null = null;
 
 	if (keezStatus === 'Cancelled') {
 		invoiceStatus = 'cancelled';
@@ -870,9 +871,11 @@ export function mapKeezInvoiceToCRM(
 	} else if (keezStatus === 'Valid') {
 		// Validated fiscal invoice — check remainingAmount for payment status
 		if (keezHeader.remainingAmount !== undefined) {
-			const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
+			remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
 			if (remainingAmountCents === 0) {
 				invoiceStatus = 'paid';
+			} else if (remainingAmountCents > 0 && remainingAmountCents < totalAmount) {
+				invoiceStatus = 'partially_paid';
 			} else if (remainingAmountCents > 0) {
 				if (dueDate && dueDate < new Date()) {
 					invoiceStatus = 'overdue';
@@ -886,9 +889,11 @@ export function mapKeezInvoiceToCRM(
 	} else {
 		// Unknown status — fallback
 		if (keezHeader.remainingAmount !== undefined) {
-			const remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
+			remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
 			if (remainingAmountCents === 0 && keezStatus) {
 				invoiceStatus = 'paid';
+			} else if (remainingAmountCents > 0 && remainingAmountCents < totalAmount) {
+				invoiceStatus = 'partially_paid';
 			} else if (remainingAmountCents > 0) {
 				if (dueDate && dueDate < new Date()) {
 					invoiceStatus = 'overdue';
@@ -906,6 +911,7 @@ export function mapKeezInvoiceToCRM(
 			? `${keezHeader.series} ${keezHeader.number}`
 			: keezHeader.number ? String(keezHeader.number) : keezHeader.externalId,
 		status: invoiceStatus,
+		remainingAmount: remainingAmountCents,
 		amount,
 		taxRate,
 		taxAmount,

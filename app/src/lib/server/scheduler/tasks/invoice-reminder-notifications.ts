@@ -37,6 +37,7 @@ export async function processInvoiceReminderNotifications(): Promise<void> {
 			.where(
 				and(
 					ne(table.invoice.status, 'paid'),
+					ne(table.invoice.status, 'partially_paid'),
 					ne(table.invoice.status, 'cancelled'),
 					ne(table.invoice.status, 'draft'),
 					isNotNull(table.invoice.dueDate),

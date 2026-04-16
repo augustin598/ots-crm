@@ -198,12 +198,15 @@
 											variant={
 												invoice.status === 'paid'
 													? 'default'
+													: invoice.status === 'partially_paid'
+													? 'outline'
 													: invoice.status === 'overdue'
 													? 'destructive'
 													: 'secondary'
 											}
+											class={invoice.status === 'partially_paid' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-700' : ''}
 										>
-											{invoice.status}
+											{invoice.status === 'paid' ? 'Achitată' : invoice.status === 'partially_paid' ? '◐ Achitată parțial' : invoice.status === 'overdue' ? 'Restantă' : invoice.status === 'sent' ? 'Trimisă' : invoice.status === 'draft' ? 'Ciornă' : invoice.status === 'cancelled' ? 'Anulată' : invoice.status}
 										</Badge>
 										{#if tenantSlug}
 											<Button variant="ghost" size="sm" onclick={() => goto(`/${tenantSlug}/invoices/${invoice.id}`)}>

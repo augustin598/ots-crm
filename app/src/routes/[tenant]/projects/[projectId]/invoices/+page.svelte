@@ -74,7 +74,11 @@
 					{#each invoices as invoice}
 						<TableRow>
 							<TableCell class="font-medium">{formatInvoiceNumberDisplay(invoice, invoiceSettings)}</TableCell>
-							<TableCell>{invoice.status}</TableCell>
+							<TableCell>
+									<span class={invoice.status === 'partially_paid' ? 'text-orange-700 font-medium' : invoice.status === 'paid' ? 'text-green-700 font-medium' : invoice.status === 'overdue' ? 'text-red-700 font-medium' : ''}>
+										{invoice.status === 'paid' ? 'Achitată' : invoice.status === 'partially_paid' ? '◐ Achitată parțial' : invoice.status === 'overdue' ? 'Restantă' : invoice.status === 'sent' ? 'Trimisă' : invoice.status === 'draft' ? 'Ciornă' : invoice.status === 'cancelled' ? 'Anulată' : invoice.status}
+									</span>
+								</TableCell>
 							<TableCell>{formatAmount(invoice.totalAmount || 0, (invoice.currency || 'RON') as Currency)}</TableCell>
 							<TableCell>{formatDate(invoice.dueDate)}</TableCell>
 							<TableCell>

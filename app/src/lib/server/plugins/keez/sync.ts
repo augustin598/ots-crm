@@ -161,8 +161,9 @@ async function _syncKeezInvoicesForTenantInner(
 
 				// Determine status based on Keez status + remainingAmount
 				const keezStatus = invoiceHeader.status || keezInvoice.status;
-				let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' =
+				let invoiceStatus: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' =
 					existing.status as any;
+				let remainingCents: number | null = null;
 
 				if (keezStatus === 'Cancelled') {
 					invoiceStatus = 'cancelled';
@@ -172,9 +173,12 @@ async function _syncKeezInvoicesForTenantInner(
 				} else if (keezStatus === 'Valid') {
 					// Validated fiscal invoice — check remainingAmount
 					if (invoiceHeader.remainingAmount !== undefined) {
-						const remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
+						remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
+						const existingTotal = existing.totalAmount || 0;
 						if (remainingCents === 0) {
 							invoiceStatus = 'paid';
+						} else if (remainingCents > 0 && remainingCents < existingTotal) {
+							invoiceStatus = 'partially_paid';
 						} else if (remainingCents > 0) {
 							const dueDate = parsedDueDate || existing.dueDate;
 							invoiceStatus = dueDate && dueDate < new Date() ? 'overdue' : 'sent';
@@ -184,9 +188,12 @@ async function _syncKeezInvoicesForTenantInner(
 					}
 				} else if (invoiceHeader.remainingAmount !== undefined) {
 					// Fallback for unknown status
-					const remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
+					remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
+					const existingTotal = existing.totalAmount || 0;
 					if (remainingCents === 0 && keezStatus) {
 						invoiceStatus = 'paid';
+					} else if (remainingCents > 0 && remainingCents < existingTotal) {
+						invoiceStatus = 'partially_paid';
 					} else if (remainingCents > 0) {
 						const dueDate = parsedDueDate || existing.dueDate;
 						invoiceStatus = dueDate && dueDate < new Date() ? 'overdue' : 'sent';
@@ -245,6 +252,7 @@ async function _syncKeezInvoicesForTenantInner(
 				if (parsedDueDate) updateData.dueDate = parsedDueDate;
 				if (invoiceStatus !== existing.status) updateData.status = invoiceStatus;
 				if (invoiceStatus === 'paid' && !existing.paidDate) updateData.paidDate = new Date();
+				if (remainingCents !== null) updateData.remainingAmount = remainingCents;
 				if (keezStatus && keezStatus !== existing.keezStatus) updateData.keezStatus = keezStatus;
 
 				if (invoiceHeader.series && invoiceHeader.number) {

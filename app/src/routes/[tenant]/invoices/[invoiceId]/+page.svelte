@@ -64,6 +64,8 @@
 		switch (status) {
 			case 'paid':
 				return 'success';
+			case 'partially_paid':
+				return 'outline';
 			case 'unpaid':
 				return 'warning';
 			case 'overdue':
@@ -76,6 +78,18 @@
 				return 'destructive';
 			default:
 				return 'secondary';
+		}
+	}
+
+	function getStatusText(status: string) {
+		switch (status) {
+			case 'paid': return 'Achitată';
+			case 'partially_paid': return 'Achitată parțial';
+			case 'sent': return 'Trimisă';
+			case 'overdue': return 'Restantă';
+			case 'draft': return 'Ciornă';
+			case 'cancelled': return 'Anulată';
+			default: return status;
 		}
 	}
 
@@ -396,7 +410,7 @@
 				<div>
 					<div class="flex items-center gap-3 mb-2">
 						<h1 class="text-3xl font-bold tracking-tight">{displayInvoiceNumber}</h1>
-						<Badge variant={getStatusVariant(invoice.status)}>{invoice.status}</Badge>
+						<Badge variant={getStatusVariant(invoice.status)}>{getStatusText(invoice.status)}</Badge>
 						{#if invoice.keezExternalId}
 							{#if invoice.keezStatus === 'Valid'}
 								<Badge variant="outline" class="border-green-500 text-green-600 dark:text-green-400">Keez ✓</Badge>
@@ -679,6 +693,24 @@
 							</div>
 						</div>
 					</Card>
+				{:else if invoice.status === 'partially_paid'}
+					<Card class="p-6 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800">
+						<div class="flex items-center gap-3">
+							<div class="flex h-12 w-12 items-center justify-center rounded-full bg-orange-500 text-white">
+								<span class="text-xl">◐</span>
+							</div>
+							<div class="flex-1">
+								<h4 class="font-semibold text-orange-900 dark:text-orange-200">Achitată parțial</h4>
+								<p class="text-sm text-orange-700 dark:text-orange-300">
+									{#if invoice.remainingAmount && invoice.totalAmount}
+										Achitat {((invoice.totalAmount - invoice.remainingAmount) / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}
+										din {(invoice.totalAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}.
+										Sold restant: <strong>{(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}</strong>
+									{/if}
+								</p>
+							</div>
+						</div>
+					</Card>
 				{/if}
 			</div>
 
@@ -695,8 +727,13 @@
 									{#if invoice.status === 'sent' && invoice.lastEmailStatus === 'sent'}
 										<Mail class="mr-1 h-3 w-3" />
 									{/if}
-									{invoice.status}
+									{getStatusText(invoice.status)}
 								</Badge>
+								{#if invoice.status === 'partially_paid' && invoice.remainingAmount}
+									<span class="text-sm font-medium text-orange-600 dark:text-orange-400">
+										Sold restant: {(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}
+									</span>
+								{/if}
 								{#if invoice.isCreditNote}
 									<Badge variant="outline">Credit Note</Badge>
 								{/if}

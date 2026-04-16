@@ -23,6 +23,8 @@
 		switch (status) {
 			case 'paid':
 				return 'success';
+			case 'partially_paid':
+				return 'warning';
 			case 'sent':
 				return 'default';
 			case 'overdue':
@@ -36,7 +38,15 @@
 	}
 
 	function formatInvoiceStatus(status: string): string {
-		return status.charAt(0).toUpperCase() + status.slice(1);
+		switch (status) {
+			case 'paid': return 'Achitată';
+			case 'partially_paid': return 'Achitată parțial';
+			case 'sent': return 'Trimisă';
+			case 'overdue': return 'Restantă';
+			case 'draft': return 'Ciornă';
+			case 'cancelled': return 'Anulată';
+			default: return status;
+		}
 	}
 
 	const tasksQuery = getTasks({});

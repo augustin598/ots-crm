@@ -824,14 +824,15 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 						${invoice.issueDate ? `<p><strong>Data emitere:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
 						${invoice.dueDate ? `<p><strong>Data scadenta:</strong> ${formatDateRo(invoice.dueDate)}</p>` : ''}
 						<p><strong>Total de plata:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Platita</p>' : ''}
+						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Achitată</p>' : ''}
+						${invoice.status === 'partially_paid' && invoice.remainingAmount ? `<p style="color: #d97706;"><strong>Status:</strong> Achitată parțial — Sold restant: ${formatAmount(invoice.remainingAmount, invoice.currency)}</p>` : ''}
 					</div>
 					${ibanHtml}
 					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
 					<div style="text-align: center; margin: 30px 0;">
 						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura Online</a>
 					</div>
-					${invoice.dueDate && invoice.status !== 'paid' ? `<p style="font-size: 14px; color: #666;">Plata este scadenta la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
+					${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `<p style="font-size: 14px; color: #666;">Plata este scadenta la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
 					<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru intrebari, nu ezitati sa ne contactati.</p>
 				</div>
 			</body>
@@ -851,7 +852,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			${ibanText}
 			Vezi factura: ${invoiceUrl}
 
-			${invoice.dueDate && invoice.status !== 'paid' ? `Plata este scadenta la ${formatDateRo(invoice.dueDate)}.\n` : ''}
+			${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `Plata este scadenta la ${formatDateRo(invoice.dueDate)}.\n` : ''}
 
 			Pentru intrebari, nu ezitati sa ne contactati.
 		`

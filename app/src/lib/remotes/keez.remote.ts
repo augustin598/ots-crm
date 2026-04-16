@@ -669,11 +669,15 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 		// Validated fiscal invoice — check remainingAmount for payment status
 		if (keezInvoiceHeader?.remainingAmount !== undefined) {
 			const remainingAmountCents = Math.round(keezInvoiceHeader.remainingAmount * 100);
+			updateData.remainingAmount = remainingAmountCents;
+			const invoiceTotal = invoice.totalAmount || 0;
 			if (remainingAmountCents === 0) {
 				updateData.status = 'paid';
 				if (!invoice.paidDate) {
 					updateData.paidDate = new Date();
 				}
+			} else if (remainingAmountCents > 0 && remainingAmountCents < invoiceTotal) {
+				updateData.status = 'partially_paid';
 			} else if (remainingAmountCents > 0) {
 				const dueDate = parsedDueDate || invoice.dueDate;
 				if (dueDate && dueDate < new Date()) {
@@ -893,7 +897,8 @@ export const syncInvoicesFromKeez = command(
 
 					// Determine status based on Keez status + remainingAmount
 					const keezStatus = invoiceHeader.status || keezInvoice.status;
-					let invoiceStatus: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' = existing.status as any;
+					let invoiceStatus: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' = existing.status as any;
+					let remainingAmountCents: number | null = null;
 
 					if (keezStatus === 'Cancelled') {
 						invoiceStatus = 'cancelled';
@@ -903,9 +908,12 @@ export const syncInvoicesFromKeez = command(
 					} else if (keezStatus === 'Valid') {
 						// Validated fiscal invoice — check remainingAmount for payment status
 						if (invoiceHeader.remainingAmount !== undefined) {
-							const remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
+							remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
+							const existingTotal = existing.totalAmount || 0;
 							if (remainingAmountCents === 0) {
 								invoiceStatus = 'paid';
+							} else if (remainingAmountCents > 0 && remainingAmountCents < existingTotal) {
+								invoiceStatus = 'partially_paid';
 							} else if (remainingAmountCents > 0) {
 								const dueDate = parsedDueDate || existing.dueDate;
 								if (dueDate && dueDate < new Date()) {
@@ -919,9 +927,12 @@ export const syncInvoicesFromKeez = command(
 						}
 					} else if (invoiceHeader.remainingAmount !== undefined) {
 						// Fallback for unknown status — use remainingAmount but only if > 0
-						const remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
+						remainingAmountCents = Math.round(invoiceHeader.remainingAmount * 100);
+						const existingTotal = existing.totalAmount || 0;
 						if (remainingAmountCents === 0 && keezStatus) {
 							invoiceStatus = 'paid';
+						} else if (remainingAmountCents > 0 && remainingAmountCents < existingTotal) {
+							invoiceStatus = 'partially_paid';
 						} else if (remainingAmountCents > 0) {
 							const dueDate = parsedDueDate || existing.dueDate;
 							if (dueDate && dueDate < new Date()) {
@@ -1007,6 +1018,9 @@ export const syncInvoicesFromKeez = command(
 					}
 					if (invoiceStatus === 'paid' && !existing.paidDate) {
 						updateData.paidDate = new Date();
+					}
+					if (remainingAmountCents !== null) {
+						updateData.remainingAmount = remainingAmountCents;
 					}
 					// Save Keez status (Draft/Valid/Cancelled) for badge display
 					if (keezStatus && keezStatus !== existing.keezStatus) {

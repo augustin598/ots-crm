@@ -70,6 +70,7 @@ export function mapUblInvoiceToCrm(
 		serviceId: null,
 		invoiceNumber: ublData.invoiceNumber,
 		status: 'sent' as const,
+		remainingAmount: null,
 		amount,
 		taxRate,
 		taxAmount,

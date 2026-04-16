@@ -184,6 +184,8 @@ import { goto } from '$app/navigation';
 		switch (status) {
 			case 'paid':
 				return 'success';
+			case 'partially_paid':
+				return 'outline';
 			case 'unpaid':
 				return 'warning';
 			case 'overdue':
@@ -203,10 +205,31 @@ import { goto } from '$app/navigation';
 		switch (status) {
 			case 'paid':
 				return '✓';
+			case 'partially_paid':
+				return '◐';
 			case 'overdue':
 				return '!';
 			default:
 				return '';
+		}
+	}
+
+	function getStatusText(status: string) {
+		switch (status) {
+			case 'paid':
+				return 'Achitată';
+			case 'partially_paid':
+				return 'Achitată parțial';
+			case 'sent':
+				return 'Trimisă';
+			case 'overdue':
+				return 'Restantă';
+			case 'draft':
+				return 'Ciornă';
+			case 'cancelled':
+				return 'Anulată';
+			default:
+				return status;
 		}
 	}
 
@@ -693,10 +716,15 @@ import { goto } from '$app/navigation';
 											</div>
 											<Badge
 												variant={getStatusColor(invoice.status)}
-												class="text-xs font-semibold px-2 py-0.5 shadow-sm"
+												class="text-xs font-semibold px-2 py-0.5 shadow-sm {invoice.status === 'partially_paid' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-700' : ''}"
 											>
-												{getStatusIcon(invoice.status)} {invoice.status}
+												{getStatusIcon(invoice.status)} {getStatusText(invoice.status)}
 											</Badge>
+											{#if invoice.status === 'partially_paid' && invoice.remainingAmount}
+												<span class="text-xs font-medium text-orange-600 dark:text-orange-400">
+													Sold restant: {(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}
+												</span>
+											{/if}
 											{#if isKeezActive && invoice.keezExternalId}
 												{#if invoice.keezStatus === 'Valid'}
 													<Badge variant="outline" class="text-xs px-2 py-0.5 border-green-500 text-green-600 dark:text-green-400">

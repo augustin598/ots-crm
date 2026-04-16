@@ -475,6 +475,7 @@ export const invoice = sqliteTable('invoice', {
 	discountValue: integer('discount_value'), // Discount amount in cents
 	smartbillSeries: text('smartbill_series'),
 	smartbillNumber: text('smartbill_number'),
+	remainingAmount: integer('remaining_amount'), // in cents — suma rămasă de plată (from Keez sync)
 	keezInvoiceId: text('keez_invoice_id'),
 	keezExternalId: text('keez_external_id'),
 	keezStatus: text('keez_status'), // 'Draft' (proforma), 'Valid' (fiscal), 'Cancelled'

@@ -59,7 +59,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
 							eq(table.invoice.keezStatus, 'Valid'),
-							notInArray(table.invoice.status, ['overdue', 'paid', 'cancelled']),
+							notInArray(table.invoice.status, ['overdue', 'paid', 'partially_paid', 'cancelled']),
 							lt(table.invoice.dueDate, now)
 						)
 					);
@@ -72,7 +72,7 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
 							eq(table.invoice.keezStatus, 'Valid'),
-							notInArray(table.invoice.status, ['paid', 'cancelled']),
+							notInArray(table.invoice.status, ['paid', 'partially_paid', 'cancelled']),
 							lt(table.invoice.dueDate, now),
 							lte(table.invoice.overdueReminderCount, maxCount - 1)
 						)
