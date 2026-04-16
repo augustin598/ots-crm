@@ -8,6 +8,9 @@
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
+	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import type { Task } from '$lib/server/db/schema';
 	import { updateTaskPosition, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { formatStatus, getPriorityColor, getPriorityDotColor, getPriorityCardClass, formatPriority, formatDate } from './task-kanban-utils';
@@ -49,7 +52,9 @@
 
 	// --- Done column lazy loading ---
 	const DONE_PAGE_SIZE = 20;
+	const DONE_COLLAPSED_COUNT = 3;
 	let doneLoadedPages = $state(1);
+	let doneExpanded = $state(false);
 
 	// Reset done pagination when filters change
 	$effect(() => {
@@ -94,6 +99,7 @@
 	const doneTotalCount = $derived(completedQueries[0]?.current?.totalCount ?? 0);
 	const doneIsLoading = $derived(completedQueries.some((q) => q.loading));
 	const doneHasMore = $derived(doneTasks.length < doneTotalCount);
+	const doneHasCollapsedItems = $derived(!doneExpanded && doneTasks.length > DONE_COLLAPSED_COUNT);
 
 	// Separate optimistic state for done column
 	let optimisticDoneTasks = $state<Task[]>([]);
@@ -120,8 +126,11 @@
 			}
 		}
 
-		// Done tasks — from their own optimistic state
-		for (const task of optimisticDoneTasks) {
+		// Done tasks — from their own optimistic state (limited when collapsed)
+		const visibleDoneTasks = doneExpanded
+			? optimisticDoneTasks
+			: optimisticDoneTasks.slice(0, DONE_COLLAPSED_COUNT);
+		for (const task of visibleDoneTasks) {
 			groups['done'].push(task);
 		}
 
@@ -480,14 +489,29 @@
 		<div class="flex flex-col min-w-[280px]" role="region" aria-label="{formatStatus(status)} column, {statusTasks.length} tasks">
 			<div class="flex items-center justify-between mb-4">
 				{#if status === 'done'}
-					<div>
-						<h3 class="font-semibold capitalize">
-							{formatStatus(status)} ({doneTasks.length}{doneHasMore ? '+' : ''})
-						</h3>
-						{#if doneTotalCount > 0}
-							<p class="text-xs text-muted-foreground mt-0.5">
-								{doneTasks.length} din {doneTotalCount} finalizate
-							</p>
+					<div class="flex items-center gap-2 w-full">
+						<CheckCircle2Icon class="h-4 w-4 text-emerald-500 shrink-0" />
+						<div class="flex-1 min-w-0">
+							<h3 class="font-semibold text-emerald-700 dark:text-emerald-400">
+								Finalizate
+								<span class="ml-1 text-xs font-normal text-muted-foreground">
+									{doneTotalCount}
+								</span>
+							</h3>
+						</div>
+						{#if optimisticDoneTasks.length > DONE_COLLAPSED_COUNT}
+							<button
+								class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
+								onclick={() => { doneExpanded = !doneExpanded; }}
+							>
+								{#if doneExpanded}
+									<ChevronUpIcon class="h-3.5 w-3.5" />
+									<span>Restrânge</span>
+								{:else}
+									<ChevronDownIcon class="h-3.5 w-3.5" />
+									<span>Toate</span>
+								{/if}
+							</button>
 						{/if}
 					</div>
 				{:else}
@@ -496,8 +520,9 @@
 					</h3>
 				{/if}
 			</div>
+			<div class="{status === 'done' && doneExpanded ? 'relative' : ''}">
 			<div
-				class="flex-1 space-y-3 min-h-[200px]"
+				class="flex-1 space-y-3 min-h-[200px] {status === 'done' && doneExpanded ? 'max-h-[600px] overflow-y-auto pr-1 done-scroll-area' : ''}"
 				role="list"
 				ondragover={(e) => handleDragOver(e, status, statusTasks.length)}
 				ondragleave={handleDragLeave}
@@ -510,7 +535,7 @@
 					{@const isDragged = draggedTask?.id === task.id}
 					{@const isDragOver = dragOverStatus === status && dragOverIndex === index}
 					<Card
-						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {getPriorityCardClass(task.priority || 'medium')} {isDragged
+						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {status === 'done' ? 'opacity-60 hover:opacity-90 border-l-4 border-l-emerald-400/50 dark:border-l-emerald-700/50' : getPriorityCardClass(task.priority || 'medium')} {isDragged
 							? 'opacity-50'
 							: ''} {isDragOver ? 'ring-2 ring-primary' : ''} {pickedUpTask?.id === task.id ? 'ring-2 ring-primary bg-primary/5' : ''}"
 						draggable={true}
@@ -533,7 +558,7 @@
 											{formatPriority(task.priority || 'medium')}
 										</span>
 									</div>
-									<h4 class="font-medium text-sm leading-snug line-clamp-2">{task.title}</h4>
+									<h4 class="font-medium text-sm leading-snug line-clamp-2 {status === 'done' ? 'text-muted-foreground line-through decoration-muted-foreground/40' : ''}">{task.title}</h4>
 								</div>
 								<DropdownMenu>
 									<DropdownMenuTrigger>
@@ -604,7 +629,16 @@
 				{#if dragOverStatus === status && dragOverIndex === statusTasks.length && draggedTask}
 					<div class="h-2 border-2 border-dashed border-primary rounded"></div>
 				{/if}
-				{#if status === 'done' && doneHasMore}
+				{#if status === 'done' && doneHasCollapsedItems}
+					<button
+						class="w-full mt-3 py-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors rounded-md border border-dashed border-muted-foreground/20 hover:border-emerald-500/30 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20"
+						onclick={() => { doneExpanded = true; }}
+					>
+						<ChevronDownIcon class="h-3.5 w-3.5" />
+						Arată toate ({doneTotalCount})
+					</button>
+				{/if}
+				{#if status === 'done' && doneExpanded && doneHasMore}
 					<Button
 						variant="outline"
 						class="w-full mt-2"
@@ -617,6 +651,28 @@
 					</Button>
 				{/if}
 			</div>
+			{#if status === 'done' && doneExpanded}
+				<div class="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent rounded-b-md"></div>
+			{/if}
+			</div>
 		</div>
 	{/each}
 </div>
+
+<style>
+	.done-scroll-area {
+		padding-bottom: 3rem;
+		scrollbar-width: thin;
+		scrollbar-color: oklch(0.7 0.05 155) transparent;
+	}
+	.done-scroll-area::-webkit-scrollbar {
+		width: 4px;
+	}
+	.done-scroll-area::-webkit-scrollbar-thumb {
+		background: oklch(0.7 0.05 155);
+		border-radius: 4px;
+	}
+	.done-scroll-area::-webkit-scrollbar-track {
+		background: transparent;
+	}
+</style>
