@@ -252,7 +252,18 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>Setări SMTP</CardTitle>
+		<div class="flex items-center gap-3">
+			<CardTitle>Setări SMTP</CardTitle>
+			{#if isGmailProvider && isEnabled}
+				<span class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Secundar · Activ</span>
+			{:else if isGmailProvider && !isEnabled}
+				<span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">Secundar · Inactiv</span>
+			{:else if isEnabled}
+				<span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">Principal · Activ</span>
+			{:else}
+				<span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-400">Inactiv</span>
+			{/if}
+		</div>
 		<CardDescription>
 			{#if isGmailProvider}
 				Folosit ca fallback când Gmail nu este disponibil
