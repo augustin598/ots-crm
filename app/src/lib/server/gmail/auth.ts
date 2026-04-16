@@ -295,6 +295,25 @@ export async function disconnectGmail(tenantId: string): Promise<void> {
 		.set({ isActive: false, updatedAt: new Date() })
 		.where(eq(table.gmailIntegration.id, integration.id));
 	logInfo('gmail', 'Disconnect: DB updated, isActive set to false', { tenantId });
+
+	// Auto-switch email provider back to SMTP if Gmail was the primary sender
+	const [emailSettings] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenantId))
+		.limit(1);
+
+	if (emailSettings?.emailProvider === 'gmail') {
+		await db
+			.update(table.emailSettings)
+			.set({ emailProvider: 'smtp', updatedAt: new Date() })
+			.where(eq(table.emailSettings.tenantId, tenantId));
+		logInfo('gmail', 'Disconnect: auto-switched email provider from Gmail to SMTP', { tenantId });
+	}
+
+	// Clear transporter cache
+	const { clearTenantTransporterCache } = await import('$lib/server/email');
+	clearTenantTransporterCache(tenantId);
 }
 
 /**
