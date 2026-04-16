@@ -390,20 +390,22 @@ async function checkTokenExpiryWarnings(): Promise<number> {
 			warned++;
 		}
 
-		// Check TikTok tokens similarly
+		// Check TikTok REFRESH tokens expiring within 7 days.
+		// Access tokens (24h) are auto-refreshed — only warn when the refresh token
+		// itself is about to expire, because that requires manual re-authorization.
 		const expiringTiktok = await db
 			.select({
 				id: table.tiktokAdsIntegration.id,
 				tenantId: table.tiktokAdsIntegration.tenantId,
-				tokenExpiresAt: table.tiktokAdsIntegration.tokenExpiresAt,
+				refreshTokenExpiresAt: table.tiktokAdsIntegration.refreshTokenExpiresAt,
 			})
 			.from(table.tiktokAdsIntegration)
 			.where(
 				and(
 					eq(table.tiktokAdsIntegration.isActive, true),
-					sql`${table.tiktokAdsIntegration.tokenExpiresAt} IS NOT NULL`,
-					sql`${table.tiktokAdsIntegration.tokenExpiresAt} <= ${sevenDaysFromNow.toISOString()}`,
-					sql`${table.tiktokAdsIntegration.tokenExpiresAt} > datetime('now')`
+					sql`${table.tiktokAdsIntegration.refreshTokenExpiresAt} IS NOT NULL`,
+					sql`${table.tiktokAdsIntegration.refreshTokenExpiresAt} <= ${sevenDaysFromNow.toISOString()}`,
+					sql`${table.tiktokAdsIntegration.refreshTokenExpiresAt} > datetime('now')`
 				)
 			);
 
@@ -429,8 +431,8 @@ async function checkTokenExpiryWarnings(): Promise<number> {
 				.where(eq(table.tenant.id, integration.tenantId))
 				.limit(1);
 
-			const expiryDate = integration.tokenExpiresAt
-				? new Date(integration.tokenExpiresAt).toLocaleDateString('ro-RO')
+			const expiryDate = integration.refreshTokenExpiresAt
+				? new Date(integration.refreshTokenExpiresAt).toLocaleDateString('ro-RO')
 				: 'curand';
 
 			for (const admin of admins) {
@@ -439,7 +441,7 @@ async function checkTokenExpiryWarnings(): Promise<number> {
 					userId: admin.userId,
 					type: 'integration.auth_expiring',
 					title: 'Token TikTok Ads expira curand',
-					message: `Token-ul de acces TikTok Ads expira pe ${expiryDate}. Reconectati integrarea.`,
+					message: `Token-ul de autorizare TikTok Ads expira pe ${expiryDate}. Reconectati integrarea.`,
 					link: tenant ? `/${tenant.slug}/settings/tiktok-ads` : undefined,
 					priority: 'high',
 				});
