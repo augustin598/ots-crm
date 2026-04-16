@@ -19,6 +19,7 @@ import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
 import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retry';
+import { cleanupOldNotifications } from './tasks/notification-cleanup';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -102,7 +103,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	debug_log_cleanup: processDebugLogCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
 	pdf_report_send: processPdfReportSend,
-	email_retry: processEmailRetry
+	email_retry: processEmailRetry,
+	notification_cleanup: cleanupOldNotifications
 };
 
 /**
@@ -214,7 +216,8 @@ export const startScheduler = async () => {
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup',
-		'db-write-health-check', 'pdf-report-send', 'email-retry'
+		'db-write-health-check', 'pdf-report-send', 'email-retry',
+		'notification-cleanup'
 	]);
 
 	try {
@@ -551,6 +554,22 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Notification cleanup — daily at 2:30 AM (read >30d, all >90d)
+	await schedulerQueue.add(
+		'notification-cleanup',
+		{
+			type: 'notification_cleanup',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '30 2 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'notification-cleanup'
+		}
+	);
+
 	// Email retry — every 15 minutes. Drains failed email_log rows that have a payload
 	// (set by sendWithPersistence) and replays them via the original send function.
 	// After admin re-saves SMTP password, this is what auto-recovers vanished emails.
@@ -603,7 +622,8 @@ export const JOB_LABELS: Record<string, string> = {
 	debug_log_cleanup: 'Cleanup Loguri Debug',
 	db_write_health_check: 'Health Check Scriere DB',
 	pdf_report_send: 'Trimitere Rapoarte PDF',
-	email_retry: 'Retry Emailuri Eșuate'
+	email_retry: 'Retry Emailuri Eșuate',
+	notification_cleanup: 'Cleanup Notificari Vechi'
 };
 
 /** Default params for jobs that need specific parameters */
