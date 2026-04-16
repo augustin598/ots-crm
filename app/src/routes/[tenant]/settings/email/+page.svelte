@@ -148,7 +148,7 @@
 </script>
 
 <p class="text-muted-foreground mb-6">
-	Configure SMTP settings for sending emails. Each tenant can use their own SMTP credentials. Passwords are encrypted and never exposed.
+	Configurează modul de trimitere email. Gmail este recomandat ca metodă principală, cu SMTP ca fallback. Parolele sunt criptate și nu sunt expuse.
 </p>
 
 <Card class="mb-6">
@@ -280,9 +280,13 @@
 				<div class="space-y-4">
 					<div class="flex items-center justify-between">
 						<div class="space-y-0.5">
-							<Label for="isEnabled">Enable Email Sending</Label>
+							<Label for="isEnabled">Activează SMTP</Label>
 							<p class="text-xs text-muted-foreground">
-								Enable or disable email sending for this tenant. When disabled, emails will not be sent even if configured.
+								{#if isGmailProvider}
+									Activează SMTP ca fallback. Când Gmail nu este disponibil, emailurile se trimit prin SMTP.
+								{:else}
+									Activează sau dezactivează trimiterea email prin SMTP.
+								{/if}
 							</p>
 						</div>
 						<Switch id="isEnabled" bind:checked={isEnabled} />
@@ -302,7 +306,7 @@
 								disabled={!isEnabled}
 							/>
 							<p class="text-xs text-muted-foreground">
-								The SMTP server hostname (e.g., smtp.gmail.com, smtp.sendgrid.net)
+								Hostname-ul serverului SMTP (ex: smtp.gmail.com, smtp.sendgrid.net)
 							</p>
 						</div>
 
@@ -322,16 +326,16 @@
 								}}
 							/>
 							<p class="text-xs text-muted-foreground">
-								SMTP port (587 for TLS, 465 for SSL, 25 for unencrypted)
+								Port SMTP (587 pentru TLS, 465 pentru SSL, 25 necriptat)
 							</p>
 						</div>
 					</div>
 
 					<div class="flex items-center justify-between">
 						<div class="space-y-0.5">
-							<Label for="smtpSecure">Use SSL/TLS</Label>
+							<Label for="smtpSecure">Folosește SSL/TLS</Label>
 							<p class="text-xs text-muted-foreground">
-								Enable this if your SMTP server requires SSL (port 465) or TLS (port 587)
+								Activează dacă serverul SMTP necesită SSL (port 465) sau TLS (port 587)
 							</p>
 						</div>
 						<Switch id="smtpSecure" bind:checked={smtpSecure} disabled={!isEnabled} />
@@ -340,37 +344,37 @@
 					<Separator />
 
 					<div class="space-y-2">
-						<Label for="smtpUser">SMTP Username *</Label>
+						<Label for="smtpUser">Utilizator SMTP *</Label>
 						<Input
 							id="smtpUser"
 							bind:value={smtpUser}
 							type="text"
-							placeholder="your-email@example.com"
+							placeholder="email@example.com"
 							required={isEnabled}
 							disabled={!isEnabled}
 						/>
 						<p class="text-xs text-muted-foreground">
-							Your SMTP username or email address
+							Numele de utilizator sau adresa de email SMTP
 						</p>
 					</div>
 
 					<div class="space-y-2">
-						<Label for="smtpPassword">SMTP Password {settings?.hasPassword ? '(leave blank to keep current)' : '*'}</Label>
+						<Label for="smtpPassword">Parolă SMTP {settings?.hasPassword ? '(lasă gol pentru a păstra parola curentă)' : '*'}</Label>
 						<Input
 							id="smtpPassword"
 							bind:value={smtpPassword}
 							type="password"
-							placeholder={settings?.hasPassword ? '••••••••' : 'Enter password'}
+							placeholder={settings?.hasPassword ? '••••••••' : 'Introdu parola'}
 							required={!settings?.hasPassword && isEnabled}
 							disabled={!isEnabled}
 						/>
 						<p class="text-xs text-muted-foreground">
-							Your SMTP password. {settings?.hasPassword ? 'Leave blank to keep the current password.' : 'Required for new configurations.'}
+							Parola SMTP. {settings?.hasPassword ? 'Lasă gol pentru a păstra parola curentă.' : 'Obligatorie pentru configurări noi.'}
 						</p>
 					</div>
 
 					<div class="space-y-2">
-						<Label for="smtpFrom">From Email Address</Label>
+						<Label for="smtpFrom">Adresă expeditor (From)</Label>
 						<Input
 							id="smtpFrom"
 							bind:value={smtpFrom}
@@ -379,7 +383,7 @@
 							disabled={!isEnabled}
 						/>
 						<p class="text-xs text-muted-foreground">
-							Optional. The email address that will appear as the sender. If not set, SMTP Username will be used.
+							Opțional. Adresa de email care va apărea ca expeditor. Dacă nu e setată, se folosește utilizatorul SMTP.
 						</p>
 					</div>
 				</div>
@@ -394,13 +398,13 @@
 
 				{#if saveSuccess}
 					<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
-						<p class="text-sm text-green-800 dark:text-green-200">Settings saved successfully!</p>
+						<p class="text-sm text-green-800 dark:text-green-200">Setările au fost salvate cu succes!</p>
 					</div>
 				{/if}
 
 				<div class="flex gap-2">
 					<Button type="submit" disabled={saving || !isEnabled || !smtpHost || !smtpUser || (!settings?.hasPassword && !smtpPassword)}>
-						{saving ? 'Saving...' : 'Save Settings'}
+						{saving ? 'Se salvează...' : 'Salvează Setări'}
 					</Button>
 					<Button
 						type="button"
@@ -409,7 +413,7 @@
 						disabled={testing || saving || !isEnabled || !smtpHost || !smtpUser || (!settings?.hasPassword && !smtpPassword)}
 					>
 						<Mail class="h-4 w-4 mr-2" />
-						{testing ? 'Sending Test Email...' : 'Send Test Email'}
+						{testing ? 'Se trimite...' : 'Trimite Email Test SMTP'}
 					</Button>
 				</div>
 
@@ -422,7 +426,7 @@
 				{#if testSuccess}
 					<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
 						<p class="text-sm text-green-800 dark:text-green-200">
-							Test email sent successfully! Check your inbox.
+							Email test SMTP trimis cu succes! Verifică inbox-ul.
 						</p>
 					</div>
 				{/if}

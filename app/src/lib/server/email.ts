@@ -213,13 +213,9 @@ export async function getTenantTransporter(
 		logError('email', 'Failed to load email settings', { tenantId, stackTrace: serializeError(error).stack });
 	}
 
-	// If tenant has email settings configured and enabled, use them
+	// If tenant has email settings configured, use them
 	if (emailSettings) {
-		if (!emailSettings.isEnabled) {
-			logWarning('email', 'Tenant email settings exist but are disabled, skipping', { tenantId });
-			return null;
-		}
-		// Try Gmail if it's the preferred provider (skip if explicitly told to use SMTP)
+		// Try Gmail first if preferred — Gmail has its own auth, independent of SMTP isEnabled
 		if (emailSettings.emailProvider === 'gmail' && !options?.skipGmail) {
 			try {
 				const gmailResult = await createGmailTransporter(tenantId);
@@ -245,7 +241,10 @@ export async function getTenantTransporter(
 			}
 		}
 
-		if (!emailSettings.smtpHost || !emailSettings.smtpUser || !emailSettings.smtpPassword) {
+		// SMTP fallback — check isEnabled (applies to SMTP only, not Gmail)
+		if (!emailSettings.isEnabled) {
+			logWarning('email', 'Tenant SMTP disabled, falling back to default', { tenantId });
+		} else if (!emailSettings.smtpHost || !emailSettings.smtpUser || !emailSettings.smtpPassword) {
 			logWarning('email', 'Tenant email settings incomplete, falling back to default', {
 				tenantId,
 				metadata: { hasHost: !!emailSettings.smtpHost, hasUser: !!emailSettings.smtpUser, hasPassword: !!emailSettings.smtpPassword }
