@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { env } from '$env/dynamic/private';
+import { google } from 'googleapis';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -7,9 +7,9 @@ import { getAuthenticatedClient, hasGmailSendScope } from './auth';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
- * Create a nodemailer transporter using Gmail OAuth2.
- * Returns null if: no active integration, missing send scope, token invalid.
- * Refreshes token via getAuthenticatedClient() BEFORE creating transport.
+ * Create a nodemailer-compatible transporter that sends via Gmail API.
+ * Uses gmail.users.messages.send instead of SMTP — works reliably with
+ * Google Workspace accounts where SMTP OAuth2 may be restricted.
  */
 export async function createGmailTransporter(
   tenantId: string
@@ -42,44 +42,55 @@ export async function createGmailTransporter(
     return null;
   }
 
-  // 4. Read fresh tokens (decrypted)
-  const credentials = oauth2Client.credentials;
-  const accessToken = credentials.access_token as string | undefined;
-  const refreshToken = credentials.refresh_token as string | undefined;
-
-  logInfo('gmail', 'Gmail credentials check', {
-    tenantId,
-    metadata: {
-      hasAccessToken: !!accessToken,
-      hasRefreshToken: !!refreshToken,
-      accessTokenLength: accessToken?.length ?? 0,
-      refreshTokenLength: refreshToken?.length ?? 0
-    }
-  });
-
-  if (!accessToken || !refreshToken) {
-    logWarning('gmail', 'Gmail credentials incomplete after refresh', { tenantId });
-    return null;
-  }
-
-  // 5. Create nodemailer transport — use explicit host/port (not service: 'gmail')
-  //    to ensure OAuth2 XOAUTH2 mechanism is used instead of PLAIN auth
+  // 4. Create Gmail API-backed transporter
+  // Nodemailer compiles the email to RFC 5322 raw format, then we send via Gmail API.
+  // This bypasses SMTP entirely — no 535 auth issues with Google Workspace.
   try {
+    const gmailApi = google.gmail({ version: 'v1', auth: oauth2Client });
+
     const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: {
-        type: 'OAuth2',
-        user: integration.email,
-        clientId: env.GOOGLE_CLIENT_ID,
-        clientSecret: env.GOOGLE_CLIENT_SECRET,
-        refreshToken,
-        accessToken
-      }
+      streamTransport: true,
+      newline: 'unix',
+      buffer: true
     });
 
-    logInfo('gmail', 'Created Gmail transporter', {
+    // Wrap sendMail to route through Gmail API
+    const originalSendMail = transporter.sendMail.bind(transporter);
+    (transporter as any).sendMail = async (mailOptions: nodemailer.SendMailOptions) => {
+      // 1. Compile email to raw RFC 5322 using nodemailer
+      const info = await originalSendMail(mailOptions);
+      const rawMessage = info.message as Buffer;
+
+      // 2. Send via Gmail API
+      const encodedMessage = rawMessage
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+
+      const response = await gmailApi.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage
+        }
+      });
+
+      logInfo('gmail', 'Email sent via Gmail API', {
+        tenantId,
+        metadata: { messageId: response.data.id }
+      });
+
+      return {
+        messageId: response.data.id || '',
+        response: `Gmail API: ${response.status}`,
+        envelope: info.envelope,
+        accepted: [mailOptions.to as string],
+        rejected: [],
+        pending: []
+      };
+    };
+
+    logInfo('gmail', 'Created Gmail API transporter', {
       tenantId,
       metadata: { email: integration.email }
     });
@@ -105,7 +116,9 @@ export function isGmailOAuthError(error: unknown): boolean {
     msg.includes('Insufficient Permission') ||
     msg.includes('Invalid Credentials') ||
     msg.includes('OAUTH') ||
-    msg.includes('oauth')
+    msg.includes('oauth') ||
+    msg.includes('401') ||
+    msg.includes('403')
   );
 }
 
