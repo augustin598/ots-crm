@@ -165,13 +165,13 @@ async function autoSendRecurringInvoiceIfEnabled(tenantId: string, invoiceId: st
 	}
 
 	let sentCount = 0;
-	for (const recipientEmail of recipients) {
+	for (const recipient of recipients) {
 		try {
-			await sendInvoiceEmail(invoiceId, recipientEmail);
+			await sendInvoiceEmail(invoiceId, recipient.email);
 			sentCount++;
 		} catch (emailError) {
 			const { message, stack } = serializeError(emailError);
-			logError('scheduler', `Recurring invoices: failed to send to ${recipientEmail}: ${message}`, { tenantId, stackTrace: stack, metadata: { invoiceId } });
+			logError('scheduler', `Recurring invoices: failed to send to ${recipient.email}: ${message}`, { tenantId, stackTrace: stack, metadata: { invoiceId } });
 		}
 	}
 

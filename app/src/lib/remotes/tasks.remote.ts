@@ -56,17 +56,17 @@ async function sendClientNotificationIfEnabled(
 		if (!client?.email) return;
 
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
-		for (const recipientEmail of recipients) {
+		for (const recipient of recipients) {
 			try {
 				await sendTaskClientNotificationEmail(
 					taskId,
-					recipientEmail,
-					client.name || client.email,
+					recipient.email,
+					recipient.name || null,
 					notificationType,
 					extra
 				);
 			} catch (error) {
-				console.error(`Failed to send client ${notificationType} notification to ${recipientEmail}:`, error);
+				console.error(`Failed to send client ${notificationType} notification to ${recipient.email}:`, error);
 				// Continue with other recipients even if one fails
 			}
 		}
@@ -653,6 +653,23 @@ export const createTask = command(taskSchema, async (data) => {
 	// Send client notification
 	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created');
 
+	// Emit approval.requested hook if task needs approval
+	if (status === 'pending-approval') {
+		try {
+			const hooks = getHooksManager();
+			await hooks.emit({
+				type: 'approval.requested',
+				taskId,
+				taskTitle: data.title,
+				requestedByUserId: event.locals.user.id,
+				tenantId: targetTenantId,
+				tenantSlug: event.locals.tenant.slug
+			});
+		} catch {
+			// Don't throw - task creation should succeed even if notification fails
+		}
+	}
+
 	return { success: true, taskId };
 });
 
@@ -904,6 +921,23 @@ export const updateTask = command(
 				await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'modified', {
 					changedFields: changedFieldLabels.join(', ')
 				});
+			}
+		}
+
+		// Emit approval.requested hook if status changed to pending-approval
+		if (updateData.status === 'pending-approval' && existing.status !== 'pending-approval') {
+			try {
+				const hooks = getHooksManager();
+				await hooks.emit({
+					type: 'approval.requested',
+					taskId,
+					taskTitle: existing.title,
+					requestedByUserId: event.locals.user.id,
+					tenantId: existing.tenantId,
+					tenantSlug: event.locals.tenant.slug
+				});
+			} catch {
+				// Don't throw - task update should succeed even if notification fails
 			}
 		}
 

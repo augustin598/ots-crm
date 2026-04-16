@@ -280,17 +280,17 @@ export const createTaskComment = command(
 
 				if (client?.email) {
 					const recipients = await getNotificationRecipients(task.clientId, 'tasks');
-					for (const recipientEmail of recipients) {
+					for (const recipient of recipients) {
 						try {
 							await sendTaskClientNotificationEmail(
 								data.taskId,
-								recipientEmail,
-								client.name || client.email,
+								recipient.email,
+								recipient.name || null,
 								'comment',
 								{ commentPreview: data.content }
 							);
 						} catch (error) {
-							console.error(`Failed to send comment notification to ${recipientEmail}:`, error);
+							console.error(`Failed to send comment notification to ${recipient.email}:`, error);
 							// Continue with other recipients even if one fails
 						}
 					}

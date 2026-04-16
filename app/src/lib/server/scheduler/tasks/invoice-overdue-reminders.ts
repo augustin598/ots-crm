@@ -137,18 +137,18 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 						// Send reminder email to primary + secondary with invoices enabled
 						const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
 						let atLeastOneSent = false;
-						for (const recipientEmail of recipients) {
+						for (const recipient of recipients) {
 							try {
 								await sendOverdueReminderEmail(
 									invoice.id,
-									recipientEmail,
+									recipient.email,
 									daysOverdue,
 									reminderCount + 1
 								);
 								atLeastOneSent = true;
 							} catch (recipientError) {
 								const { message } = serializeError(recipientError);
-								logWarning('scheduler', `Invoice overdue reminders: failed to send to ${recipientEmail} for invoice ${invoice.invoiceNumber}: ${message}`, { tenantId: settings.tenantId });
+								logWarning('scheduler', `Invoice overdue reminders: failed to send to ${recipient.email} for invoice ${invoice.invoiceNumber}: ${message}`, { tenantId: settings.tenantId });
 							}
 						}
 

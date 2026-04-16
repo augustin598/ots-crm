@@ -46,10 +46,10 @@ export function registerEmailNotificationHooks(): void {
 
 			// Send payment confirmation email to primary + secondary with invoices enabled
 			const recipients = await getNotificationRecipients(invoice.clientId, 'invoices');
-			for (const recipientEmail of recipients) {
-				await sendInvoicePaidEmail(invoice.id, recipientEmail);
+			for (const recipient of recipients) {
+				await sendInvoicePaidEmail(invoice.id, recipient.email);
 			}
-			logInfo('email', 'Invoice paid email sent', { tenantId, metadata: { invoiceNumber: invoice.invoiceNumber, recipients: recipients.join(', ') } });
+			logInfo('email', 'Invoice paid email sent', { tenantId, metadata: { invoiceNumber: invoice.invoiceNumber, recipients: recipients.map(r => r.email).join(', ') } });
 		} catch (error) {
 			logError('email', 'Failed to send invoice paid email notification', { tenantId: event.tenantId, stackTrace: serializeError(error).stack });
 			// Don't throw - hooks are designed to not fail other handlers

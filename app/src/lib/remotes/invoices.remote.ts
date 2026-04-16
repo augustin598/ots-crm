@@ -898,8 +898,8 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	if (invoiceEmailsEnabled && client?.email) {
 		try {
 			const recipients = await getNotificationRecipients(existing.clientId, 'invoices');
-			for (const recipientEmail of recipients) {
-				await sendInvoiceEmail(invoiceId, recipientEmail);
+			for (const recipient of recipients) {
+				await sendInvoiceEmail(invoiceId, recipient.email);
 			}
 			// Email sent successfully
 			updateData.lastEmailSentAt = new Date();

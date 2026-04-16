@@ -93,19 +93,21 @@ export type NotificationCategory = 'invoices' | 'tasks' | 'contracts';
  * Returns all email addresses that should receive a notification for a given client + category.
  * Always includes the primary client.email, then any secondary emails with the matching toggle.
  */
+export type NotificationRecipient = { email: string; name: string | null };
+
 export async function getNotificationRecipients(
 	clientId: string,
 	category: NotificationCategory
-): Promise<string[]> {
+): Promise<NotificationRecipient[]> {
 	const [client] = await db
-		.select({ email: table.client.email })
+		.select({ email: table.client.email, name: table.client.name, legalRepresentative: table.client.legalRepresentative })
 		.from(table.client)
 		.where(eq(table.client.id, clientId))
 		.limit(1);
 
-	const emails: string[] = [];
+	const recipients: NotificationRecipient[] = [];
 	if (client?.email) {
-		emails.push(client.email);
+		recipients.push({ email: client.email, name: client.legalRepresentative || client.name || null });
 	}
 
 	const columnMap = {
@@ -115,7 +117,7 @@ export async function getNotificationRecipients(
 	} as const;
 
 	const secondaryEmails = await db
-		.select({ email: table.clientSecondaryEmail.email })
+		.select({ email: table.clientSecondaryEmail.email, label: table.clientSecondaryEmail.label })
 		.from(table.clientSecondaryEmail)
 		.where(
 			and(
@@ -125,12 +127,12 @@ export async function getNotificationRecipients(
 		);
 
 	for (const se of secondaryEmails) {
-		if (se.email && !emails.map((e) => e.toLowerCase()).includes(se.email.toLowerCase())) {
-			emails.push(se.email);
+		if (se.email && !recipients.map((r) => r.email.toLowerCase()).includes(se.email.toLowerCase())) {
+			recipients.push({ email: se.email, name: se.label || null });
 		}
 	}
 
-	return emails;
+	return recipients;
 }
 
 // Cache tenant-specific transporters
@@ -1394,10 +1396,12 @@ export async function sendTaskUpdateEmail(
 export async function sendTaskClientNotificationEmail(
 	taskId: string,
 	clientEmail: string,
-	clientName: string,
+	clientName: string | null,
 	notificationType: 'created' | 'status-change' | 'comment' | 'modified',
 	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
 ): Promise<void> {
+	// Extract first name for a more personal greeting
+	const greeting = clientName?.split(' ')[0] || 'ziua';
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
@@ -1535,7 +1539,7 @@ export async function sendTaskClientNotificationEmail(
 				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
 					${logoHtml}
 					<h1 style="color: ${headerColor}; margin-top: 0;">${subject}</h1>
-					<p>Bună ${clientName || 'ziua'},</p>
+					<p>Bună ${greeting},</p>
 					<p>${changeDescription}</p>
 					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
 						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
@@ -1555,7 +1559,7 @@ export async function sendTaskClientNotificationEmail(
 				text: `
 ${subject}
 
-Bună ${clientName || 'ziua'},
+Bună ${greeting},
 
 ${changeDescription.replace(/<[^>]+>/g, '')}
 
