@@ -8,6 +8,7 @@ import sanitizeHtml from 'sanitize-html';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import * as storage from '$lib/server/storage';
+import { createNotification } from '$lib/server/notifications';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
 function sanitizeCommentHtml(html: string): string {
@@ -245,6 +246,21 @@ export const createTaskComment = command(
 						console.error('Failed to send mention notification:', error);
 					}
 				}
+
+				// In-app notification for @mention
+				const authorName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
+				const tenantSlug = event.locals.tenant.slug;
+				await createNotification({
+					tenantId: event.locals.tenant.id,
+					userId: mentionedId,
+					clientId: task.clientId ?? undefined,
+					type: 'comment.mention',
+					title: `${authorName} te-a mentionat`,
+					message: `Te-a mentionat intr-un comentariu la "${task.title}"`,
+					link: `/${tenantSlug}/tasks/${data.taskId}`,
+					priority: 'high',
+					metadata: { taskId: data.taskId, commentId },
+				}).catch(() => {});
 			}
 		}
 

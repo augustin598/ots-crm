@@ -237,7 +237,8 @@ export function mapAnafCompanyToClient(
 		businessName: null,
 		googleAdsCustomerId: null,
 		restrictedAccess: null,
-		monthlyBudget: null
+		monthlyBudget: null,
+		budgetWarningThreshold: null
 	};
 }
 

@@ -813,6 +813,76 @@
       "when": 1775905220000,
       "tag": "0115_sitemap_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1775991620000,
+      "tag": "0116_notification_priority",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1775991630000,
+      "tag": "0117_notification_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1775991640000,
+      "tag": "0118_notification_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1775991650000,
+      "tag": "0119_notification_updated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1775991660000,
+      "tag": "0120_notification_last_email_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1775991670000,
+      "tag": "0121_idx_notification_user_read_updated",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "6",
+      "when": 1775991680000,
+      "tag": "0122_idx_notification_user_priority",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1775991690000,
+      "tag": "0123_idx_notification_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "6",
+      "when": 1775991700000,
+      "tag": "0124_client_budget_warning_threshold",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "6",
+      "when": 1775991710000,
+      "tag": "0125_backfill_notification_updated_at",
+      "breakpoints": true
     }
   ]
 }

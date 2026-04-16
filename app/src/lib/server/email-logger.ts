@@ -16,7 +16,8 @@ type EmailType =
 	| 'daily-reminder'
 	| 'contract-signing'
 	| 'invoice-paid'
-	| 'invoice-overdue-reminder';
+	| 'invoice-overdue-reminder'
+	| 'notification_alert';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

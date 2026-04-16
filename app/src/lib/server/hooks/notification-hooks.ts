@@ -12,7 +12,8 @@ import type {
 	ContractActivatedEvent,
 	ContractExpiredEvent,
 	SyncErrorEvent,
-	LeadsImportedEvent
+	LeadsImportedEvent,
+	ClientCreatedEvent
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
 
@@ -67,7 +68,8 @@ export function registerNotificationHooks(): void {
 						title: 'Factură plătită',
 						message: `Factura ${invoiceNumber} a fost marcată ca plătită`,
 						link: link ?? undefined,
-						metadata: { invoiceId: event.invoice.id }
+						metadata: { invoiceId: event.invoice.id },
+						priority: 'low'
 					})
 				)
 			);
@@ -89,7 +91,8 @@ export function registerNotificationHooks(): void {
 				title: 'Task asignat',
 				message: `Ți-a fost asignat task-ul: "${event.taskTitle}"`,
 				link: `/${event.tenantSlug}/tasks/${event.taskId}`,
-				metadata: { taskId: event.taskId, assignedBy: event.assignedByUserId }
+				metadata: { taskId: event.taskId, assignedBy: event.assignedByUserId },
+				priority: 'medium'
 			});
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create task.assigned notification', {
@@ -120,7 +123,8 @@ export function registerNotificationHooks(): void {
 						title: 'Contract semnat',
 						message: `Contractul "${event.contractTitle}" a fost semnat de ${event.signerEmail}`,
 						link: `/${event.tenantSlug}/contracts/${event.contractId}`,
-						metadata: { contractId: event.contractId, signerEmail: event.signerEmail }
+						metadata: { contractId: event.contractId, signerEmail: event.signerEmail },
+						priority: 'medium'
 					})
 				)
 			);
@@ -152,7 +156,8 @@ export function registerNotificationHooks(): void {
 						title: `Eroare sincronizare ${event.source}`,
 						message: event.message,
 						link: tenant ? `/${tenant.slug}/admin/logs` : undefined,
-						metadata: { source: event.source }
+						metadata: { source: event.source },
+						priority: 'urgent'
 					})
 				)
 			);
@@ -178,40 +183,21 @@ export function registerNotificationHooks(): void {
 
 			const link = tenant ? `/${tenant.slug}/leads/facebook-ads` : undefined;
 			const sourceLabel = event.source === 'scheduled' ? 'automat' : 'manual';
+			const clientCount = event.clientIds?.length ?? 0;
 
-			// Create per-client notifications if clientIds are available
-			const clientIds = event.clientIds ?? [];
-			if (clientIds.length > 0) {
-				for (const clientId of clientIds) {
-					await Promise.all(
-						adminUserIds.map((userId) =>
-							createNotification({
-								tenantId: event.tenantId,
-								userId,
-								clientId,
-								type: 'lead.imported',
-								title: `Leaduri noi importate`,
-								message: `Sync ${sourceLabel}: ${event.imported} noi${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
-								link
-							})
-						)
-					);
-				}
-			} else {
-				// Fallback: global notification without clientId
-				await Promise.all(
-					adminUserIds.map((userId) =>
-						createNotification({
-							tenantId: event.tenantId,
-							userId,
-							type: 'lead.imported',
-							title: `${event.imported} leaduri noi importate`,
-							message: `Sync ${sourceLabel}: ${event.imported} noi, ${event.skipped} existente${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
-							link
-						})
-					)
-				);
-			}
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						type: 'lead.imported',
+						title: `${event.imported} leaduri importate`,
+						message: `Sync ${sourceLabel}: ${event.imported} noi${clientCount > 0 ? ` (${clientCount} clienti)` : ''}${event.errors > 0 ? `, ${event.errors} erori` : ''}`,
+						link,
+						priority: 'low'
+					})
+				)
+			);
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create leads.imported notification', {
 				tenantId: event.tenantId
@@ -243,7 +229,8 @@ export function registerNotificationHooks(): void {
 						title: 'Factură nouă creată',
 						message: `Factura ${invoiceNumber}${event.isRecurring ? ' (recurentă)' : ''} a fost creată`,
 						link: link ?? undefined,
-						metadata: { invoiceId: event.invoice.id }
+						metadata: { invoiceId: event.invoice.id },
+						priority: 'medium'
 					})
 				)
 			);
@@ -280,7 +267,8 @@ export function registerNotificationHooks(): void {
 						title: 'Factură restantă',
 						message: `Factura ${invoiceNumber} a depășit termenul de plată`,
 						link: link ?? undefined,
-						metadata: { invoiceId: event.invoice.id }
+						metadata: { invoiceId: event.invoice.id },
+						priority: 'high'
 					})
 				)
 			);
@@ -306,7 +294,8 @@ export function registerNotificationHooks(): void {
 						title: 'Contract activat',
 						message: `Contractul "${event.contractTitle}" a fost activat automat`,
 						link: `/${event.tenantSlug}/contracts/${event.contractId}`,
-						metadata: { contractId: event.contractId }
+						metadata: { contractId: event.contractId },
+						priority: 'medium'
 					})
 				)
 			);
@@ -332,12 +321,39 @@ export function registerNotificationHooks(): void {
 						title: 'Contract expirat',
 						message: `Contractul "${event.contractTitle}" a expirat`,
 						link: `/${event.tenantSlug}/contracts/${event.contractId}`,
-						metadata: { contractId: event.contractId }
+						metadata: { contractId: event.contractId },
+						priority: 'high'
 					})
 				)
 			);
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create contract.expired notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Client Created ----
+	hooks.on('client.created', async (event: ClientCreatedEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						clientId: event.client.id,
+						type: 'client.created',
+						title: 'Client nou adaugat',
+						message: `Clientul "${event.client.name}" a fost adaugat`,
+						link: `/${event.tenantSlug}/clients/${event.client.id}`,
+						priority: 'medium',
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create client.created notification', {
 				tenantId: event.tenantId
 			});
 		}

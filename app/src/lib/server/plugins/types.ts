@@ -113,6 +113,13 @@ export type TaskCompletedEvent = {
 	tenantSlug: string;
 };
 
+export type ClientCreatedEvent = {
+	type: 'client.created';
+	tenantId: string;
+	tenantSlug: string;
+	client: { id: string; name: string };
+};
+
 export type HookEvent =
 	| InvoiceCreatedEvent
 	| InvoiceUpdatedEvent
@@ -125,7 +132,8 @@ export type HookEvent =
 	| ContractActivatedEvent
 	| ContractExpiredEvent
 	| SyncErrorEvent
-	| LeadsImportedEvent;
+	| LeadsImportedEvent
+	| ClientCreatedEvent;
 
 /**
  * Hook handler function type

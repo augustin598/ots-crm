@@ -130,6 +130,7 @@ export const client = sqliteTable('client', {
 	googleAdsCustomerId: text('google_ads_customer_id'), // Google Ads customer ID (e.g., "1234567890")
 	restrictedAccess: text('restricted_access'), // null=auto (based on invoices), 'forced'=admin ban, 'unrestricted'=admin unban
 	monthlyBudget: integer('monthly_budget'), // Monthly ad budget in cents (e.g., 500000 = 5000 RON), nullable
+	budgetWarningThreshold: integer('budget_warning_threshold').default(80),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1875,7 +1876,14 @@ export const notification = sqliteTable('notification', {
 	metadata: jsonb('metadata').$type<Record<string, unknown>>(),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_timestamp`)
+		.default(sql`current_timestamp`),
+	priority: text('priority').notNull().default('medium'),
+	fingerprint: text('fingerprint').unique(),
+	count: integer('count').notNull().default(1),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	lastEmailAt: timestamp('last_email_at', { withTimezone: true, mode: 'date' })
 });
 
 export type Notification = typeof notification.$inferSelect;

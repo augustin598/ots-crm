@@ -8,6 +8,10 @@ export const GET: RequestHandler = async ({ locals }) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
+	if (!locals.tenant) {
+		return new Response('Tenant not found', { status: 403 });
+	}
+
 	const userId = locals.user.id;
 
 	let pingInterval: ReturnType<typeof setInterval> | null = null;

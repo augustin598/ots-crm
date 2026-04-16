@@ -326,6 +326,135 @@ async function refreshTiktokAdsTokens(results: RefreshResults) {
 	}
 }
 
+// --- Expiry warnings ---
+
+async function checkTokenExpiryWarnings(): Promise<number> {
+	let warned = 0;
+	const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+	try {
+		// Check Meta Ads tokens expiring within 7 days
+		const expiringMeta = await db
+			.select({
+				id: table.metaAdsIntegration.id,
+				tenantId: table.metaAdsIntegration.tenantId,
+				tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt,
+			})
+			.from(table.metaAdsIntegration)
+			.where(
+				and(
+					eq(table.metaAdsIntegration.isActive, true),
+					sql`${table.metaAdsIntegration.tokenExpiresAt} IS NOT NULL`,
+					sql`${table.metaAdsIntegration.tokenExpiresAt} <= ${sevenDaysFromNow.toISOString()}`,
+					sql`${table.metaAdsIntegration.tokenExpiresAt} > datetime('now')`
+				)
+			);
+
+		for (const integration of expiringMeta) {
+			const dedupKey = `token-expiring-notif:${integration.tenantId}:meta_ads`;
+			const already = await redis.get(dedupKey);
+			if (already) continue;
+			await redis.send('SET', [dedupKey, String(Date.now()), 'EX', String(NOTIFICATION_DEDUP_TTL)]);
+
+			const admins = await db
+				.select({ userId: table.tenantUser.userId })
+				.from(table.tenantUser)
+				.where(
+					and(
+						eq(table.tenantUser.tenantId, integration.tenantId),
+						or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+					)
+				);
+
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, integration.tenantId))
+				.limit(1);
+
+			const expiryDate = integration.tokenExpiresAt
+				? new Date(integration.tokenExpiresAt).toLocaleDateString('ro-RO')
+				: 'curand';
+
+			for (const admin of admins) {
+				await createNotification({
+					tenantId: integration.tenantId,
+					userId: admin.userId,
+					type: 'integration.auth_expiring',
+					title: 'Token Meta Ads expira curand',
+					message: `Token-ul de acces Meta Ads expira pe ${expiryDate}. Reconectati integrarea.`,
+					link: tenant ? `/${tenant.slug}/settings/meta-ads` : undefined,
+					priority: 'high',
+				});
+			}
+			warned++;
+		}
+
+		// Check TikTok tokens similarly
+		const expiringTiktok = await db
+			.select({
+				id: table.tiktokAdsIntegration.id,
+				tenantId: table.tiktokAdsIntegration.tenantId,
+				tokenExpiresAt: table.tiktokAdsIntegration.tokenExpiresAt,
+			})
+			.from(table.tiktokAdsIntegration)
+			.where(
+				and(
+					eq(table.tiktokAdsIntegration.isActive, true),
+					sql`${table.tiktokAdsIntegration.tokenExpiresAt} IS NOT NULL`,
+					sql`${table.tiktokAdsIntegration.tokenExpiresAt} <= ${sevenDaysFromNow.toISOString()}`,
+					sql`${table.tiktokAdsIntegration.tokenExpiresAt} > datetime('now')`
+				)
+			);
+
+		for (const integration of expiringTiktok) {
+			const dedupKey = `token-expiring-notif:${integration.tenantId}:tiktok_ads`;
+			const already = await redis.get(dedupKey);
+			if (already) continue;
+			await redis.send('SET', [dedupKey, String(Date.now()), 'EX', String(NOTIFICATION_DEDUP_TTL)]);
+
+			const admins = await db
+				.select({ userId: table.tenantUser.userId })
+				.from(table.tenantUser)
+				.where(
+					and(
+						eq(table.tenantUser.tenantId, integration.tenantId),
+						or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+					)
+				);
+
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, integration.tenantId))
+				.limit(1);
+
+			const expiryDate = integration.tokenExpiresAt
+				? new Date(integration.tokenExpiresAt).toLocaleDateString('ro-RO')
+				: 'curand';
+
+			for (const admin of admins) {
+				await createNotification({
+					tenantId: integration.tenantId,
+					userId: admin.userId,
+					type: 'integration.auth_expiring',
+					title: 'Token TikTok Ads expira curand',
+					message: `Token-ul de acces TikTok Ads expira pe ${expiryDate}. Reconectati integrarea.`,
+					link: tenant ? `/${tenant.slug}/settings/tiktok-ads` : undefined,
+					priority: 'high',
+				});
+			}
+			warned++;
+		}
+	} catch (err) {
+		logWarning('token-refresh', `Token expiry warning check failed`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+	}
+
+	return warned;
+}
+
 // --- Main handler ---
 
 const PLATFORM_HANDLERS: Record<string, (results: RefreshResults) => Promise<void>> = {
@@ -361,6 +490,12 @@ export async function processTokenRefresh(params: Record<string, any> = {}) {
 		}
 	}
 
-	logInfo('scheduler', 'Proactive token refresh completed', { metadata: results });
-	return results;
+	// Check for tokens expiring within 7 days (only on daily runs to avoid spam)
+	let expiryWarnings = 0;
+	if (platforms.includes('meta_ads') || platforms.includes('tiktok_ads')) {
+		expiryWarnings = await checkTokenExpiryWarnings();
+	}
+
+	logInfo('scheduler', 'Proactive token refresh completed', { metadata: { ...results, expiryWarnings } });
+	return { ...results, expiryWarnings };
 }
