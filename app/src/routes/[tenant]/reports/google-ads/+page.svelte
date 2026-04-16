@@ -294,7 +294,7 @@
 			insightsQuery = getGoogleCampaignInsights({ customerId: selectedCustomerId, since, until });
 			campaignsQuery = getGoogleActiveCampaigns({ customerId: selectedCustomerId });
 			convActionsQuery = getGoogleConversionActions({ customerId: selectedCustomerId, since, until });
-			toast.success('Se reîncarcă datele...');
+			toast.success('Se reîncarcă datele…');
 		}
 	}
 
@@ -320,7 +320,7 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<DateRangePicker bind:since bind:until onchange={() => { currentPage = 1; }} />
 			{#if accounts.length > 0}
-				<select class="h-9 rounded-md border border-input bg-background px-3 text-sm" value={selectedCustomerId} onchange={handleAccountChange}>
+				<select class="h-9 rounded-md border border-input bg-background px-3 text-sm" value={selectedCustomerId} onchange={handleAccountChange} aria-label="Selectează cont Google Ads" autocomplete="off">
 					{#each accounts as account}
 						<option value={account.googleAdsCustomerId}>
 							{account.accountName || account.googleAdsCustomerId}
@@ -329,7 +329,7 @@
 					{/each}
 				</select>
 			{/if}
-			<Button variant="outline" size="sm" onclick={handleRefresh}><RefreshCwIcon class="h-4 w-4" /></Button>
+			<Button variant="outline" size="sm" onclick={handleRefresh} aria-label="Reîncarcă datele"><RefreshCwIcon class="h-4 w-4" aria-hidden="true" /></Button>
 		</div>
 	</div>
 
@@ -343,17 +343,19 @@
 		</Card>
 	{:else if insightsError}
 		<Card class="p-8">
-			<div class="rounded-md bg-red-50 p-4 space-y-2">
-				<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
+			<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-4 space-y-2">
+				<p class="text-sm font-medium text-red-800 dark:text-red-300">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
 			</div>
 		</Card>
 	{:else}
 		<!-- Channel type filter -->
 		{#if availableChannels.length > 2}
-			<div class="flex items-center gap-1.5 rounded-lg border p-0.5 w-fit">
+			<div class="flex items-center gap-1.5 rounded-lg border p-0.5 w-fit" role="tablist" aria-label="Filtrează după tip canal">
 				{#each availableChannels as ct (ct.key)}
 					<button
-						class="px-3 py-1 text-xs rounded-md transition-colors {channelFilter === ct.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+						role="tab"
+						aria-selected={channelFilter === ct.key}
+						class="px-3 py-1 text-xs rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 {channelFilter === ct.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
 						onclick={() => { channelFilter = ct.key; currentPage = 1; selectedCampaigns = new Set(); }}
 					>{ct.label}</button>
 				{/each}
@@ -382,6 +384,7 @@
 					<KpiCard label="CPM" value={formatCurrency(totals.avgCpm, selectedCurrency)} icon={EyeIcon} subtext="Cost per 1000 impresii" />
 					<KpiCard label="CPC" value={formatCurrency(totals.avgCpc, selectedCurrency)} icon={MousePointerClickIcon} subtext="{formatNumber(totals.totalClicks)} click-uri" />
 					<KpiCard label="CTR" value={formatPercent(totals.avgCtr)} icon={PercentIcon} subtext="Click-through rate" />
+					<KpiCard label={resultKpi.label} value={resultKpi.value} icon={TargetIcon} subtext={resultKpi.subtext} />
 				{/if}
 			</div>
 		{/if}
@@ -406,13 +409,13 @@
 				</div>
 				{#if conversionActions.length > 0}
 					{@const convTotal = conversionActions.reduce((s: number, a: any) => s + a.conversions, 0)}
-					<div class="flex h-3 w-full rounded-full overflow-hidden mb-5 bg-muted">
+					<div class="flex h-3 w-full rounded-full overflow-hidden mb-5 bg-muted" role="img" aria-label="Distribuția conversiilor pe tipuri">
 						{#each conversionActions as action, i}
 							{@const pct = convTotal > 0 ? (action.conversions / convTotal) * 100 : 0}
 							<div class="{COLORS[i % COLORS.length]} transition-all" style="width: {pct}%" title="{action.name}: {action.conversions}"></div>
 						{/each}
 					</div>
-					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+					<div class="conv-grid grid gap-3 sm:grid-cols-2" style="--conv-cols: {Math.min(conversionActions.length, 6)}">
 						{#each conversionActions as action, i}
 							{@const pct = convTotal > 0 ? (action.conversions / convTotal) * 100 : 0}
 							<div class="flex items-center gap-3 rounded-lg border p-4">
@@ -453,17 +456,17 @@
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3">
 						<h3 class="text-lg font-semibold">Performanță campanii</h3>
-						<div class="flex items-center gap-1 rounded-lg border p-0.5">
+						<div class="flex items-center gap-1 rounded-lg border p-0.5" role="tablist" aria-label="Filtrează după status">
 							{#each STATUS_FILTERS as sf}
-								<button class="px-3 py-1 text-xs rounded-md transition-colors {statusFilter === sf.key ? sf.activeClass : 'text-muted-foreground hover:text-foreground'}" onclick={() => { statusFilter = sf.key; currentPage = 1; selectedCampaigns = new Set(); }}>{sf.label}</button>
+								<button role="tab" aria-selected={statusFilter === sf.key} class="px-3 py-1 text-xs rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 {statusFilter === sf.key ? sf.activeClass : 'text-muted-foreground hover:text-foreground'}" onclick={() => { statusFilter = sf.key; currentPage = 1; selectedCampaigns = new Set(); }}>{sf.label}</button>
 							{/each}
 						</div>
 					</div>
 					<div class="flex items-center gap-3">
 						{#if totalEntries > 0}<p class="text-sm text-muted-foreground">{filteredCampaigns.length} campanii</p>{/if}
 						<div class="flex items-center gap-1.5">
-							<ColumnsIcon class="h-4 w-4 text-muted-foreground" />
-							<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" value={selectedPresetKey} onchange={(e) => { selectedPresetKey = e.currentTarget.value; }}>
+							<ColumnsIcon class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" value={selectedPresetKey} onchange={(e) => { selectedPresetKey = e.currentTarget.value; }} aria-label="Selectează coloane" autocomplete="off">
 								{#each GOOGLE_COLUMN_PRESETS as preset}<option value={preset.key}>{preset.label}</option>{/each}
 							</select>
 						</div>
@@ -473,16 +476,16 @@
 				{#if campaignTableData.length === 0}
 					<Card class="p-8 text-center"><p class="text-muted-foreground">Nu sunt date de campanii pentru perioada selectată.</p></Card>
 				{:else}
-					<div class="rounded-md border overflow-x-auto">
+					<div class="rounded-md border overflow-x-auto" style="font-variant-numeric: tabular-nums;">
 						<Table>
 							<TableHeader>
 								<TableRow>
 									<TableHead class="w-[40px]"><Checkbox checked={allSelected} indeterminate={someSelected && !allSelected} onCheckedChange={() => toggleSelectAll()} /></TableHead>
-									<TableHead><button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('campaignName')}>Campanie <ArrowUpDownIcon class="h-4 w-4" /></button></TableHead>
-									<TableHead><button class="flex items-center gap-2 hover:text-primary" onclick={() => handleSort('status')}>Status <ArrowUpDownIcon class="h-4 w-4" /></button></TableHead>
+									<TableHead><button class="flex items-center gap-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded-sm" onclick={() => handleSort('campaignName')}>Campanie <ArrowUpDownIcon class="h-4 w-4" /></button></TableHead>
+									<TableHead><button class="flex items-center gap-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded-sm" onclick={() => handleSort('status')}>Status <ArrowUpDownIcon class="h-4 w-4" /></button></TableHead>
 									{#each activePreset.columns as col}
 										<TableHead class={col.align === 'right' ? 'text-right' : ''}>
-											{#if col.sortKey}<button class="{col.align === 'right' ? 'ml-auto ' : ''}flex items-center gap-2 hover:text-primary" onclick={() => handleSort(col.sortKey!)}>{col.label} <ArrowUpDownIcon class="h-4 w-4" /></button>
+											{#if col.sortKey}<button class="{col.align === 'right' ? 'ml-auto ' : ''}flex items-center gap-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-sm" onclick={() => handleSort(col.sortKey!)}>{col.label} <ArrowUpDownIcon class="h-4 w-4" /></button>
 											{:else}<span class={col.align === 'right' ? 'ml-auto' : ''}>{col.label}</span>{/if}
 										</TableHead>
 									{/each}
@@ -490,30 +493,28 @@
 							</TableHeader>
 							<TableBody>
 								{#each paginatedCampaigns as campaign}
-									<TableRow class="cursor-pointer transition-colors hover:bg-muted/40 {expandedCampaigns.has(campaign.campaignId) ? 'bg-muted/30 font-semibold border-l-3 border-l-primary' : ''}" onclick={() => toggleExpand(campaign.campaignId)}>
+									<TableRow class="cursor-pointer transition-colors hover:bg-muted/40 {expandedCampaigns.has(campaign.campaignId) ? 'bg-muted/30 font-semibold border-l-3 border-l-primary' : ''}" onclick={() => toggleExpand(campaign.campaignId)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(campaign.campaignId); }}} tabindex={0} role="row" aria-expanded={expandedCampaigns.has(campaign.campaignId)}>
 										<TableCell class="w-[40px]" onclick={(e) => e.stopPropagation()}><Checkbox checked={selectedCampaigns.has(campaign.campaignId)} onCheckedChange={() => toggleSelect(campaign.campaignId)} /></TableCell>
 										<TableCell class="font-medium max-w-[250px]">
 											<div class="flex items-center gap-1.5">
-												{#if expandedCampaigns.has(campaign.campaignId)}<ChevronDownIcon class="h-4 w-4 shrink-0 text-primary" />{:else}<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" />{/if}
+												{#if expandedCampaigns.has(campaign.campaignId)}<ChevronDownIcon class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />{:else}<ChevronRightIcon class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
 												<div class="truncate" title={campaign.campaignName}>{campaign.campaignName}</div>
 											</div>
-											{#if true}
-												{@const chConfig = getChannelConfig(campaign.channelType)}
-												{@const ChIcon = chConfig.icon}
-												<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
-													<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {chConfig.color}">
-														<ChIcon class="h-3 w-3" />
-														{chConfig.label}
+											{@const chConfig = getChannelConfig(campaign.channelType)}
+											{@const ChIcon = chConfig.icon}
+											<div class="flex items-center gap-1.5 ml-5.5 mt-0.5">
+												<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium {chConfig.color}">
+													<ChIcon class="h-3 w-3" aria-hidden="true" />
+													{chConfig.label}
+												</span>
+												{#if campaign.startDate}
+													<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+														<CalendarIcon class="h-2.5 w-2.5" aria-hidden="true" />
+														Start: {campaign.startDate}
+														{#if campaign.endDate && campaign.status !== 'ACTIVE'}· End: {campaign.endDate}{/if}
 													</span>
-													{#if campaign.startDate}
-														<span class="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
-															<CalendarIcon class="h-2.5 w-2.5" />
-															Start: {campaign.startDate}
-															{#if campaign.endDate && campaign.status !== 'ACTIVE'}· End: {campaign.endDate}{/if}
-														</span>
-													{/if}
-												</div>
-											{/if}
+												{/if}
+											</div>
 										</TableCell>
 										<TableCell><Badge variant={getStatusVariant(campaign.status)}>{campaign.status}</Badge></TableCell>
 										{#each activePreset.columns as col}
@@ -561,7 +562,7 @@
 									</TableRow>
 									{#if expandedCampaigns.has(campaign.campaignId)}
 										{#if adGroupLoading.has(campaign.campaignId)}
-											<TableRow class="bg-muted/20"><TableCell></TableCell><TableCell colspan={activePreset.columns.length + 2}><div class="flex items-center gap-2 py-2 pl-6 text-sm text-muted-foreground"><LoaderIcon class="h-4 w-4 animate-spin" />Se încarcă ad group-urile...</div></TableCell></TableRow>
+											<TableRow class="bg-muted/20"><TableCell></TableCell><TableCell colspan={activePreset.columns.length + 2}><div class="flex items-center gap-2 py-2 pl-6 text-sm text-muted-foreground" aria-live="polite"><LoaderIcon class="h-4 w-4 animate-spin" aria-hidden="true" />Se încarcă ad group-urile…</div></TableCell></TableRow>
 										{:else if adGroupData.has(campaign.campaignId)}
 											{#each adGroupData.get(campaign.campaignId) || [] as adgroup}
 												<TableRow class="bg-muted/15 border-l-3 border-l-primary/30 text-muted-foreground">
@@ -595,7 +596,7 @@
 						<div class="flex items-center justify-between">
 							<div class="flex items-center gap-2 text-sm">
 								<span class="text-muted-foreground">Arată</span>
-								<select class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm" value={pageSize.toString()} onchange={(e) => { pageSize = parseInt(e.currentTarget.value); currentPage = 1; }}>
+								<select class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm" value={pageSize.toString()} onchange={(e) => { pageSize = parseInt(e.currentTarget.value); currentPage = 1; }} aria-label="Rezultate pe pagină" autocomplete="off">
 									<option value="10">10</option><option value="25">25</option><option value="50">50</option>
 								</select>
 								<span class="text-muted-foreground">{startIndex + 1}-{endIndex} din {totalEntries}</span>
@@ -611,3 +612,11 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	@media (min-width: 1024px) {
+		.conv-grid {
+			grid-template-columns: repeat(var(--conv-cols, 4), minmax(0, 1fr));
+		}
+	}
+</style>

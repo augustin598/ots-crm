@@ -266,6 +266,31 @@ Toate textele Keez settings sunt în engleză, restul platformei e în română.
 - **L4**: ID-uri duplicate — prefix `new-` pe formularul "Not Connected" (settings/keez)
 - **L5**: Toate textele UI traduse în română (settings/keez)
 
+### Commit 3: Simplify review + Svelte autofixer (2026-04-16)
+
+**Simplify (code reuse + quality + efficiency):**
+- `extractErrorMessage(e, fallback)` — helper extras în `$lib/utils.ts`, înlocuiește 6 pattern-uri inline `(e as any)?.body?.message || ...` din 3 fișiere
+- Indentare corectată în sync.ts wrapper (`_syncKeezInvoicesForTenantInner`)
+
+**Svelte autofixer:**
+- `settings/keez/+page.svelte` — adăugat key pe `{#each syncHistory}` → `(record.id ?? record.invoiceId)`
+- `settings/keez/+page.svelte` — eliminat import nefolosit `Upload`
+- `invoice-line-item-editor.svelte` — `newItemVatRate` simplificat la `$state('19')` (eliminat `$effect` inutil)
+- `invoice-line-item-editor.svelte` — `keezSelections` convertit de la `$state` + `$effect` la `$derived.by()` (idiomatic Svelte 5)
+- `invoice-line-item-editor.svelte` — eliminate mutații directe pe `keezSelections` (acum derivat)
+- `invoice-line-item-editor.svelte` — eliminat import nefolosit `Select, SelectContent, SelectItem, SelectTrigger`
+
+**Svelte 5 best practices (invoices/new):**
+- `$derived()` → `$derived.by()` pe `defaultInvoiceSeries` și `defaultInvoiceNumber` (linia 74/84) — `$derived` cu function body e incorect, trebuie `$derived.by`
+- Eliminat `()` din toate apelurile: `defaultInvoiceSeries()` → `defaultInvoiceSeries` (acum e valoare, nu funcție)
+- 7 `{#each}` fără key → adăugat keys: `c.id`, `curr`, `plugin.name`, `item.id`
+
+**Notat pentru refactoring viitor (outside scope):**
+- RBAC helper `requireMinRole()` — ar elimina ~18 verificări inline din 3+ remote-uri
+- `parseKeezDate` duplicat în sync.ts vs hooks.ts — extragere în utils comun
+- Index lipsă pe `client.cui` — necesită migrare DB
+- `getLatestBnrRate()` N+1 la batch sync — cache in-memory pe durata sync-ului
+
 ---
 
 ## Referințe audituri anterioare
