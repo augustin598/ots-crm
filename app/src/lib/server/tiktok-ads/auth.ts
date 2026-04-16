@@ -288,8 +288,11 @@ export async function getTiktokAdsConnections(tenantId: string) {
 		lastSyncAt: int.lastSyncAt,
 		syncEnabled: int.syncEnabled,
 		lastSyncResults: int.lastSyncResults ? JSON.parse(int.lastSyncResults) : null,
-		tokenExpiringSoon: int.tokenExpiresAt ? int.tokenExpiresAt.getTime() < Date.now() + 60 * 60 * 1000 : false,
-		tokenExpired: int.tokenExpiresAt ? int.tokenExpiresAt.getTime() < Date.now() : false,
+		// Access tokens (24h) are auto-refreshed — don't alarm on those.
+		// Only flag as "expiring/expired" when the refresh token (365d) is at risk,
+		// because that requires manual re-authorization.
+		tokenExpiringSoon: int.refreshTokenExpiresAt ? int.refreshTokenExpiresAt.getTime() < Date.now() + 7 * 24 * 60 * 60 * 1000 : false,
+		tokenExpired: int.refreshTokenExpiresAt ? int.refreshTokenExpiresAt.getTime() < Date.now() : false,
 		refreshTokenExpired: int.refreshTokenExpiresAt ? int.refreshTokenExpiresAt.getTime() < Date.now() : false,
 		ttSessionStatus: int.ttSessionStatus,
 		paymentAccountId: int.paymentAccountId
