@@ -4,7 +4,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { db } from './db';
 import * as table from './db/schema';
 import { eq, and } from 'drizzle-orm';
-import { decrypt } from './plugins/smartbill/crypto';
+import { decrypt, DecryptionError } from './plugins/smartbill/crypto';
 import {
 	logEmailAttempt,
 	logEmailProcessing,
@@ -210,29 +210,58 @@ export async function getTenantTransporter(
 				metadata: { hasHost: !!emailSettings.smtpHost, hasUser: !!emailSettings.smtpUser, hasPassword: !!emailSettings.smtpPassword }
 			});
 		} else {
-			try {
-				// Decrypt password
-				const decryptedPassword = decrypt(tenantId, emailSettings.smtpPassword);
-
-				// Create transporter with tenant-specific settings
-				const port = emailSettings.smtpPort || 587;
-				const secure = emailSettings.smtpSecure || port === 465;
-				const transporter = nodemailer.createTransport({
-					host: emailSettings.smtpHost,
+			// Helper to decrypt + create transporter
+			const tryCreateTransporter = (password: string) => {
+				const decryptedPassword = decrypt(tenantId, password);
+				const port = emailSettings!.smtpPort || 587;
+				const secure = emailSettings!.smtpSecure || port === 465;
+				return { transporter: nodemailer.createTransport({
+					host: emailSettings!.smtpHost!,
 					port,
 					secure,
-					auth: {
-						user: emailSettings.smtpUser,
-						pass: decryptedPassword
-					},
+					auth: { user: emailSettings!.smtpUser!, pass: decryptedPassword },
 					tls: { rejectUnauthorized: false }
-				});
+				}), port };
+			};
 
-				// Cache the transporter
+			try {
+				const { transporter, port } = tryCreateTransporter(emailSettings.smtpPassword);
 				tenantTransporters.set(tenantId, transporter);
 				logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
 				return transporter;
 			} catch (error) {
+				// Turso transient read can return truncated ciphertext — retry once with fresh DB read
+				if (error instanceof DecryptionError) {
+					logWarning('email', 'SMTP password decrypt failed — retrying with fresh DB read (possible Turso transient)', {
+						tenantId,
+						metadata: { action: 'decrypt_retry', attempt: 1 }
+					});
+
+					await new Promise(r => setTimeout(r, 2000));
+
+					try {
+						const [freshSettings] = await db
+							.select()
+							.from(table.emailSettings)
+							.where(eq(table.emailSettings.tenantId, tenantId))
+							.limit(1);
+
+						if (freshSettings?.smtpPassword) {
+							const { transporter, port } = tryCreateTransporter(freshSettings.smtpPassword);
+							tenantTransporters.set(tenantId, transporter);
+							logInfo('email', 'SMTP decrypt retry succeeded', { tenantId, metadata: { host: freshSettings.smtpHost, port } });
+							return transporter;
+						}
+					} catch (retryError) {
+						logError('email', 'SMTP decrypt retry also failed — re-save SMTP password in Settings to fix.', {
+							tenantId,
+							metadata: { action: 'decrypt_retry_exhausted', retriesExhausted: true },
+							stackTrace: serializeError(retryError).stack
+						});
+						return null;
+					}
+				}
+
 				logError('email', 'Failed to create tenant transporter (password decryption may have failed). Re-save SMTP password in settings to fix.', { tenantId, stackTrace: serializeError(error).stack });
 				return null;
 			}

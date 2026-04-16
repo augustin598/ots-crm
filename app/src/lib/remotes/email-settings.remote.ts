@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { encrypt, decrypt } from '$lib/server/plugins/smartbill/crypto';
+import { encryptVerified, decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { getTenantTransporter, clearTenantTransporterCache } from '$lib/server/email';
 
 function generateEmailSettingsId() {
@@ -105,7 +105,7 @@ export const updateEmailSettings = command(emailSettingsSchema, async (data) => 
 
 	// Only encrypt and update password if provided
 	if (data.smtpPassword !== undefined && data.smtpPassword !== '') {
-		const encryptedPassword = encrypt(event.locals.tenant.id, data.smtpPassword);
+		const encryptedPassword = encryptVerified(event.locals.tenant.id, data.smtpPassword);
 		updateData.smtpPassword = encryptedPassword;
 	}
 
@@ -131,7 +131,7 @@ export const updateEmailSettings = command(emailSettingsSchema, async (data) => 
 			throw new Error('SMTP Password is required');
 		}
 
-		const encryptedPassword = encrypt(event.locals.tenant.id, data.smtpPassword);
+		const encryptedPassword = encryptVerified(event.locals.tenant.id, data.smtpPassword);
 
 		await db.insert(table.emailSettings).values({
 			id: settingsId,
