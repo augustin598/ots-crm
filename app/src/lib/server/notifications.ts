@@ -91,6 +91,91 @@ function generateFingerprint(tenantId: string, userId: string, type: string, cli
 	return `fp_${Math.abs(hash).toString(36)}`;
 }
 
+// ---- Email Channel ----
+
+/** Types that should also send email notifications (max 1 per group per 24h). */
+const EMAIL_TYPES: Set<NotificationType> = new Set([
+	'integration.auth_expiring',
+	'integration.auth_expired',
+	'budget.exceeded',
+	'invoice.reminder',
+	'contract.expiring',
+	'comment.mention',
+	'approval.requested',
+]);
+
+/**
+ * Send an email notification for urgent/high priority items.
+ * Respects dedup via lastEmailAt (max 1 email per notification per 24h).
+ */
+async function maybeSendEmailNotification(
+	notificationId: string,
+	params: CreateNotificationParams
+): Promise<void> {
+	if (!EMAIL_TYPES.has(params.type)) return;
+
+	try {
+		// Check dedup: was email sent in last 24h for this notification?
+		const [existing] = await db
+			.select({ lastEmailAt: table.notification.lastEmailAt })
+			.from(table.notification)
+			.where(eq(table.notification.id, notificationId))
+			.limit(1);
+
+		if (existing?.lastEmailAt) {
+			const hoursSinceLastEmail = (Date.now() - new Date(existing.lastEmailAt).getTime()) / (1000 * 60 * 60);
+			if (hoursSinceLastEmail < 24) return;
+		}
+
+		// Get user email
+		const [user] = await db
+			.select({ email: table.user.email, firstName: table.user.firstName })
+			.from(table.user)
+			.where(eq(table.user.id, params.userId))
+			.limit(1);
+
+		if (!user?.email) return;
+
+		// Dynamic import to avoid circular dependency
+		const { sendWithPersistence } = await import('$lib/server/email');
+		const nodemailer = await import('nodemailer');
+
+		await sendWithPersistence(
+			{
+				tenantId: params.tenantId,
+				toEmail: user.email,
+				subject: `[OTS CRM] ${params.title}`,
+				emailType: 'notification_alert',
+				metadata: { notificationType: params.type, notificationId },
+				htmlBody: '',
+				payload: null,
+			},
+			async () => ({
+				to: user.email,
+				subject: `[OTS CRM] ${params.title}`,
+				html: `
+					<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+						<h2 style="color: #1a1a1a; font-size: 18px;">${params.title}</h2>
+						<p style="color: #4a4a4a; font-size: 14px; line-height: 1.5;">${params.message}</p>
+						${params.link ? `<p><a href="https://clients.onetopsolution.ro${params.link}" style="color: #2563eb; text-decoration: underline;">Deschide in aplicatie</a></p>` : ''}
+						<hr style="border: none; border-top: 1px solid #e5e5e5; margin: 20px 0;" />
+						<p style="color: #999; font-size: 11px;">Aceasta notificare a fost trimisa automat de OTS CRM.</p>
+					</div>
+				`,
+			})
+		);
+
+		// Update lastEmailAt
+		await db
+			.update(table.notification)
+			.set({ lastEmailAt: new Date() })
+			.where(eq(table.notification.id, notificationId));
+
+	} catch (err) {
+		logError('server', `Failed to send email notification: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
 // ---- SSE Controller Map ----
 // In-process map — works for single-instance Docker deployment.
 // NOTE: If the app is ever scaled to multiple instances, migrate to Redis Pub/Sub.
@@ -177,6 +262,8 @@ export async function createNotification(params: CreateNotificationParams): Prom
 				updatedAt: now,
 				lastEmailAt: null,
 			});
+			// Fire-and-forget email for urgent/high types
+			maybeSendEmailNotification(existing.id, params).catch(() => {});
 			return;
 		}
 
@@ -202,6 +289,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 
 		await db.insert(table.notification).values(newNotification);
 		broadcastNotification(params.userId, newNotification);
+		maybeSendEmailNotification(id, params).catch(() => {});
 		return;
 	}
 
@@ -227,6 +315,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
 
 	await db.insert(table.notification).values(newNotification);
 	broadcastNotification(params.userId, newNotification);
+	maybeSendEmailNotification(id, params).catch(() => {});
 }
 
 /** Push a notification to the user via SSE if they are connected. */

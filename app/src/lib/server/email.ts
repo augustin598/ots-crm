@@ -347,7 +347,8 @@ type EmailType =
 	| 'daily-reminder'
 	| 'contract-signing'
 	| 'invoice-paid'
-	| 'invoice-overdue-reminder';
+	| 'invoice-overdue-reminder'
+	| 'notification_alert';
 
 export type EmailSendContext = {
 	tenantId: string | null;
