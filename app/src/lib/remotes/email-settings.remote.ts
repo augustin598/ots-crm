@@ -2,7 +2,9 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { hasGmailSendScope } from '$lib/server/gmail/auth';
+import { createGmailTransporter } from '$lib/server/gmail/transporter';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { encryptVerified, decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { getTenantTransporter, clearTenantTransporterCache } from '$lib/server/email';
@@ -24,6 +26,20 @@ export const getEmailSettings = query(async () => {
 		.where(eq(table.emailSettings.tenantId, event.locals.tenant.id))
 		.limit(1);
 
+	const [gmailIntegration] = await db
+		.select({
+			email: table.gmailIntegration.email,
+			isActive: table.gmailIntegration.isActive,
+			grantedScopes: table.gmailIntegration.grantedScopes
+		})
+		.from(table.gmailIntegration)
+		.where(eq(table.gmailIntegration.tenantId, event.locals.tenant.id))
+		.limit(1);
+
+	const gmailConnected = gmailIntegration?.isActive ?? false;
+	const gmailEmail = gmailIntegration?.email ?? null;
+	const gmailHasSendScope = gmailConnected && hasGmailSendScope(gmailIntegration?.grantedScopes ?? null);
+
 	// Return default settings if none exist
 	if (!settings) {
 		return {
@@ -33,7 +49,12 @@ export const getEmailSettings = query(async () => {
 			smtpUser: null,
 			smtpFrom: null,
 			isEnabled: true,
-			hasPassword: false
+			hasPassword: false,
+			emailProvider: 'smtp' as const,
+			gmailConnected,
+			gmailEmail,
+			gmailHasSendScope,
+			gmailNeedsReauth: gmailConnected && !gmailHasSendScope
 		};
 	}
 
@@ -45,7 +66,12 @@ export const getEmailSettings = query(async () => {
 		smtpUser: settings.smtpUser,
 		smtpFrom: settings.smtpFrom,
 		isEnabled: settings.isEnabled ?? true,
-		hasPassword: !!settings.smtpPassword
+		hasPassword: !!settings.smtpPassword,
+		emailProvider: (settings.emailProvider || 'smtp') as 'gmail' | 'smtp',
+		gmailConnected,
+		gmailEmail,
+		gmailHasSendScope,
+		gmailNeedsReauth: gmailConnected && !gmailHasSendScope
 	};
 });
 
@@ -238,6 +264,113 @@ export const testEmailSettings = command(async () => {
 		console.error('Failed to send test email:', error);
 		throw new Error(
 			`Failed to send test email: ${error instanceof Error ? error.message : 'Unknown error'}`
+		);
+	}
+});
+
+const emailProviderSchema = v.object({
+	provider: v.picklist(['gmail', 'smtp'])
+});
+
+export const updateEmailProvider = command(emailProviderSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+		throw new Error('Insufficient permissions');
+	}
+
+	const tenantId = event.locals.tenant.id;
+
+	if (data.provider === 'gmail') {
+		const [gmail] = await db
+			.select()
+			.from(table.gmailIntegration)
+			.where(and(
+				eq(table.gmailIntegration.tenantId, tenantId),
+				eq(table.gmailIntegration.isActive, true)
+			))
+			.limit(1);
+
+		if (!gmail) throw new Error('Gmail nu este conectat. Conectează-ți contul Gmail mai întâi.');
+		if (!hasGmailSendScope(gmail.grantedScopes)) {
+			throw new Error('Permisiuni insuficiente. Reconectează Gmail pentru a adăuga permisiunea de trimitere.');
+		}
+	}
+
+	const [existing] = await db
+		.select()
+		.from(table.emailSettings)
+		.where(eq(table.emailSettings.tenantId, tenantId))
+		.limit(1);
+
+	if (existing) {
+		await db
+			.update(table.emailSettings)
+			.set({ emailProvider: data.provider, updatedAt: new Date() })
+			.where(eq(table.emailSettings.tenantId, tenantId));
+	} else {
+		await db.insert(table.emailSettings).values({
+			id: generateEmailSettingsId(),
+			tenantId,
+			emailProvider: data.provider,
+			isEnabled: true
+		});
+	}
+
+	clearTenantTransporterCache(tenantId);
+	return { success: true };
+});
+
+export const testGmailSending = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
+		throw new Error('Insufficient permissions');
+	}
+
+	const tenantId = event.locals.tenant.id;
+	const result = await createGmailTransporter(tenantId);
+	if (!result) {
+		throw new Error('Nu s-a putut crea transporterul Gmail. Verifică conexiunea și permisiunile.');
+	}
+
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantId))
+		.limit(1);
+
+	const tenantName = tenant?.name || 'CRM';
+	const userEmail = event.locals.user.email;
+
+	try {
+		await result.transporter.sendMail({
+			from: `"${tenantName}" <${result.gmailEmail}>`,
+			to: userEmail,
+			subject: `Test Email Gmail — ${tenantName}`,
+			html: `
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+            <h1 style="color: #4285f4; margin-top: 0;">Test Email Gmail — Succes!</h1>
+            <p>Salut ${event.locals.user.firstName || ''},</p>
+            <p>Acest email a fost trimis prin <strong>Gmail OAuth2</strong> din contul <strong>${result.gmailEmail}</strong>.</p>
+            <p>Dacă ai primit acest email, Gmail este configurat corect pentru trimitere.</p>
+            <p style="font-size: 12px; color: #999; margin-top: 30px;">
+              Trimis la ${new Date().toLocaleString('ro-RO')}
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+			text: `Test Email Gmail — Succes!\n\nAcest email a fost trimis prin Gmail OAuth2 din contul ${result.gmailEmail}.\n\nTrimis la ${new Date().toLocaleString('ro-RO')}`
+		});
+
+		return { success: true, message: `Email test trimis cu succes la ${userEmail} prin Gmail` };
+	} catch (error) {
+		throw new Error(
+			`Trimitere eșuată prin Gmail: ${error instanceof Error ? error.message : 'Eroare necunoscută'}`
 		);
 	}
 });
