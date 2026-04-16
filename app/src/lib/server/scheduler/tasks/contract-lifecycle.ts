@@ -1,8 +1,9 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lte, sql } from 'drizzle-orm';
+import { eq, and, lte, or, sql } from 'drizzle-orm';
 import { recordContractActivity } from '../../contract-activity';
 import { getHooksManager } from '../../plugins/hooks';
+import { createNotification } from '../../notifications';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 /**
@@ -156,11 +157,79 @@ export async function processContractLifecycle(params: Record<string, any> = {})
 			}
 		}
 
-		logInfo('scheduler', `Contract lifecycle completed: ${activated} activated, ${expired} expired`, { metadata: { activated, expired } });
+		// 3. Warn about contracts expiring within 14 days
+		let expiringWarned = 0;
+		try {
+			const expiringContracts = await db
+				.select({
+					id: table.contract.id,
+					tenantId: table.contract.tenantId,
+					clientId: table.contract.clientId,
+					contractTitle: table.contract.contractTitle,
+				})
+				.from(table.contract)
+				.where(
+					and(
+						eq(table.contract.status, 'active'),
+						// Expiry date is within 14 days but hasn't passed yet
+						sql`date(${table.contract.contractDate}, '+' || ${table.contract.contractDurationMonths} || ' months') > date('now')`,
+						sql`date(${table.contract.contractDate}, '+' || ${table.contract.contractDurationMonths} || ' months') <= date('now', '+14 days')`
+					)
+				);
+
+			if (expiringContracts.length > 0) {
+				// Group by tenant
+				const byTenant = new Map<string, typeof expiringContracts>();
+				for (const c of expiringContracts) {
+					const list = byTenant.get(c.tenantId) ?? [];
+					list.push(c);
+					byTenant.set(c.tenantId, list);
+				}
+
+				for (const [tenantId, contracts] of byTenant) {
+					const adminUsers = await db
+						.select({ userId: table.tenantUser.userId })
+						.from(table.tenantUser)
+						.where(
+							and(
+								eq(table.tenantUser.tenantId, tenantId),
+								or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+							)
+						);
+
+					const [tenant] = await db
+						.select({ slug: table.tenant.slug })
+						.from(table.tenant)
+						.where(eq(table.tenant.id, tenantId))
+						.limit(1);
+
+					for (const { userId } of adminUsers) {
+						await createNotification({
+							tenantId,
+							userId,
+							type: 'contract.expiring',
+							title: `${contracts.length} contracte expira curand`,
+							message: contracts.length === 1
+								? `Contractul "${contracts[0].contractTitle || 'Fara titlu'}" expira in mai putin de 14 zile`
+								: `${contracts.length} contracte expira in mai putin de 14 zile`,
+							link: tenant ? `/${tenant.slug}/contracts` : undefined,
+							priority: 'high',
+						});
+					}
+
+					expiringWarned += contracts.length;
+				}
+			}
+		} catch (err) {
+			logError('scheduler', `Contract lifecycle: expiring check failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		logInfo('scheduler', `Contract lifecycle completed: ${activated} activated, ${expired} expired, ${expiringWarned} expiring warnings`, { metadata: { activated, expired, expiringWarned } });
 		return {
 			success: true,
 			activated,
 			expired,
+			expiringWarned,
 			errors: errors.length > 0 ? errors : undefined
 		};
 	} catch (error) {

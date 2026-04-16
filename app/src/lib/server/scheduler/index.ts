@@ -20,6 +20,8 @@ import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
 import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retry';
 import { cleanupOldNotifications } from './tasks/notification-cleanup';
+import { processInvoiceReminderNotifications } from './tasks/invoice-reminder-notifications';
+import { processTaskOverdueNotifications } from './tasks/task-overdue-notifications';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -104,7 +106,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	db_write_health_check: processDbWriteHealthCheck,
 	pdf_report_send: processPdfReportSend,
 	email_retry: processEmailRetry,
-	notification_cleanup: cleanupOldNotifications
+	notification_cleanup: cleanupOldNotifications,
+	invoice_reminder_notifications: processInvoiceReminderNotifications,
+	task_overdue_notifications: processTaskOverdueNotifications
 };
 
 /**
@@ -217,7 +221,7 @@ export const startScheduler = async () => {
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
-		'notification-cleanup'
+		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications'
 	]);
 
 	try {
@@ -554,6 +558,38 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Invoice reminder notifications — daily at 08:00 (overdue invoices)
+	await schedulerQueue.add(
+		'invoice-reminder-notifications',
+		{
+			type: 'invoice_reminder_notifications',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 8 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'invoice-reminder-notifications'
+		}
+	);
+
+	// Task overdue notifications — daily at 09:00 (tasks >3 days past deadline)
+	await schedulerQueue.add(
+		'task-overdue-notifications',
+		{
+			type: 'task_overdue_notifications',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 9 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'task-overdue-notifications'
+		}
+	);
+
 	// Notification cleanup — daily at 2:30 AM (read >30d, all >90d)
 	await schedulerQueue.add(
 		'notification-cleanup',
@@ -623,7 +659,9 @@ export const JOB_LABELS: Record<string, string> = {
 	db_write_health_check: 'Health Check Scriere DB',
 	pdf_report_send: 'Trimitere Rapoarte PDF',
 	email_retry: 'Retry Emailuri Eșuate',
-	notification_cleanup: 'Cleanup Notificari Vechi'
+	notification_cleanup: 'Cleanup Notificari Vechi',
+	invoice_reminder_notifications: 'Notificari Facturi Restante',
+	task_overdue_notifications: 'Notificari Taskuri Intarziate'
 };
 
 /** Default params for jobs that need specific parameters */

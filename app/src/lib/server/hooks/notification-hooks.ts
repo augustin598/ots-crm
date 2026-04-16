@@ -12,7 +12,8 @@ import type {
 	ContractActivatedEvent,
 	ContractExpiredEvent,
 	SyncErrorEvent,
-	LeadsImportedEvent
+	LeadsImportedEvent,
+	ClientCreatedEvent
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
 
@@ -327,6 +328,32 @@ export function registerNotificationHooks(): void {
 			);
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create contract.expired notification', {
+				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Client Created ----
+	hooks.on('client.created', async (event: ClientCreatedEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						clientId: event.client.id,
+						type: 'client.created',
+						title: 'Client nou adaugat',
+						message: `Clientul "${event.client.name}" a fost adaugat`,
+						link: `/${event.tenantSlug}/clients/${event.client.id}`,
+						priority: 'medium',
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create client.created notification', {
 				tenantId: event.tenantId
 			});
 		}
