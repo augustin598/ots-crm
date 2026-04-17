@@ -2526,7 +2526,14 @@ export async function sendReportEmail(
 				.limit(1);
 			const fromEmail = resolveFromEmail(emailSettings);
 
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			// Reuse prepareLogoAttachment only for the CID-based attachment; build
+			// a bespoke header instead of its centered default, so the email
+			// reads as a proper letterhead (small logo top-left, title below)
+			// rather than a giant centered graphic dominating a short message.
+			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const headerLogoHtml = logoAttachment
+				? '<img src="cid:companylogo" alt="" style="display: block; max-height: 36px; max-width: 140px; margin-bottom: 18px;" />'
+				: '';
 
 			const safeClientName = escapeHtml(clientName);
 			const safePeriodLabel = escapeHtml(periodLabel);
@@ -2540,20 +2547,29 @@ export async function sendReportEmail(
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
 			<title>Raport Marketing — ${safeClientName}</title>
 		</head>
-		<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-			<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-				${logoHtml}
-				<h1 style="color: #2563eb; margin-top: 0;">Raport Marketing</h1>
-				<p>Bună ziua,</p>
-				<p>Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
-				<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-					<p style="margin: 4px 0;"><strong>Client:</strong> ${safeClientName}</p>
-					<p style="margin: 4px 0;"><strong>Perioadă:</strong> ${safePeriodLabel}</p>
-					<p style="margin: 4px 0;"><strong>Emitent:</strong> ${safeTenantName}</p>
+		<body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
+			<div style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+				<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
+					${headerLogoHtml}
+					<h1 style="color: #2563eb; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">Raport Marketing</h1>
+					<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${safeTenantName}</p>
+					<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
+					<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+					<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
+					<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+						<tr>
+							<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+								<div><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong></div>
+								<div><span style="color: #6b7280;">Perioadă</span> &nbsp;·&nbsp; <strong>${safePeriodLabel}</strong></div>
+								<div><span style="color: #6b7280;">Emitent</span> &nbsp;·&nbsp; <strong>${safeTenantName}</strong></div>
+							</td>
+						</tr>
+					</table>
+					<p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Raportul conține sumarul performanței campaniilor publicitare pe toate platformele active: cheltuieli, impresii, click-uri, CTR, CPC și rezultate per platformă.</p>
+					<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 28px 0;">📎 Raportul este atașat în format PDF la acest email.</p>
+					<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 18px 0;"></div>
+					<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">Pentru întrebări sau clarificări, nu ezitați să ne contactați.</p>
 				</div>
-				<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active (cheltuieli, impresii, click-uri, CTR, CPC și rezultate per platformă).</p>
-				<p style="font-size: 13px; color: #666;">Raportul este atașat în format PDF la acest email.</p>
-				<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru întrebări sau clarificări, nu ezitați să ne contactați.</p>
 			</div>
 		</body>
 		</html>
