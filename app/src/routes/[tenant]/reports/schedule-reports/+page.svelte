@@ -39,6 +39,15 @@
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+
+	const platformIcons: Record<string, any> = {
+		meta: IconFacebook,
+		google: IconGoogleAds,
+		tiktok: IconTiktok
+	};
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -395,7 +404,11 @@
 								<!-- Platform Pills -->
 								<div class="flex gap-1.5 mt-2.5">
 									{#each schedule.platforms as p}
-										<span class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p]}">
+										{@const Icon = platformIcons[p]}
+										<span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p]}">
+											{#if Icon}
+												<Icon class="h-3.5 w-3.5" />
+											{/if}
 											{platformLabels[p]}
 										</span>
 									{/each}
@@ -533,14 +546,18 @@
 				<Label>Platforme incluse</Label>
 				<div class="flex gap-2">
 					{#each ['meta', 'google', 'tiktok'] as p}
+						{@const Icon = platformIcons[p]}
 						<button
 							type="button"
-							class="flex-1 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all duration-150
+							class="flex-1 flex items-center justify-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all duration-150
 								{formPlatforms.includes(p)
 									? `${platformColors[p]} border-current shadow-sm`
 									: 'bg-background text-muted-foreground border-transparent hover:border-border'}"
 							onclick={() => togglePlatform(p)}
 						>
+							{#if Icon}
+								<Icon class="h-4 w-4" />
+							{/if}
 							{platformLabels[p]}
 						</button>
 					{/each}
