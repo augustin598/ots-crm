@@ -2561,7 +2561,6 @@ export async function sendReportEmail(
 							<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 								<div><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong></div>
 								<div><span style="color: #6b7280;">Perioadă</span> &nbsp;·&nbsp; <strong>${safePeriodLabel}</strong></div>
-								<div><span style="color: #6b7280;">Emitent</span> &nbsp;·&nbsp; <strong>${safeTenantName}</strong></div>
 							</td>
 						</tr>
 					</table>
@@ -2594,7 +2593,6 @@ export async function sendReportEmail(
 
 				Client: ${clientName}
 				Perioada: ${periodLabel}
-				Emitent: ${tenantName}
 
 				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active (cheltuieli, impresii, click-uri, CTR, CPC si rezultate per platforma).
 
