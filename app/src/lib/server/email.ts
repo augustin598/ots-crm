@@ -2513,19 +2513,11 @@ export async function sendReportEmail(
 				.limit(1);
 			const tenantName = tenant?.name || 'CRM';
 
-			const safeClientName = escapeHtml(clientName);
-			const safePeriodLabel = escapeHtml(periodLabel);
-			const safeTenantName = escapeHtml(tenantName);
-			const html = `
-		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-			<h2 style="color: #1E293B;">Raport Marketing</h2>
-			<p>Bună ziua,</p>
-			<p>Atașat găsiți raportul de marketing pentru <strong>${safeClientName}</strong> aferent perioadei <strong>${safePeriodLabel}</strong>.</p>
-			<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active.</p>
-			<br>
-			<p style="color: #64748B; font-size: 12px;">Acest email a fost generat automat de ${safeTenantName}.</p>
-		</div>
-	`;
+			const [invoiceSettings] = await db
+				.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, tenantId))
+				.limit(1);
 
 			const [emailSettings] = await db
 				.select()
@@ -2533,6 +2525,44 @@ export async function sendReportEmail(
 				.where(eq(table.emailSettings.tenantId, tenantId))
 				.limit(1);
 			const fromEmail = resolveFromEmail(emailSettings);
+
+			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+
+			const safeClientName = escapeHtml(clientName);
+			const safePeriodLabel = escapeHtml(periodLabel);
+			const safeTenantName = escapeHtml(tenantName);
+
+			const html = `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Raport Marketing — ${safeClientName}</title>
+		</head>
+		<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+			<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
+				${logoHtml}
+				<h1 style="color: #2563eb; margin-top: 0;">Raport Marketing</h1>
+				<p>Bună ziua,</p>
+				<p>Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
+				<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
+					<p style="margin: 4px 0;"><strong>Client:</strong> ${safeClientName}</p>
+					<p style="margin: 4px 0;"><strong>Perioadă:</strong> ${safePeriodLabel}</p>
+					<p style="margin: 4px 0;"><strong>Emitent:</strong> ${safeTenantName}</p>
+				</div>
+				<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active (cheltuieli, impresii, click-uri, CTR, CPC și rezultate per platformă).</p>
+				<p style="font-size: 13px; color: #666;">Raportul este atașat în format PDF la acest email.</p>
+				<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru întrebări sau clarificări, nu ezitați să ne contactați.</p>
+			</div>
+		</body>
+		</html>
+	`;
+
+			const attachments = [
+				{ filename, content: pdfBuffer, contentType: 'application/pdf' },
+				...(logoAttachment ? [logoAttachment] : [])
+			];
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
@@ -2544,19 +2574,19 @@ export async function sendReportEmail(
 
 				Buna ziua,
 
-				Atasat gasiti raportul de marketing pentru ${clientName} aferent perioadei ${periodLabel}.
+				Va transmitem raportul de marketing pentru ${clientName}.
 
-				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active.
+				Client: ${clientName}
+				Perioada: ${periodLabel}
+				Emitent: ${tenantName}
 
-				Acest email a fost generat automat de ${tenantName}.
+				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active (cheltuieli, impresii, click-uri, CTR, CPC si rezultate per platforma).
+
+				Raportul este atasat in format PDF la acest email.
+
+				Pentru intrebari sau clarificari, nu ezitati sa ne contactati.
 			`),
-				attachments: [
-					{
-						filename,
-						content: pdfBuffer,
-						contentType: 'application/pdf'
-					}
-				]
+				attachments
 			};
 		}
 	);
