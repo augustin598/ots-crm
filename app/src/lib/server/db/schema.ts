@@ -2927,7 +2927,9 @@ export const emailSuppression = sqliteTable('email_suppression', {
 	smtpMessage: text('smtp_message'), // full SMTP error message
 	sourceEmailLogId: text('source_email_log_id'), // which email triggered the suppression
 	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`)
-});
+}, (t) => ({
+	uniqueEmail: uniqueIndex('email_suppression_unique_idx').on(t.tenantId, t.email)
+}));
 
 // Debug Log - tracks application events, errors, warnings
 export const debugLog = sqliteTable('debug_log', {

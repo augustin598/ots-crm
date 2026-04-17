@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS `email_suppression` (
 	`smtp_code` text,
 	`smtp_message` text,
 	`source_email_log_id` text,
-	`created_at` integer DEFAULT (current_timestamp) NOT NULL
+	`created_at` timestamp DEFAULT (current_timestamp) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS `email_suppression_tenant_email_idx` ON `email_suppression` (`tenant_id`, `email`);
+CREATE UNIQUE INDEX IF NOT EXISTS `email_suppression_unique_idx` ON `email_suppression` (`tenant_id`, `email`);

@@ -585,6 +585,26 @@ export async function suppressEmail(params: {
 }
 
 /**
+ * HMAC-based unsubscribe token to prevent unauthorized email suppression.
+ * Token = HMAC-SHA256(secret, email + tenantId)
+ */
+import { createHmac } from 'node:crypto';
+
+function getUnsubscribeSecret(): string {
+	return env.ENCRYPTION_KEY || env.SMTP_PASSWORD || 'ots-unsubscribe-fallback-key';
+}
+
+export function generateUnsubscribeToken(email: string, tenantId: string | null): string {
+	const data = `${email.toLowerCase()}:${tenantId || ''}`;
+	return createHmac('sha256', getUnsubscribeSecret()).update(data).digest('hex').substring(0, 32);
+}
+
+export function verifyUnsubscribeToken(email: string, tenantId: string | null, token: string): boolean {
+	const expected = generateUnsubscribeToken(email, tenantId);
+	return token === expected;
+}
+
+/**
  * Detect hard bounce from SMTP error and auto-suppress the recipient.
  */
 function isHardBounce(error: Error): { code: string; message: string } | null {
@@ -720,7 +740,13 @@ export async function sendWithPersistence(
 	];
 	if (!TRANSACTIONAL_TYPES.includes(ctx.emailType)) {
 		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
-		const unsubUrl = `${baseUrl}/api/unsubscribe?email=${encodeURIComponent(ctx.toEmail)}&type=${ctx.emailType}`;
+		const token = generateUnsubscribeToken(ctx.toEmail, ctx.tenantId);
+		const params = new URLSearchParams({
+			email: ctx.toEmail,
+			token,
+			...(ctx.tenantId ? { tenantId: ctx.tenantId } : {})
+		});
+		const unsubUrl = `${baseUrl}/api/unsubscribe?${params.toString()}`;
 		mailOptions.headers = {
 			...mailOptions.headers,
 			'List-Unsubscribe': `<${unsubUrl}>`,
