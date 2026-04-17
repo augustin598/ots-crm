@@ -2,7 +2,8 @@
 	import {
 		getReportSchedules,
 		upsertReportSchedule,
-		deleteReportSchedule
+		deleteReportSchedule,
+		sendTestReportEmail
 	} from '$lib/remotes/report-schedule.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -78,6 +79,10 @@
 	// Delete confirmation
 	let deleteDialogOpen = $state(false);
 	let deleteTarget = $state<{ id: string; name: string | null } | null>(null);
+
+	// Per-schedule pending state for the "send test" button so only the clicked
+	// row shows a spinner while the email is generated and sent.
+	let testSendingId = $state<string | null>(null);
 
 	const dayNames: Record<number, string> = {
 		1: 'Luni',
@@ -277,6 +282,19 @@
 		window.open(`/${tenantSlug}/reports/schedule-reports/preview-pdf?${params}`, '_blank');
 	}
 
+	async function sendTest(schedule: (typeof schedules)[0]) {
+		if (testSendingId) return;
+		testSendingId = schedule.id;
+		try {
+			const result = await sendTestReportEmail({ scheduleId: schedule.id });
+			toast.success(`Email de test trimis la ${result.sentTo}`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la trimiterea email-ului de test');
+		} finally {
+			testSendingId = null;
+		}
+	}
+
 	function downloadPdf(schedule: (typeof schedules)[0]) {
 		const { since, until } = getPreviewRange(schedule.frequency);
 		const params = new URLSearchParams({
@@ -450,6 +468,22 @@
 										</Button>
 									</Tooltip.Trigger>
 									<Tooltip.Content>Preview PDF</Tooltip.Content>
+								</Tooltip.Root>
+
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											disabled={testSendingId === schedule.id}
+											onclick={() => sendTest(schedule)}
+										>
+											<SendIcon class="h-3.5 w-3.5 {testSendingId === schedule.id ? 'animate-pulse' : ''}" />
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>
+										{testSendingId === schedule.id ? 'Se trimite...' : 'Trimite email de test'}
+									</Tooltip.Content>
 								</Tooltip.Root>
 
 								<Tooltip.Root>

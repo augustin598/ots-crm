@@ -3,8 +3,11 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { generateReportPdf } from '$lib/server/report-pdf-generator';
+import { getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
+import { sendReportEmail } from '$lib/server/email';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -236,6 +239,129 @@ export const deleteReportSchedule = command(
 		await db.delete(table.reportSchedule).where(eq(table.reportSchedule.id, params.id));
 
 		return { success: true };
+	}
+);
+
+/** Send a test copy of a scheduled report to the logged-in user's email so
+ * operators can preview the actual email format before it goes to clients. */
+export const sendTestReportEmail = command(
+	v.object({ scheduleId: v.pipe(v.string(), v.minLength(1)) }),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		const toEmail = event.locals.user.email;
+		if (!toEmail) {
+			throw error(400, 'Utilizatorul curent nu are adresă de email setată');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		const tenantName = event.locals.tenant.name || 'CRM';
+
+		const [schedule] = await db
+			.select({
+				id: table.reportSchedule.id,
+				clientId: table.reportSchedule.clientId,
+				frequency: table.reportSchedule.frequency,
+				platforms: table.reportSchedule.platforms,
+				clientName: table.client.name
+			})
+			.from(table.reportSchedule)
+			.leftJoin(
+				table.client,
+				and(
+					eq(table.reportSchedule.clientId, table.client.id),
+					eq(table.reportSchedule.tenantId, table.client.tenantId)
+				)
+			)
+			.where(and(
+				eq(table.reportSchedule.id, params.scheduleId),
+				eq(table.reportSchedule.tenantId, tenantId)
+			))
+			.limit(1);
+		if (!schedule) throw error(404, 'Programul nu a fost găsit');
+
+		// Same date range as the real scheduler would use for this frequency:
+		// weekly → last full Mon–Sun, monthly → previous month.
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, '0');
+		const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+		let since: string, until: string, label: string;
+		if (schedule.frequency === 'monthly') {
+			const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+			since = fmt(lastMonth);
+			until = fmt(lastMonthEnd);
+			label = lastMonth.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+		} else {
+			// weekly (also used as fallback for 'disabled')
+			const lastSunday = new Date(now);
+			lastSunday.setDate(now.getDate() - (now.getDay() === 0 ? 7 : now.getDay()));
+			const lastMonday = new Date(lastSunday);
+			lastMonday.setDate(lastSunday.getDate() - 6);
+			since = fmt(lastMonday);
+			until = fmt(lastSunday);
+			label = `${lastMonday.getDate()} - ${lastSunday.getDate()} ${lastSunday.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}`;
+		}
+
+		const allowedPlatforms = ['meta', 'google', 'tiktok'] as const;
+		const platformNames = safeParse<string[]>(schedule.platforms, ['meta', 'google', 'tiktok'])
+			.filter((p): p is string => (allowedPlatforms as readonly string[]).includes(p));
+		const platformDisplayNames: Record<string, string> = {
+			meta: 'Meta Ads', google: 'Google Ads', tiktok: 'TikTok Ads'
+		};
+		const platforms = [];
+		for (const platformName of platformNames) {
+			const data = await getPlatformSpendData(tenantId, schedule.clientId, platformName, since, until);
+			platforms.push(data ?? {
+				name: platformDisplayNames[platformName] || platformName,
+				spend: 0, impressions: 0, clicks: 0, conversions: 0,
+				currency: 'RON', accounts: []
+			});
+		}
+
+		const [invoiceSettings] = await db
+			.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, tenantId))
+			.limit(1);
+
+		const exchangeRates: Record<string, number> = {};
+		const usdRate = await db.select({ rate: table.bnrExchangeRate.rate })
+			.from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'USD'))
+			.orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+		const eurRate = await db.select({ rate: table.bnrExchangeRate.rate })
+			.from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'EUR'))
+			.orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+		if (usdRate[0]) exchangeRates['USD'] = usdRate[0].rate;
+		if (eurRate[0]) exchangeRates['EUR'] = eurRate[0].rate;
+
+		const pdfBuffer = await generateReportPdf({
+			tenantName,
+			clientName: schedule.clientName || 'Client',
+			period: { since, until, label },
+			platforms,
+			generatedAt: now,
+			tenantLogo: invoiceSettings?.invoiceLogo || null,
+			accentColor: event.locals.tenant.themeColor || null,
+			exchangeRates
+		});
+
+		// Prefix the test subject so it's obvious in the inbox. sendReportEmail
+		// builds its own subject, so we tag the client name instead.
+		await sendReportEmail(
+			tenantId,
+			schedule.clientId,
+			toEmail,
+			`[TEST] ${schedule.clientName || 'Client'}`,
+			label,
+			pdfBuffer
+		);
+
+		return { success: true, sentTo: toEmail };
 	}
 );
 
