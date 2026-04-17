@@ -1,0 +1,95 @@
+import type { RequestHandler } from './$types';
+import { error } from '@sveltejs/kit';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { generateReportPdf } from '$lib/server/report-pdf-generator';
+import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
+
+export const GET: RequestHandler = async (event) => {
+	if (!event.locals.user || !event.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+
+	const tenantId = event.locals.tenant.id;
+	const url = event.url;
+
+	const clientId = url.searchParams.get('clientId');
+	if (!clientId) {
+		throw error(400, 'clientId is required');
+	}
+
+	// Verify client belongs to tenant
+	const [client] = await db
+		.select({ id: table.client.id, name: table.client.name })
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+		.limit(1);
+
+	if (!client) {
+		throw error(404, 'Clientul nu a fost gasit');
+	}
+
+	// Parse platforms
+	const platformsParam = url.searchParams.get('platforms') || 'meta,google,tiktok';
+	const platformNames = platformsParam.split(',').filter((p) => ['meta', 'google', 'tiktok'].includes(p));
+	if (platformNames.length === 0) {
+		throw error(400, 'Cel putin o platforma valida este necesara');
+	}
+
+	// Calculate date range
+	const frequency = url.searchParams.get('frequency') || 'weekly';
+	const sinceParam = url.searchParams.get('since');
+	const untilParam = url.searchParams.get('until');
+
+	let since: string;
+	let until: string;
+	let label: string;
+
+	if (sinceParam && untilParam) {
+		since = sinceParam;
+		until = untilParam;
+		label = `${since} - ${until}`;
+	} else {
+		const range = getDateRange(frequency, new Date());
+		since = range.since;
+		until = range.until;
+		label = range.label;
+	}
+
+	// Get platform data
+	const platforms = [];
+	for (const platformName of platformNames) {
+		const data = await getPlatformSpendData(tenantId, clientId, platformName, since, until);
+		if (data) platforms.push(data);
+	}
+
+	// Generate PDF even with no data (preview should show structure)
+	const tenantName = event.locals.tenant.name || 'CRM';
+
+	const pdfBuffer = await generateReportPdf({
+		tenantName,
+		clientName: client.name || 'Client',
+		period: { since, until, label },
+		platforms,
+		generatedAt: new Date()
+	});
+
+	const safeClientName = (client.name || 'client').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+	const safeLabel = label.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+	const filename = `raport-${safeClientName}-${safeLabel}.pdf`;
+
+	const download = url.searchParams.get('download') === 'true';
+	const disposition = download ? 'attachment' : 'inline';
+
+	const uint8 = new Uint8Array(pdfBuffer);
+
+	return new Response(uint8, {
+		status: 200,
+		headers: {
+			'Content-Type': 'application/pdf',
+			'Content-Disposition': `${disposition}; filename="${filename}"`,
+			'Content-Length': pdfBuffer.length.toString()
+		}
+	});
+};

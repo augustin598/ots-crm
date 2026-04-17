@@ -139,7 +139,7 @@ export async function processPdfReportSend() {
 	}
 }
 
-function getDateRange(frequency: string, now: Date): { since: string; until: string; label: string } {
+export function getDateRange(frequency: string, now: Date): { since: string; until: string; label: string } {
 	const pad = (n: number) => String(n).padStart(2, '0');
 	const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
@@ -160,7 +160,7 @@ function getDateRange(frequency: string, now: Date): { since: string; until: str
 	return { since: fmt(lastMonth), until: fmt(lastMonthEnd), label };
 }
 
-async function getPlatformSpendData(
+export async function getPlatformSpendData(
 	tenantId: string, clientId: string, platform: string, since: string, until: string
 ): Promise<ReportPlatformData | null> {
 	if (platform === 'meta') {

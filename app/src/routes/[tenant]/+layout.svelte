@@ -22,6 +22,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import FileDownIcon from '@lucide/svelte/icons/file-down';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -352,6 +353,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 										<a href="/{tenantSlug}/reports/tiktok-ads" {...props}>
 											<IconTiktok class="h-4 w-4" />
 											<span>TikTok Ads</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath.startsWith(`/${tenantSlug}/reports/schedule-reports`)}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/reports/schedule-reports" {...props}>
+											<CalendarClockIcon class="h-4 w-4" />
+											<span>Programare Rapoarte</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>
