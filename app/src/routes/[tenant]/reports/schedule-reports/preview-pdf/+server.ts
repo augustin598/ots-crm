@@ -57,11 +57,28 @@ export const GET: RequestHandler = async (event) => {
 		label = range.label;
 	}
 
-	// Get platform data
+	// Get platform data — for preview, include platforms with zero data too
+	const platformDisplayNames: Record<string, string> = {
+		meta: 'Meta Ads',
+		google: 'Google Ads',
+		tiktok: 'TikTok Ads'
+	};
 	const platforms = [];
 	for (const platformName of platformNames) {
 		const data = await getPlatformSpendData(tenantId, clientId, platformName, since, until);
-		if (data) platforms.push(data);
+		if (data) {
+			platforms.push(data);
+		} else {
+			// Include with zero values so it appears in the PDF
+			platforms.push({
+				name: platformDisplayNames[platformName] || platformName,
+				spend: 0,
+				impressions: 0,
+				clicks: 0,
+				conversions: 0,
+				currency: 'RON'
+			});
+		}
 	}
 
 	// Get tenant logo
