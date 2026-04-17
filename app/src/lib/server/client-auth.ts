@@ -70,38 +70,48 @@ export async function verifyMagicLinkToken(
 	// Hash the provided token
 	const hashedToken = hashToken(token);
 
-	// Find token in database
-	const [tokenRecord] = await db
-		.select()
-		.from(table.magicLinkToken)
-		.where(
-			and(
-				eq(table.magicLinkToken.token, hashedToken),
-				eq(table.magicLinkToken.tenantId, tenant.id),
-				eq(table.magicLinkToken.used, false)
+	// Atomic claim: SELECT + UPDATE in transaction with rowsAffected check.
+	// Prevents two concurrent requests from both consuming the same token (TOCTOU fix).
+	const tokenRecord = await db.transaction(async (tx) => {
+		const [record] = await tx
+			.select()
+			.from(table.magicLinkToken)
+			.where(
+				and(
+					eq(table.magicLinkToken.token, hashedToken),
+					eq(table.magicLinkToken.tenantId, tenant.id),
+					eq(table.magicLinkToken.used, false)
+				)
 			)
-		)
-		.limit(1);
+			.limit(1);
 
-	if (!tokenRecord) {
-		throw new Error('Invalid or expired token');
-	}
+		if (!record) return null;
 
-	// Check if token is expired
-	if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-		// Mark as used even though expired
-		await db
+		// Check expiry BEFORE consuming the token (don't burn expired tokens)
+		if (Date.now() >= record.expiresAt.getTime()) {
+			return null;
+		}
+
+		// Atomically mark as used; check rowsAffected to detect concurrent claim
+		const result = await tx
 			.update(table.magicLinkToken)
 			.set({ used: true, usedAt: new Date() })
-			.where(eq(table.magicLinkToken.id, tokenRecord.id));
-		throw new Error('Token has expired. Please request a new magic link.');
-	}
+			.where(
+				and(
+					eq(table.magicLinkToken.id, record.id),
+					eq(table.magicLinkToken.used, false)
+				)
+			);
 
-	// Mark token as used
-	await db
-		.update(table.magicLinkToken)
-		.set({ used: true, usedAt: new Date() })
-		.where(eq(table.magicLinkToken.id, tokenRecord.id));
+		// If another request already claimed it, rowsAffected will be 0
+		if ((result as { rowsAffected?: number })?.rowsAffected === 0) return null;
+
+		return record;
+	});
+
+	if (!tokenRecord) {
+		throw new Error('Invalid or expired token. Please request a new magic link.');
+	}
 
 	// Get client
 	if (!tokenRecord.clientId) {

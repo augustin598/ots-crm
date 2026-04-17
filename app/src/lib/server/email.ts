@@ -363,7 +363,7 @@ function isRetryableSmtpError(error: Error): boolean {
 async function sendMailWithRetry(
 	transporter: nodemailer.Transporter,
 	mailOptions: nodemailer.SendMailOptions,
-	tenantId: string,
+	tenantId: string | null,
 	logId: string,
 	maxAttempts = 3
 ): Promise<{ messageId?: string; response?: string }> {
@@ -472,6 +472,8 @@ export type EmailSendContext = {
 	metadata: Record<string, unknown>;
 	htmlBody: string;
 	payload: { sendFn: string; args: unknown[] } | null;
+	/** When set, skip creating a new email_log row and reuse this existing log ID (for retries). */
+	_retryOfLogId?: string;
 };
 
 /**
@@ -498,7 +500,9 @@ export async function sendWithPersistence(
 	buildMail: () => Promise<nodemailer.SendMailOptions>
 ): Promise<void> {
 	// STEP 1: Log BEFORE anything else can fail. Guarantees a DB row exists.
-	const logId = await logEmailAttempt({
+	// If this is a retry (via scheduler), reuse the existing log ID instead of creating a duplicate row.
+	const retryLogId = ctx._retryOfLogId ?? getRetryLogId();
+	const logId = retryLogId ?? await logEmailAttempt({
 		tenantId: ctx.tenantId,
 		toEmail: ctx.toEmail,
 		subject: ctx.subject,
@@ -562,7 +566,7 @@ export async function sendWithPersistence(
 	// STEP 4: Mark processing, send with retry, record outcome.
 	try {
 		await logEmailProcessing(logId);
-		const info = await sendMailWithRetry(transporter, mailOptions, ctx.tenantId ?? '', logId);
+		const info = await sendMailWithRetry(transporter, mailOptions, ctx.tenantId, logId);
 		await logEmailSuccess(logId, info);
 		logInfo('email', `Sent ${ctx.emailType}`, {
 			tenantId: ctx.tenantId ?? undefined,
@@ -993,7 +997,8 @@ export async function sendMagicLinkEmail(
 export async function sendAdminMagicLinkEmail(
 	email: string,
 	token: string,
-	userName: string
+	userName: string,
+	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1002,7 +1007,7 @@ export async function sendAdminMagicLinkEmail(
 
 	await sendWithPersistence(
 		{
-			tenantId: null,
+			tenantId: userTenantId ?? null,
 			toEmail: email,
 			subject: `Login to ${appName}`,
 			emailType: 'admin-magic-link',
@@ -1073,7 +1078,8 @@ export async function sendAdminMagicLinkEmail(
 export async function sendPasswordResetEmail(
 	email: string,
 	token: string,
-	userName: string
+	userName: string,
+	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1082,7 +1088,7 @@ export async function sendPasswordResetEmail(
 
 	await sendWithPersistence(
 		{
-			tenantId: null,
+			tenantId: userTenantId ?? null,
 			toEmail: email,
 			subject: `Reset your password - ${appName}`,
 			emailType: 'password-reset',
@@ -2369,6 +2375,23 @@ export async function sendReportEmail(
 // Add the corresponding entry whenever you add a new send function that uses
 // `sendWithPersistence` with a non-null payload.
 // ---------------------------------------------------------------------------
+/**
+ * AsyncLocalStorage-based retry context. Prevents the global state concurrency issue
+ * where an HTTP-triggered email send could inherit the retry log ID from the scheduler.
+ * Each async call chain gets its own isolated context.
+ */
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const retryContext = new AsyncLocalStorage<{ logId: string }>();
+
+export function runWithRetryLogId<T>(logId: string, fn: () => Promise<T>): Promise<T> {
+	return retryContext.run({ logId }, fn);
+}
+
+function getRetryLogId(): string | null {
+	return retryContext.getStore()?.logId ?? null;
+}
+
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
 	sendInvitationEmail,
 	sendInvoiceEmail,

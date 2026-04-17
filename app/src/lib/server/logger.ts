@@ -139,7 +139,7 @@ export async function logDebug(params: {
 	// Push to buffer instead of direct DB insert
 	LOG_BUFFER.push({
 		id: generateId(),
-		tenantId: params.tenantId ?? null,
+		tenantId: params.tenantId || null, // empty string → null (FK constraint)
 		level: params.level,
 		source: params.source,
 		message: params.message,
