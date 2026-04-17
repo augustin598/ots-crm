@@ -35,7 +35,13 @@ export const getReportSchedules = query(async () => {
 			updatedAt: table.reportSchedule.updatedAt
 		})
 		.from(table.reportSchedule)
-		.leftJoin(table.client, eq(table.reportSchedule.clientId, table.client.id))
+		.leftJoin(
+			table.client,
+			and(
+				eq(table.reportSchedule.clientId, table.client.id),
+				eq(table.reportSchedule.tenantId, table.client.tenantId)
+			)
+		)
 		.where(eq(table.reportSchedule.tenantId, event.locals.tenant.id))
 		.orderBy(table.client.name);
 

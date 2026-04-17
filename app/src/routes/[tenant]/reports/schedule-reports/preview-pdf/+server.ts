@@ -72,11 +72,28 @@ export const GET: RequestHandler = async (event) => {
 	let label: string;
 
 	if (sinceParam && untilParam) {
+		// Reject unparseable or semantically invalid ranges. Without these guards
+		// a single request can pin the DB for minutes with a 10-year WHERE BETWEEN.
+		const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+		if (!isoDate.test(sinceParam) || !isoDate.test(untilParam)) {
+			throw error(400, 'since/until must be YYYY-MM-DD');
+		}
+		const sd = new Date(sinceParam + 'T00:00:00');
+		const ud = new Date(untilParam + 'T00:00:00');
+		if (Number.isNaN(sd.getTime()) || Number.isNaN(ud.getTime())) {
+			throw error(400, 'since/until are not valid dates');
+		}
+		if (sd > ud) {
+			throw error(400, 'since must be on or before until');
+		}
+		const MAX_DAYS = 400;
+		const diffDays = Math.ceil((ud.getTime() - sd.getTime()) / 86_400_000);
+		if (diffDays > MAX_DAYS) {
+			throw error(400, `Intervalul maxim permis este de ${MAX_DAYS} zile`);
+		}
 		since = sinceParam;
 		until = untilParam;
 		// Format label nicely: "1 - 17 aprilie 2026"
-		const sd = new Date(sinceParam + 'T00:00:00');
-		const ud = new Date(untilParam + 'T00:00:00');
 		if (sd.getMonth() === ud.getMonth()) {
 			label = `${sd.getDate()} - ${ud.getDate()} ${ud.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}`;
 		} else {

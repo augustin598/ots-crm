@@ -244,16 +244,30 @@
 		return s.clientEmail || 'Nicio adresă';
 	}
 
-	function getCurrentMonthRange(): { since: string; until: string } {
+	const pad = (n: number) => String(n).padStart(2, '0');
+	const fmtDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+	// Preview must mirror what the scheduler will actually send:
+	// weekly → last Mon–Sun, monthly → previous full month, disabled → current month to date (fallback)
+	function getPreviewRange(frequency: string): { since: string; until: string } {
 		const now = new Date();
-		const y = now.getFullYear();
-		const m = String(now.getMonth() + 1).padStart(2, '0');
-		const d = String(now.getDate()).padStart(2, '0');
-		return { since: `${y}-${m}-01`, until: `${y}-${m}-${d}` };
+		if (frequency === 'weekly') {
+			const lastSunday = new Date(now);
+			lastSunday.setDate(now.getDate() - (now.getDay() === 0 ? 7 : now.getDay()));
+			const lastMonday = new Date(lastSunday);
+			lastMonday.setDate(lastSunday.getDate() - 6);
+			return { since: fmtDate(lastMonday), until: fmtDate(lastSunday) };
+		}
+		if (frequency === 'monthly') {
+			const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+			return { since: fmtDate(lastMonth), until: fmtDate(lastMonthEnd) };
+		}
+		return { since: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, until: fmtDate(now) };
 	}
 
 	function previewPdf(schedule: (typeof schedules)[0]) {
-		const { since, until } = getCurrentMonthRange();
+		const { since, until } = getPreviewRange(schedule.frequency);
 		const params = new URLSearchParams({
 			clientId: schedule.clientId,
 			platforms: schedule.platforms.join(','),
@@ -264,7 +278,7 @@
 	}
 
 	function downloadPdf(schedule: (typeof schedules)[0]) {
-		const { since, until } = getCurrentMonthRange();
+		const { since, until } = getPreviewRange(schedule.frequency);
 		const params = new URLSearchParams({
 			clientId: schedule.clientId,
 			platforms: schedule.platforms.join(','),
@@ -427,8 +441,8 @@
 								</div>
 							</div>
 
-							<!-- Actions -->
-							<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+							<!-- Actions — always visible on touch (mobile/tablet), hover-reveal on desktop -->
+							<div class="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-150">
 								<Tooltip.Root>
 									<Tooltip.Trigger>
 										<Button variant="ghost" size="icon-sm" onclick={() => previewPdf(schedule)}>
