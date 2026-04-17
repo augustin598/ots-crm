@@ -37,6 +37,31 @@ function escapeHtml(str: string): string {
 }
 
 /**
+ * Strip leading tabs from template literal plain text (caused by code indentation).
+ */
+function trimPlainText(text: string): string {
+	return text.replace(/^\t+/gm, '').trim();
+}
+
+/**
+ * Resolve the "from" email for a tenant or the global default.
+ * Logs a warning if falling back to noreply@example.com (emails will be rejected).
+ */
+function resolveFromEmail(emailSettings?: { smtpFrom?: string | null; smtpUser?: string | null } | null): string {
+	const resolved =
+		emailSettings?.smtpFrom ||
+		emailSettings?.smtpUser ||
+		env.SMTP_FROM ||
+		env.SMTP_USER ||
+		null;
+	if (!resolved) {
+		logWarning('email', 'No SMTP_FROM configured — emails will use noreply@example.com and likely be rejected. Set SMTP_FROM in .env or tenant email settings.');
+		return 'noreply@example.com';
+	}
+	return resolved;
+}
+
+/**
  * Format a date as dd.MM.yyyy (Romanian locale, consistent across environments).
  */
 function formatDateRo(date: string | Date | null | undefined): string {
@@ -682,7 +707,7 @@ export async function sendInvitationEmail(
 	inviterName = escapeHtml(inviterName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
-	const subject = `You've been invited to join ${tenantName}`;
+	const subject = `Invitatie de alaturare la ${tenantName}`;
 	const html = `
 			<!DOCTYPE html>
 			<html>
@@ -730,19 +755,14 @@ export async function sendInvitationEmail(
 				.where(eq(table.emailSettings.tenantId, tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: email,
 				subject,
 				html,
-				text: `
+				text: trimPlainText(`
 			You've been invited!
 
 			${inviterName} has invited you to join ${tenantName} on the CRM platform.
@@ -753,7 +773,7 @@ export async function sendInvitationEmail(
 			This invitation will expire in 7 days.
 
 			If you didn't expect this invitation, you can safely ignore this email.
-		`
+		`)
 			};
 		}
 	);
@@ -811,12 +831,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = escapeHtml(tenant?.name || 'CRM');
 			const clientDisplayName = escapeHtml(client?.name || '');
 
@@ -924,7 +939,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Factura ${invoice.invoiceNumber}
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -941,7 +956,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `Plata este scadenta la ${formatDateRo(invoice.dueDate)}.\n` : ''}
 
 			Pentru intrebari, nu ezitati sa ne contactati.
-		`
+		`)
 			};
 		}
 	);
@@ -977,7 +992,7 @@ export async function sendMagicLinkEmail(
 		{
 			tenantId: tenant.id,
 			toEmail: email,
-			subject: `Login to ${tenantName} Client Portal`,
+			subject: `Autentificare ${tenantName} - Portal Client`,
 			emailType: 'magic-link',
 			metadata: { tenantSlug, clientName },
 			htmlBody: '',
@@ -992,17 +1007,12 @@ export async function sendMagicLinkEmail(
 				.where(eq(table.emailSettings.tenantId, tenant.id))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: email,
-				subject: `Login to ${tenantName} Client Portal`,
+				subject: `Autentificare ${tenantName} - Portal Client`,
 				html: `
 			<!DOCTYPE html>
 			<html>
@@ -1032,7 +1042,7 @@ export async function sendMagicLinkEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Welcome to ${tenantName}
 
 			Dear ${clientName},
@@ -1046,7 +1056,7 @@ export async function sendMagicLinkEmail(
 			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
 
 			If you have any questions, please contact your administrator.
-		`
+		`)
 			};
 		}
 	);
@@ -1070,7 +1080,7 @@ export async function sendAdminMagicLinkEmail(
 		{
 			tenantId: userTenantId ?? null,
 			toEmail: email,
-			subject: `Login to ${appName}`,
+			subject: `Autentificare ${appName}`,
 			emailType: 'admin-magic-link',
 			metadata: { userName },
 			htmlBody: '',
@@ -1079,11 +1089,11 @@ export async function sendAdminMagicLinkEmail(
 			payload: null
 		},
 		async () => {
-			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+			const fromEmail = resolveFromEmail();
 			return {
 				from: `"${appName}" <${fromEmail}>`,
 				to: email,
-				subject: `Login to ${appName}`,
+				subject: `Autentificare ${appName}`,
 				html: `
 			<!DOCTYPE html>
 			<html>
@@ -1113,7 +1123,7 @@ export async function sendAdminMagicLinkEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Welcome to ${appName}
 
 			Dear ${userName},
@@ -1127,7 +1137,7 @@ export async function sendAdminMagicLinkEmail(
 			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
 
 			If you have any questions, please contact your administrator.
-		`
+		`)
 			};
 		}
 	);
@@ -1151,7 +1161,7 @@ export async function sendPasswordResetEmail(
 		{
 			tenantId: userTenantId ?? null,
 			toEmail: email,
-			subject: `Reset your password - ${appName}`,
+			subject: `Resetare parola - ${appName}`,
 			emailType: 'password-reset',
 			metadata: { userName },
 			htmlBody: '',
@@ -1160,11 +1170,11 @@ export async function sendPasswordResetEmail(
 			payload: null
 		},
 		async () => {
-			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
+			const fromEmail = resolveFromEmail();
 			return {
 				from: `"${appName}" <${fromEmail}>`,
 				to: email,
-				subject: `Reset your password - ${appName}`,
+				subject: `Resetare parola - ${appName}`,
 				html: `
 			<!DOCTYPE html>
 			<html>
@@ -1194,7 +1204,7 @@ export async function sendPasswordResetEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Reset your password
 
 			Dear ${userName},
@@ -1208,7 +1218,7 @@ export async function sendPasswordResetEmail(
 			Security Notice: This link is valid for 1 hour and can only be used once. If you did not request this, please ignore this email and your password will remain unchanged.
 
 			If you have any questions, please contact your administrator.
-		`
+		`)
 			};
 		}
 	);
@@ -1236,7 +1246,7 @@ export async function sendTaskAssignmentEmail(
 		{
 			tenantId: task.tenantId,
 			toEmail: assigneeEmail,
-			subject: `New Task Assigned: ${task.title}`,
+			subject: `Task nou atribuit: ${task.title}`,
 			emailType: 'task-assignment',
 			metadata: { taskId, taskTitle: task.title },
 			htmlBody: '',
@@ -1266,12 +1276,7 @@ export async function sendTaskAssignmentEmail(
 			const { logoAttachment: assignLogoAttachment, logoHtml: assignLogoHtml } =
 				prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -1289,7 +1294,7 @@ export async function sendTaskAssignmentEmail(
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: assigneeEmail,
-				subject: `New Task Assigned: ${task.title}`,
+				subject: `Task nou atribuit: ${task.title}`,
 				...(assignLogoAttachment ? { attachments: [assignLogoAttachment] } : {}),
 				html: `
 			<!DOCTYPE html>
@@ -1320,7 +1325,7 @@ export async function sendTaskAssignmentEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Task Assigned to You
 
 			Hello ${assigneeName || 'there'},
@@ -1334,7 +1339,7 @@ export async function sendTaskAssignmentEmail(
 			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
 
 			View task: ${taskUrl}
-		`
+		`)
 			};
 		}
 	);
@@ -1362,7 +1367,7 @@ export async function sendTaskUpdateEmail(
 		{
 			tenantId: task.tenantId,
 			toEmail: watcherEmail,
-			subject: `Task Updated: ${task.title}`,
+			subject: `Task actualizat: ${task.title}`,
 			emailType: 'task-update',
 			metadata: { taskId, taskTitle: task.title, changeType },
 			htmlBody: '',
@@ -1392,12 +1397,7 @@ export async function sendTaskUpdateEmail(
 			const { logoAttachment: updLogoAttachment, logoHtml: updLogoHtml } =
 				prepareLogoAttachment(updInvoiceSettings?.invoiceLogo);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -1424,7 +1424,7 @@ export async function sendTaskUpdateEmail(
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: watcherEmail,
-				subject: `Task Updated: ${task.title}`,
+				subject: `Task actualizat: ${task.title}`,
 				...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
 				html: `
 			<!DOCTYPE html>
@@ -1456,7 +1456,7 @@ export async function sendTaskUpdateEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Task Updated
 
 			Hello ${watcherName || 'there'},
@@ -1472,7 +1472,7 @@ export async function sendTaskUpdateEmail(
 			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
 
 			View task: ${taskUrl}
-		`
+		`)
 			};
 		}
 	);
@@ -1550,12 +1550,7 @@ export async function sendTaskClientNotificationEmail(
 				.limit(1);
 			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -1647,7 +1642,7 @@ export async function sendTaskClientNotificationEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 ${subject}
 
 Bună ${greeting},
@@ -1661,7 +1656,7 @@ Status: ${task.status || 'Todo'}
 ${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
 
 Vezi task: ${taskUrl}
-		`
+		`)
 			};
 		}
 	);
@@ -1715,12 +1710,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
@@ -1774,7 +1764,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Plata primita
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -1791,7 +1781,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			Vezi factura: ${invoiceUrl}
 
 			Pentru intrebari, nu ezitati sa ne contactati.
-		`
+		`)
 			};
 		}
 	);
@@ -1850,12 +1840,7 @@ export async function sendOverdueReminderEmail(
 				.where(eq(table.emailSettings.tenantId, invoice.tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
@@ -1958,7 +1943,7 @@ export async function sendOverdueReminderEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Reminder plata factura
 
 			Stimate/Stimata ${client?.name || 'Client'},
@@ -1977,7 +1962,7 @@ export async function sendOverdueReminderEmail(
 			Vezi factura: ${invoiceUrl}
 
 			Daca ati efectuat deja plata, va rugam sa ignorati acest email.
-		`
+		`)
 			};
 		}
 	);
@@ -2033,12 +2018,7 @@ export async function sendTaskReminderEmail(
 				.where(eq(table.emailSettings.tenantId, task.tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
@@ -2075,7 +2055,7 @@ export async function sendTaskReminderEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			${isOverdue ? 'Overdue Task Reminder' : 'Task Reminder'}
 
 			Hello ${assigneeName || 'there'},
@@ -2089,7 +2069,7 @@ export async function sendTaskReminderEmail(
 			Due Date: ${formatDateRo(dueDate)}
 
 			View task: ${taskUrl}
-		`
+		`)
 			};
 		}
 	);
@@ -2139,12 +2119,7 @@ export async function sendDailyWorkReminderEmail(
 				.where(eq(table.emailSettings.tenantId, tenantId))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const myPlansUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/my-plans`;
 
@@ -2233,7 +2208,7 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			Good Morning, ${userName}!
 
 			Here's your work plan for ${today}:
@@ -2245,7 +2220,7 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 			View My Plans: ${myPlansUrl}
 
 			Have a productive day!
-		`
+		`)
 			};
 		}
 	);
@@ -2298,12 +2273,7 @@ export async function sendContractSigningEmail(
 				.where(eq(table.emailSettings.tenantId, tenant.id))
 				.limit(1);
 
-			const fromEmail =
-				emailSettings?.smtpFrom ||
-				emailSettings?.smtpUser ||
-				env.SMTP_FROM ||
-				env.SMTP_USER ||
-				'noreply@example.com';
+			const fromEmail = resolveFromEmail(emailSettings);
 
 			const [invoiceSettings] = await db
 				.select()
@@ -2348,7 +2318,7 @@ export async function sendContractSigningEmail(
 			</body>
 			</html>
 		`,
-				text: `
+				text: trimPlainText(`
 			${tenantName}
 
 			Stimate/Stimată ${clientName},
@@ -2362,7 +2332,7 @@ export async function sendContractSigningEmail(
 			Notă de securitate: Acest link este valabil 7 zile și poate fi folosit o singură dată.
 
 			Pentru orice întrebări, contactați ${tenantName}.
-		`
+		`)
 			};
 		}
 	);

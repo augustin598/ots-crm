@@ -10,6 +10,7 @@ import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sendMagicLinkEmail } from '$lib/server/email';
 import { verifyMagicLinkToken } from '$lib/server/client-auth';
 import { checkAuthRateLimit } from '$lib/server/rate-limiter';
+import { logInfo } from '$lib/server/logger';
 import { env as publicEnv } from '$env/dynamic/public';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
@@ -330,6 +331,10 @@ export const sendClientMagicLinkEmail = command(
 		});
 
 		await sendMagicLinkEmail(client.email.toLowerCase(), plainToken, tenantSlug, client.name);
+		logInfo('email', `Admin sent magic link to client`, {
+			tenantId,
+			metadata: { clientId, clientEmail: client.email, adminUserId: event.locals.user.id }
+		});
 		return { sent: true, email: client.email };
 	}
 );
