@@ -1,10 +1,12 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, inArray } from 'drizzle-orm';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { sendReportEmail } from '$lib/server/email';
 import { generateReportPdf, type ReportPlatformData } from '$lib/server/report-pdf-generator';
 import { sql, gte, lte, desc } from 'drizzle-orm';
+
+type AccountSpend = { accountName: string; spend: number; currency: string };
 
 /**
  * Process scheduled PDF report emails.
@@ -39,7 +41,13 @@ export async function processPdfReportSend() {
 				tenantThemeColor: table.tenant.themeColor
 			})
 			.from(table.reportSchedule)
-			.leftJoin(table.client, eq(table.reportSchedule.clientId, table.client.id))
+			.leftJoin(
+				table.client,
+				and(
+					eq(table.reportSchedule.clientId, table.client.id),
+					eq(table.reportSchedule.tenantId, table.client.tenantId)
+				)
+			)
 			.leftJoin(table.tenant, eq(table.reportSchedule.tenantId, table.tenant.id))
 			.where(
 				and(
@@ -65,8 +73,22 @@ export async function processPdfReportSend() {
 				// Calculate date range
 				const { since, until, label } = getDateRange(schedule.frequency, now);
 
-				// Get platform data from DB
-				const platformNames: string[] = JSON.parse(schedule.platforms || '["meta","google","tiktok"]');
+				// Get platform data from DB. Safe-parse: corrupt JSON or unknown
+				// platforms must not crash the whole scheduler tick.
+				const allowedPlatforms = ['meta', 'google', 'tiktok'] as const;
+				let platformNames: string[];
+				try {
+					const raw = JSON.parse(schedule.platforms || '[]');
+					platformNames = Array.isArray(raw)
+						? raw.filter((p): p is string => typeof p === 'string' && (allowedPlatforms as readonly string[]).includes(p))
+						: [];
+				} catch {
+					logWarning('scheduler', `Corrupt platforms JSON for schedule ${schedule.id}, falling back to defaults`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id, raw: schedule.platforms } });
+					platformNames = [];
+				}
+				if (platformNames.length === 0) {
+					platformNames = [...allowedPlatforms];
+				}
 				const platforms: ReportPlatformData[] = [];
 
 				for (const platformName of platformNames) {
@@ -123,8 +145,29 @@ export async function processPdfReportSend() {
 					continue;
 				}
 
-				// Send to each recipient
+				// Per-recipient idempotency: if the worker retries after a partial
+				// failure, we must not re-send to recipients that already received
+				// this exact period's report. The subject encodes (clientName, label)
+				// which is unique per (client, period), so we match on it.
+				const expectedSubject = `Raport Marketing — ${schedule.clientName || 'Client'} — ${label}`;
+				const alreadyDelivered = await db.select({ toEmail: table.emailLog.toEmail })
+					.from(table.emailLog)
+					.where(and(
+						eq(table.emailLog.tenantId, schedule.tenantId),
+						eq(table.emailLog.emailType, 'report'),
+						eq(table.emailLog.status, 'completed'),
+						eq(table.emailLog.subject, expectedSubject),
+						inArray(table.emailLog.toEmail, recipients)
+					));
+				const deliveredSet = new Set(alreadyDelivered.map((r) => r.toEmail));
+
+				// Send to each recipient not already delivered
+				let sentForThisSchedule = 0;
 				for (const email of recipients) {
+					if (deliveredSet.has(email)) {
+						logInfo('scheduler', `Skipping already-delivered recipient ${email} for ${schedule.clientName}`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id } });
+						continue;
+					}
 					try {
 						await sendReportEmail(
 							schedule.tenantId,
@@ -135,15 +178,20 @@ export async function processPdfReportSend() {
 							pdfBuffer
 						);
 						reportsSent++;
+						sentForThisSchedule++;
 					} catch (err) {
 						errors.push({ clientId: schedule.clientId, error: `${email}: ${(err as Error).message}` });
 					}
 				}
 
-				// Update lastSentAt
-				await db.update(table.reportSchedule)
-					.set({ lastSentAt: now, updatedAt: now })
-					.where(eq(table.reportSchedule.id, schedule.id));
+				// Update lastSentAt only when at least one new delivery succeeded in
+				// this tick. Keeps UI honest about partial failures so operators can
+				// see something is wrong on the next refresh.
+				if (sentForThisSchedule > 0) {
+					await db.update(table.reportSchedule)
+						.set({ lastSentAt: now, updatedAt: now })
+						.where(eq(table.reportSchedule.id, schedule.id));
+				}
 
 			} catch (err) {
 				errors.push({ clientId: schedule.clientId, error: (err as Error).message });
@@ -170,9 +218,10 @@ export function getDateRange(frequency: string, now: Date): { since: string; unt
 	const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 	if (frequency === 'weekly') {
-		// Last Monday to Sunday
+		// Last full Monday–Sunday. When run on Sunday we still want the PREVIOUS
+		// full week, never today (data for today is incomplete at 08:00).
 		const lastSunday = new Date(now);
-		lastSunday.setDate(now.getDate() - (now.getDay() === 0 ? 0 : now.getDay()));
+		lastSunday.setDate(now.getDate() - (now.getDay() === 0 ? 7 : now.getDay()));
 		const lastMonday = new Date(lastSunday);
 		lastMonday.setDate(lastSunday.getDate() - 6);
 		const label = `${lastMonday.getDate()} - ${lastSunday.getDate()} ${lastSunday.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}`;
@@ -216,13 +265,24 @@ export async function getPlatformSpendData(
 			gte(table.metaAdsSpending.periodEnd, since)
 		)).groupBy(table.metaAdsSpending.metaAdAccountId, table.metaAdsSpending.currencyCode);
 
-		const accounts = [];
-		for (const row of acctRows) {
-			if (row.spend === 0) continue;
-			const [acct] = await db.select({ name: table.metaAdsAccount.accountName })
-				.from(table.metaAdsAccount).where(eq(table.metaAdsAccount.metaAdAccountId, row.accountId)).limit(1);
-			accounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		const nonZero = acctRows.filter((r) => r.spend !== 0);
+		const accountIds = nonZero.map((r) => r.accountId);
+		const accountMap = new Map<string, string>();
+		if (accountIds.length > 0) {
+			const rows = await db.select({
+				id: table.metaAdsAccount.metaAdAccountId,
+				name: table.metaAdsAccount.accountName
+			}).from(table.metaAdsAccount).where(and(
+				inArray(table.metaAdsAccount.metaAdAccountId, accountIds),
+				eq(table.metaAdsAccount.tenantId, tenantId)
+			));
+			for (const r of rows) if (r.name) accountMap.set(r.id, r.name);
 		}
+		const accounts: AccountSpend[] = nonZero.map((r) => ({
+			accountName: accountMap.get(r.accountId) ?? r.accountId,
+			spend: r.spend / 100,
+			currency: r.currency || 'RON'
+		}));
 
 		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON', accounts };
 	}
@@ -254,13 +314,24 @@ export async function getPlatformSpendData(
 			gte(table.googleAdsSpending.periodEnd, since)
 		)).groupBy(table.googleAdsSpending.googleAdsCustomerId, table.googleAdsSpending.currencyCode);
 
-		const gAccounts = [];
-		for (const row of gAcctRows) {
-			if (row.spend === 0) continue;
-			const [acct] = await db.select({ name: table.googleAdsAccount.accountName })
-				.from(table.googleAdsAccount).where(eq(table.googleAdsAccount.googleAdsCustomerId, row.accountId)).limit(1);
-			gAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		const gNonZero = gAcctRows.filter((r) => r.spend !== 0);
+		const gAccountIds = gNonZero.map((r) => r.accountId);
+		const gAccountMap = new Map<string, string>();
+		if (gAccountIds.length > 0) {
+			const rows = await db.select({
+				id: table.googleAdsAccount.googleAdsCustomerId,
+				name: table.googleAdsAccount.accountName
+			}).from(table.googleAdsAccount).where(and(
+				inArray(table.googleAdsAccount.googleAdsCustomerId, gAccountIds),
+				eq(table.googleAdsAccount.tenantId, tenantId)
+			));
+			for (const r of rows) if (r.name) gAccountMap.set(r.id, r.name);
 		}
+		const gAccounts: AccountSpend[] = gNonZero.map((r) => ({
+			accountName: gAccountMap.get(r.accountId) ?? r.accountId,
+			spend: r.spend / 100,
+			currency: r.currency || 'RON'
+		}));
 
 		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: gAccounts };
 	}
@@ -292,13 +363,24 @@ export async function getPlatformSpendData(
 			gte(table.tiktokAdsSpending.periodEnd, since)
 		)).groupBy(table.tiktokAdsSpending.tiktokAdvertiserId, table.tiktokAdsSpending.currencyCode);
 
-		const tAccounts = [];
-		for (const row of tAcctRows) {
-			if (row.spend === 0) continue;
-			const [acct] = await db.select({ name: table.tiktokAdsAccount.accountName })
-				.from(table.tiktokAdsAccount).where(eq(table.tiktokAdsAccount.tiktokAdvertiserId, row.accountId)).limit(1);
-			tAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		const tNonZero = tAcctRows.filter((r) => r.spend !== 0);
+		const tAccountIds = tNonZero.map((r) => r.accountId);
+		const tAccountMap = new Map<string, string>();
+		if (tAccountIds.length > 0) {
+			const rows = await db.select({
+				id: table.tiktokAdsAccount.tiktokAdvertiserId,
+				name: table.tiktokAdsAccount.accountName
+			}).from(table.tiktokAdsAccount).where(and(
+				inArray(table.tiktokAdsAccount.tiktokAdvertiserId, tAccountIds),
+				eq(table.tiktokAdsAccount.tenantId, tenantId)
+			));
+			for (const r of rows) if (r.name) tAccountMap.set(r.id, r.name);
 		}
+		const tAccounts: AccountSpend[] = tNonZero.map((r) => ({
+			accountName: tAccountMap.get(r.accountId) ?? r.accountId,
+			spend: r.spend / 100,
+			currency: r.currency || 'RON'
+		}));
 
 		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: tAccounts };
 	}
