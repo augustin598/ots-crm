@@ -108,18 +108,18 @@
 	const platformColors: Record<string, { pill: string; btn: string; btnOff: string }> = {
 		meta: {
 			pill: 'bg-[#1877F2]/10 text-[#1877F2] border-[#1877F2]/20',
-			btn: 'bg-[#1877F2]/10 border-[#1877F2]/40 text-[#1877F2] shadow-sm',
-			btnOff: 'bg-background text-muted-foreground border-border hover:border-[#1877F2]/30 hover:bg-[#1877F2]/5'
+			btn: 'bg-[#1877F2]/15 border-[#1877F2] text-[#1877F2] font-semibold shadow-sm ring-2 ring-[#1877F2]/20',
+			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
 		},
 		google: {
 			pill: 'bg-[#3C8BD9]/10 text-[#3C8BD9] border-[#3C8BD9]/20',
-			btn: 'bg-[#FABC04]/10 border-[#FABC04]/40 text-foreground shadow-sm',
-			btnOff: 'bg-background text-muted-foreground border-border hover:border-[#FABC04]/30 hover:bg-[#FABC04]/5'
+			btn: 'bg-[#FABC04]/15 border-[#FABC04] text-foreground font-semibold shadow-sm ring-2 ring-[#FABC04]/20',
+			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
 		},
 		tiktok: {
 			pill: 'bg-foreground/5 text-foreground border-foreground/10',
-			btn: 'bg-foreground/5 border-foreground/20 text-foreground shadow-sm',
-			btnOff: 'bg-background text-muted-foreground border-border hover:border-foreground/20 hover:bg-foreground/5'
+			btn: 'bg-foreground/10 border-foreground text-foreground font-semibold shadow-sm ring-2 ring-foreground/10',
+			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
 		}
 	};
 
