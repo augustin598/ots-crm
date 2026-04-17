@@ -136,40 +136,69 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		y = MT + 8;
 
 		// ============================================================
-		// HEADER (logo left, title right)
+		// HEADER — logo left, title right (matching invoice pattern)
 		// ============================================================
-		const logoH = 36;
+		const logoH = 32;
 		try {
 			if (data.tenantLogo) {
 				const base64Data = data.tenantLogo.replace(/^data:image\/\w+;base64,/, '');
 				const logoBuffer = Buffer.from(base64Data, 'base64');
-				doc.image(logoBuffer, ML, y, { height: logoH });
+				doc.image(logoBuffer, ML, y + 2, { height: logoH });
 			} else if (existsSync(DEFAULT_LOGO)) {
-				doc.image(DEFAULT_LOGO, ML, y, { height: logoH });
+				doc.image(DEFAULT_LOGO, ML, y + 2, { height: logoH });
 			}
 		} catch { /* skip logo on error */ }
 
-		// Title aligned right of logo area
-		const titleX = ML + 50;
-		doc.font('Bold').fontSize(20).fillColor(ACCENT)
-			.text('Raport Marketing', titleX, y + 2, { width: CW - 50, align: 'right' });
-		y += logoH + 10;
-
-		doc.font('Bold').fontSize(11).fillColor(DARK)
-			.text(data.clientName, ML, y);
-		y += 16;
-
-		doc.font('Regular').fontSize(9).fillColor(MUTED)
-			.text(`Perioadă: ${data.period.label}`, ML, y);
-		y += 13;
-
-		doc.font('Regular').fontSize(8).fillColor(LIGHT)
-			.text(`Generat: ${data.generatedAt.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}`, ML, y);
-		y += 8;
+		doc.font('Bold').fontSize(22).fillColor(ACCENT)
+			.text('Raport Marketing', ML, y, { width: CW, align: 'right' });
+		y += 50;
 
 		// Accent line under header
-		doc.moveTo(ML, y + 6).lineTo(ML + 60, y + 6).strokeColor(ACCENT).lineWidth(2).stroke();
-		y += 20;
+		doc.moveTo(ML, y).lineTo(PW - MR, y).strokeColor(ACCENT).lineWidth(2).stroke();
+		y += 15;
+
+		// ============================================================
+		// TWO COLUMNS: Client | Detalii Raport
+		// ============================================================
+		const col1X = ML;
+		const col2X = ML + CW / 2 + 15;
+		const colW = CW / 2 - 15;
+		const sectionStart = y;
+
+		// Left: CLIENT
+		doc.font('Bold').fontSize(7).fillColor(ACCENT)
+			.text('CLIENT', col1X, y);
+		y += 12;
+
+		doc.font('Bold').fontSize(9.5).fillColor(DARK)
+			.text(data.clientName, col1X, y, { width: colW });
+		y += 16;
+
+		// Right: DETALII RAPORT
+		let yr = sectionStart;
+		doc.font('Bold').fontSize(7).fillColor(ACCENT)
+			.text('DETALII RAPORT', col2X, yr);
+		yr += 14;
+
+		const meta: [string, string][] = [
+			['Perioadă', data.period.label],
+			['Generat', data.generatedAt.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })],
+			['Platforme', data.platforms.map((p) => p.name).join(', ') || '—']
+		];
+
+		for (const [label, val] of meta) {
+			doc.font('Regular').fontSize(7.5).fillColor(MUTED)
+				.text(label, col2X, yr, { width: 65, continued: false });
+			doc.font('Bold').fontSize(7.5).fillColor(DARK)
+				.text(val, col2X + 67, yr, { width: colW - 67, align: 'right' });
+			yr += 13;
+		}
+
+		y = Math.max(y, yr) + 12;
+
+		// Thin separator
+		doc.moveTo(ML, y).lineTo(PW - MR, y).strokeColor(BORDER).lineWidth(0.5).stroke();
+		y += 16;
 
 		// ============================================================
 		// SUMMARY KPI CARDS
