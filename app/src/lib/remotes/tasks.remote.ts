@@ -38,11 +38,11 @@ async function sendClientNotificationIfEnabled(
 		};
 		if (!toggleMap[notificationType]) return;
 
-		// Get task with client
+		// Get task with client (tenant-scoped for isolation)
 		const [task] = await db
 			.select()
 			.from(table.task)
-			.where(eq(table.task.id, taskId))
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
 			.limit(1);
 
 		if (!task?.clientId) return;
