@@ -2552,7 +2552,7 @@ export async function sendReportEmail(
 				<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
 					${headerLogoHtml}
 					<h1 style="color: #2563eb; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">Raport Marketing</h1>
-					<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${safeTenantName}</p>
+					<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">Digital Marketing &amp; Growth Solutions</p>
 					<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
 					<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
 					<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
