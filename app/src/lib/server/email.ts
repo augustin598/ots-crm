@@ -997,7 +997,8 @@ export async function sendMagicLinkEmail(
 export async function sendAdminMagicLinkEmail(
 	email: string,
 	token: string,
-	userName: string
+	userName: string,
+	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1006,7 +1007,7 @@ export async function sendAdminMagicLinkEmail(
 
 	await sendWithPersistence(
 		{
-			tenantId: null,
+			tenantId: userTenantId ?? null,
 			toEmail: email,
 			subject: `Login to ${appName}`,
 			emailType: 'admin-magic-link',
@@ -1077,7 +1078,8 @@ export async function sendAdminMagicLinkEmail(
 export async function sendPasswordResetEmail(
 	email: string,
 	token: string,
-	userName: string
+	userName: string,
+	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1086,7 +1088,7 @@ export async function sendPasswordResetEmail(
 
 	await sendWithPersistence(
 		{
-			tenantId: null,
+			tenantId: userTenantId ?? null,
 			toEmail: email,
 			subject: `Reset your password - ${appName}`,
 			emailType: 'password-reset',

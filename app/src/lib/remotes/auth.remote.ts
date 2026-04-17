@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { command, query } from '$app/server';
 import { lucia } from '../server/lucia';
 import { db } from '../server/db';
-import { user, adminMagicLinkToken, passwordResetToken } from '../server/db/schema';
+import { user, adminMagicLinkToken, passwordResetToken, tenantUser } from '../server/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
 import { hash, verify } from '@node-rs/argon2';
 import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
@@ -283,12 +283,20 @@ export const requestMagicLink = command(
 				used: false
 			});
 
-			// Send magic link email
+			// Find user's primary tenant to use its email transporter (Gmail/SMTP)
+			const [userTenant] = await db
+				.select({ tenantId: tenantUser.tenantId })
+				.from(tenantUser)
+				.where(eq(tenantUser.userId, userRecord.id))
+				.limit(1);
+
+			// Send magic link email (uses tenant transporter if available, else default SMTP)
 			try {
 				await sendAdminMagicLinkEmail(
 					email,
 					plainToken,
-					userRecord.firstName + ' ' + userRecord.lastName
+					userRecord.firstName + ' ' + userRecord.lastName,
+					userTenant?.tenantId
 				);
 			} catch (emailError) {
 				console.error('Failed to send magic link email:', emailError);
@@ -386,11 +394,19 @@ export const requestPasswordReset = command(
 				expiresAt
 			});
 
+			// Find user's primary tenant for email transporter
+			const [resetUserTenant] = await db
+				.select({ tenantId: tenantUser.tenantId })
+				.from(tenantUser)
+				.where(eq(tenantUser.userId, userRecord.id))
+				.limit(1);
+
 			try {
 				await sendPasswordResetEmail(
 					email,
 					plainToken,
-					userRecord.firstName + ' ' + userRecord.lastName
+					userRecord.firstName + ' ' + userRecord.lastName,
+					resetUserTenant?.tenantId
 				);
 			} catch (emailError) {
 				console.error('Failed to send password reset email:', emailError);
