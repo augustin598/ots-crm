@@ -184,11 +184,6 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		const colW = CW / 2 - 15;
 		const sectionStart = y;
 
-		// Left: CLIENT
-		doc.font('Bold').fontSize(7).fillColor(ACCENT)
-			.text('CLIENT', col1X, y);
-		y += 12;
-
 		doc.font('Bold').fontSize(9.5).fillColor(DARK)
 			.text(data.clientName, col1X, y, { width: colW });
 		y += 14;
