@@ -399,8 +399,11 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
 				const dotColor = PLATFORM_COLORS[platform.name] || ACCENT;
-				const acctCount = platform.accounts && platform.accounts.length > 1 ? platform.accounts.length : 0;
-				const cardH = 58 + (acctCount > 0 ? acctCount * 12 + 4 : 0);
+				const hasAccts = platform.accounts && platform.accounts.length > 1;
+				const acctCount = hasAccts ? platform.accounts!.length : 0;
+				const kpiBlockH = 58;
+				const acctBlockH = acctCount > 0 ? 6 + acctCount * 13 + 4 : 0;
+				const cardH = kpiBlockH + acctBlockH;
 
 				// Card outline
 				doc.save();
@@ -440,20 +443,22 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 						.text(miniKpis[k].value, mx, y + 38, { width: miniW - 4, lineBreak: false });
 				}
 
-				y += cardH;
+				// Account breakdown inside card (separator + rows)
+				if (hasAccts) {
+					const sepY = y + kpiBlockH;
+					doc.moveTo(ML + 14, sepY).lineTo(PW - MR - 10, sepY).strokeColor(BORDER).lineWidth(0.3).stroke();
 
-				// Account breakdown (only if 2+ accounts)
-				if (platform.accounts && platform.accounts.length > 1) {
-					for (const acc of platform.accounts) {
+					let accY = sepY + 6;
+					for (const acc of platform.accounts!) {
 						doc.font('Regular').fontSize(7).fillColor(MUTED)
-							.text(acc.accountName, ML + 18, y + 2, { width: CW / 2 - 20, lineBreak: false });
-						doc.font('Regular').fontSize(7).fillColor(TEXT)
-							.text(fmtAmount(acc.spend, acc.currency), ML + 14, y + 2, { width: CW - 28, align: 'right', lineBreak: false });
-						y += 12;
+							.text(acc.accountName, ML + 18, accY, { width: CW / 2 - 20, lineBreak: false });
+						doc.font('Bold').fontSize(7).fillColor(TEXT)
+							.text(fmtAmount(acc.spend, acc.currency), ML + 14, accY, { width: CW - 28, align: 'right', lineBreak: false });
+						accY += 13;
 					}
 				}
 
-				y += 8;
+				y += cardH + 8;
 			}
 		}
 
