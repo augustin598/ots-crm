@@ -118,7 +118,7 @@ function drawPlatformLogo(doc: PDFKit.PDFDocument, name: string, x: number, y: n
 
 export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
-		const doc = new PDFDocument({ size: 'A4', margin: ML, bufferPages: true });
+		const doc = new PDFDocument({ size: 'A4', margin: ML });
 		const chunks: Buffer[] = [];
 
 		doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -426,16 +426,16 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		}
 
 		// ============================================================
-		// FOOTER
+		// FOOTER — positioned at bottom of current page
 		// ============================================================
-		// Bottom accent line
-		doc.moveTo(ML, PH - 45).lineTo(PW - MR, PH - 45).strokeColor(BORDER).lineWidth(0.5).stroke();
+		const footerY = PH - 45;
+		doc.moveTo(ML, footerY).lineTo(PW - MR, footerY).strokeColor(BORDER).lineWidth(0.5).stroke();
 
 		doc.font('Regular').fontSize(7).fillColor(LIGHT)
-			.text(data.tenantName, ML, PH - 36);
+			.text(data.tenantName, ML, footerY + 9, { lineBreak: false });
 
 		doc.font('Regular').fontSize(7).fillColor(LIGHT)
-			.text('Raport generat automat', PW - MR - 120, PH - 36, { width: 120, align: 'right' });
+			.text('Raport generat automat', PW - MR - 120, footerY + 9, { width: 120, align: 'right', lineBreak: false });
 
 		doc.end();
 	});
