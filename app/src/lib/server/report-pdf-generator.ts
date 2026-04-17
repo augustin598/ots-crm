@@ -124,20 +124,18 @@ function drawPlatformLogo(doc: PDFKit.PDFDocument, name: string, x: number, y: n
 	else if (name === 'TikTok Ads') drawTikTokLogo(doc, x, y, size);
 }
 
-export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
-	return new Promise((resolve, reject) => {
-		const doc = new PDFDocument({ size: 'A4', margin: ML });
-		const chunks: Buffer[] = [];
+/**
+ * Populate an already-created PDFDocument with the report content.
+ * Does NOT call doc.end() — the caller controls the lifecycle so the same
+ * logic can be used for both buffered output (email attachment) and streamed
+ * output (HTTP response body).
+ */
+function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
+	doc.registerFont('Regular', FONT_REGULAR);
+	doc.registerFont('Bold', FONT_BOLD);
 
-		doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-		doc.on('end', () => resolve(Buffer.concat(chunks)));
-		doc.on('error', reject);
-
-		doc.registerFont('Regular', FONT_REGULAR);
-		doc.registerFont('Bold', FONT_BOLD);
-
-		const ACCENT = data.accentColor || DEFAULT_ACCENT;
-		const rates = data.exchangeRates || {};
+	const ACCENT = data.accentColor || DEFAULT_ACCENT;
+	const rates = data.exchangeRates || {};
 
 		// Convert any amount to RON
 		function toRON(amount: number, currency: string): number {
@@ -480,6 +478,59 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		doc.font('Regular').fontSize(7).fillColor(LIGHT)
 			.text('Raport generat automat', PW - MR - 120, footerY + 9, { width: 120, align: 'right', lineBreak: false });
 
-		doc.end();
+}
+
+/**
+ * Generate the report PDF into a Buffer. Used for email attachments where
+ * nodemailer needs the full bytes up front.
+ *
+ * Note: still accumulates the entire PDF in memory — unavoidable for the
+ * email path since SMTP attachments cannot be chunk-streamed reliably across
+ * providers. For the HTTP response path prefer `generateReportPdfStream`.
+ */
+export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
+	return new Promise((resolve, reject) => {
+		const doc = new PDFDocument({ size: 'A4', margin: ML });
+		const chunks: Buffer[] = [];
+
+		doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+		doc.on('end', () => resolve(Buffer.concat(chunks)));
+		doc.on('error', reject);
+
+		try {
+			populateReportPdf(doc, data);
+			doc.end();
+		} catch (err) {
+			reject(err);
+		}
+	});
+}
+
+/**
+ * Generate the report PDF as a Web ReadableStream. The HTTP response consumes
+ * chunks as PDFKit emits them — memory stays bounded by the socket backpressure
+ * instead of growing with PDF size. Use this for the preview/download endpoint.
+ */
+export function generateReportPdfStream(data: ReportPdfData): ReadableStream<Uint8Array> {
+	return new ReadableStream<Uint8Array>({
+		start(controller) {
+			const doc = new PDFDocument({ size: 'A4', margin: ML });
+
+			doc.on('data', (chunk: Buffer) => {
+				// Copy into a plain Uint8Array — Buffer is a Node subclass but
+				// the Fetch API surface some runtimes expose only accepts
+				// Uint8Array, so convert defensively.
+				controller.enqueue(new Uint8Array(chunk));
+			});
+			doc.on('end', () => controller.close());
+			doc.on('error', (err) => controller.error(err));
+
+			try {
+				populateReportPdf(doc, data);
+				doc.end();
+			} catch (err) {
+				controller.error(err);
+			}
+		}
 	});
 }

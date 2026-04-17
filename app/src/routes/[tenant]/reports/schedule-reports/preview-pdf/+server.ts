@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { generateReportPdf } from '$lib/server/report-pdf-generator';
+import { generateReportPdfStream } from '$lib/server/report-pdf-generator';
 import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
 import { logWarning } from '$lib/server/logger';
 
@@ -174,7 +174,7 @@ export const GET: RequestHandler = async (event) => {
 		logWarning('server', 'Failed to load BNR exchange rates, using original currencies', { tenantId, metadata: { error: (err as Error).message } });
 	}
 
-	const pdfBuffer = await generateReportPdf({
+	const pdfStream = generateReportPdfStream({
 		tenantName,
 		clientName: client.name || 'Client',
 		period: { since, until, label },
@@ -192,14 +192,13 @@ export const GET: RequestHandler = async (event) => {
 	const download = url.searchParams.get('download') === 'true';
 	const disposition = download ? 'attachment' : 'inline';
 
-	const uint8 = new Uint8Array(pdfBuffer);
-
-	return new Response(uint8, {
+	// Streaming: chunks flow from PDFKit → socket without accumulating.
+	// Content-Length is intentionally omitted so chunked transfer is used.
+	return new Response(pdfStream, {
 		status: 200,
 		headers: {
 			'Content-Type': 'application/pdf',
-			'Content-Disposition': `${disposition}; filename="${filename}"`,
-			'Content-Length': pdfBuffer.length.toString()
+			'Content-Disposition': `${disposition}; filename="${filename}"`
 		}
 	});
 };
