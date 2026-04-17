@@ -363,7 +363,7 @@ function isRetryableSmtpError(error: Error): boolean {
 async function sendMailWithRetry(
 	transporter: nodemailer.Transporter,
 	mailOptions: nodemailer.SendMailOptions,
-	tenantId: string,
+	tenantId: string | null,
 	logId: string,
 	maxAttempts = 3
 ): Promise<{ messageId?: string; response?: string }> {
@@ -501,7 +501,7 @@ export async function sendWithPersistence(
 ): Promise<void> {
 	// STEP 1: Log BEFORE anything else can fail. Guarantees a DB row exists.
 	// If this is a retry (via scheduler), reuse the existing log ID instead of creating a duplicate row.
-	const retryLogId = ctx._retryOfLogId ?? _activeRetryLogId;
+	const retryLogId = ctx._retryOfLogId ?? getRetryLogId();
 	const logId = retryLogId ?? await logEmailAttempt({
 		tenantId: ctx.tenantId,
 		toEmail: ctx.toEmail,
@@ -566,7 +566,7 @@ export async function sendWithPersistence(
 	// STEP 4: Mark processing, send with retry, record outcome.
 	try {
 		await logEmailProcessing(logId);
-		const info = await sendMailWithRetry(transporter, mailOptions, ctx.tenantId ?? '', logId);
+		const info = await sendMailWithRetry(transporter, mailOptions, ctx.tenantId, logId);
 		await logEmailSuccess(logId, info);
 		logInfo('email', `Sent ${ctx.emailType}`, {
 			tenantId: ctx.tenantId ?? undefined,
@@ -2374,18 +2374,20 @@ export async function sendReportEmail(
 // `sendWithPersistence` with a non-null payload.
 // ---------------------------------------------------------------------------
 /**
- * When set, sendWithPersistence will reuse this log ID instead of creating a new row.
- * Used by the email_retry scheduler to prevent duplicate email_log entries.
- * Set before calling a registry handler, cleared after.
+ * AsyncLocalStorage-based retry context. Prevents the global state concurrency issue
+ * where an HTTP-triggered email send could inherit the retry log ID from the scheduler.
+ * Each async call chain gets its own isolated context.
  */
-let _activeRetryLogId: string | null = null;
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-export function setRetryLogId(logId: string | null): void {
-	_activeRetryLogId = logId;
+const retryContext = new AsyncLocalStorage<{ logId: string }>();
+
+export function runWithRetryLogId<T>(logId: string, fn: () => Promise<T>): Promise<T> {
+	return retryContext.run({ logId }, fn);
 }
 
-export function getRetryLogId(): string | null {
-	return _activeRetryLogId;
+function getRetryLogId(): string | null {
+	return retryContext.getStore()?.logId ?? null;
 }
 
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {

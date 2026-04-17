@@ -110,7 +110,7 @@ export async function verifyAdminMagicLinkToken(
 		// Hash the provided token
 		const hashedToken = hashToken(token);
 
-		// Atomic claim: SELECT + UPDATE in transaction prevents TOCTOU race condition
+		// Atomic claim: SELECT + UPDATE in transaction with rowsAffected check (TOCTOU fix)
 		const tokenRecord = await db.transaction(async (tx) => {
 			const [record] = await tx
 				.select()
@@ -125,7 +125,12 @@ export async function verifyAdminMagicLinkToken(
 
 			if (!record) return null;
 
-			await tx
+			// Check expiry BEFORE consuming the token
+			if (Date.now() >= record.expiresAt.getTime()) {
+				return null;
+			}
+
+			const result = await tx
 				.update(table.adminMagicLinkToken)
 				.set({ used: true, usedAt: new Date() })
 				.where(
@@ -135,16 +140,13 @@ export async function verifyAdminMagicLinkToken(
 					)
 				);
 
+			if ((result as { rowsAffected?: number })?.rowsAffected === 0) return null;
+
 			return record;
 		});
 
 		if (!tokenRecord) {
-			return { success: false, error: 'Invalid or expired token' };
-		}
-
-		// Check if token is expired (already marked used above)
-		if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-			return { success: false, error: 'Token has expired. Please request a new magic link.' };
+			return { success: false, error: 'Invalid or expired token. Please request a new magic link.' };
 		}
 
 		// Find user by email

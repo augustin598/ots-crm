@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
-import { EMAIL_SEND_REGISTRY, clearTenantTransporterCache, setRetryLogId } from '$lib/server/email';
+import { EMAIL_SEND_REGISTRY, clearTenantTransporterCache, runWithRetryLogId } from '$lib/server/email';
 
 /**
  * Scheduled task: drain failed email_log rows and replay them via the original send
@@ -151,13 +151,9 @@ export async function processEmailRetry(): Promise<{
 
 				try {
 					// STEP 2: Call the original send function with retry context
-					// setRetryLogId prevents sendWithPersistence from creating a duplicate email_log row
-					setRetryLogId(row.id);
-					try {
-						await handler(...parsed.args);
-					} finally {
-						setRetryLogId(null);
-					}
+					// runWithRetryLogId uses AsyncLocalStorage to scope the log ID to this call chain,
+					// preventing concurrent HTTP requests from inheriting the retry context.
+					await runWithRetryLogId(row.id, () => handler(...parsed.args));
 					// STEP 3: Success — row was updated in-place by sendWithPersistence (no duplicate)
 					recovered++;
 				} catch (sendErr) {

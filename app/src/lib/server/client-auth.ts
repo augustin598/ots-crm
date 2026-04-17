@@ -70,8 +70,8 @@ export async function verifyMagicLinkToken(
 	// Hash the provided token
 	const hashedToken = hashToken(token);
 
-	// Atomic claim: UPDATE ... WHERE used=false inside a transaction prevents
-	// two concurrent requests from both succeeding with the same token (TOCTOU fix).
+	// Atomic claim: SELECT + UPDATE in transaction with rowsAffected check.
+	// Prevents two concurrent requests from both consuming the same token (TOCTOU fix).
 	const tokenRecord = await db.transaction(async (tx) => {
 		const [record] = await tx
 			.select()
@@ -87,8 +87,13 @@ export async function verifyMagicLinkToken(
 
 		if (!record) return null;
 
-		// Atomically mark as used within the same transaction
-		await tx
+		// Check expiry BEFORE consuming the token (don't burn expired tokens)
+		if (Date.now() >= record.expiresAt.getTime()) {
+			return null;
+		}
+
+		// Atomically mark as used; check rowsAffected to detect concurrent claim
+		const result = await tx
 			.update(table.magicLinkToken)
 			.set({ used: true, usedAt: new Date() })
 			.where(
@@ -98,16 +103,14 @@ export async function verifyMagicLinkToken(
 				)
 			);
 
+		// If another request already claimed it, rowsAffected will be 0
+		if ((result as { rowsAffected?: number })?.rowsAffected === 0) return null;
+
 		return record;
 	});
 
 	if (!tokenRecord) {
-		throw new Error('Invalid or expired token');
-	}
-
-	// Check if token is expired (already marked used above, so no second use possible)
-	if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-		throw new Error('Token has expired. Please request a new magic link.');
+		throw new Error('Invalid or expired token. Please request a new magic link.');
 	}
 
 	// Get client
