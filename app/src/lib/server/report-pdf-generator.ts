@@ -214,12 +214,12 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		const cpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
 
 		const kpis = [
-			{ label: 'Cheltuieli totale', value: fmtAmount(totalSpend, mainCurrency), accent: true },
+			{ label: 'Buget reclame', value: fmtAmount(totalSpend, mainCurrency), accent: true },
 			{ label: 'Impresii', value: fmtNum(totalImpressions), accent: false },
 			{ label: 'Click-uri', value: fmtNum(totalClicks), accent: false },
 			{ label: 'CTR', value: totalImpressions > 0 ? fmtPct(ctr) : '—', accent: false },
 			{ label: 'CPC mediu', value: totalClicks > 0 ? fmtAmount(cpc, mainCurrency) : '—', accent: false },
-			{ label: 'Conversii', value: totalConversions > 0 ? fmtNum(totalConversions) : '—', accent: false }
+			{ label: 'Rezultate', value: totalConversions > 0 ? fmtNum(totalConversions) : '—', accent: false }
 		];
 
 		// Draw KPI grid (2 rows x 3 columns)
@@ -262,13 +262,14 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 			// Table columns
 			const cols = [
-				{ label: 'Platformă', w: 110, align: 'left' as const },
-				{ label: 'Cheltuieli', w: 90, align: 'right' as const },
-				{ label: 'Impresii', w: 72, align: 'right' as const },
-				{ label: 'Click-uri', w: 62, align: 'right' as const },
-				{ label: 'CPC', w: 72, align: 'right' as const },
-				{ label: 'CTR', w: 60, align: 'right' as const },
-				{ label: 'Conversii', w: 69, align: 'right' as const }
+				{ label: 'Platformă', w: 100, align: 'left' as const },
+				{ label: 'Buget reclame', w: 82, align: 'right' as const },
+				{ label: 'Impresii', w: 62, align: 'right' as const },
+				{ label: 'Click-uri', w: 52, align: 'right' as const },
+				{ label: 'CPC', w: 62, align: 'right' as const },
+				{ label: 'CTR', w: 48, align: 'right' as const },
+				{ label: 'Rezultate', w: 55, align: 'right' as const },
+				{ label: 'Cost/rez.', w: 74, align: 'right' as const }
 			];
 
 			const rowH = 24;
@@ -288,6 +289,7 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				const platform = data.platforms[i];
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
+				const pCostPerResult = platform.conversions > 0 ? platform.spend / platform.conversions : 0;
 
 				// Alternating row background
 				if (i % 2 === 0) {
@@ -308,7 +310,8 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 					fmtNum(platform.clicks),
 					pCpc > 0 ? fmtAmount(pCpc, platform.currency) : '—',
 					pCtr > 0 ? fmtPct(pCtr) : '—',
-					platform.conversions > 0 ? fmtNum(platform.conversions) : '—'
+					platform.conversions > 0 ? fmtNum(platform.conversions) : '—',
+					pCostPerResult > 0 ? fmtAmount(pCostPerResult, platform.currency) : '—'
 				];
 
 				for (let j = 0; j < rowData.length; j++) {
@@ -329,13 +332,15 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				.text('TOTAL', cx, y + 9, { width: cols[0].w - 12, align: 'left' });
 			cx += cols[0].w;
 
+			const totalCostPerResult = totalConversions > 0 ? totalSpend / totalConversions : 0;
 			const totalRow = [
 				fmtAmount(totalSpend, mainCurrency),
 				fmtNum(totalImpressions),
 				fmtNum(totalClicks),
 				totalClicks > 0 ? fmtAmount(totalSpend / totalClicks, mainCurrency) : '—',
 				totalImpressions > 0 ? fmtPct((totalClicks / totalImpressions) * 100) : '—',
-				totalConversions > 0 ? fmtNum(totalConversions) : '—'
+				totalConversions > 0 ? fmtNum(totalConversions) : '—',
+				totalCostPerResult > 0 ? fmtAmount(totalCostPerResult, mainCurrency) : '—'
 			];
 
 			for (let j = 0; j < totalRow.length; j++) {
