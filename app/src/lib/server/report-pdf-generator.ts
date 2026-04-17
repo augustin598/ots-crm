@@ -17,9 +17,9 @@ const DEFAULT_LOGO = resolve(ASSETS_DIR, 'logo.png');
 // A4
 const PW = 595.28;
 const PH = 841.89;
-const ML = 45;
-const MR = 45;
-const MT = 40;
+const ML = 30;
+const MR = 30;
+const MT = 28;
 const CW = PW - ML - MR;
 
 // Colors
@@ -260,13 +260,13 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 			// Table columns
 			const cols = [
-				{ label: 'Platformă', w: 100, align: 'left' as const },
-				{ label: 'Cheltuieli', w: 85, align: 'right' as const },
-				{ label: 'Impresii', w: 68, align: 'right' as const },
-				{ label: 'Click-uri', w: 58, align: 'right' as const },
-				{ label: 'CPC', w: 68, align: 'right' as const },
-				{ label: 'CTR', w: 58, align: 'right' as const },
-				{ label: 'Conversii', w: 68, align: 'right' as const }
+				{ label: 'Platformă', w: 110, align: 'left' as const },
+				{ label: 'Cheltuieli', w: 90, align: 'right' as const },
+				{ label: 'Impresii', w: 72, align: 'right' as const },
+				{ label: 'Click-uri', w: 62, align: 'right' as const },
+				{ label: 'CPC', w: 72, align: 'right' as const },
+				{ label: 'CTR', w: 60, align: 'right' as const },
+				{ label: 'Conversii', w: 69, align: 'right' as const }
 			];
 
 			const rowH = 24;
