@@ -16,6 +16,7 @@ import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
+import { processTokenCleanup } from './tasks/token-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
 import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retry';
@@ -103,6 +104,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
+	token_cleanup: processTokenCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
 	pdf_report_send: processPdfReportSend,
 	email_retry: processEmailRetry,
@@ -219,7 +221,7 @@ export const startScheduler = async () => {
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
-		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup',
+		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications'
 	]);
@@ -525,6 +527,22 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Token cleanup — daily at 3:00 AM (delete tokens expired > 7 days ago)
+	await schedulerQueue.add(
+		'token-cleanup',
+		{
+			type: 'token_cleanup',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 3 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'token-cleanup'
+		}
+	);
+
 	// DB write health check — every 5 minutes (no retries — next scheduled run is sufficient)
 	await schedulerQueue.add(
 		'db-write-health-check',
@@ -656,6 +674,7 @@ export const JOB_LABELS: Record<string, string> = {
 	token_refresh_frequent: 'Refresh Token-uri (Gmail/Google Ads)',
 	token_refresh_daily: 'Refresh Token-uri (Meta/TikTok)',
 	debug_log_cleanup: 'Cleanup Loguri Debug',
+	token_cleanup: 'Cleanup Token-uri Expirate',
 	db_write_health_check: 'Health Check Scriere DB',
 	pdf_report_send: 'Trimitere Rapoarte PDF',
 	email_retry: 'Retry Emailuri Eșuate',

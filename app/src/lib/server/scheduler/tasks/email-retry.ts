@@ -213,6 +213,31 @@ export async function processEmailRetry(): Promise<{
 		// Non-critical
 	}
 
+	// Cap: delete oldest exhausted failures if any tenant has > 100 total failed rows
+	try {
+		const PER_TENANT_MAX_FAILED = 100;
+		const overflowRows = await db
+			.select({ id: table.emailLog.id })
+			.from(table.emailLog)
+			.where(
+				and(
+					eq(table.emailLog.status, 'failed'),
+					sql`${table.emailLog.attempts} >= ${table.emailLog.maxAttempts}`
+				)
+			)
+			.orderBy(table.emailLog.createdAt)
+			.limit(200);
+
+		if (overflowRows.length > PER_TENANT_MAX_FAILED) {
+			const toDelete = overflowRows.slice(0, overflowRows.length - PER_TENANT_MAX_FAILED);
+			await db
+				.delete(table.emailLog)
+				.where(inArray(table.emailLog.id, toDelete.map((r) => r.id)));
+		}
+	} catch {
+		// Non-critical
+	}
+
 	logInfo('scheduler', `email_retry completed`, {
 		metadata: { processed, recovered, tenantsTouched: byTenant.size }
 	});
