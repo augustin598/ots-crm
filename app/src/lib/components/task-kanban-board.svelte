@@ -535,7 +535,7 @@
 					{@const isDragged = draggedTask?.id === task.id}
 					{@const isDragOver = dragOverStatus === status && dragOverIndex === index}
 					<Card
-						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {status === 'done' ? 'opacity-60 hover:opacity-90 border-l-4 border-l-emerald-400/50 dark:border-l-emerald-700/50' : getPriorityCardClass(task.priority || 'medium')} {isDragged
+						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {status === 'done' ? 'opacity-60 blur-[0.5px] hover:opacity-90 hover:blur-none border-l-4 border-l-emerald-400/50 dark:border-l-emerald-700/50' : getPriorityCardClass(task.priority || 'medium')} {isDragged
 							? 'opacity-50'
 							: ''} {isDragOver ? 'ring-2 ring-primary' : ''} {pickedUpTask?.id === task.id ? 'ring-2 ring-primary bg-primary/5' : ''}"
 						draggable={true}

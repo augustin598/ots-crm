@@ -88,7 +88,12 @@
 		// Sort
 		const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 		const statusOrder: Record<string, number> = { 'pending-approval': 0, 'todo': 1, 'in-progress': 2, 'review': 3, 'done': 4, 'cancelled': 5 };
+		const isInactive = (s: string) => s === 'done' || s === 'cancelled' ? 1 : 0;
 		result = [...result].sort((a, b) => {
+			// Always push done/cancelled to the end
+			const inactiveDiff = isInactive(a.status) - isInactive(b.status);
+			if (inactiveDiff !== 0) return inactiveDiff;
+
 			if (sortBy === 'priority') {
 				return (priorityOrder[a.priority ?? 'medium'] ?? 2) - (priorityOrder[b.priority ?? 'medium'] ?? 2);
 			}
@@ -397,7 +402,7 @@
 				{@const dueDateInfo = formatDueDate(task.dueDate)}
 				{@const overdue = task.status !== 'done' && task.status !== 'cancelled' && dueDateInfo.isOverdue}
 				<div
-					class="group relative rounded-xl border border-border/40 bg-card/50 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden border-l-4 {getPriorityBorderColor(task.priority)}"
+					class="group relative rounded-xl border border-border/40 bg-card/50 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden border-l-4 {getPriorityBorderColor(task.priority)} {task.status === 'done' || task.status === 'cancelled' ? 'opacity-50 blur-[0.5px] hover:opacity-90 hover:blur-none' : ''}"
 					role="button"
 					tabindex="0"
 					onclick={() => goto(`/client/${tenantSlug}/tasks/${task.id}`)}

@@ -145,6 +145,11 @@ export const createTaskComment = command(
 			throw new Error('Task not found');
 		}
 
+		// Client users can only comment on their own tasks
+		if (event.locals.isClientUser && task.clientId !== event.locals.client?.id) {
+			throw new Error('Unauthorized: You do not have access to this task');
+		}
+
 		// Strip empty TipTap HTML (e.g. "<p></p>", "<p> </p>")
 		const textContent = data.content.replace(/<[^>]*>/g, '').trim();
 		if (!textContent && !data.attachmentPath) {
@@ -183,8 +188,14 @@ export const createTaskComment = command(
 		// Send internal notification to watchers (if enabled)
 		if (settings?.internalEmailOnComment !== false) {
 			const watchers = await db
-				.select()
+				.select({
+					userId: table.taskWatcher.userId,
+					email: table.user.email,
+					firstName: table.user.firstName,
+					lastName: table.user.lastName
+				})
 				.from(table.taskWatcher)
+				.innerJoin(table.user, eq(table.taskWatcher.userId, table.user.id))
 				.where(
 					and(
 						eq(table.taskWatcher.taskId, data.taskId),
@@ -194,21 +205,14 @@ export const createTaskComment = command(
 
 			for (const watcher of watchers) {
 				if (watcher.userId === event.locals.user.id) continue;
+				if (!watcher.email) continue;
 
-				const [watcherUser] = await db
-					.select()
-					.from(table.user)
-					.where(eq(table.user.id, watcher.userId))
-					.limit(1);
-
-				if (watcherUser?.email) {
-					try {
-						const watcherName =
-							`${watcherUser.firstName} ${watcherUser.lastName}`.trim() || watcherUser.email;
-						await sendTaskUpdateEmail(data.taskId, watcherUser.email, watcherName, 'comment');
-					} catch (error) {
-						console.error('Failed to send comment notification to watcher:', error);
-					}
+				try {
+					const watcherName =
+						`${watcher.firstName} ${watcher.lastName}`.trim() || watcher.email;
+					await sendTaskUpdateEmail(data.taskId, watcher.email, watcherName, 'comment');
+				} catch (error) {
+					console.error('Failed to send comment notification to watcher:', error);
 				}
 			}
 		}
@@ -281,6 +285,8 @@ export const createTaskComment = command(
 				if (client?.email) {
 					const recipients = await getNotificationRecipients(task.clientId, 'tasks');
 					for (const recipient of recipients) {
+						// Skip the comment author (don't notify yourself)
+						if (recipient.email.toLowerCase() === event.locals.user.email.toLowerCase()) continue;
 						try {
 							await sendTaskClientNotificationEmail(
 								data.taskId,
@@ -333,6 +339,11 @@ export const updateTaskComment = command(
 			throw new Error('Comment not found');
 		}
 
+		// Client users can only update comments on their own tasks
+		if (event.locals.isClientUser && comment.task.clientId !== event.locals.client?.id) {
+			throw new Error('Unauthorized: You do not have access to this task');
+		}
+
 		// Only allow user who created the comment to update it
 		if (comment.comment.userId !== event.locals.user.id) {
 			throw new Error('Unauthorized to update this comment');
@@ -376,6 +387,11 @@ export const deleteTaskComment = command(
 
 		if (!comment) {
 			throw new Error('Comment not found');
+		}
+
+		// Client users can only delete comments on their own tasks
+		if (event.locals.isClientUser && comment.task.clientId !== event.locals.client?.id) {
+			throw new Error('Unauthorized: You do not have access to this task');
 		}
 
 		// Only allow user who created the comment to delete it

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTask } from '$lib/remotes/tasks.remote';
+	import { getTask, reopenTask } from '$lib/remotes/tasks.remote';
 	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getCommentAttachmentUrl } from '$lib/remotes/task-comments.remote';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
@@ -115,6 +115,24 @@
 	const overdue = $derived(
 		task && task.status !== 'done' && task.status !== 'cancelled' && isTaskOverdue(task.dueDate)
 	);
+
+	const isReadOnly = $derived(task?.status === 'done' || task?.status === 'cancelled');
+
+	let reopenLoading = $state(false);
+	async function handleReopenTask() {
+		if (!task) return;
+		reopenLoading = true;
+		try {
+			await reopenTask({
+				taskId: task.id
+			}).updates(getTask(taskId));
+			toast.success('Task-ul a fost redeschis și trimis spre aprobare.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Nu s-a putut redeschide task-ul');
+		} finally {
+			reopenLoading = false;
+		}
+	}
 
 	let commentLoading = $state(false);
 	let editingCommentId = $state<string | null>(null);
@@ -403,7 +421,7 @@
 
 					<div class="space-y-3 mb-4">
 						{#if comments.length === 0}
-							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
+							<p class="text-sm text-muted-foreground">{isReadOnly ? 'Nu există comentarii pentru acest task.' : 'No comments yet. Be the first to comment!'}</p>
 						{:else}
 							{#each topLevelComments as comment}
 								{@const authorName = comment.authorName || userMap.get(comment.userId) || 'User'}
@@ -422,19 +440,21 @@
 													<span class="italic">(edited)</span>
 												{/if}
 											</p>
-											<div class="flex items-center gap-0.5 ml-auto">
-												<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { replyingToId = replyingToId === comment.id ? null : comment.id; }} title="Reply">
-													<ReplyIcon class="h-3 w-3" />
-												</Button>
-												{#if isOwnComment && editingCommentId !== comment.id}
-													<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
-														<PencilIcon class="h-3 w-3" />
+											{#if !isReadOnly}
+												<div class="flex items-center gap-0.5 ml-auto">
+													<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { replyingToId = replyingToId === comment.id ? null : comment.id; }} title="Reply">
+														<ReplyIcon class="h-3 w-3" />
 													</Button>
-													<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => handleDeleteComment(comment.id)}>
-														<Trash2Icon class="h-3 w-3" />
-													</Button>
-												{/if}
-											</div>
+													{#if isOwnComment && editingCommentId !== comment.id}
+														<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => { editingCommentId = comment.id; editingContent = comment.content; }}>
+															<PencilIcon class="h-3 w-3" />
+														</Button>
+														<Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => handleDeleteComment(comment.id)}>
+															<Trash2Icon class="h-3 w-3" />
+														</Button>
+													{/if}
+												</div>
+											{/if}
 										</div>
 										{#if editingCommentId === comment.id}
 											<div class="space-y-2">
@@ -493,7 +513,7 @@
 															<div class="flex items-center gap-2 mb-0.5">
 																<p class="text-xs font-medium">{replyAuthor}</p>
 																<p class="text-[10px] text-muted-foreground">{timeAgo(reply.createdAt)}</p>
-																{#if isOwnReply}
+																{#if isOwnReply && !isReadOnly}
 																	<Button variant="ghost" size="icon" class="h-5 w-5 ml-auto" onclick={() => handleDeleteComment(reply.id)}>
 																		<Trash2Icon class="h-2.5 w-2.5" />
 																	</Button>
@@ -507,7 +527,7 @@
 										{/if}
 
 										<!-- Reply editor -->
-										{#if replyingToId === comment.id}
+										{#if !isReadOnly && replyingToId === comment.id}
 											<div class="mt-2 border-l-2 border-primary/30 pl-3">
 												<RichEditor
 													bind:this={replyEditor}
@@ -534,24 +554,34 @@
 					</div>
 
 					<!-- Add comment form -->
-					<div class="flex gap-3">
-						<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-semibold mt-0.5">
-							<UserIcon class="h-3.5 w-3.5" />
-						</div>
-						<div class="flex-1 space-y-2">
-							<RichEditor
-								bind:this={newCommentEditor}
-								placeholder="Write a comment..."
-								minHeight="120px"
-								showFooter={false}
-								{users}
-							/>
-							<Button size="sm" onclick={handleAddComment} disabled={commentLoading}>
-								<SendIcon class="mr-2 h-3.5 w-3.5" />
-								{commentLoading ? 'Posting...' : 'Post Comment'}
+					{#if isReadOnly}
+						<div class="rounded-lg border border-border/40 bg-muted/30 p-4 text-center space-y-3">
+							<p class="text-sm text-muted-foreground">Acest task este finalizat. Comentariile sunt disponibile doar pentru vizualizare.</p>
+							<Button variant="outline" size="sm" onclick={handleReopenTask} disabled={reopenLoading}>
+								<RefreshCwIcon class="mr-2 h-3.5 w-3.5" />
+								{reopenLoading ? 'Se redeschide...' : 'Redeschide task'}
 							</Button>
 						</div>
-					</div>
+					{:else}
+						<div class="flex gap-3">
+							<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-semibold mt-0.5">
+								<UserIcon class="h-3.5 w-3.5" />
+							</div>
+							<div class="flex-1 space-y-2">
+								<RichEditor
+									bind:this={newCommentEditor}
+									placeholder="Write a comment..."
+									minHeight="120px"
+									showFooter={false}
+									{users}
+								/>
+								<Button size="sm" onclick={handleAddComment} disabled={commentLoading}>
+									<SendIcon class="mr-2 h-3.5 w-3.5" />
+									{commentLoading ? 'Posting...' : 'Post Comment'}
+								</Button>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</div>
 

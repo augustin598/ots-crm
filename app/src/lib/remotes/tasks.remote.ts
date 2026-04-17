@@ -15,7 +15,8 @@ async function sendClientNotificationIfEnabled(
 	taskId: string,
 	tenantId: string,
 	notificationType: ClientNotificationType,
-	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
+	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string },
+	excludeEmail?: string
 ): Promise<void> {
 	try {
 		// Load task settings
@@ -57,6 +58,8 @@ async function sendClientNotificationIfEnabled(
 
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
 		for (const recipient of recipients) {
+			// Skip the user who performed the action (don't notify yourself)
+			if (excludeEmail && recipient.email.toLowerCase() === excludeEmail.toLowerCase()) continue;
 			try {
 				await sendTaskClientNotificationEmail(
 					taskId,
@@ -651,7 +654,7 @@ export const createTask = command(taskSchema, async (data) => {
 	});
 
 	// Send client notification
-	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created');
+	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created', undefined, event.locals.user.email);
 
 	// Emit approval.requested hook if task needs approval
 	if (status === 'pending-approval') {
@@ -902,7 +905,7 @@ export const updateTask = command(
 		if (statusChanged) {
 			await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'status-change', {
 				newStatus: updateData.status
-			});
+			}, event.locals.user.email);
 		} else {
 			// Collect changed fields for notification
 			const changedFieldLabels: string[] = [];
@@ -920,7 +923,7 @@ export const updateTask = command(
 			if (changedFieldLabels.length > 0) {
 				await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'modified', {
 					changedFields: changedFieldLabels.join(', ')
-				});
+				}, event.locals.user.email);
 			}
 		}
 
@@ -939,6 +942,129 @@ export const updateTask = command(
 			} catch {
 				// Don't throw - task update should succeed even if notification fails
 			}
+		}
+
+		return { success: true };
+	}
+);
+
+export const reopenTask = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const { taskId } = data;
+
+		const [existing] = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!existing) {
+			throw new Error('Task not found');
+		}
+
+		// Client users can only reopen their own tasks
+		if (event.locals.isClientUser && existing.clientId !== event.locals.client?.id) {
+			throw new Error('Unauthorized: You do not have access to this task');
+		}
+
+		if (existing.status !== 'done' && existing.status !== 'cancelled') {
+			throw new Error('Only completed or cancelled tasks can be reopened');
+		}
+
+		// Cooldown: prevent spam reopening (30 seconds)
+		const [recentReopen] = await db
+			.select({ id: table.taskActivity.id })
+			.from(table.taskActivity)
+			.where(
+				and(
+					eq(table.taskActivity.taskId, taskId),
+					eq(table.taskActivity.action, 'status_changed'),
+					gte(table.taskActivity.createdAt, new Date(Date.now() - 30_000))
+				)
+			)
+			.orderBy(desc(table.taskActivity.createdAt))
+			.limit(1);
+
+		if (recentReopen) {
+			throw new Error('Task-ul a fost modificat recent. Așteaptă câteva secunde.');
+		}
+
+		const oldStatus = existing.status;
+
+		// Conditional update to prevent race conditions
+		const result = await db
+			.update(table.task)
+			.set({ status: 'pending-approval', updatedAt: new Date() })
+			.where(
+				and(
+					eq(table.task.id, taskId),
+					inArray(table.task.status, ['done', 'cancelled'])
+				)
+			);
+
+		// If no rows updated, the status was already changed by another request
+		if ((result as any).rowsAffected === 0) {
+			throw new Error('Task-ul nu mai poate fi redeschis (statusul s-a schimbat deja).');
+		}
+
+		await recordTaskActivity({
+			taskId,
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id,
+			action: 'status_changed',
+			field: 'status',
+			oldValue: oldStatus,
+			newValue: 'pending-approval'
+		});
+
+		// Notify assignee that task was reopened and needs approval
+		const reopenerName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
+		if (existing.assignedToUserId) {
+			try {
+				const [assignee] = await db
+					.select()
+					.from(table.user)
+					.where(eq(table.user.id, existing.assignedToUserId))
+					.limit(1);
+
+				if (assignee?.email) {
+					const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
+					await sendTaskUpdateEmail(taskId, assignee.email, assigneeName, `Task redeschis de ${reopenerName} - necesită aprobare`);
+				}
+			} catch (error) {
+				logError('Failed to send reopen notification email', error);
+			}
+		}
+
+		// Also notify tenant admin users
+		try {
+			const adminUsers = await db
+				.select()
+				.from(table.user)
+				.innerJoin(table.tenantUser, eq(table.user.id, table.tenantUser.userId))
+				.where(
+					and(
+						eq(table.tenantUser.tenantId, event.locals.tenant.id),
+						or(eq(table.tenantUser.role, 'admin'), eq(table.tenantUser.role, 'owner'))
+					)
+				);
+
+			for (const { user: adminUser } of adminUsers) {
+				if (adminUser.email && adminUser.id !== existing.assignedToUserId) {
+					const adminName = `${adminUser.firstName} ${adminUser.lastName}`.trim() || adminUser.email;
+					await sendTaskUpdateEmail(taskId, adminUser.email, adminName, `Task redeschis de ${reopenerName} - necesită aprobare`);
+				}
+			}
+		} catch (error) {
+			logError('Failed to send admin reopen notification emails', error);
 		}
 
 		return { success: true };
@@ -1033,7 +1159,7 @@ export const updateTaskPosition = command(
 			// Send client notification for status change
 			await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 				newStatus
-			});
+			}, event.locals.user.email);
 		}
 
 		return { success: true };
@@ -1308,7 +1434,7 @@ export const approveTask = command(
 		// Send client notification
 		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 			newStatus: status
-		});
+		}, event.locals.user.email);
 
 		return { success: true, taskId };
 	}
@@ -1363,7 +1489,7 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 	// Send client notification
 	await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 		newStatus: 'cancelled'
-	});
+	}, event.locals.user.email);
 
 	return { success: true, taskId };
 });

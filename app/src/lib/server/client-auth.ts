@@ -211,8 +211,38 @@ async function findOrCreateClientUserSession(
 
 	if (!user) {
 		const emailParts = normalizedEmail.split('@');
-		const firstName = client.name.split(' ')[0] || emailParts[0];
-		const lastName = client.name.split(' ').slice(1).join(' ') || '';
+
+		// Try to get individual contact name from secondary email label
+		let contactName = '';
+		if (!isPrimary) {
+			const [secondaryEmail] = await db
+				.select()
+				.from(table.clientSecondaryEmail)
+				.where(
+					and(
+						eq(table.clientSecondaryEmail.clientId, client.id),
+						eq(table.clientSecondaryEmail.email, normalizedEmail)
+					)
+				)
+				.limit(1);
+			if (secondaryEmail?.label) {
+				contactName = secondaryEmail.label.trim();
+			}
+		} else {
+			// For primary email, try legalRepresentative from client record
+			const [fullClient] = await db
+				.select()
+				.from(table.client)
+				.where(eq(table.client.id, client.id))
+				.limit(1);
+			if (fullClient?.legalRepresentative) {
+				contactName = fullClient.legalRepresentative.trim();
+			}
+		}
+
+		const nameParts = contactName ? contactName.split(' ') : [];
+		const firstName = nameParts[0] || emailParts[0];
+		const lastName = nameParts.slice(1).join(' ') || '';
 
 		const userId = generateUserId();
 		const dummyPasswordHash = await hash('dummy-password-for-client-users', {
@@ -239,6 +269,54 @@ async function findOrCreateClientUserSession(
 
 		if (!user) {
 			throw new Error('Failed to create user');
+		}
+	}
+
+	// Sync user name from contact label if user still has the company name
+	if (user) {
+		let contactName = '';
+		if (!isPrimary) {
+			const [secondaryEmail] = await db
+				.select()
+				.from(table.clientSecondaryEmail)
+				.where(
+					and(
+						eq(table.clientSecondaryEmail.clientId, client.id),
+						eq(table.clientSecondaryEmail.email, normalizedEmail)
+					)
+				)
+				.limit(1);
+			if (secondaryEmail?.label) {
+				contactName = secondaryEmail.label.trim();
+			}
+		} else {
+			const [fullClient] = await db
+				.select()
+				.from(table.client)
+				.where(eq(table.client.id, client.id))
+				.limit(1);
+			if (fullClient?.legalRepresentative) {
+				contactName = fullClient.legalRepresentative.trim();
+			}
+		}
+
+		if (contactName) {
+			const nameParts = contactName.split(' ');
+			const newFirst = nameParts[0] || '';
+			const newLast = nameParts.slice(1).join(' ') || '';
+			const currentName = `${user.firstName} ${user.lastName}`.trim();
+			const newContactName = `${newFirst} ${newLast}`.trim();
+			// Only update if name is empty, matches company name, or already matches a previous contact label
+			// This prevents overwriting names that were manually edited by admin
+			const emailPrefix = normalizedEmail.split('@')[0];
+			const isDefaultOrCompanyName = !user.firstName || currentName === client.name || currentName === emailPrefix;
+			const isAlreadyCorrect = currentName === newContactName;
+			if (isDefaultOrCompanyName && !isAlreadyCorrect) {
+				await db
+					.update(table.user)
+					.set({ firstName: newFirst, lastName: newLast })
+					.where(eq(table.user.id, user.id));
+			}
 		}
 	}
 
