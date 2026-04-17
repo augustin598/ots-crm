@@ -148,19 +148,54 @@ export async function getNotificationRecipients(
 	return recipients;
 }
 
-// Cache tenant-specific transporters
+// Cache tenant-specific transporters with TTL and max size
 interface CachedTransporter {
   transporter: nodemailer.Transporter;
   provider: 'gmail' | 'smtp' | 'default';
   gmailEmail?: string;
+  cachedAt: number;
+  lastUsedAt: number;
 }
+
+const TRANSPORTER_MAX_ENTRIES = 50;
+const TRANSPORTER_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 const tenantTransporters = new Map<string, CachedTransporter>();
+
+// Evict stale entries every 5 minutes
+setInterval(() => {
+	const now = Date.now();
+	for (const [key, entry] of tenantTransporters) {
+		if (now - entry.lastUsedAt > TRANSPORTER_TTL_MS) {
+			try { entry.transporter.close(); } catch { /* ignore */ }
+			tenantTransporters.delete(key);
+		}
+	}
+}, 5 * 60 * 1000).unref();
+
+/** Evict least-recently-used entry when cache is full */
+function evictLruTransporter(): void {
+	let oldest: { key: string; lastUsedAt: number } | null = null;
+	for (const [key, entry] of tenantTransporters) {
+		if (!oldest || entry.lastUsedAt < oldest.lastUsedAt) {
+			oldest = { key, lastUsedAt: entry.lastUsedAt };
+		}
+	}
+	if (oldest) {
+		const evicted = tenantTransporters.get(oldest.key);
+		if (evicted) {
+			try { evicted.transporter.close(); } catch { /* ignore */ }
+		}
+		tenantTransporters.delete(oldest.key);
+	}
+}
 
 /**
  * Get the Gmail 'from' email for a tenant, if Gmail is the active provider.
  */
 export function getGmailFromEmail(tenantId: string): string | null {
   const cached = tenantTransporters.get(tenantId);
+  if (cached) cached.lastUsedAt = Date.now();
   return cached?.provider === 'gmail' ? (cached.gmailEmail ?? null) : null;
 }
 
@@ -208,10 +243,16 @@ export async function getTenantTransporter(
 	tenantId: string,
 	options?: { skipGmail?: boolean }
 ): Promise<nodemailer.Transporter | null> {
-	// Check cache first
-	if (tenantTransporters.has(tenantId)) {
-		logInfo('email', 'Using cached transporter', { tenantId });
-		return tenantTransporters.get(tenantId)!.transporter;
+	// Check cache first (with TTL validation)
+	const cached = tenantTransporters.get(tenantId);
+	if (cached) {
+		if (Date.now() - cached.cachedAt < TRANSPORTER_TTL_MS) {
+			cached.lastUsedAt = Date.now();
+			return cached.transporter;
+		}
+		// TTL expired -- evict and recreate
+		try { cached.transporter.close(); } catch { /* ignore */ }
+		tenantTransporters.delete(tenantId);
 	}
 
 	// Load email settings from database
@@ -235,10 +276,14 @@ export async function getTenantTransporter(
 			try {
 				const gmailResult = await createGmailTransporter(tenantId);
 				if (gmailResult) {
+					const now = Date.now();
+					if (tenantTransporters.size >= TRANSPORTER_MAX_ENTRIES) evictLruTransporter();
 					const cached: CachedTransporter = {
 						transporter: gmailResult.transporter,
 						provider: 'gmail',
-						gmailEmail: gmailResult.gmailEmail
+						gmailEmail: gmailResult.gmailEmail,
+						cachedAt: now,
+						lastUsedAt: now
 					};
 					tenantTransporters.set(tenantId, cached);
 					logInfo('email', 'Using Gmail transporter (primary)', {
@@ -281,7 +326,9 @@ export async function getTenantTransporter(
 
 			try {
 				const { transporter, port } = tryCreateTransporter(emailSettings.smtpPassword);
-				tenantTransporters.set(tenantId, { transporter, provider: 'smtp' });
+				if (tenantTransporters.size >= TRANSPORTER_MAX_ENTRIES) evictLruTransporter();
+				const now = Date.now();
+				tenantTransporters.set(tenantId, { transporter, provider: 'smtp', cachedAt: now, lastUsedAt: now });
 				logInfo('email', 'Created tenant transporter', { tenantId, metadata: { host: emailSettings.smtpHost, port } });
 				return transporter;
 			} catch (error) {
@@ -303,7 +350,9 @@ export async function getTenantTransporter(
 
 						if (freshSettings?.smtpPassword) {
 							const { transporter, port } = tryCreateTransporter(freshSettings.smtpPassword);
-							tenantTransporters.set(tenantId, { transporter, provider: 'smtp' });
+							if (tenantTransporters.size >= TRANSPORTER_MAX_ENTRIES) evictLruTransporter();
+							const now2 = Date.now();
+							tenantTransporters.set(tenantId, { transporter, provider: 'smtp', cachedAt: now2, lastUsedAt: now2 });
 							logInfo('email', 'SMTP decrypt retry succeeded', { tenantId, metadata: { host: freshSettings.smtpHost, port } });
 							return transporter;
 						}
