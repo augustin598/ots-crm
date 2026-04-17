@@ -631,7 +631,7 @@ export const createTask = command(taskSchema, async (data) => {
 				const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
 				await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
 			} catch (error) {
-				console.error('Failed to send task assignment email:', error);
+				logWarning('email', `Failed to send task assignment email: ${(error as Error).message}`);
 				// Don't throw - task creation should succeed even if email fails
 			}
 		}
@@ -838,7 +838,7 @@ export const updateTask = command(
 						`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
 					await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
 				} catch (error) {
-					console.error('Failed to send task assignment email:', error);
+					logWarning('email', `Failed to send task assignment email: ${(error as Error).message}`);
 					// Don't throw - task update should succeed even if email fails
 				}
 			}
@@ -902,7 +902,7 @@ export const updateTask = command(
 							`${watcherUser.firstName} ${watcherUser.lastName}`.trim() || watcherUser.email;
 						await sendTaskUpdateEmail(taskId, watcherUser.email, watcherName, changeType);
 					} catch (error) {
-						console.error('Failed to send task update email:', error);
+						logWarning('email', `Failed to send task update email: ${(error as Error).message}`);
 						// Continue with other watchers even if one fails
 					}
 				}

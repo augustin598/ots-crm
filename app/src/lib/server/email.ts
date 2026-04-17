@@ -559,7 +559,7 @@ export async function sendWithPersistence(
 				.set({ htmlBody: mailOptions.html, updatedAt: new Date() })
 				.where(eq(table.emailLog.id, logId));
 		} catch (err) {
-			console.error('[email-logger] Failed to update htmlBody:', err);
+			logWarning('email', `Failed to update htmlBody for ${logId}: ${(err as Error).message}`);
 		}
 	}
 
