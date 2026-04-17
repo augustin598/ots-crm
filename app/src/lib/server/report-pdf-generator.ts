@@ -39,6 +39,12 @@ const PLATFORM_COLORS: Record<string, string> = {
 	'TikTok Ads': '#000000'
 };
 
+export interface ReportAccountData {
+	accountName: string;
+	spend: number;
+	currency: string;
+}
+
 export interface ReportPlatformData {
 	name: string;
 	spend: number;
@@ -46,6 +52,7 @@ export interface ReportPlatformData {
 	clicks: number;
 	conversions: number;
 	currency: string;
+	accounts?: ReportAccountData[];
 }
 
 export interface ReportPdfData {
@@ -378,7 +385,8 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
 				const dotColor = PLATFORM_COLORS[platform.name] || ACCENT;
-				const cardH = 58;
+				const acctCount = platform.accounts?.length || 0;
+				const cardH = 58 + (acctCount > 0 ? acctCount * 12 + 4 : 0);
 
 				// Card outline
 				doc.save();
@@ -418,7 +426,20 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 						.text(miniKpis[k].value, mx, y + 38, { width: miniW - 4, lineBreak: false });
 				}
 
-				y += cardH + 8;
+				y += cardH;
+
+				// Account breakdown (if available)
+				if (platform.accounts && platform.accounts.length > 0) {
+					for (const acc of platform.accounts) {
+						doc.font('Regular').fontSize(7).fillColor(MUTED)
+							.text(acc.accountName, ML + 18, y + 2, { width: CW / 2 - 20, lineBreak: false });
+						doc.font('Regular').fontSize(7).fillColor(TEXT)
+							.text(fmtAmount(acc.spend, acc.currency), ML + 14, y + 2, { width: CW - 28, align: 'right', lineBreak: false });
+						y += 12;
+					}
+				}
+
+				y += 8;
 			}
 		}
 

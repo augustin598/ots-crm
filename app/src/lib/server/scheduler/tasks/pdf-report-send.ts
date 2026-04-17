@@ -203,7 +203,28 @@ export async function getPlatformSpendData(
 		)).groupBy(table.metaAdsSpending.currencyCode);
 
 		if (!result || result.spend === 0) return null;
-		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON' };
+
+		// Account breakdown
+		const acctRows = await db.select({
+			accountId: table.metaAdsSpending.metaAdAccountId,
+			spend: sql<number>`coalesce(sum(${table.metaAdsSpending.spendCents}), 0)`,
+			currency: table.metaAdsSpending.currencyCode
+		}).from(table.metaAdsSpending).where(and(
+			eq(table.metaAdsSpending.tenantId, tenantId),
+			eq(table.metaAdsSpending.clientId, clientId),
+			lte(table.metaAdsSpending.periodStart, until),
+			gte(table.metaAdsSpending.periodEnd, since)
+		)).groupBy(table.metaAdsSpending.metaAdAccountId, table.metaAdsSpending.currencyCode);
+
+		const accounts = [];
+		for (const row of acctRows) {
+			if (row.spend === 0) continue;
+			const [acct] = await db.select({ name: table.metaAdsAccount.accountName })
+				.from(table.metaAdsAccount).where(eq(table.metaAdsAccount.metaAdAccountId, row.accountId)).limit(1);
+			accounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		}
+
+		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON', accounts: accounts.length > 1 ? accounts : undefined };
 	}
 
 	if (platform === 'google') {
@@ -221,7 +242,27 @@ export async function getPlatformSpendData(
 		)).groupBy(table.googleAdsSpending.currencyCode);
 
 		if (!result || result.spend === 0) return null;
-		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON' };
+
+		const gAcctRows = await db.select({
+			accountId: table.googleAdsSpending.googleAdsCustomerId,
+			spend: sql<number>`coalesce(sum(${table.googleAdsSpending.spendCents}), 0)`,
+			currency: table.googleAdsSpending.currencyCode
+		}).from(table.googleAdsSpending).where(and(
+			eq(table.googleAdsSpending.tenantId, tenantId),
+			eq(table.googleAdsSpending.clientId, clientId),
+			lte(table.googleAdsSpending.periodStart, until),
+			gte(table.googleAdsSpending.periodEnd, since)
+		)).groupBy(table.googleAdsSpending.googleAdsCustomerId, table.googleAdsSpending.currencyCode);
+
+		const gAccounts = [];
+		for (const row of gAcctRows) {
+			if (row.spend === 0) continue;
+			const [acct] = await db.select({ name: table.googleAdsAccount.accountName })
+				.from(table.googleAdsAccount).where(eq(table.googleAdsAccount.googleAdsCustomerId, row.accountId)).limit(1);
+			gAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		}
+
+		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: gAccounts.length > 1 ? gAccounts : undefined };
 	}
 
 	if (platform === 'tiktok') {
@@ -239,7 +280,27 @@ export async function getPlatformSpendData(
 		)).groupBy(table.tiktokAdsSpending.currencyCode);
 
 		if (!result || result.spend === 0) return null;
-		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON' };
+
+		const tAcctRows = await db.select({
+			accountId: table.tiktokAdsSpending.tiktokAdvertiserId,
+			spend: sql<number>`coalesce(sum(${table.tiktokAdsSpending.spendCents}), 0)`,
+			currency: table.tiktokAdsSpending.currencyCode
+		}).from(table.tiktokAdsSpending).where(and(
+			eq(table.tiktokAdsSpending.tenantId, tenantId),
+			eq(table.tiktokAdsSpending.clientId, clientId),
+			lte(table.tiktokAdsSpending.periodStart, until),
+			gte(table.tiktokAdsSpending.periodEnd, since)
+		)).groupBy(table.tiktokAdsSpending.tiktokAdvertiserId, table.tiktokAdsSpending.currencyCode);
+
+		const tAccounts = [];
+		for (const row of tAcctRows) {
+			if (row.spend === 0) continue;
+			const [acct] = await db.select({ name: table.tiktokAdsAccount.accountName })
+				.from(table.tiktokAdsAccount).where(eq(table.tiktokAdsAccount.tiktokAdvertiserId, row.accountId)).limit(1);
+			tAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
+		}
+
+		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: tAccounts.length > 1 ? tAccounts : undefined };
 	}
 
 	return null;
