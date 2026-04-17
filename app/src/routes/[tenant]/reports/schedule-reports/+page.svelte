@@ -12,6 +12,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
+	import { Combobox } from '$lib/components/ui/combobox';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/state';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
@@ -70,6 +71,13 @@
 		editingId
 			? clients // When editing, show all clients
 			: clients.filter((c) => !schedules.some((s) => s.clientId === c.id))
+	);
+
+	const clientOptions = $derived(
+		availableClients.map((c) => ({
+			value: c.id,
+			label: c.name + (c.email ? ` (${c.email})` : '')
+		}))
 	);
 
 	function resetForm() {
@@ -289,19 +297,12 @@
 							{#if !editingId}
 								<div class="space-y-2">
 									<Label>Client *</Label>
-									<Select.Root type="single" value={formClientId} onValueChange={(v) => { if (v) formClientId = v; }}>
-										<Select.Trigger class="w-full">
-											{clients.find((c) => c.id === formClientId)?.name || 'Selectează client...'}
-										</Select.Trigger>
-										<Select.Content>
-											{#each availableClients as client (client.id)}
-												<Select.Item value={client.id}>{client.name}{client.email ? ` (${client.email})` : ''}</Select.Item>
-											{/each}
-											{#if availableClients.length === 0}
-												<p class="text-sm text-muted-foreground p-2">Toți clienții au deja un program.</p>
-											{/if}
-										</Select.Content>
-									</Select.Root>
+									<Combobox
+										bind:value={formClientId}
+										options={clientOptions}
+										placeholder="Selectează client..."
+										searchPlaceholder="Caută clienți..."
+									/>
 								</div>
 							{:else}
 								<div class="space-y-2">
