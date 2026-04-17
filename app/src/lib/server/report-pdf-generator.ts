@@ -56,6 +56,7 @@ export interface ReportPdfData {
 	generatedAt: Date;
 	tenantLogo?: string | null; // base64 encoded logo or null for default
 	accentColor?: string | null; // tenant theme color
+	exchangeRates?: Record<string, number>; // e.g. { USD: 4.57, EUR: 4.97 } → to RON
 }
 
 function fmtNum(n: number): string {
@@ -129,6 +130,15 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		doc.registerFont('Bold', FONT_BOLD);
 
 		const ACCENT = data.accentColor || DEFAULT_ACCENT;
+		const rates = data.exchangeRates || {};
+
+		// Convert any amount to RON
+		function toRON(amount: number, currency: string): number {
+			if (currency === 'RON') return amount;
+			const rate = rates[currency];
+			return rate ? amount * rate : amount;
+		}
+
 		let y = MT;
 
 		// ============================================================
@@ -205,11 +215,12 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		// ============================================================
 		// SUMMARY KPI CARDS
 		// ============================================================
-		const totalSpend = data.platforms.reduce((s, p) => s + p.spend, 0);
+		// Convert all spend to RON for totals
+		const totalSpend = data.platforms.reduce((s, p) => s + toRON(p.spend, p.currency), 0);
 		const totalImpressions = data.platforms.reduce((s, p) => s + p.impressions, 0);
 		const totalClicks = data.platforms.reduce((s, p) => s + p.clicks, 0);
 		const totalConversions = data.platforms.reduce((s, p) => s + p.conversions, 0);
-		const mainCurrency = data.platforms[0]?.currency || 'RON';
+		const mainCurrency = 'RON';
 		const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
 		const cpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
 

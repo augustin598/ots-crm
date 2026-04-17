@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { generateReportPdf } from '$lib/server/report-pdf-generator';
 import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
 
@@ -93,6 +93,25 @@ export const GET: RequestHandler = async (event) => {
 		tenantLogo = invoiceSettings?.invoiceLogo || null;
 	} catch { /* use default logo */ }
 
+	// Fetch latest BNR exchange rates for currency conversion
+	const exchangeRates: Record<string, number> = {};
+	try {
+		const rates = await db
+			.select({ currency: table.bnrExchangeRate.currency, rate: table.bnrExchangeRate.rate })
+			.from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'USD'))
+			.orderBy(desc(table.bnrExchangeRate.rateDate))
+			.limit(1);
+		const eurRates = await db
+			.select({ currency: table.bnrExchangeRate.currency, rate: table.bnrExchangeRate.rate })
+			.from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'EUR'))
+			.orderBy(desc(table.bnrExchangeRate.rateDate))
+			.limit(1);
+		if (rates[0]) exchangeRates['USD'] = rates[0].rate;
+		if (eurRates[0]) exchangeRates['EUR'] = eurRates[0].rate;
+	} catch { /* use original currencies */ }
+
 	const pdfBuffer = await generateReportPdf({
 		tenantName,
 		clientName: client.name || 'Client',
@@ -100,7 +119,8 @@ export const GET: RequestHandler = async (event) => {
 		platforms,
 		generatedAt: new Date(),
 		tenantLogo,
-		accentColor: event.locals.tenant.themeColor || null
+		accentColor: event.locals.tenant.themeColor || null,
+		exchangeRates
 	});
 
 	const safeClientName = (client.name || 'client').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();

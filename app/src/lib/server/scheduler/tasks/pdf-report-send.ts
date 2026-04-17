@@ -4,7 +4,7 @@ import { eq, and, ne } from 'drizzle-orm';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { sendReportEmail } from '$lib/server/email';
 import { generateReportPdf, type ReportPlatformData } from '$lib/server/report-pdf-generator';
-import { sql, gte, lte } from 'drizzle-orm';
+import { sql, gte, lte, desc } from 'drizzle-orm';
 
 /**
  * Process scheduled PDF report emails.
@@ -91,6 +91,17 @@ export async function processPdfReportSend() {
 				} catch { /* use default */ }
 
 				// Generate PDF
+				// Fetch exchange rates
+				const exchangeRates: Record<string, number> = {};
+				try {
+					const usdRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
+						.where(eq(table.bnrExchangeRate.currency, 'USD')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+					const eurRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
+						.where(eq(table.bnrExchangeRate.currency, 'EUR')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+					if (usdRate[0]) exchangeRates['USD'] = usdRate[0].rate;
+					if (eurRate[0]) exchangeRates['EUR'] = eurRate[0].rate;
+				} catch { /* use original currencies */ }
+
 				const pdfBuffer = await generateReportPdf({
 					tenantName: schedule.tenantName || 'CRM',
 					clientName: schedule.clientName || 'Client',
@@ -98,7 +109,8 @@ export async function processPdfReportSend() {
 					platforms,
 					generatedAt: now,
 					tenantLogo,
-					accentColor: schedule.tenantThemeColor || null
+					accentColor: schedule.tenantThemeColor || null,
+					exchangeRates
 				});
 
 				// Get recipients
