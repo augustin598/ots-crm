@@ -162,16 +162,21 @@ const TRANSPORTER_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const tenantTransporters = new Map<string, CachedTransporter>();
 
-// Evict stale entries every 5 minutes
-setInterval(() => {
-	const now = Date.now();
-	for (const [key, entry] of tenantTransporters) {
-		if (now - entry.lastUsedAt > TRANSPORTER_TTL_MS) {
-			try { entry.transporter.close(); } catch { /* ignore */ }
-			tenantTransporters.delete(key);
+// Evict idle entries every 5 minutes (uses lastUsedAt for idle-based eviction).
+// Cache-hit path uses cachedAt for age-based eviction (forces credential refresh every 30 min).
+// globalThis guard prevents accumulating timers on HMR reloads in dev.
+const TRANSPORTER_CLEANUP_SYM = Symbol.for('ots_transporter_cleanup');
+if (!(globalThis as Record<symbol, unknown>)[TRANSPORTER_CLEANUP_SYM]) {
+	(globalThis as Record<symbol, unknown>)[TRANSPORTER_CLEANUP_SYM] = setInterval(() => {
+		const now = Date.now();
+		for (const [key, entry] of tenantTransporters) {
+			if (now - entry.lastUsedAt > TRANSPORTER_TTL_MS) {
+				try { entry.transporter.close(); } catch { /* ignore */ }
+				tenantTransporters.delete(key);
+			}
 		}
-	}
-}, 5 * 60 * 1000).unref();
+	}, 5 * 60 * 1000).unref();
+}
 
 /** Evict least-recently-used entry when cache is full */
 function evictLruTransporter(): void {

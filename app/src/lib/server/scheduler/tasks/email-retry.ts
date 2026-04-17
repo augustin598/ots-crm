@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { EMAIL_SEND_REGISTRY, clearTenantTransporterCache, runWithRetryLogId } from '$lib/server/email';
 
@@ -43,17 +43,30 @@ function isPermanentError(err: unknown): boolean {
  */
 export async function recoverInterruptedRetries(): Promise<void> {
 	try {
+		// Recover rows stuck in transient states from a crash:
+		// - 'retrying': handler was in progress when process died
+		// - 'active': sendMailWithRetry was in progress
+		// - 'pending': logEmailAttempt succeeded but send never started
+		const stuckFilter = or(
+			eq(table.emailLog.status, 'retrying'),
+			eq(table.emailLog.status, 'active'),
+			eq(table.emailLog.status, 'pending')
+		)!;
+
 		const stuck = await db
-			.select({ id: table.emailLog.id })
+			.select({ id: table.emailLog.id, status: table.emailLog.status })
 			.from(table.emailLog)
-			.where(eq(table.emailLog.status, 'retrying'));
+			.where(stuckFilter);
 
 		if (stuck.length > 0) {
 			await db
 				.update(table.emailLog)
 				.set({ status: 'failed', updatedAt: new Date() })
-				.where(eq(table.emailLog.status, 'retrying'));
-			logWarning('scheduler', `Recovered ${stuck.length} email(s) stuck in 'retrying' state after restart`);
+				.where(stuckFilter);
+			const byStatus = stuck.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {} as Record<string, number>);
+			logWarning('scheduler', `Recovered ${stuck.length} email(s) stuck after restart`, {
+				metadata: { byStatus }
+			});
 		}
 	} catch (e) {
 		const { message } = serializeError(e);
@@ -213,9 +226,11 @@ export async function processEmailRetry(): Promise<{
 		// Non-critical
 	}
 
-	// Cap: delete oldest exhausted failures if any tenant has > 100 total failed rows
+	// Global cap: keep at most GLOBAL_MAX_EXHAUSTED exhausted failure rows across all tenants.
+	// This prevents unbounded table growth from misconfigured SMTP or attack scenarios.
+	// Intentionally global (not per-tenant) for simplicity at ~50 tenants scale.
 	try {
-		const PER_TENANT_MAX_FAILED = 100;
+		const GLOBAL_MAX_EXHAUSTED = 100;
 		const overflowRows = await db
 			.select({ id: table.emailLog.id })
 			.from(table.emailLog)
@@ -228,8 +243,8 @@ export async function processEmailRetry(): Promise<{
 			.orderBy(table.emailLog.createdAt)
 			.limit(200);
 
-		if (overflowRows.length > PER_TENANT_MAX_FAILED) {
-			const toDelete = overflowRows.slice(0, overflowRows.length - PER_TENANT_MAX_FAILED);
+		if (overflowRows.length > GLOBAL_MAX_EXHAUSTED) {
+			const toDelete = overflowRows.slice(0, overflowRows.length - GLOBAL_MAX_EXHAUSTED);
 			await db
 				.delete(table.emailLog)
 				.where(inArray(table.emailLog.id, toDelete.map((r) => r.id)));
