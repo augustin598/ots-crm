@@ -260,13 +260,13 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 			// Table columns
 			const cols = [
-				{ label: 'Platformă', w: 110, align: 'left' as const },
-				{ label: 'Cheltuieli', w: 90, align: 'right' as const },
-				{ label: 'Impresii', w: 70, align: 'right' as const },
-				{ label: 'Click-uri', w: 60, align: 'right' as const },
-				{ label: 'CPC', w: 70, align: 'right' as const },
-				{ label: 'CTR', w: 55, align: 'right' as const },
-				{ label: 'Conversii', w: 55, align: 'right' as const }
+				{ label: 'Platformă', w: 100, align: 'left' as const },
+				{ label: 'Cheltuieli', w: 85, align: 'right' as const },
+				{ label: 'Impresii', w: 68, align: 'right' as const },
+				{ label: 'Click-uri', w: 58, align: 'right' as const },
+				{ label: 'CPC', w: 68, align: 'right' as const },
+				{ label: 'CTR', w: 58, align: 'right' as const },
+				{ label: 'Conversii', w: 68, align: 'right' as const }
 			];
 
 			const rowH = 24;
