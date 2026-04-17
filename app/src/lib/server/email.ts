@@ -559,7 +559,7 @@ export async function sendWithPersistence(
 				.set({ htmlBody: mailOptions.html, updatedAt: new Date() })
 				.where(eq(table.emailLog.id, logId));
 		} catch (err) {
-			console.error('[email-logger] Failed to update htmlBody:', err);
+			logWarning('email', `Failed to update htmlBody for ${logId}: ${(err as Error).message}`);
 		}
 	}
 
@@ -599,10 +599,17 @@ export async function sendWithPersistence(
 						title: 'Email netrimis',
 						message: `Email ${ctx.emailType} catre ${ctx.toEmail} a esuat: ${(err as Error).message?.substring(0, 100)}`,
 						priority: 'high',
-					}).catch(() => {});
+					}).catch((notifErr) => {
+						logWarning('email', `Failed to notify admin about email failure: ${(notifErr as Error).message}`, {
+							tenantId: ctx.tenantId ?? undefined
+						});
+					});
 				}
-			} catch {
-				// Don't let notification failure mask the original error
+			} catch (notifyErr) {
+				// Don't let notification failure mask the original error, but log it
+				logWarning('email', `Failed to notify admins about email failure: ${(notifyErr as Error).message}`, {
+					tenantId: ctx.tenantId ?? undefined
+				});
 			}
 		}
 
