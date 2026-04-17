@@ -405,3 +405,22 @@ export async function deleteNotifications(
 		return result.rowsAffected;
 	}
 }
+
+/**
+ * Clear all notifications of a specific type for a tenant.
+ * Used to remove stale error notifications after a successful operation.
+ */
+export async function clearNotificationsByType(
+	tenantId: string,
+	type: NotificationType
+): Promise<number> {
+	const result = await db
+		.delete(table.notification)
+		.where(
+			and(
+				eq(table.notification.tenantId, tenantId),
+				eq(table.notification.type, type)
+			)
+		);
+	return result.rowsAffected;
+}
