@@ -105,22 +105,10 @@
 		tiktok: 'TikTok'
 	};
 
-	const platformColors: Record<string, { pill: string; btn: string; btnOff: string }> = {
-		meta: {
-			pill: 'bg-[#1877F2]/10 text-[#1877F2] border-[#1877F2]/20',
-			btn: 'bg-[#1877F2]/15 border-[#1877F2] text-[#1877F2] font-semibold shadow-sm ring-2 ring-[#1877F2]/20',
-			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
-		},
-		google: {
-			pill: 'bg-[#3C8BD9]/10 text-[#3C8BD9] border-[#3C8BD9]/20',
-			btn: 'bg-[#FABC04]/15 border-[#FABC04] text-foreground font-semibold shadow-sm ring-2 ring-[#FABC04]/20',
-			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
-		},
-		tiktok: {
-			pill: 'bg-foreground/5 text-foreground border-foreground/10',
-			btn: 'bg-foreground/10 border-foreground text-foreground font-semibold shadow-sm ring-2 ring-foreground/10',
-			btnOff: 'bg-muted/50 text-muted-foreground border-transparent opacity-60 hover:opacity-100 hover:bg-muted'
-		}
+	const platformPillColors: Record<string, string> = {
+		meta: 'bg-[#1877F2]/10 text-[#1877F2] border-[#1877F2]/20',
+		google: 'bg-[#3C8BD9]/10 text-[#3C8BD9] border-[#3C8BD9]/20',
+		tiktok: 'bg-foreground/5 text-foreground border-foreground/10'
 	};
 
 	const frequencyLabels: Record<string, string> = {
@@ -417,7 +405,7 @@
 								<div class="flex gap-1.5 mt-2.5">
 									{#each schedule.platforms as p}
 										{@const Icon = platformIcons[p]}
-										<span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p].pill}">
+										<span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium {platformPillColors[p]}">
 											{#if Icon}
 												<Icon class="h-3.5 w-3.5" />
 											{/if}
@@ -559,16 +547,26 @@
 				<div class="flex gap-2">
 					{#each ['meta', 'google', 'tiktok'] as p}
 						{@const Icon = platformIcons[p]}
+						{@const selected = formPlatforms.includes(p)}
 						<button
 							type="button"
-							class="flex-1 flex items-center justify-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all duration-150
-								{formPlatforms.includes(p) ? platformColors[p].btn : platformColors[p].btnOff}"
+							class="flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all duration-150
+								{selected
+									? 'border-success bg-success/10 text-foreground'
+									: 'border-border bg-background text-muted-foreground hover:bg-muted/50'}"
 							onclick={() => togglePlatform(p)}
 						>
-							{#if Icon}
-								<Icon class="h-4 w-4" />
+							<span class="flex items-center gap-2">
+								{#if Icon}
+									<Icon class="h-4 w-4" />
+								{/if}
+								{platformLabels[p]}
+							</span>
+							{#if selected}
+								<span class="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-success text-white">
+									<svg class="h-2.5 w-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
+								</span>
 							{/if}
-							{platformLabels[p]}
 						</button>
 					{/each}
 				</div>
