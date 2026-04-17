@@ -5,6 +5,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { clearNotificationsByType } from '$lib/server/notifications';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -457,6 +458,13 @@ async function _syncKeezInvoicesForTenantInner(
 			.update(table.keezIntegration)
 			.set({ lastSyncAt: new Date(), updatedAt: new Date() })
 			.where(eq(table.keezIntegration.tenantId, tenantId));
+	}
+
+	// Clear stale Keez sync error notifications after successful sync
+	try {
+		await clearNotificationsByType(tenantId, 'keez.sync_error');
+	} catch {
+		// Don't break sync for notification cleanup errors
 	}
 
 	return result;
