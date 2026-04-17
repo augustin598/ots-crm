@@ -467,16 +467,15 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 		}
 
 		// ============================================================
-		// FOOTER — tenant name only. The previous right-aligned "Raport
-		// generat automat" text was removed: its lineHeight pushed PDFKit
-		// past page.height - margin.bottom, triggering an automatic page
-		// break that produced a blank page 2 containing only that text.
+		// FOOTER — only a thin separator line. Text previously drawn here
+		// (tenant name, "Raport generat automat") sat at y ~= 805 where
+		// PDFKit's auto-page-break (doc.y + lineHeight > page.height -
+		// margin.bottom, i.e. 811.89 with the default 30pt bottom margin)
+		// would fire and push the text onto a phantom page 2. `stroke()`
+		// doesn't advance the cursor, so the line alone is safe.
 		// ============================================================
 		const footerY = PH - 45;
 		doc.moveTo(ML, footerY).lineTo(PW - MR, footerY).strokeColor(BORDER).lineWidth(0.5).stroke();
-
-		doc.font('Regular').fontSize(7).fillColor(LIGHT)
-			.text(data.tenantName, ML, footerY + 9, { width: CW, lineBreak: false });
 }
 
 /**
