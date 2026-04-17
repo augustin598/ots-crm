@@ -193,18 +193,15 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 			.text(data.clientName, col1X, y, { width: colW });
 		y += 14;
 
-		// Promoted sites (unique account names from all platforms)
-		const allAccountNames = new Set<string>();
+		// Promoted sites grouped by platform with logo
 		for (const p of data.platforms) {
-			if (p.accounts) {
-				for (const a of p.accounts) allAccountNames.add(a.accountName);
+			if (p.accounts && p.accounts.length > 0) {
+				const sitesText = p.accounts.map((a) => a.accountName).join('  •  ');
+				drawPlatformLogo(doc, p.name, col1X, y - 1, 10);
+				doc.font('Regular').fontSize(7).fillColor(MUTED)
+					.text(sitesText, col1X + 14, y, { width: colW - 14, lineBreak: false });
+				y += 13;
 			}
-		}
-		if (allAccountNames.size > 0) {
-			const sitesText = Array.from(allAccountNames).join('  •  ');
-			doc.font('Regular').fontSize(7.5).fillColor(MUTED)
-				.text(sitesText, col1X, y, { width: colW });
-			y += 12;
 		}
 
 		// Right: DETALII RAPORT
