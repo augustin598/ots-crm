@@ -78,13 +78,25 @@ export async function processPdfReportSend() {
 					continue;
 				}
 
+				// Get tenant logo
+				let tenantLogo: string | null = null;
+				try {
+					const [invoiceSettings] = await db
+						.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+						.from(table.invoiceSettings)
+						.where(eq(table.invoiceSettings.tenantId, schedule.tenantId))
+						.limit(1);
+					tenantLogo = invoiceSettings?.invoiceLogo || null;
+				} catch { /* use default */ }
+
 				// Generate PDF
 				const pdfBuffer = await generateReportPdf({
 					tenantName: schedule.tenantName || 'CRM',
 					clientName: schedule.clientName || 'Client',
 					period: { since, until, label },
 					platforms,
-					generatedAt: now
+					generatedAt: now,
+					tenantLogo
 				});
 
 				// Get recipients

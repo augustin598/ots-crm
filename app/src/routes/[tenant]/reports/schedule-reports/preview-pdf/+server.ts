@@ -64,15 +64,25 @@ export const GET: RequestHandler = async (event) => {
 		if (data) platforms.push(data);
 	}
 
-	// Generate PDF even with no data (preview should show structure)
+	// Get tenant logo
 	const tenantName = event.locals.tenant.name || 'CRM';
+	let tenantLogo: string | null = null;
+	try {
+		const [invoiceSettings] = await db
+			.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, tenantId))
+			.limit(1);
+		tenantLogo = invoiceSettings?.invoiceLogo || null;
+	} catch { /* use default logo */ }
 
 	const pdfBuffer = await generateReportPdf({
 		tenantName,
 		clientName: client.name || 'Client',
 		period: { since, until, label },
 		platforms,
-		generatedAt: new Date()
+		generatedAt: new Date(),
+		tenantLogo
 	});
 
 	const safeClientName = (client.name || 'client').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();

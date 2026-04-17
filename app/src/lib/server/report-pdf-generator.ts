@@ -12,6 +12,7 @@ function resolveAssetsDir(): string {
 const ASSETS_DIR = resolveAssetsDir();
 const FONT_REGULAR = resolve(ASSETS_DIR, 'DejaVuSans.ttf');
 const FONT_BOLD = resolve(ASSETS_DIR, 'DejaVuSans-Bold.ttf');
+const DEFAULT_LOGO = resolve(ASSETS_DIR, 'logo.png');
 
 // A4
 const PW = 595.28;
@@ -53,6 +54,7 @@ export interface ReportPdfData {
 	period: { since: string; until: string; label: string };
 	platforms: ReportPlatformData[];
 	generatedAt: Date;
+	tenantLogo?: string | null; // base64 encoded logo or null for default
 }
 
 function fmtNum(n: number): string {
@@ -71,6 +73,46 @@ function roundedRect(doc: PDFKit.PDFDocument, x: number, y: number, w: number, h
 	doc.save();
 	doc.roundedRect(x, y, w, h, r).fill(color);
 	doc.restore();
+}
+
+/** Draw the Meta (Facebook) logo at given position */
+function drawMetaLogo(doc: PDFKit.PDFDocument, x: number, y: number, size: number) {
+	const s = size / 80;
+	doc.save();
+	doc.translate(x, y);
+	doc.scale(s);
+	doc.path('M77,37.5c0-20.4-16.6-37-37-37S3,17.1,3,37.5C3,56,16.5,71.3,34.2,74.1V48.2h-9.4V37.5h9.4v-8.2c0-9.3,5.5-14.4,14-14.4c4,0,8.3,0.7,8.3,0.7v9.1h-4.7c-4.6,0-6,2.9-6,5.8v6.9H56l-1.6,10.7h-8.6v25.9C63.5,71.3,77,56,77,37.5z').fill('#1877F2');
+	doc.path('M54.4,48.2L56,37.5H45.8v-6.9c0-2.9,1.4-5.8,6-5.8h4.7v-9.1c0,0-4.2-0.7-8.3-0.7c-8.5,0-14,5.1-14,14.4v8.2h-9.4v10.7h9.4v25.9c1.9,0.3,3.8,0.4,5.8,0.4s3.9-0.2,5.8-0.4V48.2H54.4z').fill('#FFFFFF');
+	doc.restore();
+}
+
+/** Draw the Google Ads logo at given position */
+function drawGoogleLogo(doc: PDFKit.PDFDocument, x: number, y: number, size: number) {
+	const s = size / 80;
+	doc.save();
+	doc.translate(x, y);
+	doc.scale(s);
+	doc.path('M27.2,9.2c0.8-2,1.8-3.9,3.4-5.4c6.3-6.2,16.8-4.6,21,3.1c3.2,5.9,6.6,11.6,10,17.4c5.5,9.6,11.1,19.3,16.6,28.9c4.6,8.1-0.4,18.3-9.5,19.7c-5.6,0.8-10.9-1.7-13.8-6.8c-4.9-8.5-9.8-16.9-14.6-25.4c-0.1-0.2-0.2-0.4-0.4-0.5c-0.5-0.4-0.7-1-1.1-1.6c-2.2-3.8-4.4-7.6-6.5-11.3c-1.4-2.4-2.8-4.9-4.2-7.3c-1.3-2.2-1.8-4.6-1.8-7.1C26.5,11.7,26.6,10.4,27.2,9.2').fill('#3C8BD9');
+	doc.path('M27.2,9.2c-0.3,1.2-0.5,2.3-0.6,3.5c-0.1,2.7,0.6,5.2,1.9,7.6c3.5,6.1,7.1,12.2,10.6,18.3c0.3,0.5,0.6,1.1,0.9,1.6c-1.9,3.4-3.9,6.7-5.8,10c-2.7,4.7-5.4,9.4-8.2,14c-0.1,0-0.2-0.1-0.2-0.2c0-0.3,0.1-0.5,0.1-0.7c1.3-4.8,0.2-9.1-3.1-12.8c-2-2.2-4.6-3.5-7.6-3.9c-3.9-0.5-7.3,0.5-10.3,2.9c-0.5,0.4-0.9,1-1.5,1.4c-0.1,0-0.2-0.1-0.2-0.2c1.5-2.7,3.1-5.3,4.6-8C14.2,31.7,20.6,20.6,27,9.6C27.1,9.4,27.2,9.3,27.2,9.2').fill('#FABC04');
+	doc.path('M3.3,50.9c0.6-0.5,1.2-1.1,1.8-1.6c7.8-6.2,19.6-1.7,21.3,8.1c0.4,2.4,0.2,4.6-0.5,6.9c0,0.2-0.1,0.4-0.1,0.5c-0.3,0.5-0.5,1.1-0.9,1.6c-2.9,4.7-7.1,7.1-12.6,6.7C6,72.6,1,67.8,0.1,61.5c-0.4-3.1,0.2-5.9,1.8-8.6c0.3-0.6,0.7-1.1,1.1-1.7C3.1,51.2,3.1,50.9,3.3,50.9').fill('#34A852');
+	doc.restore();
+}
+
+/** Draw the TikTok logo at given position */
+function drawTikTokLogo(doc: PDFKit.PDFDocument, x: number, y: number, size: number) {
+	const s = size / 512;
+	doc.save();
+	doc.translate(x, y);
+	doc.scale(s);
+	doc.path('M412.19,118.66a109.27,109.27,0,0,1-9.45-5.5,132.87,132.87,0,0,1-24.27-20.62c-18.1-20.71-24.86-41.72-27.35-56.43h.1C349.14,23.9,350,16,350.13,16H267.69V334.78c0,4.28,0,8.51-.18,12.69,0,.52-.05,1-.08,1.56,0,.23,0,.47-.05.71,0,.06,0,.12,0,.18a70,70,0,0,1-35.22,55.56,68.8,68.8,0,0,1-34.11,9c-38.41,0-69.54-31.32-69.54-70s31.13-70,69.54-70a68.9,68.9,0,0,1,21.41,3.39l.1-83.94a153.14,153.14,0,0,0-118,34.52,161.79,161.79,0,0,0-35.3,43.53c-3.48,6-16.61,30.11-18.2,69.24-1,22.21,5.67,45.22,8.85,54.73v.2c2,5.6,9.75,24.71,22.38,40.82A167.53,167.53,0,0,0,115,470.66v-.2l.2.2C155.11,497.78,199.36,496,199.36,496c7.66-.31,33.32,0,62.46-13.81,32.32-15.31,50.72-38.12,50.72-38.12a158.46,158.46,0,0,0,27.64-45.93c7.46-19.61,9.95-43.13,9.95-52.53V176.49c1,.6,14.32,9.41,14.32,9.41s19.19,12.3,49.13,20.31c21.48,5.7,50.42,6.9,50.42,6.9V131.27C453.86,132.37,433.27,129.17,412.19,118.66Z').fill('#000000');
+	doc.restore();
+}
+
+/** Draw platform logo by name */
+function drawPlatformLogo(doc: PDFKit.PDFDocument, name: string, x: number, y: number, size: number) {
+	if (name === 'Meta Ads') drawMetaLogo(doc, x, y, size);
+	else if (name === 'Google Ads') drawGoogleLogo(doc, x, y, size);
+	else if (name === 'TikTok Ads') drawTikTokLogo(doc, x, y, size);
 }
 
 export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
@@ -94,11 +136,24 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		y = MT + 8;
 
 		// ============================================================
-		// HEADER
+		// HEADER (logo left, title right)
 		// ============================================================
-		doc.font('Bold').fontSize(22).fillColor(ACCENT)
-			.text('Raport Marketing', ML, y);
-		y += 30;
+		const logoH = 36;
+		try {
+			if (data.tenantLogo) {
+				const base64Data = data.tenantLogo.replace(/^data:image\/\w+;base64,/, '');
+				const logoBuffer = Buffer.from(base64Data, 'base64');
+				doc.image(logoBuffer, ML, y, { height: logoH });
+			} else if (existsSync(DEFAULT_LOGO)) {
+				doc.image(DEFAULT_LOGO, ML, y, { height: logoH });
+			}
+		} catch { /* skip logo on error */ }
+
+		// Title aligned right of logo area
+		const titleX = ML + 50;
+		doc.font('Bold').fontSize(20).fillColor(ACCENT)
+			.text('Raport Marketing', titleX, y + 2, { width: CW - 50, align: 'right' });
+		y += logoH + 10;
 
 		doc.font('Bold').fontSize(11).fillColor(DARK)
 			.text(data.clientName, ML, y);
@@ -210,11 +265,10 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 				cx = ML + 8;
 
-				// Platform name with color dot
-				const dotColor = PLATFORM_COLORS[platform.name] || ACCENT;
-				doc.circle(cx + 3, y + rowH / 2, 3).fill(dotColor);
+				// Platform name with logo
+				drawPlatformLogo(doc, platform.name, cx, y + 5, 14);
 				doc.font('Bold').fontSize(8).fillColor(DARK)
-					.text(platform.name, cx + 12, y + 8, { width: cols[0].w - 20, align: 'left' });
+					.text(platform.name, cx + 18, y + 8, { width: cols[0].w - 26, align: 'left' });
 				cx += cols[0].w;
 
 				const rowData = [
@@ -290,9 +344,10 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				doc.rect(ML, y + 4, 3, cardH - 8).fill(dotColor);
 				doc.restore();
 
-				// Platform name
+				// Platform logo + name
+				drawPlatformLogo(doc, platform.name, ML + 14, y + 7, 16);
 				doc.font('Bold').fontSize(9).fillColor(DARK)
-					.text(platform.name, ML + 14, y + 10);
+					.text(platform.name, ML + 34, y + 10);
 
 				// Mini KPIs inside card
 				const miniKpis = [
