@@ -912,22 +912,34 @@ export async function listGeographicInsights(
 		}
 
 		// Build results, filtering out countries and postal codes
-		const results: GoogleAdsGeographicInsight[] = [];
+		// Aggregate by resolved location name to merge different geo_target IDs for the same city/region
+		const aggregatedMap = new Map<string, GoogleAdsGeographicInsight>();
 		for (const [resourceName, data] of topLocations) {
 			const info = nameMap.get(resourceName);
 			if (info?.targetType === 'Country' || info?.targetType === 'Postal Code') continue;
 			if (info?.name && /^\d+$/.test(info.name)) continue;
-			const match = resourceName.match(/(\d+)$/);
-			results.push({
-				locationId: match ? Number(match[1]) : 0,
-				locationName: info?.name || resourceName,
-				locationType: info?.targetType || 'REGION',
-				spend: data.spend,
-				impressions: data.impressions,
-				clicks: data.clicks,
-				results: data.results
-			});
+			const locationName = info?.name || resourceName;
+			const key = locationName.toLowerCase();
+			const existing = aggregatedMap.get(key);
+			if (existing) {
+				existing.spend += data.spend;
+				existing.impressions += data.impressions;
+				existing.clicks += data.clicks;
+				existing.results += data.results;
+			} else {
+				const match = resourceName.match(/(\d+)$/);
+				aggregatedMap.set(key, {
+					locationId: match ? Number(match[1]) : 0,
+					locationName,
+					locationType: info?.targetType || 'REGION',
+					spend: data.spend,
+					impressions: data.impressions,
+					clicks: data.clicks,
+					results: data.results
+				});
+			}
 		}
+		const results = Array.from(aggregatedMap.values()).sort((a, b) => b.spend - a.spend);
 
 		logInfo('google-ads', `Geographic insights loaded for ${customerId}`, {
 			metadata: { locations: results.length }
