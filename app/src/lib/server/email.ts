@@ -472,6 +472,8 @@ export type EmailSendContext = {
 	metadata: Record<string, unknown>;
 	htmlBody: string;
 	payload: { sendFn: string; args: unknown[] } | null;
+	/** When set, skip creating a new email_log row and reuse this existing log ID (for retries). */
+	_retryOfLogId?: string;
 };
 
 /**
@@ -498,7 +500,9 @@ export async function sendWithPersistence(
 	buildMail: () => Promise<nodemailer.SendMailOptions>
 ): Promise<void> {
 	// STEP 1: Log BEFORE anything else can fail. Guarantees a DB row exists.
-	const logId = await logEmailAttempt({
+	// If this is a retry (via scheduler), reuse the existing log ID instead of creating a duplicate row.
+	const retryLogId = ctx._retryOfLogId ?? _activeRetryLogId;
+	const logId = retryLogId ?? await logEmailAttempt({
 		tenantId: ctx.tenantId,
 		toEmail: ctx.toEmail,
 		subject: ctx.subject,
@@ -2369,6 +2373,21 @@ export async function sendReportEmail(
 // Add the corresponding entry whenever you add a new send function that uses
 // `sendWithPersistence` with a non-null payload.
 // ---------------------------------------------------------------------------
+/**
+ * When set, sendWithPersistence will reuse this log ID instead of creating a new row.
+ * Used by the email_retry scheduler to prevent duplicate email_log entries.
+ * Set before calling a registry handler, cleared after.
+ */
+let _activeRetryLogId: string | null = null;
+
+export function setRetryLogId(logId: string | null): void {
+	_activeRetryLogId = logId;
+}
+
+export function getRetryLogId(): string | null {
+	return _activeRetryLogId;
+}
+
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
 	sendInvitationEmail,
 	sendInvoiceEmail,

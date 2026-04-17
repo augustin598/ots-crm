@@ -70,38 +70,45 @@ export async function verifyMagicLinkToken(
 	// Hash the provided token
 	const hashedToken = hashToken(token);
 
-	// Find token in database
-	const [tokenRecord] = await db
-		.select()
-		.from(table.magicLinkToken)
-		.where(
-			and(
-				eq(table.magicLinkToken.token, hashedToken),
-				eq(table.magicLinkToken.tenantId, tenant.id),
-				eq(table.magicLinkToken.used, false)
+	// Atomic claim: UPDATE ... WHERE used=false inside a transaction prevents
+	// two concurrent requests from both succeeding with the same token (TOCTOU fix).
+	const tokenRecord = await db.transaction(async (tx) => {
+		const [record] = await tx
+			.select()
+			.from(table.magicLinkToken)
+			.where(
+				and(
+					eq(table.magicLinkToken.token, hashedToken),
+					eq(table.magicLinkToken.tenantId, tenant.id),
+					eq(table.magicLinkToken.used, false)
+				)
 			)
-		)
-		.limit(1);
+			.limit(1);
+
+		if (!record) return null;
+
+		// Atomically mark as used within the same transaction
+		await tx
+			.update(table.magicLinkToken)
+			.set({ used: true, usedAt: new Date() })
+			.where(
+				and(
+					eq(table.magicLinkToken.id, record.id),
+					eq(table.magicLinkToken.used, false)
+				)
+			);
+
+		return record;
+	});
 
 	if (!tokenRecord) {
 		throw new Error('Invalid or expired token');
 	}
 
-	// Check if token is expired
+	// Check if token is expired (already marked used above, so no second use possible)
 	if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-		// Mark as used even though expired
-		await db
-			.update(table.magicLinkToken)
-			.set({ used: true, usedAt: new Date() })
-			.where(eq(table.magicLinkToken.id, tokenRecord.id));
 		throw new Error('Token has expired. Please request a new magic link.');
 	}
-
-	// Mark token as used
-	await db
-		.update(table.magicLinkToken)
-		.set({ used: true, usedAt: new Date() })
-		.where(eq(table.magicLinkToken.id, tokenRecord.id));
 
 	// Get client
 	if (!tokenRecord.clientId) {

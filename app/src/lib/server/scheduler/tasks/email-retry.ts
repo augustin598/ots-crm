@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
-import { EMAIL_SEND_REGISTRY, clearTenantTransporterCache } from '$lib/server/email';
+import { EMAIL_SEND_REGISTRY, clearTenantTransporterCache, setRetryLogId } from '$lib/server/email';
 
 /**
  * Scheduled task: drain failed email_log rows and replay them via the original send
@@ -150,10 +150,15 @@ export async function processEmailRetry(): Promise<{
 					.where(eq(table.emailLog.id, row.id));
 
 				try {
-					// STEP 2: Call the original send function
-					await handler(...parsed.args);
-					// STEP 3: Success — delete old row (sendWithPersistence created a new success row)
-					await db.delete(table.emailLog).where(eq(table.emailLog.id, row.id));
+					// STEP 2: Call the original send function with retry context
+					// setRetryLogId prevents sendWithPersistence from creating a duplicate email_log row
+					setRetryLogId(row.id);
+					try {
+						await handler(...parsed.args);
+					} finally {
+						setRetryLogId(null);
+					}
+					// STEP 3: Success — row was updated in-place by sendWithPersistence (no duplicate)
 					recovered++;
 				} catch (sendErr) {
 					// STEP 4: Classify error and decide retry strategy

@@ -110,37 +110,42 @@ export async function verifyAdminMagicLinkToken(
 		// Hash the provided token
 		const hashedToken = hashToken(token);
 
-		// Find token in database
-		const [tokenRecord] = await db
-			.select()
-			.from(table.adminMagicLinkToken)
-			.where(
-				and(
-					eq(table.adminMagicLinkToken.token, hashedToken),
-					eq(table.adminMagicLinkToken.used, false)
+		// Atomic claim: SELECT + UPDATE in transaction prevents TOCTOU race condition
+		const tokenRecord = await db.transaction(async (tx) => {
+			const [record] = await tx
+				.select()
+				.from(table.adminMagicLinkToken)
+				.where(
+					and(
+						eq(table.adminMagicLinkToken.token, hashedToken),
+						eq(table.adminMagicLinkToken.used, false)
+					)
 				)
-			)
-			.limit(1);
+				.limit(1);
+
+			if (!record) return null;
+
+			await tx
+				.update(table.adminMagicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(
+					and(
+						eq(table.adminMagicLinkToken.id, record.id),
+						eq(table.adminMagicLinkToken.used, false)
+					)
+				);
+
+			return record;
+		});
 
 		if (!tokenRecord) {
 			return { success: false, error: 'Invalid or expired token' };
 		}
 
-		// Check if token is expired
+		// Check if token is expired (already marked used above)
 		if (Date.now() >= tokenRecord.expiresAt.getTime()) {
-			// Mark as used even though expired
-			await db
-				.update(table.adminMagicLinkToken)
-				.set({ used: true, usedAt: new Date() })
-				.where(eq(table.adminMagicLinkToken.id, tokenRecord.id));
 			return { success: false, error: 'Token has expired. Please request a new magic link.' };
 		}
-
-		// Mark token as used
-		await db
-			.update(table.adminMagicLinkToken)
-			.set({ used: true, usedAt: new Date() })
-			.where(eq(table.adminMagicLinkToken.id, tokenRecord.id));
 
 		// Find user by email
 		const [userRecord] = await db
