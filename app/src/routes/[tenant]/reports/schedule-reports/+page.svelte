@@ -5,13 +5,23 @@
 		deleteReportSchedule
 	} from '$lib/remotes/report-schedule.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Switch } from '$lib/components/ui/switch';
+	import { Badge } from '$lib/components/ui/badge';
 	import * as Select from '$lib/components/ui/select';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogHeader,
+		DialogTitle,
+		DialogFooter
+	} from '$lib/components/ui/dialog';
 	import { Combobox } from '$lib/components/ui/combobox';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/state';
@@ -21,6 +31,14 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import XIcon from '@lucide/svelte/icons/x';
 	import EyeIcon from '@lucide/svelte/icons/eye';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import SendIcon from '@lucide/svelte/icons/send';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -31,18 +49,26 @@
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current ?? []);
 
-	// Edit/create form state
-	let editing = $state(false);
+	// Stats
+	const activeCount = $derived(schedules.filter((s) => s.isEnabled && s.frequency !== 'disabled').length);
+	const pausedCount = $derived(schedules.filter((s) => !s.isEnabled || s.frequency === 'disabled').length);
+
+	// Dialog form state
+	let dialogOpen = $state(false);
 	let editingId = $state<string | null>(null);
 	let saving = $state(false);
 
-	let formClientId = $state('');
+	let formClientId = $state<string | undefined>('');
 	let formFrequency = $state<'weekly' | 'monthly' | 'disabled'>('weekly');
 	let formDayOfWeek = $state(1);
 	let formDayOfMonth = $state(1);
 	let formPlatforms = $state<string[]>(['meta', 'google', 'tiktok']);
 	let formEmails = $state('');
 	let formIsEnabled = $state(true);
+
+	// Delete confirmation
+	let deleteDialogOpen = $state(false);
+	let deleteTarget = $state<{ id: string; name: string | null } | null>(null);
 
 	const dayNames: Record<number, string> = {
 		1: 'Luni',
@@ -54,10 +80,26 @@
 		7: 'Duminică'
 	};
 
+	const dayNamesShort: Record<number, string> = {
+		1: 'Lun',
+		2: 'Mar',
+		3: 'Mie',
+		4: 'Joi',
+		5: 'Vin',
+		6: 'Sâm',
+		7: 'Dum'
+	};
+
 	const platformLabels: Record<string, string> = {
-		meta: 'Meta Ads',
-		google: 'Google Ads',
-		tiktok: 'TikTok Ads'
+		meta: 'Meta',
+		google: 'Google',
+		tiktok: 'TikTok'
+	};
+
+	const platformColors: Record<string, string> = {
+		meta: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800',
+		google: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
+		tiktok: 'bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800'
 	};
 
 	const frequencyLabels: Record<string, string> = {
@@ -66,10 +108,9 @@
 		disabled: 'Dezactivat'
 	};
 
-	// Clients that don't already have a schedule (for "add new")
 	const availableClients = $derived(
 		editingId
-			? clients // When editing, show all clients
+			? clients
 			: clients.filter((c) => !schedules.some((s) => s.clientId === c.id))
 	);
 
@@ -88,16 +129,15 @@
 		formPlatforms = ['meta', 'google', 'tiktok'];
 		formEmails = '';
 		formIsEnabled = true;
-		editing = false;
 		editingId = null;
 	}
 
-	function startCreate() {
+	function openCreate() {
 		resetForm();
-		editing = true;
+		dialogOpen = true;
 	}
 
-	function startEdit(schedule: (typeof schedules)[0]) {
+	function openEdit(schedule: (typeof schedules)[0]) {
 		editingId = schedule.id;
 		formClientId = schedule.clientId;
 		formFrequency = schedule.frequency as 'weekly' | 'monthly' | 'disabled';
@@ -106,7 +146,7 @@
 		formPlatforms = [...schedule.platforms];
 		formEmails = schedule.recipientEmails.join(', ');
 		formIsEnabled = schedule.isEnabled;
-		editing = true;
+		dialogOpen = true;
 	}
 
 	function togglePlatform(p: string) {
@@ -143,6 +183,7 @@
 				isEnabled: formIsEnabled
 			}).updates(schedulesQuery);
 			toast.success(editingId ? 'Programul a fost actualizat.' : 'Programul a fost creat.');
+			dialogOpen = false;
 			resetForm();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare.');
@@ -151,12 +192,18 @@
 		}
 	}
 
-	async function handleDelete(id: string, clientName: string | null) {
-		if (!confirm(`Ștergi programul de raportare pentru ${clientName || 'client'}?`)) return;
+	function confirmDelete(id: string, clientName: string | null) {
+		deleteTarget = { id, name: clientName };
+		deleteDialogOpen = true;
+	}
+
+	async function handleDelete() {
+		if (!deleteTarget) return;
 		try {
-			await deleteReportSchedule({ id }).updates(schedulesQuery);
+			await deleteReportSchedule({ id: deleteTarget.id }).updates(schedulesQuery);
 			toast.success('Programul a fost șters.');
-			if (editingId === id) resetForm();
+			deleteDialogOpen = false;
+			deleteTarget = null;
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere.');
 		}
@@ -173,10 +220,19 @@
 		});
 	}
 
-	function getScheduleDescription(s: (typeof schedules)[0]): string {
+	function getScheduleLabel(s: (typeof schedules)[0]): string {
 		if (s.frequency === 'disabled') return 'Dezactivat';
-		if (s.frequency === 'weekly') return `Săptămânal — ${dayNames[s.dayOfWeek ?? 1]}`;
-		return `Lunar — ziua ${s.dayOfMonth}`;
+		if (s.frequency === 'weekly') return dayNames[s.dayOfWeek ?? 1];
+		return `Ziua ${s.dayOfMonth}`;
+	}
+
+	function getRecipientCount(s: (typeof schedules)[0]): number {
+		return s.recipientEmails.length > 0 ? s.recipientEmails.length : (s.clientEmail ? 1 : 0);
+	}
+
+	function getRecipientLabel(s: (typeof schedules)[0]): string {
+		if (s.recipientEmails.length > 0) return s.recipientEmails.join(', ');
+		return s.clientEmail || 'Nicio adresă';
 	}
 
 	function previewPdf(schedule: (typeof schedules)[0]) {
@@ -187,230 +243,374 @@
 		});
 		window.open(`/${tenantSlug}/reports/schedule-reports/preview-pdf?${params}`, '_blank');
 	}
+
+	function downloadPdf(schedule: (typeof schedules)[0]) {
+		const params = new URLSearchParams({
+			clientId: schedule.clientId,
+			platforms: schedule.platforms.join(','),
+			frequency: schedule.frequency,
+			download: 'true'
+		});
+		window.open(`/${tenantSlug}/reports/schedule-reports/preview-pdf?${params}`, '_blank');
+	}
 </script>
 
-<div class="space-y-6">
-	<div class="flex items-center gap-2">
-		<CalendarClockIcon class="h-8 w-8" />
-		<h1 class="text-3xl font-bold">Programare Rapoarte</h1>
+<!-- Page Header -->
+<div class="space-y-8">
+	<div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+		<div class="space-y-1">
+			<h1 class="text-2xl font-semibold tracking-tight">Programare Rapoarte</h1>
+			<p class="text-sm text-muted-foreground">
+				Rapoarte PDF trimise automat pe email
+			</p>
+		</div>
+		<Button onclick={openCreate} class="gap-2 self-start">
+			<PlusIcon class="h-4 w-4" />
+			Adaugă program
+		</Button>
 	</div>
 
-	<p class="text-muted-foreground">
-		Configurează trimiterea automată a rapoartelor PDF pe email pentru fiecare client.
-	</p>
+	<!-- Stats Row -->
+	{#if schedules.length > 0}
+		<div class="grid grid-cols-3 gap-4">
+			<div class="rounded-xl border bg-card p-4 space-y-1">
+				<div class="flex items-center gap-2 text-muted-foreground">
+					<FileTextIcon class="h-4 w-4" />
+					<span class="text-xs font-medium uppercase tracking-wider">Total</span>
+				</div>
+				<p class="text-2xl font-semibold tabular-nums">{schedules.length}</p>
+			</div>
+			<div class="rounded-xl border bg-card p-4 space-y-1">
+				<div class="flex items-center gap-2 text-success">
+					<SendIcon class="h-4 w-4" />
+					<span class="text-xs font-medium uppercase tracking-wider">Active</span>
+				</div>
+				<p class="text-2xl font-semibold tabular-nums">{activeCount}</p>
+			</div>
+			<div class="rounded-xl border bg-card p-4 space-y-1">
+				<div class="flex items-center gap-2 text-warning">
+					<ClockIcon class="h-4 w-4" />
+					<span class="text-xs font-medium uppercase tracking-wider">Pauzate</span>
+				</div>
+				<p class="text-2xl font-semibold tabular-nums">{pausedCount}</p>
+			</div>
+		</div>
+	{/if}
 
-	<!-- Existing schedules -->
-	<div class="space-y-4">
-		{#if loading}
-			<Card>
-				<CardContent class="py-8">
-					<div class="animate-pulse space-y-4">
-						<div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
-						<div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
-					</div>
-				</CardContent>
-			</Card>
-		{:else}
-			{#if schedules.length === 0 && !editing}
-				<Card>
-					<CardContent class="py-12 text-center">
-						<CalendarClockIcon class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-						<p class="text-muted-foreground">Nu ai niciun program de raportare configurat.</p>
-						<Button class="mt-4" onclick={startCreate}>
-							<PlusIcon class="h-4 w-4 mr-2" />
-							Adaugă primul program
-						</Button>
-					</CardContent>
-				</Card>
-			{:else}
-				{#each schedules as schedule (schedule.id)}
-					{#if editingId !== schedule.id}
-						<Card>
-							<CardContent class="py-4">
-								<div class="flex items-center justify-between">
-									<div class="space-y-1">
-										<div class="flex items-center gap-2">
-											<p class="font-medium">{schedule.clientName || 'Client necunoscut'}</p>
-											{#if !schedule.isEnabled}
-												<span class="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 px-2 py-0.5 rounded">Pauzat</span>
-											{/if}
-										</div>
-										<p class="text-sm text-muted-foreground">
-											{getScheduleDescription(schedule)}
-											&middot;
-											{schedule.platforms.map((p) => platformLabels[p] || p).join(', ')}
-										</p>
-										<p class="text-xs text-muted-foreground">
-											Destinatari: {schedule.recipientEmails.length > 0 ? schedule.recipientEmails.join(', ') : schedule.clientEmail || 'email client'}
-											&middot;
-											Ultimul: {formatLastSent(schedule.lastSentAt)}
-										</p>
-									</div>
-									<div class="flex items-center gap-2">
-										<Button variant="ghost" size="icon" title="Preview PDF" onclick={() => previewPdf(schedule)}>
-											<EyeIcon class="h-4 w-4" />
-										</Button>
-										<Button variant="ghost" size="icon" onclick={() => startEdit(schedule)}>
-											<PencilIcon class="h-4 w-4" />
-										</Button>
-										<Button variant="ghost" size="icon" onclick={() => handleDelete(schedule.id, schedule.clientName)}>
-											<TrashIcon class="h-4 w-4 text-destructive" />
-										</Button>
-									</div>
-								</div>
-							</CardContent>
-						</Card>
-					{/if}
-				{/each}
-
-				{#if !editing}
-					<Button variant="outline" onclick={startCreate}>
-						<PlusIcon class="h-4 w-4 mr-2" />
-						Adaugă program
-					</Button>
-				{/if}
-			{/if}
-
-			<!-- Create/Edit form -->
-			{#if editing}
-				<Card>
-					<CardHeader>
-						<div class="flex items-center justify-between">
-							<div>
-								<CardTitle>{editingId ? 'Editează program' : 'Program nou de raportare'}</CardTitle>
-								<CardDescription>Configurează frecvența și destinatarii raportului PDF.</CardDescription>
-							</div>
-							<Button variant="ghost" size="icon" onclick={resetForm}>
-								<XIcon class="h-4 w-4" />
-							</Button>
+	<!-- Schedule List -->
+	{#if loading}
+		<div class="space-y-3">
+			{#each [1, 2, 3] as _}
+				<div class="rounded-xl border bg-card p-5 animate-pulse">
+					<div class="flex items-center gap-4">
+						<div class="h-10 w-10 rounded-lg bg-muted"></div>
+						<div class="flex-1 space-y-2">
+							<div class="h-4 w-1/3 rounded bg-muted"></div>
+							<div class="h-3 w-1/4 rounded bg-muted"></div>
 						</div>
-					</CardHeader>
-					<CardContent>
-						<form
-							onsubmit={(e) => {
-								e.preventDefault();
-								handleSave();
-							}}
-							class="space-y-6"
-						>
-							<!-- Client selection -->
-							{#if !editingId}
-								<div class="space-y-2">
-									<Label>Client *</Label>
-									<Combobox
-										bind:value={formClientId}
-										options={clientOptions}
-										placeholder="Selectează client..."
-										searchPlaceholder="Caută clienți..."
-									/>
-								</div>
-							{:else}
-								<div class="space-y-2">
-									<Label>Client</Label>
-									<p class="text-sm font-medium">{schedules.find((s) => s.id === editingId)?.clientName}</p>
-								</div>
-							{/if}
-
-							<!-- Frequency -->
-							<div class="space-y-2">
-								<Label>Frecvență</Label>
-								<Select.Root type="single" value={formFrequency} onValueChange={(v) => { if (v) formFrequency = v as typeof formFrequency; }}>
-									<Select.Trigger class="w-full max-w-xs">
-										{frequencyLabels[formFrequency]}
-									</Select.Trigger>
-									<Select.Content>
-										<Select.Item value="weekly">Săptămânal</Select.Item>
-										<Select.Item value="monthly">Lunar</Select.Item>
-										<Select.Item value="disabled">Dezactivat</Select.Item>
-									</Select.Content>
-								</Select.Root>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{:else if schedules.length === 0}
+		<!-- Empty State -->
+		<div class="rounded-xl border-2 border-dashed bg-card/50 py-16 text-center">
+			<div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+				<CalendarClockIcon class="h-7 w-7 text-primary" />
+			</div>
+			<h3 class="text-lg font-medium mb-1">Niciun program configurat</h3>
+			<p class="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
+				Configurează trimiterea automată a rapoartelor de marketing către clienții tăi.
+			</p>
+			<Button onclick={openCreate} class="gap-2">
+				<PlusIcon class="h-4 w-4" />
+				Primul program de raportare
+			</Button>
+		</div>
+	{:else}
+		<div class="space-y-3">
+			{#each schedules as schedule, i (schedule.id)}
+				<div
+					class="group rounded-xl border bg-card transition-all duration-200 hover:shadow-md hover:border-primary/20"
+					style="animation: fadeSlideIn 0.3s ease-out {i * 50}ms both"
+				>
+					<div class="p-5">
+						<div class="flex items-start gap-4">
+							<!-- Client Avatar -->
+							<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-semibold text-sm
+								{schedule.isEnabled && schedule.frequency !== 'disabled'
+									? 'bg-primary/10 text-primary'
+									: 'bg-muted text-muted-foreground'}"
+							>
+								{(schedule.clientName || '?').slice(0, 2).toUpperCase()}
 							</div>
 
-							<!-- Day selection -->
-							{#if formFrequency === 'weekly'}
-								<div class="space-y-2">
-									<Label>Ziua săptămânii</Label>
-									<Select.Root type="single" value={String(formDayOfWeek)} onValueChange={(v) => { if (v) formDayOfWeek = Number(v); }}>
-										<Select.Trigger class="w-full max-w-xs">
-											{dayNames[formDayOfWeek]}
-										</Select.Trigger>
-										<Select.Content>
-											{#each Object.entries(dayNames) as [val, label]}
-												<Select.Item value={val}>{label}</Select.Item>
-											{/each}
-										</Select.Content>
-									</Select.Root>
-								</div>
-							{:else if formFrequency === 'monthly'}
-								<div class="space-y-2">
-									<Label>Ziua lunii (1-28)</Label>
-									<Input
-										type="number"
-										min="1"
-										max="28"
-										bind:value={formDayOfMonth}
-										class="max-w-xs"
-									/>
-								</div>
-							{/if}
+							<!-- Main Info -->
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-2 mb-1.5">
+									<h3 class="font-medium text-sm truncate">{schedule.clientName || 'Client necunoscut'}</h3>
 
-							<Separator />
+									{#if schedule.isEnabled && schedule.frequency !== 'disabled'}
+										<Badge variant="success" class="text-[10px] px-1.5 py-0">Activ</Badge>
+									{:else if schedule.frequency === 'disabled'}
+										<Badge variant="outline" class="text-[10px] px-1.5 py-0">Dezactivat</Badge>
+									{:else}
+										<Badge variant="warning" class="text-[10px] px-1.5 py-0">Pauzat</Badge>
+									{/if}
+								</div>
 
-							<!-- Platforms -->
-							<div class="space-y-2">
-								<Label>Platforme incluse</Label>
-								<div class="flex gap-3">
-									{#each ['meta', 'google', 'tiktok'] as p}
-										<button
-											type="button"
-											class="px-3 py-1.5 rounded-md border text-sm transition-colors {formPlatforms.includes(p)
-												? 'bg-primary text-primary-foreground border-primary'
-												: 'bg-background text-muted-foreground border-border hover:bg-accent'}"
-											onclick={() => togglePlatform(p)}
-										>
+								<!-- Details Row -->
+								<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+									<!-- Frequency -->
+									<span class="inline-flex items-center gap-1">
+										<RepeatIcon class="h-3 w-3" />
+										{frequencyLabels[schedule.frequency]}
+										{#if schedule.frequency !== 'disabled'}
+											&middot; {getScheduleLabel(schedule)}
+										{/if}
+									</span>
+
+									<!-- Recipients -->
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<span class="inline-flex items-center gap-1 cursor-default">
+												<MailIcon class="h-3 w-3" />
+												{getRecipientCount(schedule)} destinatar{getRecipientCount(schedule) !== 1 ? 'i' : ''}
+											</span>
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">{getRecipientLabel(schedule)}</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+
+									<!-- Last Sent -->
+									{#if schedule.lastSentAt}
+										<span class="inline-flex items-center gap-1">
+											<ClockIcon class="h-3 w-3" />
+											{formatLastSent(schedule.lastSentAt)}
+										</span>
+									{/if}
+								</div>
+
+								<!-- Platform Pills -->
+								<div class="flex gap-1.5 mt-2.5">
+									{#each schedule.platforms as p}
+										<span class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p]}">
 											{platformLabels[p]}
-										</button>
+										</span>
 									{/each}
 								</div>
-								<p class="text-xs text-muted-foreground">Cel puțin o platformă trebuie selectată.</p>
 							</div>
 
-							<!-- Recipient emails -->
-							<div class="space-y-2">
-								<Label for="recipientEmails">Destinatari email</Label>
-								<Input
-									id="recipientEmails"
-									bind:value={formEmails}
-									placeholder="email@exemplu.com, alt-email@exemplu.com"
-								/>
-								<p class="text-xs text-muted-foreground">
-									Separă adresele cu virgulă. Lasă gol pentru a folosi emailul clientului.
-								</p>
-							</div>
+							<!-- Actions -->
+							<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button variant="ghost" size="icon-sm" onclick={() => previewPdf(schedule)}>
+											<EyeIcon class="h-3.5 w-3.5" />
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>Preview PDF</Tooltip.Content>
+								</Tooltip.Root>
 
-							<!-- Enabled -->
-							<div class="flex items-center justify-between">
-								<div class="space-y-0.5">
-									<Label for="scheduleEnabled">Activ</Label>
-									<p class="text-xs text-muted-foreground">Activează sau dezactivează trimiterea automată.</p>
-								</div>
-								<Switch id="scheduleEnabled" bind:checked={formIsEnabled} />
-							</div>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button variant="ghost" size="icon-sm" onclick={() => downloadPdf(schedule)}>
+											<DownloadIcon class="h-3.5 w-3.5" />
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>Descarcă PDF</Tooltip.Content>
+								</Tooltip.Root>
 
-							<Separator />
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button variant="ghost" size="icon-sm" onclick={() => openEdit(schedule)}>
+											<PencilIcon class="h-3.5 w-3.5" />
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>Editează</Tooltip.Content>
+								</Tooltip.Root>
 
-							<div class="flex gap-2">
-								<Button type="submit" disabled={saving || !formClientId}>
-									{saving ? 'Se salvează...' : editingId ? 'Actualizează' : 'Creează program'}
-								</Button>
-								<Button type="button" variant="outline" onclick={resetForm} disabled={saving}>
-									Anulează
-								</Button>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button variant="ghost" size="icon-sm" onclick={() => confirmDelete(schedule.id, schedule.clientName)}>
+											<TrashIcon class="h-3.5 w-3.5 text-destructive" />
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>Șterge</Tooltip.Content>
+								</Tooltip.Root>
 							</div>
-						</form>
-					</CardContent>
-				</Card>
-			{/if}
-		{/if}
-	</div>
+						</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
 </div>
+
+<!-- Create/Edit Dialog -->
+<Dialog bind:open={dialogOpen} onOpenChange={(open) => { if (!open) resetForm(); }}>
+	<DialogContent class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+		<DialogHeader>
+			<DialogTitle>{editingId ? 'Editează program' : 'Program nou'}</DialogTitle>
+			<DialogDescription>Configurează frecvența și destinatarii raportului PDF.</DialogDescription>
+		</DialogHeader>
+
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleSave();
+			}}
+			class="space-y-5 pt-2"
+		>
+			<!-- Client -->
+			{#if !editingId}
+				<div class="space-y-2">
+					<Label>Client</Label>
+					<Combobox
+						bind:value={formClientId}
+						options={clientOptions}
+						placeholder="Caută și selectează..."
+						searchPlaceholder="Caută clienți..."
+					/>
+				</div>
+			{:else}
+				<div class="space-y-1.5">
+					<Label class="text-muted-foreground text-xs">Client</Label>
+					<p class="text-sm font-medium">{schedules.find((s) => s.id === editingId)?.clientName}</p>
+				</div>
+			{/if}
+
+			<!-- Frequency + Day (side by side) -->
+			<div class="grid grid-cols-2 gap-4">
+				<div class="space-y-2">
+					<Label>Frecvență</Label>
+					<Select.Root type="single" value={formFrequency} onValueChange={(v) => { if (v) formFrequency = v as typeof formFrequency; }}>
+						<Select.Trigger class="w-full">
+							{frequencyLabels[formFrequency]}
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="weekly">Săptămânal</Select.Item>
+							<Select.Item value="monthly">Lunar</Select.Item>
+							<Select.Item value="disabled">Dezactivat</Select.Item>
+						</Select.Content>
+					</Select.Root>
+				</div>
+
+				{#if formFrequency === 'weekly'}
+					<div class="space-y-2">
+						<Label>Ziua trimiterii</Label>
+						<Select.Root type="single" value={String(formDayOfWeek)} onValueChange={(v) => { if (v) formDayOfWeek = Number(v); }}>
+							<Select.Trigger class="w-full">
+								{dayNames[formDayOfWeek]}
+							</Select.Trigger>
+							<Select.Content>
+								{#each Object.entries(dayNames) as [val, label]}
+									<Select.Item value={val}>{label}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+				{:else if formFrequency === 'monthly'}
+					<div class="space-y-2">
+						<Label>Ziua lunii</Label>
+						<Input
+							type="number"
+							min="1"
+							max="28"
+							bind:value={formDayOfMonth}
+						/>
+					</div>
+				{:else}
+					<div></div>
+				{/if}
+			</div>
+
+			<Separator />
+
+			<!-- Platforms -->
+			<div class="space-y-2.5">
+				<Label>Platforme incluse</Label>
+				<div class="flex gap-2">
+					{#each ['meta', 'google', 'tiktok'] as p}
+						<button
+							type="button"
+							class="flex-1 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all duration-150
+								{formPlatforms.includes(p)
+									? `${platformColors[p]} border-current shadow-sm`
+									: 'bg-background text-muted-foreground border-transparent hover:border-border'}"
+							onclick={() => togglePlatform(p)}
+						>
+							{platformLabels[p]}
+						</button>
+					{/each}
+				</div>
+				<p class="text-[11px] text-muted-foreground">Cel puțin o platformă trebuie selectată.</p>
+			</div>
+
+			<!-- Recipient emails -->
+			<div class="space-y-2">
+				<Label for="recipientEmails">Destinatari email</Label>
+				<Input
+					id="recipientEmails"
+					bind:value={formEmails}
+					placeholder="email@exemplu.com, alt@exemplu.com"
+				/>
+				<p class="text-[11px] text-muted-foreground">
+					Separă cu virgulă. Lasă gol = emailul clientului.
+				</p>
+			</div>
+
+			<!-- Enabled -->
+			<div class="flex items-center justify-between rounded-lg border p-3">
+				<div class="space-y-0.5">
+					<Label for="scheduleEnabled" class="text-sm">Trimitere activă</Label>
+					<p class="text-[11px] text-muted-foreground">Pornește sau oprește trimiterea automată</p>
+				</div>
+				<Switch id="scheduleEnabled" bind:checked={formIsEnabled} />
+			</div>
+
+			<DialogFooter class="pt-2">
+				<Button type="button" variant="outline" onclick={() => { dialogOpen = false; resetForm(); }} disabled={saving}>
+					Anulează
+				</Button>
+				<Button type="submit" disabled={saving || !formClientId}>
+					{saving ? 'Se salvează...' : editingId ? 'Salvează' : 'Creează'}
+				</Button>
+			</DialogFooter>
+		</form>
+	</DialogContent>
+</Dialog>
+
+<!-- Delete Confirmation Dialog -->
+<Dialog bind:open={deleteDialogOpen}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<DialogTitle>Confirmare ștergere</DialogTitle>
+			<DialogDescription>
+				Ești sigur că vrei să ștergi programul de raportare pentru <strong>{deleteTarget?.name || 'acest client'}</strong>?
+			</DialogDescription>
+		</DialogHeader>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => { deleteDialogOpen = false; deleteTarget = null; }}>
+				Anulează
+			</Button>
+			<Button variant="destructive" onclick={handleDelete}>
+				Șterge
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<style>
+	@keyframes fadeSlideIn {
+		from {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+</style>
