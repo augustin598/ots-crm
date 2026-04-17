@@ -2917,6 +2917,20 @@ export const emailLog = sqliteTable('email_log', {
 	updatedAt: timestamp('updated_at').notNull().default(sql`current_timestamp`)
 });
 
+// Email Suppression - tracks bounced/complained addresses to prevent re-sending
+export const emailSuppression = sqliteTable('email_suppression', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id').references(() => tenant.id),
+	email: text('email').notNull(),
+	reason: text('reason').notNull(), // 'hard_bounce' | 'complaint' | 'manual'
+	smtpCode: text('smtp_code'), // e.g. '550', '551'
+	smtpMessage: text('smtp_message'), // full SMTP error message
+	sourceEmailLogId: text('source_email_log_id'), // which email triggered the suppression
+	createdAt: timestamp('created_at').notNull().default(sql`current_timestamp`)
+}, (t) => ({
+	uniqueEmail: uniqueIndex('email_suppression_unique_idx').on(t.tenantId, t.email)
+}));
+
 // Debug Log - tracks application events, errors, warnings
 export const debugLog = sqliteTable('debug_log', {
 	id: text('id').primaryKey(),
