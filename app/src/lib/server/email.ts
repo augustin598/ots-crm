@@ -3,7 +3,8 @@ import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { db } from './db';
 import * as table from './db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, sql } from 'drizzle-orm';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { decrypt, DecryptionError } from './plugins/smartbill/crypto';
 import {
 	logEmailAttempt,
@@ -524,6 +525,81 @@ function getTransporter(): nodemailer.Transporter {
 }
 
 // ---------------------------------------------------------------------------
+// Email suppression — bounce/complaint tracking
+// ---------------------------------------------------------------------------
+
+type SuppressionReason = 'hard_bounce' | 'complaint' | 'manual';
+
+async function isEmailSuppressed(
+	email: string,
+	tenantId: string | null
+): Promise<{ reason: string } | null> {
+	try {
+		const normalizedEmail = email.toLowerCase();
+		// Check global suppression (tenantId IS NULL) and tenant-specific
+		const conditions = tenantId
+			? or(
+				and(eq(table.emailSuppression.email, normalizedEmail), eq(table.emailSuppression.tenantId, tenantId)),
+				and(eq(table.emailSuppression.email, normalizedEmail), sql`${table.emailSuppression.tenantId} IS NULL`)
+			)
+			: and(eq(table.emailSuppression.email, normalizedEmail), sql`${table.emailSuppression.tenantId} IS NULL`);
+
+		const [suppressed] = await db
+			.select({ reason: table.emailSuppression.reason })
+			.from(table.emailSuppression)
+			.where(conditions!)
+			.limit(1);
+
+		return suppressed ?? null;
+	} catch {
+		// Don't block email send if suppression check fails
+		return null;
+	}
+}
+
+export async function suppressEmail(params: {
+	email: string;
+	tenantId: string | null;
+	reason: SuppressionReason;
+	smtpCode?: string;
+	smtpMessage?: string;
+	sourceEmailLogId?: string;
+}): Promise<void> {
+	const id = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+	try {
+		await db.insert(table.emailSuppression).values({
+			id,
+			tenantId: params.tenantId,
+			email: params.email.toLowerCase(),
+			reason: params.reason,
+			smtpCode: params.smtpCode ?? null,
+			smtpMessage: params.smtpMessage ?? null,
+			sourceEmailLogId: params.sourceEmailLogId ?? null
+		});
+		logInfo('email', `Suppressed email: ${params.email} (${params.reason})`, {
+			tenantId: params.tenantId ?? undefined
+		});
+	} catch {
+		// Ignore duplicate suppression
+	}
+}
+
+/**
+ * Detect hard bounce from SMTP error and auto-suppress the recipient.
+ */
+function isHardBounce(error: Error): { code: string; message: string } | null {
+	const msg = error.message || '';
+	const match = msg.match(/\b(550|551|552|553|554)\b/);
+	if (match) {
+		return { code: match[1], message: msg.substring(0, 200) };
+	}
+	if (/mailbox.*not found|user.*unknown|address.*rejected|account.*disabled/i.test(msg)) {
+		return { code: 'unknown', message: msg.substring(0, 200) };
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
 // Persistent send helper — DB-backed outbox pattern
 // ---------------------------------------------------------------------------
 
@@ -591,6 +667,15 @@ export async function sendWithPersistence(
 		payload: ctx.payload
 	});
 
+	// STEP 1b: Check email suppression (bounced/complained addresses)
+	const suppressed = await isEmailSuppressed(ctx.toEmail, ctx.tenantId);
+	if (suppressed) {
+		const msg = `Email suppressed (${suppressed.reason}): ${ctx.toEmail}`;
+		await logEmailFailure(logId, msg);
+		logWarning('email', msg, { tenantId: ctx.tenantId ?? undefined });
+		throw new Error(msg);
+	}
+
 	// STEP 2: Get transporter. If null (decryption failed / SMTP disabled), mark failed.
 	const transporter = ctx.tenantId
 		? await getTenantTransporter(ctx.tenantId)
@@ -627,6 +712,22 @@ export async function sendWithPersistence(
 			: gmailFrom;
 	}
 
+	// STEP 3a: Add RFC 8058 List-Unsubscribe headers for non-transactional emails.
+	// Required by Gmail/Yahoo since Feb 2024 for bulk/notification-style mail.
+	const TRANSACTIONAL_TYPES: EmailType[] = [
+		'magic-link', 'admin-magic-link', 'password-reset',
+		'invitation', 'invoice', 'invoice-paid', 'contract-signing'
+	];
+	if (!TRANSACTIONAL_TYPES.includes(ctx.emailType)) {
+		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const unsubUrl = `${baseUrl}/api/unsubscribe?email=${encodeURIComponent(ctx.toEmail)}&type=${ctx.emailType}`;
+		mailOptions.headers = {
+			...mailOptions.headers,
+			'List-Unsubscribe': `<${unsubUrl}>`,
+			'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+		};
+	}
+
 	// STEP 3b: Persist HTML body for preview if not already saved.
 	// Skip for sensitive email types that contain auth tokens in their HTML.
 	const SENSITIVE_EMAIL_TYPES: EmailType[] = ['magic-link', 'admin-magic-link', 'password-reset'];
@@ -657,6 +758,19 @@ export async function sendWithPersistence(
 			tenantId: ctx.tenantId ?? undefined,
 			stackTrace: serializeError(err).stack
 		});
+
+		// Auto-suppress on hard bounce (prevents retrying to invalid addresses)
+		const bounce = isHardBounce(err as Error);
+		if (bounce) {
+			await suppressEmail({
+				email: ctx.toEmail,
+				tenantId: ctx.tenantId,
+				reason: 'hard_bounce',
+				smtpCode: bounce.code,
+				smtpMessage: bounce.message,
+				sourceEmailLogId: logId
+			});
+		}
 
 		// Notify admins about email delivery failure
 		if (ctx.tenantId) {
