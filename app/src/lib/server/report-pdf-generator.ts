@@ -219,11 +219,11 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 			yr += 13;
 		}
 
-		y = Math.max(y, yr) + 12;
+		y = Math.max(y, yr) + 18;
 
 		// Thin separator
 		doc.moveTo(ML, y).lineTo(PW - MR, y).strokeColor(BORDER).lineWidth(0.5).stroke();
-		y += 16;
+		y += 20;
 
 		// ============================================================
 		// SUMMARY KPI CARDS
