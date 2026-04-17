@@ -1048,7 +1048,7 @@ export const reopenTask = command(
 					await sendTaskUpdateEmail(taskId, assignee.email, assigneeName, `Task redeschis de ${reopenerName} - necesită aprobare`);
 				}
 			} catch (error) {
-				logError('Failed to send reopen notification email', error);
+				logError('email', 'Failed to send reopen notification email', { stackTrace: error instanceof Error ? error.stack : String(error) });
 			}
 		}
 
@@ -1072,7 +1072,7 @@ export const reopenTask = command(
 				}
 			}
 		} catch (error) {
-			logError('Failed to send admin reopen notification emails', error);
+			logError('email', 'Failed to send admin reopen notification emails', { stackTrace: error instanceof Error ? error.stack : String(error) });
 		}
 
 		// Send client notification for status change

@@ -6,11 +6,7 @@
 	import { Check, ChevronsUpDown } from 'lucide-svelte';
 	import { cn } from '$lib/utils';
 
-	export type Option = {
-		value: string | number;
-		label: string;
-		meta?: Record<string, unknown>;
-	};
+	import type { Option } from './combobox-types';
 
 	let {
 		options = $bindable([] as Option[]),
