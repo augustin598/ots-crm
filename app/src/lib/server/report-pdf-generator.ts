@@ -236,7 +236,7 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 			// Card background
 			if (kpis[i].accent) {
 				roundedRect(doc, kx, ky, kpiW, kpiH, 4, ACCENT);
-				doc.font('Regular').fontSize(7).fillColor('#FFFFFFCC')
+				doc.font('Bold').fontSize(7).fillColor(WHITE)
 					.text(kpis[i].label, kx + 10, ky + 10, { width: kpiW - 20 });
 				doc.font('Bold').fontSize(13).fillColor(WHITE)
 					.text(kpis[i].value, kx + 10, ky + 24, { width: kpiW - 20 });
@@ -383,11 +383,11 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				// Platform logo + name
 				drawPlatformLogo(doc, platform.name, ML + 14, y + 7, 16);
 				doc.font('Bold').fontSize(9).fillColor(DARK)
-					.text(platform.name, ML + 34, y + 10);
+					.text(platform.name, ML + 34, y + 10, { lineBreak: false });
 
 				// Mini KPIs inside card
 				const miniKpis = [
-					{ label: 'Cheltuieli', value: fmtAmount(platform.spend, platform.currency) },
+					{ label: 'Buget', value: fmtAmount(platform.spend, platform.currency) },
 					{ label: 'Impresii', value: fmtNum(platform.impressions) },
 					{ label: 'Click-uri', value: fmtNum(platform.clicks) },
 					{ label: 'CPC', value: pCpc > 0 ? fmtAmount(pCpc, platform.currency) : '—' },
@@ -395,16 +395,16 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				];
 
 				if (platform.conversions > 0) {
-					miniKpis.push({ label: 'Conversii', value: fmtNum(platform.conversions) });
+					miniKpis.push({ label: 'Rezultate', value: fmtNum(platform.conversions) });
 				}
 
 				const miniW = (CW - 28) / miniKpis.length;
 				for (let k = 0; k < miniKpis.length; k++) {
 					const mx = ML + 14 + k * miniW;
 					doc.font('Regular').fontSize(6.5).fillColor(MUTED)
-						.text(miniKpis[k].label, mx, y + 28, { width: miniW - 4 });
+						.text(miniKpis[k].label, mx, y + 28, { width: miniW - 4, lineBreak: false });
 					doc.font('Bold').fontSize(9).fillColor(DARK)
-						.text(miniKpis[k].value, mx, y + 38, { width: miniW - 4 });
+						.text(miniKpis[k].value, mx, y + 38, { width: miniW - 4, lineBreak: false });
 				}
 
 				y += cardH + 8;
