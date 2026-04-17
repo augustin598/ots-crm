@@ -232,7 +232,7 @@ async function findOrCreateClientUserSession(
 	// Normalize email to lowercase to prevent duplicate user records
 	const normalizedEmail = email.toLowerCase();
 
-	// Find or create user
+	// Find or create user (race-safe: INSERT...ON CONFLICT handles concurrent magic link clicks)
 	let user = await db
 		.select()
 		.from(table.user)
@@ -249,25 +249,29 @@ async function findOrCreateClientUserSession(
 		const lastName = nameParts.slice(1).join(' ') || '';
 
 		const userId = generateUserId();
-		const dummyPasswordHash = await hash('dummy-password-for-client-users', {
+		const randomPassword = crypto.getRandomValues(new Uint8Array(32));
+		const randomPasswordStr = Array.from(randomPassword, (b) => b.toString(16).padStart(2, '0')).join('');
+		const passwordHash = await hash(randomPasswordStr, {
 			memoryCost: 19456,
 			timeCost: 2,
 			outputLen: 32,
 			parallelism: 1
 		});
 
+		// Use ON CONFLICT to handle concurrent requests (e.g., multi-device magic link clicks)
 		await db.insert(table.user).values({
 			id: userId,
 			email: normalizedEmail,
 			firstName,
 			lastName,
-			passwordHash: dummyPasswordHash
-		});
+			passwordHash
+		}).onConflictDoNothing({ target: table.user.email });
 
+		// Always re-fetch by email (our insert may have been a no-op due to conflict)
 		user = await db
 			.select()
 			.from(table.user)
-			.where(eq(table.user.id, userId))
+			.where(eq(table.user.email, normalizedEmail))
 			.limit(1)
 			.then((users) => users[0] || null);
 
@@ -333,6 +337,8 @@ async function findOrCreateClientUserSession(
 
 	// Create session if event is provided
 	if (event) {
+		// Invalidate all existing sessions for this user (prevents session fixation)
+		await auth.invalidateUserSessions(user.id);
 		const sessionToken = auth.generateSessionToken();
 		const session = await auth.createSession(sessionToken, user.id);
 		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);

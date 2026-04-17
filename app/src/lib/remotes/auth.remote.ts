@@ -12,6 +12,7 @@ import { env } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import type { User } from '../server/db/schema';
 import { sendAdminMagicLinkEmail, sendPasswordResetEmail } from '../server/email';
+import { checkAuthRateLimit } from '../server/rate-limiter';
 import { verifyAdminMagicLinkToken } from '../server/auth';
 import { generateSessionToken, createSession, setSessionTokenCookie, invalidateSession, deleteSessionTokenCookie } from '../server/auth';
 
@@ -233,6 +234,17 @@ export const requestMagicLink = command(
 	}),
 	async ({ email }): Promise<{ success: boolean; message: string; error?: string }> => {
 		try {
+			// Rate limiting
+			const event = getRequestEvent();
+			const clientIp = event ? event.getClientAddress() : null;
+			const rateLimitError = checkAuthRateLimit(email, clientIp);
+			if (rateLimitError) {
+				return {
+					success: true,
+					message: 'If an account exists with this email, a magic link has been sent.'
+				};
+			}
+
 			// Check if user exists (but don't reveal if they don't for security)
 			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
 
@@ -243,6 +255,17 @@ export const requestMagicLink = command(
 					message: 'If an account exists with this email, a magic link has been sent.'
 				};
 			}
+
+			// Invalidate any existing unused admin tokens for this email
+			await db
+				.update(adminMagicLinkToken)
+				.set({ used: true })
+				.where(
+					and(
+						eq(adminMagicLinkToken.email, email),
+						eq(adminMagicLinkToken.used, false)
+					)
+				);
 
 			// Generate magic link token
 			const plainToken = generateMagicLinkToken();
@@ -255,7 +278,7 @@ export const requestMagicLink = command(
 			await db.insert(adminMagicLinkToken).values({
 				id: tokenId,
 				token: hashedToken,
-				email,
+				email: email.toLowerCase(),
 				expiresAt,
 				used: false
 			});
@@ -320,6 +343,17 @@ export const requestPasswordReset = command(
 	}),
 	async ({ email }): Promise<{ success: boolean; message: string; error?: string }> => {
 		try {
+			// Rate limiting
+			const event = getRequestEvent();
+			const clientIp = event ? event.getClientAddress() : null;
+			const rateLimitError = checkAuthRateLimit(email, clientIp);
+			if (rateLimitError) {
+				return {
+					success: true,
+					message: 'If an account exists with this email, a password reset link has been sent.'
+				};
+			}
+
 			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
 
 			if (!userRecord) {
