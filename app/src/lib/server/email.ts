@@ -599,10 +599,17 @@ export async function sendWithPersistence(
 						title: 'Email netrimis',
 						message: `Email ${ctx.emailType} catre ${ctx.toEmail} a esuat: ${(err as Error).message?.substring(0, 100)}`,
 						priority: 'high',
-					}).catch(() => {});
+					}).catch((notifErr) => {
+						logWarning('email', `Failed to notify admin about email failure: ${(notifErr as Error).message}`, {
+							tenantId: ctx.tenantId ?? undefined
+						});
+					});
 				}
-			} catch {
-				// Don't let notification failure mask the original error
+			} catch (notifyErr) {
+				// Don't let notification failure mask the original error, but log it
+				logWarning('email', `Failed to notify admins about email failure: ${(notifyErr as Error).message}`, {
+					tenantId: ctx.tenantId ?? undefined
+				});
 			}
 		}
 

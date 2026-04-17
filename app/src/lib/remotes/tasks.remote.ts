@@ -7,7 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
-import { logError } from '$lib/server/logger';
+import { logError, logWarning } from '$lib/server/logger';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -57,6 +57,7 @@ async function sendClientNotificationIfEnabled(
 		if (!client?.email) return;
 
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
+		const errors: Array<{ email: string; error: string }> = [];
 		for (const recipient of recipients) {
 			// Skip the user who performed the action (don't notify yourself)
 			if (excludeEmail && recipient.email.toLowerCase() === excludeEmail.toLowerCase()) continue;
@@ -69,12 +70,20 @@ async function sendClientNotificationIfEnabled(
 					extra
 				);
 			} catch (error) {
-				console.error(`Failed to send client ${notificationType} notification to ${recipient.email}:`, error);
-				// Continue with other recipients even if one fails
+				errors.push({ email: recipient.email, error: (error as Error).message });
 			}
 		}
+		if (errors.length > 0) {
+			logWarning('email', `Failed to send client ${notificationType} notification to ${errors.length} recipient(s)`, {
+				tenantId,
+				metadata: { taskId, errors }
+			});
+		}
 	} catch (error) {
-		console.error(`Failed to send client notification (${notificationType}):`, error);
+		logError('email', `Failed to send client notification (${notificationType}): ${(error as Error).message}`, {
+			tenantId,
+			metadata: { taskId }
+		});
 	}
 }
 

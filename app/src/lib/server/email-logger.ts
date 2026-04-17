@@ -2,6 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { eq } from 'drizzle-orm';
+import { logWarning } from '$lib/server/logger';
 
 type EmailType =
 	| 'invitation'
@@ -51,6 +52,9 @@ export async function logEmailAttempt(params: {
 		});
 	} catch (err) {
 		console.error('[email-logger] Failed to log email attempt:', err);
+		// Re-throw so sendWithPersistence knows the log row doesn't exist.
+		// Without this, all subsequent log updates silently fail on a phantom ID.
+		throw err;
 	}
 	return id;
 }
@@ -67,7 +71,7 @@ export async function logEmailProcessing(logId: string) {
 			})
 			.where(eq(table.emailLog.id, logId));
 	} catch (err) {
-		console.error('[email-logger] Failed to log email processing:', err);
+		logWarning('email', `Failed to log email processing for ${logId}: ${(err as Error).message}`);
 	}
 }
 
@@ -82,7 +86,7 @@ export async function logEmailRetry(logId: string, attempt: number, errorMessage
 			})
 			.where(eq(table.emailLog.id, logId));
 	} catch (err) {
-		console.error('[email-logger] Failed to log email retry:', err);
+		logWarning('email', `Failed to log email retry for ${logId}: ${(err as Error).message}`);
 	}
 }
 
@@ -102,7 +106,7 @@ export async function logEmailSuccess(
 			})
 			.where(eq(table.emailLog.id, logId));
 	} catch (err) {
-		console.error('[email-logger] Failed to log email success:', err);
+		logWarning('email', `Failed to log email success for ${logId}: ${(err as Error).message}`);
 	}
 }
 
@@ -117,6 +121,8 @@ export async function logEmailFailure(logId: string, errorMessage: string) {
 			})
 			.where(eq(table.emailLog.id, logId));
 	} catch (err) {
-		console.error('[email-logger] Failed to log email failure:', err);
+		// Critical: if we can't mark the email as failed, it stays 'pending' forever.
+		// Log to structured logger so admin has visibility.
+		logWarning('email', `CRITICAL: Failed to log email failure for ${logId}: ${(err as Error).message}`);
 	}
 }
