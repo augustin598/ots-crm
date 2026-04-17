@@ -74,7 +74,14 @@ export const GET: RequestHandler = async (event) => {
 	if (sinceParam && untilParam) {
 		since = sinceParam;
 		until = untilParam;
-		label = `${since} - ${until}`;
+		// Format label nicely: "1 - 17 aprilie 2026"
+		const sd = new Date(sinceParam + 'T00:00:00');
+		const ud = new Date(untilParam + 'T00:00:00');
+		if (sd.getMonth() === ud.getMonth()) {
+			label = `${sd.getDate()} - ${ud.getDate()} ${ud.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}`;
+		} else {
+			label = `${sd.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })} - ${ud.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+		}
 	} else {
 		const range = getDateRange(frequency, new Date());
 		since = range.since;

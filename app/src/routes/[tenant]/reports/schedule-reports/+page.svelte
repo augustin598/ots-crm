@@ -244,20 +244,32 @@
 		return s.clientEmail || 'Nicio adresă';
 	}
 
+	function getCurrentMonthRange(): { since: string; until: string } {
+		const now = new Date();
+		const y = now.getFullYear();
+		const m = String(now.getMonth() + 1).padStart(2, '0');
+		const d = String(now.getDate()).padStart(2, '0');
+		return { since: `${y}-${m}-01`, until: `${y}-${m}-${d}` };
+	}
+
 	function previewPdf(schedule: (typeof schedules)[0]) {
+		const { since, until } = getCurrentMonthRange();
 		const params = new URLSearchParams({
 			clientId: schedule.clientId,
 			platforms: schedule.platforms.join(','),
-			frequency: schedule.frequency
+			since,
+			until
 		});
 		window.open(`/${tenantSlug}/reports/schedule-reports/preview-pdf?${params}`, '_blank');
 	}
 
 	function downloadPdf(schedule: (typeof schedules)[0]) {
+		const { since, until } = getCurrentMonthRange();
 		const params = new URLSearchParams({
 			clientId: schedule.clientId,
 			platforms: schedule.platforms.join(','),
-			frequency: schedule.frequency,
+			since,
+			until,
 			download: 'true'
 		});
 		window.open(`/${tenantSlug}/reports/schedule-reports/preview-pdf?${params}`, '_blank');
