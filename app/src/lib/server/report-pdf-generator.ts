@@ -467,17 +467,16 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 		}
 
 		// ============================================================
-		// FOOTER — positioned at bottom of current page
+		// FOOTER — tenant name only. The previous right-aligned "Raport
+		// generat automat" text was removed: its lineHeight pushed PDFKit
+		// past page.height - margin.bottom, triggering an automatic page
+		// break that produced a blank page 2 containing only that text.
 		// ============================================================
 		const footerY = PH - 45;
 		doc.moveTo(ML, footerY).lineTo(PW - MR, footerY).strokeColor(BORDER).lineWidth(0.5).stroke();
 
 		doc.font('Regular').fontSize(7).fillColor(LIGHT)
-			.text(data.tenantName, ML, footerY + 9, { lineBreak: false });
-
-		doc.font('Regular').fontSize(7).fillColor(LIGHT)
-			.text('Raport generat automat', PW - MR - 120, footerY + 9, { width: 120, align: 'right', lineBreak: false });
-
+			.text(data.tenantName, ML, footerY + 9, { width: CW, lineBreak: false });
 }
 
 /**
