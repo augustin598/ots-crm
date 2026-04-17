@@ -8,6 +8,22 @@ import { sql, gte, lte, desc } from 'drizzle-orm';
 
 type AccountSpend = { accountName: string; spend: number; currency: string };
 
+const BUCHAREST_TZ = 'Europe/Bucharest';
+
+function getBucharestCalendar(d: Date): { dayOfWeek: number; dayOfMonth: number; ymd: string } {
+	const parts = new Intl.DateTimeFormat('en-GB', {
+		timeZone: BUCHAREST_TZ,
+		year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short'
+	}).formatToParts(d);
+	const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+	const weekdayMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+	return {
+		dayOfWeek: weekdayMap[get('weekday')] ?? 1,
+		dayOfMonth: Number(get('day')),
+		ymd: `${get('year')}-${get('month')}-${get('day')}`
+	};
+}
+
 /**
  * Process scheduled PDF report emails.
  * Runs daily at 08:00 Europe/Bucharest.
@@ -15,10 +31,12 @@ type AccountSpend = { accountName: string; spend: number; currency: string };
  */
 export async function processPdfReportSend() {
 	const now = new Date();
-	const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon, 7=Sun
-	const dayOfMonth = now.getDate();
+	// Derive dayOfWeek/dayOfMonth from Europe/Bucharest, not the server's local
+	// timezone. A worker running in UTC would otherwise fire a "Monday" schedule
+	// on Sunday evening when it's already Monday in Romania.
+	const { dayOfWeek, dayOfMonth, ymd } = getBucharestCalendar(now);
 
-	logInfo('scheduler', `PDF Report Send: checking schedules (dayOfWeek=${dayOfWeek}, dayOfMonth=${dayOfMonth})`, { metadata: { dayOfWeek, dayOfMonth } });
+	logInfo('scheduler', `PDF Report Send: checking schedules (dayOfWeek=${dayOfWeek}, dayOfMonth=${dayOfMonth}, date=${ymd})`, { metadata: { dayOfWeek, dayOfMonth, ymd } });
 
 	let reportsSent = 0;
 	const errors: { clientId: string; error: string }[] = [];
@@ -35,6 +53,7 @@ export async function processPdfReportSend() {
 				dayOfMonth: table.reportSchedule.dayOfMonth,
 				platforms: table.reportSchedule.platforms,
 				recipientEmails: table.reportSchedule.recipientEmails,
+				lastSentAt: table.reportSchedule.lastSentAt,
 				clientName: table.client.name,
 				clientEmail: table.client.email,
 				tenantName: table.tenant.name,
@@ -61,6 +80,19 @@ export async function processPdfReportSend() {
 				// Check if today is the right day
 				if (schedule.frequency === 'weekly' && schedule.dayOfWeek !== dayOfWeek) continue;
 				if (schedule.frequency === 'monthly' && schedule.dayOfMonth !== dayOfMonth) continue;
+
+				// Idempotency guard: if lastSentAt falls on today (Europe/Bucharest),
+				// we already processed this schedule in this tick. BullMQ may retry
+				// the job after a worker crash — without this check, all recipients
+				// would get a duplicate email. The per-recipient dedup below is the
+				// second line of defense; this skip is cheaper.
+				if (schedule.lastSentAt) {
+					const lastYmd = getBucharestCalendar(new Date(schedule.lastSentAt)).ymd;
+					if (lastYmd === ymd) {
+						logInfo('scheduler', `Schedule ${schedule.id} already sent today (${ymd}), skipping`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id } });
+						continue;
+					}
+				}
 
 				// Check SMTP
 				const [emailConfig] = await db
@@ -110,7 +142,9 @@ export async function processPdfReportSend() {
 						.where(eq(table.invoiceSettings.tenantId, schedule.tenantId))
 						.limit(1);
 					tenantLogo = invoiceSettings?.invoiceLogo || null;
-				} catch { /* use default */ }
+				} catch (err) {
+					logWarning('scheduler', 'Failed to load invoice settings for report PDF, using default logo', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
+				}
 
 				// Generate PDF
 				// Fetch exchange rates
@@ -122,7 +156,9 @@ export async function processPdfReportSend() {
 						.where(eq(table.bnrExchangeRate.currency, 'EUR')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
 					if (usdRate[0]) exchangeRates['USD'] = usdRate[0].rate;
 					if (eurRate[0]) exchangeRates['EUR'] = eurRate[0].rate;
-				} catch { /* use original currencies */ }
+				} catch (err) {
+					logWarning('scheduler', 'Failed to load BNR exchange rates for report PDF, using original currencies', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
+				}
 
 				const pdfBuffer = await generateReportPdf({
 					tenantName: schedule.tenantName || 'CRM',

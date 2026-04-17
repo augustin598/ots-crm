@@ -637,7 +637,8 @@ type EmailType =
 	| 'contract-signing'
 	| 'invoice-paid'
 	| 'invoice-overdue-reminder'
-	| 'notification_alert';
+	| 'notification_alert'
+	| 'report';
 
 export type EmailSendContext = {
 	tenantId: string | null;
@@ -2497,7 +2498,7 @@ export async function sendReportEmail(
 			tenantId,
 			toEmail: recipientEmail,
 			subject,
-			emailType: 'report' as any,
+			emailType: 'report',
 			metadata: { clientId, clientName, periodLabel },
 			htmlBody: '',
 			// payload: null — pdfBuffer is non-serializable, and the pdf_report_send scheduler
@@ -2512,14 +2513,17 @@ export async function sendReportEmail(
 				.limit(1);
 			const tenantName = tenant?.name || 'CRM';
 
+			const safeClientName = escapeHtml(clientName);
+			const safePeriodLabel = escapeHtml(periodLabel);
+			const safeTenantName = escapeHtml(tenantName);
 			const html = `
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
 			<h2 style="color: #1E293B;">Raport Marketing</h2>
 			<p>Bună ziua,</p>
-			<p>Atașat găsiți raportul de marketing pentru <strong>${clientName}</strong> aferent perioadei <strong>${periodLabel}</strong>.</p>
+			<p>Atașat găsiți raportul de marketing pentru <strong>${safeClientName}</strong> aferent perioadei <strong>${safePeriodLabel}</strong>.</p>
 			<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active.</p>
 			<br>
-			<p style="color: #64748B; font-size: 12px;">Acest email a fost generat automat de ${tenantName}.</p>
+			<p style="color: #64748B; font-size: 12px;">Acest email a fost generat automat de ${safeTenantName}.</p>
 		</div>
 	`;
 

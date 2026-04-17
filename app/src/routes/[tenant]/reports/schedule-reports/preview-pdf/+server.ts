@@ -3,8 +3,9 @@ import { error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { generateReportPdf } from '$lib/server/report-pdf-generator';
+import { generateReportPdfStream } from '$lib/server/report-pdf-generator';
 import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
+import { logWarning } from '$lib/server/logger';
 
 /** Get account names for a client on a platform (from account tables, not spending) */
 async function getClientAccounts(tenantId: string, clientId: string, platform: string) {
@@ -27,7 +28,9 @@ async function getClientAccounts(tenantId: string, clientId: string, platform: s
 				.where(and(eq(table.tiktokAdsAccount.tenantId, tenantId), eq(table.tiktokAdsAccount.clientId, clientId)));
 			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
 		}
-	} catch { /* ignore */ }
+	} catch (err) {
+		logWarning('server', `Failed to load ${platform} accounts for preview`, { tenantId, metadata: { clientId, platform, error: (err as Error).message } });
+	}
 	return [];
 }
 
@@ -146,7 +149,9 @@ export const GET: RequestHandler = async (event) => {
 			.where(eq(table.invoiceSettings.tenantId, tenantId))
 			.limit(1);
 		tenantLogo = invoiceSettings?.invoiceLogo || null;
-	} catch { /* use default logo */ }
+	} catch (err) {
+		logWarning('server', 'Failed to load invoice settings for PDF preview, using default logo', { tenantId, metadata: { error: (err as Error).message } });
+	}
 
 	// Fetch latest BNR exchange rates for currency conversion
 	const exchangeRates: Record<string, number> = {};
@@ -165,9 +170,11 @@ export const GET: RequestHandler = async (event) => {
 			.limit(1);
 		if (rates[0]) exchangeRates['USD'] = rates[0].rate;
 		if (eurRates[0]) exchangeRates['EUR'] = eurRates[0].rate;
-	} catch { /* use original currencies */ }
+	} catch (err) {
+		logWarning('server', 'Failed to load BNR exchange rates, using original currencies', { tenantId, metadata: { error: (err as Error).message } });
+	}
 
-	const pdfBuffer = await generateReportPdf({
+	const pdfStream = generateReportPdfStream({
 		tenantName,
 		clientName: client.name || 'Client',
 		period: { since, until, label },
@@ -185,14 +192,13 @@ export const GET: RequestHandler = async (event) => {
 	const download = url.searchParams.get('download') === 'true';
 	const disposition = download ? 'attachment' : 'inline';
 
-	const uint8 = new Uint8Array(pdfBuffer);
-
-	return new Response(uint8, {
+	// Streaming: chunks flow from PDFKit → socket without accumulating.
+	// Content-Length is intentionally omitted so chunked transfer is used.
+	return new Response(pdfStream, {
 		status: 200,
 		headers: {
 			'Content-Type': 'application/pdf',
-			'Content-Disposition': `${disposition}; filename="${filename}"`,
-			'Content-Length': pdfBuffer.length.toString()
+			'Content-Disposition': `${disposition}; filename="${filename}"`
 		}
 	});
 };
