@@ -2383,10 +2383,29 @@ export async function sendReportEmail(
 		</div>
 	`;
 
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
 			return {
+				from: `"${tenantName}" <${fromEmail}>`,
 				to: recipientEmail,
 				subject,
 				html,
+				text: trimPlainText(`
+				Raport Marketing
+
+				Buna ziua,
+
+				Atasat gasiti raportul de marketing pentru ${clientName} aferent perioadei ${periodLabel}.
+
+				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active.
+
+				Acest email a fost generat automat de ${tenantName}.
+			`),
 				attachments: [
 					{
 						filename,
