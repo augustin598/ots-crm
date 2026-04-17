@@ -24,6 +24,19 @@ import { createInvoiceViewToken } from '$lib/server/invoice-token';
 // ---------------------------------------------------------------------------
 
 /**
+ * Escape HTML special characters to prevent HTML injection in email templates.
+ * Applied to all user-supplied values interpolated into HTML email bodies.
+ */
+function escapeHtml(str: string): string {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+/**
  * Format a date as dd.MM.yyyy (Romanian locale, consistent across environments).
  */
 function formatDateRo(date: string | Date | null | undefined): string {
@@ -182,7 +195,7 @@ function getDefaultTransporter(): nodemailer.Transporter {
 			user: env.SMTP_USER,
 			pass: env.SMTP_PASSWORD
 		},
-		tls: { rejectUnauthorized: false } // allow self-signed certs (e.g. sender.navitech.cloud)
+		tls: { rejectUnauthorized: env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false' }
 	});
 
 	return defaultTransporter;
@@ -262,7 +275,7 @@ export async function getTenantTransporter(
 					port,
 					secure,
 					auth: { user: emailSettings!.smtpUser!, pass: decryptedPassword },
-					tls: { rejectUnauthorized: false }
+					tls: { rejectUnauthorized: env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false' }
 				}), port };
 			};
 
@@ -532,7 +545,10 @@ export async function sendWithPersistence(
 	}
 
 	// STEP 3b: Persist HTML body for preview if not already saved.
-	if (!ctx.htmlBody && typeof mailOptions.html === 'string' && mailOptions.html) {
+	// Skip for sensitive email types that contain auth tokens in their HTML.
+	const SENSITIVE_EMAIL_TYPES: EmailType[] = ['magic-link', 'admin-magic-link', 'password-reset'];
+	const isSensitive = SENSITIVE_EMAIL_TYPES.includes(ctx.emailType);
+	if (!isSensitive && !ctx.htmlBody && typeof mailOptions.html === 'string' && mailOptions.html) {
 		try {
 			await db
 				.update(table.emailLog)
@@ -597,6 +613,8 @@ export async function sendInvitationEmail(
 	inviterName: string,
 	tenantId: string
 ): Promise<void> {
+	tenantName = escapeHtml(tenantName);
+	inviterName = escapeHtml(inviterName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
 	const subject = `You've been invited to join ${tenantName}`;
@@ -734,7 +752,8 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 				env.SMTP_FROM ||
 				env.SMTP_USER ||
 				'noreply@example.com';
-			const tenantName = tenant?.name || 'CRM';
+			const tenantName = escapeHtml(tenant?.name || 'CRM');
+			const clientDisplayName = escapeHtml(client?.name || '');
 
 			// Generate public view token and URL (accessible without authentication)
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
@@ -885,7 +904,8 @@ export async function sendMagicLinkEmail(
 		throw new Error('Tenant not found');
 	}
 
-	const tenantName = tenant.name || 'CRM';
+	const tenantName = escapeHtml(tenant.name || 'CRM');
+	clientName = escapeHtml(clientName);
 	const loginUrl = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(token)}`;
 
 	await sendWithPersistence(
@@ -896,10 +916,9 @@ export async function sendMagicLinkEmail(
 			emailType: 'magic-link',
 			metadata: { tenantSlug, clientName },
 			htmlBody: '',
-			payload: {
-				sendFn: 'sendMagicLinkEmail',
-				args: [email, token, tenantSlug, clientName]
-			}
+			// SECURITY: payload intentionally null — token is single-use and must not
+			// be persisted in email_log (plaintext leak risk). Not retriable by design.
+			payload: null
 		},
 		async () => {
 			const [emailSettings] = await db
@@ -976,6 +995,7 @@ export async function sendAdminMagicLinkEmail(
 	token: string,
 	userName: string
 ): Promise<void> {
+	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const appName = 'CRM Admin';
 	const loginUrl = `${baseUrl}/login/verify?token=${encodeURIComponent(token)}`;
@@ -988,10 +1008,9 @@ export async function sendAdminMagicLinkEmail(
 			emailType: 'admin-magic-link',
 			metadata: { userName },
 			htmlBody: '',
-			payload: {
-				sendFn: 'sendAdminMagicLinkEmail',
-				args: [email, token, userName]
-			}
+			// SECURITY: payload intentionally null — token is single-use and must not
+			// be persisted in email_log (plaintext leak risk). Not retriable by design.
+			payload: null
 		},
 		async () => {
 			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
@@ -1056,6 +1075,7 @@ export async function sendPasswordResetEmail(
 	token: string,
 	userName: string
 ): Promise<void> {
+	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const appName = 'CRM Admin';
 	const resetUrl = `${baseUrl}/login/reset-password/${encodeURIComponent(token)}`;
@@ -1068,10 +1088,9 @@ export async function sendPasswordResetEmail(
 			emailType: 'password-reset',
 			metadata: { userName },
 			htmlBody: '',
-			payload: {
-				sendFn: 'sendPasswordResetEmail',
-				args: [email, token, userName]
-			}
+			// SECURITY: payload intentionally null — token is single-use and must not
+			// be persisted in email_log (plaintext leak risk). Not retriable by design.
+			payload: null
 		},
 		async () => {
 			const fromEmail = env.SMTP_FROM || env.SMTP_USER || 'noreply@example.com';
@@ -1136,6 +1155,7 @@ export async function sendTaskAssignmentEmail(
 	assigneeEmail: string,
 	assigneeName?: string
 ): Promise<void> {
+	if (assigneeName) assigneeName = escapeHtml(assigneeName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	// Get task details (needed up-front for tenantId & subject)
@@ -1262,6 +1282,7 @@ export async function sendTaskUpdateEmail(
 	watcherName?: string,
 	changeType?: string
 ): Promise<void> {
+	if (watcherName) watcherName = escapeHtml(watcherName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
@@ -1400,6 +1421,9 @@ export async function sendTaskClientNotificationEmail(
 	notificationType: 'created' | 'status-change' | 'comment' | 'modified',
 	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
 ): Promise<void> {
+	if (clientName) clientName = escapeHtml(clientName);
+	if (extra?.commentPreview) extra.commentPreview = escapeHtml(extra.commentPreview);
+	if (extra?.changedFields) extra.changedFields = escapeHtml(extra.changedFields);
 	// Extract first name for a more personal greeting
 	const greeting = clientName?.split(' ')[0] || 'ziua';
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1900,6 +1924,7 @@ export async function sendTaskReminderEmail(
 	assigneeEmail: string,
 	assigneeName?: string
 ): Promise<void> {
+	if (assigneeName) assigneeName = escapeHtml(assigneeName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
@@ -2012,6 +2037,7 @@ export async function sendDailyWorkReminderEmail(
 	tasks: Array<typeof table.task.$inferSelect>,
 	userName: string
 ): Promise<void> {
+	userName = escapeHtml(userName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	const [user] = await db.select().from(table.user).where(eq(table.user.id, userId)).limit(1);
@@ -2168,6 +2194,8 @@ export async function sendContractSigningEmail(
 	contractNumber: string,
 	clientName: string
 ): Promise<void> {
+	clientName = escapeHtml(clientName);
+	contractNumber = escapeHtml(contractNumber);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 
 	const [tenant] = await db
@@ -2344,9 +2372,6 @@ export async function sendReportEmail(
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
 	sendInvitationEmail,
 	sendInvoiceEmail,
-	sendMagicLinkEmail,
-	sendAdminMagicLinkEmail,
-	sendPasswordResetEmail,
 	sendTaskAssignmentEmail,
 	sendTaskUpdateEmail,
 	sendTaskClientNotificationEmail,
@@ -2354,7 +2379,9 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendOverdueReminderEmail,
 	sendTaskReminderEmail,
 	sendContractSigningEmail
-	// NOTE: sendDailyWorkReminderEmail and sendReportEmail intentionally omitted —
-	// they use payload: null because their inputs are not safely replay-able
-	// (Buffer attachments, large task arrays). Their scheduled tasks regenerate them.
+	// NOTE: Intentionally omitted (payload: null, not replay-able):
+	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
+	//   (contain single-use auth tokens that must not be persisted)
+	// - sendDailyWorkReminderEmail, sendReportEmail
+	//   (Buffer attachments, large task arrays — scheduled tasks regenerate them)
 };

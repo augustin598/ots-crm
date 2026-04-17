@@ -9,6 +9,7 @@ import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sendMagicLinkEmail } from '$lib/server/email';
 import { verifyMagicLinkToken } from '$lib/server/client-auth';
+import { checkAuthRateLimit } from '$lib/server/rate-limiter';
 import { env as publicEnv } from '$env/dynamic/public';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
@@ -33,6 +34,14 @@ export const clientSignup = command(
 	}),
 	async ({ tenantSlug, cui, email }) => {
 		try {
+			// Rate limiting
+			const event = getRequestEvent();
+			const clientIp = event ? event.getClientAddress() : null;
+			const rateLimitError = checkAuthRateLimit(email, clientIp);
+			if (rateLimitError) {
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
+			}
+
 			// Find tenant by slug
 			const [tenant] = await db
 				.select()
@@ -41,7 +50,8 @@ export const clientSignup = command(
 				.limit(1);
 
 			if (!tenant) {
-				throw new Error('Tenant not found');
+				// SECURITY: Return generic message to prevent tenant enumeration
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
 			// Find client by CUI in this tenant
@@ -52,13 +62,20 @@ export const clientSignup = command(
 				.limit(1);
 
 			if (!client) {
-				throw new Error('Client not found with this CUI. Please contact your administrator.');
+				// SECURITY: Return generic message to prevent CUI enumeration
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
-			// Verify email matches either primary or secondary (don't overwrite primary email)
+			// Verify email matches either primary or secondary
 			const emailLower = email.toLowerCase();
 			const isPrimaryMatch = client.email?.toLowerCase() === emailLower;
 			if (!isPrimaryMatch) {
+				// Client must have an email configured by admin
+				if (!client.email) {
+					// SECURITY: Don't allow arbitrary email to be set as primary via signup.
+					// Admin must configure client email first.
+					return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
+				}
 				const [secondary] = await db
 					.select()
 					.from(table.clientSecondaryEmail)
@@ -70,17 +87,24 @@ export const clientSignup = command(
 						)
 					)
 					.limit(1);
-				if (!secondary && client.email) {
-					throw new Error('Email does not match this client. Please use the email your administrator has configured.');
-				}
-				// If client has no email set yet, allow the signup email to be set as primary
-				if (!client.email) {
-					await db
-						.update(table.client)
-						.set({ email, updatedAt: new Date() })
-						.where(eq(table.client.id, client.id));
+				if (!secondary) {
+					// SECURITY: Return generic message to prevent email enumeration
+					return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 				}
 			}
+
+			// Invalidate any existing unused tokens for this email+tenant
+			const normalizedEmail = email.toLowerCase();
+			await db
+				.update(table.magicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(
+					and(
+						eq(table.magicLinkToken.email, normalizedEmail),
+						eq(table.magicLinkToken.tenantId, tenant.id),
+						eq(table.magicLinkToken.used, false)
+					)
+				);
 
 			// Generate magic link token
 			const plainToken = generateMagicLinkToken();
@@ -89,8 +113,6 @@ export const clientSignup = command(
 
 			const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
-			// Store token in database (normalized email)
-			const normalizedEmail = email.toLowerCase();
 			await db.insert(table.magicLinkToken).values({
 				id: tokenId,
 				token: hashedToken,
@@ -112,8 +134,8 @@ export const clientSignup = command(
 			return { success: true, message: 'Magic link sent to your email' };
 		} catch (error) {
 			console.error('Client signup error:', error);
-			const message = error instanceof Error ? error.message : 'Signup failed';
-			throw new Error(message);
+			// Return generic message to prevent leaking internal errors
+			return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 		}
 	}
 );
@@ -127,9 +149,15 @@ export const requestMagicLink = command(
 		email: v.pipe(v.string(), v.email('Invalid email address'))
 	}),
 	async ({ tenantSlug, email }) => {
-		const startTime = Date.now();
-		console.log('[MAGIC_LINK_DEBUG] === Request started ===', { tenantSlug, email, timestamp: new Date().toISOString() });
 		try {
+			// Rate limiting
+			const event = getRequestEvent();
+			const clientIp = event ? event.getClientAddress() : null;
+			const rateLimitError = checkAuthRateLimit(email, clientIp);
+			if (rateLimitError) {
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
+			}
+
 			// Find tenant by slug
 			const [tenant] = await db
 				.select()
@@ -137,7 +165,6 @@ export const requestMagicLink = command(
 				.where(eq(table.tenant.slug, tenantSlug))
 				.limit(1);
 
-			console.log('[MAGIC_LINK_DEBUG] Tenant lookup:', { found: !!tenant, tenantId: tenant?.id, elapsed: Date.now() - startTime + 'ms' });
 
 			if (!tenant) {
 				throw new Error('Tenant not found');
@@ -150,7 +177,6 @@ export const requestMagicLink = command(
 				.where(and(eq(table.client.tenantId, tenant.id), eq(sql`lower(${table.client.email})`, email.toLowerCase())))
 				.limit(1);
 
-			console.log('[MAGIC_LINK_DEBUG] Primary email lookup:', { found: !!client, clientId: client?.id, elapsed: Date.now() - startTime + 'ms' });
 
 			// If not found by primary email, check secondary emails
 			if (!client) {
@@ -168,13 +194,26 @@ export const requestMagicLink = command(
 				if (secondary) {
 					client = secondary.client;
 				}
-				console.log('[MAGIC_LINK_DEBUG] Secondary email lookup:', { found: !!client, elapsed: Date.now() - startTime + 'ms' });
+
 			}
 
 			if (!client) {
-				console.log('[MAGIC_LINK_DEBUG] No client found, returning silent success');
+
 				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
+
+			// Invalidate any existing unused tokens for this email+tenant
+			const normalizedEmail = email.toLowerCase();
+			await db
+				.update(table.magicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(
+					and(
+						eq(table.magicLinkToken.email, normalizedEmail),
+						eq(table.magicLinkToken.tenantId, tenant.id),
+						eq(table.magicLinkToken.used, false)
+					)
+				);
 
 			// Generate magic link token
 			const plainToken = generateMagicLinkToken();
@@ -183,8 +222,6 @@ export const requestMagicLink = command(
 
 			const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
-			// Store token in database (normalized email)
-			const normalizedEmail = email.toLowerCase();
 			await db.insert(table.magicLinkToken).values({
 				id: tokenId,
 				token: hashedToken,
@@ -195,27 +232,17 @@ export const requestMagicLink = command(
 				used: false
 			});
 
-			console.log('[MAGIC_LINK_DEBUG] Token stored in DB:', { tokenId, elapsed: Date.now() - startTime + 'ms' });
-
 			// Send magic link email
 			try {
 				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, client.name);
-				console.log('[MAGIC_LINK_DEBUG] Email sent successfully:', { elapsed: Date.now() - startTime + 'ms' });
 			} catch (emailError) {
-				console.error('[MAGIC_LINK_DEBUG] Failed to send email:', emailError);
+				console.error('Failed to send magic link email:', emailError);
 				throw new Error('Failed to send email. Please try again later.');
 			}
 
-			console.log('[MAGIC_LINK_DEBUG] === Returning success response ===', { elapsed: Date.now() - startTime + 'ms' });
 			return { success: true, message: 'Magic link sent to your email' };
 		} catch (error) {
-			console.error('[MAGIC_LINK_DEBUG] === CAUGHT ERROR ===', {
-				type: typeof error,
-				name: error instanceof Error ? error.name : 'unknown',
-				message: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-				elapsed: Date.now() - startTime + 'ms'
-			});
+			console.error('Request magic link error:', error);
 			const message = error instanceof Error ? error.message : 'Request failed';
 			throw new Error(message);
 		}
@@ -254,7 +281,7 @@ export const generateClientMagicLink = command(
 		await db.insert(table.magicLinkToken).values({
 			id: tokenId,
 			token: hashedToken,
-			email: client.email,
+			email: client.email.toLowerCase(),
 			clientId: client.id,
 			tenantId,
 			expiresAt,
@@ -295,14 +322,14 @@ export const sendClientMagicLinkEmail = command(
 		await db.insert(table.magicLinkToken).values({
 			id: tokenId,
 			token: hashedToken,
-			email: client.email,
+			email: client.email.toLowerCase(),
 			clientId: client.id,
 			tenantId,
 			expiresAt,
 			used: false
 		});
 
-		await sendMagicLinkEmail(client.email, plainToken, tenantSlug, client.name);
+		await sendMagicLinkEmail(client.email.toLowerCase(), plainToken, tenantSlug, client.name);
 		return { sent: true, email: client.email };
 	}
 );

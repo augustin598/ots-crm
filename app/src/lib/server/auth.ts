@@ -74,6 +74,10 @@ export async function invalidateSession(sessionId: string) {
 	await db.delete(table.session).where(eq(table.session.id, sessionId));
 }
 
+export async function invalidateUserSessions(userId: string) {
+	await db.delete(table.session).where(eq(table.session.userId, userId));
+}
+
 export function setSessionTokenCookie(event: RequestEvent, token: string, expiresAt: Date) {
 	event.cookies.set(sessionCookieName, token, {
 		expires: expiresAt,
@@ -153,6 +157,8 @@ export async function verifyAdminMagicLinkToken(
 
 		// Set session cookie if event is provided
 		if (event) {
+			// Invalidate all existing sessions for this user (prevents session fixation)
+			await invalidateUserSessions(userRecord.id);
 			const sessionToken = generateSessionToken();
 			const session = await createSession(sessionToken, userRecord.id);
 			setSessionTokenCookie(event, sessionToken, session.expiresAt);
