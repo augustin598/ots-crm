@@ -105,10 +105,22 @@
 		tiktok: 'TikTok'
 	};
 
-	const platformColors: Record<string, string> = {
-		meta: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800',
-		google: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
-		tiktok: 'bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800'
+	const platformColors: Record<string, { pill: string; btn: string; btnOff: string }> = {
+		meta: {
+			pill: 'bg-[#1877F2]/10 text-[#1877F2] border-[#1877F2]/20',
+			btn: 'bg-[#1877F2]/10 border-[#1877F2]/40 text-[#1877F2] shadow-sm',
+			btnOff: 'bg-background text-muted-foreground border-border hover:border-[#1877F2]/30 hover:bg-[#1877F2]/5'
+		},
+		google: {
+			pill: 'bg-[#3C8BD9]/10 text-[#3C8BD9] border-[#3C8BD9]/20',
+			btn: 'bg-[#FABC04]/10 border-[#FABC04]/40 text-foreground shadow-sm',
+			btnOff: 'bg-background text-muted-foreground border-border hover:border-[#FABC04]/30 hover:bg-[#FABC04]/5'
+		},
+		tiktok: {
+			pill: 'bg-foreground/5 text-foreground border-foreground/10',
+			btn: 'bg-foreground/5 border-foreground/20 text-foreground shadow-sm',
+			btnOff: 'bg-background text-muted-foreground border-border hover:border-foreground/20 hover:bg-foreground/5'
+		}
 	};
 
 	const frequencyLabels: Record<string, string> = {
@@ -405,7 +417,7 @@
 								<div class="flex gap-1.5 mt-2.5">
 									{#each schedule.platforms as p}
 										{@const Icon = platformIcons[p]}
-										<span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p]}">
+										<span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium {platformColors[p].pill}">
 											{#if Icon}
 												<Icon class="h-3.5 w-3.5" />
 											{/if}
@@ -550,9 +562,7 @@
 						<button
 							type="button"
 							class="flex-1 flex items-center justify-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all duration-150
-								{formPlatforms.includes(p)
-									? `${platformColors[p]} border-current shadow-sm`
-									: 'bg-background text-muted-foreground border-transparent hover:border-border'}"
+								{formPlatforms.includes(p) ? platformColors[p].btn : platformColors[p].btnOff}"
 							onclick={() => togglePlatform(p)}
 						>
 							{#if Icon}
