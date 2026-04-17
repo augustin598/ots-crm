@@ -6,6 +6,31 @@ import { eq, and, desc } from 'drizzle-orm';
 import { generateReportPdf } from '$lib/server/report-pdf-generator';
 import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
 
+/** Get account names for a client on a platform (from account tables, not spending) */
+async function getClientAccounts(tenantId: string, clientId: string, platform: string) {
+	try {
+		if (platform === 'meta') {
+			const rows = await db.select({ name: table.metaAdsAccount.accountName })
+				.from(table.metaAdsAccount)
+				.where(and(eq(table.metaAdsAccount.tenantId, tenantId), eq(table.metaAdsAccount.clientId, clientId)));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+		}
+		if (platform === 'google') {
+			const rows = await db.select({ name: table.googleAdsAccount.accountName })
+				.from(table.googleAdsAccount)
+				.where(and(eq(table.googleAdsAccount.tenantId, tenantId), eq(table.googleAdsAccount.clientId, clientId)));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+		}
+		if (platform === 'tiktok') {
+			const rows = await db.select({ name: table.tiktokAdsAccount.accountName })
+				.from(table.tiktokAdsAccount)
+				.where(and(eq(table.tiktokAdsAccount.tenantId, tenantId), eq(table.tiktokAdsAccount.clientId, clientId)));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+		}
+	} catch { /* ignore */ }
+	return [];
+}
+
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.tenant) {
 		throw error(401, 'Unauthorized');
@@ -67,16 +92,22 @@ export const GET: RequestHandler = async (event) => {
 	for (const platformName of platformNames) {
 		const data = await getPlatformSpendData(tenantId, clientId, platformName, since, until);
 		if (data) {
+			// If no accounts from spending, try to get from account tables
+			if (!data.accounts || data.accounts.length === 0) {
+				data.accounts = await getClientAccounts(tenantId, clientId, platformName);
+			}
 			platforms.push(data);
 		} else {
 			// Include with zero values so it appears in the PDF
+			const accounts = await getClientAccounts(tenantId, clientId, platformName);
 			platforms.push({
 				name: platformDisplayNames[platformName] || platformName,
 				spend: 0,
 				impressions: 0,
 				clicks: 0,
 				conversions: 0,
-				currency: 'RON'
+				currency: 'RON',
+				accounts
 			});
 		}
 	}
