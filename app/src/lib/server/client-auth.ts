@@ -17,6 +17,37 @@ function hashToken(token: string): string {
 }
 
 /**
+ * Resolve contact name from secondary email label or client legalRepresentative
+ */
+async function resolveContactName(clientId: string, normalizedEmail: string, isPrimary: boolean): Promise<string> {
+	if (!isPrimary) {
+		const [secondaryEmail] = await db
+			.select()
+			.from(table.clientSecondaryEmail)
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.clientId, clientId),
+					eq(table.clientSecondaryEmail.email, normalizedEmail)
+				)
+			)
+			.limit(1);
+		if (secondaryEmail?.label) {
+			return secondaryEmail.label.trim();
+		}
+	} else {
+		const [fullClient] = await db
+			.select()
+			.from(table.client)
+			.where(eq(table.client.id, clientId))
+			.limit(1);
+		if (fullClient?.legalRepresentative) {
+			return fullClient.legalRepresentative.trim();
+		}
+	}
+	return '';
+}
+
+/**
  * Server-side helper function to verify magic link token
  * This can be called from both server load functions and commands
  */
@@ -212,34 +243,7 @@ async function findOrCreateClientUserSession(
 	if (!user) {
 		const emailParts = normalizedEmail.split('@');
 
-		// Try to get individual contact name from secondary email label
-		let contactName = '';
-		if (!isPrimary) {
-			const [secondaryEmail] = await db
-				.select()
-				.from(table.clientSecondaryEmail)
-				.where(
-					and(
-						eq(table.clientSecondaryEmail.clientId, client.id),
-						eq(table.clientSecondaryEmail.email, normalizedEmail)
-					)
-				)
-				.limit(1);
-			if (secondaryEmail?.label) {
-				contactName = secondaryEmail.label.trim();
-			}
-		} else {
-			// For primary email, try legalRepresentative from client record
-			const [fullClient] = await db
-				.select()
-				.from(table.client)
-				.where(eq(table.client.id, client.id))
-				.limit(1);
-			if (fullClient?.legalRepresentative) {
-				contactName = fullClient.legalRepresentative.trim();
-			}
-		}
-
+		const contactName = await resolveContactName(client.id, normalizedEmail, isPrimary);
 		const nameParts = contactName ? contactName.split(' ') : [];
 		const firstName = nameParts[0] || emailParts[0];
 		const lastName = nameParts.slice(1).join(' ') || '';
@@ -274,31 +278,7 @@ async function findOrCreateClientUserSession(
 
 	// Sync user name from contact label if user still has the company name
 	if (user) {
-		let contactName = '';
-		if (!isPrimary) {
-			const [secondaryEmail] = await db
-				.select()
-				.from(table.clientSecondaryEmail)
-				.where(
-					and(
-						eq(table.clientSecondaryEmail.clientId, client.id),
-						eq(table.clientSecondaryEmail.email, normalizedEmail)
-					)
-				)
-				.limit(1);
-			if (secondaryEmail?.label) {
-				contactName = secondaryEmail.label.trim();
-			}
-		} else {
-			const [fullClient] = await db
-				.select()
-				.from(table.client)
-				.where(eq(table.client.id, client.id))
-				.limit(1);
-			if (fullClient?.legalRepresentative) {
-				contactName = fullClient.legalRepresentative.trim();
-			}
-		}
+		const contactName = await resolveContactName(client.id, normalizedEmail, isPrimary);
 
 		if (contactName) {
 			const nameParts = contactName.split(' ');

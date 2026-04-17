@@ -1010,8 +1010,14 @@ export const reopenTask = command(
 				)
 			);
 
-		// If no rows updated, the status was already changed by another request
-		if ((result as any).rowsAffected === 0) {
+		// Verify the update actually changed a row (race condition guard)
+		const [verifyTask] = await db
+			.select({ status: table.task.status })
+			.from(table.task)
+			.where(eq(table.task.id, taskId))
+			.limit(1);
+
+		if (verifyTask?.status !== 'pending-approval') {
 			throw new Error('Task-ul nu mai poate fi redeschis (statusul s-a schimbat deja).');
 		}
 
@@ -1025,9 +1031,11 @@ export const reopenTask = command(
 			newValue: 'pending-approval'
 		});
 
-		// Notify assignee that task was reopened and needs approval
 		const reopenerName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
-		if (existing.assignedToUserId) {
+		const currentUserId = event.locals.user.id;
+
+		// Notify assignee (skip if reopener is the assignee)
+		if (existing.assignedToUserId && existing.assignedToUserId !== currentUserId) {
 			try {
 				const [assignee] = await db
 					.select()
@@ -1044,7 +1052,7 @@ export const reopenTask = command(
 			}
 		}
 
-		// Also notify tenant admin users
+		// Notify tenant admin/owner users (skip reopener and assignee)
 		try {
 			const adminUsers = await db
 				.select()
@@ -1058,7 +1066,7 @@ export const reopenTask = command(
 				);
 
 			for (const { user: adminUser } of adminUsers) {
-				if (adminUser.email && adminUser.id !== existing.assignedToUserId) {
+				if (adminUser.email && adminUser.id !== existing.assignedToUserId && adminUser.id !== currentUserId) {
 					const adminName = `${adminUser.firstName} ${adminUser.lastName}`.trim() || adminUser.email;
 					await sendTaskUpdateEmail(taskId, adminUser.email, adminName, `Task redeschis de ${reopenerName} - necesită aprobare`);
 				}
@@ -1066,6 +1074,11 @@ export const reopenTask = command(
 		} catch (error) {
 			logError('Failed to send admin reopen notification emails', error);
 		}
+
+		// Send client notification for status change
+		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
+			newStatus: 'pending-approval'
+		}, event.locals.user.email);
 
 		return { success: true };
 	}
