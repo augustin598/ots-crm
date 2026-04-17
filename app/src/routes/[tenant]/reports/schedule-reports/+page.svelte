@@ -475,7 +475,7 @@
 
 <!-- Create/Edit Dialog -->
 <Dialog bind:open={dialogOpen} onOpenChange={(open) => { if (!open) resetForm(); }}>
-	<DialogContent class="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+	<DialogContent class="sm:max-w-xl max-h-[85vh] overflow-y-visible">
 		<DialogHeader>
 			<DialogTitle>{editingId ? 'Editează program' : 'Program nou'}</DialogTitle>
 			<DialogDescription>Configurează frecvența și destinatarii raportului PDF.</DialogDescription>
