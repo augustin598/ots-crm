@@ -35,7 +35,8 @@ export async function processPdfReportSend() {
 				recipientEmails: table.reportSchedule.recipientEmails,
 				clientName: table.client.name,
 				clientEmail: table.client.email,
-				tenantName: table.tenant.name
+				tenantName: table.tenant.name,
+				tenantThemeColor: table.tenant.themeColor
 			})
 			.from(table.reportSchedule)
 			.leftJoin(table.client, eq(table.reportSchedule.clientId, table.client.id))
@@ -96,7 +97,8 @@ export async function processPdfReportSend() {
 					period: { since, until, label },
 					platforms,
 					generatedAt: now,
-					tenantLogo
+					tenantLogo,
+					accentColor: schedule.tenantThemeColor || null
 				});
 
 				// Get recipients

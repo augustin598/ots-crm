@@ -23,7 +23,7 @@ const MT = 28;
 const CW = PW - ML - MR;
 
 // Colors
-const ACCENT = '#3B82F6';
+const DEFAULT_ACCENT = '#3B82F6';
 const DARK = '#1E293B';
 const TEXT = '#334155';
 const MUTED = '#64748B';
@@ -55,6 +55,7 @@ export interface ReportPdfData {
 	platforms: ReportPlatformData[];
 	generatedAt: Date;
 	tenantLogo?: string | null; // base64 encoded logo or null for default
+	accentColor?: string | null; // tenant theme color
 }
 
 function fmtNum(n: number): string {
@@ -127,6 +128,7 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 		doc.registerFont('Regular', FONT_REGULAR);
 		doc.registerFont('Bold', FONT_BOLD);
 
+		const ACCENT = data.accentColor || DEFAULT_ACCENT;
 		let y = MT;
 
 		// ============================================================

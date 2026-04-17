@@ -99,7 +99,8 @@ export const GET: RequestHandler = async (event) => {
 		period: { since, until, label },
 		platforms,
 		generatedAt: new Date(),
-		tenantLogo
+		tenantLogo,
+		accentColor: event.locals.tenant.themeColor || null
 	});
 
 	const safeClientName = (client.name || 'client').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
