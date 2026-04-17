@@ -191,7 +191,21 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 		doc.font('Bold').fontSize(9.5).fillColor(DARK)
 			.text(data.clientName, col1X, y, { width: colW });
-		y += 16;
+		y += 14;
+
+		// Promoted sites (unique account names from all platforms)
+		const allAccountNames = new Set<string>();
+		for (const p of data.platforms) {
+			if (p.accounts) {
+				for (const a of p.accounts) allAccountNames.add(a.accountName);
+			}
+		}
+		if (allAccountNames.size > 0) {
+			const sitesText = Array.from(allAccountNames).join('  •  ');
+			doc.font('Regular').fontSize(7.5).fillColor(MUTED)
+				.text(sitesText, col1X, y, { width: colW });
+			y += 12;
+		}
 
 		// Right: DETALII RAPORT
 		let yr = sectionStart;
@@ -385,7 +399,7 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
 				const dotColor = PLATFORM_COLORS[platform.name] || ACCENT;
-				const acctCount = platform.accounts?.length || 0;
+				const acctCount = platform.accounts && platform.accounts.length > 1 ? platform.accounts.length : 0;
 				const cardH = 58 + (acctCount > 0 ? acctCount * 12 + 4 : 0);
 
 				// Card outline
@@ -428,8 +442,8 @@ export async function generateReportPdf(data: ReportPdfData): Promise<Buffer> {
 
 				y += cardH;
 
-				// Account breakdown (if available)
-				if (platform.accounts && platform.accounts.length > 0) {
+				// Account breakdown (only if 2+ accounts)
+				if (platform.accounts && platform.accounts.length > 1) {
 					for (const acc of platform.accounts) {
 						doc.font('Regular').fontSize(7).fillColor(MUTED)
 							.text(acc.accountName, ML + 18, y + 2, { width: CW / 2 - 20, lineBreak: false });

@@ -224,7 +224,7 @@ export async function getPlatformSpendData(
 			accounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
 		}
 
-		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON', accounts: accounts.length > 1 ? accounts : undefined };
+		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON', accounts };
 	}
 
 	if (platform === 'google') {
@@ -262,7 +262,7 @@ export async function getPlatformSpendData(
 			gAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
 		}
 
-		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: gAccounts.length > 1 ? gAccounts : undefined };
+		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: gAccounts };
 	}
 
 	if (platform === 'tiktok') {
@@ -300,7 +300,7 @@ export async function getPlatformSpendData(
 			tAccounts.push({ accountName: acct?.name || row.accountId, spend: row.spend / 100, currency: row.currency || 'RON' });
 		}
 
-		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: tAccounts.length > 1 ? tAccounts : undefined };
+		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: tAccounts };
 	}
 
 	return null;
