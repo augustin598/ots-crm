@@ -71,9 +71,29 @@ export async function createGmailTransporter(
         }
       });
 
+      // Gmail API sometimes places sent messages in INBOX — remove INBOX label to keep only in SENT
+      const messageId = response.data.id;
+      if (messageId) {
+        try {
+          await gmailApi.users.messages.modify({
+            userId: 'me',
+            id: messageId,
+            requestBody: {
+              removeLabelIds: ['INBOX', 'UNREAD']
+            }
+          });
+        } catch (labelError) {
+          // Non-critical — log but don't fail the send
+          logWarning('gmail', 'Failed to remove INBOX label from sent message', {
+            tenantId,
+            metadata: { messageId, error: labelError instanceof Error ? labelError.message : String(labelError) }
+          });
+        }
+      }
+
       logInfo('gmail', 'Email sent via Gmail API', {
         tenantId,
-        metadata: { messageId: response.data.id }
+        metadata: { messageId }
       });
 
       return {
