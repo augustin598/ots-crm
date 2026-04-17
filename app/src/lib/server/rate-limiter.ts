@@ -1,6 +1,6 @@
 /**
  * Simple in-memory rate limiter for auth endpoints.
- * Tracks requests per key (email or IP) with sliding window.
+ * Tracks requests per key (email or IP) with fixed window.
  */
 
 interface RateLimitEntry {
@@ -8,9 +8,10 @@ interface RateLimitEntry {
 	resetAt: number;
 }
 
+const MAX_STORE_SIZE = 50_000;
 const store = new Map<string, RateLimitEntry>();
 
-// Cleanup stale entries every 10 minutes
+// Cleanup stale entries every 10 minutes (unref to allow graceful shutdown)
 setInterval(() => {
 	const now = Date.now();
 	for (const [key, entry] of store) {
@@ -18,7 +19,7 @@ setInterval(() => {
 			store.delete(key);
 		}
 	}
-}, 10 * 60 * 1000);
+}, 10 * 60 * 1000).unref();
 
 export interface RateLimitOptions {
 	/** Max requests allowed in the window */
@@ -42,6 +43,11 @@ function isRateLimited(key: string, options: RateLimitOptions): boolean {
 		return false;
 	}
 
+	// Already over limit -- don't increment further
+	if (entry.count >= options.max) {
+		return true;
+	}
+
 	entry.count++;
 	return entry.count > options.max;
 }
@@ -51,6 +57,14 @@ function isRateLimited(key: string, options: RateLimitOptions): boolean {
  * Returns null if allowed, or an error message if rate limited.
  */
 export function checkAuthRateLimit(email: string, ip: string | null): string | null {
+	// Safety: prevent unbounded Map growth under attack
+	if (store.size > MAX_STORE_SIZE) {
+		const now = Date.now();
+		for (const [key, entry] of store) {
+			if (now > entry.resetAt) store.delete(key);
+		}
+	}
+
 	const emailKey = `auth:email:${email.toLowerCase()}`;
 	if (isRateLimited(emailKey, AUTH_EMAIL_LIMIT)) {
 		return 'Too many requests. Please try again later.';

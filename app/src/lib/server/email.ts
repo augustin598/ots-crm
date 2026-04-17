@@ -2372,9 +2372,6 @@ export async function sendReportEmail(
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
 	sendInvitationEmail,
 	sendInvoiceEmail,
-	sendMagicLinkEmail,
-	sendAdminMagicLinkEmail,
-	sendPasswordResetEmail,
 	sendTaskAssignmentEmail,
 	sendTaskUpdateEmail,
 	sendTaskClientNotificationEmail,
@@ -2382,7 +2379,9 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendOverdueReminderEmail,
 	sendTaskReminderEmail,
 	sendContractSigningEmail
-	// NOTE: sendDailyWorkReminderEmail and sendReportEmail intentionally omitted —
-	// they use payload: null because their inputs are not safely replay-able
-	// (Buffer attachments, large task arrays). Their scheduled tasks regenerate them.
+	// NOTE: Intentionally omitted (payload: null, not replay-able):
+	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
+	//   (contain single-use auth tokens that must not be persisted)
+	// - sendDailyWorkReminderEmail, sendReportEmail
+	//   (Buffer attachments, large task arrays — scheduled tasks regenerate them)
 };

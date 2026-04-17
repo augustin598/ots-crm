@@ -134,8 +134,8 @@ export const clientSignup = command(
 			return { success: true, message: 'Magic link sent to your email' };
 		} catch (error) {
 			console.error('Client signup error:', error);
-			const message = error instanceof Error ? error.message : 'Signup failed';
-			throw new Error(message);
+			// Return generic message to prevent leaking internal errors
+			return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 		}
 	}
 );
@@ -281,7 +281,7 @@ export const generateClientMagicLink = command(
 		await db.insert(table.magicLinkToken).values({
 			id: tokenId,
 			token: hashedToken,
-			email: client.email,
+			email: client.email.toLowerCase(),
 			clientId: client.id,
 			tenantId,
 			expiresAt,
@@ -322,14 +322,14 @@ export const sendClientMagicLinkEmail = command(
 		await db.insert(table.magicLinkToken).values({
 			id: tokenId,
 			token: hashedToken,
-			email: client.email,
+			email: client.email.toLowerCase(),
 			clientId: client.id,
 			tenantId,
 			expiresAt,
 			used: false
 		});
 
-		await sendMagicLinkEmail(client.email, plainToken, tenantSlug, client.name);
+		await sendMagicLinkEmail(client.email.toLowerCase(), plainToken, tenantSlug, client.name);
 		return { sent: true, email: client.email };
 	}
 );

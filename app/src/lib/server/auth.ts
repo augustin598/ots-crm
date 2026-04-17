@@ -157,6 +157,8 @@ export async function verifyAdminMagicLinkToken(
 
 		// Set session cookie if event is provided
 		if (event) {
+			// Invalidate all existing sessions for this user (prevents session fixation)
+			await invalidateUserSessions(userRecord.id);
 			const sessionToken = generateSessionToken();
 			const session = await createSession(sessionToken, userRecord.id);
 			setSessionTokenCookie(event, sessionToken, session.expiresAt);

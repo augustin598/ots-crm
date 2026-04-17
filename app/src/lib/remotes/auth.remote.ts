@@ -262,7 +262,7 @@ export const requestMagicLink = command(
 				.set({ used: true })
 				.where(
 					and(
-						eq(adminMagicLinkToken.email, email),
+						eq(adminMagicLinkToken.email, email.toLowerCase()),
 						eq(adminMagicLinkToken.used, false)
 					)
 				);
@@ -367,6 +367,17 @@ export const requestPasswordReset = command(
 			const hashedToken = hashToken(plainToken);
 			const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000);
 			const tokenId = encodeBase32LowerCase(randomBytes(15));
+
+			// Invalidate any existing unused password reset tokens for this user
+			await db
+				.update(passwordResetToken)
+				.set({ used: true })
+				.where(
+					and(
+						eq(passwordResetToken.userId, userRecord.id),
+						eq(passwordResetToken.used, false)
+					)
+				);
 
 			await db.insert(passwordResetToken).values({
 				id: tokenId,
