@@ -120,6 +120,61 @@ function drawPlatformLogo(doc: PDFKit.PDFDocument, name: string, x: number, y: n
 	else if (name === 'TikTok Ads') drawTikTokLogo(doc, x, y, size);
 }
 
+type KpiIconType = 'wallet' | 'eye' | 'cursor' | 'percent' | 'coin' | 'target';
+
+/** Draw a simple silhouette icon for KPI card watermark. 24x24 design grid. */
+function drawKpiIcon(
+	doc: PDFKit.PDFDocument,
+	type: KpiIconType,
+	x: number,
+	y: number,
+	size: number,
+	color: string,
+	opacity: number
+) {
+	doc.save();
+	doc.opacity(opacity);
+	const s = size / 24;
+	doc.translate(x, y);
+	doc.scale(s);
+	doc.fillColor(color);
+
+	switch (type) {
+		case 'wallet':
+			doc.roundedRect(1, 7, 22, 14, 2.5).fill();
+			doc.roundedRect(4, 4, 15, 5, 1.5).fill();
+			break;
+		case 'eye':
+			doc.path('M 1 12 C 4 6 8 4 12 4 C 16 4 20 6 23 12 C 20 18 16 20 12 20 C 8 20 4 18 1 12 Z M 12 9 A 3 3 0 1 1 12 15 A 3 3 0 1 1 12 9 Z')
+				.fill('even-odd');
+			break;
+		case 'cursor':
+			doc.path('M 5 2 L 5 20 L 10 16 L 13 22 L 16 21 L 13 15 L 19 15 Z').fill();
+			break;
+		case 'percent':
+			doc.circle(7, 7, 3).fill();
+			doc.circle(17, 17, 3).fill();
+			doc.save();
+			doc.translate(12, 12);
+			doc.rotate(-45);
+			doc.rect(-11, -1.2, 22, 2.4).fill();
+			doc.restore();
+			break;
+		case 'coin':
+			doc.ellipse(12, 19, 8.5, 2.5).fill();
+			doc.ellipse(12, 13, 8.5, 2.5).fill();
+			doc.ellipse(12, 7, 8.5, 2.5).fill();
+			break;
+		case 'target':
+			doc.path('M 12 2 A 10 10 0 1 0 12 22 A 10 10 0 1 0 12 2 Z M 12 6 A 6 6 0 1 1 12 18 A 6 6 0 1 1 12 6 Z')
+				.fill('even-odd');
+			doc.circle(12, 12, 3).fill();
+			break;
+	}
+	doc.opacity(1);
+	doc.restore();
+}
+
 /**
  * Populate an already-created PDFDocument with the report content.
  * Does NOT call doc.end() — the caller controls the lifecycle so the same
@@ -231,13 +286,13 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 		const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
 		const cpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
 
-		const kpis = [
-			{ label: 'Buget reclame', value: fmtAmount(totalSpend, mainCurrency), accent: true },
-			{ label: 'Impresii', value: fmtNum(totalImpressions), accent: false },
-			{ label: 'Click-uri', value: fmtNum(totalClicks), accent: false },
-			{ label: 'CTR', value: totalImpressions > 0 ? fmtPct(ctr) : '—', accent: false },
-			{ label: 'CPC mediu', value: totalClicks > 0 ? fmtAmount(cpc, mainCurrency) : '—', accent: false },
-			{ label: 'Rezultate', value: totalConversions > 0 ? fmtNum(totalConversions) : '—', accent: false }
+		const kpis: { label: string; value: string; accent: boolean; icon: KpiIconType }[] = [
+			{ label: 'Buget reclame', value: fmtAmount(totalSpend, mainCurrency), accent: true, icon: 'wallet' },
+			{ label: 'Impresii', value: fmtNum(totalImpressions), accent: false, icon: 'eye' },
+			{ label: 'Click-uri', value: fmtNum(totalClicks), accent: false, icon: 'cursor' },
+			{ label: 'CTR', value: totalImpressions > 0 ? fmtPct(ctr) : '—', accent: false, icon: 'percent' },
+			{ label: 'CPC mediu', value: totalClicks > 0 ? fmtAmount(cpc, mainCurrency) : '—', accent: false, icon: 'coin' },
+			{ label: 'Rezultate', value: totalConversions > 0 ? fmtNum(totalConversions) : '—', accent: false, icon: 'target' }
 		];
 
 		// Draw KPI grid (2 rows x 3 columns)
@@ -245,25 +300,31 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 		const kpiH = 52;
 		const kpiGap = 8;
 
+		const iconSize = 30;
 		for (let i = 0; i < kpis.length; i++) {
 			const col = i % 3;
 			const row = Math.floor(i / 3);
 			const kx = ML + col * (kpiW + kpiGap);
 			const ky = y + row * (kpiH + kpiGap);
+			const iconX = kx + kpiW - iconSize - 10;
+			const iconY = ky + (kpiH - iconSize) / 2;
+			const textW = kpiW - 20 - iconSize - 4;
 
-			// Card background
+			// Card background + faded icon watermark
 			if (kpis[i].accent) {
 				roundedRect(doc, kx, ky, kpiW, kpiH, 4, ACCENT);
+				drawKpiIcon(doc, kpis[i].icon, iconX, iconY, iconSize, WHITE, 0.22);
 				doc.font('Bold').fontSize(7).fillColor(WHITE)
-					.text(kpis[i].label, kx + 10, ky + 10, { width: kpiW - 20 });
+					.text(kpis[i].label, kx + 10, ky + 10, { width: textW, lineBreak: false });
 				doc.font('Bold').fontSize(13).fillColor(WHITE)
-					.text(kpis[i].value, kx + 10, ky + 24, { width: kpiW - 20 });
+					.text(kpis[i].value, kx + 10, ky + 24, { width: textW, lineBreak: false });
 			} else {
 				roundedRect(doc, kx, ky, kpiW, kpiH, 4, SOFT_BG);
+				drawKpiIcon(doc, kpis[i].icon, iconX, iconY, iconSize, DARK, 0.1);
 				doc.font('Regular').fontSize(7).fillColor(MUTED)
-					.text(kpis[i].label, kx + 10, ky + 10, { width: kpiW - 20 });
+					.text(kpis[i].label, kx + 10, ky + 10, { width: textW, lineBreak: false });
 				doc.font('Bold').fontSize(13).fillColor(DARK)
-					.text(kpis[i].value, kx + 10, ky + 24, { width: kpiW - 20 });
+					.text(kpis[i].value, kx + 10, ky + 24, { width: textW, lineBreak: false });
 			}
 		}
 
