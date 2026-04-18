@@ -54,13 +54,27 @@ export function getOAuthUrl(state: string): string {
 }
 
 /**
+ * Compute the access-token absolute expiration in ms from TikTok's response,
+ * handling BOTH shapes: `access_token_expire_time` (UNIX seconds, per v1.3 docs)
+ * and `access_token_expires_in` (duration seconds, legacy). Falls back to a
+ * 365-day horizon so we never accidentally mark a long-lived TikTok token as
+ * "expires in 24h" which is the root-cause bug for daily forced reconnection.
+ */
+function computeExpiryMs(expireTime: unknown, expiresIn: unknown, fallbackSeconds: number): number {
+	const nowSec = Math.floor(Date.now() / 1000);
+	if (typeof expireTime === 'number' && expireTime > nowSec) return expireTime * 1000;
+	if (typeof expiresIn === 'number' && expiresIn > 0) return (nowSec + expiresIn) * 1000;
+	return (nowSec + fallbackSeconds) * 1000;
+}
+
+/**
  * Exchange auth_code for access_token + refresh_token via TikTok API
  */
 async function exchangeCodeForTokens(authCode: string): Promise<{
 	accessToken: string;
 	refreshToken: string;
-	accessTokenExpiresIn: number;
-	refreshTokenExpiresIn: number;
+	accessTokenExpiresAtMs: number;
+	refreshTokenExpiresAtMs: number;
 }> {
 	const res = await fetch(`${TIKTOK_API_URL}/oauth2/access_token/`, {
 		method: 'POST',
@@ -98,11 +112,15 @@ async function exchangeCodeForTokens(authCode: string): Promise<{
 		throw new Error(`TikTok token exchange failed: ${json.message || 'Unknown error'}`);
 	}
 
+	// 365d fallback for access — MUCH better than the legacy 24h default which caused
+	// the app to think every token expired the next day. TikTok's real access tokens
+	// typically last ~1 year; computeExpiryMs picks the real timestamp if present.
+	const ONE_YEAR_SEC = 365 * 24 * 3600;
 	return {
 		accessToken: data.access_token,
 		refreshToken: data.refresh_token || '',
-		accessTokenExpiresIn: data.access_token_expires_in || 86400, // default 24h
-		refreshTokenExpiresIn: data.refresh_token_expires_in || 31536000 // default 365 days
+		accessTokenExpiresAtMs: computeExpiryMs(data.access_token_expire_time, data.access_token_expires_in, ONE_YEAR_SEC),
+		refreshTokenExpiresAtMs: computeExpiryMs(data.refresh_token_expire_time, data.refresh_token_expires_in, ONE_YEAR_SEC)
 	};
 }
 
@@ -114,8 +132,8 @@ async function exchangeCodeForTokens(authCode: string): Promise<{
 async function refreshAccessToken(refreshToken: string): Promise<{
 	accessToken: string;
 	refreshToken: string;
-	accessTokenExpiresIn: number;
-	refreshTokenExpiresIn: number;
+	accessTokenExpiresAtMs: number;
+	refreshTokenExpiresAtMs: number;
 }> {
 	const MAX_RETRIES = 3;
 	let lastError: Error | null = null;
@@ -167,11 +185,12 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 				throw error;
 			}
 
+			const ONE_YEAR_SEC = 365 * 24 * 3600;
 			return {
 				accessToken: data.access_token,
 				refreshToken: data.refresh_token || refreshToken,
-				accessTokenExpiresIn: data.access_token_expires_in || 86400,
-				refreshTokenExpiresIn: data.refresh_token_expires_in || 31536000
+				accessTokenExpiresAtMs: computeExpiryMs(data.access_token_expire_time, data.access_token_expires_in, ONE_YEAR_SEC),
+				refreshTokenExpiresAtMs: computeExpiryMs(data.refresh_token_expire_time, data.refresh_token_expires_in, ONE_YEAR_SEC)
 			};
 		} catch (err) {
 			lastError = err instanceof Error ? err : new Error(String(err));
@@ -199,8 +218,8 @@ export async function handleCallback(
 
 	const tokens = await exchangeCodeForTokens(authCode);
 
-	const tokenExpiresAt = new Date(Date.now() + tokens.accessTokenExpiresIn * 1000);
-	const refreshTokenExpiresAt = new Date(Date.now() + tokens.refreshTokenExpiresIn * 1000);
+	const tokenExpiresAt = new Date(tokens.accessTokenExpiresAtMs);
+	const refreshTokenExpiresAt = new Date(tokens.refreshTokenExpiresAtMs);
 
 	// Update the integration record
 	await db
@@ -238,7 +257,18 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 	const oneHourMs = 60 * 60 * 1000;
 	if (integration.tokenExpiresAt && integration.tokenExpiresAt.getTime() < Date.now() + oneHourMs) {
 		if (!integration.refreshToken) {
-			logWarning('tiktok-ads', 'Token expired and no refresh token available', { metadata: { integrationId } });
+			// TikTok Business API may not issue a refresh_token (app configuration).
+			// If the access token is still valid, keep using it — triggering a refresh
+			// loop with no refresh_token floods debug_log and makes the scheduler
+			// increment consecutiveRefreshFailures until the integration is auto-deactivated.
+			const accessStillValid = integration.tokenExpiresAt && integration.tokenExpiresAt.getTime() > Date.now();
+			if (accessStillValid) {
+				logInfo('tiktok-ads', 'No refresh token — using existing access token until real expiry', {
+					metadata: { integrationId, expiresAt: integration.tokenExpiresAt.toISOString() }
+				});
+				return { accessToken: integration.accessToken, integration };
+			}
+			logWarning('tiktok-ads', 'Access token expired and no refresh token available — manual re-auth required', { metadata: { integrationId } });
 			return null;
 		}
 
@@ -250,8 +280,8 @@ export async function getAuthenticatedToken(integrationId: string): Promise<{ ac
 
 		try {
 			const tokens = await refreshAccessToken(integration.refreshToken);
-			const tokenExpiresAt = new Date(Date.now() + tokens.accessTokenExpiresIn * 1000);
-			const refreshTokenExpiresAt = new Date(Date.now() + tokens.refreshTokenExpiresIn * 1000);
+			const tokenExpiresAt = new Date(tokens.accessTokenExpiresAtMs);
+			const refreshTokenExpiresAt = new Date(tokens.refreshTokenExpiresAtMs);
 
 			await db
 				.update(table.tiktokAdsIntegration)
