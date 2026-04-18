@@ -49,6 +49,14 @@ export interface ReportPlatformData {
 	conversions: number;
 	currency: string;
 	accounts?: ReportAccountData[];
+	/**
+	 * Status of the live API fetch for this platform. Used by the PDF renderer
+	 * to decide whether to show a "live data unavailable" warning on the row.
+	 * Optional for backward compatibility — legacy callers that don't set it
+	 * render as normal "ok" rows.
+	 */
+	fetchStatus?: 'ok' | 'api-error' | 'no-integration';
+	errorMessage?: string;
 }
 
 export interface ReportPdfData {
@@ -404,6 +412,25 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				}
 
 				y += rowH;
+
+				// Live-fetch warning banner — shown directly under the platform
+				// row when the API call failed for every account on this platform.
+				// The numbers above are all zero in that case, so without this
+				// banner the reader would think the client simply had no activity.
+				if (platform.fetchStatus === 'api-error') {
+					const warnH = 16;
+					const warnBg = '#FEF3C7'; // amber-100
+					const warnText = '#92400E'; // amber-900
+					roundedRect(doc, ML, y, CW, warnH, 0, warnBg);
+					doc.save();
+					doc.rect(ML, y, 3, warnH).fill('#F59E0B'); // amber-500 left stripe
+					doc.restore();
+					doc.font('Regular').fontSize(7.5).fillColor(warnText)
+						.text('⚠ Datele live nu au putut fi preluate pentru această platformă. Cifrele de mai sus sunt indicative.',
+							ML + 10, y + 4, { width: CW - 20, lineBreak: false });
+					y += warnH;
+					zebraIdx++;
+				}
 
 				// Per-account sub-rows — each site gets its own normal row,
 				// with a left indent + colored stripe to signal "part of the
