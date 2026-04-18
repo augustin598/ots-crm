@@ -14,19 +14,19 @@ async function getClientAccounts(tenantId: string, clientId: string, platform: s
 			const rows = await db.select({ name: table.metaAdsAccount.accountName })
 				.from(table.metaAdsAccount)
 				.where(and(eq(table.metaAdsAccount.tenantId, tenantId), eq(table.metaAdsAccount.clientId, clientId)));
-			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON', impressions: 0, clicks: 0, conversions: 0 }));
 		}
 		if (platform === 'google') {
 			const rows = await db.select({ name: table.googleAdsAccount.accountName })
 				.from(table.googleAdsAccount)
 				.where(and(eq(table.googleAdsAccount.tenantId, tenantId), eq(table.googleAdsAccount.clientId, clientId)));
-			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON', impressions: 0, clicks: 0, conversions: 0 }));
 		}
 		if (platform === 'tiktok') {
 			const rows = await db.select({ name: table.tiktokAdsAccount.accountName })
 				.from(table.tiktokAdsAccount)
 				.where(and(eq(table.tiktokAdsAccount.tenantId, tenantId), eq(table.tiktokAdsAccount.clientId, clientId)));
-			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON' }));
+			return rows.map((r) => ({ accountName: r.name, spend: 0, currency: 'RON', impressions: 0, clicks: 0, conversions: 0 }));
 		}
 	} catch (err) {
 		logWarning('server', `Failed to load ${platform} accounts for preview`, { tenantId, metadata: { clientId, platform, error: (err as Error).message } });

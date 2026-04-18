@@ -166,7 +166,12 @@ async function syncForIntegration(
 
 				// Dedup: check if this period already exists
 				const [existing] = await db
-					.select({ id: table.metaAdsSpending.id, spendCents: table.metaAdsSpending.spendCents })
+					.select({
+						id: table.metaAdsSpending.id,
+						spendCents: table.metaAdsSpending.spendCents,
+						impressions: table.metaAdsSpending.impressions,
+						clicks: table.metaAdsSpending.clicks
+					})
 					.from(table.metaAdsSpending)
 					.where(
 						and(
@@ -178,16 +183,26 @@ async function syncForIntegration(
 					)
 					.limit(1);
 
+				const newImpressions = parseInt(insight.impressions) || 0;
+				const newClicks = parseInt(insight.clicks) || 0;
+
 				if (existing) {
-					// Update if spend changed
-					if (existing.spendCents !== spendCents) {
+					// Update if any metric changed (Meta/TikTok sometimes backfill
+					// impressions/clicks after the spend is already final — checking
+					// only spend misses those late updates).
+					const metricsChanged =
+						existing.spendCents !== spendCents ||
+						existing.impressions !== newImpressions ||
+						existing.clicks !== newClicks;
+
+					if (metricsChanged) {
 						await db
 							.update(table.metaAdsSpending)
 							.set({
 								spendAmount: insight.spend,
 								spendCents,
-								impressions: parseInt(insight.impressions) || 0,
-								clicks: parseInt(insight.clicks) || 0,
+								impressions: newImpressions,
+								clicks: newClicks,
 								syncedAt: new Date(),
 								updatedAt: new Date()
 							})

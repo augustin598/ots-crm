@@ -140,7 +140,13 @@ async function syncForIntegration(
 
 				// Dedup: check if this period already exists
 				const [existing] = await db
-					.select({ id: table.tiktokAdsSpending.id, spendCents: table.tiktokAdsSpending.spendCents })
+					.select({
+						id: table.tiktokAdsSpending.id,
+						spendCents: table.tiktokAdsSpending.spendCents,
+						impressions: table.tiktokAdsSpending.impressions,
+						clicks: table.tiktokAdsSpending.clicks,
+						conversions: table.tiktokAdsSpending.conversions
+					})
 					.from(table.tiktokAdsSpending)
 					.where(
 						and(
@@ -152,16 +158,26 @@ async function syncForIntegration(
 					)
 					.limit(1);
 
+				const newImpressions = parseInt(insight.impressions) || 0;
+				const newClicks = parseInt(insight.clicks) || 0;
+				const newConversions = parseInt(insight.conversions) || 0;
+
 				if (existing) {
-					if (existing.spendCents !== spendCents) {
+					const metricsChanged =
+						existing.spendCents !== spendCents ||
+						existing.impressions !== newImpressions ||
+						existing.clicks !== newClicks ||
+						existing.conversions !== newConversions;
+
+					if (metricsChanged) {
 						await db
 							.update(table.tiktokAdsSpending)
 							.set({
 								spendAmount: insight.spend,
 								spendCents,
-								impressions: parseInt(insight.impressions) || 0,
-								clicks: parseInt(insight.clicks) || 0,
-								conversions: parseInt(insight.conversions) || 0,
+								impressions: newImpressions,
+								clicks: newClicks,
+								conversions: newConversions,
 								syncedAt: new Date(),
 								updatedAt: new Date()
 							})
