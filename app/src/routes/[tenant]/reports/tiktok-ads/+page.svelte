@@ -497,13 +497,26 @@
 			<p class="text-muted-foreground">Nu sunt conturi TikTok Ads configurate. Conectează un cont din <a href="/{tenantSlug}/settings/tiktok-ads" class="text-primary underline">Settings</a>.</p>
 		</Card>
 	{:else if insightsError}
+		{@const errMsg = (insightsError as any)?.body?.message
+			|| (insightsError instanceof Error ? insightsError.message : null)
+			|| (insightsError as any)?.message
+			|| 'Eroare la încărcarea datelor'}
+		{@const errStatus = (insightsError as any)?.status ?? 0}
 		<Card class="p-8">
 			<div class="rounded-md bg-red-50 p-4 space-y-2">
-				<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
-				<p class="text-sm text-red-700">
-					Dacă tokenul a expirat, reconectează din
-					<a href="/{tenantSlug}/settings/tiktok-ads" class="underline font-medium">Settings → TikTok Ads</a>.
-				</p>
+				<p class="text-sm font-medium text-red-800">{errMsg}</p>
+				{#if errStatus === 401 || errStatus === 409}
+					<p class="text-sm text-red-700">
+						Reconectează din
+						<a href="/{tenantSlug}/settings/tiktok-ads" class="underline font-medium">Settings → TikTok Ads</a>.
+					</p>
+				{:else}
+					<p class="text-sm text-red-700">
+						Dacă problema persistă, verifică
+						<a href="/{tenantSlug}/settings/tiktok-ads" class="underline font-medium">Settings → TikTok Ads</a>
+						sau contactează suportul.
+					</p>
+				{/if}
 			</div>
 		</Card>
 	{:else}

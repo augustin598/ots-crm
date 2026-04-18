@@ -342,9 +342,13 @@
 			<p class="text-muted-foreground">Nu sunt conturi Google Ads configurate. Conectează din <a href="/{tenantSlug}/settings/google-ads" class="text-primary underline">Settings</a>.</p>
 		</Card>
 	{:else if insightsError}
+		{@const errMsg = (insightsError as any)?.body?.message
+			|| (insightsError instanceof Error ? insightsError.message : null)
+			|| (insightsError as any)?.message
+			|| 'Eroare la încărcarea datelor'}
 		<Card class="p-8">
 			<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-4 space-y-2">
-				<p class="text-sm font-medium text-red-800 dark:text-red-300">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
+				<p class="text-sm font-medium text-red-800 dark:text-red-300">{errMsg}</p>
 			</div>
 		</Card>
 	{:else}

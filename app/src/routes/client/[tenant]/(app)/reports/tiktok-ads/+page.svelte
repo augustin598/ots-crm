@@ -407,9 +407,14 @@
 		</div>
 
 		{#if insightsError}
+			{@const errMsg = (insightsError as any)?.body?.message
+				|| (insightsError instanceof Error ? insightsError.message : null)
+				|| (insightsError as any)?.message
+				|| 'Eroare la încărcarea datelor'}
 			<Card class="p-8">
 				<div class="rounded-md bg-red-50 p-4 space-y-2">
-					<p class="text-sm font-medium text-red-800">{insightsError instanceof Error ? insightsError.message : 'Eroare la încărcarea datelor'}</p>
+					<p class="text-sm font-medium text-red-800">{errMsg}</p>
+					<p class="text-sm text-red-700">Contactează echipa dacă problema persistă.</p>
 				</div>
 			</Card>
 		{:else if insightsLoading}
