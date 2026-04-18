@@ -32,17 +32,13 @@ const BORDER = '#CBD5E1';
 const SOFT_BG = '#F1F5F9';
 const WHITE = '#FFFFFF';
 
-// Platform brand colors
-const PLATFORM_COLORS: Record<string, string> = {
-	'Meta Ads': '#1877F2',
-	'Google Ads': '#3C8BD9',
-	'TikTok Ads': '#000000'
-};
-
 export interface ReportAccountData {
 	accountName: string;
 	spend: number;
 	currency: string;
+	impressions: number;
+	clicks: number;
+	conversions: number;
 }
 
 export interface ReportPlatformData {
@@ -307,16 +303,20 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 			y += rowH + 1;
 
 			// Data rows
+			const subRowH = 22;
+			let zebraIdx = 0;
 			for (let i = 0; i < data.platforms.length; i++) {
 				const platform = data.platforms[i];
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
 				const pCostPerResult = platform.conversions > 0 ? platform.spend / platform.conversions : 0;
+				const subRows = platform.accounts && platform.accounts.length > 0 ? platform.accounts : [];
 
-				// Alternating row background
-				if (i % 2 === 0) {
+				// Zebra for the platform row
+				if (zebraIdx % 2 === 0) {
 					roundedRect(doc, ML, y, CW, rowH, 0, SOFT_BG);
 				}
+				zebraIdx++;
 
 				cx = ML + 8;
 
@@ -343,6 +343,58 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				}
 
 				y += rowH;
+
+				// Per-account sub-rows — each site gets its own normal row,
+				// with a left indent + colored stripe to signal "part of the
+				// platform above". Only spend is meaningful at account level.
+				const stripeColor = ACCENT;
+				for (const acc of subRows) {
+					// Zebra for sub-row
+					if (zebraIdx % 2 === 0) {
+						roundedRect(doc, ML, y, CW, subRowH, 0, SOFT_BG);
+					}
+					zebraIdx++;
+
+					// Left accent stripe to indicate "belongs to parent platform"
+					doc.save();
+					doc.rect(ML + 16, y + 4, 2, subRowH - 8).fill(stripeColor);
+					doc.restore();
+
+					const aCpc = acc.clicks > 0 ? acc.spend / acc.clicks : 0;
+					const aCtr = acc.impressions > 0 ? (acc.clicks / acc.impressions) * 100 : 0;
+					const aCostPerResult = acc.conversions > 0 ? acc.spend / acc.conversions : 0;
+
+					cx = ML + 8;
+					doc.font('Regular').fontSize(8).fillColor(TEXT);
+					const nameMaxW = cols[0].w - 28;
+					let displayName = acc.accountName;
+					if (doc.widthOfString(displayName) > nameMaxW) {
+						while (displayName.length > 1 && doc.widthOfString(displayName + '…') > nameMaxW) {
+							displayName = displayName.slice(0, -1);
+						}
+						displayName = displayName.trimEnd() + '…';
+					}
+					doc.text(displayName, cx + 24, y + 7, { width: nameMaxW, lineBreak: false });
+					cx += cols[0].w;
+
+					const accRowData = [
+						fmtAmount(acc.spend, acc.currency),
+						fmtNum(acc.impressions),
+						fmtNum(acc.clicks),
+						aCpc > 0 ? fmtAmount(aCpc, acc.currency) : '—',
+						aCtr > 0 ? fmtPct(aCtr) : '—',
+						acc.conversions > 0 ? fmtNum(acc.conversions) : '—',
+						aCostPerResult > 0 ? fmtAmount(aCostPerResult, acc.currency) : '—'
+					];
+
+					for (let j = 0; j < accRowData.length; j++) {
+						doc.font('Regular').fontSize(8).fillColor(TEXT)
+							.text(accRowData[j], cx, y + 7, { width: cols[j + 1].w - 12, align: 'right' });
+						cx += cols[j + 1].w;
+					}
+
+					y += subRowH;
+				}
 			}
 
 			// Total row
@@ -372,84 +424,6 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 			}
 
 			y += rowH + 20;
-		}
-
-		// ============================================================
-		// PER-PLATFORM BREAKDOWN CARDS (if multiple platforms)
-		// ============================================================
-		if (data.platforms.length > 1) {
-			for (const platform of data.platforms) {
-				// Check if we need a new page
-				if (y + 80 > PH - 60) {
-					doc.addPage();
-					doc.rect(0, 0, PW, 4).fill(ACCENT);
-					y = MT + 10;
-				}
-
-				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
-				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
-				const dotColor = PLATFORM_COLORS[platform.name] || ACCENT;
-				const hasAccts = platform.accounts && platform.accounts.length > 1;
-				const acctCount = hasAccts ? platform.accounts!.length : 0;
-				const kpiBlockH = 58;
-				const acctBlockH = acctCount > 0 ? 6 + acctCount * 13 + 4 : 0;
-				const cardH = kpiBlockH + acctBlockH;
-
-				// Card outline
-				doc.save();
-				doc.roundedRect(ML, y, CW, cardH, 4)
-					.lineWidth(0.5).strokeColor(BORDER).stroke();
-				doc.restore();
-
-				// Left accent stripe
-				doc.save();
-				doc.rect(ML, y + 4, 3, cardH - 8).fill(dotColor);
-				doc.restore();
-
-				// Platform logo + name
-				drawPlatformLogo(doc, platform.name, ML + 14, y + 7, 16);
-				doc.font('Bold').fontSize(9).fillColor(DARK)
-					.text(platform.name, ML + 34, y + 10, { lineBreak: false });
-
-				// Mini KPIs inside card
-				const miniKpis = [
-					{ label: 'Buget', value: fmtAmount(platform.spend, platform.currency) },
-					{ label: 'Impresii', value: fmtNum(platform.impressions) },
-					{ label: 'Click-uri', value: fmtNum(platform.clicks) },
-					{ label: 'CPC', value: pCpc > 0 ? fmtAmount(pCpc, platform.currency) : '—' },
-					{ label: 'CTR', value: pCtr > 0 ? fmtPct(pCtr) : '—' }
-				];
-
-				if (platform.conversions > 0) {
-					miniKpis.push({ label: 'Rezultate', value: fmtNum(platform.conversions) });
-				}
-
-				const miniW = (CW - 28) / miniKpis.length;
-				for (let k = 0; k < miniKpis.length; k++) {
-					const mx = ML + 14 + k * miniW;
-					doc.font('Regular').fontSize(6.5).fillColor(MUTED)
-						.text(miniKpis[k].label, mx, y + 28, { width: miniW - 4, lineBreak: false });
-					doc.font('Bold').fontSize(9).fillColor(DARK)
-						.text(miniKpis[k].value, mx, y + 38, { width: miniW - 4, lineBreak: false });
-				}
-
-				// Account breakdown inside card (separator + rows)
-				if (hasAccts) {
-					const sepY = y + kpiBlockH;
-					doc.moveTo(ML + 14, sepY).lineTo(PW - MR - 10, sepY).strokeColor(BORDER).lineWidth(0.3).stroke();
-
-					let accY = sepY + 6;
-					for (const acc of platform.accounts!) {
-						doc.font('Regular').fontSize(7).fillColor(MUTED)
-							.text(acc.accountName, ML + 18, accY, { width: CW / 2 - 20, lineBreak: false });
-						doc.font('Bold').fontSize(7).fillColor(TEXT)
-							.text(fmtAmount(acc.spend, acc.currency), ML + 14, accY, { width: CW - 28, align: 'right', lineBreak: false });
-						accY += 13;
-					}
-				}
-
-				y += cardH + 8;
-			}
 		}
 
 		// ============================================================

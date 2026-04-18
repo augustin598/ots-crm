@@ -6,7 +6,14 @@ import { sendReportEmail } from '$lib/server/email';
 import { generateReportPdf, type ReportPlatformData } from '$lib/server/report-pdf-generator';
 import { sql, gte, lte, desc } from 'drizzle-orm';
 
-type AccountSpend = { accountName: string; spend: number; currency: string };
+type AccountSpend = {
+	accountName: string;
+	spend: number;
+	currency: string;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+};
 
 const BUCHAREST_TZ = 'Europe/Bucharest';
 
@@ -293,6 +300,8 @@ export async function getPlatformSpendData(
 		const acctRows = await db.select({
 			accountId: table.metaAdsSpending.metaAdAccountId,
 			spend: sql<number>`coalesce(sum(${table.metaAdsSpending.spendCents}), 0)`,
+			impressions: sql<number>`coalesce(sum(${table.metaAdsSpending.impressions}), 0)`,
+			clicks: sql<number>`coalesce(sum(${table.metaAdsSpending.clicks}), 0)`,
 			currency: table.metaAdsSpending.currencyCode
 		}).from(table.metaAdsSpending).where(and(
 			eq(table.metaAdsSpending.tenantId, tenantId),
@@ -317,7 +326,10 @@ export async function getPlatformSpendData(
 		const accounts: AccountSpend[] = nonZero.map((r) => ({
 			accountName: accountMap.get(r.accountId) ?? r.accountId,
 			spend: r.spend / 100,
-			currency: r.currency || 'RON'
+			currency: r.currency || 'RON',
+			impressions: r.impressions,
+			clicks: r.clicks,
+			conversions: 0
 		}));
 
 		return { name: 'Meta Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: 0, currency: result.currency || 'RON', accounts };
@@ -342,6 +354,9 @@ export async function getPlatformSpendData(
 		const gAcctRows = await db.select({
 			accountId: table.googleAdsSpending.googleAdsCustomerId,
 			spend: sql<number>`coalesce(sum(${table.googleAdsSpending.spendCents}), 0)`,
+			impressions: sql<number>`coalesce(sum(${table.googleAdsSpending.impressions}), 0)`,
+			clicks: sql<number>`coalesce(sum(${table.googleAdsSpending.clicks}), 0)`,
+			conversions: sql<number>`coalesce(sum(${table.googleAdsSpending.conversions}), 0)`,
 			currency: table.googleAdsSpending.currencyCode
 		}).from(table.googleAdsSpending).where(and(
 			eq(table.googleAdsSpending.tenantId, tenantId),
@@ -366,7 +381,10 @@ export async function getPlatformSpendData(
 		const gAccounts: AccountSpend[] = gNonZero.map((r) => ({
 			accountName: gAccountMap.get(r.accountId) ?? r.accountId,
 			spend: r.spend / 100,
-			currency: r.currency || 'RON'
+			currency: r.currency || 'RON',
+			impressions: r.impressions,
+			clicks: r.clicks,
+			conversions: r.conversions
 		}));
 
 		return { name: 'Google Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: gAccounts };
@@ -391,6 +409,9 @@ export async function getPlatformSpendData(
 		const tAcctRows = await db.select({
 			accountId: table.tiktokAdsSpending.tiktokAdvertiserId,
 			spend: sql<number>`coalesce(sum(${table.tiktokAdsSpending.spendCents}), 0)`,
+			impressions: sql<number>`coalesce(sum(${table.tiktokAdsSpending.impressions}), 0)`,
+			clicks: sql<number>`coalesce(sum(${table.tiktokAdsSpending.clicks}), 0)`,
+			conversions: sql<number>`coalesce(sum(${table.tiktokAdsSpending.conversions}), 0)`,
 			currency: table.tiktokAdsSpending.currencyCode
 		}).from(table.tiktokAdsSpending).where(and(
 			eq(table.tiktokAdsSpending.tenantId, tenantId),
@@ -415,7 +436,10 @@ export async function getPlatformSpendData(
 		const tAccounts: AccountSpend[] = tNonZero.map((r) => ({
 			accountName: tAccountMap.get(r.accountId) ?? r.accountId,
 			spend: r.spend / 100,
-			currency: r.currency || 'RON'
+			currency: r.currency || 'RON',
+			impressions: r.impressions,
+			clicks: r.clicks,
+			conversions: r.conversions
 		}));
 
 		return { name: 'TikTok Ads', spend: result.spend / 100, impressions: result.impressions, clicks: result.clicks, conversions: result.conversions, currency: result.currency || 'RON', accounts: tAccounts };
