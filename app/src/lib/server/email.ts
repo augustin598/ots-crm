@@ -2515,10 +2515,13 @@ export async function sendReportEmail(
 	recipientEmail: string,
 	clientName: string,
 	periodLabel: string,
-	pdfBuffer: Buffer
+	pdfBuffer: Buffer,
+	variant: 'standard' | 'monthly-summary' = 'standard'
 ): Promise<void> {
-	const subject = `Raport Marketing — ${clientName} — ${periodLabel}`;
-	const filename = `raport-${clientName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${periodLabel.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`;
+	const titlePrefix = variant === 'monthly-summary' ? 'Raport Marketing Lunar' : 'Raport Marketing';
+	const subject = `${titlePrefix} — ${clientName} — ${periodLabel}`;
+	const fileSlug = variant === 'monthly-summary' ? 'raport-lunar' : 'raport';
+	const filename = `${fileSlug}-${clientName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${periodLabel.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`;
 
 	await sendWithPersistence(
 		{
@@ -2526,7 +2529,7 @@ export async function sendReportEmail(
 			toEmail: recipientEmail,
 			subject,
 			emailType: 'report',
-			metadata: { clientId, clientName, periodLabel },
+			metadata: { clientId, clientName, periodLabel, variant },
 			htmlBody: '',
 			// payload: null — pdfBuffer is non-serializable, and the pdf_report_send scheduler
 			// task regenerates and re-sends scheduled reports on its next run.
@@ -2562,9 +2565,9 @@ export async function sendReportEmail(
 			const html = renderBrandedEmail({
 				themeColor: brand.themeColor,
 				headerLogoHtml: brand.headerLogoHtml,
-				title: 'Raport Marketing',
+				title: titlePrefix,
 				bodyHtml,
-				previewTitle: `Raport Marketing — ${safeClientName}`
+				previewTitle: `${titlePrefix} — ${safeClientName}`
 			});
 
 			const attachments = [

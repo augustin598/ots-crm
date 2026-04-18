@@ -33,6 +33,7 @@ export const getReportSchedules = query(async () => {
 			platforms: table.reportSchedule.platforms,
 			recipientEmails: table.reportSchedule.recipientEmails,
 			isEnabled: table.reportSchedule.isEnabled,
+			monthlyReportEnabled: table.reportSchedule.monthlyReportEnabled,
 			lastSentAt: table.reportSchedule.lastSentAt,
 			createdAt: table.reportSchedule.createdAt,
 			updatedAt: table.reportSchedule.updatedAt
@@ -102,7 +103,8 @@ const upsertSchema = v.object({
 	dayOfMonth: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(28)), 1),
 	platforms: v.optional(v.array(v.picklist(['meta', 'google', 'tiktok'])), ['meta', 'google', 'tiktok']),
 	recipientEmails: v.optional(v.array(v.pipe(v.string(), v.email())), []),
-	isEnabled: v.optional(v.boolean(), true)
+	isEnabled: v.optional(v.boolean(), true),
+	monthlyReportEnabled: v.optional(v.boolean(), false)
 });
 
 /** Create or update a report schedule for a client */
@@ -145,6 +147,7 @@ export const upsertReportSchedule = command(upsertSchema, async (params) => {
 			? JSON.stringify(params.recipientEmails)
 			: null,
 		isEnabled: params.isEnabled ?? true,
+		monthlyReportEnabled: params.monthlyReportEnabled ?? false,
 		updatedAt: now
 	};
 
@@ -373,3 +376,102 @@ function safeParse<T>(json: string | null | undefined, fallback: T): T {
 		return fallback;
 	}
 }
+
+/**
+ * Get email notification history for scheduled reports, grouped by clientId.
+ * Each scheduled report is linked to a clientId in email_log.metadata.
+ * Used by the schedule-reports UI to show per-schedule sent/failed stats.
+ */
+export const getReportEmailLogs = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+
+	const logs = await db
+		.select({
+			id: table.emailLog.id,
+			status: table.emailLog.status,
+			toEmail: table.emailLog.toEmail,
+			subject: table.emailLog.subject,
+			metadata: table.emailLog.metadata,
+			errorMessage: table.emailLog.errorMessage,
+			createdAt: table.emailLog.createdAt,
+			completedAt: table.emailLog.completedAt
+		})
+		.from(table.emailLog)
+		.where(
+			and(
+				eq(table.emailLog.tenantId, event.locals.tenant.id),
+				eq(table.emailLog.emailType, 'report')
+			)
+		)
+		.orderBy(desc(table.emailLog.createdAt));
+
+	const byClient: Record<string, {
+		total: number;
+		completed: number;
+		failed: number;
+		pending: number;
+		lastSentAt: Date | null;
+		lastRecipient: string | null;
+		lastError: string | null;
+		recentLogs: Array<{
+			status: string;
+			toEmail: string;
+			createdAt: Date;
+			completedAt: Date | null;
+			errorMessage: string | null;
+		}>;
+	}> = {};
+
+	for (const log of logs) {
+		let clientId: string | null = null;
+		if (log.metadata) {
+			try {
+				const meta = JSON.parse(log.metadata);
+				clientId = meta.clientId || null;
+			} catch {}
+		}
+		if (!clientId) continue;
+
+		if (!byClient[clientId]) {
+			byClient[clientId] = {
+				total: 0,
+				completed: 0,
+				failed: 0,
+				pending: 0,
+				lastSentAt: null,
+				lastRecipient: null,
+				lastError: null,
+				recentLogs: []
+			};
+		}
+
+		const entry = byClient[clientId];
+		entry.total++;
+		if (log.status === 'completed') entry.completed++;
+		else if (log.status === 'failed') entry.failed++;
+		else entry.pending++;
+
+		// First log is newest because we ordered by createdAt DESC.
+		if (!entry.lastSentAt) {
+			entry.lastSentAt = log.completedAt ?? log.createdAt;
+			entry.lastRecipient = log.toEmail;
+			entry.lastError = log.errorMessage;
+		}
+
+		// Keep last 5 for tooltip drill-down.
+		if (entry.recentLogs.length < 5) {
+			entry.recentLogs.push({
+				status: log.status,
+				toEmail: log.toEmail,
+				createdAt: log.createdAt,
+				completedAt: log.completedAt,
+				errorMessage: log.errorMessage
+			});
+		}
+	}
+
+	return byClient;
+});

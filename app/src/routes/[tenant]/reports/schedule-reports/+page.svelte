@@ -3,7 +3,8 @@
 		getReportSchedules,
 		upsertReportSchedule,
 		deleteReportSchedule,
-		sendTestReportEmail
+		sendTestReportEmail,
+		getReportEmailLogs
 	} from '$lib/remotes/report-schedule.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -15,6 +16,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Select from '$lib/components/ui/select';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import * as Popover from '$lib/components/ui/popover';
 	import {
 		Dialog,
 		DialogContent,
@@ -40,6 +42,8 @@
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
@@ -59,6 +63,10 @@
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current ?? []);
 
+	// Email notification history per client (report emails only).
+	const emailLogsQuery = getReportEmailLogs();
+	const emailLogsByClient = $derived(emailLogsQuery.current ?? {});
+
 	// Stats
 	const activeCount = $derived(schedules.filter((s) => s.isEnabled && s.frequency !== 'disabled').length);
 	const pausedCount = $derived(schedules.filter((s) => !s.isEnabled || s.frequency === 'disabled').length);
@@ -75,6 +83,7 @@
 	let formPlatforms = $state<string[]>(['meta', 'google', 'tiktok']);
 	let formEmails = $state('');
 	let formIsEnabled = $state(true);
+	let formMonthlyReport = $state(false);
 
 	// Delete confirmation
 	let deleteDialogOpen = $state(false);
@@ -83,6 +92,20 @@
 	// Per-schedule pending state for the "send test" button so only the clicked
 	// row shows a spinner while the email is generated and sent.
 	let testSendingId = $state<string | null>(null);
+
+	// Short-lived "copied" feedback for the email-copy button.
+	let emailCopied = $state(false);
+
+	async function copyClientEmail(email: string) {
+		try {
+			await navigator.clipboard.writeText(email);
+			emailCopied = true;
+			toast.success('Email copiat');
+			setTimeout(() => (emailCopied = false), 1500);
+		} catch {
+			toast.error('Nu am putut copia emailul');
+		}
+	}
 
 	const dayNames: Record<number, string> = {
 		1: 'Luni',
@@ -143,6 +166,7 @@
 		formPlatforms = ['meta', 'google', 'tiktok'];
 		formEmails = '';
 		formIsEnabled = true;
+		formMonthlyReport = false;
 		editingId = null;
 	}
 
@@ -160,6 +184,7 @@
 		formPlatforms = [...schedule.platforms];
 		formEmails = schedule.recipientEmails.join(', ');
 		formIsEnabled = schedule.isEnabled;
+		formMonthlyReport = schedule.monthlyReportEnabled ?? false;
 		dialogOpen = true;
 	}
 
@@ -194,7 +219,8 @@
 				dayOfMonth: formDayOfMonth,
 				platforms: formPlatforms as ('meta' | 'google' | 'tiktok')[],
 				recipientEmails: parseEmails(formEmails),
-				isEnabled: formIsEnabled
+				isEnabled: formIsEnabled,
+				monthlyReportEnabled: formMonthlyReport
 			}).updates(schedulesQuery);
 			toast.success(editingId ? 'Programul a fost actualizat.' : 'Programul a fost creat.');
 			dialogOpen = false;
@@ -410,6 +436,73 @@
 									{:else}
 										<Badge variant="warning" class="text-[10px] px-1.5 py-0">Pauzat</Badge>
 									{/if}
+
+									{#if emailLogsByClient[schedule.clientId]?.total > 0}
+										{@const stats = emailLogsByClient[schedule.clientId]}
+										<Popover.Root>
+											<Popover.Trigger>
+												{#snippet child({ props })}
+													<button
+														{...props}
+														class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors
+														{stats.failed > 0
+															? 'border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-950/40 dark:text-red-400'
+															: 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-400'}"
+													>
+														<MailIcon class="h-3 w-3" />
+														{stats.total}
+													</button>
+												{/snippet}
+											</Popover.Trigger>
+											<Popover.Content class="w-72 p-3" align="start">
+												<p class="mb-2 text-xs font-semibold text-muted-foreground">Notificări trimise</p>
+												<div class="space-y-1.5 text-xs">
+													{#if stats.completed > 0}
+														<div class="flex items-center justify-between">
+															<span class="text-muted-foreground">Raport trimis</span>
+															<span class="font-medium text-green-600">{stats.completed}x</span>
+														</div>
+													{/if}
+													{#if stats.failed > 0}
+														<div class="flex items-center justify-between">
+															<span class="text-red-500">Eșuate</span>
+															<span class="font-medium text-red-600">{stats.failed}x</span>
+														</div>
+													{/if}
+													{#if stats.pending > 0}
+														<div class="flex items-center justify-between">
+															<span class="text-muted-foreground">În coadă</span>
+															<span class="font-medium text-amber-600">{stats.pending}x</span>
+														</div>
+													{/if}
+													<div class="border-t pt-1.5 mt-1.5 space-y-1">
+														<div class="flex items-center justify-between text-muted-foreground">
+															<span>Total</span>
+															<span class="font-medium">{stats.completed} trimise / {stats.total} total</span>
+														</div>
+														{#if stats.lastSentAt}
+															<div class="flex items-center justify-between text-muted-foreground">
+																<span>Ultimul email</span>
+																<span>{new Date(stats.lastSentAt).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+															</div>
+														{/if}
+														{#if stats.lastRecipient}
+															<div class="flex items-center justify-between text-muted-foreground gap-2">
+																<span class="shrink-0">Ultimul destinatar</span>
+																<span class="truncate" title={stats.lastRecipient}>{stats.lastRecipient}</span>
+															</div>
+														{/if}
+														{#if stats.lastError}
+															<div class="mt-1.5 rounded bg-red-50 p-1.5 text-red-700 dark:bg-red-950/40 dark:text-red-400">
+																<span class="block font-semibold">Ultima eroare</span>
+																<span class="block break-words">{stats.lastError}</span>
+															</div>
+														{/if}
+													</div>
+												</div>
+											</Popover.Content>
+										</Popover.Root>
+									{/if}
 								</div>
 
 								<!-- Details Row -->
@@ -548,9 +641,27 @@
 					/>
 				</div>
 			{:else}
+				{@const s = schedules.find((x) => x.id === editingId)}
 				<div class="space-y-1.5">
 					<Label class="text-muted-foreground text-xs">Client</Label>
-					<p class="text-sm font-medium">{schedules.find((s) => s.id === editingId)?.clientName}</p>
+					<p class="text-sm font-medium">{s?.clientName}</p>
+					{#if s?.clientEmail}
+						<div class="flex items-center gap-1.5">
+							<p class="text-xs text-muted-foreground select-all">{s.clientEmail}</p>
+							<button
+								type="button"
+								onclick={() => copyClientEmail(s.clientEmail!)}
+								class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+								title="Copiază emailul"
+							>
+								{#if emailCopied}
+									<CheckIcon class="h-3 w-3 text-success" />
+								{:else}
+									<CopyIcon class="h-3 w-3" />
+								{/if}
+							</button>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -653,6 +764,17 @@
 					<p class="text-[11px] text-muted-foreground">Pornește sau oprește trimiterea automată</p>
 				</div>
 				<Switch id="scheduleEnabled" bind:checked={formIsEnabled} />
+			</div>
+
+			<!-- Monthly all-platforms summary -->
+			<div class="flex items-center justify-between rounded-lg border p-3">
+				<div class="space-y-0.5 pr-3">
+					<Label for="monthlyReport" class="text-sm">Raport lunar complet</Label>
+					<p class="text-[11px] text-muted-foreground">
+						Trimite suplimentar, pe data de 1 a fiecărei luni, un raport cu toate platformele (Meta, Google, TikTok) pentru luna anterioară.
+					</p>
+				</div>
+				<Switch id="monthlyReport" bind:checked={formMonthlyReport} />
 			</div>
 
 			<DialogFooter class="pt-2">

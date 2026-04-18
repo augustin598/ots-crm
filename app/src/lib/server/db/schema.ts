@@ -1939,6 +1939,10 @@ export const reportSchedule = sqliteTable('report_schedule', {
 	platforms: text('platforms').notNull().default('["meta","google","tiktok"]'), // JSON array
 	recipientEmails: text('recipient_emails'), // JSON array, null = use client.email
 	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+	/** Additional monthly all-platforms summary sent on day 1 of each month,
+	 * covering the previous full month with Meta + Google + TikTok combined.
+	 * Independent of the primary frequency (may coexist with weekly). */
+	monthlyReportEnabled: integer('monthly_report_enabled', { mode: 'boolean' }).notNull().default(false),
 	lastSentAt: timestamp('last_sent_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
