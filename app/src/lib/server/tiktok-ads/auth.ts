@@ -75,6 +75,25 @@ async function exchangeCodeForTokens(authCode: string): Promise<{
 	const json = await res.json();
 	const data = json.data;
 
+	// Phase 0 diagnostics: capture RAW response shape without leaking token values.
+	// TikTok Business API v1.3 docs claim `access_token_expire_time` / `refresh_token_expire_time`
+	// (unix seconds), but legacy code reads `_expires_in`. Log to see which the API actually returns.
+	logInfo('tiktok-ads', 'OAuth exchange RAW response shape', {
+		metadata: {
+			httpStatus: res.status,
+			topLevelKeys: Object.keys(json || {}),
+			dataKeys: data ? Object.keys(data) : [],
+			hasAccessToken: Boolean(data?.access_token),
+			hasRefreshToken: Boolean(data?.refresh_token),
+			accessTokenExpireTime: data?.access_token_expire_time ?? null,
+			accessTokenExpiresIn: data?.access_token_expires_in ?? null,
+			refreshTokenExpireTime: data?.refresh_token_expire_time ?? null,
+			refreshTokenExpiresIn: data?.refresh_token_expires_in ?? null,
+			errorCode: json?.code,
+			errorMessage: json?.message
+		}
+	});
+
 	if (json.code !== 0 || !data?.access_token) {
 		throw new Error(`TikTok token exchange failed: ${json.message || 'Unknown error'}`);
 	}
@@ -117,6 +136,25 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 
 			const json = await res.json();
 			const data = json.data;
+
+			// Phase 0 diagnostics: log shape of refresh response to confirm endpoint + field names.
+			logInfo('tiktok-ads', 'OAuth refresh RAW response shape', {
+				metadata: {
+					attempt,
+					httpStatus: res.status,
+					endpointUsed: `${TIKTOK_API_URL}/oauth2/access_token/`,
+					topLevelKeys: Object.keys(json || {}),
+					dataKeys: data ? Object.keys(data) : [],
+					hasNewAccessToken: Boolean(data?.access_token),
+					hasNewRefreshToken: Boolean(data?.refresh_token),
+					accessTokenExpireTime: data?.access_token_expire_time ?? null,
+					accessTokenExpiresIn: data?.access_token_expires_in ?? null,
+					refreshTokenExpireTime: data?.refresh_token_expire_time ?? null,
+					refreshTokenExpiresIn: data?.refresh_token_expires_in ?? null,
+					errorCode: json?.code,
+					errorMessage: json?.message
+				}
+			});
 
 			if (json.code !== 0 || !data?.access_token) {
 				const error = new Error(`TikTok token refresh failed: ${json.message || 'Unknown error'}`);
