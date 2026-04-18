@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, ne, inArray } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { sendReportEmail } from '$lib/server/email';
 import { generateReportPdf, type ReportPlatformData } from '$lib/server/report-pdf-generator';
@@ -49,7 +49,9 @@ export async function processPdfReportSend() {
 	const errors: { clientId: string; error: string }[] = [];
 
 	try {
-		// Get all enabled schedules
+		// Get all enabled schedules. We pull rows where EITHER the primary
+		// frequency is active OR the monthly-summary toggle is on — the second
+		// pass below decides which emails actually get sent today.
 		const schedules = await db
 			.select({
 				id: table.reportSchedule.id,
@@ -60,6 +62,7 @@ export async function processPdfReportSend() {
 				dayOfMonth: table.reportSchedule.dayOfMonth,
 				platforms: table.reportSchedule.platforms,
 				recipientEmails: table.reportSchedule.recipientEmails,
+				monthlyReportEnabled: table.reportSchedule.monthlyReportEnabled,
 				lastSentAt: table.reportSchedule.lastSentAt,
 				clientName: table.client.name,
 				clientEmail: table.client.email,
@@ -75,33 +78,21 @@ export async function processPdfReportSend() {
 				)
 			)
 			.leftJoin(table.tenant, eq(table.reportSchedule.tenantId, table.tenant.id))
-			.where(
-				and(
-					eq(table.reportSchedule.isEnabled, true),
-					ne(table.reportSchedule.frequency, 'disabled')
-				)
-			);
+			.where(eq(table.reportSchedule.isEnabled, true));
 
 		for (const schedule of schedules) {
 			try {
-				// Check if today is the right day
-				if (schedule.frequency === 'weekly' && schedule.dayOfWeek !== dayOfWeek) continue;
-				if (schedule.frequency === 'monthly' && schedule.dayOfMonth !== dayOfMonth) continue;
+				const shouldSendPrimary =
+					(schedule.frequency === 'weekly' && schedule.dayOfWeek === dayOfWeek) ||
+					(schedule.frequency === 'monthly' && schedule.dayOfMonth === dayOfMonth);
+				// Monthly summary fires on day 1 of each month, regardless of
+				// primary frequency (so a weekly schedule can also get a monthly
+				// roll-up on the 1st). Uses ALL 3 platforms.
+				const shouldSendMonthlySummary = !!schedule.monthlyReportEnabled && dayOfMonth === 1;
 
-				// Idempotency guard: if lastSentAt falls on today (Europe/Bucharest),
-				// we already processed this schedule in this tick. BullMQ may retry
-				// the job after a worker crash — without this check, all recipients
-				// would get a duplicate email. The per-recipient dedup below is the
-				// second line of defense; this skip is cheaper.
-				if (schedule.lastSentAt) {
-					const lastYmd = getBucharestCalendar(new Date(schedule.lastSentAt)).ymd;
-					if (lastYmd === ymd) {
-						logInfo('scheduler', `Schedule ${schedule.id} already sent today (${ymd}), skipping`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id } });
-						continue;
-					}
-				}
+				if (!shouldSendPrimary && !shouldSendMonthlySummary) continue;
 
-				// Check SMTP
+				// Check SMTP once per schedule (both passes share the transport).
 				const [emailConfig] = await db
 					.select({ isEnabled: table.emailSettings.isEnabled })
 					.from(table.emailSettings)
@@ -109,133 +100,27 @@ export async function processPdfReportSend() {
 					.limit(1);
 				if (!emailConfig?.isEnabled) continue;
 
-				// Calculate date range
-				const { since, until, label } = getDateRange(schedule.frequency, now);
-
-				// Get platform data from DB. Safe-parse: corrupt JSON or unknown
-				// platforms must not crash the whole scheduler tick.
-				const allowedPlatforms = ['meta', 'google', 'tiktok'] as const;
-				let platformNames: string[];
-				try {
-					const raw = JSON.parse(schedule.platforms || '[]');
-					platformNames = Array.isArray(raw)
-						? raw.filter((p): p is string => typeof p === 'string' && (allowedPlatforms as readonly string[]).includes(p))
-						: [];
-				} catch {
-					logWarning('scheduler', `Corrupt platforms JSON for schedule ${schedule.id}, falling back to defaults`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id, raw: schedule.platforms } });
-					platformNames = [];
-				}
-				if (platformNames.length === 0) {
-					platformNames = [...allowedPlatforms];
-				}
-				const platforms: ReportPlatformData[] = [];
-
-				for (const platformName of platformNames) {
-					const data = await getPlatformSpendData(schedule.tenantId, schedule.clientId, platformName, since, until);
-					if (data) platforms.push(data);
+				// --- Pass 1: primary scheduled report ---
+				if (shouldSendPrimary) {
+					const sent = await sendReportForSchedule({
+						schedule,
+						now,
+						variant: 'standard',
+						errors
+					});
+					reportsSent += sent;
 				}
 
-				if (platforms.length === 0) {
-					logInfo('scheduler', `No spending data for client ${schedule.clientName}, skipping`, { tenantId: schedule.tenantId, metadata: { clientName: schedule.clientName } });
-					continue;
+				// --- Pass 2: monthly all-platforms summary ---
+				if (shouldSendMonthlySummary) {
+					const sent = await sendReportForSchedule({
+						schedule,
+						now,
+						variant: 'monthly-summary',
+						errors
+					});
+					reportsSent += sent;
 				}
-
-				// Get tenant logo
-				let tenantLogo: string | null = null;
-				try {
-					const [invoiceSettings] = await db
-						.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
-						.from(table.invoiceSettings)
-						.where(eq(table.invoiceSettings.tenantId, schedule.tenantId))
-						.limit(1);
-					tenantLogo = invoiceSettings?.invoiceLogo || null;
-				} catch (err) {
-					logWarning('scheduler', 'Failed to load invoice settings for report PDF, using default logo', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
-				}
-
-				// Generate PDF
-				// Fetch exchange rates
-				const exchangeRates: Record<string, number> = {};
-				try {
-					const usdRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
-						.where(eq(table.bnrExchangeRate.currency, 'USD')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
-					const eurRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
-						.where(eq(table.bnrExchangeRate.currency, 'EUR')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
-					if (usdRate[0]) exchangeRates['USD'] = usdRate[0].rate;
-					if (eurRate[0]) exchangeRates['EUR'] = eurRate[0].rate;
-				} catch (err) {
-					logWarning('scheduler', 'Failed to load BNR exchange rates for report PDF, using original currencies', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
-				}
-
-				const pdfBuffer = await generateReportPdf({
-					tenantName: schedule.tenantName || 'CRM',
-					clientName: schedule.clientName || 'Client',
-					period: { since, until, label },
-					platforms,
-					generatedAt: now,
-					tenantLogo,
-					accentColor: schedule.tenantThemeColor || null,
-					exchangeRates
-				});
-
-				// Get recipients
-				const recipients = schedule.recipientEmails
-					? JSON.parse(schedule.recipientEmails) as string[]
-					: schedule.clientEmail ? [schedule.clientEmail] : [];
-
-				if (recipients.length === 0) {
-					logWarning('scheduler', `No recipients for client ${schedule.clientName}`, { tenantId: schedule.tenantId });
-					continue;
-				}
-
-				// Per-recipient idempotency: if the worker retries after a partial
-				// failure, we must not re-send to recipients that already received
-				// this exact period's report. The subject encodes (clientName, label)
-				// which is unique per (client, period), so we match on it.
-				const expectedSubject = `Raport Marketing — ${schedule.clientName || 'Client'} — ${label}`;
-				const alreadyDelivered = await db.select({ toEmail: table.emailLog.toEmail })
-					.from(table.emailLog)
-					.where(and(
-						eq(table.emailLog.tenantId, schedule.tenantId),
-						eq(table.emailLog.emailType, 'report'),
-						eq(table.emailLog.status, 'completed'),
-						eq(table.emailLog.subject, expectedSubject),
-						inArray(table.emailLog.toEmail, recipients)
-					));
-				const deliveredSet = new Set(alreadyDelivered.map((r) => r.toEmail));
-
-				// Send to each recipient not already delivered
-				let sentForThisSchedule = 0;
-				for (const email of recipients) {
-					if (deliveredSet.has(email)) {
-						logInfo('scheduler', `Skipping already-delivered recipient ${email} for ${schedule.clientName}`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id } });
-						continue;
-					}
-					try {
-						await sendReportEmail(
-							schedule.tenantId,
-							schedule.clientId,
-							email,
-							schedule.clientName || 'Client',
-							label,
-							pdfBuffer
-						);
-						reportsSent++;
-						sentForThisSchedule++;
-					} catch (err) {
-						errors.push({ clientId: schedule.clientId, error: `${email}: ${(err as Error).message}` });
-					}
-				}
-
-				// Update lastSentAt only when at least one new delivery succeeded in
-				// this tick. Keeps UI honest about partial failures so operators can
-				// see something is wrong on the next refresh.
-				if (sentForThisSchedule > 0) {
-					await db.update(table.reportSchedule)
-						.set({ lastSentAt: now, updatedAt: now })
-						.where(eq(table.reportSchedule.id, schedule.id));
-				}
-
 			} catch (err) {
 				errors.push({ clientId: schedule.clientId, error: (err as Error).message });
 				logError('scheduler', `Report error for client ${schedule.clientName}`, {
@@ -254,6 +139,164 @@ export async function processPdfReportSend() {
 		logError('scheduler', 'PDF Report Send fatal error', { metadata: { error: (err as Error).message } });
 		throw err;
 	}
+}
+
+type ScheduleRow = {
+	id: string;
+	tenantId: string;
+	clientId: string;
+	frequency: string;
+	dayOfWeek: number | null;
+	dayOfMonth: number | null;
+	platforms: string;
+	recipientEmails: string | null;
+	monthlyReportEnabled: boolean;
+	lastSentAt: Date | null;
+	clientName: string | null;
+	clientEmail: string | null;
+	tenantName: string | null;
+	tenantThemeColor: string | null;
+};
+
+/**
+ * Build + send one report (either the primary schedule or the monthly
+ * summary). Returns the count of recipients that received an email in this
+ * pass. Errors are pushed to the caller's error collector.
+ */
+async function sendReportForSchedule(opts: {
+	schedule: ScheduleRow;
+	now: Date;
+	variant: 'standard' | 'monthly-summary';
+	errors: { clientId: string; error: string }[];
+}): Promise<number> {
+	const { schedule, now, variant, errors } = opts;
+	const allowedPlatforms = ['meta', 'google', 'tiktok'] as const;
+
+	// Monthly summary forces all 3 platforms regardless of the schedule's
+	// configured subset; the primary send respects the user's selection.
+	let platformNames: string[];
+	if (variant === 'monthly-summary') {
+		platformNames = [...allowedPlatforms];
+	} else {
+		try {
+			const raw = JSON.parse(schedule.platforms || '[]');
+			platformNames = Array.isArray(raw)
+				? raw.filter((p): p is string => typeof p === 'string' && (allowedPlatforms as readonly string[]).includes(p))
+				: [];
+		} catch {
+			logWarning('scheduler', `Corrupt platforms JSON for schedule ${schedule.id}, falling back to defaults`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id, raw: schedule.platforms } });
+			platformNames = [];
+		}
+		if (platformNames.length === 0) platformNames = [...allowedPlatforms];
+	}
+
+	// Monthly summary always covers the previous full month.
+	const { since, until, label } = variant === 'monthly-summary'
+		? getDateRange('monthly', now)
+		: getDateRange(schedule.frequency, now);
+
+	const platforms: ReportPlatformData[] = [];
+	for (const platformName of platformNames) {
+		const data = await getPlatformSpendData(schedule.tenantId, schedule.clientId, platformName, since, until);
+		if (data) platforms.push(data);
+	}
+
+	if (platforms.length === 0) {
+		logInfo('scheduler', `No spending data for ${schedule.clientName} (${variant}), skipping`, { tenantId: schedule.tenantId, metadata: { clientName: schedule.clientName, variant } });
+		return 0;
+	}
+
+	let tenantLogo: string | null = null;
+	try {
+		const [invoiceSettings] = await db
+			.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, schedule.tenantId))
+			.limit(1);
+		tenantLogo = invoiceSettings?.invoiceLogo || null;
+	} catch (err) {
+		logWarning('scheduler', 'Failed to load invoice settings for report PDF, using default logo', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
+	}
+
+	const exchangeRates: Record<string, number> = {};
+	try {
+		const usdRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'USD')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+		const eurRate = await db.select({ rate: table.bnrExchangeRate.rate }).from(table.bnrExchangeRate)
+			.where(eq(table.bnrExchangeRate.currency, 'EUR')).orderBy(desc(table.bnrExchangeRate.rateDate)).limit(1);
+		if (usdRate[0]) exchangeRates['USD'] = usdRate[0].rate;
+		if (eurRate[0]) exchangeRates['EUR'] = eurRate[0].rate;
+	} catch (err) {
+		logWarning('scheduler', 'Failed to load BNR exchange rates for report PDF, using original currencies', { tenantId: schedule.tenantId, metadata: { error: (err as Error).message } });
+	}
+
+	const pdfBuffer = await generateReportPdf({
+		tenantName: schedule.tenantName || 'CRM',
+		clientName: schedule.clientName || 'Client',
+		period: { since, until, label },
+		platforms,
+		generatedAt: now,
+		tenantLogo,
+		accentColor: schedule.tenantThemeColor || null,
+		exchangeRates
+	});
+
+	const recipients = schedule.recipientEmails
+		? JSON.parse(schedule.recipientEmails) as string[]
+		: schedule.clientEmail ? [schedule.clientEmail] : [];
+
+	if (recipients.length === 0) {
+		logWarning('scheduler', `No recipients for ${schedule.clientName} (${variant})`, { tenantId: schedule.tenantId });
+		return 0;
+	}
+
+	// Per-recipient idempotency: subject encodes variant + clientName + label,
+	// so primary and monthly-summary can coexist on the same day (day 1 of the
+	// month when monthly frequency is also chosen) without colliding.
+	const subjectPrefix = variant === 'monthly-summary' ? 'Raport Marketing Lunar' : 'Raport Marketing';
+	const expectedSubject = `${subjectPrefix} — ${schedule.clientName || 'Client'} — ${label}`;
+	const alreadyDelivered = await db.select({ toEmail: table.emailLog.toEmail })
+		.from(table.emailLog)
+		.where(and(
+			eq(table.emailLog.tenantId, schedule.tenantId),
+			eq(table.emailLog.emailType, 'report'),
+			eq(table.emailLog.status, 'completed'),
+			eq(table.emailLog.subject, expectedSubject),
+			inArray(table.emailLog.toEmail, recipients)
+		));
+	const deliveredSet = new Set(alreadyDelivered.map((r) => r.toEmail));
+
+	let sentCount = 0;
+	for (const email of recipients) {
+		if (deliveredSet.has(email)) {
+			logInfo('scheduler', `Skipping already-delivered recipient ${email} for ${schedule.clientName} (${variant})`, { tenantId: schedule.tenantId, metadata: { scheduleId: schedule.id, variant } });
+			continue;
+		}
+		try {
+			await sendReportEmail(
+				schedule.tenantId,
+				schedule.clientId,
+				email,
+				schedule.clientName || 'Client',
+				label,
+				pdfBuffer,
+				variant
+			);
+			sentCount++;
+		} catch (err) {
+			errors.push({ clientId: schedule.clientId, error: `${email} (${variant}): ${(err as Error).message}` });
+		}
+	}
+
+	// Only stamp lastSentAt for the primary send — the monthly summary is a
+	// secondary artefact and we don't want it to mask the primary cadence.
+	if (variant === 'standard' && sentCount > 0) {
+		await db.update(table.reportSchedule)
+			.set({ lastSentAt: now, updatedAt: now })
+			.where(eq(table.reportSchedule.id, schedule.id));
+	}
+
+	return sentCount;
 }
 
 export function getDateRange(frequency: string, now: Date): { since: string; until: string; label: string } {
