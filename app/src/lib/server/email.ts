@@ -90,6 +90,106 @@ function prepareLogoAttachment(invoiceLogo: string | null | undefined) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared branded email shell — letterhead layout used by every tenant-facing
+// email. Color picks up tenant.themeColor (validated) with #2563eb fallback.
+// ---------------------------------------------------------------------------
+const BRAND_MOTTO = 'Digital Marketing &amp; Growth Solutions';
+const DEFAULT_THEME_COLOR = '#2563eb';
+
+function normalizeThemeColor(raw: string | null | undefined): string {
+	if (!raw) return DEFAULT_THEME_COLOR;
+	const trimmed = raw.trim();
+	return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : DEFAULT_THEME_COLOR;
+}
+
+function buildHeaderLogoHtml(logoAttachment: { cid: string } | null): string {
+	return logoAttachment
+		? '<img src="cid:companylogo" alt="" style="display: block; max-height: 36px; max-width: 140px; margin-bottom: 18px;" />'
+		: '';
+}
+
+interface BrandedEmailOptions {
+	themeColor: string;
+	headerLogoHtml: string;
+	title: string;         // already-escaped or trusted string
+	subtitle?: string;     // defaults to motto; pass empty string to hide
+	bodyHtml: string;      // trusted HTML (callers escape user input themselves)
+	footerHtml?: string;   // small muted line at bottom
+	previewTitle?: string; // <title> tag content
+}
+
+function renderBrandedEmail(opts: BrandedEmailOptions): string {
+	const subtitle = opts.subtitle ?? BRAND_MOTTO;
+	const footer =
+		opts.footerHtml ??
+		'Pentru întrebări sau clarificări, nu ezitați să ne contactați.';
+	const subtitleBlock = subtitle
+		? `<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>`
+		: '';
+	return `<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>${opts.previewTitle ?? opts.title}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
+	<div style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+		<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
+			${opts.headerLogoHtml}
+			<h1 style="color: ${opts.themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${opts.title}</h1>
+			${subtitleBlock}
+			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
+			${opts.bodyHtml}
+			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 18px 0;"></div>
+			<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">${footer}</p>
+		</div>
+	</div>
+</body>
+</html>`;
+}
+
+/**
+ * CTA button (primary) — uses tenant theme color.
+ */
+function renderCtaButton(href: string, label: string, themeColor: string): string {
+	return `<div style="text-align: center; margin: 24px 0;">
+		<a href="${href}" style="background-color: ${themeColor}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 14px;">${label}</a>
+	</div>`;
+}
+
+/**
+ * Fetch tenant brand bundle: name, themeColor, logo attachment, header logo HTML.
+ * Reuses existing invoiceSettings + tenant rows so callers can skip duplicate reads.
+ */
+async function fetchTenantBrand(tenantId: string): Promise<{
+	tenantName: string;
+	themeColor: string;
+	logoAttachment: ReturnType<typeof prepareLogoAttachment>['logoAttachment'];
+	headerLogoHtml: string;
+}> {
+	const [tenant] = await db
+		.select({ name: table.tenant.name, themeColor: table.tenant.themeColor })
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantId))
+		.limit(1);
+
+	const [invoiceSettings] = await db
+		.select({ invoiceLogo: table.invoiceSettings.invoiceLogo })
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
+	const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+	return {
+		tenantName: tenant?.name || 'CRM',
+		themeColor: normalizeThemeColor(tenant?.themeColor),
+		logoAttachment,
+		headerLogoHtml: buildHeaderLogoHtml(logoAttachment)
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Task email badge color helpers (hex equivalents of Tailwind classes in task-kanban-utils.ts)
 // ---------------------------------------------------------------------------
 function getEmailStatusColors(status: string | null): { bg: string; text: string; dot: string } {
@@ -844,36 +944,11 @@ export async function sendInvitationEmail(
 	inviterName: string,
 	tenantId: string
 ): Promise<void> {
-	tenantName = escapeHtml(tenantName);
-	inviterName = escapeHtml(inviterName);
+	const safeTenantName = escapeHtml(tenantName);
+	const safeInviterName = escapeHtml(inviterName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
-	const subject = `Invitatie de alaturare la ${tenantName}`;
-	const html = `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Invitation to ${tenantName}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: #2563eb; margin-top: 0;">You've been invited!</h1>
-					<p>Hello,</p>
-					<p><strong>${inviterName}</strong> has invited you to join <strong>${tenantName}</strong> on the CRM platform.</p>
-					<p>Click the button below to accept the invitation:</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invitationUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Accept Invitation</a>
-					</div>
-					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-					<p style="font-size: 14px; color: #2563eb; word-break: break-all;">${invitationUrl}</p>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">This invitation will expire in 7 days.</p>
-					<p style="font-size: 12px; color: #999;">If you didn't expect this invitation, you can safely ignore this email.</p>
-				</div>
-			</body>
-			</html>
-		`;
+	const subject = `Invitație de alăturare la ${tenantName}`;
 
 	await sendWithPersistence(
 		{
@@ -882,38 +957,56 @@ export async function sendInvitationEmail(
 			subject,
 			emailType: 'invitation',
 			metadata: { invitationToken, tenantName, inviterName },
-			htmlBody: html,
+			htmlBody: '',
 			payload: {
 				sendFn: 'sendInvitationEmail',
 				args: [email, invitationToken, tenantName, inviterName, tenantId]
 			}
 		},
 		async () => {
-			// Get tenant email settings to determine from email
+			const brand = await fetchTenantBrand(tenantId);
 			const [emailSettings] = await db
 				.select()
 				.from(table.emailSettings)
 				.where(eq(table.emailSettings.tenantId, tenantId))
 				.limit(1);
-
 			const fromEmail = resolveFromEmail(emailSettings);
 
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;"><strong>${safeInviterName}</strong> v-a invitat să vă alăturați echipei <strong>${safeTenantName}</strong> pe platforma CRM.</p>
+				${renderCtaButton(invitationUrl, 'Acceptă invitația', brand.themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: ${brand.themeColor}; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0; word-break: break-all;">${invitationUrl}</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 6px 0;">Această invitație expiră în 7 zile.</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0;">Dacă nu ați așteptat această invitație, puteți ignora acest email.</p>
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Invitație nouă',
+				bodyHtml,
+				previewTitle: `Invitație — ${safeTenantName}`
+			});
+
 			return {
-				from: `"${tenantName}" <${fromEmail}>`,
+				from: `"${brand.tenantName}" <${fromEmail}>`,
 				to: email,
 				subject,
 				html,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
 				text: trimPlainText(`
-			You've been invited!
+			Invitatie noua
 
-			${inviterName} has invited you to join ${tenantName} on the CRM platform.
+			${inviterName} v-a invitat sa va alaturati echipei ${tenantName} pe platforma CRM.
 
-			Accept the invitation by visiting this link:
+			Acceptati invitatia accesand acest link:
 			${invitationUrl}
 
-			This invitation will expire in 7 days.
+			Aceasta invitatie expira in 7 zile.
 
-			If you didn't expect this invitation, you can safely ignore this email.
+			Daca nu ati asteptat aceasta invitatie, puteti ignora acest email.
 		`)
 			};
 		}
@@ -974,7 +1067,8 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = escapeHtml(tenant?.name || 'CRM');
-			const clientDisplayName = escapeHtml(client?.name || '');
+			const clientDisplayName = escapeHtml(client?.name || 'Client');
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 
 			// Generate public view token and URL (accessible without authentication)
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
@@ -987,7 +1081,8 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 				.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
 				.limit(1);
 
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const headerLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			// Generate PDF attachment
 			const lineItems = await db
@@ -1025,11 +1120,11 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 			// IBAN payment details
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
-				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
-				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
-				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
-				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
+				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
+				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
+				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
+				${tenant.ibanEuro ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (EUR)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.ibanEuro)}</p>` : ''}
 			</div>`
 				: '';
 
@@ -1042,44 +1137,45 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 				...(logoAttachment ? [logoAttachment] : [])
 			];
 
+			const statusRow =
+				invoice.status === 'paid'
+					? `<div><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; <strong style="color: #15803d;">Achitată</strong></div>`
+					: invoice.status === 'partially_paid' && invoice.remainingAmount
+						? `<div><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; <strong style="color: #d97706;">Achitată parțial</strong> — sold restant ${formatAmount(invoice.remainingAmount, invoice.currency)}</div>`
+						: '';
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${clientDisplayName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem factura de la <strong>${tenantName}</strong>.</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
+							${invoice.issueDate ? `<div><span style="color: #6b7280;">Data emitere</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.issueDate)}</strong></div>` : ''}
+							${invoice.dueDate ? `<div><span style="color: #6b7280;">Scadență</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.dueDate)}</strong></div>` : ''}
+							<div><span style="color: #6b7280;">Total de plată</span> &nbsp;·&nbsp; <strong>${formatAmount(invoice.totalAmount, invoice.currency)}</strong></div>
+							${statusRow}
+						</td>
+					</tr>
+				</table>
+				${ibanHtml}
+				${pdfAttachment ? '<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 12px 0;">📎 Factura este atașată în format PDF la acest email.</p>' : ''}
+				${renderCtaButton(invoiceUrl, 'Vezi factura online', themeColor)}
+				${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 8px 0;">Plata este scadentă la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
 				subject: `Factura ${invoice.invoiceNumber} de la ${tenantName}`,
 				...(attachments.length > 0 ? { attachments } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Factura ${invoice.invoiceNumber}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${logoHtml}
-					<h1 style="color: #2563eb; margin-top: 0;">Factura ${invoice.invoiceNumber}</h1>
-					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
-					<p>Va transmitem factura de la <strong>${tenantName}</strong>.</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
-						${invoice.issueDate ? `<p><strong>Data emitere:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
-						${invoice.dueDate ? `<p><strong>Data scadenta:</strong> ${formatDateRo(invoice.dueDate)}</p>` : ''}
-						<p><strong>Total de plata:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.status === 'paid' ? '<p style="color: green;"><strong>Status:</strong> Achitată</p>' : ''}
-						${invoice.status === 'partially_paid' && invoice.remainingAmount ? `<p style="color: #d97706;"><strong>Status:</strong> Achitată parțial — Sold restant: ${formatAmount(invoice.remainingAmount, invoice.currency)}</p>` : ''}
-					</div>
-					${ibanHtml}
-					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura Online</a>
-					</div>
-					${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `<p style="font-size: 14px; color: #666;">Plata este scadenta la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru intrebari, nu ezitati sa ne contactati.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml,
+					title: `Factura ${invoice.invoiceNumber}`,
+					bodyHtml,
+					previewTitle: `Factura ${invoice.invoiceNumber}`
+				}),
 				text: trimPlainText(`
 			Factura ${invoice.invoiceNumber}
 
@@ -1142,61 +1238,49 @@ export async function sendMagicLinkEmail(
 			payload: null
 		},
 		async () => {
+			const brand = await fetchTenantBrand(tenant.id);
 			const [emailSettings] = await db
 				.select()
 				.from(table.emailSettings)
 				.where(eq(table.emailSettings.tenantId, tenant.id))
 				.limit(1);
-
 			const fromEmail = resolveFromEmail(emailSettings);
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua ${clientName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Ați solicitat acces la portalul client pentru <strong>${tenantName}</strong>.</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Apăsați butonul de mai jos pentru autentificare. Linkul expiră în 24 de ore.</p>
+				${renderCtaButton(loginUrl, 'Intră în portalul client', brand.themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0; word-break: break-all;">${loginUrl}</p>
+				<div style="background-color: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin: 0 0 20px 0;">
+					<p style="color: #92400e; font-size: 13px; line-height: 1.5; margin: 0;"><strong>Securitate</strong> · Linkul este valabil 24 de ore și poate fi folosit o singură dată. Dacă nu ați solicitat acest email, ignorați-l.</p>
+				</div>
+			`;
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: email,
 				subject: `Autentificare ${tenantName} - Portal Client`,
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Login to ${tenantName}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: #2563eb; margin-top: 0;">Welcome to ${tenantName}</h1>
-					<p>Dear ${clientName},</p>
-					<p>You have requested access to the client portal for <strong>${tenantName}</strong>.</p>
-					<p>Click the button below to log in to your account. This link will expire in 24 hours.</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${loginUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Log In to Client Portal</a>
-					</div>
-					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-					<p style="font-size: 12px; color: #999; word-break: break-all;">${loginUrl}</p>
-					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
-						<p style="margin: 0; font-size: 14px; color: #856404;">
-							<strong>Security Notice:</strong> This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
-						</p>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please contact your administrator.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor: brand.themeColor,
+					headerLogoHtml: brand.headerLogoHtml,
+					title: `Autentificare în ${tenantName}`,
+					bodyHtml,
+					previewTitle: `Autentificare ${tenantName}`
+				}),
 				text: trimPlainText(`
-			Welcome to ${tenantName}
+			Autentificare ${tenantName}
 
-			Dear ${clientName},
+			Buna ziua ${clientName},
 
-			You have requested access to the client portal for ${tenantName}.
+			Ati solicitat acces la portalul client pentru ${tenantName}.
 
-			Click the link below to log in to your account. This link will expire in 24 hours.
-
+			Accesati acest link pentru autentificare (valabil 24h, o singura utilizare):
 			${loginUrl}
 
-			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
-
-			If you have any questions, please contact your administrator.
+			Daca nu ati solicitat acest email, ignorati-l.
 		`)
 			};
 		}
@@ -1231,53 +1315,37 @@ export async function sendAdminMagicLinkEmail(
 		},
 		async () => {
 			const fromEmail = resolveFromEmail();
+			const themeColor = DEFAULT_THEME_COLOR;
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua ${userName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Ați solicitat un link de autentificare pentru contul de administrator. Linkul expiră în 24 de ore.</p>
+				${renderCtaButton(loginUrl, 'Intră în panoul admin', themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0; word-break: break-all;">${loginUrl}</p>
+				<div style="background-color: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin: 0 0 20px 0;">
+					<p style="color: #92400e; font-size: 13px; line-height: 1.5; margin: 0;"><strong>Securitate</strong> · Linkul este valabil 24 de ore și poate fi folosit o singură dată. Dacă nu ați solicitat acest email, ignorați-l.</p>
+				</div>
+			`;
 			return {
 				from: `"${appName}" <${fromEmail}>`,
 				to: email,
 				subject: `Autentificare ${appName}`,
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Login to ${appName}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: #2563eb; margin-top: 0;">Welcome to ${appName}</h1>
-					<p>Dear ${userName},</p>
-					<p>You have requested a magic link to log in to your admin account.</p>
-					<p>Click the button below to log in. This link will expire in 24 hours.</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${loginUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Log In to Admin Panel</a>
-					</div>
-					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-					<p style="font-size: 12px; color: #999; word-break: break-all;">${loginUrl}</p>
-					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
-						<p style="margin: 0; font-size: 14px; color: #856404;">
-							<strong>Security Notice:</strong> This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
-						</p>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please contact your administrator.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: '',
+					title: `Autentificare ${appName}`,
+					bodyHtml,
+					previewTitle: `Autentificare ${appName}`
+				}),
 				text: trimPlainText(`
-			Welcome to ${appName}
+			Autentificare ${appName}
 
-			Dear ${userName},
+			Buna ziua ${userName},
 
-			You have requested a magic link to log in to your admin account.
-
-			Click the link below to log in. This link will expire in 24 hours.
-
+			Ati solicitat un link de autentificare (valabil 24h, o singura utilizare):
 			${loginUrl}
 
-			Security Notice: This link is valid for 24 hours and can only be used once. If you did not request this link, please ignore this email.
-
-			If you have any questions, please contact your administrator.
+			Daca nu ati solicitat acest email, ignorati-l.
 		`)
 			};
 		}
@@ -1312,53 +1380,37 @@ export async function sendPasswordResetEmail(
 		},
 		async () => {
 			const fromEmail = resolveFromEmail();
+			const themeColor = DEFAULT_THEME_COLOR;
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua ${userName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Ați solicitat resetarea parolei pentru contul de administrator. Linkul expiră în 1 oră.</p>
+				${renderCtaButton(resetUrl, 'Resetează parola', themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0; word-break: break-all;">${resetUrl}</p>
+				<div style="background-color: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin: 0 0 20px 0;">
+					<p style="color: #92400e; font-size: 13px; line-height: 1.5; margin: 0;"><strong>Securitate</strong> · Linkul este valabil 1 oră și poate fi folosit o singură dată. Dacă nu ați solicitat această resetare, ignorați emailul — parola rămâne neschimbată.</p>
+				</div>
+			`;
 			return {
 				from: `"${appName}" <${fromEmail}>`,
 				to: email,
 				subject: `Resetare parola - ${appName}`,
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Reset Password - ${appName}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: #2563eb; margin-top: 0;">Reset your password</h1>
-					<p>Dear ${userName},</p>
-					<p>You have requested to reset your password for your admin account.</p>
-					<p>Click the button below to set a new password. This link will expire in 1 hour.</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${resetUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Reset Password</a>
-					</div>
-					<p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
-					<p style="font-size: 12px; color: #999; word-break: break-all;">${resetUrl}</p>
-					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
-						<p style="margin: 0; font-size: 14px; color: #856404;">
-							<strong>Security Notice:</strong> This link is valid for 1 hour and can only be used once. If you did not request this, please ignore this email and your password will remain unchanged.
-						</p>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">If you have any questions, please contact your administrator.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: '',
+					title: 'Resetare parolă',
+					bodyHtml,
+					previewTitle: `Resetare parolă - ${appName}`
+				}),
 				text: trimPlainText(`
-			Reset your password
+			Resetare parola - ${appName}
 
-			Dear ${userName},
+			Buna ziua ${userName},
 
-			You have requested to reset your password for your admin account.
-
-			Click the link below to set a new password. This link will expire in 1 hour.
-
+			Ati solicitat resetarea parolei. Folositi linkul de mai jos (valabil 1h, o singura utilizare):
 			${resetUrl}
 
-			Security Notice: This link is valid for 1 hour and can only be used once. If you did not request this, please ignore this email and your password will remain unchanged.
-
-			If you have any questions, please contact your administrator.
+			Daca nu ati solicitat aceasta resetare, ignorati emailul.
 		`)
 			};
 		}
@@ -1414,11 +1466,13 @@ export async function sendTaskAssignmentEmail(
 				.from(table.invoiceSettings)
 				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
 				.limit(1);
-			const { logoAttachment: assignLogoAttachment, logoHtml: assignLogoHtml } =
+			const { logoAttachment: assignLogoAttachment } =
 				prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const assignHeaderLogoHtml = buildHeaderLogoHtml(assignLogoAttachment);
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
 			const assignStatusColors = getEmailStatusColors(task.status);
@@ -1432,54 +1486,54 @@ export async function sendTaskAssignmentEmail(
 			const assignStatusBadge = `<span style="${assignBadgeStyle} background:${assignStatusColors.bg}; color:${assignStatusColors.text};"><span style="${assignDotStyle(assignStatusColors.dot)}"></span>${assignStatusLabel}</span>`;
 			const assignPriorityBadge = `<span style="${assignBadgeStyle} background:${assignPriorityColors.bg}; color:${assignPriorityColors.text};">${assignPriorityLabel}</span>`;
 
+			const safeAssignee = escapeHtml(assigneeName || '');
+			const safeTitle = escapeHtml(task.title);
+			const safeDesc = task.description ? escapeHtml(task.description) : '';
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Ți-a fost atribuit un task nou:</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
+							${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">${safeDesc}</div>` : ''}
+							<div><span style="color: #6b7280;">Prioritate</span> &nbsp;·&nbsp; ${assignPriorityBadge}</div>
+							<div style="margin-top: 6px;"><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; ${assignStatusBadge}</div>
+							${task.dueDate ? `<div style="margin-top: 6px;"><span style="color: #6b7280;">Termen</span> &nbsp;·&nbsp; <strong>${formatDateRo(task.dueDate)}</strong></div>` : ''}
+						</td>
+					</tr>
+				</table>
+				${renderCtaButton(taskUrl, 'Vezi task-ul', themeColor)}
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: assigneeEmail,
 				subject: `Task nou atribuit: ${task.title}`,
 				...(assignLogoAttachment ? { attachments: [assignLogoAttachment] } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Task Assigned: ${task.title}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${assignLogoHtml}
-					<h1 style="color: #2563eb; margin-top: 0;">Task Assigned to You</h1>
-					<p>Hello ${assigneeName || 'there'},</p>
-					<p>You have been assigned a new task:</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
-						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Priority:</strong> ${assignPriorityBadge}</p>
-						<p><strong>Status:</strong> ${assignStatusBadge}</p>
-						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
-					</div>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
-					</div>
-					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Sent automatically by ${tenantName}.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: assignHeaderLogoHtml,
+					title: 'Task nou atribuit',
+					bodyHtml,
+					previewTitle: `Task: ${task.title}`,
+					footerHtml: `Trimis automat de ${escapeHtml(tenantName)}.`
+				}),
 				text: trimPlainText(`
-			Task Assigned to You
+			Task nou atribuit
 
-			Hello ${assigneeName || 'there'},
+			Buna ziua${assigneeName ? ` ${assigneeName}` : ''},
 
-			You have been assigned a new task:
+			Ti-a fost atribuit un task nou:
 
 			${task.title}
 			${task.description ? `\n${task.description}\n` : ''}
-			Priority: ${task.priority || 'Medium'}
+			Prioritate: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
-			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
+			${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
 
-			View task: ${taskUrl}
+			Vezi task: ${taskUrl}
 		`)
 			};
 		}
@@ -1535,21 +1589,23 @@ export async function sendTaskUpdateEmail(
 				.from(table.invoiceSettings)
 				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
 				.limit(1);
-			const { logoAttachment: updLogoAttachment, logoHtml: updLogoHtml } =
+			const { logoAttachment: updLogoAttachment } =
 				prepareLogoAttachment(updInvoiceSettings?.invoiceLogo);
+			const updHeaderLogoHtml = buildHeaderLogoHtml(updLogoAttachment);
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
 			const changeDescription =
 				changeType === 'status'
-					? 'status was updated'
+					? 'statusul a fost actualizat'
 					: changeType === 'assigned'
-						? 'assignment was changed'
+						? 'atribuirea a fost modificată'
 						: changeType === 'dueDate'
-							? 'due date was updated'
-							: 'task was updated';
+							? 'termenul a fost actualizat'
+							: 'taskul a fost modificat';
 
 			const updStatusColors = getEmailStatusColors(task.status);
 			const updPriorityColors = getEmailPriorityColors(task.priority);
@@ -1562,57 +1618,54 @@ export async function sendTaskUpdateEmail(
 			const updStatusBadge = `<span style="${updBadgeStyle} background:${updStatusColors.bg}; color:${updStatusColors.text};"><span style="${updDotStyle(updStatusColors.dot)}"></span>${updStatusLabel}</span>`;
 			const updPriorityBadge = `<span style="${updBadgeStyle} background:${updPriorityColors.bg}; color:${updPriorityColors.text};">${updPriorityLabel}</span>`;
 
+			const safeWatcher = escapeHtml(watcherName || '');
+			const safeTitle = escapeHtml(task.title);
+			const safeDesc = task.description ? escapeHtml(task.description) : '';
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeWatcher ? ` ${safeWatcher}` : ''},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un task pe care îl urmăriți a fost actualizat — <em>${changeDescription}</em>.</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
+							${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">${safeDesc}</div>` : ''}
+							<div><span style="color: #6b7280;">Prioritate</span> &nbsp;·&nbsp; ${updPriorityBadge}</div>
+							<div style="margin-top: 6px;"><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; ${updStatusBadge}</div>
+							${task.dueDate ? `<div style="margin-top: 6px;"><span style="color: #6b7280;">Termen</span> &nbsp;·&nbsp; <strong>${formatDateRo(task.dueDate)}</strong></div>` : ''}
+						</td>
+					</tr>
+				</table>
+				${renderCtaButton(taskUrl, 'Vezi task-ul', themeColor)}
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: watcherEmail,
 				subject: `Task actualizat: ${task.title}`,
 				...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Task Updated: ${task.title}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${updLogoHtml}
-					<h1 style="color: #2563eb; margin-top: 0;">Task Updated</h1>
-					<p>Hello ${watcherName || 'there'},</p>
-					<p>A task you're watching has been updated:</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
-						<p><strong>What changed:</strong> The task's ${changeDescription}.</p>
-						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Priority:</strong> ${updPriorityBadge}</p>
-						<p><strong>Status:</strong> ${updStatusBadge}</p>
-						${task.dueDate ? `<p><strong>Due Date:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
-					</div>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
-					</div>
-					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Sent automatically by ${tenantName}.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: updHeaderLogoHtml,
+					title: 'Task actualizat',
+					bodyHtml,
+					previewTitle: `Task actualizat: ${task.title}`,
+					footerHtml: `Trimis automat de ${escapeHtml(tenantName)}.`
+				}),
 				text: trimPlainText(`
-			Task Updated
+			Task actualizat
 
-			Hello ${watcherName || 'there'},
+			Buna ziua${watcherName ? ` ${watcherName}` : ''},
 
-			A task you're watching has been updated:
+			Un task pe care il urmariti a fost actualizat (${changeDescription}):
 
 			${task.title}
-			What changed: The task's ${changeDescription}.
-
 			${task.description ? `\n${task.description}\n` : ''}
-			Priority: ${task.priority || 'Medium'}
+			Prioritate: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
-			${task.dueDate ? `Due Date: ${formatDateRo(task.dueDate)}\n` : ''}
+			${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
 
-			View task: ${taskUrl}
+			Vezi task: ${taskUrl}
 		`)
 			};
 		}
@@ -1689,16 +1742,18 @@ export async function sendTaskClientNotificationEmail(
 				.from(table.invoiceSettings)
 				.where(eq(table.invoiceSettings.tenantId, task.tenantId))
 				.limit(1);
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const clientNotifHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
 			// Full subject + description based on notification type
 			let subject: string;
 			let changeDescription: string;
-			let headerColor = '#2563eb';
+			let headerColor = themeColor;
 
 			switch (notificationType) {
 				case 'created':
@@ -1749,40 +1804,38 @@ export async function sendTaskClientNotificationEmail(
 			const statusBadge = `<span style="${badgeStyle} background:${statusColors.bg}; color:${statusColors.text};"><span style="${dotStyle(statusColors.dot)}"></span>${statusLabel}</span>`;
 			const priorityBadge = `<span style="${badgeStyle} background:${priorityColors.bg}; color:${priorityColors.text};">${priorityLabel}</span>`;
 
+			const safeTitle = escapeHtml(task.title);
+			const safeDesc = task.description ? escapeHtml(task.description) : '';
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ${greeting},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${changeDescription}</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
+							${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">${safeDesc}</div>` : ''}
+							<div><span style="color: #6b7280;">Prioritate</span> &nbsp;·&nbsp; ${priorityBadge}</div>
+							<div style="margin-top: 6px;"><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; ${statusBadge}</div>
+							${task.dueDate ? `<div style="margin-top: 6px;"><span style="color: #6b7280;">Termen</span> &nbsp;·&nbsp; <strong>${formatDateRo(task.dueDate)}</strong></div>` : ''}
+						</td>
+					</tr>
+				</table>
+				${renderCtaButton(taskUrl, 'Vezi task-ul', themeColor)}
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
 				subject,
 				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>${subject}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${logoHtml}
-					<h1 style="color: ${headerColor}; margin-top: 0;">${subject}</h1>
-					<p>Bună ${greeting},</p>
-					<p>${changeDescription}</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
-						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Prioritate:</strong> ${priorityBadge}</p>
-						<p><strong>Status:</strong> ${statusBadge}</p>
-						${task.dueDate ? `<p><strong>Termen:</strong> ${formatDateRo(task.dueDate)}</p>` : ''}
-					</div>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Task</a>
-					</div>
-					<p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">Acest email a fost trimis automat de ${tenantName}.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor: headerColor,
+					headerLogoHtml: clientNotifHeaderLogoHtml,
+					title: subject,
+					bodyHtml,
+					previewTitle: subject,
+					footerHtml: `Trimis automat de ${escapeHtml(tenantName)}.`
+				}),
 				text: trimPlainText(`
 ${subject}
 
@@ -1853,6 +1906,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
 			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
@@ -1863,7 +1917,8 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 				.where(eq(table.invoiceSettings.tenantId, invoice.tenantId))
 				.limit(1);
 
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const paidHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			const formatAmount = (cents: number | null | undefined, currency: string) => {
 				if (cents === null || cents === undefined) return 'N/A';
@@ -1871,40 +1926,36 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 				return `${amount} ${currency}`;
 			};
 
+			const safeClientName = escapeHtml(client?.name || 'Client');
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Am primit plata pentru următoarea factură:</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
+							<div><span style="color: #6b7280;">Suma plătită</span> &nbsp;·&nbsp; <strong>${formatAmount(invoice.totalAmount, invoice.currency)}</strong></div>
+							${invoice.paidDate ? `<div><span style="color: #6b7280;">Data plății</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.paidDate)}</strong></div>` : ''}
+							${invoice.issueDate ? `<div><span style="color: #6b7280;">Data emitere</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.issueDate)}</strong></div>` : ''}
+						</td>
+					</tr>
+				</table>
+				<p style="color: #15803d; font-weight: 600; font-size: 15px; margin: 0 0 20px 0;">Vă mulțumim pentru plată!</p>
+				${renderCtaButton(invoiceUrl, 'Vezi factura', themeColor)}
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
 				subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
 				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Plata primita: Factura ${invoice.invoiceNumber}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${logoHtml}
-					<h1 style="color: #10b981; margin-top: 0;">Plata primita</h1>
-					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
-					<p>Am primit plata pentru urmatoarea factura:</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
-						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
-						<p><strong>Suma platita:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						${invoice.paidDate ? `<p><strong>Data plata:</strong> ${formatDateRo(invoice.paidDate)}</p>` : ''}
-						${invoice.issueDate ? `<p><strong>Data emitere:</strong> ${formatDateRo(invoice.issueDate)}</p>` : ''}
-					</div>
-					<p style="color: #10b981; font-weight: bold;">Va multumim pentru plata!</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura</a>
-					</div>
-					<p style="font-size: 12px; color: #999;">Pentru intrebari, nu ezitati sa ne contactati.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: paidHeaderLogoHtml,
+					title: 'Plată primită',
+					bodyHtml,
+					previewTitle: `Plata primita: Factura ${invoice.invoiceNumber}`
+				}),
 				text: trimPlainText(`
 			Plata primita
 
@@ -1983,6 +2034,7 @@ export async function sendOverdueReminderEmail(
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
 
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
 			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
@@ -2027,14 +2079,15 @@ export async function sendOverdueReminderEmail(
 
 			const dueDateStr = formatDateRo(invoice.dueDate);
 
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const overdueHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: white; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #2563eb;">
-				<p style="font-weight: bold; margin-top: 0;">Date pentru plata:</p>
-				${tenant.bankName ? `<p style="margin: 4px 0;"><strong>Banca:</strong> ${tenant.bankName}</p>` : ''}
-				<p style="margin: 4px 0;"><strong>IBAN (LEI):</strong> ${tenant.iban}</p>
-				${tenant.ibanEuro ? `<p style="margin: 4px 0;"><strong>IBAN (EUR):</strong> ${tenant.ibanEuro}</p>` : ''}
+				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
+				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
+				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
+				${tenant.ibanEuro ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (EUR)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.ibanEuro)}</p>` : ''}
 			</div>`
 				: '';
 
@@ -2047,43 +2100,40 @@ export async function sendOverdueReminderEmail(
 				...(logoAttachment ? [logoAttachment] : [])
 			];
 
+			const safeClientName = escapeHtml(client?.name || 'Client');
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă reamintim că factura de mai jos este restantă de <strong>${daysOverdue} zile</strong>.</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fffbeb; border-left: 3px solid #d97706; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
+							<div><span style="color: #6b7280;">Suma de plată</span> &nbsp;·&nbsp; <strong>${formatAmount(invoice.totalAmount, invoice.currency)}</strong></div>
+							<div><span style="color: #6b7280;">Scadență</span> &nbsp;·&nbsp; <strong>${dueDateStr}</strong></div>
+							<div><span style="color: #6b7280;">Zile restanță</span> &nbsp;·&nbsp; <strong style="color: #d97706;">${daysOverdue}</strong></div>
+							${reminderNumber > 1 ? `<div style="color: #9ca3af; font-size: 12px; margin-top: 6px;">Reminder #${reminderNumber}</div>` : ''}
+						</td>
+					</tr>
+				</table>
+				${ibanHtml}
+				<p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Vă rugăm să efectuați plata cât mai curând posibil.</p>
+				${pdfAttachment ? '<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 12px 0;">📎 Factura este atașată în format PDF la acest email.</p>' : ''}
+				${renderCtaButton(invoiceUrl, 'Vezi factura online', themeColor)}
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">Dacă ați efectuat deja plata, vă rugăm să ignorați acest email.</p>
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
 				subject: `Reminder: Factura ${invoice.invoiceNumber} este restanta de ${daysOverdue} zile`,
 				...(attachments.length > 0 ? { attachments } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Reminder: Factura ${invoice.invoiceNumber}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${logoHtml}
-					<h1 style="color: #d97706; margin-top: 0;">Reminder plata factura</h1>
-					<p>Stimate/Stimata ${client?.name || 'Client'},</p>
-					<p>Va reamintim ca factura de mai jos este restanta de <strong>${daysOverdue} zile</strong>.</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #d97706;">
-						<p><strong>Numar factura:</strong> ${invoice.invoiceNumber}</p>
-						<p><strong>Suma de plata:</strong> ${formatAmount(invoice.totalAmount, invoice.currency)}</p>
-						<p><strong>Data scadenta:</strong> ${dueDateStr}</p>
-						<p style="color: #d97706;"><strong>Zile restanta:</strong> ${daysOverdue}</p>
-						${reminderNumber > 1 ? `<p style="font-size: 12px; color: #999;">Reminder #${reminderNumber}</p>` : ''}
-					</div>
-					${ibanHtml}
-					<p>Va rugam sa efectuati plata cat mai curand posibil.</p>
-					${pdfAttachment ? '<p style="font-size: 13px; color: #666;">Factura este atasata in format PDF la acest email.</p>' : ''}
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${invoiceUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Vezi Factura Online</a>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">Daca ati efectuat deja plata, va rugam sa ignorati acest email. Pentru intrebari, nu ezitati sa ne contactati.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: overdueHeaderLogoHtml,
+					title: 'Reminder plată factură',
+					bodyHtml,
+					previewTitle: `Reminder: Factura ${invoice.invoiceNumber}`
+				}),
 				text: trimPlainText(`
 			Reminder plata factura
 
@@ -2161,55 +2211,60 @@ export async function sendTaskReminderEmail(
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
+			const brand = await fetchTenantBrand(task.tenantId);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+			const accent = isOverdue ? '#dc2626' : '#d97706';
+
+			const safeAssignee = escapeHtml(assigneeName || '');
+			const safeTitle = escapeHtml(task.title);
+			const safeDesc = task.description ? escapeHtml(task.description) : '';
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
+				${isOverdue ? `<p style="color: ${accent}; font-weight: 600; font-size: 15px; margin: 0 0 16px 0;">Acest task este restant!</p>` : `<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">Acest task are termen ${daysUntilDue === 0 ? 'astăzi' : `în ${daysUntilDue} ${daysUntilDue === 1 ? 'zi' : 'zile'}`}.</p>`}
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-left: 3px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
+							${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">${safeDesc}</div>` : ''}
+							<div><span style="color: #6b7280;">Prioritate</span> &nbsp;·&nbsp; <strong>${task.priority || 'medium'}</strong></div>
+							<div><span style="color: #6b7280;">Status</span> &nbsp;·&nbsp; <strong>${task.status || 'todo'}</strong></div>
+							<div><span style="color: #6b7280;">Termen</span> &nbsp;·&nbsp; <strong style="color: ${isOverdue ? accent : '#111827'};">${formatDateRo(dueDate)}</strong></div>
+						</td>
+					</tr>
+				</table>
+				${renderCtaButton(taskUrl, 'Vezi task-ul', themeColor)}
+			`;
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: assigneeEmail,
 				subject: isOverdue
-					? `Overdue Task Reminder: ${task.title}`
-					: `Task Reminder: ${task.title} - Due ${daysUntilDue === 0 ? 'Today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}`,
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Task Reminder: ${task.title}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: ${isOverdue ? '#dc2626' : '#f59e0b'}; margin-top: 0;">${isOverdue ? 'Overdue Task Reminder' : 'Task Reminder'}</h1>
-					<p>Hello ${assigneeName || 'there'},</p>
-					${isOverdue ? '<p style="color: #dc2626; font-weight: bold;">This task is overdue!</p>' : `<p>This task is due ${daysUntilDue === 0 ? 'today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}.</p>`}
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid ${isOverdue ? '#dc2626' : '#f59e0b'};">
-						<h2 style="margin-top: 0; color: #2563eb;">${task.title}</h2>
-						${task.description ? `<p style="color: #666;">${task.description}</p>` : ''}
-						<p><strong>Priority:</strong> ${task.priority || 'Medium'}</p>
-						<p><strong>Status:</strong> ${task.status || 'Todo'}</p>
-						<p><strong>Due Date:</strong> <span style="color: ${isOverdue ? '#dc2626' : '#333'};">${formatDateRo(dueDate)}</span></p>
-					</div>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${taskUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Task</a>
-					</div>
-				</div>
-			</body>
-			</html>
-		`,
+					? `Task restant: ${task.title}`
+					: `Reminder task: ${task.title} — ${daysUntilDue === 0 ? 'astăzi' : `în ${daysUntilDue} ${daysUntilDue === 1 ? 'zi' : 'zile'}`}`,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: brand.headerLogoHtml,
+					title: isOverdue ? 'Task restant' : 'Reminder task',
+					bodyHtml,
+					previewTitle: `Reminder: ${task.title}`,
+					footerHtml: `Trimis automat de ${escapeHtml(tenantName)}.`
+				}),
 				text: trimPlainText(`
-			${isOverdue ? 'Overdue Task Reminder' : 'Task Reminder'}
+			${isOverdue ? 'Task restant' : 'Reminder task'}
 
-			Hello ${assigneeName || 'there'},
+			Buna ziua${assigneeName ? ` ${assigneeName}` : ''},
 
-			${isOverdue ? 'This task is overdue!' : `This task is due ${daysUntilDue === 0 ? 'today' : `in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}.`}
+			${isOverdue ? 'Acest task este restant!' : `Acest task are termen ${daysUntilDue === 0 ? 'astazi' : `in ${daysUntilDue} zile`}.`}
 
 			${task.title}
 			${task.description ? `\n${task.description}\n` : ''}
-			Priority: ${task.priority || 'Medium'}
-			Status: ${task.status || 'Todo'}
-			Due Date: ${formatDateRo(dueDate)}
+			Prioritate: ${task.priority || 'medium'}
+			Status: ${task.status || 'todo'}
+			Termen: ${formatDateRo(dueDate)}
 
-			View task: ${taskUrl}
+			Vezi task: ${taskUrl}
 		`)
 			};
 		}
@@ -2262,20 +2317,17 @@ export async function sendDailyWorkReminderEmail(
 
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
+			const brand = await fetchTenantBrand(tenantId);
 			const myPlansUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/my-plans`;
 
 			const getPriorityColor = (priority: string | null) => {
 				switch (priority) {
-					case 'urgent':
-						return '#dc2626';
-					case 'high':
-						return '#f59e0b';
-					case 'medium':
-						return '#2563eb';
-					case 'low':
-						return '#10b981';
-					default:
-						return '#6b7280';
+					case 'urgent': return '#dc2626';
+					case 'high':   return '#f59e0b';
+					case 'medium': return themeColor;
+					case 'low':    return '#10b981';
+					default:       return '#6b7280';
 				}
 			};
 
@@ -2283,17 +2335,17 @@ export async function sendDailyWorkReminderEmail(
 				.map((task) => {
 					const priorityColor = getPriorityColor(task.priority);
 					const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${task.id}`;
-					const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'No due date';
+					const dueDate = task.dueDate ? formatDateRo(task.dueDate) : 'Fără termen';
+					const safeTitle = escapeHtml(task.title);
+					const safeDesc = task.description ? escapeHtml(task.description) : '';
 					return `
-				<div style="background-color: white; padding: 16px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid ${priorityColor};">
-					<h3 style="margin: 0 0 8px 0; color: #2563eb;">
-						<a href="${taskUrl}" style="color: #2563eb; text-decoration: none;">${task.title}</a>
-					</h3>
-					${task.description ? `<p style="color: #666; margin: 8px 0; font-size: 14px;">${task.description}</p>` : ''}
-					<div style="display: flex; gap: 16px; margin-top: 12px; font-size: 14px;">
-						<span><strong>Priority:</strong> <span style="color: ${priorityColor};">${task.priority || 'Medium'}</span></span>
-						<span><strong>Status:</strong> ${task.status || 'Todo'}</span>
-						<span><strong>Due:</strong> ${dueDate}</span>
+				<div style="background-color: #f9fafb; padding: 14px 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${priorityColor};">
+					<div style="margin: 0 0 6px 0;"><a href="${taskUrl}" style="color: ${themeColor}; text-decoration: none; font-weight: 600; font-size: 15px;">${safeTitle}</a></div>
+					${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin: 0 0 8px 0;">${safeDesc}</div>` : ''}
+					<div style="color: #374151; font-size: 13px; line-height: 1.6;">
+						<span style="color: #6b7280;">Prioritate</span> · <strong style="color: ${priorityColor};">${task.priority || 'medium'}</strong>
+						&nbsp;&nbsp;<span style="color: #6b7280;">Status</span> · <strong>${task.status || 'todo'}</strong>
+						&nbsp;&nbsp;<span style="color: #6b7280;">Termen</span> · <strong>${dueDate}</strong>
 					</div>
 				</div>
 			`;
@@ -2321,46 +2373,39 @@ ${task.description ? `  ${task.description}\n` : ''}  Priority: ${task.priority 
 				day: 'numeric'
 			});
 
+			const taskCount = tasks.length;
+			const countLabel = `${taskCount} task${taskCount !== 1 ? '-uri' : ''}`;
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună dimineața, ${userName}!</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Planul tău pentru <strong>${today}</strong> — ai ${countLabel} programate astăzi:</p>
+				${tasksListHtml}
+				<div style="height: 4px;"></div>
+				${renderCtaButton(myPlansUrl, 'Vezi planurile mele', themeColor)}
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">Spor la treabă!</p>
+			`;
+
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: user.email!,
-				subject: `Your Daily Work Plan - ${tasks.length} task${tasks.length !== 1 ? 's' : ''} for today`,
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Daily Work Reminder</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					<h1 style="color: #2563eb; margin-top: 0;">Good Morning, ${userName}!</h1>
-					<p>Here's your work plan for <strong>${today}</strong>:</p>
-					<div style="background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0;">
-						<h2 style="margin-top: 0; color: #2563eb;">You have ${tasks.length} task${tasks.length !== 1 ? 's' : ''} scheduled for today</h2>
-						${tasksListHtml}
-					</div>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${myPlansUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View My Plans</a>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">Have a productive day!</p>
-				</div>
-			</body>
-			</html>
-		`,
+				subject: `Planul tău de astăzi — ${countLabel}`,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: brand.headerLogoHtml,
+					title: `Bună dimineața, ${userName}!`,
+					bodyHtml,
+					previewTitle: 'Planul zilei de lucru'
+				}),
 				text: trimPlainText(`
-			Good Morning, ${userName}!
+			Buna dimineata, ${userName}!
 
-			Here's your work plan for ${today}:
-
-			You have ${tasks.length} task${tasks.length !== 1 ? 's' : ''} scheduled for today:
+			Planul tau pentru ${today} — ${countLabel} programate astazi:
 
 			${tasksListText}
 
-			View My Plans: ${myPlansUrl}
+			Vezi planurile mele: ${myPlansUrl}
 
-			Have a productive day!
+			Spor la treaba!
 		`)
 			};
 		}
@@ -2408,57 +2453,39 @@ export async function sendContractSigningEmail(
 			}
 		},
 		async () => {
+			const brand = await fetchTenantBrand(tenant.id);
 			const [emailSettings] = await db
 				.select()
 				.from(table.emailSettings)
 				.where(eq(table.emailSettings.tenantId, tenant.id))
 				.limit(1);
-
 			const fromEmail = resolveFromEmail(emailSettings);
 
-			const [invoiceSettings] = await db
-				.select()
-				.from(table.invoiceSettings)
-				.where(eq(table.invoiceSettings.tenantId, tenant.id))
-				.limit(1);
-
-			const { logoAttachment, logoHtml } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${clientName},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Ați primit o invitație pentru a semna contractul <strong>${contractNumber}</strong> emis de <strong>${escapeHtml(tenantName)}</strong>.</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Apăsați butonul de mai jos pentru a vizualiza și semna contractul. Linkul este valabil 7 zile.</p>
+				${renderCtaButton(signingUrl, 'Vizualizează și semnează contractul', brand.themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0; word-break: break-all;">${signingUrl}</p>
+				<div style="background-color: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin: 0 0 20px 0;">
+					<p style="color: #92400e; font-size: 13px; line-height: 1.5; margin: 0;"><strong>Securitate</strong> · Linkul este valabil 7 zile și poate fi folosit o singură dată. Dacă nu ați solicitat semnarea, ignorați emailul.</p>
+				</div>
+			`;
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: email,
 				subject: `Semnare contract ${contractNumber} - ${tenantName}`,
-				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-				html: `
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Semnare contract ${contractNumber}</title>
-			</head>
-			<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-				<div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px;">
-					${logoHtml}
-					<h1 style="color: #1e293b; margin-top: 0;">${tenantName}</h1>
-					<p>Stimate/Stimată ${clientName},</p>
-					<p>Ați primit o invitație pentru a semna contractul <strong>${contractNumber}</strong> emis de <strong>${tenantName}</strong>.</p>
-					<p>Faceți clic pe butonul de mai jos pentru a vizualiza și semna contractul. Link-ul este valabil 7 zile.</p>
-					<div style="text-align: center; margin: 30px 0;">
-						<a href="${signingUrl}" style="background-color: #1e293b; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Vizualizează și Semnează Contractul</a>
-					</div>
-					<p style="font-size: 14px; color: #666;">Sau copiați și lipiți acest link în browser:</p>
-					<p style="font-size: 12px; color: #999; word-break: break-all;">${signingUrl}</p>
-					<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 20px 0; border-radius: 4px;">
-						<p style="margin: 0; font-size: 14px; color: #856404;">
-							<strong>Notă de securitate:</strong> Acest link este valabil 7 zile și poate fi folosit o singură dată. Dacă nu ați solicitat semnarea acestui contract, vă rugăm să ignorați acest email.
-						</p>
-					</div>
-					<p style="font-size: 12px; color: #999; margin-top: 30px;">Pentru orice întrebări, vă rugăm să contactați ${tenantName}.</p>
-				</div>
-			</body>
-			</html>
-		`,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor: brand.themeColor,
+					headerLogoHtml: brand.headerLogoHtml,
+					title: `Semnare contract ${contractNumber}`,
+					bodyHtml,
+					previewTitle: `Semnare contract ${contractNumber}`,
+					footerHtml: `Pentru orice întrebări, contactați ${escapeHtml(tenantName)}.`
+				}),
 				text: trimPlainText(`
 			${tenantName}
 
@@ -2506,27 +2533,7 @@ export async function sendReportEmail(
 			payload: null
 		},
 		async () => {
-			const [tenant] = await db
-				.select({ name: table.tenant.name })
-				.from(table.tenant)
-				.where(eq(table.tenant.id, tenantId))
-				.limit(1);
-			const tenantName = tenant?.name || 'CRM';
-
-			const safeClientName = escapeHtml(clientName);
-			const safePeriodLabel = escapeHtml(periodLabel);
-			const safeTenantName = escapeHtml(tenantName);
-			const html = `
-		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-			<h2 style="color: #1E293B;">Raport Marketing</h2>
-			<p>Bună ziua,</p>
-			<p>Atașat găsiți raportul de marketing pentru <strong>${safeClientName}</strong> aferent perioadei <strong>${safePeriodLabel}</strong>.</p>
-			<p>Raportul include un sumar al performanței campaniilor publicitare pe toate platformele active.</p>
-			<br>
-			<p style="color: #64748B; font-size: 12px;">Acest email a fost generat automat de ${safeTenantName}.</p>
-		</div>
-	`;
-
+			const brand = await fetchTenantBrand(tenantId);
 			const [emailSettings] = await db
 				.select()
 				.from(table.emailSettings)
@@ -2534,8 +2541,39 @@ export async function sendReportEmail(
 				.limit(1);
 			const fromEmail = resolveFromEmail(emailSettings);
 
+			const safeClientName = escapeHtml(clientName);
+			const safePeriodLabel = escapeHtml(periodLabel);
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
+							<div><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong></div>
+							<div><span style="color: #6b7280;">Perioadă</span> &nbsp;·&nbsp; <strong>${safePeriodLabel}</strong></div>
+						</td>
+					</tr>
+				</table>
+				<p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Raportul conține sumarul performanței campaniilor publicitare pe toate platformele active: cheltuieli, impresii, click-uri, CTR, CPC și rezultate per platformă.</p>
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0;">📎 Raportul este atașat în format PDF la acest email.</p>
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Raport Marketing',
+				bodyHtml,
+				previewTitle: `Raport Marketing — ${safeClientName}`
+			});
+
+			const attachments = [
+				{ filename, content: pdfBuffer, contentType: 'application/pdf' },
+				...(brand.logoAttachment ? [brand.logoAttachment] : [])
+			];
+
 			return {
-				from: `"${tenantName}" <${fromEmail}>`,
+				from: `"${brand.tenantName}" <${fromEmail}>`,
 				to: recipientEmail,
 				subject,
 				html,
@@ -2544,19 +2582,18 @@ export async function sendReportEmail(
 
 				Buna ziua,
 
-				Atasat gasiti raportul de marketing pentru ${clientName} aferent perioadei ${periodLabel}.
+				Va transmitem raportul de marketing pentru ${clientName}.
 
-				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active.
+				Client: ${clientName}
+				Perioada: ${periodLabel}
 
-				Acest email a fost generat automat de ${tenantName}.
+				Raportul include un sumar al performantei campaniilor publicitare pe toate platformele active (cheltuieli, impresii, click-uri, CTR, CPC si rezultate per platforma).
+
+				Raportul este atasat in format PDF la acest email.
+
+				Pentru intrebari sau clarificari, nu ezitati sa ne contactati.
 			`),
-				attachments: [
-					{
-						filename,
-						content: pdfBuffer,
-						contentType: 'application/pdf'
-					}
-				]
+				attachments
 			};
 		}
 	);
