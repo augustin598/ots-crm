@@ -13,7 +13,8 @@ import type {
 	ContractExpiredEvent,
 	SyncErrorEvent,
 	LeadsImportedEvent,
-	ClientCreatedEvent
+	ClientCreatedEvent,
+	ApprovalRequestedEvent
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
 
@@ -355,6 +356,31 @@ export function registerNotificationHooks(): void {
 		} catch (error) {
 			logError('server', 'notification-hooks: failed to create client.created notification', {
 				tenantId: event.tenantId
+			});
+		}
+	});
+
+	// ---- Task Approval Requested ----
+	hooks.on('approval.requested', async (event: ApprovalRequestedEvent) => {
+		try {
+			const adminUserIds = await getTenantAdminUserIds(event.tenantId);
+
+			await Promise.all(
+				adminUserIds.map((userId) =>
+					createNotification({
+						tenantId: event.tenantId,
+						userId,
+						type: 'approval.requested',
+						title: 'Task necesită aprobare',
+						message: `Task-ul "${event.taskTitle}" așteaptă aprobare`,
+						link: `/${event.tenantSlug}/tasks/${event.taskId}`,
+						priority: 'high',
+					})
+				)
+			);
+		} catch (error) {
+			logError('server', 'notification-hooks: failed to create approval.requested notification', {
+				metadata: { tenantId: event.tenantId, taskId: event.taskId }
 			});
 		}
 	});

@@ -120,6 +120,15 @@ export type ClientCreatedEvent = {
 	client: { id: string; name: string };
 };
 
+export type ApprovalRequestedEvent = {
+	type: 'approval.requested';
+	taskId: string;
+	taskTitle: string;
+	requestedByUserId: string;
+	tenantId: string;
+	tenantSlug: string;
+};
+
 export type HookEvent =
 	| InvoiceCreatedEvent
 	| InvoiceUpdatedEvent
@@ -133,7 +142,8 @@ export type HookEvent =
 	| ContractExpiredEvent
 	| SyncErrorEvent
 	| LeadsImportedEvent
-	| ClientCreatedEvent;
+	| ClientCreatedEvent
+	| ApprovalRequestedEvent;
 
 /**
  * Hook handler function type

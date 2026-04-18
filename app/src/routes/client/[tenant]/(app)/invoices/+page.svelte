@@ -186,30 +186,31 @@
 		</div>
 		{#if lastKeezSyncAt}
 			<div class="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-				<RefreshCwIcon class="h-3.5 w-3.5" />
+				<RefreshCwIcon class="h-3.5 w-3.5" aria-hidden="true" />
 				<span>Ultima sincronizare: <strong class="text-foreground">{new Date(lastKeezSyncAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong></span>
 			</div>
 		{/if}
 	</div>
 
 	{#if loading}
-		<p class="text-muted-foreground">Loading invoices...</p>
+		<p class="text-muted-foreground">Se încarcă facturile…</p>
 	{:else if invoices.length === 0}
 		<div class="rounded-md border p-8 text-center">
-			<p class="text-muted-foreground">No invoices yet.</p>
+			<p class="text-muted-foreground">Nicio factură încă.</p>
 		</div>
 	{:else}
 		<!-- Info bar with search and sort -->
 		<div class="flex flex-col gap-3 rounded-md bg-muted/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
 			<p class="text-sm text-muted-foreground whitespace-nowrap">
-				Showing {showingFrom} to {showingTo} of {totalEntries} entries
+				{showingFrom}–{showingTo} din {totalEntries} facturi
 			</p>
 			<div class="flex items-center gap-3">
 				<!-- Sort dropdown -->
 				<div class="flex items-center gap-2">
 					<span class="text-sm text-muted-foreground whitespace-nowrap">Sort by:</span>
 					<select
-						class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+						aria-label="Sortare facturi"
+						class="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
 						value={`${sortColumn}-${sortDirection}`}
 						onchange={(e) => {
 							const val = e.currentTarget.value;
@@ -233,10 +234,12 @@
 				<div class="relative w-64">
 					<Search
 						class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+						aria-hidden="true"
 					/>
 					<Input
 						type="text"
-						placeholder="Search..."
+						placeholder="Caută…"
+						aria-label="Caută facturi"
 						class="pl-9"
 						bind:value={searchQuery}
 						oninput={() => {
@@ -250,12 +253,12 @@
 		<!-- Invoice cards -->
 		{#if paginatedInvoices.length === 0}
 			<div class="rounded-md border p-8 text-center">
-				<p class="text-muted-foreground">No invoices match your search.</p>
+				<p class="text-muted-foreground">Nicio factură nu corespunde căutării.</p>
 			</div>
 		{:else}
 			<div class="space-y-4">
 				{#each paginatedInvoices as invoice (invoice.id)}
-					<Card class="group relative overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5">
+					<Card class="group relative overflow-hidden transition-[shadow,transform] duration-300 hover:shadow-lg hover:shadow-primary/5 motion-safe:hover:-translate-y-0.5">
 						<!-- Vertical accent bar on left, colored by status -->
 						<div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-lg {invoice.status === 'paid' ? 'bg-green-500' : invoice.status === 'partially_paid' ? 'bg-orange-500' : invoice.status === 'overdue' ? 'bg-red-500' : invoice.status === 'cancelled' ? 'bg-gray-400' : 'bg-blue-500'}"></div>
 
@@ -264,7 +267,7 @@
 							<div class="flex items-start justify-between gap-4">
 								<div class="flex items-center gap-2 flex-wrap flex-1 min-w-0">
 									<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
-										<FileTextIcon class="h-3.5 w-3.5 text-primary" />
+										<FileTextIcon class="h-3.5 w-3.5 text-primary" aria-hidden="true" />
 									</div>
 									<h3 class="text-lg font-bold tracking-tight text-foreground">
 										{invoice.invoiceNumber}
@@ -286,19 +289,19 @@
 									<Button
 										variant="outline"
 										size="sm"
-										class="hover:border-primary/50 hover:bg-primary/5 transition-all"
+										class="cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors"
 										onclick={() => handlePreviewPDF(invoice.id)}
 									>
-										<EyeIcon class="h-3.5 w-3.5 mr-1.5" />
+										<EyeIcon class="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
 										Vizualizare
 									</Button>
 									<Button
 										variant="outline"
 										size="sm"
-										class="hover:border-primary/50 hover:bg-primary/5 transition-all"
+										class="cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors"
 										onclick={() => handleDownloadPDF(invoice.id, invoice.invoiceNumber)}
 									>
-										<DownloadIcon class="h-3.5 w-3.5 mr-1.5" />
+										<DownloadIcon class="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
 										Descarcă PDF
 									</Button>
 								</div>
@@ -307,9 +310,9 @@
 							<!-- Info grid -->
 							<div class="mt-4 grid gap-3 {invoice.paidDate ? 'md:grid-cols-4' : 'md:grid-cols-3'}">
 								<!-- Amount -->
-								<div class="relative p-3 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/10 group-hover:border-primary/20 transition-all">
+								<div class="relative p-3 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/10 group-hover:border-primary/20 transition-colors">
 									<div class="flex items-center gap-1.5 mb-1.5">
-										<CoinsIcon class="h-3.5 w-3.5 text-primary/60" />
+										<CoinsIcon class="h-3.5 w-3.5 text-primary/60" aria-hidden="true" />
 										<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Suma</p>
 									</div>
 									<p class="text-2xl font-bold text-primary leading-tight">
@@ -318,9 +321,9 @@
 								</div>
 
 								<!-- Issue Date -->
-								<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-all">
+								<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-colors">
 									<div class="flex items-center gap-1.5 mb-1.5">
-										<CalendarIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+										<CalendarIcon class="h-3.5 w-3.5 text-muted-foreground/60" aria-hidden="true" />
 										<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Data emiterii</p>
 									</div>
 									<p class="text-sm font-semibold text-foreground">
@@ -329,9 +332,9 @@
 								</div>
 
 								<!-- Due Date -->
-								<div class="p-3 rounded-lg transition-all {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'bg-red-50 border-2 border-red-400 dark:bg-red-950/30 dark:border-red-700 due-blink ring-2 ring-red-300/50 dark:ring-red-700/50' : isInvoiceUnpaid(invoice.status) ? 'bg-orange-50 border border-orange-200 dark:bg-orange-950/20 dark:border-orange-800' : 'bg-muted/30 border border-border/50 group-hover:bg-muted/50'}">
+								<div class="p-3 rounded-lg transition-colors {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'bg-red-50 border-2 border-red-400 dark:bg-red-950/30 dark:border-red-700 due-blink ring-2 ring-red-300/50 dark:ring-red-700/50' : isInvoiceUnpaid(invoice.status) ? 'bg-orange-50 border border-orange-200 dark:bg-orange-950/20 dark:border-orange-800' : 'bg-muted/30 border border-border/50 group-hover:bg-muted/50'}">
 									<div class="flex items-center gap-1.5 mb-1.5">
-										<CalendarIcon class="h-3.5 w-3.5 {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'text-red-500 animate-pulse' : isInvoiceUnpaid(invoice.status) ? 'text-orange-500 animate-pulse' : 'text-muted-foreground/60'}" />
+										<CalendarIcon class="h-3.5 w-3.5 motion-safe:animate-pulse {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'text-red-500' : isInvoiceUnpaid(invoice.status) ? 'text-orange-500' : 'text-muted-foreground/60'}" aria-hidden="true" />
 										<p class="text-xs font-semibold uppercase tracking-wide {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'text-red-600 dark:text-red-400' : isInvoiceUnpaid(invoice.status) ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground'}">Scadenta</p>
 									</div>
 									<p class="text-sm font-semibold {isInvoiceOverdue(invoice.status, invoice.dueDate) ? 'text-red-700 dark:text-red-300' : isInvoiceUnpaid(invoice.status) ? 'text-orange-700 dark:text-orange-300' : 'text-foreground'}">
@@ -354,7 +357,7 @@
 								{#if invoice.paidDate}
 									<div class="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
 										<div class="flex items-center gap-1.5 mb-1.5">
-											<CalendarIcon class="h-3.5 w-3.5 text-green-600/60" />
+											<CalendarIcon class="h-3.5 w-3.5 text-green-600/60" aria-hidden="true" />
 											<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Data platii</p>
 										</div>
 										<p class="text-sm font-semibold text-green-600 dark:text-green-400">
@@ -373,9 +376,10 @@
 		{#if totalEntries > 0}
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2 text-sm">
-					<span class="text-muted-foreground">Show</span>
+					<span class="text-muted-foreground">Arată</span>
 					<select
-						class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm"
+						aria-label="Facturi pe pagină"
+						class="h-8 w-[70px] rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
 						value={pageSize.toString()}
 						onchange={(e) => {
 							pageSize = parseInt(e.currentTarget.value);
@@ -387,7 +391,7 @@
 						<option value="50">50</option>
 						<option value="100">100</option>
 					</select>
-					<span class="text-muted-foreground">entries</span>
+					<span class="text-muted-foreground">facturi</span>
 				</div>
 
 				<div class="flex items-center gap-1">
@@ -399,7 +403,7 @@
 							currentPage = safePage - 1;
 						}}
 					>
-						Previous
+						Anterior
 					</Button>
 					{#each pageNumbers as pn (pn)}
 						<Button
@@ -421,7 +425,7 @@
 							currentPage = safePage + 1;
 						}}
 					>
-						Next
+						Următor
 					</Button>
 				</div>
 			</div>
@@ -430,8 +434,10 @@
 </div>
 
 <style>
-	:global(.due-blink) {
-		animation: due-blink 1.5s ease-in-out infinite;
+	@media (prefers-reduced-motion: no-preference) {
+		:global(.due-blink) {
+			animation: due-blink 1.5s ease-in-out infinite;
+		}
 	}
 
 	@keyframes due-blink {

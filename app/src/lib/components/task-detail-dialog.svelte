@@ -128,16 +128,39 @@
 	const clientMap = $derived(new Map(clientsList.map((c: any) => [c.id, c.name])));
 
 
+	const fieldLabels: Record<string, string> = {
+		title: 'titlul',
+		description: 'descrierea',
+		status: 'statusul',
+		priority: 'prioritatea',
+		assignedToUserId: 'responsabilul',
+		dueDate: 'termenul limită',
+		clientId: 'clientul',
+		projectId: 'proiectul',
+		milestoneId: 'milestone-ul'
+	};
+
 	function getActivityVerb(activity: { action: string; field?: string | null }): string {
 		switch (activity.action) {
-			case 'created': return 'created this task';
-			case 'commented': return 'added a comment';
-			case 'approved': return 'approved the task';
-			case 'rejected': return 'rejected the task';
-			case 'status_changed': return 'changed status';
-			case 'assigned': return 'changed assignee';
-			case 'updated': return activity.field ? `updated ${activity.field}` : 'updated the task';
+			case 'created': return 'a creat acest task';
+			case 'commented': return 'a adăugat un comentariu';
+			case 'approved': return 'a aprobat task-ul';
+			case 'rejected': return 'a respins task-ul';
+			case 'status_changed': return 'a schimbat statusul';
+			case 'assigned': return 'a schimbat responsabilul';
+			case 'updated': return activity.field ? `a actualizat ${fieldLabels[activity.field] || activity.field}` : 'a actualizat task-ul';
 			default: return activity.action;
+		}
+	}
+
+	function resolveActivityValue(field: string | null | undefined, value: string | null | undefined): string {
+		if (!value) return '';
+		if (!field) return value;
+		switch (field) {
+			case 'clientId': return clientMap.get(value) || value;
+			case 'assignedToUserId': return userMap.get(value) || value;
+			case 'projectId': return projectMap.get(value) || value;
+			default: return value;
 		}
 	}
 
@@ -801,13 +824,13 @@
 											{#if activity.oldValue || activity.newValue}
 												<div class="flex items-center gap-1.5 mt-1 flex-wrap">
 													{#if activity.oldValue}
-														<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{activity.oldValue}</Badge>
+														<Badge variant="outline" class="text-xs font-normal {getActivityValueColor(activity.field, activity.oldValue)}">{resolveActivityValue(activity.field, activity.oldValue)}</Badge>
 													{/if}
 													{#if activity.oldValue && activity.newValue}
 														<ArrowRight class="h-3 w-3 text-muted-foreground shrink-0" />
 													{/if}
 													{#if activity.newValue}
-														<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{activity.newValue}</Badge>
+														<Badge variant="secondary" class="text-xs font-normal {getActivityValueColor(activity.field, activity.newValue)}">{resolveActivityValue(activity.field, activity.newValue)}</Badge>
 													{/if}
 												</div>
 											{/if}
