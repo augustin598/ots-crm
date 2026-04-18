@@ -31,6 +31,28 @@ function setCache(key: string, data: any): void {
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
+/**
+ * Verify the integration exists for this tenant AND is active before attempting auth.
+ * Returns 409 with an actionable message when disconnected — prevents the 500/401 leak
+ * that the UI currently renders as the generic "Eroare la încărcarea datelor".
+ */
+async function assertActiveIntegration(integrationId: string, tenantId: string): Promise<void> {
+	const [int] = await db
+		.select({ id: table.tiktokAdsIntegration.id, isActive: table.tiktokAdsIntegration.isActive })
+		.from(table.tiktokAdsIntegration)
+		.where(
+			and(
+				eq(table.tiktokAdsIntegration.id, integrationId),
+				eq(table.tiktokAdsIntegration.tenantId, tenantId)
+			)
+		)
+		.limit(1);
+	if (!int) throw error(404, 'Integrare TikTok Ads negăsită');
+	if (!int.isActive) {
+		throw error(409, 'Integrarea TikTok Ads este dezactivată. Reconectează din Settings → TikTok Ads.');
+	}
+}
+
 // ---- Queries ----
 
 /** Get all TikTok Ads accounts for the tenant (for the ad account filter dropdown) */
@@ -50,7 +72,8 @@ export const getTiktokReportAdAccounts = query(async () => {
 			clientId: table.tiktokAdsAccount.clientId,
 			clientName: table.client.name,
 			isActive: table.tiktokAdsAccount.isActive,
-			refreshTokenExpiresAt: table.tiktokAdsIntegration.refreshTokenExpiresAt
+			refreshTokenExpiresAt: table.tiktokAdsIntegration.refreshTokenExpiresAt,
+			integrationActive: table.tiktokAdsIntegration.isActive
 		})
 		.from(table.tiktokAdsAccount)
 		.leftJoin(table.client, eq(table.tiktokAdsAccount.clientId, table.client.id))
@@ -63,8 +86,26 @@ export const getTiktokReportAdAccounts = query(async () => {
 		)
 		.orderBy(table.tiktokAdsAccount.accountName);
 
+	// Dedup same advertiserId across multiple integrations (after reconnect / orgId change),
+	// preferring the one whose parent integration is still active. Mirrors the meta-ads fix
+	// in reports.remote.ts — without this, the dropdown lists dead accounts whose auth fails.
+	const deduped = new Map<string, (typeof accounts)[number]>();
+	for (const acc of accounts) {
+		const existing = deduped.get(acc.tiktokAdvertiserId);
+		if (!existing) {
+			deduped.set(acc.tiktokAdvertiserId, acc);
+			continue;
+		}
+		const existingActive = existing.integrationActive === true;
+		const candidateActive = acc.integrationActive === true;
+		if (!existingActive && candidateActive) {
+			deduped.set(acc.tiktokAdvertiserId, acc);
+		}
+	}
+	const uniqueAccounts = Array.from(deduped.values());
+
 	// Batch lookup currency per ad account from spending data
-	const accountIds = accounts.map(a => a.tiktokAdvertiserId);
+	const accountIds = uniqueAccounts.map(a => a.tiktokAdvertiserId);
 	const currencyMap = new Map<string, string>();
 
 	if (accountIds.length > 0) {
@@ -81,10 +122,11 @@ export const getTiktokReportAdAccounts = query(async () => {
 		}
 	}
 
-	return accounts.map(acc => ({
+	return uniqueAccounts.map(acc => ({
 		...acc,
 		currency: currencyMap.get(acc.tiktokAdvertiserId) || 'RON',
-		refreshTokenExpiresAt: acc.refreshTokenExpiresAt
+		refreshTokenExpiresAt: acc.refreshTokenExpiresAt,
+		integrationActive: acc.integrationActive ?? true
 	}));
 });
 
@@ -137,9 +179,11 @@ export const getMyTiktokAdAccounts = query(async () => {
 			tiktokAdvertiserId: table.tiktokAdsAccount.tiktokAdvertiserId,
 			accountName: table.tiktokAdsAccount.accountName,
 			integrationId: table.tiktokAdsAccount.integrationId,
-			clientId: table.tiktokAdsAccount.clientId
+			clientId: table.tiktokAdsAccount.clientId,
+			integrationActive: table.tiktokAdsIntegration.isActive
 		})
 		.from(table.tiktokAdsAccount)
+		.leftJoin(table.tiktokAdsIntegration, eq(table.tiktokAdsAccount.integrationId, table.tiktokAdsIntegration.id))
 		.where(
 			and(
 				eq(table.tiktokAdsAccount.tenantId, event.locals.tenant.id),
@@ -150,8 +194,22 @@ export const getMyTiktokAdAccounts = query(async () => {
 
 	if (accounts.length === 0) return [];
 
+	// Dedup same advertiserId across multiple integrations (active preferred).
+	const deduped = new Map<string, (typeof accounts)[number]>();
+	for (const acc of accounts) {
+		const existing = deduped.get(acc.tiktokAdvertiserId);
+		if (!existing) {
+			deduped.set(acc.tiktokAdvertiserId, acc);
+			continue;
+		}
+		if (!existing.integrationActive && acc.integrationActive) {
+			deduped.set(acc.tiktokAdvertiserId, acc);
+		}
+	}
+	const uniqueAccounts = Array.from(deduped.values());
+
 	// Batch lookup currency
-	const accountIds = accounts.map(a => a.tiktokAdvertiserId);
+	const accountIds = uniqueAccounts.map(a => a.tiktokAdvertiserId);
 	const currencyMap = new Map<string, string>();
 
 	if (accountIds.length > 0) {
@@ -168,9 +226,10 @@ export const getMyTiktokAdAccounts = query(async () => {
 		}
 	}
 
-	return accounts.map(acc => ({
+	return uniqueAccounts.map(acc => ({
 		...acc,
-		currency: currencyMap.get(acc.tiktokAdvertiserId) || 'RON'
+		currency: currencyMap.get(acc.tiktokAdvertiserId) || 'RON',
+		integrationActive: acc.integrationActive ?? true
 	}));
 });
 
@@ -226,6 +285,8 @@ export const getTiktokCampaignInsights = query(
 		if (!account) {
 			throw error(404, 'Cont TikTok Ads negăsit');
 		}
+
+		await assertActiveIntegration(params.integrationId, tenantId);
 
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) {
@@ -313,6 +374,8 @@ export const getTiktokActiveCampaigns = query(
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
 
+		await assertActiveIntegration(params.integrationId, tenantId);
+
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) {
 			throw error(500, 'Nu s-a putut obține token-ul TikTok Ads. Verifică conexiunea din Settings.');
@@ -370,6 +433,8 @@ export const getTiktokDemographicInsights = query(
 		const cacheKey = `tt-demographics:${tenantId}:${params.advertiserId}:${params.since}:${params.until}:${campaignKey}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
+
+		await assertActiveIntegration(params.integrationId, tenantId);
 
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) {
@@ -429,6 +494,8 @@ export const getTiktokAdGroupInsights = query(
 		const cacheKey = `tt-adgroups:${tenantId}:${params.advertiserId}:${params.campaignId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
 		if (cached) return cached;
+
+		await assertActiveIntegration(params.integrationId, tenantId);
 
 		const authResult = await getAuthenticatedToken(params.integrationId);
 		if (!authResult) {
