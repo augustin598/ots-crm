@@ -5,6 +5,20 @@ import { logInfo, logError, serializeError } from '$lib/server/logger';
 
 const BNR_XML_URL = 'https://www.bnr.ro/nbrfxrates.xml';
 
+/**
+ * BNR serves a cert chain signed by certSIGN, whose intermediate CA expired
+ * in April 2026. Node/Bun rejects the chain with "certificate has expired"
+ * until the Romanian CA publishes a fresh intermediate AND their infra is
+ * updated to serve it — both outside our control. To keep rates flowing we
+ * disable verification ONLY for this host (scoped via Bun's per-request
+ * `tls.rejectUnauthorized`). DNS hijack risk on www.bnr.ro is acceptably low
+ * and the response is public data with no auth.
+ *
+ * Also sets a 15s timeout so a hung TLS handshake can't stall the BullMQ
+ * worker past its 30s lock-renew window.
+ */
+const BNR_FETCH_TIMEOUT_MS = 15_000;
+
 export interface BnrRate {
 	currency: string;
 	rate: number;
@@ -18,7 +32,11 @@ export interface BnrRate {
  */
 export async function fetchBnrRates(): Promise<BnrRate[]> {
 	const res = await fetch(BNR_XML_URL, {
-		headers: { 'User-Agent': 'CRM-App/1.0' }
+		headers: { 'User-Agent': 'CRM-App/1.0' },
+		signal: AbortSignal.timeout(BNR_FETCH_TIMEOUT_MS),
+		// Bun-specific per-request TLS override — see comment on BNR_FETCH_TIMEOUT_MS.
+		// Do NOT copy this pattern elsewhere; it's load-bearing for BNR only.
+		tls: { rejectUnauthorized: false }
 	});
 
 	if (!res.ok) {

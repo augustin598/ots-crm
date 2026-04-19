@@ -49,6 +49,14 @@ export interface ReportPlatformData {
 	conversions: number;
 	currency: string;
 	accounts?: ReportAccountData[];
+	/**
+	 * Status of the live API fetch for this platform. Used by the PDF renderer
+	 * to decide whether to show a "live data unavailable" warning on the row.
+	 * Optional for backward compatibility — legacy callers that don't set it
+	 * render as normal "ok" rows.
+	 */
+	fetchStatus?: 'ok' | 'api-error' | 'no-integration';
+	errorMessage?: string;
 }
 
 export interface ReportPdfData {
@@ -339,16 +347,17 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				.text('Detalii per Platformă', ML, y);
 			y += 22;
 
-			// Table columns
+			// Table columns. The 74pt freed by dropping the old "Cost/rez." column
+			// goes back to "Platformă" so long account names (e.g. full URLs) no
+			// longer need the truncation ellipsis.
 			const cols = [
-				{ label: 'Platformă', w: 100, align: 'left' as const },
+				{ label: 'Platformă', w: 174, align: 'left' as const },
 				{ label: 'Buget reclame', w: 82, align: 'right' as const },
 				{ label: 'Impresii', w: 62, align: 'right' as const },
 				{ label: 'Click-uri', w: 52, align: 'right' as const },
 				{ label: 'CPC', w: 62, align: 'right' as const },
 				{ label: 'CTR', w: 48, align: 'right' as const },
-				{ label: 'Rezultate', w: 55, align: 'right' as const },
-				{ label: 'Cost/rez.', w: 74, align: 'right' as const }
+				{ label: 'Rezultate', w: 55, align: 'right' as const }
 			];
 
 			const rowH = 24;
@@ -370,7 +379,6 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				const platform = data.platforms[i];
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
-				const pCostPerResult = platform.conversions > 0 ? platform.spend / platform.conversions : 0;
 				const subRows = platform.accounts && platform.accounts.length > 0 ? platform.accounts : [];
 
 				// Zebra for the platform row
@@ -393,8 +401,7 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 					fmtNum(platform.clicks),
 					pCpc > 0 ? fmtAmount(pCpc, platform.currency) : '—',
 					pCtr > 0 ? fmtPct(pCtr) : '—',
-					platform.conversions > 0 ? fmtNum(platform.conversions) : '—',
-					pCostPerResult > 0 ? fmtAmount(pCostPerResult, platform.currency) : '—'
+					platform.conversions > 0 ? fmtNum(platform.conversions) : '—'
 				];
 
 				for (let j = 0; j < rowData.length; j++) {
@@ -404,6 +411,25 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				}
 
 				y += rowH;
+
+				// Live-fetch warning banner — shown directly under the platform
+				// row when the API call failed for every account on this platform.
+				// The numbers above are all zero in that case, so without this
+				// banner the reader would think the client simply had no activity.
+				if (platform.fetchStatus === 'api-error') {
+					const warnH = 16;
+					const warnBg = '#FEF3C7'; // amber-100
+					const warnText = '#92400E'; // amber-900
+					roundedRect(doc, ML, y, CW, warnH, 0, warnBg);
+					doc.save();
+					doc.rect(ML, y, 3, warnH).fill('#F59E0B'); // amber-500 left stripe
+					doc.restore();
+					doc.font('Regular').fontSize(7.5).fillColor(warnText)
+						.text('⚠ Datele live nu au putut fi preluate pentru această platformă. Cifrele de mai sus sunt indicative.',
+							ML + 10, y + 4, { width: CW - 20, lineBreak: false });
+					y += warnH;
+					zebraIdx++;
+				}
 
 				// Per-account sub-rows — each site gets its own normal row,
 				// with a left indent + colored stripe to signal "part of the
@@ -423,7 +449,6 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 
 					const aCpc = acc.clicks > 0 ? acc.spend / acc.clicks : 0;
 					const aCtr = acc.impressions > 0 ? (acc.clicks / acc.impressions) * 100 : 0;
-					const aCostPerResult = acc.conversions > 0 ? acc.spend / acc.conversions : 0;
 
 					cx = ML + 8;
 					doc.font('Regular').fontSize(8).fillColor(TEXT);
@@ -444,8 +469,7 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 						fmtNum(acc.clicks),
 						aCpc > 0 ? fmtAmount(aCpc, acc.currency) : '—',
 						aCtr > 0 ? fmtPct(aCtr) : '—',
-						acc.conversions > 0 ? fmtNum(acc.conversions) : '—',
-						aCostPerResult > 0 ? fmtAmount(aCostPerResult, acc.currency) : '—'
+						acc.conversions > 0 ? fmtNum(acc.conversions) : '—'
 					];
 
 					for (let j = 0; j < accRowData.length; j++) {
@@ -467,15 +491,13 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				.text('TOTAL', cx, y + 9, { width: cols[0].w - 12, align: 'left' });
 			cx += cols[0].w;
 
-			const totalCostPerResult = totalConversions > 0 ? totalSpend / totalConversions : 0;
 			const totalRow = [
 				fmtAmount(totalSpend, mainCurrency),
 				fmtNum(totalImpressions),
 				fmtNum(totalClicks),
 				totalClicks > 0 ? fmtAmount(totalSpend / totalClicks, mainCurrency) : '—',
 				totalImpressions > 0 ? fmtPct((totalClicks / totalImpressions) * 100) : '—',
-				totalConversions > 0 ? fmtNum(totalConversions) : '—',
-				totalCostPerResult > 0 ? fmtAmount(totalCostPerResult, mainCurrency) : '—'
+				totalConversions > 0 ? fmtNum(totalConversions) : '—'
 			];
 
 			for (let j = 0; j < totalRow.length; j++) {

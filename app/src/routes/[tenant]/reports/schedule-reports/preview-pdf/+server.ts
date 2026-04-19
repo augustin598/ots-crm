@@ -4,7 +4,8 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { generateReportPdfStream } from '$lib/server/report-pdf-generator';
-import { getDateRange, getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
+import { getDateRange } from '$lib/server/scheduler/tasks/pdf-report-send';
+import { fetchLivePlatformSpend } from '$lib/server/reports/live-spend';
 import { logWarning } from '$lib/server/logger';
 
 /** Get account names for a client on a platform (from account tables, not spending) */
@@ -109,34 +110,20 @@ export const GET: RequestHandler = async (event) => {
 		label = range.label;
 	}
 
-	// Get platform data — for preview, include platforms with zero data too
-	const platformDisplayNames: Record<string, string> = {
-		meta: 'Meta Ads',
-		google: 'Google Ads',
-		tiktok: 'TikTok Ads'
-	};
+	// Get platform data — for preview, ALWAYS include every selected platform
+	// so the user can see the full layout. `fetchLivePlatformSpend` returns a
+	// populated result for every status (ok / api-error / no-integration),
+	// with `fetchStatus` so the PDF renderer knows whether to show the "live
+	// data unavailable" banner. We still fall back to the account-name list
+	// when the live fetch returns no account rows, so an unconfigured or
+	// empty-period platform still shows the site names the client expects.
 	const platforms = [];
 	for (const platformName of platformNames) {
-		const data = await getPlatformSpendData(tenantId, clientId, platformName, since, until);
-		if (data) {
-			// If no accounts from spending, try to get from account tables
-			if (!data.accounts || data.accounts.length === 0) {
-				data.accounts = await getClientAccounts(tenantId, clientId, platformName);
-			}
-			platforms.push(data);
-		} else {
-			// Include with zero values so it appears in the PDF
-			const accounts = await getClientAccounts(tenantId, clientId, platformName);
-			platforms.push({
-				name: platformDisplayNames[platformName] || platformName,
-				spend: 0,
-				impressions: 0,
-				clicks: 0,
-				conversions: 0,
-				currency: 'RON',
-				accounts
-			});
+		const data = await fetchLivePlatformSpend(tenantId, clientId, platformName, since, until);
+		if (!data.accounts || data.accounts.length === 0) {
+			data.accounts = await getClientAccounts(tenantId, clientId, platformName);
 		}
+		platforms.push(data);
 	}
 
 	// Get tenant logo

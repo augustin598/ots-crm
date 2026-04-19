@@ -4,6 +4,19 @@ import { logInfo, logWarning, logError, serializeError } from '$lib/server/logge
 const DEFAULT_BASE_URL = 'https://app.keez.ro/api/v1.0/public-api';
 const DEFAULT_TOKEN_URL = 'https://app.keez.ro/idp/connect/token';
 
+/**
+ * 4xx (except 401) from Keez — never retried. Carries the status code so
+ * callers can decide between "log and skip" (404/409) vs "show to user" (403).
+ */
+export class KeezClientError extends Error {
+	readonly status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = 'KeezClientError';
+		this.status = status;
+	}
+}
+
 export interface KeezClientConfig {
 	clientEid: string;
 	applicationId: string;
@@ -262,7 +275,16 @@ export class KeezClient {
 	}
 
 	/**
-	 * Make authenticated API request with retry logic
+	 * Make authenticated API request with retry logic.
+	 *
+	 * Retry policy:
+	 * - 5xx / network / timeout → retry with exponential backoff + jitter.
+	 *   Jitter prevents two concurrent syncs from hammering Keez in lockstep.
+	 * - 401 → clear cached token and retry once (token refresh path).
+	 * - 4xx (except 401) → do NOT retry. Client errors don't self-heal and
+	 *   burning retries on them just delays the real error up the stack.
+	 * - Per-attempt 30s AbortSignal timeout so a hung Keez nginx can't stall
+	 *   the BullMQ worker past its lock-renew window.
 	 */
 	private async request<T>(endpoint: string, options: RequestInit = {}, retries = 3): Promise<T> {
 		const url = `${this.baseUrl}${endpoint}`;
@@ -279,7 +301,8 @@ export class KeezClient {
 
 				const response = await fetch(url, {
 					...options,
-					headers
+					headers,
+					signal: AbortSignal.timeout(30_000)
 				});
 
 				if (response.status === 401) {
@@ -295,6 +318,18 @@ export class KeezClient {
 					throw new Error('Not found');
 				}
 
+				// 4xx (except 401 handled above): client error, no retry.
+				// Tag as non-retryable via `KeezClientError` so the catch block
+				// throws immediately instead of backing off and retrying.
+				if (response.status >= 400 && response.status < 500) {
+					const errorText = await response.text();
+					throw new KeezClientError(
+						`Keez API client error ${response.status}: ${errorText}`,
+						response.status
+					);
+				}
+
+				// 5xx: server error, retryable.
 				if (!response.ok) {
 					const errorText = await response.text();
 					throw new Error(`Keez API error: ${response.status} ${errorText}`);
@@ -317,11 +352,18 @@ export class KeezClient {
 
 				return response.text() as unknown as T;
 			} catch (error) {
+				// Non-retryable → throw immediately regardless of attempt count.
+				if (error instanceof KeezClientError) {
+					throw error;
+				}
 				if (attempt === retries - 1) {
 					throw error;
 				}
-				// Exponential backoff
-				const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+				// Exponential backoff + jitter (up to ±25%) to de-sync
+				// concurrent callers retrying the same upstream outage.
+				const base = Math.min(1000 * Math.pow(2, attempt), 5000);
+				const jitter = base * (Math.random() * 0.5 - 0.25);
+				const delay = Math.round(base + jitter);
 				await new Promise((resolve) => setTimeout(resolve, delay));
 			}
 		}

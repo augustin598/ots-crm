@@ -7,9 +7,19 @@ import type { InvoicePaidEvent } from '../plugins/types';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
- * Register email notification hooks
+ * Register email notification hooks.
+ *
+ * Idempotent: a globalThis symbol prevents double-registration across HMR or
+ * accidental double-calls. Handlers are inline arrow functions (new reference
+ * each call), so the hooks manager's Set can't dedupe them — this guard does.
  */
+const EMAIL_HOOKS_REGISTERED = Symbol.for('ots_crm_email_notification_hooks_registered');
+const gt = globalThis as unknown as Record<symbol, boolean>;
+
 export function registerEmailNotificationHooks(): void {
+	if (gt[EMAIL_HOOKS_REGISTERED]) return;
+	gt[EMAIL_HOOKS_REGISTERED] = true;
+
 	const hooks = getHooksManager();
 
 	// Listen for invoice.paid events
