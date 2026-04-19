@@ -346,7 +346,10 @@ export const deleteSchedulerLogsByLevel = command(
 				and(
 					eq(table.debugLog.source, 'scheduler'),
 					eq(table.debugLog.level, level),
-					eq(table.debugLog.tenantId, tenantId)
+					or(
+						eq(table.debugLog.tenantId, tenantId),
+						isNull(table.debugLog.tenantId)
+					)
 				)
 			);
 

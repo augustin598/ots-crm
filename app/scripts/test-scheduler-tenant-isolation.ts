@@ -49,8 +49,8 @@ function testAccessControl() {
 function testTenantFilterLogic() {
 	console.log('\n🔒 Test: Tenant isolation query patterns');
 
-	// Simulate log entries from different tenants
-	type Log = { id: string; tenantId: string; source: string; level: string; message: string };
+	// Simulate log entries from different tenants + system-level (null tenantId)
+	type Log = { id: string; tenantId: string | null; source: string; level: string; message: string };
 
 	const allLogs: Log[] = [
 		{ id: '1', tenantId: 'tenant-a', source: 'scheduler', level: 'info', message: 'Job completed: recurring_invoices' },
@@ -58,40 +58,45 @@ function testTenantFilterLogic() {
 		{ id: '3', tenantId: 'tenant-b', source: 'scheduler', level: 'info', message: 'Job completed: keez_invoice_sync' },
 		{ id: '4', tenantId: 'tenant-b', source: 'scheduler', level: 'error', message: 'Job failed: token_refresh - Auth expired' },
 		{ id: '5', tenantId: 'tenant-a', source: 'email', level: 'info', message: 'Email sent' }, // different source
+		{ id: '6', tenantId: null, source: 'scheduler', level: 'error', message: 'Job failed: bnr_rate_sync - cert expired' }, // system worker
 	];
 
-	// getSchedulerHistory pattern: WHERE source='scheduler' AND tenantId=?
-	const tenantALogs = allLogs.filter(l => l.source === 'scheduler' && l.tenantId === 'tenant-a');
-	const tenantBLogs = allLogs.filter(l => l.source === 'scheduler' && l.tenantId === 'tenant-b');
+	// getSchedulerHistory pattern: WHERE source='scheduler' AND (tenantId=? OR tenantId IS NULL)
+	const tenantALogs = allLogs.filter(l => l.source === 'scheduler' && (l.tenantId === 'tenant-a' || l.tenantId === null));
+	const tenantBLogs = allLogs.filter(l => l.source === 'scheduler' && (l.tenantId === 'tenant-b' || l.tenantId === null));
 
-	assert('Tenant A sees 2 scheduler logs', tenantALogs.length === 2);
-	assert('Tenant B sees 2 scheduler logs', tenantBLogs.length === 2);
+	assert('Tenant A sees 3 scheduler logs (2 own + 1 system)', tenantALogs.length === 3);
+	assert('Tenant B sees 3 scheduler logs (2 own + 1 system)', tenantBLogs.length === 3);
 	assert('Tenant A does NOT see Tenant B logs', !tenantALogs.some(l => l.tenantId === 'tenant-b'));
 	assert('Tenant B does NOT see Tenant A logs', !tenantBLogs.some(l => l.tenantId === 'tenant-a'));
+	assert('Both tenants see system-level log', tenantALogs.some(l => l.id === '6') && tenantBLogs.some(l => l.id === '6'));
 	assert('Non-scheduler logs excluded', !tenantALogs.some(l => l.source !== 'scheduler'));
 }
 
 function testDeleteIsolation() {
-	console.log('\n🗑️ Test: Delete only own tenant logs');
+	console.log('\n🗑️ Test: Delete own tenant logs + shared system logs');
 
-	type Log = { id: string; tenantId: string; level: string };
+	type Log = { id: string; tenantId: string | null; level: string };
 
 	let logs: Log[] = [
 		{ id: '1', tenantId: 'tenant-a', level: 'info' },
 		{ id: '2', tenantId: 'tenant-a', level: 'error' },
 		{ id: '3', tenantId: 'tenant-b', level: 'info' },
 		{ id: '4', tenantId: 'tenant-b', level: 'error' },
+		{ id: '5', tenantId: null, level: 'error' }, // system-level log (worker)
+		{ id: '6', tenantId: null, level: 'info' },  // system-level log
 	];
 
-	// deleteSchedulerLogsByLevel pattern: WHERE source='scheduler' AND level=? AND tenantId=?
-	// Tenant A deletes info logs
-	logs = logs.filter(l => !(l.tenantId === 'tenant-a' && l.level === 'info'));
+	// deleteSchedulerLogsByLevel pattern: WHERE source='scheduler' AND level=? AND (tenantId=? OR tenantId IS NULL)
+	// Tenant A deletes error logs — removes own errors + system errors (matches what the count shows)
+	logs = logs.filter(l => !((l.tenantId === 'tenant-a' || l.tenantId === null) && l.level === 'error'));
 
-	assert('Tenant A info log deleted', !logs.some(l => l.id === '1'));
-	assert('Tenant A error log preserved', logs.some(l => l.id === '2'));
-	assert('Tenant B info log preserved', logs.some(l => l.id === '3'));
-	assert('Tenant B error log preserved', logs.some(l => l.id === '4'));
-	assert('3 logs remain', logs.length === 3);
+	assert('Tenant A error log deleted', !logs.some(l => l.id === '2'));
+	assert('System-level error log deleted (matches stats)', !logs.some(l => l.id === '5'));
+	assert('Tenant A info log preserved', logs.some(l => l.id === '1'));
+	assert('Tenant B error log preserved (other tenant)', logs.some(l => l.id === '4'));
+	assert('System info log preserved (different level)', logs.some(l => l.id === '6'));
+	assert('4 logs remain', logs.length === 4);
 }
 
 function testAuditTrailStructure() {
