@@ -40,8 +40,18 @@ async function getTenantAdminUserIds(tenantId: string): Promise<string[]> {
  * IMPORTANT: All handlers MUST catch their own errors and NOT re-throw.
  * The hooks.emit() uses Promise.all() — a re-thrown error here would
  * cancel other hooks (e.g., email hooks) from running.
+ *
+ * Idempotent: a globalThis symbol prevents double-registration across HMR or
+ * accidental double-calls. Handlers are inline arrow functions (new reference
+ * each call), so the hooks manager's Set can't dedupe them — this guard does.
  */
+const NOTIFICATION_HOOKS_REGISTERED = Symbol.for('ots_crm_notification_hooks_registered');
+const gt = globalThis as unknown as Record<symbol, boolean>;
+
 export function registerNotificationHooks(): void {
+	if (gt[NOTIFICATION_HOOKS_REGISTERED]) return;
+	gt[NOTIFICATION_HOOKS_REGISTERED] = true;
+
 	const hooks = getHooksManager();
 
 	// ---- Invoice Paid ----

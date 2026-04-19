@@ -14,26 +14,40 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-// Initialize plugins once
-let pluginsInitialized = false;
+// Initialize plugins once — flag stored on globalThis so HMR in dev mode
+// doesn't reset it (module reload wipes module-level `let`, but not globalThis).
+// Without this guard, every code change re-runs `init()` and re-registers
+// plugins/hooks, which in turn duplicates hook listeners (Set keyed by
+// reference; inline arrow handlers always produce new refs).
+const PLUGINS_INIT_SYMBOL = Symbol.for('ots_crm_plugins_initialized');
+const SCHEDULER_INIT_SYMBOL = Symbol.for('ots_crm_scheduler_initialized');
+const HOOKS_INIT_SYMBOL = Symbol.for('ots_crm_app_hooks_registered');
+const gt = globalThis as unknown as Record<symbol, boolean>;
+
 async function ensurePluginsInitialized() {
-	if (!pluginsInitialized) {
+	if (!gt[PLUGINS_INIT_SYMBOL]) {
 		await initializePlugins();
-		pluginsInitialized = true;
+		gt[PLUGINS_INIT_SYMBOL] = true;
 	}
 }
 
-// Initialize scheduler once
-let schedulerInitialized = false;
 async function ensureSchedulerInitialized() {
-	if (!schedulerInitialized) {
-		schedulerInitialized = true;
+	if (!gt[SCHEDULER_INIT_SYMBOL]) {
+		gt[SCHEDULER_INIT_SYMBOL] = true;
 		try {
 			await startScheduler();
 		} catch (e) {
-			schedulerInitialized = false;
+			gt[SCHEDULER_INIT_SYMBOL] = false;
 			console.error('[scheduler] Failed to initialize:', e);
 		}
+	}
+}
+
+function ensureAppHooksRegistered() {
+	if (!gt[HOOKS_INIT_SYMBOL]) {
+		registerEmailNotificationHooks();
+		registerNotificationHooks();
+		gt[HOOKS_INIT_SYMBOL] = true;
 	}
 }
 
@@ -143,8 +157,7 @@ export const init = async () => {
 		console.error('[INIT] Migrations failed, continuing startup:', e instanceof Error ? e.message : e);
 	}
 	await ensurePluginsInitialized();
-	registerEmailNotificationHooks();
-	registerNotificationHooks();
+	ensureAppHooksRegistered();
 	await ensureSchedulerInitialized();
 	// Sync BNR rates if not already synced today (works even without Redis scheduler)
 	await ensureBnrRatesSynced();
