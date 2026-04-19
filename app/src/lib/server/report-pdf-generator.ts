@@ -347,16 +347,17 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				.text('Detalii per Platformă', ML, y);
 			y += 22;
 
-			// Table columns
+			// Table columns. The 74pt freed by dropping the old "Cost/rez." column
+			// goes back to "Platformă" so long account names (e.g. full URLs) no
+			// longer need the truncation ellipsis.
 			const cols = [
-				{ label: 'Platformă', w: 100, align: 'left' as const },
+				{ label: 'Platformă', w: 174, align: 'left' as const },
 				{ label: 'Buget reclame', w: 82, align: 'right' as const },
 				{ label: 'Impresii', w: 62, align: 'right' as const },
 				{ label: 'Click-uri', w: 52, align: 'right' as const },
 				{ label: 'CPC', w: 62, align: 'right' as const },
 				{ label: 'CTR', w: 48, align: 'right' as const },
-				{ label: 'Rezultate', w: 55, align: 'right' as const },
-				{ label: 'Cost/rez.', w: 74, align: 'right' as const }
+				{ label: 'Rezultate', w: 55, align: 'right' as const }
 			];
 
 			const rowH = 24;
@@ -378,7 +379,6 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				const platform = data.platforms[i];
 				const pCpc = platform.clicks > 0 ? platform.spend / platform.clicks : 0;
 				const pCtr = platform.impressions > 0 ? (platform.clicks / platform.impressions) * 100 : 0;
-				const pCostPerResult = platform.conversions > 0 ? platform.spend / platform.conversions : 0;
 				const subRows = platform.accounts && platform.accounts.length > 0 ? platform.accounts : [];
 
 				// Zebra for the platform row
@@ -401,8 +401,7 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 					fmtNum(platform.clicks),
 					pCpc > 0 ? fmtAmount(pCpc, platform.currency) : '—',
 					pCtr > 0 ? fmtPct(pCtr) : '—',
-					platform.conversions > 0 ? fmtNum(platform.conversions) : '—',
-					pCostPerResult > 0 ? fmtAmount(pCostPerResult, platform.currency) : '—'
+					platform.conversions > 0 ? fmtNum(platform.conversions) : '—'
 				];
 
 				for (let j = 0; j < rowData.length; j++) {
@@ -450,7 +449,6 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 
 					const aCpc = acc.clicks > 0 ? acc.spend / acc.clicks : 0;
 					const aCtr = acc.impressions > 0 ? (acc.clicks / acc.impressions) * 100 : 0;
-					const aCostPerResult = acc.conversions > 0 ? acc.spend / acc.conversions : 0;
 
 					cx = ML + 8;
 					doc.font('Regular').fontSize(8).fillColor(TEXT);
@@ -471,8 +469,7 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 						fmtNum(acc.clicks),
 						aCpc > 0 ? fmtAmount(aCpc, acc.currency) : '—',
 						aCtr > 0 ? fmtPct(aCtr) : '—',
-						acc.conversions > 0 ? fmtNum(acc.conversions) : '—',
-						aCostPerResult > 0 ? fmtAmount(aCostPerResult, acc.currency) : '—'
+						acc.conversions > 0 ? fmtNum(acc.conversions) : '—'
 					];
 
 					for (let j = 0; j < accRowData.length; j++) {
@@ -494,15 +491,13 @@ function populateReportPdf(doc: PDFKit.PDFDocument, data: ReportPdfData): void {
 				.text('TOTAL', cx, y + 9, { width: cols[0].w - 12, align: 'left' });
 			cx += cols[0].w;
 
-			const totalCostPerResult = totalConversions > 0 ? totalSpend / totalConversions : 0;
 			const totalRow = [
 				fmtAmount(totalSpend, mainCurrency),
 				fmtNum(totalImpressions),
 				fmtNum(totalClicks),
 				totalClicks > 0 ? fmtAmount(totalSpend / totalClicks, mainCurrency) : '—',
 				totalImpressions > 0 ? fmtPct((totalClicks / totalImpressions) * 100) : '—',
-				totalConversions > 0 ? fmtNum(totalConversions) : '—',
-				totalCostPerResult > 0 ? fmtAmount(totalCostPerResult, mainCurrency) : '—'
+				totalConversions > 0 ? fmtNum(totalConversions) : '—'
 			];
 
 			for (let j = 0; j < totalRow.length; j++) {
