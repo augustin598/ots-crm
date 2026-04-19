@@ -29,6 +29,7 @@
 	import { type DateValue } from '@internationalized/date';
 	import type { DateRange } from 'bits-ui';
 	import { toast } from 'svelte-sonner';
+	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
 	import { clientLogger } from '$lib/client-logger';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlayIcon from '@lucide/svelte/icons/play';
@@ -268,7 +269,12 @@
 	}
 
 	async function handleRemoveJob(job: (typeof jobs)[0]) {
-		if (!confirm(`Sigur doriti sa stergeti job-ul "${job.label}"?`)) return;
+		const ok = await confirmDialog({
+			title: 'Sterge job programat',
+			description: `Sigur doriti sa stergeti job-ul "${job.label}"?`,
+			confirmLabel: 'Sterge'
+		});
+		if (!ok) return;
 		removingJob = job.key;
 		try {
 			await removeSchedulerJob(job.key);
@@ -392,7 +398,12 @@
 	let deletingLevel = $state<string | null>(null);
 
 	async function handleDeleteByLevel(level: 'info' | 'warning' | 'error', label: string) {
-		if (!confirm(`Sigur doriti sa stergeti toate logurile de tip "${label}"?`)) return;
+		const ok = await confirmDialog({
+			title: `Sterge loguri "${label}"`,
+			description: `Sigur doriti sa stergeti toate logurile de tip "${label}"?`,
+			confirmLabel: 'Sterge'
+		});
+		if (!ok) return;
 		deletingLevel = level;
 		try {
 			await deleteSchedulerLogsByLevel(level);
