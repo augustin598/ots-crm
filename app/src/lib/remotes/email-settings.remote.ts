@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { hasGmailSendScope } from '$lib/server/gmail/auth';
+import { hasGmailSendScope, hasGmailModifyScope } from '$lib/server/gmail/auth';
 import { createGmailTransporter } from '$lib/server/gmail/transporter';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { encryptVerified, decrypt } from '$lib/server/plugins/smartbill/crypto';
@@ -39,6 +39,8 @@ export const getEmailSettings = query(async () => {
 	const gmailConnected = gmailIntegration?.isActive ?? false;
 	const gmailEmail = gmailIntegration?.email ?? null;
 	const gmailHasSendScope = gmailConnected && hasGmailSendScope(gmailIntegration?.grantedScopes ?? null);
+	const gmailHasModifyScope = gmailConnected && hasGmailModifyScope(gmailIntegration?.grantedScopes ?? null);
+	const gmailNeedsReauth = gmailConnected && (!gmailHasSendScope || !gmailHasModifyScope);
 
 	// Return default settings if none exist
 	if (!settings) {
@@ -54,7 +56,8 @@ export const getEmailSettings = query(async () => {
 			gmailConnected,
 			gmailEmail,
 			gmailHasSendScope,
-			gmailNeedsReauth: gmailConnected && !gmailHasSendScope
+			gmailHasModifyScope,
+			gmailNeedsReauth
 		};
 	}
 
@@ -71,7 +74,8 @@ export const getEmailSettings = query(async () => {
 		gmailConnected,
 		gmailEmail,
 		gmailHasSendScope,
-		gmailNeedsReauth: gmailConnected && !gmailHasSendScope
+		gmailHasModifyScope,
+		gmailNeedsReauth
 	};
 });
 
