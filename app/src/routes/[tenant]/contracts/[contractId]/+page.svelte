@@ -205,12 +205,13 @@
 		if (!contractId) return;
 		deleting = true;
 		try {
-			await deleteContract(contractId).updates(contractQuery, getContracts({}));
+			await deleteContract(contractId).updates(getContracts({}));
 			toast.success('Contract șters cu succes');
 			goto(`/${tenantSlug}/contracts`);
 		} catch (e) {
 			console.error('Delete contract error:', e);
 			clientLogger.apiError('contract_delete', e);
+			toast.error('Eroare la ștergerea contractului');
 		} finally {
 			deleting = false;
 		}

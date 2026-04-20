@@ -14,5 +14,15 @@ export const load: PageServerLoad = async (event) => {
 		.from(table.contractTemplate)
 		.where(eq(table.contractTemplate.tenantId, event.locals.tenant!.id));
 
-	return { clients, templates };
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, event.locals.tenant!.id))
+		.limit(1);
+
+	return {
+		clients,
+		templates,
+		defaultTaxRate: invoiceSettings?.defaultTaxRate ?? 19
+	};
 };

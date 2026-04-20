@@ -15,7 +15,6 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
-	import { Separator } from '$lib/components/ui/separator';
 	import ContractClausesEditor from '$lib/components/app/contract-clauses-editor.svelte';
 	import { getDefaultContractClauses } from '$lib/contract-templates';
 	import type { ContractClause } from '$lib/contract-templates';
@@ -31,7 +30,7 @@
 	// Form state - Date contract
 	let clientId = $state('');
 	let contractNumber = $state('');
-	let contractDate = $state(new Date().toISOString().split('T')[0]);
+	let contractDate = $state(new Date().toLocaleDateString('en-CA'));
 	let contractTitle = $state('PRESTARI SERVICII INFORMATICE');
 	let templateId = $state('');
 	const defaultClauses = getDefaultContractClauses();
@@ -103,10 +102,16 @@
 		lineItems = lineItems.filter((item) => item.id !== id);
 	}
 
+	// TVA rate from settings
+	const defaultTaxRate = $derived(data?.defaultTaxRate ?? 19);
+	let includeTVA = $state(true);
+
 	// Calculate total
 	const subtotal = $derived(lineItems.reduce((sum, item) => sum + item.price, 0));
 	const discountAmount = $derived(discountPercent > 0 ? (subtotal * discountPercent) / 100 : 0);
-	const total = $derived(subtotal - discountAmount);
+	const netTotal = $derived(subtotal - discountAmount);
+	const tvaAmount = $derived(includeTVA ? (netTotal * defaultTaxRate) / 100 : 0);
+	const total = $derived(netTotal + tvaAmount);
 
 	// Termeni plata
 	let currency = $state('EUR');
@@ -165,18 +170,15 @@
 
 	let loading = $state(false);
 
-	function formatEUR(cents: number): string {
-		return (cents / 100).toFixed(2);
-	}
-
 	async function handleSubmit() {
 		if (!clientId) {
 			clientLogger.warn({ message: 'Selecteaza un client', action: 'contract_create' });
 			return;
 		}
 
-		if (lineItems.length === 0 || lineItems.every((item) => !item.description.trim())) {
-			clientLogger.warn({ message: 'Adauga cel putin un serviciu', action: 'contract_create' });
+		const validItems = lineItems.filter((item) => item.description.trim());
+		if (validItems.length === 0) {
+			clientLogger.warn({ message: 'Adauga cel putin un serviciu cu descriere', action: 'contract_create' });
 			return;
 		}
 
@@ -197,7 +199,7 @@
 				penaltyRate: Math.round(penaltyRate * 100),
 				billingFrequency,
 				contractDurationMonths,
-				discountPercent: discountPercent > 0 ? discountPercent : undefined,
+				discountPercent: discountPercent || 0,
 				prestatorEmail: prestatorEmail || undefined,
 				beneficiarEmail: beneficiarEmail || undefined,
 				hourlyRate: Math.round(hourlyRate * 100),
@@ -284,61 +286,53 @@
 	<!-- Section 2: Servicii -->
 	<Card class="p-6">
 		<h2 class="text-xl font-semibold mb-4">Servicii</h2>
-		<div class="overflow-x-auto">
-			<table class="w-full">
-				<thead>
-					<tr class="border-b">
-						<th class="text-left py-2 font-medium text-sm">Descriere</th>
-						<th class="text-right py-2 font-medium text-sm w-36">Pret (EUR)</th>
-						<th class="text-left py-2 font-medium text-sm w-28">UM</th>
-						<th class="py-2 w-12"></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each lineItems as item, index (item.id)}
-						<tr class="border-b">
-							<td class="py-2 pr-2">
-								<Input
-									bind:value={item.description}
-									placeholder="Descriere serviciu"
-								/>
-							</td>
-							<td class="py-2 px-2">
-								<Input
-									type="number"
-									bind:value={item.price}
-									placeholder="0.00"
-									step="0.01"
-									min="0"
-									class="text-right"
-								/>
-							</td>
-							<td class="py-2 px-2">
-								<Select type="single" bind:value={item.unitOfMeasure}>
-									<SelectTrigger>{item.unitOfMeasure || 'Luna'}</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="Luna">Luna</SelectItem>
-										<SelectItem value="Ora">Ora</SelectItem>
-										<SelectItem value="Zi">Zi</SelectItem>
-										<SelectItem value="Bucata">Bucata</SelectItem>
-										<SelectItem value="Proiect">Proiect</SelectItem>
-									</SelectContent>
-								</Select>
-							</td>
-							<td class="py-2 pl-2">
-								<Button
-									variant="ghost"
-									size="icon"
-									onclick={() => removeLineItem(item.id)}
-									disabled={lineItems.length <= 1}
-								>
-									<TrashIcon class="h-4 w-4 text-destructive" />
-								</Button>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
+		<div class="space-y-3">
+			{#each lineItems as item, index (item.id)}
+				<div class="flex items-start gap-2 pb-3 border-b">
+					<div class="flex-1">
+						{#if index === 0}<Label class="text-xs text-muted-foreground mb-1">Descriere</Label>{/if}
+						<Input
+							bind:value={item.description}
+							placeholder="Descriere serviciu"
+						/>
+					</div>
+					<div class="w-28">
+						{#if index === 0}<Label class="text-xs text-muted-foreground mb-1">Pret</Label>{/if}
+						<Input
+							type="number"
+							bind:value={item.price}
+							placeholder="0.00"
+							step="0.01"
+							min="0"
+							class="text-right"
+						/>
+					</div>
+					<div class="w-28">
+						{#if index === 0}<Label class="text-xs text-muted-foreground mb-1">UM</Label>{/if}
+						<Select type="single" bind:value={item.unitOfMeasure}>
+							<SelectTrigger>{item.unitOfMeasure || 'Luna'}</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="Luna">Luna</SelectItem>
+								<SelectItem value="Ora">Ora</SelectItem>
+								<SelectItem value="Zi">Zi</SelectItem>
+								<SelectItem value="Bucata">Bucata</SelectItem>
+								<SelectItem value="Proiect">Proiect</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div class="w-10 flex items-end">
+						{#if index === 0}<div class="h-5"></div>{/if}
+						<Button
+							variant="ghost"
+							size="icon"
+							onclick={() => removeLineItem(item.id)}
+							disabled={lineItems.length <= 1}
+						>
+							<TrashIcon class="h-4 w-4 text-destructive" />
+						</Button>
+					</div>
+				</div>
+			{/each}
 		</div>
 
 		<div class="mt-4 flex items-center justify-between">
@@ -350,7 +344,15 @@
 
 		<div class="mt-4 flex flex-col items-end gap-2">
 			<div class="flex items-center gap-2">
-				<Label class="text-sm">Discount %</Label>
+				<Label class="text-sm">Moneda</Label>
+				<Select type="single" bind:value={currency}>
+					<SelectTrigger class="w-24">{currency}</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="EUR">EUR</SelectItem>
+						<SelectItem value="RON">RON</SelectItem>
+					</SelectContent>
+				</Select>
+				<Label class="text-sm ml-2">Discount %</Label>
 				<Input
 					type="number"
 					bind:value={discountPercent}
@@ -363,14 +365,23 @@
 			</div>
 			{#if discountPercent > 0}
 				<div class="text-sm text-muted-foreground">
-					Subtotal: {subtotal.toFixed(2)} EUR
+					Subtotal: {subtotal.toFixed(2)} {currency}
 				</div>
 				<div class="text-sm text-muted-foreground">
-					Discount ({discountPercent}%): -{discountAmount.toFixed(2)} EUR
+					Discount ({discountPercent}%): -{discountAmount.toFixed(2)} {currency}
 				</div>
 			{/if}
+			<div class="text-sm text-muted-foreground">
+				Net: {netTotal.toFixed(2)} {currency}
+			</div>
+			<div class="flex items-center gap-2">
+				<label class="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+					<input type="checkbox" bind:checked={includeTVA} class="rounded" />
+					TVA ({defaultTaxRate}%): {tvaAmount.toFixed(2)} {currency}
+				</label>
+			</div>
 			<div class="text-lg font-semibold">
-				Total: {total.toFixed(2)} EUR
+				Total: {total.toFixed(2)} {currency}
 			</div>
 		</div>
 	</Card>
@@ -379,16 +390,6 @@
 	<Card class="p-6">
 		<h2 class="text-xl font-semibold mb-4">Termeni plata</h2>
 		<div class="grid gap-4 md:grid-cols-2">
-			<div class="space-y-1.5">
-				<Label>Moneda</Label>
-				<Select type="single" bind:value={currency}>
-					<SelectTrigger>{currency}</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="EUR">EUR</SelectItem>
-						<SelectItem value="RON">RON</SelectItem>
-					</SelectContent>
-				</Select>
-			</div>
 			<div class="space-y-1.5">
 				<Label>Zile plata</Label>
 				<Input type="number" bind:value={paymentTermsDays} min="0" />

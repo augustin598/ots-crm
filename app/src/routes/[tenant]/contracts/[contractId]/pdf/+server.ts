@@ -63,11 +63,18 @@ export const GET: RequestHandler = async (event) => {
 		throw error(404, 'Client not found');
 	}
 
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
 	const pdfBuffer = await generateContractPDF({
 		contract,
 		lineItems,
 		tenant: event.locals.tenant,
-		client
+		client,
+		taxRate: invoiceSettings?.defaultTaxRate ?? 19
 	});
 
 	const clientName = (client.businessName || client.name || 'Client').replace(/[^a-zA-Z0-9-_]/g, '_');

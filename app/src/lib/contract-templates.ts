@@ -53,7 +53,7 @@ export function getDefaultContractClauses(): ContractClause[] {
 			title: 'Prețul contractului',
 			paragraphs: [
 				'3.1 Prețul contractului reprezintă valoarea totală a serviciilor prestate pe întreaga durată a contractului.',
-				'3.2 Tariful achitat o dată la stabilit pentru executarea contractului, pe care Beneficiarul îl va achita Prestatorului, este echivalentul în lei al sumei de **{discountedTotal} {currency} + TVA**, calculat la cursul BNR din ziua emiterii facturii, plata efectuându-se în lei.',
+				'3.2 Tariful stabilit pentru executarea contractului, pe care Beneficiarul îl va achita Prestatorului, este de **{totalWithTVA} {currency} (inclusiv TVA {tvaRate}%)**, plata efectuându-se în lei la cursul BNR din ziua emiterii facturii.',
 				'3.3 În cazul neplății unei facturi la termen, **{tenantName}** are dreptul de a solicita Beneficiarului **penalități de întârziere de {penaltyRate}% pe zi** calendaristică din valoarea facturii respective.',
 				'3.4 Prețul pentru serviciile contractate a fost stabilit de comun acord de către ambele Părți contractante și poate fi modificat numai prin acordul scris al ambelor Părți.',
 				'3.5 Plata trebuie efectuată în termen de **{paymentTermsDays} zile** lucrătoare de la primirea facturii, prin ordin de plată (transfer bancar).',
@@ -179,7 +179,7 @@ export function getDefaultContractClauses(): ContractClause[] {
 			title: 'Servicii suplimentare opționale',
 			paragraphs: [
 				'16.1 La solicitarea beneficiarului, prestatorul poate să îi acorde și servicii de mentenanță sau administrare web, pentru un preț suplimentar.',
-				'16.2 Prețul suplimentar va fi stabilit având ca bază de calcul tariful orar de **{hourlyRate} {hourlyRateCurrency} / oră + TVA**, calculat în funcție de sarcinile ce urmează să fie îndeplinite la cererea beneficiarului.',
+				'16.2 Prețul suplimentar va fi stabilit având ca bază de calcul tariful orar de **{hourlyRate} {hourlyRateCurrency} / oră (inclusiv TVA)**, calculat în funcție de sarcinile ce urmează să fie îndeplinite la cererea beneficiarului.',
 				'16.3 Dacă serviciile suplimentare opționale descrise în alineatul anterior se vor solicita ulterior încheierii prezentului contract, prestarea acestora se va face ulterior încheierii unui Act Adițional în acest sens.'
 			]
 		},

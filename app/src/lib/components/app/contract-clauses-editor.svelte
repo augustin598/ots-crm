@@ -3,11 +3,6 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import {
-		Collapsible,
-		CollapsibleContent,
-		CollapsibleTrigger
-	} from '$lib/components/ui/collapsible';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -80,7 +75,7 @@
 		const defaultClause = defaultClauses.find((d) => d.number === clause.number);
 		if (defaultClause) {
 			clauses = clauses.map((c, i) =>
-				i === index ? { ...defaultClause } : c
+				i === index ? { ...defaultClause, paragraphs: [...defaultClause.paragraphs] } : c
 			);
 		}
 	}
@@ -137,99 +132,93 @@
 	{#each clauses as clause, index (clause.number)}
 		{@const isOpen = openSections.has(clause.number)}
 		{@const modified = !readonly && defaultClauses.length > 0 && hasChanges(clause)}
-		<Collapsible open={isOpen}>
-			<div class="rounded-lg border {modified ? 'border-amber-300 bg-amber-50/30 dark:border-amber-700 dark:bg-amber-950/20' : ''}">
-				<CollapsibleTrigger class="w-full">
-					<button
-						type="button"
-						class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 rounded-lg transition-colors"
-						onclick={() => toggleSection(clause.number)}
-					>
-						<ChevronRightIcon
-							class="h-4 w-4 shrink-0 transition-transform {isOpen ? 'rotate-90' : ''}"
-						/>
-						<span class="text-sm font-medium">
-							{clause.number}. {clause.title}
-						</span>
-						{#if modified}
-							<span class="ml-auto text-xs text-amber-600 dark:text-amber-400">modificat</span>
-						{/if}
-						<span class="ml-auto text-xs text-muted-foreground">
-							{clause.paragraphs.length} {clause.paragraphs.length === 1 ? 'paragraf' : 'paragrafe'}
-						</span>
-					</button>
-				</CollapsibleTrigger>
-				<CollapsibleContent>
-					{#if isOpen}
-						<div class="border-t px-4 py-4 space-y-4">
-							{#if !readonly}
-								<div class="space-y-1.5">
-									<Label class="text-xs text-muted-foreground">Titlu sectiune</Label>
-									<Input
-										value={clause.title}
-										oninput={(e) => updateClauseTitle(index, e.currentTarget.value)}
-									/>
-								</div>
-							{/if}
+		<div class="rounded-lg border {modified ? 'border-amber-300 bg-amber-50/30 dark:border-amber-700 dark:bg-amber-950/20' : ''}">
+			<button
+				type="button"
+				class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 rounded-lg transition-colors"
+				onclick={() => toggleSection(clause.number)}
+			>
+				<ChevronRightIcon
+					class="h-4 w-4 shrink-0 transition-transform {isOpen ? 'rotate-90' : ''}"
+				/>
+				<span class="text-sm font-medium">
+					{clause.number}. {clause.title}
+				</span>
+				{#if modified}
+					<span class="ml-auto text-xs text-amber-600 dark:text-amber-400">modificat</span>
+				{/if}
+				<span class="ml-auto text-xs text-muted-foreground">
+					{clause.paragraphs.length} {clause.paragraphs.length === 1 ? 'paragraf' : 'paragrafe'}
+				</span>
+			</button>
+			{#if isOpen}
+				<div class="border-t px-4 py-4 space-y-4">
+					{#if !readonly}
+						<div class="space-y-1.5">
+							<Label class="text-xs text-muted-foreground">Titlu sectiune</Label>
+							<Input
+								value={clause.title}
+								oninput={(e) => updateClauseTitle(index, e.currentTarget.value)}
+							/>
+						</div>
+					{/if}
 
-							{#each clause.paragraphs as paragraph, pIndex}
-								<div class="space-y-1.5">
-									<div class="flex items-center justify-between">
-										<Label class="text-xs text-muted-foreground">
-											{clause.number}.{pIndex + 1}
-										</Label>
-										{#if !readonly && clause.paragraphs.length > 1}
-											<Button
-												variant="ghost"
-												size="sm"
-												class="h-6 w-6 p-0"
-												onclick={() => removeParagraph(index, pIndex)}
-											>
-												<TrashIcon class="h-3 w-3 text-destructive" />
-											</Button>
-										{/if}
-									</div>
-									{#if readonly}
-										<p class="text-sm whitespace-pre-wrap">{paragraph}</p>
-									{:else}
-										<Textarea
-											value={paragraph}
-											oninput={(e) => updateParagraph(index, pIndex, e.currentTarget.value)}
-											rows={Math.max(2, Math.ceil(paragraph.length / 80))}
-											class="text-sm"
-										/>
-									{/if}
-								</div>
-							{/each}
-
-							{#if !readonly}
-								<div class="flex items-center gap-2">
-									<Button variant="outline" size="sm" onclick={() => addParagraph(index)}>
-										<PlusIcon class="mr-1 h-3 w-3" />
-										Adauga paragraf
-									</Button>
-									{#if defaultClauses.length > 0 && defaultClauses.find((d) => d.number === clause.number)}
-										<Button variant="ghost" size="sm" onclick={() => resetClause(index)}>
-											<RotateCcwIcon class="mr-1 h-3 w-3" />
-											Reset sectiune
-										</Button>
-									{/if}
+					{#each clause.paragraphs as paragraph, pIndex}
+						<div class="space-y-1.5">
+							<div class="flex items-center justify-between">
+								<Label class="text-xs text-muted-foreground">
+									{clause.number}.{pIndex + 1}
+								</Label>
+								{#if !readonly && clause.paragraphs.length > 1}
 									<Button
 										variant="ghost"
 										size="sm"
-										class="ml-auto text-destructive"
-										onclick={() => removeClause(index)}
+										class="h-6 w-6 p-0"
+										onclick={() => removeParagraph(index, pIndex)}
 									>
-										<TrashIcon class="mr-1 h-3 w-3" />
-										Sterge clauza
+										<TrashIcon class="h-3 w-3 text-destructive" />
 									</Button>
-								</div>
+								{/if}
+							</div>
+							{#if readonly}
+								<p class="text-sm whitespace-pre-wrap">{paragraph}</p>
+							{:else}
+								<Textarea
+									value={paragraph}
+									oninput={(e) => updateParagraph(index, pIndex, e.currentTarget.value)}
+									rows={Math.max(2, Math.ceil(paragraph.length / 80))}
+									class="text-sm"
+								/>
 							{/if}
 						</div>
+					{/each}
+
+					{#if !readonly}
+						<div class="flex items-center gap-2">
+							<Button variant="outline" size="sm" onclick={() => addParagraph(index)}>
+								<PlusIcon class="mr-1 h-3 w-3" />
+								Adauga paragraf
+							</Button>
+							{#if defaultClauses.length > 0 && defaultClauses.find((d) => d.number === clause.number)}
+								<Button variant="ghost" size="sm" onclick={() => resetClause(index)}>
+									<RotateCcwIcon class="mr-1 h-3 w-3" />
+									Reset sectiune
+								</Button>
+							{/if}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="ml-auto text-destructive"
+								onclick={() => removeClause(index)}
+							>
+								<TrashIcon class="mr-1 h-3 w-3" />
+								Sterge clauza
+							</Button>
+						</div>
 					{/if}
-				</CollapsibleContent>
-			</div>
-		</Collapsible>
+				</div>
+			{/if}
+		</div>
 	{/each}
 
 	{#if !readonly}

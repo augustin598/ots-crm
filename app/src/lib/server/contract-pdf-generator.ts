@@ -84,6 +84,7 @@ export interface ContractPDFInput {
 	lineItems: ContractLineItemData[];
 	tenant: ContractTenantData;
 	client: ContractClientData;
+	taxRate?: number; // VAT percentage, e.g. 19 or 21
 }
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ function tenantAddr(t: ContractTenantData): string {
 export async function generateContractPDF(input: ContractPDFInput): Promise<Buffer> {
 	return new Promise<Buffer>((resolve, reject) => {
 		try {
-			const { contract, lineItems, tenant, client } = input;
+			const { contract, lineItems, tenant, client, taxRate } = input;
 			const ACCENT = tenant.themeColor || DEFAULT_ACCENT;
 
 			const doc = new PDFDocument({
@@ -266,6 +267,9 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 			for (const item of lineItems) totalPrice += item.price / 100;
 			const discountPct = contract.discountPercent ?? 0;
 			const discountedTotal = totalPrice * (1 - discountPct / 100);
+			const effectiveTaxRate = taxRate ?? 0;
+			const tvaAmount = effectiveTaxRate > 0 ? Math.round((discountedTotal * effectiveTaxRate) / 100 * 100) / 100 : 0;
+			const totalWithTVA = Math.round((discountedTotal + tvaAmount) * 100) / 100;
 
 			// ── Variable interpolation ──────────────────────────────────
 
@@ -288,6 +292,9 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 					billingFrequency: translateBillingFrequency(contract.billingFrequency),
 					discountPercent: String(contract.discountPercent ?? 0),
 					discountedTotal: fNum(discountedTotal),
+					tvaRate: String(effectiveTaxRate),
+					tvaAmount: fNum(tvaAmount),
+					totalWithTVA: fNum(totalWithTVA),
 					serviceDescription: contract.serviceDescription || '',
 					// Tenant (Prestator)
 					tenantName: tenant.name,
@@ -323,6 +330,13 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 				let result = text;
 				for (const [key, value] of Object.entries(vars)) {
 					result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+				}
+				// Backward compat: replace old "+ TVA" pattern with total including TVA
+				if (effectiveTaxRate > 0) {
+					result = result.replace(
+						new RegExp(`${fNum(discountedTotal).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${contract.currency}\\s*\\+\\s*TVA`),
+						`${fNum(totalWithTVA)} ${contract.currency} (inclusiv TVA ${effectiveTaxRate}%)`
+					);
 				}
 				return result;
 			}
@@ -520,7 +534,8 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 						y += rowH;
 					}
 
-					// Total row
+					// Total (fara TVA) row
+					y = ensureSpace(y, effectiveTaxRate > 0 ? (24 + 2) * 3 + 16 : 24 + 16);
 					y += 2;
 					const totalRowH = 24;
 					doc.rect(ML, y, CW, totalRowH).fillColor(ACCENT).fill();
@@ -528,7 +543,27 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 					const totalLabel = discountPct > 0 ? `Total cu DISCOUNT ${discountPct}%` : 'Total';
 					doc.text(totalLabel, ML + 6, y + 6, { width: colServiceW - 12, lineBreak: false });
 					doc.text(`${fNum(discountedTotal)} ${contract.currency}`, ML + colServiceW + 6, y + 6, { width: colPriceW - 12, align: 'center', lineBreak: false });
-					y += totalRowH + 16;
+					y += totalRowH;
+
+					// TVA row
+					if (effectiveTaxRate > 0) {
+						y += 2;
+						doc.rect(ML, y, CW, totalRowH).fillColor('#E8F4FD').fill();
+						doc.fontSize(9).font('DejaVu-Bold').fillColor(DARK);
+						doc.text(`TVA (${effectiveTaxRate}%)`, ML + 6, y + 6, { width: colServiceW - 12, lineBreak: false });
+						doc.text(`${fNum(tvaAmount)} ${contract.currency}`, ML + colServiceW + 6, y + 6, { width: colPriceW - 12, align: 'center', lineBreak: false });
+						y += totalRowH;
+
+						// Total cu TVA row
+						y += 2;
+						doc.rect(ML, y, CW, totalRowH).fillColor(ACCENT).fill();
+						doc.fontSize(9).font('DejaVu-Bold').fillColor(WHITE);
+						doc.text('Total cu TVA', ML + 6, y + 6, { width: colServiceW - 12, lineBreak: false });
+						doc.text(`${fNum(totalWithTVA)} ${contract.currency}`, ML + colServiceW + 6, y + 6, { width: colPriceW - 12, align: 'center', lineBreak: false });
+						y += totalRowH;
+					}
+
+					y += 16;
 				}
 
 				// Render paragraphs from clausesJson

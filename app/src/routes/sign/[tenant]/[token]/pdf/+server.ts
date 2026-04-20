@@ -89,7 +89,13 @@ export const GET: RequestHandler = async ({ params }) => {
 		throw error(404, 'Client not found');
 	}
 
-	const pdfBuffer = await generateContractPDF({ contract, lineItems, tenant, client });
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenant.id))
+		.limit(1);
+
+	const pdfBuffer = await generateContractPDF({ contract, lineItems, tenant, client, taxRate: invoiceSettings?.defaultTaxRate ?? 19 });
 	const uint8 = new Uint8Array(pdfBuffer);
 
 	return new Response(uint8, {

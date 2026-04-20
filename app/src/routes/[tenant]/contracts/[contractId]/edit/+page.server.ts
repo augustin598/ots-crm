@@ -12,7 +12,17 @@ export const load: PageServerLoad = async (event) => {
 			.where(eq(table.client.tenantId, event.locals.tenant!.id));
 		const templates = await db.select().from(table.contractTemplate)
 			.where(eq(table.contractTemplate.tenantId, event.locals.tenant!.id));
-		return { contract, clients, templates };
+		const [invoiceSettings] = await db
+			.select()
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant!.id))
+			.limit(1);
+		return {
+			contract,
+			clients,
+			templates,
+			defaultTaxRate: invoiceSettings?.defaultTaxRate ?? 19
+		};
 	} catch {
 		throw error(404, 'Contract not found');
 	}

@@ -64,11 +64,18 @@ export const GET: RequestHandler = async (event) => {
 		.where(eq(table.contractLineItem.contractId, contractId))
 		.orderBy(asc(table.contractLineItem.sortOrder));
 
+	const [invoiceSettings] = await db
+		.select()
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
 	const pdfBuffer = await generateContractPDF({
 		contract,
 		lineItems,
 		tenant: event.locals.tenant,
-		client: event.locals.client
+		client: event.locals.client,
+		taxRate: invoiceSettings?.defaultTaxRate ?? 19
 	});
 
 	const clientName = (event.locals.client.businessName || event.locals.client.name || 'Client').replace(/[^a-zA-Z0-9-_]/g, '_');
