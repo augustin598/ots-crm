@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { getAuthenticatedClient, hasGmailSendScope } from './auth';
+import { getAuthenticatedClient, hasGmailSendScope, hasGmailModifyScope } from './auth';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
 /**
@@ -73,7 +73,7 @@ export async function createGmailTransporter(
 
       // Gmail API sometimes places sent messages in INBOX — remove INBOX label to keep only in SENT
       const messageId = response.data.id;
-      if (messageId) {
+      if (messageId && hasGmailModifyScope(integration.grantedScopes)) {
         try {
           await gmailApi.users.messages.modify({
             userId: 'me',
