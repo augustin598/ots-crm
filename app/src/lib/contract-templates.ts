@@ -45,6 +45,7 @@ export function getDefaultContractClauses(): ContractClause[] {
 			title: 'Scopul și obiectul contractului',
 			paragraphs: [
 				'{serviceDescription}',
+				'[if:offerLink]• Oferta comercială detaliată poate fi consultată la adresa: **{offerLink}**',
 				'• Orice modificare ulterioară a conținutului ofertei publicate la acest link nu va produce efecte asupra prezentului contract, decât dacă este acceptată în scris de ambele părți.'
 			]
 		},

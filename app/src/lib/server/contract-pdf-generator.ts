@@ -296,6 +296,7 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 					tvaAmount: fNum(tvaAmount),
 					totalWithTVA: fNum(totalWithTVA),
 					serviceDescription: contract.serviceDescription || '',
+					offerLink: contract.offerLink || '',
 					// Tenant (Prestator)
 					tenantName: tenant.name,
 					tenantCui: tenant.cui || '',
@@ -492,6 +493,19 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 				}
 			}
 
+			// Backward compat: inject offerLink paragraph into section 2 if missing
+			if (contract.offerLink) {
+				const section2 = clauses.find((c) => (c.sectionNumber || c.number) === '2');
+				if (section2) {
+					const hasOfferLink = section2.paragraphs.some((p: string) => p.includes('{offerLink}'));
+					if (!hasOfferLink) {
+						// Insert before the last paragraph (the disclaimer)
+						const insertIdx = Math.max(0, section2.paragraphs.length - 1);
+						section2.paragraphs.splice(insertIdx, 0, '• Oferta comercială detaliată poate fi consultată la adresa: **{offerLink}**');
+					}
+				}
+			}
+
 			for (const clause of clauses) {
 				y += 6;
 
@@ -575,6 +589,20 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 						doc.fontSize(9).font('DejaVu-Bold').fillColor(DARK);
 						doc.text(centerText, ML, y, { width: CW, align: 'center' });
 						y += 16;
+						continue;
+					}
+
+					// [if:varName] — conditional paragraph, skip if variable is empty
+					if (para.startsWith('[if:')) {
+						const endBracket = para.indexOf(']');
+						const varName = para.slice(4, endBracket);
+						const varValue = contract[varName as keyof typeof contract];
+						if (!varValue) continue;
+						const cleanPara = para.slice(endBracket + 1);
+						const interpolated = interpolateVars(cleanPara);
+						if (!interpolated.trim()) continue;
+						y = ensureSpace(y, 16);
+						y = renderParagraph(interpolated, ML, y);
 						continue;
 					}
 
