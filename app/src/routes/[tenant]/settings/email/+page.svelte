@@ -201,6 +201,20 @@
 					<span class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Trimitere activă</span>
 				</div>
 
+				{#if settings?.gmailNeedsModifyScope}
+					<div class="flex items-center gap-3 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20">
+						<div class="flex-1">
+							<p class="font-medium text-blue-800 dark:text-blue-200">Permisiune opțională</p>
+							<p class="text-sm text-blue-700 dark:text-blue-300">
+								Pentru a păstra mesajele trimise în INBOX curățate (mutate doar în „Trimise”), acordă permisiunea suplimentară <code class="text-xs">gmail.modify</code>. Trimiterea funcționează deja corect fără această permisiune.
+							</p>
+						</div>
+						<Button variant="outline" onclick={() => window.location.href = `/api/gmail/auth?tenant=${tenantSlug}`}>
+							Acordă Permisiunea
+						</Button>
+					</div>
+				{/if}
+
 				<div class="flex items-center justify-between">
 					<div class="space-y-0.5">
 						<Label>Folosește Gmail pentru trimitere</Label>
