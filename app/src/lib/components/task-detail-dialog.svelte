@@ -20,7 +20,8 @@
 		rejectTask,
 		getTasks,
 		getTask,
-		getCompletedTasks
+		getCompletedTasks,
+		updateTask
 	} from '$lib/remotes/tasks.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
@@ -32,7 +33,12 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import * as Popover from '$lib/components/ui/popover';
-	import EditTaskForm from '$lib/components/edit-task-form.svelte';
+	import InlineEditableText from '$lib/components/inline-editable-text.svelte';
+	import { Calendar as CalendarPicker } from '$lib/components/ui/calendar';
+	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
+	import { CalendarDate, type DateValue } from '@internationalized/date';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import {
 		formatStatus,
@@ -40,6 +46,7 @@
 		formatDate,
 		getPriorityColor,
 		getPriorityDotColor,
+		getStatusDotColor,
 		formatPriority,
 		getActivityValueColor
 	} from '$lib/components/task-kanban-utils';
@@ -90,11 +97,27 @@
 
 	const filterParams = getTaskFilters();
 
-	let mode = $state<'view' | 'edit'>('view');
-	// Reset to view mode when the dialog closes, so re-opening starts fresh
+	// Optimistic local overrides mirror task prop; reset only when task identity changes
+	// (not on every refetch — that would wipe in-flight edits).
+	let localOverrides = $state<Partial<Task>>({});
+	let lastTaskId = $state<string | null>(null);
 	$effect(() => {
-		if (!open) mode = 'view';
+		if (task && task.id !== lastTaskId) {
+			localOverrides = {};
+			lastTaskId = task.id;
+		}
 	});
+	const currentTask = $derived(task ? ({ ...task, ...localOverrides } as Task) : null);
+
+	// Due-date Popover state (used by Task 9 markup)
+	let dueDateOpen = $state(false);
+	const dueDateValue = $derived.by<DateValue | undefined>(() => {
+		const d = currentTask?.dueDate;
+		if (!d) return undefined;
+		const dt = new Date(d);
+		return new CalendarDate(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+	});
+
 	let commentLoading = $state(false);
 	let approvalLoading = $state(false);
 	let editingCommentId = $state<string | null>(null);
@@ -182,6 +205,64 @@
 	const clientsQuery = getClients();
 	const clientsList = $derived(clientsQuery.current || []);
 	const clientMap = $derived(new Map(clientsList.map((c: any) => [c.id, c.name])));
+
+	// Pickers data for inline editors
+	const clientOptions = $derived([
+		{ value: '', label: '—' },
+		...(clientsList as { id: string; name: string }[]).map((c) => ({
+			value: c.id,
+			label: c.name
+		}))
+	]);
+	const projectOptions = $derived([
+		{ value: '', label: '—' },
+		...(projects as { id: string; name: string }[]).map((p) => ({
+			value: p.id,
+			label: p.name
+		}))
+	]);
+
+	async function saveField<K extends keyof Task>(field: K, value: Task[K]) {
+		if (!task) return;
+		// Title cannot be empty per updateTask schema
+		if (field === 'title' && !String(value ?? '').trim()) {
+			toast.error('Titlul nu poate fi gol');
+			return;
+		}
+		const previous = (currentTask as any)?.[field];
+		(localOverrides as any)[field] = value;
+		try {
+			// Title is ALWAYS required by valibot schema — always include it
+			const payload: any = {
+				taskId: task.id,
+				title: currentTask?.title ?? task.title
+			};
+			// For non-title fields: follow edit-task-form pattern — omit if falsy
+			// (schema rejects null; empty string would write "" to DB)
+			if (field === 'title') {
+				payload.title = value;
+			} else {
+				const v = (value as any) || undefined;
+				if (v !== undefined) payload[field] = v;
+			}
+			await updateTask(payload).updates(
+				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				getTask(task.id),
+				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
+				...additionalQueriesToUpdate
+			);
+		} catch (e) {
+			(localOverrides as any)[field] = previous;
+			toast.error(`Nu s-a putut salva: ${e instanceof Error ? e.message : 'eroare'}`);
+		}
+	}
+
+	function handleDueDateSelect(value: DateValue | undefined) {
+		dueDateOpen = false;
+		if (!value) return; // clearing dueDate isn't supported (schema rejects null; omit = no change)
+		const iso = `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
+		saveField('dueDate', iso as any);
+	}
 
 	const fieldLabels: Record<string, string> = {
 		title: 'titlul',
@@ -537,7 +618,7 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-2">
-						{#if mode === 'view' && task.status === 'pending-approval'}
+						{#if task.status === 'pending-approval'}
 							<Button
 								variant="default"
 								size="sm"
@@ -557,12 +638,10 @@
 								Reject
 							</Button>
 						{/if}
-						{#if mode === 'view'}
-							<Button variant="outline" size="sm" onclick={() => (mode = 'edit')}>
-								<Edit class="mr-2 h-4 w-4" />
-								Edit
-							</Button>
-						{/if}
+						<Button variant="outline" size="sm" onclick={() => {}}>
+							<Edit class="mr-2 h-4 w-4" />
+							Edit
+						</Button>
 						<Button variant="ghost" size="sm" onclick={() => onOpenChange(false)}>
 							<X class="h-4 w-4" />
 						</Button>
@@ -570,20 +649,7 @@
 				</div>
 			</DialogHeader>
 
-			{#if mode === 'edit'}
-				<EditTaskForm
-					{task}
-					{additionalQueriesToUpdate}
-					onSuccess={() => {
-						// Close dialog after save so parent refetches tasks and user sees
-						// fresh data on next open. Avoids stale view-mode render.
-						mode = 'view';
-						onOpenChange(false);
-					}}
-					onCancel={() => (mode = 'view')}
-				/>
-			{:else}
-				<div class="mt-4 space-y-6">
+			<div class="mt-4 space-y-6">
 					{#if task.description}
 						<div>
 							<h4 class="mb-2 font-semibold">Description</h4>
@@ -1045,7 +1111,6 @@
 						{/if}
 					</div>
 				</div>
-			{/if}
 		</DialogContent>
 	</Dialog>
 {/if}
