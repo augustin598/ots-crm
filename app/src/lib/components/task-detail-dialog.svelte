@@ -621,14 +621,69 @@
 								<p class="mt-2 text-sm text-muted-foreground">{projectMap.get(task.projectId)}</p>
 							</a>
 						{/if}
-						<div class="mt-3 flex items-center gap-2">
-							<Badge class={getPriorityColor(task.priority || 'medium')}>
-								{formatPriority(task.priority || 'medium')}
-							</Badge>
-							<Badge variant={getStatusBadgeVariant(task.status)}
-								>{formatStatus(task.status || 'todo')}</Badge
-							>
-						</div>
+						{#if currentTask}
+							<div class="mt-3 flex items-center gap-2">
+								<!-- Priority popover -->
+								<Popover.Root>
+									<Popover.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												class="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+												aria-label="Schimbă prioritatea"
+											>
+												<Badge class={getPriorityColor(currentTask.priority || 'medium')}>
+													{formatPriority(currentTask.priority || 'medium')}
+												</Badge>
+											</button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-48 p-1">
+										{#each [['urgent', 'Urgent'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']] as [val, label] (val)}
+											<button
+												type="button"
+												class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+												onclick={() => saveField('priority', val as any)}
+											>
+												<span class="h-2 w-2 rounded-full {getPriorityDotColor(val)}"></span>
+												{label}
+											</button>
+										{/each}
+									</Popover.Content>
+								</Popover.Root>
+
+								<!-- Status popover -->
+								<Popover.Root>
+									<Popover.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												class="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+												aria-label="Schimbă statusul"
+											>
+												<Badge variant={getStatusBadgeVariant(currentTask.status)}>
+													{formatStatus(currentTask.status || 'todo')}
+												</Badge>
+											</button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-52 p-1">
+										{#each [['pending-approval', 'Pending Approval'], ['todo', 'To Do'], ['in-progress', 'In Progress'], ['review', 'Review'], ['done', 'Done'], ['cancelled', 'Cancelled']] as [val, label] (val)}
+											<button
+												type="button"
+												class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+												onclick={() => saveField('status', val as any)}
+											>
+												<span class="h-2 w-2 rounded-full {getStatusDotColor(val)}"></span>
+												{label}
+											</button>
+										{/each}
+									</Popover.Content>
+								</Popover.Root>
+							</div>
+						{/if}
 					</div>
 					<div class="flex items-center gap-2">
 						{#if task.status === 'pending-approval'}
@@ -663,475 +718,473 @@
 			</DialogHeader>
 
 			<div class="mt-4 space-y-6">
-					<div>
-						<h4 class="mb-2 font-semibold">Description</h4>
-						{#if currentTask}
-							<InlineEditableText
-								value={currentTask.description ?? ''}
-								onSave={(v) => saveField('description', (v || null) as any)}
-								multiline
-								placeholder="Scrie o descriere..."
-								emptyPlaceholder="Click pentru a adăuga o descriere"
-								displayClass="text-muted-foreground leading-relaxed whitespace-pre-wrap"
-								ariaLabel="Editează descrierea"
-							/>
-						{/if}
-					</div>
-					<Separator />
+				<div>
+					<h4 class="mb-2 font-semibold">Description</h4>
+					{#if currentTask}
+						<InlineEditableText
+							value={currentTask.description ?? ''}
+							onSave={(v) => saveField('description', (v || null) as any)}
+							multiline
+							placeholder="Scrie o descriere..."
+							emptyPlaceholder="Click pentru a adăuga o descriere"
+							displayClass="text-muted-foreground leading-relaxed whitespace-pre-wrap"
+							ariaLabel="Editează descrierea"
+						/>
+					{/if}
+				</div>
+				<Separator />
 
-					<div class="grid gap-4 md:grid-cols-2">
-						{#if task.clientId}
-							<div class="flex items-center gap-3">
-								<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
-									<Building class="h-5 w-5 text-orange-600" />
-								</div>
-								<div>
-									<p class="text-sm text-muted-foreground">Client</p>
-									<p class="font-medium">{clientMap.get(task.clientId) || '-'}</p>
-								</div>
+				<div class="grid gap-4 md:grid-cols-2">
+					{#if task.clientId}
+						<div class="flex items-center gap-3">
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
+								<Building class="h-5 w-5 text-orange-600" />
 							</div>
-						{/if}
-
-						{#if task.assignedToUserId}
-							<div class="flex items-center gap-3">
-								<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-									<User class="h-5 w-5 text-primary" />
-								</div>
-								<div>
-									<p class="text-sm text-muted-foreground">Assignee</p>
-									<p class="font-medium">
-										{userMap.get(task.assignedToUserId) || task.assignedToUserId}
-									</p>
-								</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Client</p>
+								<p class="font-medium">{clientMap.get(task.clientId) || '-'}</p>
 							</div>
-						{/if}
-
-						{#if task.dueDate}
-							<div class="flex items-center gap-3">
-								<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-									<Calendar class="h-5 w-5 text-blue-600" />
-								</div>
-								<div>
-									<p class="text-sm text-muted-foreground">Due Date</p>
-									<p class="font-medium">{formatDate(task.dueDate)}</p>
-								</div>
-							</div>
-						{/if}
-					</div>
-
-					<Separator />
-
-					<!-- Materials section -->
-					<div>
-						<div class="mb-4 flex items-center justify-between">
-							<div class="flex items-center gap-2">
-								<Link class="h-4 w-4 text-muted-foreground" />
-								<h4 class="font-semibold">Materiale ({taskMaterials.length})</h4>
-							</div>
-							<Popover.Root bind:open={materialPickerOpen}>
-								<Popover.Trigger>
-									{#snippet child({ props })}
-										<Button {...props} variant="outline" size="sm">
-											<Plus class="mr-1 h-3.5 w-3.5" />
-											Adaugă
-										</Button>
-									{/snippet}
-								</Popover.Trigger>
-								<Popover.Content class="w-80 p-0" align="end">
-									<div class="border-b p-3">
-										<Input
-											type="text"
-											placeholder="Caută materiale..."
-											bind:value={materialSearchTerm}
-											class="h-8 text-sm"
-										/>
-									</div>
-									<div class="max-h-[200px] overflow-y-auto">
-										{#if filteredAvailableMaterials.length === 0}
-											<p class="p-3 text-sm text-muted-foreground">
-												{materialSearchTerm
-													? 'Niciun material găsit.'
-													: 'Nu există materiale disponibile.'}
-											</p>
-										{:else}
-											{#each filteredAvailableMaterials as mat}
-												{@const Icon = MATERIAL_TYPE_ICONS[mat.type] || FileText}
-												<button
-													class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50"
-													onclick={() => handleLinkMaterial(mat.id)}
-													disabled={linkingMaterialId === mat.id}
-												>
-													<Icon class="h-4 w-4 shrink-0 text-muted-foreground" />
-													<span class="flex-1 truncate">{mat.title}</span>
-													<Badge variant="outline" class="shrink-0 text-xs">{mat.type}</Badge>
-												</button>
-											{/each}
-										{/if}
-									</div>
-								</Popover.Content>
-							</Popover.Root>
 						</div>
+					{/if}
 
-						{#if taskMaterials.length === 0}
-							<p class="text-sm text-muted-foreground">Niciun material asociat.</p>
+					{#if task.assignedToUserId}
+						<div class="flex items-center gap-3">
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+								<User class="h-5 w-5 text-primary" />
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Assignee</p>
+								<p class="font-medium">
+									{userMap.get(task.assignedToUserId) || task.assignedToUserId}
+								</p>
+							</div>
+						</div>
+					{/if}
+
+					{#if task.dueDate}
+						<div class="flex items-center gap-3">
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+								<Calendar class="h-5 w-5 text-blue-600" />
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Due Date</p>
+								<p class="font-medium">{formatDate(task.dueDate)}</p>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<Separator />
+
+				<!-- Materials section -->
+				<div>
+					<div class="mb-4 flex items-center justify-between">
+						<div class="flex items-center gap-2">
+							<Link class="h-4 w-4 text-muted-foreground" />
+							<h4 class="font-semibold">Materiale ({taskMaterials.length})</h4>
+						</div>
+						<Popover.Root bind:open={materialPickerOpen}>
+							<Popover.Trigger>
+								{#snippet child({ props })}
+									<Button {...props} variant="outline" size="sm">
+										<Plus class="mr-1 h-3.5 w-3.5" />
+										Adaugă
+									</Button>
+								{/snippet}
+							</Popover.Trigger>
+							<Popover.Content class="w-80 p-0" align="end">
+								<div class="border-b p-3">
+									<Input
+										type="text"
+										placeholder="Caută materiale..."
+										bind:value={materialSearchTerm}
+										class="h-8 text-sm"
+									/>
+								</div>
+								<div class="max-h-[200px] overflow-y-auto">
+									{#if filteredAvailableMaterials.length === 0}
+										<p class="p-3 text-sm text-muted-foreground">
+											{materialSearchTerm
+												? 'Niciun material găsit.'
+												: 'Nu există materiale disponibile.'}
+										</p>
+									{:else}
+										{#each filteredAvailableMaterials as mat}
+											{@const Icon = MATERIAL_TYPE_ICONS[mat.type] || FileText}
+											<button
+												class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50"
+												onclick={() => handleLinkMaterial(mat.id)}
+												disabled={linkingMaterialId === mat.id}
+											>
+												<Icon class="h-4 w-4 shrink-0 text-muted-foreground" />
+												<span class="flex-1 truncate">{mat.title}</span>
+												<Badge variant="outline" class="shrink-0 text-xs">{mat.type}</Badge>
+											</button>
+										{/each}
+									{/if}
+								</div>
+							</Popover.Content>
+						</Popover.Root>
+					</div>
+
+					{#if taskMaterials.length === 0}
+						<p class="text-sm text-muted-foreground">Niciun material asociat.</p>
+					{:else}
+						<div class="grid gap-2 sm:grid-cols-2">
+							{#each taskMaterials as mat}
+								{@const Icon = MATERIAL_TYPE_ICONS[mat.materialType] || FileText}
+								<div class="group flex items-center gap-3 rounded-lg border p-3">
+									<div
+										class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted"
+									>
+										<Icon class="h-4 w-4 text-muted-foreground" />
+									</div>
+									<div class="min-w-0 flex-1">
+										{#if mat.materialExternalUrl}
+											<a
+												href={mat.materialExternalUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="block truncate text-sm font-medium hover:text-primary"
+											>
+												{mat.materialTitle}
+											</a>
+										{:else}
+											<p class="truncate text-sm font-medium">{mat.materialTitle}</p>
+										{/if}
+										<p class="text-xs text-muted-foreground capitalize">
+											{mat.materialCategory.replace(/-/g, ' ')} · {mat.materialType}
+										</p>
+									</div>
+									<Button
+										variant="ghost"
+										size="icon"
+										class="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+										onclick={() => handleUnlinkMaterial(mat.materialId)}
+									>
+										<Unlink class="h-3.5 w-3.5" />
+									</Button>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<Separator />
+
+				<div>
+					<div class="mb-4 flex items-center gap-2">
+						<MessageSquare class="h-4 w-4 text-muted-foreground" />
+						<h4 class="font-semibold">Comments ({comments.length})</h4>
+					</div>
+
+					<div class="mb-4 space-y-3">
+						{#if comments.length === 0}
+							<p class="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
 						{:else}
-							<div class="grid gap-2 sm:grid-cols-2">
-								{#each taskMaterials as mat}
-									{@const Icon = MATERIAL_TYPE_ICONS[mat.materialType] || FileText}
-									<div class="group flex items-center gap-3 rounded-lg border p-3">
+							{#each topLevelComments as comment}
+								{@const authorName =
+									comment.authorName || userMap.get(comment.userId) || comment.userId}
+								{@const isOwnComment = currentUserId && comment.userId === currentUserId}
+								{@const replies = repliesMap.get(comment.id) || []}
+								<div class="rounded-lg border p-3">
+									<div class="mb-1.5 flex items-center gap-2">
 										<div
-											class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted"
+											class="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
 										>
-											<Icon class="h-4 w-4 text-muted-foreground" />
+											{getInitials(authorName)}
 										</div>
 										<div class="min-w-0 flex-1">
-											{#if mat.materialExternalUrl}
-												<a
-													href={mat.materialExternalUrl}
-													target="_blank"
-													rel="noopener noreferrer"
-													class="block truncate text-sm font-medium hover:text-primary"
-												>
-													{mat.materialTitle}
-												</a>
-											{:else}
-												<p class="truncate text-sm font-medium">{mat.materialTitle}</p>
-											{/if}
-											<p class="text-xs text-muted-foreground capitalize">
-												{mat.materialCategory.replace(/-/g, ' ')} · {mat.materialType}
+											<p class="text-sm font-medium">{authorName}</p>
+											<p class="text-xs text-muted-foreground">
+												{new Date(comment.createdAt).toLocaleString()}
+												{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
+													<span class="italic">(edited)</span>
+												{/if}
 											</p>
 										</div>
-										<Button
-											variant="ghost"
-											size="icon"
-											class="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-											onclick={() => handleUnlinkMaterial(mat.materialId)}
-										>
-											<Unlink class="h-3.5 w-3.5" />
-										</Button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-
-					<Separator />
-
-					<div>
-						<div class="mb-4 flex items-center gap-2">
-							<MessageSquare class="h-4 w-4 text-muted-foreground" />
-							<h4 class="font-semibold">Comments ({comments.length})</h4>
-						</div>
-
-						<div class="mb-4 space-y-3">
-							{#if comments.length === 0}
-								<p class="text-sm text-muted-foreground">
-									No comments yet. Be the first to comment!
-								</p>
-							{:else}
-								{#each topLevelComments as comment}
-									{@const authorName =
-										comment.authorName || userMap.get(comment.userId) || comment.userId}
-									{@const isOwnComment = currentUserId && comment.userId === currentUserId}
-									{@const replies = repliesMap.get(comment.id) || []}
-									<div class="rounded-lg border p-3">
-										<div class="mb-1.5 flex items-center gap-2">
-											<div
-												class="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+										<div class="flex items-center gap-1">
+											<Button
+												variant="ghost"
+												size="icon"
+												class="h-7 w-7"
+												onclick={() => {
+													replyingToId = replyingToId === comment.id ? null : comment.id;
+												}}
+												title="Reply"
 											>
-												{getInitials(authorName)}
-											</div>
-											<div class="min-w-0 flex-1">
-												<p class="text-sm font-medium">{authorName}</p>
-												<p class="text-xs text-muted-foreground">
-													{new Date(comment.createdAt).toLocaleString()}
-													{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
-														<span class="italic">(edited)</span>
-													{/if}
-												</p>
-											</div>
-											<div class="flex items-center gap-1">
+												<Reply class="h-3 w-3" />
+											</Button>
+											{#if isOwnComment && editingCommentId !== comment.id}
 												<Button
 													variant="ghost"
 													size="icon"
 													class="h-7 w-7"
 													onclick={() => {
-														replyingToId = replyingToId === comment.id ? null : comment.id;
+														editingCommentId = comment.id;
+														editingContent = comment.content;
 													}}
-													title="Reply"
 												>
-													<Reply class="h-3 w-3" />
+													<Pencil class="h-3 w-3" />
 												</Button>
-												{#if isOwnComment && editingCommentId !== comment.id}
-													<Button
-														variant="ghost"
-														size="icon"
-														class="h-7 w-7"
-														onclick={() => {
-															editingCommentId = comment.id;
-															editingContent = comment.content;
-														}}
-													>
-														<Pencil class="h-3 w-3" />
-													</Button>
-													<Button
-														variant="ghost"
-														size="icon"
-														class="h-7 w-7"
-														onclick={() => handleDeleteComment(comment.id)}
-													>
-														<Trash2 class="h-3 w-3" />
-													</Button>
-												{/if}
-											</div>
-										</div>
-										{#if editingCommentId === comment.id}
-											<div class="space-y-2">
-												<RichEditor
-													bind:this={editCommentEditor}
-													content={editingContent}
-													placeholder="Edit comment..."
-													minHeight="120px"
-													showFooter={false}
-													users={mentionUsers}
-												/>
-												<div class="flex gap-2">
-													<Button
-														size="sm"
-														onclick={() => handleEditComment(comment.id)}
-														disabled={editLoading}
-													>
-														{editLoading ? 'Saving...' : 'Save'}
-													</Button>
-													<Button
-														size="sm"
-														variant="outline"
-														onclick={() => {
-															editingCommentId = null;
-															editingContent = '';
-														}}
-													>
-														Cancel
-													</Button>
-												</div>
-											</div>
-										{:else}
-											<div class="comment-display text-sm leading-relaxed">
-												{@html comment.content}
-											</div>
-										{/if}
-										{#if comment.attachmentPath}
-											{@const url = attachmentUrls[comment.id]}
-											{#if !url}
-												{(loadAttachmentUrl(comment.id), '')}
-												<div class="mt-2 h-32 w-48 animate-pulse rounded-lg bg-muted"></div>
-											{:else}
-												<button class="mt-2 block cursor-pointer" onclick={() => openLightbox(url)}>
-													<img
-														src={url}
-														alt={comment.attachmentFileName || 'Attachment'}
-														class="max-h-48 rounded-lg border transition-opacity hover:opacity-90"
-													/>
-												</button>
+												<Button
+													variant="ghost"
+													size="icon"
+													class="h-7 w-7"
+													onclick={() => handleDeleteComment(comment.id)}
+												>
+													<Trash2 class="h-3 w-3" />
+												</Button>
 											{/if}
-										{/if}
-
-										<!-- Replies -->
-										{#if replies.length > 0}
-											<div class="mt-3 ml-6 space-y-2 border-l-2 border-muted pl-3">
-												{#each replies as reply}
-													{@const replyAuthor =
-														reply.authorName || userMap.get(reply.userId) || reply.userId}
-													{@const isOwnReply = currentUserId && reply.userId === currentUserId}
-													<div class="py-1.5">
-														<div class="mb-1 flex items-center gap-2">
-															<div
-																class="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
-															>
-																{getInitials(replyAuthor)}
-															</div>
-															<p class="text-xs font-medium">{replyAuthor}</p>
-															<p class="text-xs text-muted-foreground">
-																{new Date(reply.createdAt).toLocaleString()}
-															</p>
-															{#if isOwnReply}
-																<Button
-																	variant="ghost"
-																	size="icon"
-																	class="ml-auto h-5 w-5"
-																	onclick={() => handleDeleteComment(reply.id)}
-																>
-																	<Trash2 class="h-2.5 w-2.5" />
-																</Button>
-															{/if}
-														</div>
-														<div class="comment-display ml-8 text-sm">{@html reply.content}</div>
-													</div>
-												{/each}
-											</div>
-										{/if}
-
-										<!-- Reply editor -->
-										{#if replyingToId === comment.id}
-											<div class="mt-3 ml-6 border-l-2 border-primary/30 pl-3">
-												<RichEditor
-													bind:this={replyEditor}
-													placeholder="Write a reply..."
-													minHeight="120px"
-													showFooter={false}
-													users={mentionUsers}
-												/>
-												<div class="mt-2 flex gap-2">
-													<Button
-														size="sm"
-														onclick={() => handleReply(comment.id)}
-														disabled={replyLoading}
-													>
-														{replyLoading ? 'Replying...' : 'Reply'}
-													</Button>
-													<Button
-														size="sm"
-														variant="outline"
-														onclick={() => {
-															replyingToId = null;
-														}}
-													>
-														Cancel
-													</Button>
-												</div>
-											</div>
-										{/if}
+										</div>
 									</div>
-								{/each}
-							{/if}
-						</div>
-
-						<div class="space-y-2">
-							<RichEditor
-								bind:this={newCommentEditor}
-								placeholder="Add a comment... (paste an image with Ctrl+V)"
-								minHeight="120px"
-								showFooter={false}
-								onPasteImage={(file) => uploadImage(file)}
-								users={mentionUsers}
-							/>
-							{#if uploadingImage}
-								<div class="flex items-center gap-2 text-sm text-muted-foreground">
-									<div
-										class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
-									></div>
-									Uploading image...
-								</div>
-							{/if}
-							{#if pendingAttachments.length > 0}
-								<div class="flex flex-wrap gap-2">
-									{#each pendingAttachments as attachment, i}
-										<div class="relative inline-block">
-											<img
-												src={attachment.previewUrl}
-												alt="Preview"
-												class="max-h-32 rounded-lg border"
+									{#if editingCommentId === comment.id}
+										<div class="space-y-2">
+											<RichEditor
+												bind:this={editCommentEditor}
+												content={editingContent}
+												placeholder="Edit comment..."
+												minHeight="120px"
+												showFooter={false}
+												users={mentionUsers}
 											/>
-											<button
-												class="text-destructive-foreground absolute -top-2 -right-2 rounded-full bg-destructive p-0.5 hover:bg-destructive/90"
-												onclick={() => removePendingAttachment(i)}
-											>
-												<X class="h-4 w-4" />
-											</button>
-										</div>
-									{/each}
-								</div>
-							{/if}
-							<Button
-								size="sm"
-								onclick={handleAddComment}
-								disabled={commentLoading || uploadingImage}
-							>
-								{commentLoading ? 'Posting...' : 'Post Comment'}
-							</Button>
-						</div>
-					</div>
-
-					<Separator />
-
-					<div>
-						<div class="mb-4 flex items-center gap-2">
-							<History class="h-4 w-4 text-muted-foreground" />
-							<h4 class="font-semibold">Activity ({activities.length})</h4>
-						</div>
-
-						{#if activities.length === 0}
-							<p class="text-sm text-muted-foreground">No activity recorded yet.</p>
-						{:else}
-							<div class="relative max-h-[350px] overflow-y-auto">
-								<div class="absolute top-0 bottom-0 left-[15px] w-px bg-border"></div>
-								<div class="space-y-4">
-									{#each activities as activity}
-										{@const actorName =
-											activity.userName || userMap.get(activity.userId) || activity.userId}
-										<div class="relative flex items-start gap-3">
-											<div
-												class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full {getActivityIconColor(
-													activity.action
-												)} z-10"
-											>
-												{#if activity.action === 'created'}
-													<Plus class="h-3.5 w-3.5" />
-												{:else if activity.action === 'commented'}
-													<MessageSquare class="h-3.5 w-3.5" />
-												{:else if activity.action === 'approved'}
-													<Check class="h-3.5 w-3.5" />
-												{:else if activity.action === 'rejected'}
-													<X class="h-3.5 w-3.5" />
-												{:else if activity.action === 'status_changed'}
-													<ArrowRight class="h-3.5 w-3.5" />
-												{:else if activity.action === 'assigned'}
-													<UserCheck class="h-3.5 w-3.5" />
-												{:else}
-													<RefreshCw class="h-3.5 w-3.5" />
-												{/if}
+											<div class="flex gap-2">
+												<Button
+													size="sm"
+													onclick={() => handleEditComment(comment.id)}
+													disabled={editLoading}
+												>
+													{editLoading ? 'Saving...' : 'Save'}
+												</Button>
+												<Button
+													size="sm"
+													variant="outline"
+													onclick={() => {
+														editingCommentId = null;
+														editingContent = '';
+													}}
+												>
+													Cancel
+												</Button>
 											</div>
-											<div class="min-w-0 flex-1 pt-0.5">
-												<p class="text-sm">
-													<span class="font-medium">{actorName}</span>
-													<span class="text-muted-foreground"> {getActivityVerb(activity)}</span>
-												</p>
-												{#if activity.oldValue || activity.newValue}
-													<div class="mt-1 flex flex-wrap items-center gap-1.5">
-														{#if activity.oldValue}
-															<Badge
-																variant="outline"
-																class="text-xs font-normal {getActivityValueColor(
-																	activity.field,
-																	activity.oldValue
-																)}">{resolveActivityValue(activity.field, activity.oldValue)}</Badge
+										</div>
+									{:else}
+										<div class="comment-display text-sm leading-relaxed">
+											{@html comment.content}
+										</div>
+									{/if}
+									{#if comment.attachmentPath}
+										{@const url = attachmentUrls[comment.id]}
+										{#if !url}
+											{(loadAttachmentUrl(comment.id), '')}
+											<div class="mt-2 h-32 w-48 animate-pulse rounded-lg bg-muted"></div>
+										{:else}
+											<button class="mt-2 block cursor-pointer" onclick={() => openLightbox(url)}>
+												<img
+													src={url}
+													alt={comment.attachmentFileName || 'Attachment'}
+													class="max-h-48 rounded-lg border transition-opacity hover:opacity-90"
+												/>
+											</button>
+										{/if}
+									{/if}
+
+									<!-- Replies -->
+									{#if replies.length > 0}
+										<div class="mt-3 ml-6 space-y-2 border-l-2 border-muted pl-3">
+											{#each replies as reply}
+												{@const replyAuthor =
+													reply.authorName || userMap.get(reply.userId) || reply.userId}
+												{@const isOwnReply = currentUserId && reply.userId === currentUserId}
+												<div class="py-1.5">
+													<div class="mb-1 flex items-center gap-2">
+														<div
+															class="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+														>
+															{getInitials(replyAuthor)}
+														</div>
+														<p class="text-xs font-medium">{replyAuthor}</p>
+														<p class="text-xs text-muted-foreground">
+															{new Date(reply.createdAt).toLocaleString()}
+														</p>
+														{#if isOwnReply}
+															<Button
+																variant="ghost"
+																size="icon"
+																class="ml-auto h-5 w-5"
+																onclick={() => handleDeleteComment(reply.id)}
 															>
-														{/if}
-														{#if activity.oldValue && activity.newValue}
-															<ArrowRight class="h-3 w-3 shrink-0 text-muted-foreground" />
-														{/if}
-														{#if activity.newValue}
-															<Badge
-																variant="secondary"
-																class="text-xs font-normal {getActivityValueColor(
-																	activity.field,
-																	activity.newValue
-																)}">{resolveActivityValue(activity.field, activity.newValue)}</Badge
-															>
+																<Trash2 class="h-2.5 w-2.5" />
+															</Button>
 														{/if}
 													</div>
-												{/if}
-												<p class="mt-1 text-xs text-muted-foreground">
-													{timeAgo(activity.createdAt)}
-												</p>
+													<div class="comment-display ml-8 text-sm">{@html reply.content}</div>
+												</div>
+											{/each}
+										</div>
+									{/if}
+
+									<!-- Reply editor -->
+									{#if replyingToId === comment.id}
+										<div class="mt-3 ml-6 border-l-2 border-primary/30 pl-3">
+											<RichEditor
+												bind:this={replyEditor}
+												placeholder="Write a reply..."
+												minHeight="120px"
+												showFooter={false}
+												users={mentionUsers}
+											/>
+											<div class="mt-2 flex gap-2">
+												<Button
+													size="sm"
+													onclick={() => handleReply(comment.id)}
+													disabled={replyLoading}
+												>
+													{replyLoading ? 'Replying...' : 'Reply'}
+												</Button>
+												<Button
+													size="sm"
+													variant="outline"
+													onclick={() => {
+														replyingToId = null;
+													}}
+												>
+													Cancel
+												</Button>
 											</div>
 										</div>
-									{/each}
+									{/if}
 								</div>
-							</div>
+							{/each}
 						{/if}
 					</div>
+
+					<div class="space-y-2">
+						<RichEditor
+							bind:this={newCommentEditor}
+							placeholder="Add a comment... (paste an image with Ctrl+V)"
+							minHeight="120px"
+							showFooter={false}
+							onPasteImage={(file) => uploadImage(file)}
+							users={mentionUsers}
+						/>
+						{#if uploadingImage}
+							<div class="flex items-center gap-2 text-sm text-muted-foreground">
+								<div
+									class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
+								></div>
+								Uploading image...
+							</div>
+						{/if}
+						{#if pendingAttachments.length > 0}
+							<div class="flex flex-wrap gap-2">
+								{#each pendingAttachments as attachment, i}
+									<div class="relative inline-block">
+										<img
+											src={attachment.previewUrl}
+											alt="Preview"
+											class="max-h-32 rounded-lg border"
+										/>
+										<button
+											class="text-destructive-foreground absolute -top-2 -right-2 rounded-full bg-destructive p-0.5 hover:bg-destructive/90"
+											onclick={() => removePendingAttachment(i)}
+										>
+											<X class="h-4 w-4" />
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+						<Button
+							size="sm"
+							onclick={handleAddComment}
+							disabled={commentLoading || uploadingImage}
+						>
+							{commentLoading ? 'Posting...' : 'Post Comment'}
+						</Button>
+					</div>
 				</div>
+
+				<Separator />
+
+				<div>
+					<div class="mb-4 flex items-center gap-2">
+						<History class="h-4 w-4 text-muted-foreground" />
+						<h4 class="font-semibold">Activity ({activities.length})</h4>
+					</div>
+
+					{#if activities.length === 0}
+						<p class="text-sm text-muted-foreground">No activity recorded yet.</p>
+					{:else}
+						<div class="relative max-h-[350px] overflow-y-auto">
+							<div class="absolute top-0 bottom-0 left-[15px] w-px bg-border"></div>
+							<div class="space-y-4">
+								{#each activities as activity}
+									{@const actorName =
+										activity.userName || userMap.get(activity.userId) || activity.userId}
+									<div class="relative flex items-start gap-3">
+										<div
+											class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full {getActivityIconColor(
+												activity.action
+											)} z-10"
+										>
+											{#if activity.action === 'created'}
+												<Plus class="h-3.5 w-3.5" />
+											{:else if activity.action === 'commented'}
+												<MessageSquare class="h-3.5 w-3.5" />
+											{:else if activity.action === 'approved'}
+												<Check class="h-3.5 w-3.5" />
+											{:else if activity.action === 'rejected'}
+												<X class="h-3.5 w-3.5" />
+											{:else if activity.action === 'status_changed'}
+												<ArrowRight class="h-3.5 w-3.5" />
+											{:else if activity.action === 'assigned'}
+												<UserCheck class="h-3.5 w-3.5" />
+											{:else}
+												<RefreshCw class="h-3.5 w-3.5" />
+											{/if}
+										</div>
+										<div class="min-w-0 flex-1 pt-0.5">
+											<p class="text-sm">
+												<span class="font-medium">{actorName}</span>
+												<span class="text-muted-foreground"> {getActivityVerb(activity)}</span>
+											</p>
+											{#if activity.oldValue || activity.newValue}
+												<div class="mt-1 flex flex-wrap items-center gap-1.5">
+													{#if activity.oldValue}
+														<Badge
+															variant="outline"
+															class="text-xs font-normal {getActivityValueColor(
+																activity.field,
+																activity.oldValue
+															)}">{resolveActivityValue(activity.field, activity.oldValue)}</Badge
+														>
+													{/if}
+													{#if activity.oldValue && activity.newValue}
+														<ArrowRight class="h-3 w-3 shrink-0 text-muted-foreground" />
+													{/if}
+													{#if activity.newValue}
+														<Badge
+															variant="secondary"
+															class="text-xs font-normal {getActivityValueColor(
+																activity.field,
+																activity.newValue
+															)}">{resolveActivityValue(activity.field, activity.newValue)}</Badge
+														>
+													{/if}
+												</div>
+											{/if}
+											<p class="mt-1 text-xs text-muted-foreground">
+												{timeAgo(activity.createdAt)}
+											</p>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
 		</DialogContent>
 	</Dialog>
 {/if}
