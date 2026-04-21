@@ -38,6 +38,7 @@
 	}
 
 	async function commit() {
+		if (saving) return; // guard against double-fire when blur triggers during save
 		if (buffer === value) {
 			editing = false;
 			return;
