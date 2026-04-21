@@ -164,3 +164,19 @@ export const STATUS_GROUP_DOT_CLASSES: Record<StatusGroup, string> = {
 	done: 'bg-emerald-500',
 	cancelled: 'bg-zinc-400'
 };
+
+// filled badge classes for priority (used in dialogs where a solid Badge is rendered)
+export const PRIORITY_BADGE_CLASSES: Record<TaskPriority | 'none', string> = {
+	urgent: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+	high: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+	medium: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+	low: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+	none: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
+};
+
+export function getPriorityBadgeClasses(priority: string | null | undefined): string {
+	if (priority && priority in PRIORITY_BADGE_CLASSES) {
+		return PRIORITY_BADGE_CLASSES[priority as TaskPriority];
+	}
+	return PRIORITY_BADGE_CLASSES.none;
+}

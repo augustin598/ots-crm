@@ -40,6 +40,7 @@
 		matchesFilters,
 		isTaskOverdue,
 		computeCounters,
+		getPriorityBadgeClasses,
 		type Filters
 	} from '$lib/components/my-plans/filters';
 	import { getClients } from '$lib/remotes/clients.remote';
@@ -179,21 +180,6 @@
 			assignError = e instanceof Error ? e.message : 'Failed to assign task';
 		} finally {
 			assignLoading = false;
-		}
-	}
-
-	function getPriorityColor(priority: string) {
-		switch (priority) {
-			case 'urgent':
-				return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-			case 'high':
-				return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
-			case 'medium':
-				return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
-			case 'low':
-				return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-			default:
-				return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300';
 		}
 	}
 
@@ -633,7 +619,7 @@
 									<div class="mt-2 flex items-center gap-2">
 										<Badge variant="outline" class="text-xs">{task.status}</Badge>
 										{#if task.priority}
-											<Badge class="text-xs {getPriorityColor(task.priority)}"
+											<Badge class="text-xs {getPriorityBadgeClasses(task.priority)}"
 												>{task.priority}</Badge
 											>
 										{/if}
@@ -728,7 +714,7 @@
 									<div class="mt-2 flex items-center gap-2">
 										<Badge variant="outline" class="text-xs">{task.status}</Badge>
 										{#if task.priority}
-											<Badge class="text-xs {getPriorityColor(task.priority)}"
+											<Badge class="text-xs {getPriorityBadgeClasses(task.priority)}"
 												>{task.priority}</Badge
 											>
 										{/if}
