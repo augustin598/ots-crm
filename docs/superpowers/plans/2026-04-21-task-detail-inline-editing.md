@@ -187,9 +187,14 @@ const projectOptions = $derived([
 ]);
 // Optimistic local state mirrors task prop + overrides on save
 let localOverrides = $state<Partial<Task>>({});
+let lastTaskId = $state<string | null>(null);
 $effect(() => {
-  // Reset overrides when task identity changes
-  if (task) localOverrides = {};
+  // Reset overrides ONLY when task identity changes (new task opened) —
+  // not on prop refetch, otherwise in-flight edits would be wiped.
+  if (task && task.id !== lastTaskId) {
+    localOverrides = {};
+    lastTaskId = task.id;
+  }
 });
 const currentTask = $derived(task ? { ...task, ...localOverrides } : null);
 
@@ -204,14 +209,18 @@ const dueDateValue = $derived<DateValue | undefined>(() => {
 
 async function saveField<K extends keyof Task>(field: K, value: Task[K]) {
   if (!task) return;
+  // Validate title before optimistic apply — updateTask schema requires non-empty title
+  if (field === 'title' && !String(value ?? '').trim()) {
+    toast.error('Titlul nu poate fi gol');
+    return;
+  }
   const previous = (currentTask as any)?.[field];
   (localOverrides as any)[field] = value;
   try {
-    await updateTask({
-      taskId: task.id,
-      title: field === 'title' ? (value as string) : task.title,
-      [field]: value
-    } as any).updates(
+    // Always include current title (required by valibot schema in tasks.remote.ts)
+    const payload: any = { taskId: task.id, title: currentTask?.title ?? task.title };
+    payload[field] = value;
+    await updateTask(payload).updates(
       getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
       getTask(task.id),
       getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
@@ -357,7 +366,11 @@ Approve/Reject rămân vizibile mereu (nu mai e `mode === 'view'` gate).
 | Dropdown-urile/popover-urile peste dialog — z-index | bits-ui gestionează automat prin portal. Verifică vizual pe localhost. |
 | Error toast import | `import { toast } from 'svelte-sonner';` — deja importat în task-detail-dialog.svelte:70. |
 | Milestones editing | **Out of scope**. Nu adăugăm inline-edit pentru milestone (depinde de project, logică cascadă). Dacă user vrea să schimbe milestone, rămâne opțiunea de a folosi EditTaskDialog din tasks page. |
-| Validare titlu gol | `saveField('title', '')` trebuie blocat — adaugă guard `if (field === 'title' && !(value as string).trim()) { toast.error('Titlul nu poate fi gol'); rollback; return; }`. |
+| Validare titlu gol | Fix la nivel de `saveField`: guard `if (field === 'title' && !String(value).trim()) { toast + return }`. |
+| **Client user restrictions** (flagged în review Gemini) | `tasks.remote.ts:741-756` șterge `status/priority/assignedToUserId/projectId` din payload pentru client users. Efect: inline edit pentru aceste câmpuri pare să salveze, dar serverul ignoră. **Fix:** condiționează afișarea popoverelor pe `event.locals.isClientUser === false`. Prop `currentUserId` nu include acest flag; planul cere să exportăm `isClientUser` prin `$page.data` sau prin prop nou pe TaskDetailDialog (`readonly?: boolean`). **Decizie MVP:** neutralizăm pe moment — vizual rămân clickabile, serverul ignoră silentios (comportament existent dinainte). Follow-up separat pentru proper read-only UI. |
+| **Buffer pierdut pe save-error** (flagged Gemini) | `InlineEditableText.commit()` la eroare stay în edit mode — dar `buffer` rămâne intact. Confirmat în design: `catch {}` nu modifică `buffer`, doar `saving = false`. |
+| **Combobox API neverificat** (flagged Gemini) | Pasul 0 al execuției = citim `app/src/lib/components/ui/combobox/combobox.svelte` și confirmăm dacă expune `onChange` callback sau doar `bind:value`. Dacă doar `bind:value`, folosim `$effect` cu track pe valoare, sau înlocuim cu `bits-ui Select` (consistent cu edit-task-form). |
+| **dueDate UTC** (flagged Gemini) | `saveField('dueDate', '2026-04-22')` → server face `new Date(string)` care interpretează UTC. `task.dueDate` în pagini cu TZ+3 apare ca `2026-04-22 03:00`. Acceptabil vizual (format doar dată), dar verifică pe localhost cu `Europe/Bucharest`. |
 
 ## Verificare
 
@@ -397,6 +410,22 @@ Revert commit-ul cu implementarea asta. Commit-ul anterior `574294a` (view/edit 
 - TaskDetailDialog refactor: ~1.5h (8 câmpuri × 10-15min fiecare + cleanup)
 - Type-check + prettier + smoke test: ~30min
 - **Total: ~2.5-3h**
+
+## Ordine de execuție (de-risk, după review Gemini)
+
+1. **Pas 0 (5min) — citește `taskSchema`** în `tasks.remote.ts` pentru a confirma ce câmpuri sunt mandatory la `updateTask`. Dacă `title` e required (probabil da), `saveField` îl include mereu (deja reflectat în design).
+2. **Pas 0.5 (5min) — citește `combobox.svelte`** pentru a confirma API-ul (`onChange` vs `bind:value`). Ajustează secțiunea 5/6 din markup-ul propus.
+3. **Pas 1 (30min) — `inline-editable-text.svelte`:** self-contained, test pe localhost (text + textarea, Enter/blur/Escape).
+4. **Pas 2 (25min) — status + priority popovers:** cele mai simple (Select cu lista fixă), testează z-index peste DialogContent.
+5. **Pas 3 (20min) — Assignee Select** (copy din edit-task-form, lista userilor).
+6. **Pas 4 (20min) — Client + Project** (Combobox sau Select, în funcție de API confirmat la pasul 0.5).
+7. **Pas 5 (15min) — DueDate Calendar** (test TZ Europe/Bucharest).
+8. **Pas 6 (20min) — wrap title + description** în `<InlineEditableText>`.
+9. **Pas 7 (15min) — șterge mode='view'|'edit' + butoanele Edit inutile + EditTaskForm import.**
+10. **Pas 8 (15min) — type-check + prettier + commit.**
+11. **Pas 9 (15min) — smoke test scenariu user:** "click task → schimbă status la Done + scrie un comentariu fără să schimbi modul".
+
+**Blocker crit:** pasul 0. Dacă schema refuză payload-ul, reformulează `saveField` înainte de a merge mai departe.
 
 ## Decizii amânate (follow-up ulterior)
 
