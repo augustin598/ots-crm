@@ -1,379 +1,375 @@
 <script lang="ts">
-	import { getServices, createService, deleteService } from '$lib/remotes/services.remote';
-	import { getClients } from '$lib/remotes/clients.remote';
-	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
-	import { formatAmount, CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import {
-		Dialog,
-		DialogContent,
-		DialogDescription,
-		DialogFooter,
-		DialogHeader,
-		DialogTitle,
-		DialogTrigger
-	} from '$lib/components/ui/dialog';
+		Select,
+		SelectContent,
+		SelectItem,
+		SelectTrigger
+	} from '$lib/components/ui/select';
+	import PackageIcon from '@lucide/svelte/icons/package';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import InboxIcon from '@lucide/svelte/icons/inbox';
+	import PercentIcon from '@lucide/svelte/icons/percent';
+	import CategoryIcon from '$lib/components/services/CategoryIcon.svelte';
+	import DiscountsDialog from '$lib/components/services/DiscountsDialog.svelte';
 	import {
-		DropdownMenu,
-		DropdownMenuContent,
-		DropdownMenuItem,
-		DropdownMenuTrigger
-	} from '$lib/components/ui/dropdown-menu';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import { Switch } from '$lib/components/ui/switch';
-	import PlusIcon from '@lucide/svelte/icons/plus';
-	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
+		CATEGORIES,
+		CRM_FEATURES,
+		TIERS,
+		TIER_LABELS,
+		TIER_COLORS,
+		formatFeatureValue,
+		isBooleanFeature,
+		getCategory,
+		type Category,
+		type Tier
+	} from '$lib/constants/ots-catalog';
+	import {
+		getPackageRequests,
+		updatePackageRequestStatus
+	} from '$lib/remotes/packages.remote';
+	import InvoiceItemsPanel from './InvoiceItemsPanel.svelte';
+	import PackageComparisonDialog from './PackageComparisonDialog.svelte';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import MinusIcon from '@lucide/svelte/icons/minus';
 
-	const tenantSlug = $derived(page.params.tenant);
-	const servicesQuery = getServices({});
-	const services = $derived(servicesQuery.current || []);
-	const loading = $derived(servicesQuery.loading);
+	let activeTab = $state(page.url.searchParams.get('tab') || 'packages');
 
-	const clientsQuery = getClients();
-	const clients = $derived(clientsQuery.current || []);
+	const requestsQuery = getPackageRequests();
+	const requests = $derived(requestsQuery.current || []);
+	const requestsLoading = $derived(requestsQuery.loading);
 
-	const invoiceSettingsQuery = getInvoiceSettings();
-	const invoiceSettings = $derived(invoiceSettingsQuery.current);
-
-	// Create a map of client IDs to names
-	const clientMap = $derived(
-		new Map(clients.map((client) => [client.id, client.name]))
+	let statusFilter = $state<'all' | 'pending' | 'contacted' | 'accepted' | 'rejected'>('all');
+	const filteredRequests = $derived(
+		statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)
 	);
-	const clientOptions = $derived(clients.map((c) => ({ value: c.id, label: c.name })));
 
-	let isDialogOpen = $state(false);
-	let formName = $state('');
-	let formDescription = $state('');
-	let formClientId = $state('');
-	let formCategory = $state('');
-	let formPrice = $state('');
-	let formCurrency = $state<Currency>('RON');
-	let formUnit = $state('hour');
-	let formActive = $state(true);
-	let formLoading = $state(false);
-	let formError = $state<string | null>(null);
+	const STATUS_LABEL: Record<string, string> = {
+		pending: 'În așteptare',
+		contacted: 'Contactat',
+		accepted: 'Acceptat',
+		rejected: 'Respins'
+	};
 
-	// Update currency when settings load
-	$effect(() => {
-		if (invoiceSettings?.defaultCurrency) {
-			formCurrency = invoiceSettings.defaultCurrency as Currency;
-		}
-	});
-
-	// Map recurring type to display unit
-	function getUnitFromRecurringType(recurringType: string): string {
-		switch (recurringType) {
-			case 'daily':
-				return 'day';
-			case 'weekly':
-				return 'week';
-			case 'monthly':
-				return 'month';
-			case 'yearly':
-				return 'year';
-			case 'none':
+	function statusBadgeClass(status: string): string {
+		switch (status) {
+			case 'pending':
+				return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300';
+			case 'contacted':
+				return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
+			case 'accepted':
+				return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300';
+			case 'rejected':
+				return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300';
 			default:
-				return 'project';
+				return 'bg-gray-100 text-gray-700';
 		}
 	}
 
-	// Map unit to recurring type for saving
-	function getRecurringTypeFromUnit(unit: string): string {
-		switch (unit) {
-			case 'hour':
-				return 'none'; // One-time per hour
-			case 'day':
-				return 'daily';
-			case 'project':
-				return 'none';
-			case 'month':
-				return 'monthly';
-			default:
-				return 'none';
-		}
+	let selectedCategory = $state<Category | null>(null);
+	let dialogOpen = $state(false);
+	let discountsOpen = $state(false);
+
+	function openCategory(cat: Category) {
+		selectedCategory = cat;
+		dialogOpen = true;
 	}
 
-	function getCategoryColor(category: string) {
-		switch (category) {
-			case 'Development':
-				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
-			case 'Design':
-				return 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300';
-			case 'Marketing':
-				return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
-			case 'Consulting':
-				return 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300';
-			default:
-				return 'bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300';
-		}
-	}
-
-	async function handleCreateService() {
-		if (!formName || !formClientId) {
-			formError = 'Service name and client are required';
-			return;
-		}
-
-		formLoading = true;
-		formError = null;
-
+	async function handleStatusChange(
+		requestId: string,
+		status: 'pending' | 'contacted' | 'accepted' | 'rejected'
+	) {
 		try {
-			await createService({
-				name: formName,
-				description: formDescription || undefined,
-				category: formCategory || undefined,
-				clientId: formClientId,
-				price: formPrice ? parseFloat(formPrice) : undefined,
-				currency: formCurrency || undefined,
-				recurringType: getRecurringTypeFromUnit(formUnit),
-				recurringInterval: 1,
-				isActive: formActive
-			}).updates(servicesQuery);
-
-			// Reset form
-			formName = '';
-			formDescription = '';
-			formClientId = '';
-			formCategory = '';
-			formPrice = '';
-			formCurrency = (invoiceSettings?.defaultCurrency || 'RON') as Currency;
-			formUnit = 'hour';
-			formActive = true;
-			isDialogOpen = false;
+			await updatePackageRequestStatus({ requestId, status }).updates(requestsQuery);
 		} catch (e) {
-			formError = e instanceof Error ? e.message : 'Failed to create service';
-		} finally {
-			formLoading = false;
+			alert(e instanceof Error ? e.message : 'Eroare la actualizare status');
 		}
 	}
 
-	async function handleDeleteService(serviceId: string) {
-		if (!confirm('Are you sure you want to delete this service?')) {
-			return;
-		}
-
-		try {
-			await deleteService(serviceId).updates(servicesQuery);
-		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to delete service');
-		}
+	function categoryLabel(slug: string): string {
+		return getCategory(slug)?.name || slug;
 	}
 
+	function formatEur(value: number | null): string {
+		if (value === null) return '—';
+		return `${value.toLocaleString('ro-RO')} €`;
+	}
 
-	function formatUnit(recurringType: string): string {
-		const unit = getUnitFromRecurringType(recurringType);
-		if (unit === 'project') return 'Per Project';
-		if (unit === 'day') return 'Per Day';
-		if (unit === 'month') return 'Per Month';
-		if (unit === 'week') return 'Per Week';
-		if (unit === 'year') return 'Per Year';
-		return 'Per Hour';
+	function formatDate(d: Date | string | null | undefined): string {
+		if (!d) return '—';
+		const date = d instanceof Date ? d : new Date(d);
+		return date.toLocaleDateString('ro-RO', {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
 	}
 </script>
 
 <svelte:head>
-	<title>Services - CRM</title>
+	<title>Servicii — CRM</title>
 </svelte:head>
 
-<div class="mb-8 flex items-center justify-between">
-	<div>
-		<h1 class="text-3xl font-bold tracking-tight">Services</h1>
-		<p class="text-muted-foreground mt-1">Manage your service catalog and pricing</p>
+<div class="mb-6 flex items-start justify-between gap-4 flex-wrap">
+	<div class="min-w-0">
+		<h1 class="text-3xl font-bold tracking-tight">Servicii</h1>
+		<p class="text-muted-foreground mt-1">
+			Catalog pachete OTS pentru clienți + elemente de facturi.
+		</p>
 	</div>
-	<Dialog bind:open={isDialogOpen}>
-		<DialogTrigger>
-			{#snippet child({ props })}
-				<Button {...props}>
-					<PlusIcon class="mr-2 h-4 w-4" />
-					Add Service
-				</Button>
-			{/snippet}
-		</DialogTrigger>
-		<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
-			<DialogHeader>
-				<DialogTitle>Add New Service</DialogTitle>
-				<DialogDescription>Create a new service offering for your clients</DialogDescription>
-			</DialogHeader>
-			<div class="grid gap-4 py-4">
-				<div class="grid gap-2">
-					<Label for="name">Service Name</Label>
-					<Input id="name" bind:value={formName} placeholder="Web Development" />
-				</div>
-				<div class="grid gap-2">
-					<Label for="description">Description</Label>
-					<Textarea
-						id="description"
-						bind:value={formDescription}
-						placeholder="Describe what this service includes..."
-					/>
-				</div>
-				<div class="grid gap-2">
-					<Label for="clientId">Client *</Label>
-					<Combobox
-						bind:value={formClientId}
-						options={clientOptions}
-						placeholder="Select a client"
-						searchPlaceholder="Search clients..."
-					/>
-				</div>
-				<div class="grid gap-2">
-					<Label for="category">Category</Label>
-					<Select type="single" bind:value={formCategory}>
-						<SelectTrigger id="category">
-							{#if formCategory}
-								{formCategory}
-							{:else}
-								Select a category
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="Development">Development</SelectItem>
-							<SelectItem value="Design">Design</SelectItem>
-							<SelectItem value="Marketing">Marketing</SelectItem>
-							<SelectItem value="Consulting">Consulting</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-				<div class="grid gap-2">
-					<Label for="price">Price</Label>
-					<Input id="price" type="number" bind:value={formPrice} placeholder="150" step="0.01" />
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="grid gap-2">
-						<Label for="currency">Currency</Label>
-						<Select type="single" bind:value={formCurrency}>
-							<SelectTrigger id="currency">
-								{CURRENCY_LABELS[formCurrency]}
-							</SelectTrigger>
-							<SelectContent>
-								{#each CURRENCIES as curr}
-									<SelectItem value={curr}>{CURRENCY_LABELS[curr]}</SelectItem>
-								{/each}
-							</SelectContent>
-						</Select>
-					</div>
-					<div class="grid gap-2">
-						<Label for="unit">Unit</Label>
-						<Select type="single" bind:value={formUnit}>
-							<SelectTrigger id="unit">
-								{#if formUnit === 'hour'}
-									Per Hour
-								{:else if formUnit === 'day'}
-									Per Day
-								{:else if formUnit === 'project'}
-									Per Project
-								{:else if formUnit === 'month'}
-									Per Month
-								{:else}
-									Select unit
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="hour">Per Hour</SelectItem>
-								<SelectItem value="day">Per Day</SelectItem>
-								<SelectItem value="project">Per Project</SelectItem>
-								<SelectItem value="month">Per Month</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-				</div>
-				<div class="flex items-center justify-between">
-					<div class="space-y-0.5">
-						<Label for="active">Active Service</Label>
-						<p class="text-sm text-muted-foreground">Make this service available for clients</p>
-					</div>
-					<Switch id="active" bind:checked={formActive} />
-				</div>
-			</div>
-			{#if formError}
-				<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
-					<p class="text-sm text-red-800 dark:text-red-300">{formError}</p>
-				</div>
-			{/if}
-			<DialogFooter>
-				<Button variant="outline" onclick={() => (isDialogOpen = false)}>Cancel</Button>
-				<Button onclick={handleCreateService} disabled={formLoading}>
-					{formLoading ? 'Adding...' : 'Add Service'}
-				</Button>
-			</DialogFooter>
-		</DialogContent>
-	</Dialog>
+	<button
+		type="button"
+		onclick={() => (discountsOpen = true)}
+		class="group shrink-0 inline-flex items-center gap-3 px-5 py-3 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 dark:from-amber-500 dark:to-amber-600 text-white shadow-md shadow-amber-200/50 dark:shadow-amber-900/30 hover:shadow-lg hover:shadow-amber-300/50 hover:from-amber-500 hover:to-amber-600 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 cursor-pointer"
+	>
+		<span
+			class="flex items-center justify-center w-9 h-9 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors"
+		>
+			<PercentIcon class="h-4 w-4" />
+		</span>
+		<span class="flex flex-col items-start">
+			<span class="text-sm font-bold tracking-wide leading-tight">Discount multi-servicii</span>
+			<span class="text-[11px] font-medium text-white/80 leading-tight mt-0.5">
+				Economisești până la −22%
+			</span>
+		</span>
+	</button>
 </div>
 
-{#if loading}
-	<p>Loading services...</p>
-{:else if services.length === 0}
-	<Card>
-		<div class="p-6 text-center">
-			<p class="text-muted-foreground">No services yet. Get started by adding your first service.</p>
-		</div>
-	</Card>
-{:else}
-	<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-		{#each services as service}
-			<Card class="p-6">
-				<div class="flex items-start justify-between mb-4">
-					<div class="flex-1">
-						<div class="flex items-center gap-2 mb-2">
-							<h3 class="text-xl font-semibold">{service.name}</h3>
-							{#if service.isActive}
-								<Badge variant="default">Active</Badge>
-							{:else}
-								<Badge variant="outline">Inactive</Badge>
-							{/if}
-							{#if service.category}
-								<Badge class={getCategoryColor(service.category)}>{service.category}</Badge>
-							{/if}
+<Tabs bind:value={activeTab} class="w-full">
+	<TabsList>
+		<TabsTrigger value="packages">
+			<SparklesIcon class="mr-2 h-4 w-4" />
+			Pachete OTS
+		</TabsTrigger>
+		<TabsTrigger value="requests">
+			<InboxIcon class="mr-2 h-4 w-4" />
+			Cereri clienți
+			{#if requests.filter((r) => r.status === 'pending').length > 0}
+				<Badge class="ml-2" variant="default">
+					{requests.filter((r) => r.status === 'pending').length}
+				</Badge>
+			{/if}
+		</TabsTrigger>
+		<TabsTrigger value="invoice-items">
+			<PackageIcon class="mr-2 h-4 w-4" />
+			Elemente de facturi
+		</TabsTrigger>
+	</TabsList>
+
+	<TabsContent value="packages" class="mt-6">
+		<section class="mb-10">
+			<div class="flex items-center gap-2 mb-1">
+				<SparklesIcon class="h-3.5 w-3.5 text-primary" />
+				<span class="text-[11px] font-medium uppercase tracking-wider text-primary">Inclus gratuit</span>
+			</div>
+			<h2 class="text-base font-semibold">Acces CRM real-time — diferențiatorul OTS</h2>
+			<p class="text-sm text-muted-foreground mt-1 mb-4">
+				Clientul vede spend, conversii, poziții SEO, uptime și email stats live, 24/7.
+			</p>
+			<div class="overflow-x-auto rounded-lg border">
+				<table class="w-full text-sm">
+					<thead class="bg-muted/30">
+						<tr>
+							<th class="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Feature CRM</th>
+							{#each TIERS as tier (tier)}
+								{@const colors = TIER_COLORS[tier]}
+								<th class="px-3 py-2 text-xs font-semibold text-center {colors.text}">
+									<div class="inline-flex items-center gap-1.5">
+										<span class="h-1.5 w-1.5 rounded-full {colors.dot}"></span>
+										{TIER_LABELS[tier]}
+									</div>
+								</th>
+							{/each}
+						</tr>
+					</thead>
+					<tbody>
+						{#each CRM_FEATURES as feat (feat.id)}
+							<tr class="border-t">
+								<td class="px-3 py-2">{feat.label}</td>
+								{#each TIERS as tier (tier)}
+									{@const value = feat.values[tier]}
+									<td class="px-3 py-2 text-center">
+										{#if isBooleanFeature(value)}
+											{#if value}
+												<CheckIcon class="mx-auto h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+											{:else}
+												<MinusIcon class="mx-auto h-3.5 w-3.5 text-muted-foreground/30" />
+											{/if}
+										{:else}
+											<span class="font-medium text-xs">{formatFeatureValue(value)}</span>
+										{/if}
+									</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<h2 class="text-xl font-semibold mb-4">Categorii servicii</h2>
+		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+			{#each CATEGORIES as category (category.slug)}
+				<Card class="p-0 hover:border-primary/50 hover:shadow-sm transition-all">
+					<button
+						type="button"
+						class="w-full text-left p-6 cursor-pointer"
+						onclick={() => openCategory(category)}
+					>
+						<div class="flex items-start gap-3 mb-4">
+							<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
+								<CategoryIcon slug={category.slug} class="h-5 w-5" />
+							</div>
+							<div class="min-w-0 flex-1">
+								<h3 class="font-semibold text-lg leading-tight">{category.name}</h3>
+								<p class="text-xs text-muted-foreground mt-1">{category.tagline}</p>
+							</div>
 						</div>
-					</div>
-					<DropdownMenu>
-						<DropdownMenuTrigger>
-							{#snippet child({ props })}
-								<Button {...props} variant="ghost" size="icon">
-									<MoreVerticalIcon class="h-4 w-4" />
-								</Button>
-							{/snippet}
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end">
-							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/services/${service.id}/edit`)}>
-								Edit
-							</DropdownMenuItem>
-							<DropdownMenuItem onclick={() => goto(`/${tenantSlug}/services/${service.id}`)}>
-								View Details
-							</DropdownMenuItem>
-							<DropdownMenuItem>
-								{service.isActive ? 'Deactivate' : 'Activate'}
-							</DropdownMenuItem>
-							<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteService(service.id)}>
-								Delete
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				</div>
+						<div class="space-y-2 mb-4">
+							{#each TIERS as tier (tier)}
+								{@const colors = TIER_COLORS[tier]}
+								{@const price = category.prices[tier]}
+								{@const setup = category.setupFees?.[tier]}
+								{#if price !== null || setup}
+									<div
+										class="flex items-center justify-between px-3 py-2 rounded-md border {colors.border} {colors.bg}"
+									>
+										<div class="flex items-center gap-2">
+											<span class="h-2 w-2 rounded-full {colors.dot}"></span>
+											<span class="text-xs font-semibold {colors.text}">{TIER_LABELS[tier]}</span>
+										</div>
+										<span class="text-xs font-bold {colors.text}">
+											{#if price !== null}
+												{formatEur(price)}<span class="font-normal opacity-70">/lună</span>
+											{:else if setup}
+												{formatEur(setup)}<span class="font-normal opacity-70"> one-time</span>
+											{/if}
+										</span>
+									</div>
+								{/if}
+							{/each}
+						</div>
+						<p class="text-xs text-primary font-medium">Vezi comparație tier-uri →</p>
+					</button>
+				</Card>
+			{/each}
+		</div>
+	</TabsContent>
 
-				<p class="text-sm text-muted-foreground mb-4 line-clamp-2">
-					{service.description || 'No description provided'}
+	<TabsContent value="requests" class="mt-6">
+		<div class="flex items-center justify-between mb-4">
+			<div>
+				<h2 class="text-xl font-semibold">Cereri primite de la clienți</h2>
+				<p class="text-sm text-muted-foreground mt-1">
+					Când un client cere un pachet din portal, apare aici și tu primești email.
 				</p>
+			</div>
+			<Select type="single" bind:value={statusFilter}>
+				<SelectTrigger class="w-[200px]">
+					{statusFilter === 'all' ? 'Toate statusurile' : STATUS_LABEL[statusFilter]}
+				</SelectTrigger>
+				<SelectContent>
+					<SelectItem value="all">Toate statusurile</SelectItem>
+					<SelectItem value="pending">În așteptare</SelectItem>
+					<SelectItem value="contacted">Contactat</SelectItem>
+					<SelectItem value="accepted">Acceptat</SelectItem>
+					<SelectItem value="rejected">Respins</SelectItem>
+				</SelectContent>
+			</Select>
+		</div>
 
-				<div class="pt-4 border-t">
-					<div class="flex items-baseline gap-1">
-						<span class="text-3xl font-bold text-primary">
-							{service.price
-								? formatAmount(service.price, (service.currency || 'RON') as Currency)
-								: '—'}
-						</span>
-						<span class="text-sm text-muted-foreground">/ {formatUnit(service.recurringType)}</span>
-					</div>
+		{#if requestsLoading}
+			<p class="text-muted-foreground">Se încarcă...</p>
+		{:else if filteredRequests.length === 0}
+			<Card>
+				<div class="p-10 text-center">
+					<InboxIcon class="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
+					<p class="text-muted-foreground">Nicio cerere încă.</p>
 				</div>
 			</Card>
-		{/each}
-	</div>
-{/if}
+		{:else}
+			<div class="space-y-3">
+				{#each filteredRequests as req (req.id)}
+					{@const tierColors = TIER_COLORS[req.tier as Tier]}
+					<Card class="p-4" id={`req-${req.id}`}>
+						<div class="flex items-start justify-between gap-4 flex-wrap">
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-2 flex-wrap mb-1.5">
+									<div class="flex items-center gap-2">
+										<CategoryIcon slug={req.categorySlug} class="h-4 w-4" />
+										<h3 class="font-semibold">{categoryLabel(req.categorySlug)}</h3>
+									</div>
+									<span
+										class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border {tierColors.border} {tierColors.text} {tierColors.bg}"
+									>
+										<span class="h-1.5 w-1.5 rounded-full {tierColors.dot}"></span>
+										{TIER_LABELS[req.tier as Tier] ?? req.tier}
+									</span>
+									<Badge class={statusBadgeClass(req.status)}>
+										{STATUS_LABEL[req.status] ?? req.status}
+									</Badge>
+								</div>
+								<p class="text-sm text-muted-foreground">
+									{req.clientName || '—'}
+									{#if req.clientEmail}
+										<span class="mx-1">·</span>
+										<a href={`mailto:${req.clientEmail}`} class="hover:underline">{req.clientEmail}</a>
+									{/if}
+									<span class="mx-1">·</span>
+									{formatDate(req.createdAt)}
+								</p>
+								{#if req.note}
+									<p class="text-sm mt-2 p-3 rounded bg-muted/50 whitespace-pre-line">
+										{req.note}
+									</p>
+								{/if}
+							</div>
+							<div class="flex gap-2 flex-shrink-0">
+								{#if req.status === 'pending'}
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={() => handleStatusChange(req.id, 'contacted')}
+									>
+										Marchează contactat
+									</Button>
+								{/if}
+								{#if req.status !== 'accepted' && req.status !== 'rejected'}
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={() => handleStatusChange(req.id, 'accepted')}
+									>
+										Acceptă
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onclick={() => handleStatusChange(req.id, 'rejected')}
+									>
+										Respinge
+									</Button>
+								{/if}
+							</div>
+						</div>
+					</Card>
+				{/each}
+			</div>
+		{/if}
+	</TabsContent>
+
+	<TabsContent value="invoice-items" class="mt-6">
+		<InvoiceItemsPanel />
+	</TabsContent>
+</Tabs>
+
+<PackageComparisonDialog bind:open={dialogOpen} category={selectedCategory} />
+
+<DiscountsDialog bind:open={discountsOpen} />

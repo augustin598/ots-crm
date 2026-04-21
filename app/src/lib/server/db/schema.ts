@@ -1257,6 +1257,26 @@ export const clientUser = sqliteTable('client_user', {
 		.default(sql`current_date`)
 });
 
+export const servicePackageRequest = sqliteTable('service_package_request', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id').references(() => client.id),
+	clientUserId: text('client_user_id').references(() => clientUser.id),
+	categorySlug: text('category_slug').notNull(),
+	tier: text('tier').notNull(), // 'bronze' | 'silver' | 'gold' | 'platinum'
+	note: text('note'),
+	status: text('status').notNull().default('pending'), // 'pending' | 'contacted' | 'accepted' | 'rejected'
+	contactedAt: timestamp('contacted_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 export const clientUserPreferences = sqliteTable('client_user_preferences', {
 	id: text('id').primaryKey(),
 	clientUserId: text('client_user_id')
@@ -3190,6 +3210,8 @@ export type Document = typeof document.$inferSelect;
 export type NewDocument = typeof document.$inferInsert;
 export type Service = typeof service.$inferSelect;
 export type NewService = typeof service.$inferInsert;
+export type ServicePackageRequest = typeof servicePackageRequest.$inferSelect;
+export type NewServicePackageRequest = typeof servicePackageRequest.$inferInsert;
 export type Invoice = typeof invoice.$inferSelect;
 export type NewInvoice = typeof invoice.$inferInsert;
 export type InvoiceLineItem = typeof invoiceLineItem.$inferSelect;

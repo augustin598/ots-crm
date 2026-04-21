@@ -588,6 +588,21 @@ export const createTask = command(taskSchema, async (data) => {
 	// If client user, set status to pending-approval, otherwise use provided status or default to 'todo'
 	const status = event.locals.isClientUser ? 'pending-approval' : data.status || 'todo';
 
+	// Clients can only schedule tasks from tomorrow onwards.
+	if (event.locals.isClientUser && data.dueDate) {
+		const [y, m, d] = data.dueDate.split('-').map(Number);
+		if (y && m && d) {
+			const picked = new Date(y, m - 1, d);
+			picked.setHours(0, 0, 0, 0);
+			const tomorrow = new Date();
+			tomorrow.setHours(0, 0, 0, 0);
+			tomorrow.setDate(tomorrow.getDate() + 1);
+			if (picked.getTime() < tomorrow.getTime()) {
+				throw new Error('Data limită trebuie să fie de mâine sau mai târziu.');
+			}
+		}
+	}
+
 	// If client user, set clientId from context
 	const clientId =
 		event.locals.isClientUser && event.locals.client

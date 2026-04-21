@@ -1058,6 +1058,13 @@
       "when": 1777420012000,
       "tag": "0150_whatsapp_message_media_size",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "6",
+      "when": 1777420013000,
+      "tag": "0151_service_package_request",
+      "breakpoints": true
     }
   ]
 }

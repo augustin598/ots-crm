@@ -1,5 +1,3 @@
-Rescrie complet CLAUDE.md cu acest conținut exact, fără să modifici nimic:
-
 # OTS CRM — Claude Code Instructions
 
 ## Stack

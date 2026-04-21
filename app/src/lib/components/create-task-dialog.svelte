@@ -15,7 +15,7 @@
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { getPriorityDotColor, getStatusDotColor } from '$lib/components/task-kanban-utils';
-	import { CalendarDate, type DateValue } from '@internationalized/date';
+	import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 
 	interface Props {
@@ -83,6 +83,14 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Clients must schedule tasks from tomorrow onwards; admins have no restriction.
+	const tomorrow = $derived(today(getLocalTimeZone()).add({ days: 1 }));
+	const minDueDate = $derived(isClient ? tomorrow : undefined);
+
+	function toDateString(value: DateValue): string {
+		return `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
+	}
+
 	// Sync dueDate string → CalendarDate
 	$effect(() => {
 		if (dueDate) {
@@ -128,7 +136,7 @@
 			status = isClient ? 'pending-approval' : 'todo';
 			priority = defaultPriorityProp || 'medium';
 			assignedToUserId = '';
-			dueDate = defaultDueDate || '';
+			dueDate = defaultDueDate || (isClient ? toDateString(tomorrow) : '');
 			error = null;
 		}
 	});
@@ -145,6 +153,17 @@
 		if (!title.trim()) {
 			error = 'Title is required';
 			return;
+		}
+
+		if (isClient && dueDate) {
+			const [y, m, d] = dueDate.split('-').map(Number);
+			if (y && m && d) {
+				const picked = new CalendarDate(y, m, d);
+				if (picked.compare(tomorrow) < 0) {
+					error = 'Data limită trebuie să fie de mâine sau mai târziu.';
+					return;
+				}
+			}
 		}
 
 		loading = true;
@@ -325,7 +344,7 @@
 						</Popover.Trigger>
 						<Popover.Content class="w-auto p-0" align="start">
 							<div class="flex flex-col">
-								<Calendar type="single" value={dueDateValue} onValueChange={handleDateSelect} locale="ro-RO" />
+								<Calendar type="single" value={dueDateValue} onValueChange={handleDateSelect} locale="ro-RO" minValue={minDueDate} />
 								{#if dueDate}
 									<Button variant="ghost" class="rounded-t-none border-t text-muted-foreground text-sm" onclick={() => { dueDate = ''; dueDateValue = undefined; dueDateOpen = false; }}>
 										Clear date

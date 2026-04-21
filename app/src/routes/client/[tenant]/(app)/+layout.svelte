@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
@@ -96,6 +97,16 @@
 							<a href="/client/{tenantSlug}/dashboard" {...props}>
 								<LayoutDashboardIcon />
 								<span>Dashboard</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton data-sidebar-id="services" isActive={currentPath.startsWith(`/client/${tenantSlug}/services`)}>
+						{#snippet child({ props })}
+							<a href="/client/{tenantSlug}/services" {...props}>
+								<SparklesIcon />
+								<span>Servicii & Oferte</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

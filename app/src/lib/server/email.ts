@@ -2602,6 +2602,142 @@ export async function sendReportEmail(
 	);
 }
 
+/**
+ * Send notification to tenant admin/owner when a client requests a service package.
+ */
+export async function sendPackageRequestEmail(
+	requestId: string,
+	recipientEmail: string,
+	recipientName?: string
+): Promise<void> {
+	const safeRecipientName = recipientName ? escapeHtml(recipientName) : '';
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	const [request] = await db
+		.select()
+		.from(table.servicePackageRequest)
+		.where(eq(table.servicePackageRequest.id, requestId))
+		.limit(1);
+
+	if (!request) {
+		throw new Error('Package request not found');
+	}
+
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.id, request.tenantId))
+		.limit(1);
+
+	await sendWithPersistence(
+		{
+			tenantId: request.tenantId,
+			toEmail: recipientEmail,
+			subject: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`,
+			emailType: 'package-request',
+			metadata: { requestId, categorySlug: request.categorySlug, tier: request.tier },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendPackageRequestEmail',
+				args: [requestId, recipientEmail, recipientName]
+			}
+		},
+		async () => {
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, request.tenantId))
+				.limit(1);
+
+			const brand = await fetchTenantBrand(request.tenantId);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			let clientName = '';
+			let clientEmail = '';
+			if (request.clientId) {
+				const [clientRow] = await db
+					.select({ name: table.client.name, email: table.client.email })
+					.from(table.client)
+					.where(eq(table.client.id, request.clientId))
+					.limit(1);
+				clientName = clientRow?.name || '';
+				clientEmail = clientRow?.email || '';
+			}
+			if (!clientEmail && request.clientUserId) {
+				const [cu] = await db
+					.select({ userId: table.clientUser.userId })
+					.from(table.clientUser)
+					.where(eq(table.clientUser.id, request.clientUserId))
+					.limit(1);
+				if (cu?.userId) {
+					const [u] = await db
+						.select({ email: table.user.email, firstName: table.user.firstName, lastName: table.user.lastName })
+						.from(table.user)
+						.where(eq(table.user.id, cu.userId))
+						.limit(1);
+					clientEmail = u?.email || '';
+					if (!clientName) clientName = [u?.firstName, u?.lastName].filter(Boolean).join(' ');
+				}
+			}
+
+			const safeClientName = escapeHtml(clientName || 'Client');
+			const safeClientEmail = escapeHtml(clientEmail);
+			const safeNote = request.note ? escapeHtml(request.note) : '';
+			const categoryLabel = escapeHtml(request.categorySlug);
+			const tierLabel = escapeHtml(request.tier.charAt(0).toUpperCase() + request.tier.slice(1));
+
+			const adminUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/services?tab=requests&id=${requestId}`;
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeRecipientName ? ` ${safeRecipientName}` : ''},</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat un pachet de servicii din CRM:</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
+							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
+							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div>
+							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Pachet</span> &nbsp;·&nbsp; <strong>${tierLabel}</strong></div>
+							${safeNote ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #d1d5db;"><span style="color: #6b7280;">Notă client:</span><div style="margin-top: 6px; color: #111827; white-space: pre-line;">${safeNote}</div></div>` : ''}
+						</td>
+					</tr>
+				</table>
+				${renderCtaButton(adminUrl, 'Vezi cererea în CRM', brand.themeColor)}
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Cerere pachet nouă',
+				bodyHtml,
+				previewTitle: `Cerere pachet — ${request.categorySlug} ${request.tier}`,
+				footerHtml: `Trimis automat de ${escapeHtml(brand.tenantName)} când un client cere un pachet.`
+			});
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html,
+				text: trimPlainText(`
+					Cerere pachet noua
+
+					Buna ziua${recipientName ? ` ${recipientName}` : ''},
+
+					Un client a solicitat un pachet de servicii din CRM:
+
+					Client: ${clientName || 'Client'}${clientEmail ? ` (${clientEmail})` : ''}
+					Categorie: ${request.categorySlug}
+					Pachet: ${request.tier}
+					${request.note ? `\nNota client:\n${request.note}\n` : ''}
+
+					Vezi cererea in CRM: ${adminUrl}
+				`)
+			};
+		}
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
 // and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
@@ -2635,7 +2771,8 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendInvoicePaidEmail,
 	sendOverdueReminderEmail,
 	sendTaskReminderEmail,
-	sendContractSigningEmail
+	sendContractSigningEmail,
+	sendPackageRequestEmail
 	// NOTE: Intentionally omitted (payload: null, not replay-able):
 	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
 	//   (contain single-use auth tokens that must not be persisted)
