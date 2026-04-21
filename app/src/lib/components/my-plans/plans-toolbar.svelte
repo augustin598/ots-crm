@@ -9,6 +9,7 @@
 		STATUS_OPTIONS,
 		PRIORITY_OPTIONS,
 		filtersToSearchParams,
+		hasActiveFilters,
 		type Filters,
 		type Counters,
 		type TaskStatus,
@@ -26,15 +27,26 @@
 		counters: Counters;
 		clients: ClientOption[];
 		onGoToToday: () => void;
+		onClickToday?: () => void;
 	}
 
-	const { filters, counters, clients, onGoToToday }: Props = $props();
+	const { filters, counters, clients, onGoToToday, onClickToday }: Props = $props();
+
+	const FILTER_KEYS = ['status', 'priority', 'client', 'overdue'] as const;
 
 	function updateUrl(next: Filters) {
-		const sp = filtersToSearchParams(next);
 		const url = new URL(page.url);
-		url.search = sp.toString();
+		for (const k of FILTER_KEYS) url.searchParams.delete(k);
+		const sp = filtersToSearchParams(next);
+		sp.forEach((v, k) => url.searchParams.set(k, v));
 		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function handleBadgeKey(e: KeyboardEvent, fn: () => void) {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			fn();
+		}
 	}
 
 	function toggleStatus(value: TaskStatus) {
@@ -94,12 +106,7 @@
 			? `Client: ${clients.find((c) => c.id === filters.clientId)?.name ?? '…'}`
 			: 'Client'
 	);
-	const hasAny = $derived(
-		filters.status.length > 0 ||
-			filters.priority.length > 0 ||
-			filters.clientId !== null ||
-			filters.onlyOverdue
-	);
+	const hasAny = $derived(hasActiveFilters(filters));
 </script>
 
 <div class="flex flex-wrap items-center gap-2 mb-4">
@@ -218,22 +225,34 @@
 	<div class="ml-auto flex items-center gap-2 flex-wrap">
 		<Badge
 			variant="outline"
-			class="cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20 {counters.overdue > 0
+			class="cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring {counters.overdue >
+			0
 				? 'border-red-500 text-red-600 dark:text-red-400'
 				: ''}"
 			onclick={applyOverdueFilter}
+			onkeydown={(e) => handleBadgeKey(e, applyOverdueFilter)}
 			role="button"
 			tabindex={0}
 		>
 			{counters.overdue} overdue
 		</Badge>
-		<Badge variant="outline" class="cursor-default">
+		<Badge
+			variant="outline"
+			class={onClickToday
+				? 'cursor-pointer hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+				: 'cursor-default'}
+			onclick={onClickToday}
+			onkeydown={onClickToday ? (e) => handleBadgeKey(e, onClickToday) : undefined}
+			role={onClickToday ? 'button' : undefined}
+			tabindex={onClickToday ? 0 : undefined}
+		>
 			{counters.today} today
 		</Badge>
 		<Badge
 			variant="outline"
-			class="cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20"
+			class="cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			onclick={() => applyStatusFilter('in-progress')}
+			onkeydown={(e) => handleBadgeKey(e, () => applyStatusFilter('in-progress'))}
 			role="button"
 			tabindex={0}
 		>
