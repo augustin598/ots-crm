@@ -41,7 +41,11 @@
 		{/snippet}
 	</Collapsible.Trigger>
 	<Collapsible.Content>
-		<div class="flex flex-wrap items-center gap-4 text-xs text-muted-foreground px-3 py-2">
+		<div
+			class="flex flex-wrap items-center gap-4 text-xs text-muted-foreground px-3 py-2"
+			aria-label="Legendă culori"
+			role="group"
+		>
 			<div class="flex items-center gap-3">
 				<span class="font-medium text-foreground">Status:</span>
 				<span class="inline-flex items-center gap-1.5">
