@@ -1,13 +1,6 @@
 <script lang="ts">
 	import type { Task } from '$lib/server/db/schema';
-	import {
-		Circle,
-		CircleDashed,
-		CircleDot,
-		Eye,
-		CheckCircle2,
-		XCircle
-	} from '@lucide/svelte';
+	import { Circle, CircleDashed, CircleDot, Eye, CheckCircle2, XCircle } from '@lucide/svelte';
 	import {
 		getStatusGroup,
 		STATUS_GROUP_CLASSES,
@@ -24,14 +17,7 @@
 		ondragend?: (event: DragEvent) => void;
 	}
 
-	const {
-		task,
-		isOverdue,
-		dimmed = false,
-		onclick,
-		ondragstart,
-		ondragend
-	}: Props = $props();
+	const { task, isOverdue, dimmed = false, onclick, ondragstart, ondragend }: Props = $props();
 
 	const group = $derived(getStatusGroup(task.status));
 	const priorityKey = $derived<keyof typeof PRIORITY_BORDER_CLASSES>(
@@ -68,11 +54,11 @@
 </script>
 
 <div
-	class="relative flex items-center gap-1.5 text-xs text-start px-2 py-1 rounded-md truncate font-medium shadow-sm border border-current/20 border-l-4 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity {STATUS_GROUP_CLASSES[
+	class="relative flex cursor-grab items-center gap-1.5 truncate rounded-md border border-l-4 border-current/20 px-2 py-1 text-start text-xs font-medium shadow-sm transition-opacity hover:opacity-80 active:cursor-grabbing {STATUS_GROUP_CLASSES[
 		group
-	]} {PRIORITY_BORDER_CLASSES[priorityKey]} {isOverdue ? 'ring-1 ring-red-500 ring-offset-1' : ''} {dimmed
-		? 'opacity-25 pointer-events-none'
-		: ''}"
+	]} {PRIORITY_BORDER_CLASSES[priorityKey]} {isOverdue
+		? 'ring-1 ring-red-500 ring-offset-1'
+		: ''} {dimmed ? 'pointer-events-none opacity-25' : ''}"
 	title={task.title}
 	draggable={true}
 	{ondragstart}
@@ -87,7 +73,7 @@
 	<span class="truncate">{task.title}</span>
 	{#if isOverdue}
 		<span
-			class="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"
+			class="absolute -top-1 -right-1 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500"
 			aria-hidden="true"
 		></span>
 	{/if}

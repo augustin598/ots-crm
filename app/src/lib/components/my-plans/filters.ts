@@ -164,4 +164,3 @@ export const STATUS_GROUP_DOT_CLASSES: Record<StatusGroup, string> = {
 	done: 'bg-emerald-500',
 	cancelled: 'bg-zinc-400'
 };
-
