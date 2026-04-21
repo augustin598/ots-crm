@@ -772,16 +772,31 @@
 						</div>
 					{/if}
 
-					{#if task.assignedToUserId}
+					{#if currentTask}
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
 								<User class="h-5 w-5 text-primary" />
 							</div>
-							<div>
+							<div class="min-w-0 flex-1">
 								<p class="text-sm text-muted-foreground">Assignee</p>
-								<p class="font-medium">
-									{userMap.get(task.assignedToUserId) || task.assignedToUserId}
-								</p>
+								<Select
+									type="single"
+									value={currentTask.assignedToUserId ?? ''}
+									onValueChange={(v) => saveField('assignedToUserId', (v || '') as any)}
+								>
+									<SelectTrigger class="h-auto border-0 p-0 font-medium shadow-none">
+										{userMap.get(currentTask.assignedToUserId ?? '') ??
+											currentTask.assignedToUserId ??
+											'Alege responsabil'}
+									</SelectTrigger>
+									<SelectContent>
+										{#each users as u (u.id)}
+											<SelectItem value={u.id}
+												>{`${u.firstName} ${u.lastName}`.trim() || u.email}</SelectItem
+											>
+										{/each}
+									</SelectContent>
+								</Select>
 							</div>
 						</div>
 					{/if}
