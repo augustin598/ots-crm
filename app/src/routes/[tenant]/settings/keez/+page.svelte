@@ -265,13 +265,31 @@
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2">
 					<CardTitle>Conexiune Keez</CardTitle>
-					<Badge variant="default" class="gap-1">
-						<CheckCircle2 class="h-3 w-3" />
-						Conectat
-					</Badge>
+					{#if status.isDegraded}
+						<Badge variant="outline" class="gap-1 border-amber-500 text-amber-700 dark:text-amber-400">
+							<AlertTriangle class="h-3 w-3" />
+							Degradat
+						</Badge>
+					{:else}
+						<Badge variant="default" class="gap-1">
+							<CheckCircle2 class="h-3 w-3" />
+							Conectat
+						</Badge>
+					{/if}
 				</div>
 			</div>
-			<CardDescription>Contul Keez este conectat și activ</CardDescription>
+			<CardDescription>
+				{#if status.isDegraded}
+					Ultima sincronizare a eșuat. Integrarea rămâne activă, dar datele din CRM pot fi neactualizate.
+					{#if status.lastFailureReason}
+						<span class="mt-1 block text-xs text-amber-700 dark:text-amber-400">
+							Detalii: {status.lastFailureReason}
+						</span>
+					{/if}
+				{:else}
+					Contul Keez este conectat și activ
+				{/if}
+			</CardDescription>
 		</CardHeader>
 		<CardContent class="space-y-6">
 			<div class="space-y-2">

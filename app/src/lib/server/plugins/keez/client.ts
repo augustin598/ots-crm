@@ -1,21 +1,12 @@
 import { env } from '$env/dynamic/private';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { KeezClientError } from './errors';
 
 const DEFAULT_BASE_URL = 'https://app.keez.ro/api/v1.0/public-api';
 const DEFAULT_TOKEN_URL = 'https://app.keez.ro/idp/connect/token';
 
-/**
- * 4xx (except 401) from Keez — never retried. Carries the status code so
- * callers can decide between "log and skip" (404/409) vs "show to user" (403).
- */
-export class KeezClientError extends Error {
-	readonly status: number;
-	constructor(message: string, status: number) {
-		super(message);
-		this.name = 'KeezClientError';
-		this.status = status;
-	}
-}
+// Re-export for backward compatibility with existing call sites that import from client.
+export { KeezClientError };
 
 export interface KeezClientConfig {
 	clientEid: string;

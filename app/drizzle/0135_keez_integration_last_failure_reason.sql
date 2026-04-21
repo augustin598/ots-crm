@@ -1,0 +1,1 @@
+ALTER TABLE keez_integration ADD COLUMN last_failure_reason text;

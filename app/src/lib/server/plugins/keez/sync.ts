@@ -452,13 +452,20 @@ async function _syncKeezInvoicesForTenantInner(
 		}
 	}
 
-	// Update integration last sync time only if at least one invoice was processed successfully
-	if (result.imported > 0 || result.updated > 0 || result.skipped > 0) {
-		await db
-			.update(table.keezIntegration)
-			.set({ lastSyncAt: new Date(), updatedAt: new Date() })
-			.where(eq(table.keezIntegration.tenantId, tenantId));
-	}
+	// Successful completion — always update lastSyncAt AND reset failure columns,
+	// even for zero-invoice responses. Clearing failure state here is what lets
+	// a healthy sync recover from a prior degraded state.
+	await db
+		.update(table.keezIntegration)
+		.set({
+			lastSyncAt: new Date(),
+			lastFailureAt: null,
+			lastFailureReason: null,
+			consecutiveFailures: 0,
+			isDegraded: false,
+			updatedAt: new Date()
+		})
+		.where(eq(table.keezIntegration.tenantId, tenantId));
 
 	// Clear stale Keez sync error notifications after successful sync
 	try {

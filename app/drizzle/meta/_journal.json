@@ -939,6 +939,34 @@
       "when": 1776672000000,
       "tag": "0133_report_schedule_monthly_all",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "6",
+      "when": 1777363200000,
+      "tag": "0134_keez_integration_last_failure_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "6",
+      "when": 1777363201000,
+      "tag": "0135_keez_integration_last_failure_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "6",
+      "when": 1777363202000,
+      "tag": "0136_keez_integration_consecutive_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "6",
+      "when": 1777363203000,
+      "tag": "0137_keez_integration_is_degraded",
+      "breakpoints": true
     }
   ]
 }
