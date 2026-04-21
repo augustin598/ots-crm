@@ -732,9 +732,7 @@
 				<div class="grid gap-4 md:grid-cols-2">
 					{#if currentTask}
 						<div class="flex items-center gap-3">
-							<div
-								class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10"
-							>
+							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
 								<Building class="h-5 w-5 text-orange-600" />
 							</div>
 							<div class="min-w-0 flex-1">
@@ -758,8 +756,7 @@
 											options={clientOptions}
 											placeholder="Alege client"
 											searchPlaceholder="Caută..."
-											onValueChange={(v) =>
-												saveField('clientId', ((v as string) || '') as any)}
+											onValueChange={(v) => saveField('clientId', ((v as string) || '') as any)}
 										/>
 									</Popover.Content>
 								</Popover.Root>
