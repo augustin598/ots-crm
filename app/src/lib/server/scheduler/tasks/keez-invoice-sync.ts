@@ -2,154 +2,75 @@ import { db } from '../../db';
 import * as table from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { syncKeezInvoicesForTenant } from '../../plugins/keez/sync';
-import { KeezCredentialsCorruptError } from '../../plugins/keez/factory';
-import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
-import { createNotification } from '../../notifications';
-import { and, or } from 'drizzle-orm';
+import { KeezCredentialsCorruptError } from '../../plugins/keez/errors';
+import { handleKeezSyncFailure } from '../../plugins/keez/failure-handler';
+import { enqueueKeezRetry } from './keez-invoice-sync-retry';
+import { logInfo, logWarning } from '$lib/server/logger';
 
 /**
- * Process Keez invoice sync - finds all tenants with active Keez integrations
- * and syncs invoices for each tenant.
+ * Daily Keez invoice sync. Finds every tenant with an active integration
+ * and calls the shared sync for each. On per-tenant failure, delegates to
+ * handleKeezSyncFailure, which decides between retry and degraded.
  */
-export async function processKeezInvoiceSync(params: Record<string, any> = {}) {
-	try {
-		// Get all tenants with active Keez integrations
-		const integrations = await db
-			.select({ tenantId: table.keezIntegration.tenantId })
-			.from(table.keezIntegration)
-			.where(eq(table.keezIntegration.isActive, true));
+export async function processKeezInvoiceSync(_params: Record<string, any> = {}) {
+	const integrations = await db
+		.select({ tenantId: table.keezIntegration.tenantId })
+		.from(table.keezIntegration)
+		.where(eq(table.keezIntegration.isActive, true));
 
-		if (integrations.length === 0) {
-			logInfo('scheduler', 'Keez invoice sync: no tenants with active integrations, skipping', { metadata: { activeIntegrations: 0 } });
-			return {
-				success: true,
-				tenantsProcessed: 0,
-				totalImported: 0,
-				totalUpdated: 0,
-				totalSkipped: 0,
-				totalErrors: 0
-			};
-		}
-
-		let tenantsProcessed = 0;
-		let totalImported = 0;
-		let totalUpdated = 0;
-		let totalSkipped = 0;
-		let totalErrors = 0;
-		const errors: Array<{ tenantId: string; error: string }> = [];
-
-		for (const integration of integrations) {
-			try {
-				logInfo('scheduler', `Keez invoice sync: syncing invoices`, { tenantId: integration.tenantId });
-
-				const result = await syncKeezInvoicesForTenant(integration.tenantId);
-
-				tenantsProcessed++;
-				totalImported += result.imported;
-				totalUpdated += result.updated;
-				totalSkipped += result.skipped;
-				totalErrors += result.errors;
-
-				logInfo('scheduler', `Keez invoice sync: tenant completed`, { tenantId: integration.tenantId, metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors } });
-			} catch (error) {
-				// Credentials corrupt — could be transient Turso read failure.
-				// Retry once with fresh DB read before deactivating.
-				if (error instanceof KeezCredentialsCorruptError) {
-					logWarning('scheduler', `Keez invoice sync: credentials decrypt failed — retrying with fresh DB read`, {
-						tenantId: integration.tenantId,
-						metadata: { action: 'decrypt_retry', attempt: 1 }
-					});
-
-					// Wait briefly then retry (fresh DB read inside syncKeezInvoicesForTenant)
-					await new Promise(r => setTimeout(r, 2000));
-
-					try {
-						const retryResult = await syncKeezInvoicesForTenant(integration.tenantId);
-						tenantsProcessed++;
-						totalImported += retryResult.imported;
-						totalUpdated += retryResult.updated;
-						totalSkipped += retryResult.skipped;
-						totalErrors += retryResult.errors;
-						logInfo('scheduler', `Keez invoice sync: retry succeeded after transient decrypt failure`, {
-							tenantId: integration.tenantId,
-							metadata: { imported: retryResult.imported, updated: retryResult.updated }
-						});
-						continue;
-					} catch (retryError) {
-						if (retryError instanceof KeezCredentialsCorruptError) {
-							logWarning('scheduler', `Keez invoice sync: credentials corrupt after retry — deactivating integration until user re-saves`, {
-								tenantId: integration.tenantId,
-								metadata: { action: 'auto_deactivate_corrupt_credentials', retriesExhausted: true }
-							});
-							await db
-								.update(table.keezIntegration)
-								.set({ isActive: false, updatedAt: new Date() })
-								.where(eq(table.keezIntegration.tenantId, integration.tenantId));
-							continue;
-						}
-						// Non-credential retry error — fall through to normal error handling
-						const { message, stack } = serializeError(retryError);
-						logError('scheduler', `Keez invoice sync: retry error: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
-						errors.push({ tenantId: integration.tenantId, error: message });
-						continue;
-					}
-				}
-
-				const { message, stack } = serializeError(error);
-				logError('scheduler', `Keez invoice sync: error syncing invoices: ${message}`, { tenantId: integration.tenantId, stackTrace: stack });
-				errors.push({ tenantId: integration.tenantId, error: message });
-
-				// Notify admins about Keez sync failure
-				try {
-					const admins = await db
-						.select({ userId: table.tenantUser.userId })
-						.from(table.tenantUser)
-						.where(and(
-							eq(table.tenantUser.tenantId, integration.tenantId),
-							or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
-						));
-					const [tenant] = await db
-						.select({ slug: table.tenant.slug })
-						.from(table.tenant)
-						.where(eq(table.tenant.id, integration.tenantId))
-						.limit(1);
-					for (const admin of admins) {
-						await createNotification({
-							tenantId: integration.tenantId,
-							userId: admin.userId,
-							type: 'keez.sync_error',
-							title: 'Eroare sincronizare Keez',
-							message: `Sincronizarea facturilor Keez a esuat: ${message.substring(0, 100)}`,
-							link: tenant ? `/${tenant.slug}/settings` : undefined,
-							priority: 'high',
-						}).catch(() => {});
-					}
-				} catch { /* don't break sync for notification errors */ }
-			}
-		}
-
-		logInfo('scheduler', `Keez invoice sync completed`, { metadata: { tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors } });
-
-		return {
-			success: true,
-			tenantsProcessed,
-			totalImported,
-			totalUpdated,
-			totalSkipped,
-			totalErrors,
-			errors: errors.length > 0 ? errors : undefined
-		};
-	} catch (error) {
-		const { message, stack } = serializeError(error);
-		logError('scheduler', `Keez invoice sync: process error: ${message}`, { stackTrace: stack });
-		return {
-			success: false,
-			tenantsProcessed: 0,
-			totalImported: 0,
-			totalUpdated: 0,
-			totalSkipped: 0,
-			totalErrors: 0,
-			error: 'Failed to process Keez invoice sync'
-		};
+	if (integrations.length === 0) {
+		logInfo('scheduler', 'Keez invoice sync: no active integrations, skipping', { metadata: { activeIntegrations: 0 } });
+		return { success: true, tenantsProcessed: 0, totalImported: 0, totalUpdated: 0, totalSkipped: 0, totalErrors: 0 };
 	}
+
+	let tenantsProcessed = 0;
+	let totalImported = 0;
+	let totalUpdated = 0;
+	let totalSkipped = 0;
+	let totalErrors = 0;
+
+	for (const integration of integrations) {
+		try {
+			logInfo('scheduler', `Keez invoice sync: starting`, { tenantId: integration.tenantId });
+			const result = await syncKeezInvoicesForTenant(integration.tenantId);
+			tenantsProcessed++;
+			totalImported += result.imported;
+			totalUpdated += result.updated;
+			totalSkipped += result.skipped;
+			totalErrors += result.errors;
+			logInfo('scheduler', `Keez invoice sync: tenant completed`, {
+				tenantId: integration.tenantId,
+				metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors }
+			});
+		} catch (error) {
+			// Transient decrypt failure — retry once with fresh DB read before classifying.
+			if (error instanceof KeezCredentialsCorruptError) {
+				logWarning('scheduler', `Keez sync: decrypt failed, retrying once with fresh DB read`, {
+					tenantId: integration.tenantId,
+					metadata: { action: 'decrypt_retry' }
+				});
+				await new Promise(r => setTimeout(r, 2000));
+				try {
+					const retryResult = await syncKeezInvoicesForTenant(integration.tenantId);
+					tenantsProcessed++;
+					totalImported += retryResult.imported;
+					totalUpdated += retryResult.updated;
+					totalSkipped += retryResult.skipped;
+					totalErrors += retryResult.errors;
+					continue;
+				} catch (retryError) {
+					await handleKeezSyncFailure(integration.tenantId, retryError, { enqueueRetry: enqueueKeezRetry });
+					continue;
+				}
+			}
+
+			await handleKeezSyncFailure(integration.tenantId, error, { enqueueRetry: enqueueKeezRetry });
+		}
+	}
+
+	logInfo('scheduler', `Keez invoice sync completed`, {
+		metadata: { tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors }
+	});
+
+	return { success: true, tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors };
 }

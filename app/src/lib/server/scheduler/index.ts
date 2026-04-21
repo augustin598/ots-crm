@@ -6,6 +6,7 @@ import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
 import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
 import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
+import { processKeezInvoiceSyncRetry } from './tasks/keez-invoice-sync-retry';
 import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
 import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
@@ -75,7 +76,7 @@ function createSchedulerQueue() {
 	return queue;
 }
 
-const schedulerQueue =
+export const schedulerQueue =
 	(globalThis as any)[SCHEDULER_QUEUE_SYMBOL] ||
 	((globalThis as any)[SCHEDULER_QUEUE_SYMBOL] = createSchedulerQueue());
 
@@ -94,6 +95,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	spv_invoice_sync: processSpvInvoiceSync,
 	revolut_transaction_sync: processRevolutTransactionSync,
 	keez_invoice_sync: processKeezInvoiceSync,
+	keez_invoice_sync_retry: processKeezInvoiceSyncRetry,
 	gmail_invoice_sync: processGmailInvoiceSync,
 	bnr_rate_sync: processBnrRateSync,
 	invoice_overdue_reminders: processInvoiceOverdueReminders,
