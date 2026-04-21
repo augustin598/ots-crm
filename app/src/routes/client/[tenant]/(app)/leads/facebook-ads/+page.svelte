@@ -160,9 +160,14 @@
 		try {
 			await updateLeadStatus({ leadId, status: newStatus as any });
 			toast.success('Status actualizat');
-			loadLeads();
+			// Update local state directly instead of loadLeads() which may return cached data
+			kanbanLeads = kanbanLeads.map((l) =>
+				l.id === leadId ? { ...l, status: newStatus } : l
+			);
 		} catch (e) {
 			toast.error('Eroare la actualizare status');
+			// Reload on error to resync state
+			loadLeads();
 		}
 	}
 </script>

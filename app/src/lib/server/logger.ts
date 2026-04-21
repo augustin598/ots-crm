@@ -35,7 +35,8 @@ export type LogSource =
 	| 'tiktok-scraper'
 	| 'token-refresh'
 	| 'meta-ads-leads'
-	| 'tiktok-auto-assign';
+	| 'tiktok-auto-assign'
+	| 'whatsapp';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

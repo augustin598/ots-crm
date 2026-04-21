@@ -3411,3 +3411,103 @@ export const seoLinkDiscoveryResultRelations = relations(seoLinkDiscoveryResult,
 		references: [seoLinkDiscoveryJob.id]
 	})
 }));
+
+export const whatsappSession = sqliteTable('whatsapp_session', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	status: text('status').notNull(), // 'qr_pending' | 'connecting' | 'connected' | 'disconnected' | 'needs_reauth'
+	phoneE164: text('phone_e164'),
+	displayName: text('display_name'),
+	storagePath: text('storage_path').notNull(), // MinIO path prefix
+	lastConnectedAt: timestamp('last_connected_at', { withTimezone: true, mode: 'date' }),
+	lastDisconnectedAt: timestamp('last_disconnected_at', { withTimezone: true, mode: 'date' }),
+	lastError: text('last_error'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
+export const whatsappMessage = sqliteTable('whatsapp_message', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	sessionId: text('session_id')
+		.notNull()
+		.references(() => whatsappSession.id),
+	clientId: text('client_id').references(() => client.id),
+	direction: text('direction').notNull(), // 'inbound' | 'outbound'
+	remoteJid: text('remote_jid').notNull(), // '40722123456@s.whatsapp.net'
+	remotePhoneE164: text('remote_phone_e164').notNull(), // '+40722123456'
+	wamId: text('wam_id').notNull(), // Baileys key.id
+	messageType: text('message_type').notNull().default('text'),
+	body: text('body'),
+	mediaPath: text('media_path'),
+	mediaMimeType: text('media_mime_type'),
+	mediaFileName: text('media_file_name'),
+	mediaSizeBytes: integer('media_size_bytes'),
+	status: text('status').notNull(), // 'pending'|'sent'|'delivered'|'read'|'failed'
+	errorMessage: text('error_message'),
+	sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }),
+	deliveredAt: timestamp('delivered_at', { withTimezone: true, mode: 'date' }),
+	readAt: timestamp('read_at', { withTimezone: true, mode: 'date' }),
+	receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
+export const whatsappContact = sqliteTable('whatsapp_contact', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	phoneE164: text('phone_e164').notNull(),
+	displayName: text('display_name'), // user-edited label
+	pushName: text('push_name'), // auto-captured from WhatsApp profile/contacts
+	notes: text('notes'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
+export const whatsappContactRelations = relations(whatsappContact, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whatsappContact.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const whatsappSessionRelations = relations(whatsappSession, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [whatsappSession.tenantId],
+		references: [tenant.id]
+	}),
+	messages: many(whatsappMessage)
+}));
+
+export const whatsappMessageRelations = relations(whatsappMessage, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whatsappMessage.tenantId],
+		references: [tenant.id]
+	}),
+	session: one(whatsappSession, {
+		fields: [whatsappMessage.sessionId],
+		references: [whatsappSession.id]
+	}),
+	client: one(client, {
+		fields: [whatsappMessage.clientId],
+		references: [client.id]
+	})
+}));

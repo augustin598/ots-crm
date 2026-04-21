@@ -161,6 +161,7 @@ export const getContracts = query(
 				status: table.contract.status,
 				currency: table.contract.currency,
 				contractDurationMonths: table.contract.contractDurationMonths,
+				billingFrequency: table.contract.billingFrequency,
 				uploadedFilePath: table.contract.uploadedFilePath
 			})
 			.from(table.contract)
@@ -169,19 +170,55 @@ export const getContracts = query(
 			.limit(pageSize)
 			.offset(offset);
 
+		// Fetch line item totals for listed contracts
+		// Fetch tenant tax rate
+		const [settings] = await db
+			.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
+			.limit(1);
+		const taxRate = settings?.defaultTaxRate ?? 19;
+
+		const contractIds = contracts.map(c => c.id);
+		const priceMap = new Map<string, number>();
+		if (contractIds.length > 0) {
+			const totals = await db
+				.select({
+					contractId: table.contractLineItem.contractId,
+					total: sql<number>`sum(${table.contractLineItem.price})`
+				})
+				.from(table.contractLineItem)
+				.where(inArray(table.contractLineItem.contractId, contractIds))
+				.groupBy(table.contractLineItem.contractId);
+			for (const t of totals) {
+				priceMap.set(t.contractId, Number(t.total) || 0);
+			}
+		}
+		const contractsWithPrice = contracts.map(c => {
+			const price = priceMap.get(c.id) || 0;
+			const tvaAmount = Math.round(price * taxRate / 100);
+			return {
+				...c,
+				totalPrice: price,
+				tvaAmount,
+				totalWithTVA: price + tvaAmount,
+				taxRate
+			};
+		});
+
 		// For client users, attach signing URLs for draft/sent contracts
 		if (event.locals.isClientUser) {
-			const contractIds = contracts
+			const signingIds = contractsWithPrice
 				.filter(c => c.status === 'draft' || c.status === 'sent')
 				.map(c => c.id);
 
-			if (contractIds.length > 0) {
+			if (signingIds.length > 0) {
 				const tokens = await db
 					.select()
 					.from(table.contractSignToken)
 					.where(
 						and(
-							inArray(table.contractSignToken.contractId, contractIds),
+							inArray(table.contractSignToken.contractId, signingIds),
 							eq(table.contractSignToken.tenantId, event.locals.tenant.id),
 							eq(table.contractSignToken.used, false)
 						)
@@ -196,7 +233,7 @@ export const getContracts = query(
 				}
 
 				return {
-					contracts: contracts.map(c => ({
+					contracts: contractsWithPrice.map(c => ({
 						...c,
 						signingUrl: tokenMap.get(c.id) ?? null
 					})),
@@ -208,7 +245,7 @@ export const getContracts = query(
 			}
 		}
 
-		return { contracts, totalCount, page, pageSize, totalPages };
+		return { contracts: contractsWithPrice, totalCount, page, pageSize, totalPages };
 	}
 );
 

@@ -23,10 +23,12 @@
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
 	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
 	import { getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
+	import { getWhatsappConnectionStatus } from '$lib/remotes/whatsapp.remote';
 	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto, invalidateAll } from '$app/navigation';
@@ -132,6 +134,11 @@
 	const tiktokAdsStatusQuery = getTiktokAdsConnectionStatus();
 	const tiktokAdsConnections = $derived(tiktokAdsStatusQuery.current || []);
 	const tiktokAdsActiveCount = $derived(tiktokAdsConnections.filter((c: any) => c.connected).length);
+
+	const whatsappStatusQuery = getWhatsappConnectionStatus();
+	const whatsappStatus = $derived(whatsappStatusQuery.current?.status ?? null);
+	const whatsappConnected = $derived(whatsappStatus?.status === 'connected');
+	const whatsappNeedsReauth = $derived(whatsappStatus?.status === 'needs_reauth');
 
 	// BNR exchange rates
 	const bnrRatesQuery = getBnrRates();
@@ -803,6 +810,38 @@
 					<div class="flex items-center gap-2">
 						{#if tiktokAdsActiveCount > 0}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">{tiktokAdsActiveCount} Conectat{tiktokAdsActiveCount > 1 ? 'e' : ''}</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/whatsapp`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<IconWhatsapp class="h-5 w-5" />
+						<div>
+							<CardTitle>WhatsApp</CardTitle>
+							<CardDescription>
+								{#if whatsappConnected && whatsappStatus?.phoneE164}
+									Conectat cu {whatsappStatus.phoneE164}
+								{:else if whatsappNeedsReauth}
+									Reautentificare necesară — scanează QR din nou
+								{:else}
+									Conectează WhatsApp prin scan QR pentru discuții cu clienții
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if whatsappConnected}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else if whatsappNeedsReauth}
+							<Badge variant="destructive">Re-auth</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
 						{/if}

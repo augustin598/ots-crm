@@ -1,0 +1,20 @@
+CREATE TABLE `whatsapp_message` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
+	`session_id` text NOT NULL REFERENCES `whatsapp_session`(`id`),
+	`client_id` text REFERENCES `client`(`id`),
+	`direction` text NOT NULL,
+	`remote_jid` text NOT NULL,
+	`remote_phone_e164` text NOT NULL,
+	`wam_id` text NOT NULL,
+	`message_type` text NOT NULL DEFAULT 'text',
+	`body` text,
+	`status` text NOT NULL,
+	`error_message` text,
+	`sent_at` timestamp,
+	`delivered_at` timestamp,
+	`read_at` timestamp,
+	`received_at` timestamp,
+	`created_at` timestamp NOT NULL DEFAULT (current_timestamp),
+	`updated_at` timestamp NOT NULL DEFAULT (current_timestamp)
+);

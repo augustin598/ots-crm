@@ -193,7 +193,7 @@
 
 	<Tabs value={activeTab()} class="w-full">
 		<TabsList class="grid w-full grid-cols-6">
-			{#each tabs as tab}
+			{#each tabs as tab (tab.id)}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{tab.label}
 				</TabsTrigger>

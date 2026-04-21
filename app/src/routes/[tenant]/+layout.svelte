@@ -36,6 +36,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn, getFaviconUrl } from '$lib/utils';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -446,6 +447,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							</SidebarMenuSubItem>
 						</SidebarMenuSub>
 					{/if}
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/whatsapp`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/whatsapp" {...props}>
+								<IconWhatsapp class="h-4 w-4" />
+								<span>WhatsApp</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
 				</SidebarMenuItem>
 				<SidebarMenuItem>
 					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/settings`) && !currentPath.startsWith(`/${tenantSlug}/settings/gmail`)}>

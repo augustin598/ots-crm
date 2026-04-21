@@ -10,6 +10,7 @@ import { registerNotificationHooks } from '$lib/server/hooks/notification-hooks'
 import { runMigrations } from '$lib/server/db/migrate';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
 import { flushLogBuffer } from '$lib/server/logger';
+import { restoreAllSessions as restoreWhatsappSessions, shutdownAllSessions as shutdownWhatsappSessions } from '$lib/server/whatsapp/session-manager';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -22,6 +23,7 @@ import { eq, and } from 'drizzle-orm';
 const PLUGINS_INIT_SYMBOL = Symbol.for('ots_crm_plugins_initialized');
 const SCHEDULER_INIT_SYMBOL = Symbol.for('ots_crm_scheduler_initialized');
 const HOOKS_INIT_SYMBOL = Symbol.for('ots_crm_app_hooks_registered');
+const WHATSAPP_INIT_SYMBOL = Symbol.for('ots_crm_whatsapp_initialized');
 const gt = globalThis as unknown as Record<symbol, boolean>;
 
 async function ensurePluginsInitialized() {
@@ -161,16 +163,26 @@ export const init = async () => {
 	await ensureSchedulerInitialized();
 	// Sync BNR rates if not already synced today (works even without Redis scheduler)
 	await ensureBnrRatesSynced();
+	// Restore WhatsApp sessions (Baileys) — guarded against HMR re-runs
+	if (!gt[WHATSAPP_INIT_SYMBOL]) {
+		gt[WHATSAPP_INIT_SYMBOL] = true;
+		restoreWhatsappSessions().catch((e) => {
+			gt[WHATSAPP_INIT_SYMBOL] = false;
+			console.error('[INIT] WhatsApp session restore failed:', e instanceof Error ? e.message : e);
+		});
+	}
 };
 
 export const handle: Handle = handleAuth;
 
-// Graceful shutdown: flush logs + close Puppeteer browser
+// Graceful shutdown: flush logs + close Puppeteer browser + WhatsApp sockets
 process.on('SIGTERM', async () => {
+	await shutdownWhatsappSessions();
 	await flushLogBuffer();
 	await shutdownBrowser();
 });
 process.on('SIGINT', async () => {
+	await shutdownWhatsappSessions();
 	await flushLogBuffer();
 	await shutdownBrowser();
 });

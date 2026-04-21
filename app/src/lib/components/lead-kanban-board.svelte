@@ -23,11 +23,26 @@
 
 	let { leads, readonly, tenantSlug, onLeadClick, onStatusChange }: Props = $props();
 
-	// Optimistic updates — initialized and synced from prop
-	let optimisticLeads = $state<any[]>([]);
+	// Optimistic updates — null means no override, use leads prop
+	let optimisticLeads = $state<any[] | null>(null);
+	const actualLeads = $derived(optimisticLeads ?? leads);
 
+	// Sync effect: clear optimistic override only when server data matches
 	$effect(() => {
-		optimisticLeads = leads;
+		if (optimisticLeads && leads.length > 0) {
+			const hasCaughtUp = optimisticLeads.every((ol) => {
+				const real = leads.find((l) => l.id === ol.id);
+				if (!real) return true; // Lead might be filtered out or deleted
+				return real.status === ol.status;
+			});
+
+			if (hasCaughtUp) {
+				optimisticLeads = null;
+			}
+		} else if (leads.length === 0 && !optimisticLeads) {
+			// Ensure we stay in sync if leads are cleared
+			optimisticLeads = null;
+		}
 	});
 
 	// Group leads by status, sorted by externalCreatedAt DESC
@@ -40,7 +55,7 @@
 			disqualified: []
 		};
 
-		const source = optimisticLeads.length > 0 ? optimisticLeads : leads;
+		const source = actualLeads;
 
 		for (const lead of source) {
 			const status = lead.status || 'new';
@@ -66,6 +81,24 @@
 	let draggedFromStatus = $state<string | null>(null);
 	let dragOverStatus = $state<string | null>(null);
 	let isDragging = $state(false);
+
+	async function updateLeadStatusLocal(leadId: string, targetStatus: string) {
+		if (readonly || !onStatusChange) return;
+
+		// Optimistic update
+		const base = optimisticLeads ?? leads;
+		optimisticLeads = base.map((l) =>
+			l.id === leadId ? { ...l, status: targetStatus } : l
+		);
+
+		try {
+			await onStatusChange(leadId, targetStatus);
+		} catch {
+			// Rollback on error
+			optimisticLeads = null;
+			toast.error('Eroare la actualizare status');
+		}
+	}
 
 	function handleDragStart(e: DragEvent, lead: any, status: string) {
 		if (readonly) return;
@@ -114,24 +147,13 @@
 
 		const leadId = draggedLead.id;
 
-		// Optimistic update
-		optimisticLeads = optimisticLeads.map((l) =>
-			l.id === leadId ? { ...l, status: targetStatus } : l
-		);
-
-		// Reset drag state
+		// Reset drag state before update to avoid UI glitches
 		draggedLead = null;
 		draggedFromStatus = null;
 		dragOverStatus = null;
 		isDragging = false;
 
-		try {
-			await onStatusChange(leadId, targetStatus);
-		} catch {
-			// Rollback on error
-			optimisticLeads = leads;
-			toast.error('Eroare la actualizare status');
-		}
+		await updateLeadStatusLocal(leadId, targetStatus);
 	}
 </script>
 
@@ -208,7 +230,7 @@
 												</DropdownMenu.Trigger>
 												<DropdownMenu.Content align="end">
 													{#each LEAD_STATUSES.filter((s) => s !== status) as targetStatus (targetStatus)}
-														<DropdownMenu.Item onclick={() => onStatusChange(lead.id, targetStatus)}>
+														<DropdownMenu.Item onclick={() => updateLeadStatusLocal(lead.id, targetStatus)}>
 															<span class="h-2 w-2 rounded-full {LEAD_STATUS_DOT_COLORS[targetStatus]} mr-2 inline-block"></span>
 															{LEAD_STATUS_LABELS[targetStatus]}
 														</DropdownMenu.Item>
