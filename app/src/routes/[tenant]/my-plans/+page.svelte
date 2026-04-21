@@ -19,6 +19,17 @@
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
 	import type { Task } from '$lib/server/db/schema';
 	import type { DateValue } from '@internationalized/date';
+	import TaskPill from '$lib/components/my-plans/task-pill.svelte';
+	import PlansToolbar from '$lib/components/my-plans/plans-toolbar.svelte';
+	import PlansLegend from '$lib/components/my-plans/plans-legend.svelte';
+	import {
+		parseFilters,
+		matchesFilters,
+		isTaskOverdue,
+		computeCounters,
+		type Filters
+	} from '$lib/components/my-plans/filters';
+	import { getClients } from '$lib/remotes/clients.remote';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
@@ -42,6 +53,35 @@
 	const tasksQuery = $derived(getMyPlansTasks({ startDate, endDate }));
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
+
+	// Filters from URL
+	const filters: Filters = $derived(parseFilters(page.url.searchParams));
+
+	// Clients for filter dropdown (only those that appear in the task range)
+	const clientsQuery = getClients();
+	const allClients = $derived(clientsQuery.current || []);
+	const clientIdsInRange = $derived(new Set(tasks.map((t) => t.clientId).filter(Boolean) as string[]));
+	const clientsForFilter = $derived(
+		allClients
+			.filter((c) => clientIdsInRange.has(c.id))
+			.map((c) => ({ id: c.id, name: c.name }))
+	);
+
+	// Counters (computed on full task list, not filtered — so they don't lie)
+	const counters = $derived(computeCounters(tasks, todayDate));
+
+	// Apply filters to individual task rendering decisions
+	function taskMatches(task: Task): boolean {
+		return matchesFilters(task, filters, todayDate);
+	}
+
+	// Single-filter "onlyOverdue" => hide non-matching entirely; otherwise dim them
+	const shouldHideNonMatching = $derived(
+		filters.onlyOverdue &&
+			filters.status.length === 0 &&
+			filters.priority.length === 0 &&
+			filters.clientId === null
+	);
 
 	// Group tasks by date
 	const tasksByDate = $derived.by(() => {
@@ -151,6 +191,18 @@
 
 	function handleDateClick(date: DateValue) {
 		selectedDate = date;
+	}
+
+	function goToToday() {
+		calendarValue = todayDate;
+		calendarPlaceholder = todayDate;
+		selectedDate = todayDate;
+	}
+
+	function handleClickTodayBadge() {
+		selectedDate = todayDate;
+		selectedDayForDialog = todayDate;
+		isDayDialogOpen = true;
 	}
 
 	function handleTaskClick(task: Task, event: MouseEvent) {
@@ -278,6 +330,14 @@
 		</Button>
 	</div>
 
+	<PlansToolbar
+		{filters}
+		{counters}
+		clients={clientsForFilter}
+		onGoToToday={goToToday}
+		onClickToday={handleClickTodayBadge}
+	/>
+
 	<div class="flex-1 min-h-0 ">
 		<Card class="h-full flex flex-col">
 			<CardContent class="p-4 flex-1 min-h-0 overflow-auto">
@@ -332,6 +392,9 @@
 																{@const isSelected = date.year === selectedDate.year && date.month === selectedDate.month && date.day === selectedDate.day}
 																{@const isToday = date.year === todayDate.year && date.month === todayDate.month && date.day === todayDate.day}
 																{@const isDragOver = dragOverDate === formatDateKey(date)}
+																{@const cellDate = date.toDate(getLocalTimeZone())}
+																{@const isWeekend = cellDate.getDay() === 0 || cellDate.getDay() === 6}
+																{@const overdueInDay = dayTasks.filter((t) => isTaskOverdue(t, todayDate)).length}
 																<CalendarComponents.Cell {date} month={month.value} class="h-auto! min-h-[180px] w-full border border-border/50">
 																	<ContextMenu.Root>
 																		<ContextMenu.Trigger>
@@ -339,15 +402,27 @@
 																			<button
 																				{...props}
 																				type="button"
-																				class="group relative flex flex-col items-start w-full min-h-[180px] h-full p-2 cursor-pointer hover:bg-accent/50 rounded-md transition-all {isSelected ? 'bg-primary/10 ring-2 ring-primary ring-offset-1' : ''} {isToday && !isSelected ? 'bg-accent/30 ring-1 ring-primary/50' : ''} {!isEqualMonth(date, month.value) ? 'opacity-40' : ''} {isDragOver ? 'bg-primary/20 ring-2 ring-primary border-primary' : ''}"
+																				class="group relative flex flex-col items-start w-full min-h-[180px] h-full p-2 cursor-pointer hover:bg-accent/50 rounded-md transition-all {isSelected ? 'bg-primary/10 ring-2 ring-primary ring-offset-1' : ''} {isToday && !isSelected ? 'bg-accent/30 ring-1 ring-primary/50' : ''} {!isEqualMonth(date, month.value) ? 'opacity-40' : ''} {isDragOver ? 'bg-primary/20 ring-2 ring-primary border-primary' : ''} {isWeekend && isEqualMonth(date, month.value) ? 'bg-muted/20' : ''}"
 																				onclick={() => handleDateClick(date)}
 																				ondragover={(e) => handleDragOver(e, date)}
 																				ondrop={(e) => handleDrop(e, date)}
 																			>
 																				<div class="flex items-center justify-between w-full mb-1.5">
-																					<span class="text-sm font-semibold {isSelected ? 'text-primary' : isToday && !isSelected ? 'text-primary font-bold' : 'text-foreground'}">
-																						{date.day}
-																					</span>
+																					<div class="flex items-center gap-1">
+																						<span class="text-sm font-semibold {isSelected ? 'text-primary' : isToday && !isSelected ? 'text-primary font-bold' : 'text-foreground'}">
+																							{date.day}
+																						</span>
+																						{#if overdueInDay > 0}
+																							<span
+																								class="w-1.5 h-1.5 bg-red-500 rounded-full"
+																								aria-label="{overdueInDay} overdue"
+																								title="{overdueInDay} overdue"
+																							></span>
+																						{/if}
+																						{#if isToday && !isSelected}
+																							<span class="text-[9px] font-semibold uppercase tracking-wider text-primary/70">TODAY</span>
+																						{/if}
+																					</div>
 																					<div
 																						role="button"
 																						tabindex="0"
@@ -361,20 +436,21 @@
 																				</div>
 																				{#if dayTasks.length > 0}
 																					<div class="flex flex-col gap-1 w-full flex-1 min-h-0">
-																						{#each dayTasks.slice(0, 6) as task}
-																							<div
-																								class="text-xs text-start px-2 py-1 rounded-md truncate font-medium shadow-sm border border-current/20 cursor-grab active:cursor-grabbing hover:opacity-80 text-wrap transition-opacity {getPriorityColor(task.priority || 'medium')}"
-																								title={task.title}
-																								draggable={true}
-																								ondragstart={(e) => handleDragStart(e, task)}
-																								ondragend={handleDragEnd}
-																								onclick={(e) => handleTaskClick(task, e)}
-																								role="button"
-																								tabindex="0"
-																								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleTaskClick(task, e as unknown as MouseEvent)}
-																							>
-																								{task.title}
-																							</div>
+																						{#each dayTasks.slice(0, 6) as task (task.id)}
+																							{@const pillOverdue = isTaskOverdue(task, todayDate)}
+																							{@const match = taskMatches(task)}
+																							{#if !match && shouldHideNonMatching}
+																								<!-- hidden by overdue-only filter -->
+																							{:else}
+																								<TaskPill
+																									{task}
+																									isOverdue={pillOverdue}
+																									dimmed={!match}
+																									onclick={(e) => handleTaskClick(task, e)}
+																									ondragstart={(e) => handleDragStart(e, task)}
+																									ondragend={handleDragEnd}
+																								/>
+																							{/if}
 																						{/each}
 																						{#if dayTasks.length > 6}
 																							<div class="text-xs px-2 py-1 text-muted-foreground truncate font-medium">
@@ -423,6 +499,10 @@
 					{/if}
 				</CardContent>
 			</Card>
+		</div>
+
+		<div class="mt-2">
+			<PlansLegend />
 		</div>
 </div>
 
