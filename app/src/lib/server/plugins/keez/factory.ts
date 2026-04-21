@@ -4,23 +4,10 @@ import { eq } from 'drizzle-orm';
 import { KeezClient } from './client';
 import { decrypt, encryptVerified, DecryptionError } from './crypto';
 import { logInfo, logError } from '$lib/server/logger';
+import { KeezCredentialsCorruptError } from './errors';
 
-/**
- * Thrown when stored Keez credentials cannot be decrypted.
- * Callers should catch this to show a user-friendly re-auth prompt instead of a 500.
- */
-export class KeezCredentialsCorruptError extends Error {
-	public readonly requiresReauth = true;
-
-	constructor(tenantId: string, cause?: unknown) {
-		super(
-			`Keez credentials for tenant ${tenantId} are corrupted or were encrypted with a different key. ` +
-			`Please re-save your Keez integration in Settings.`
-		);
-		this.name = 'KeezCredentialsCorruptError';
-		this.cause = cause;
-	}
-}
+// Re-export for backward compatibility with existing call sites that import from factory.
+export { KeezCredentialsCorruptError };
 
 interface IntegrationCredentials {
 	clientEid: string;

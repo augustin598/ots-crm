@@ -16,7 +16,8 @@ function getOAuth2Client() {
 
 const SCOPES = [
 	'https://www.googleapis.com/auth/gmail.readonly',
-	'https://www.googleapis.com/auth/gmail.send'
+	'https://www.googleapis.com/auth/gmail.send',
+	'https://www.googleapis.com/auth/gmail.modify'
 ];
 
 /**
@@ -96,6 +97,20 @@ export function hasGmailSendScope(grantedScopes: string | null): boolean {
 	try {
 		const scopes: string[] = JSON.parse(grantedScopes);
 		return scopes.some(s => s.includes('gmail.send'));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Check if the stored granted scopes include gmail.modify
+ * Required to remove INBOX label from sent messages (keeps them only in Sent).
+ */
+export function hasGmailModifyScope(grantedScopes: string | null): boolean {
+	if (!grantedScopes) return false;
+	try {
+		const scopes: string[] = JSON.parse(grantedScopes);
+		return scopes.some(s => s.includes('gmail.modify'));
 	} catch {
 		return false;
 	}
