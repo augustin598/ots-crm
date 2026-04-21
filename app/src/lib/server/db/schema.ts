@@ -740,6 +740,10 @@ export const keezIntegration = sqliteTable('keez_integration', {
 	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }),
 	isActive: boolean('is_active').notNull().default(true),
 	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	lastFailureAt: timestamp('last_failure_at', { withTimezone: true, mode: 'date' }),
+	lastFailureReason: text('last_failure_reason'),
+	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+	isDegraded: boolean('is_degraded').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

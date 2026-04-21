@@ -1,0 +1,1 @@
+ALTER TABLE keez_integration ADD COLUMN is_degraded integer DEFAULT 0 NOT NULL;
