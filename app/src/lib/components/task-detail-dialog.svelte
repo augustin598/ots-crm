@@ -663,13 +663,21 @@
 			</DialogHeader>
 
 			<div class="mt-4 space-y-6">
-					{#if task.description}
-						<div>
-							<h4 class="mb-2 font-semibold">Description</h4>
-							<p class="leading-relaxed text-muted-foreground">{task.description}</p>
-						</div>
-						<Separator />
-					{/if}
+					<div>
+						<h4 class="mb-2 font-semibold">Description</h4>
+						{#if currentTask}
+							<InlineEditableText
+								value={currentTask.description ?? ''}
+								onSave={(v) => saveField('description', (v || null) as any)}
+								multiline
+								placeholder="Scrie o descriere..."
+								emptyPlaceholder="Click pentru a adăuga o descriere"
+								displayClass="text-muted-foreground leading-relaxed whitespace-pre-wrap"
+								ariaLabel="Editează descrierea"
+							/>
+						{/if}
+					</div>
+					<Separator />
 
 					<div class="grid gap-4 md:grid-cols-2">
 						{#if task.clientId}
