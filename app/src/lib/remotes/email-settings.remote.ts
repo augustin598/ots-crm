@@ -40,7 +40,11 @@ export const getEmailSettings = query(async () => {
 	const gmailEmail = gmailIntegration?.email ?? null;
 	const gmailHasSendScope = gmailConnected && hasGmailSendScope(gmailIntegration?.grantedScopes ?? null);
 	const gmailHasModifyScope = gmailConnected && hasGmailModifyScope(gmailIntegration?.grantedScopes ?? null);
-	const gmailNeedsReauth = gmailConnected && (!gmailHasSendScope || !gmailHasModifyScope);
+	// Blocking reauth: only when the send scope is missing, since without it Gmail sending
+	// is genuinely broken. Missing gmail.modify is a soft notice (see gmailNeedsModifyScope
+	// below) because sending still works — only the cosmetic INBOX-label cleanup is skipped.
+	const gmailNeedsReauth = gmailConnected && !gmailHasSendScope;
+	const gmailNeedsModifyScope = gmailConnected && gmailHasSendScope && !gmailHasModifyScope;
 
 	// Return default settings if none exist
 	if (!settings) {
@@ -57,7 +61,8 @@ export const getEmailSettings = query(async () => {
 			gmailEmail,
 			gmailHasSendScope,
 			gmailHasModifyScope,
-			gmailNeedsReauth
+			gmailNeedsReauth,
+			gmailNeedsModifyScope
 		};
 	}
 
@@ -75,7 +80,8 @@ export const getEmailSettings = query(async () => {
 		gmailEmail,
 		gmailHasSendScope,
 		gmailHasModifyScope,
-		gmailNeedsReauth
+		gmailNeedsReauth,
+		gmailNeedsModifyScope
 	};
 });
 
