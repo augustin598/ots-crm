@@ -55,7 +55,6 @@
 		User,
 		Building,
 		MessageSquare,
-		Edit,
 		Check,
 		X,
 		Pencil,
@@ -706,10 +705,6 @@
 								Reject
 							</Button>
 						{/if}
-						<Button variant="outline" size="sm" onclick={() => {}}>
-							<Edit class="mr-2 h-4 w-4" />
-							Edit
-						</Button>
 						<Button variant="ghost" size="sm" onclick={() => onOpenChange(false)}>
 							<X class="h-4 w-4" />
 						</Button>
