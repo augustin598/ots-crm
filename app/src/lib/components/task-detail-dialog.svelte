@@ -801,14 +801,36 @@
 						</div>
 					{/if}
 
-					{#if task.dueDate}
+					{#if currentTask}
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
 								<Calendar class="h-5 w-5 text-blue-600" />
 							</div>
-							<div>
+							<div class="min-w-0 flex-1">
 								<p class="text-sm text-muted-foreground">Due Date</p>
-								<p class="font-medium">{formatDate(task.dueDate)}</p>
+								<Popover.Root bind:open={dueDateOpen}>
+									<Popover.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												class="text-left font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+												aria-label="Schimbă data limită"
+											>
+												<CalendarIcon class="mr-1 inline h-3.5 w-3.5 opacity-60" />
+												{currentTask.dueDate ? formatDate(currentTask.dueDate) : 'Alege data'}
+											</button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-auto p-0" align="start">
+										<CalendarPicker
+											type="single"
+											value={dueDateValue}
+											onValueChange={handleDueDateSelect}
+											locale="ro-RO"
+										/>
+									</Popover.Content>
+								</Popover.Root>
 							</div>
 						</div>
 					{/if}
