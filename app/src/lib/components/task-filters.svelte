@@ -17,9 +17,10 @@
 		projects?: Array<{ id: string; name: string }>;
 		users?: Array<{ id: string; firstName: string; lastName: string; email: string }>;
 		milestones?: Array<{ id: string; name: string }>;
+		clients?: Array<{ id: string; name: string }>;
 	};
 
-	let { projects = [], users = [], milestones = [] }: Props = $props();
+	let { projects = [], users = [], milestones = [], clients = [] }: Props = $props();
 
 	// Query states using nuqs-svelte
 	const statuses = useQueryState(
@@ -33,6 +34,7 @@
 	const assignees = useQueryState('assignee', parseAsArrayOf(parseAsString));
 	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString));
 	const milestoneIds = useQueryState('milestone', parseAsArrayOf(parseAsString));
+	const clientId = useQueryState('client', parseAsString.withDefault(''));
 	const search = useQueryState('search', parseAsString.withDefault(''));
 	const dueDate = useQueryState('dueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth']));
 
@@ -42,6 +44,7 @@
 	let assigneePopoverOpen = $state(false);
 	let projectPopoverOpen = $state(false);
 	let milestonePopoverOpen = $state(false);
+	let clientPopoverOpen = $state(false);
 	let dueDatePopoverOpen = $state(false);
 
 	// Computed active filters count
@@ -51,6 +54,7 @@
 			((assignees.current as string[] | null)?.length || 0) +
 			((projectIds.current as string[] | null)?.length || 0) +
 			((milestoneIds.current as string[] | null)?.length || 0) +
+			(clientId.current ? 1 : 0) +
 			(dueDate.current ? 1 : 0) +
 			(search.current ? 1 : 0)
 	);
@@ -106,6 +110,7 @@
 		assignees.current = null as any;
 		projectIds.current = null as any;
 		milestoneIds.current = null as any;
+		clientId.current = '';
 		dueDate.current = null as any;
 		search.current = '';
 	}
@@ -114,6 +119,63 @@
 		const name = `${user.firstName} ${user.lastName}`.trim();
 		return name || user.email;
 	}
+
+	function setClient(id: string | null) {
+		clientId.current = id ?? '';
+	}
+
+	function toggleOverdue() {
+		dueDate.current = (dueDate.current === 'overdue' ? null : 'overdue') as any;
+	}
+
+	// Dynamic labels (my-plans style)
+	const statusLabel = $derived.by(() => {
+		const list = (statuses.current as string[] | null) || [];
+		if (list.length === 0) return 'Status';
+		if (list.length === 1) return `Status: ${formatStatus(list[0])}`;
+		return `Status (${list.length})`;
+	});
+	const priorityLabel = $derived.by(() => {
+		const list = (priorities.current as string[] | null) || [];
+		if (list.length === 0) return 'Priority';
+		if (list.length === 1) return `Priority: ${formatPriority(list[0])}`;
+		return `Priority (${list.length})`;
+	});
+	const assigneeLabel = $derived.by(() => {
+		const list = (assignees.current as string[] | null) || [];
+		if (list.length === 0) return 'Assignee';
+		if (list.length === 1) {
+			const user = users.find((u) => u.id === list[0]);
+			return user ? `Assignee: ${getUserDisplayName(user)}` : 'Assignee (1)';
+		}
+		return `Assignee (${list.length})`;
+	});
+	const projectLabel = $derived.by(() => {
+		const list = (projectIds.current as string[] | null) || [];
+		if (list.length === 0) return 'Project';
+		if (list.length === 1) {
+			const project = projects.find((p) => p.id === list[0]);
+			return project ? `Project: ${project.name}` : 'Project (1)';
+		}
+		return `Project (${list.length})`;
+	});
+	const milestoneLabel = $derived.by(() => {
+		const list = (milestoneIds.current as string[] | null) || [];
+		if (list.length === 0) return 'Milestone';
+		if (list.length === 1) {
+			const milestone = milestones.find((m) => m.id === list[0]);
+			return milestone ? `Milestone: ${milestone.name}` : 'Milestone (1)';
+		}
+		return `Milestone (${list.length})`;
+	});
+	const clientLabel = $derived.by(() => {
+		if (!clientId.current) return 'Client';
+		const c = clients.find((x) => x.id === clientId.current);
+		return c ? `Client: ${c.name}` : 'Client';
+	});
+	const dueDateLabel = $derived(
+		dueDate.current ? `Due: ${formatDateRange(dueDate.current)}` : 'Due Date'
+	);
 </script>
 
 <div class="flex flex-wrap items-center gap-2">
@@ -133,12 +195,7 @@
 			{#snippet child({ props })}
 				<Button {...props} variant="outline" size="sm">
 					<FilterIcon class="mr-2 h-4 w-4" />
-					Status
-					{#if (statuses.current as string[] | null) && (statuses.current as string[]).length > 0}
-						<Badge variant="secondary" class="ml-2">
-							{(statuses.current as string[]).length}
-						</Badge>
-					{/if}
+					{statusLabel}
 				</Button>
 			{/snippet}
 		</PopoverTrigger>
@@ -166,12 +223,7 @@
 		<PopoverTrigger>
 			{#snippet child({ props })}
 				<Button {...props} variant="outline" size="sm">
-					Priority
-					{#if (priorities.current as string[] | null) && (priorities.current as string[]).length > 0}
-						<Badge variant="secondary" class="ml-2">
-							{(priorities.current as string[]).length}
-						</Badge>
-					{/if}
+					{priorityLabel}
 				</Button>
 			{/snippet}
 		</PopoverTrigger>
@@ -194,18 +246,52 @@
 		</PopoverContent>
 	</Popover>
 
+	<!-- Client Filter (single-select) -->
+	{#if clients.length > 0}
+		<Popover bind:open={clientPopoverOpen}>
+			<PopoverTrigger>
+				{#snippet child({ props })}
+					<Button {...props} variant="outline" size="sm">
+						{clientLabel}
+					</Button>
+				{/snippet}
+			</PopoverTrigger>
+			<PopoverContent class="max-h-[300px] w-64 overflow-auto p-2">
+				<div class="flex flex-col gap-1">
+					<button
+						type="button"
+						class="rounded px-2 py-1.5 text-left text-sm hover:bg-accent {!clientId.current
+							? 'font-semibold'
+							: ''}"
+						onclick={() => setClient(null)}
+					>
+						All clients
+					</button>
+					{#each clients as c (c.id)}
+						<button
+							type="button"
+							class="truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent {clientId.current ===
+							c.id
+								? 'bg-accent/50 font-semibold'
+								: ''}"
+							onclick={() => setClient(c.id)}
+							title={c.name}
+						>
+							{c.name}
+						</button>
+					{/each}
+				</div>
+			</PopoverContent>
+		</Popover>
+	{/if}
+
 	<!-- Assignee Filter -->
 	{#if users.length > 0}
 		<Popover bind:open={assigneePopoverOpen}>
 			<PopoverTrigger>
 				{#snippet child({ props })}
 					<Button {...props} variant="outline" size="sm">
-						Assignee
-						{#if (assignees.current as string[] | null) && (assignees.current as string[]).length > 0}
-							<Badge variant="secondary" class="ml-2">
-								{(assignees.current as string[]).length}
-							</Badge>
-						{/if}
+						{assigneeLabel}
 					</Button>
 				{/snippet}
 			</PopoverTrigger>
@@ -235,12 +321,7 @@
 			<PopoverTrigger>
 				{#snippet child({ props })}
 					<Button {...props} variant="outline" size="sm">
-						Project
-						{#if (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0}
-							<Badge variant="secondary" class="ml-2">
-								{(projectIds.current as string[]).length}
-							</Badge>
-						{/if}
+						{projectLabel}
 					</Button>
 				{/snippet}
 			</PopoverTrigger>
@@ -270,12 +351,7 @@
 			<PopoverTrigger>
 				{#snippet child({ props })}
 					<Button {...props} variant="outline" size="sm">
-						Milestone
-						{#if (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0}
-							<Badge variant="secondary" class="ml-2">
-								{(milestoneIds.current as string[]).length}
-							</Badge>
-						{/if}
+						{milestoneLabel}
 					</Button>
 				{/snippet}
 			</PopoverTrigger>
@@ -304,10 +380,7 @@
 		<PopoverTrigger>
 			{#snippet child({ props })}
 				<Button {...props} variant="outline" size="sm">
-					Due Date
-					{#if dueDate.current}
-						<Badge variant="secondary" class="ml-2">1</Badge>
-					{/if}
+					{dueDateLabel}
 				</Button>
 			{/snippet}
 		</PopoverTrigger>
@@ -335,6 +408,12 @@
 			</div>
 		</PopoverContent>
 	</Popover>
+
+	<!-- Only overdue quick toggle -->
+	<label class="flex cursor-pointer items-center gap-2 text-sm select-none">
+		<Checkbox checked={dueDate.current === 'overdue'} onCheckedChange={() => toggleOverdue()} />
+		Doar overdue
+	</label>
 
 	<!-- Clear All Filters -->
 	{#if activeFiltersCount > 0}
@@ -405,6 +484,20 @@
 					</Badge>
 				{/if}
 			{/each}
+		{/if}
+		{#if clientId.current}
+			{@const selectedClient = clients.find((c) => c.id === clientId.current)}
+			{#if selectedClient}
+				<Badge variant="secondary" class="gap-1">
+					Client: {selectedClient.name}
+					<button
+						onclick={() => setClient(null)}
+						class="ml-1 hover:bg-destructive/20 rounded-full p-0.5"
+					>
+						<XIcon class="h-3 w-3" />
+					</button>
+				</Badge>
+			{/if}
 		{/if}
 		{#if (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0}
 			{#each (milestoneIds.current as string[]) as milestoneId}

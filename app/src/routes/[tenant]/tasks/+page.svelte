@@ -42,6 +42,7 @@
 	const assignees = useQueryState('assignee', parseAsArrayOf(parseAsString));
 	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString));
 	const milestoneIds = useQueryState('milestone', parseAsArrayOf(parseAsString));
+	const clientIdFilter = useQueryState('client', parseAsString.withDefault(''));
 	const search = useQueryState('search', parseAsString.withDefault(''));
 	const dueDate = useQueryState('dueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth']));
 	const sortBy = useQueryState('sortBy', parseAsString.withDefault(''));
@@ -54,6 +55,7 @@
 		assignee: (assignees.current as string[] | null) && (assignees.current as string[]).length > 0 ? (assignees.current as string[]) : undefined,
 		projectId: (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0 ? (projectIds.current as string[]) : undefined,
 		milestoneId: (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0 ? (milestoneIds.current as string[]) : undefined,
+		clientId: clientIdFilter.current || undefined,
 		search: search.current || undefined,
 		dueDate: dueDate.current || undefined,
 		sortBy: sortBy.current || undefined,
@@ -214,6 +216,7 @@
 		projects={projects}
 		users={users}
 		milestones={milestones}
+		clients={clients}
 	/>
 </div>
 
