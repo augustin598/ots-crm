@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTasks, deleteTask, getCompletedTasks } from '$lib/remotes/tasks.remote';
+	import { getTasks, deleteTask, getCompletedTasks, getTaskClientIds } from '$lib/remotes/tasks.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getMilestones } from '$lib/remotes/milestones.remote';
@@ -88,6 +88,15 @@
 
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
+
+	// Clients shown in the filter dropdown — only those that have at least one task
+	const taskClientIdsQuery = getTaskClientIds();
+	const taskClientIds = $derived(new Set(taskClientIdsQuery.current || []));
+	const clientsForFilter = $derived(
+		clients
+			.filter((c: any) => taskClientIds.has(c.id))
+			.map((c: any) => ({ id: c.id, name: c.name }))
+	);
 
 	// Create maps
 	const projectMap = $derived(new Map(projects.map((project) => [project.id, project.name])));
@@ -216,7 +225,7 @@
 		projects={projects}
 		users={users}
 		milestones={milestones}
-		clients={clients}
+		clients={clientsForFilter}
 	/>
 </div>
 

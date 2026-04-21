@@ -239,7 +239,12 @@ export const getTasks = query(
 			todayEnd.setHours(23, 59, 59, 999);
 
 			if (filters.dueDate === 'overdue') {
-				conditions = and(conditions, lt(table.task.dueDate, now)) as any;
+				// Overdue means dueDate in the past AND task is still actionable
+				conditions = and(
+					conditions,
+					lt(table.task.dueDate, now),
+					notInArray(table.task.status, ['done', 'cancelled'])
+				) as any;
 			} else if (filters.dueDate === 'today') {
 				conditions = and(
 					conditions,
@@ -333,6 +338,22 @@ export const getTasks = query(
 		return await queryBuilder;
 	}
 );
+
+export const getTaskClientIds = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	const rows = await db
+		.selectDistinct({ clientId: table.task.clientId })
+		.from(table.task)
+		.where(
+			and(eq(table.task.tenantId, event.locals.tenant.id), sql`${table.task.clientId} IS NOT NULL`)
+		);
+
+	return rows.map((r) => r.clientId).filter((id): id is string => !!id);
+});
 
 export const getCompletedTasks = query(
 	v.object({
