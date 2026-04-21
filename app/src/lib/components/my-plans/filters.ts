@@ -1,5 +1,13 @@
 import type { Task } from '$lib/server/db/schema';
-import { today, getLocalTimeZone, type DateValue } from '@internationalized/date';
+import type { DateValue } from '@internationalized/date';
+
+function toLocalYMD(d: Date): string {
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dateValueToYMD(dv: { year: number; month: number; day: number }): string {
+	return `${dv.year}-${String(dv.month).padStart(2, '0')}-${String(dv.day).padStart(2, '0')}`;
+}
 
 // ── status groups ─────────────────────────────────────────────────────────
 export type StatusGroup = 'todo' | 'in-progress' | 'done' | 'cancelled';
@@ -42,9 +50,9 @@ export function getStatusGroup(status: string | null | undefined): StatusGroup {
 export function isTaskOverdue(task: Pick<Task, 'dueDate' | 'status'>, now: DateValue): boolean {
 	if (!task.dueDate) return false;
 	if (task.status === 'done' || task.status === 'cancelled') return false;
-	const due = new Date(task.dueDate);
-	const nowDate = new Date(now.year, now.month - 1, now.day);
-	return due < nowDate;
+	const dueYMD = toLocalYMD(new Date(task.dueDate));
+	const nowYMD = dateValueToYMD(now);
+	return dueYMD < nowYMD;
 }
 
 // ── filters ───────────────────────────────────────────────────────────────
@@ -120,11 +128,11 @@ export function computeCounters(
 	let overdue = 0;
 	let todayCount = 0;
 	let inProgress = 0;
-	const nowYMD = `${now.year}-${String(now.month).padStart(2, '0')}-${String(now.day).padStart(2, '0')}`;
+	const nowYMD = dateValueToYMD(now);
 	for (const t of tasks) {
 		if (isTaskOverdue(t, now)) overdue++;
 		if (t.dueDate) {
-			const dueYMD = new Date(t.dueDate).toISOString().split('T')[0];
+			const dueYMD = toLocalYMD(new Date(t.dueDate));
 			if (dueYMD === nowYMD && t.status !== 'done' && t.status !== 'cancelled') todayCount++;
 		}
 		if (t.status === 'in-progress' || t.status === 'review') inProgress++;
@@ -157,4 +165,3 @@ export const STATUS_GROUP_DOT_CLASSES: Record<StatusGroup, string> = {
 	cancelled: 'bg-zinc-400'
 };
 
-export { today, getLocalTimeZone };
