@@ -193,6 +193,11 @@ export async function handleCallback(code: string, tenantId: string): Promise<{ 
 		logInfo('gmail', 'OAuth: New integration created', { tenantId });
 	}
 
+	// Clear cached transporter so the new grantedScopes (e.g. gmail.modify after re-auth)
+	// are picked up immediately instead of being masked by the 30-min TTL snapshot.
+	const { clearTenantTransporterCache } = await import('$lib/server/email');
+	clearTenantTransporterCache(tenantId);
+
 	return { email };
 }
 
