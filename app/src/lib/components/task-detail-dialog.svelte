@@ -598,7 +598,16 @@
 			<DialogHeader>
 				<div class="flex items-start justify-between">
 					<div class="flex-1">
-						<DialogTitle class="text-2xl">{task.title}</DialogTitle>
+						<DialogTitle class="text-2xl">
+							{#if currentTask}
+								<InlineEditableText
+									value={currentTask.title}
+									onSave={(v) => saveField('title', v)}
+									displayClass="text-2xl font-semibold"
+									ariaLabel="Editează titlul task-ului"
+								/>
+							{/if}
+						</DialogTitle>
 						{#if task.projectId && projectMap.has(task.projectId)}
 							<a
 								href="/{tenantSlug}/projects/{task.projectId}"
