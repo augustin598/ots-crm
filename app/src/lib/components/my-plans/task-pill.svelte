@@ -35,7 +35,9 @@
 
 	const group = $derived(getStatusGroup(task.status));
 	const priorityKey = $derived<keyof typeof PRIORITY_BORDER_CLASSES>(
-		(task.priority as TaskPriority) || 'none'
+		task.priority && task.priority in PRIORITY_BORDER_CLASSES
+			? (task.priority as TaskPriority)
+			: 'none'
 	);
 
 	const StatusIcon = $derived.by(() => {
