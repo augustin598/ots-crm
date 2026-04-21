@@ -152,11 +152,12 @@
 	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
 
 	function handleCreateSuccess() {
-		// Refresh tasks query after task creation
-		// Note: CreateTaskDialog uses getTasks internally, but we need to refresh getMyPlansTasks
-		// The dialog will update getTasks, but we'll also need to refresh our calendar view
-		// For now, tasksQuery will auto-refresh when the page re-renders
 		isCreateDialogOpen = false;
+		// additionalQueriesToUpdate doesn't reliably invalidate getMyPlansTasks when the
+		// query reference is passed through a layered dialog prop chain, so refresh
+		// explicitly here.
+		tasksQuery.refresh?.();
+		allTasksQuery.refresh?.();
 	}
 
 	async function handleAssignTask(task: Task) {
@@ -653,7 +654,13 @@
 	open={isTaskDetailOpen}
 	onOpenChange={(open) => {
 		isTaskDetailOpen = open;
-		if (!open) selectedTask = null;
+		if (!open) {
+			selectedTask = null;
+			// Layered-prop additionalQueriesToUpdate doesn't reliably invalidate
+			// getMyPlansTasks; refresh on close so the calendar reflects any edits.
+			tasksQuery.refresh?.();
+			allTasksQuery.refresh?.();
+		}
 	}}
 	{tenantSlug}
 	additionalQueriesToUpdate={[tasksQuery, allTasksQuery]}
