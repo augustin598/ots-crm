@@ -229,20 +229,24 @@
 			toast.error('Titlul nu poate fi gol');
 			return;
 		}
-		const previous = (currentTask as any)?.[field];
-		(localOverrides as any)[field] = value;
+		const previous = currentTask?.[field];
+		// Immutable replace keeps Svelte 5 reactivity obvious and preserves type safety
+		localOverrides = { ...localOverrides, [field]: value };
 		try {
 			// Title is ALWAYS required by valibot schema — always include it
 			const payload: any = {
 				taskId: task.id,
 				title: currentTask?.title ?? task.title
 			};
-			// For non-title fields: follow edit-task-form pattern — omit if falsy
-			// (schema rejects null; empty string would write "" to DB)
+			// Non-title fields follow edit-task-form pattern: treat '' as "no change"
+			// and omit the key. Schema is v.optional(v.string()) for all non-title
+			// fields — an empty string would otherwise persist as "" in the DB.
+			// NOTE: this invariant relies on the current all-string schema; revisit
+			// if numeric/boolean fields land on the task.
 			if (field === 'title') {
 				payload.title = value;
 			} else {
-				const v = (value as any) || undefined;
+				const v = value === '' || value === null ? undefined : value;
 				if (v !== undefined) payload[field] = v;
 			}
 			await updateTask(payload).updates(
@@ -252,7 +256,7 @@
 				...additionalQueriesToUpdate
 			);
 		} catch (e) {
-			(localOverrides as any)[field] = previous;
+			localOverrides = { ...localOverrides, [field]: previous };
 			toast.error(`Nu s-a putut salva: ${e instanceof Error ? e.message : 'eroare'}`);
 		}
 	}
