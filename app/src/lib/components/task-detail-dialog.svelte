@@ -735,14 +735,39 @@
 				<Separator />
 
 				<div class="grid gap-4 md:grid-cols-2">
-					{#if task.clientId}
+					{#if currentTask}
 						<div class="flex items-center gap-3">
-							<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
+							<div
+								class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10"
+							>
 								<Building class="h-5 w-5 text-orange-600" />
 							</div>
-							<div>
+							<div class="min-w-0 flex-1">
 								<p class="text-sm text-muted-foreground">Client</p>
-								<p class="font-medium">{clientMap.get(task.clientId) || '-'}</p>
+								<Popover.Root>
+									<Popover.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												class="w-full truncate text-left font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+												aria-label="Schimbă clientul"
+											>
+												{clientMap.get(currentTask.clientId ?? '') ?? 'Alege client'}
+											</button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-64 p-2">
+										<Combobox
+											value={currentTask.clientId ?? ''}
+											options={clientOptions}
+											placeholder="Alege client"
+											searchPlaceholder="Caută..."
+											onValueChange={(v) =>
+												saveField('clientId', ((v as string) || '') as any)}
+										/>
+									</Popover.Content>
+								</Popover.Root>
 							</div>
 						</div>
 					{/if}
