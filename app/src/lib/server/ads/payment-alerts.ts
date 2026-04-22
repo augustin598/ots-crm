@@ -88,6 +88,8 @@ async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
 interface PriorStatusInfo {
 	status: AdsPaymentStatus | null;
 	everChecked: boolean;
+	lastAlertEmailAt: Date | null;
+	alertMutedAtStatus: string | null;
 }
 
 async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): Promise<PriorStatusInfo> {
@@ -96,6 +98,8 @@ async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): P
 			.select({
 				paymentStatus: table.metaAdsAccount.paymentStatus,
 				checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
+				lastAlertEmailAt: table.metaAdsAccount.lastAlertEmailAt,
+				alertMutedAtStatus: table.metaAdsAccount.alertMutedAtStatus,
 			})
 			.from(table.metaAdsAccount)
 			.where(
@@ -108,6 +112,8 @@ async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): P
 		return {
 			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
 			everChecked: row?.checkedAt != null,
+			lastAlertEmailAt: row?.lastAlertEmailAt ?? null,
+			alertMutedAtStatus: row?.alertMutedAtStatus ?? null,
 		};
 	}
 	if (snap.provider === 'google') {
@@ -115,6 +121,8 @@ async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): P
 			.select({
 				paymentStatus: table.googleAdsAccount.paymentStatus,
 				checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
+				lastAlertEmailAt: table.googleAdsAccount.lastAlertEmailAt,
+				alertMutedAtStatus: table.googleAdsAccount.alertMutedAtStatus,
 			})
 			.from(table.googleAdsAccount)
 			.where(
@@ -127,12 +135,16 @@ async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): P
 		return {
 			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
 			everChecked: row?.checkedAt != null,
+			lastAlertEmailAt: row?.lastAlertEmailAt ?? null,
+			alertMutedAtStatus: row?.alertMutedAtStatus ?? null,
 		};
 	}
 	const [row] = await db
 		.select({
 			paymentStatus: table.tiktokAdsAccount.paymentStatus,
 			checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
+			lastAlertEmailAt: table.tiktokAdsAccount.lastAlertEmailAt,
+			alertMutedAtStatus: table.tiktokAdsAccount.alertMutedAtStatus,
 		})
 		.from(table.tiktokAdsAccount)
 		.where(
@@ -145,8 +157,66 @@ async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): P
 	return {
 		status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
 		everChecked: row?.checkedAt != null,
+		lastAlertEmailAt: row?.lastAlertEmailAt ?? null,
+		alertMutedAtStatus: row?.alertMutedAtStatus ?? null,
 	};
 }
+
+/**
+ * Per-provider helper: clear the mute on an account (set alert_muted_at_status = NULL).
+ * Called when status changes away from the muted-at status — we auto-unmute so
+ * the admin sees the new condition.
+ */
+async function clearAccountMute(provider: 'meta' | 'google' | 'tiktok', accountId: string, tenantId: string) {
+	if (provider === 'meta') {
+		await db
+			.update(table.metaAdsAccount)
+			.set({ alertMutedAtStatus: null })
+			.where(and(eq(table.metaAdsAccount.id, accountId), eq(table.metaAdsAccount.tenantId, tenantId)));
+	} else if (provider === 'google') {
+		await db
+			.update(table.googleAdsAccount)
+			.set({ alertMutedAtStatus: null })
+			.where(and(eq(table.googleAdsAccount.id, accountId), eq(table.googleAdsAccount.tenantId, tenantId)));
+	} else {
+		await db
+			.update(table.tiktokAdsAccount)
+			.set({ alertMutedAtStatus: null })
+			.where(and(eq(table.tiktokAdsAccount.id, accountId), eq(table.tiktokAdsAccount.tenantId, tenantId)));
+	}
+}
+
+/**
+ * Updates last_alert_email_at for a batch of (provider, accountTableId) pairs.
+ * Wrapped in try-catch by the caller — if this fails, the next poll will re-alert
+ * (at-least-once over at-most-once, preferred for billing notifications).
+ */
+async function updateAlertTimestamps(
+	tenantId: string,
+	accounts: Array<{ provider: 'meta' | 'google' | 'tiktok'; accountId: string }>,
+) {
+	const now = new Date();
+	for (const { provider, accountId } of accounts) {
+		if (provider === 'meta') {
+			await db
+				.update(table.metaAdsAccount)
+				.set({ lastAlertEmailAt: now })
+				.where(and(eq(table.metaAdsAccount.id, accountId), eq(table.metaAdsAccount.tenantId, tenantId)));
+		} else if (provider === 'google') {
+			await db
+				.update(table.googleAdsAccount)
+				.set({ lastAlertEmailAt: now })
+				.where(and(eq(table.googleAdsAccount.id, accountId), eq(table.googleAdsAccount.tenantId, tenantId)));
+		} else {
+			await db
+				.update(table.tiktokAdsAccount)
+				.set({ lastAlertEmailAt: now })
+				.where(and(eq(table.tiktokAdsAccount.id, accountId), eq(table.tiktokAdsAccount.tenantId, tenantId)));
+		}
+	}
+}
+
+const RE_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function resolveAdminRecipients(tenantId: string): Promise<Array<{ userId: string; email: string }>> {
 	const rows = await db
@@ -209,6 +279,10 @@ async function resolveClientRecipients(
 interface DigestAccumulator {
 	adminByEmail: Map<string, AdDigestItem[]>;
 	clientByEmail: Map<string, AdDigestItem[]>;
+	/** Accounts that were included in at least one digest entry this run.
+	 * Used to update last_alert_email_at after flush (not embedded in AdDigestItem
+	 * to avoid leaking internal IDs into the email payload). */
+	sentAccounts: Array<{ provider: 'meta' | 'google' | 'tiktok'; accountId: string }>;
 }
 
 async function resolveClientInfo(
@@ -312,6 +386,11 @@ async function collectTransitionNotifications(
 		balanceFormatted,
 	};
 
+	// Track whether this account landed in ANY email digest this run, so we can
+	// update last_alert_email_at after successful flush (single entry regardless
+	// of how many recipients).
+	let addedToDigest = false;
+
 	// --- Admins ---
 	const admins = await resolveAdminRecipients(tenantId);
 	for (const admin of admins) {
@@ -334,6 +413,7 @@ async function collectTransitionNotifications(
 			const list = digest.adminByEmail.get(admin.email) ?? [];
 			list.push({ ...baseDigestItem, clientLabel: clientName ?? undefined });
 			digest.adminByEmail.set(admin.email, list);
+			addedToDigest = true;
 		}
 	}
 
@@ -360,6 +440,7 @@ async function collectTransitionNotifications(
 				const list = digest.clientByEmail.get(u.email) ?? [];
 				list.push({ ...baseDigestItem });
 				digest.clientByEmail.set(u.email, list);
+				addedToDigest = true;
 			}
 		}
 		if (!suppressEmail) {
@@ -367,8 +448,13 @@ async function collectTransitionNotifications(
 				const list = digest.clientByEmail.get(email) ?? [];
 				list.push({ ...baseDigestItem });
 				digest.clientByEmail.set(email, list);
+				addedToDigest = true;
 			}
 		}
+	}
+
+	if (addedToDigest) {
+		digest.sentAccounts.push({ provider: snap.provider, accountId: snap.accountTableId });
 	}
 }
 
@@ -406,6 +492,7 @@ export async function reconcileAndAlert(
 	const digest: DigestAccumulator = {
 		adminByEmail: new Map(),
 		clientByEmail: new Map(),
+		sentAccounts: [],
 	};
 
 	for (const snap of snapshots) {
@@ -420,22 +507,48 @@ export async function reconcileAndAlert(
 				continue;
 			}
 
-			if (prior.status === snap.paymentStatus) {
+			// --- MUTE CHECK ---
+			// Admin-muted at a specific status. While current status matches,
+			// skip notifications entirely. On status drift, auto-unmute so admin
+			// sees the new condition.
+			if (prior.alertMutedAtStatus && prior.alertMutedAtStatus === snap.paymentStatus) {
 				await persistStatus(snap, tenantId);
 				result.unchanged += 1;
 				continue;
 			}
+			if (prior.alertMutedAtStatus && prior.alertMutedAtStatus !== snap.paymentStatus) {
+				// Status drifted from the muted-at status — clear the mute and proceed.
+				await clearAccountMute(snap.provider, snap.accountTableId, tenantId);
+			}
 
 			const priorBad = prior.status !== null && isBadStatus(prior.status);
 			const currentBad = isBadStatus(snap.paymentStatus);
+			const isTransition = prior.status !== snap.paymentStatus;
+			const isStaleReminder =
+				currentBad &&
+				!isTransition &&
+				(!prior.lastAlertEmailAt ||
+					Date.now() - prior.lastAlertEmailAt.getTime() > RE_ALERT_INTERVAL_MS);
 
-			if (currentBad || (priorBad && !currentBad)) {
-				await persistStatus(snap, tenantId);
+			// Dispatch when:
+			//   - It's a transition to/from bad (existing behavior), OR
+			//   - It's a stale reminder: still-bad status hasn't been emailed in 24h
+			const shouldDispatch =
+				isTransition && (currentBad || priorBad) ? true : isStaleReminder;
+
+			await persistStatus(snap, tenantId);
+
+			if (shouldDispatch) {
 				await collectTransitionNotifications(snap, tenantId, prior.status, digest);
-				if (!currentBad && priorBad) result.restored += 1;
-				else result.transitions += 1;
+				if (isStaleReminder) {
+					// Count re-alerts toward transitions for telemetry visibility.
+					result.transitions += 1;
+				} else if (!currentBad && priorBad) {
+					result.restored += 1;
+				} else {
+					result.transitions += 1;
+				}
 			} else {
-				await persistStatus(snap, tenantId);
 				result.unchanged += 1;
 			}
 		} catch (err) {
@@ -448,6 +561,15 @@ export async function reconcileAndAlert(
 	// regardless of how many accounts transitioned. Prevents the email storm
 	// pattern observed on the initial seed incident.
 	await flushDigest(tenantId, digest);
+
+	// After successful flush, stamp last_alert_email_at so we don't re-alert
+	// these accounts within the next 24h window. Best-effort — failure here
+	// means next run may re-alert (at-least-once; acceptable for billing).
+	try {
+		await updateAlertTimestamps(tenantId, digest.sentAccounts);
+	} catch (err) {
+		logError('server', `updateAlertTimestamps failed tenant=${tenantId}: ${err instanceof Error ? err.message : String(err)}`);
+	}
 
 	logInfo('server', `Reconcile done tenant=${tenantId}`, {
 		metadata: {

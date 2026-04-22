@@ -1465,6 +1465,8 @@ export const googleAdsAccount = sqliteTable('google_ads_account', {
 	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
 	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
 	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
+	lastAlertEmailAt: timestamp('last_alert_email_at', { withTimezone: true, mode: 'date' }),
+	alertMutedAtStatus: text('alert_muted_at_status'),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -1575,6 +1577,8 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
 	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
 	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
+	lastAlertEmailAt: timestamp('last_alert_email_at', { withTimezone: true, mode: 'date' }), // throttle re-alerts to 24h
+	alertMutedAtStatus: text('alert_muted_at_status'), // admin-muted while current status == this; auto-unmutes on status change
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -1783,6 +1787,8 @@ export const tiktokAdsAccount = sqliteTable('tiktok_ads_account', {
 	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
 	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
 	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
+	lastAlertEmailAt: timestamp('last_alert_email_at', { withTimezone: true, mode: 'date' }),
+	alertMutedAtStatus: text('alert_muted_at_status'),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()

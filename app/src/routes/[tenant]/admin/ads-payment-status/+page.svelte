@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { getAdsPaymentStatusDashboard, triggerAdsStatusMonitor } from '$lib/remotes/ads-status.remote';
+	import {
+		getAdsPaymentStatusDashboard,
+		triggerAdsStatusMonitor,
+		muteAccountAlerts,
+		unmuteAccountAlerts,
+	} from '$lib/remotes/ads-status.remote';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -19,6 +24,8 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import BellOffIcon from '@lucide/svelte/icons/bell-off';
+	import BellIcon from '@lucide/svelte/icons/bell';
 	import { page } from '$app/state';
 
 	let showOnlyActive = $state(true);
@@ -109,6 +116,21 @@
 			toast.error('Nu s-a putut declanșa verificarea');
 		} finally {
 			isTriggering = false;
+		}
+	}
+
+	async function handleToggleMute(row: { provider: 'meta' | 'google' | 'tiktok'; accountTableId: string; accountName: string; isMuted: boolean }) {
+		try {
+			if (row.isMuted) {
+				await unmuteAccountAlerts({ provider: row.provider, accountTableId: row.accountTableId });
+				toast.success(`Alertele pentru ${row.accountName} au fost reactivate`);
+			} else {
+				await muteAccountAlerts({ provider: row.provider, accountTableId: row.accountTableId });
+				toast.success(`Alertele pentru ${row.accountName} au fost ignorate`);
+			}
+			await dashboardQuery.refresh();
+		} catch (err) {
+			toast.error('Nu s-a putut modifica starea de mut');
 		}
 	}
 
@@ -257,7 +279,10 @@
 						</thead>
 						<tbody>
 							{#each filteredRows as row (row.provider + ':' + row.accountTableId)}
-								<tr class="border-b last:border-0 hover:bg-muted/30">
+								<tr
+									class="border-b last:border-0 hover:bg-muted/30"
+									class:opacity-50={row.isMuted}
+								>
 									<td class="py-3 pr-3">
 										<Badge class={providerStyles[row.provider]}>
 											{row.providerLabel}
@@ -302,15 +327,29 @@
 										{formatCheckedAt(row.checkedAt)}
 									</td>
 									<td class="py-3">
-										<a
-											href={row.billingUrl}
-											target="_blank"
-											rel="noopener noreferrer"
-											class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-										>
-											<ExternalLinkIcon class="size-3" />
-											Billing
-										</a>
+										<div class="flex items-center gap-2">
+											<button
+												type="button"
+												onclick={() => handleToggleMute(row)}
+												title={row.isMuted ? 'Reactivează alertele' : 'Ignoră alertele'}
+												class="inline-flex size-7 items-center justify-center rounded-md hover:bg-muted {row.isMuted ? 'text-amber-600' : 'text-muted-foreground'}"
+											>
+												{#if row.isMuted}
+													<BellOffIcon class="size-3.5" />
+												{:else}
+													<BellIcon class="size-3.5" />
+												{/if}
+											</button>
+											<a
+												href={row.billingUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+											>
+												<ExternalLinkIcon class="size-3" />
+												Billing
+											</a>
+										</div>
 									</td>
 								</tr>
 							{/each}

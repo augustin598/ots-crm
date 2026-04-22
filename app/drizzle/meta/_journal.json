@@ -1177,6 +1177,48 @@
       "when": 1777425601000,
       "tag": "0167_google_ads_account_integration_id_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "6",
+      "when": 1777430000000,
+      "tag": "0168_meta_ads_account_last_alert_email_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "6",
+      "when": 1777430001000,
+      "tag": "0169_meta_ads_account_alert_muted_at_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "6",
+      "when": 1777430002000,
+      "tag": "0170_google_ads_account_last_alert_email_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "6",
+      "when": 1777430003000,
+      "tag": "0171_google_ads_account_alert_muted_at_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "6",
+      "when": 1777430004000,
+      "tag": "0172_tiktok_ads_account_last_alert_email_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "6",
+      "when": 1777430005000,
+      "tag": "0173_tiktok_ads_account_alert_muted_at_status",
+      "breakpoints": true
     }
   ]
 }

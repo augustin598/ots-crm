@@ -67,13 +67,15 @@ export interface FlaggedAccountRow {
 	clientId: string | null;
 	clientName: string | null;
 	clientEmail: string | null;
-	clientStatus: string | null; // 'active' | 'inactive' | 'prospect' | null (orphan)
+	clientStatus: string | null;
 	paymentStatus: AdsPaymentStatus;
 	statusLabel: string;
 	rawStatusCode: string;
 	rawDisableReason: string | null;
 	checkedAt: string | null;
 	billingUrl: string;
+	/** True when admin has muted alerts for this account at its current status */
+	isMuted: boolean;
 }
 
 export interface AdsStatusDashboard {
@@ -142,6 +144,7 @@ export const getAdsPaymentStatusDashboard = query(
 				paymentStatus: table.metaAdsAccount.paymentStatus,
 				paymentStatusRaw: table.metaAdsAccount.paymentStatusRaw,
 				checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
+				alertMutedAtStatus: table.metaAdsAccount.alertMutedAtStatus,
 			})
 			.from(table.metaAdsAccount)
 			.where(eq(table.metaAdsAccount.tenantId, tenantId))
@@ -155,6 +158,7 @@ export const getAdsPaymentStatusDashboard = query(
 				paymentStatus: table.googleAdsAccount.paymentStatus,
 				paymentStatusRaw: table.googleAdsAccount.paymentStatusRaw,
 				checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
+				alertMutedAtStatus: table.googleAdsAccount.alertMutedAtStatus,
 			})
 			.from(table.googleAdsAccount)
 			.where(eq(table.googleAdsAccount.tenantId, tenantId))
@@ -168,6 +172,7 @@ export const getAdsPaymentStatusDashboard = query(
 				paymentStatus: table.tiktokAdsAccount.paymentStatus,
 				paymentStatusRaw: table.tiktokAdsAccount.paymentStatusRaw,
 				checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
+				alertMutedAtStatus: table.tiktokAdsAccount.alertMutedAtStatus,
 			})
 			.from(table.tiktokAdsAccount)
 			.where(eq(table.tiktokAdsAccount.tenantId, tenantId))
@@ -208,6 +213,8 @@ export const getAdsPaymentStatusDashboard = query(
 
 		const raw = parseRaw(row.paymentStatusRaw);
 
+		const isMuted = row.alertMutedAtStatus != null && row.alertMutedAtStatus === status;
+
 		flagged.push({
 			provider,
 			providerLabel: PROVIDER_LABEL[provider],
@@ -224,6 +231,7 @@ export const getAdsPaymentStatusDashboard = query(
 			rawDisableReason: raw.disableReason,
 			checkedAt: row.checkedAt ? row.checkedAt.toISOString() : null,
 			billingUrl: PROVIDER_BILLING_URL[provider](row.externalId),
+			isMuted,
 		});
 	}
 
@@ -372,6 +380,96 @@ export const getClientAdsHealth = query(
 			totalMonitored,
 		};
 		return result;
+	},
+);
+
+/**
+ * Mute alerts for a specific ad account at its current payment status.
+ * While the account remains at this status, no email/in-app alerts fire.
+ * Auto-unmutes on status change (see reconciler).
+ */
+export const muteAccountAlerts = command(
+	v.object({
+		provider: v.picklist(['meta', 'google', 'tiktok']),
+		accountTableId: v.pipe(v.string(), v.minLength(1)),
+	}),
+	async ({ provider, accountTableId }) => {
+		const event = requireAdmin();
+		const tenantId = event.locals.tenant!.id;
+
+		// Read current paymentStatus (mute is bound to a specific status).
+		let currentStatus: string | null = null;
+		if (provider === 'meta') {
+			const [r] = await db
+				.select({ s: table.metaAdsAccount.paymentStatus })
+				.from(table.metaAdsAccount)
+				.where(and(eq(table.metaAdsAccount.id, accountTableId), eq(table.metaAdsAccount.tenantId, tenantId)))
+				.limit(1);
+			currentStatus = r?.s ?? null;
+			if (!currentStatus) throw new Error('Account not found');
+			await db
+				.update(table.metaAdsAccount)
+				.set({ alertMutedAtStatus: currentStatus })
+				.where(and(eq(table.metaAdsAccount.id, accountTableId), eq(table.metaAdsAccount.tenantId, tenantId)));
+		} else if (provider === 'google') {
+			const [r] = await db
+				.select({ s: table.googleAdsAccount.paymentStatus })
+				.from(table.googleAdsAccount)
+				.where(and(eq(table.googleAdsAccount.id, accountTableId), eq(table.googleAdsAccount.tenantId, tenantId)))
+				.limit(1);
+			currentStatus = r?.s ?? null;
+			if (!currentStatus) throw new Error('Account not found');
+			await db
+				.update(table.googleAdsAccount)
+				.set({ alertMutedAtStatus: currentStatus })
+				.where(and(eq(table.googleAdsAccount.id, accountTableId), eq(table.googleAdsAccount.tenantId, tenantId)));
+		} else {
+			const [r] = await db
+				.select({ s: table.tiktokAdsAccount.paymentStatus })
+				.from(table.tiktokAdsAccount)
+				.where(and(eq(table.tiktokAdsAccount.id, accountTableId), eq(table.tiktokAdsAccount.tenantId, tenantId)))
+				.limit(1);
+			currentStatus = r?.s ?? null;
+			if (!currentStatus) throw new Error('Account not found');
+			await db
+				.update(table.tiktokAdsAccount)
+				.set({ alertMutedAtStatus: currentStatus })
+				.where(and(eq(table.tiktokAdsAccount.id, accountTableId), eq(table.tiktokAdsAccount.tenantId, tenantId)));
+		}
+
+		await getAdsPaymentStatusDashboard({ showOnlyActiveClients: true }).refresh();
+		return { ok: true, mutedAtStatus: currentStatus };
+	},
+);
+
+export const unmuteAccountAlerts = command(
+	v.object({
+		provider: v.picklist(['meta', 'google', 'tiktok']),
+		accountTableId: v.pipe(v.string(), v.minLength(1)),
+	}),
+	async ({ provider, accountTableId }) => {
+		const event = requireAdmin();
+		const tenantId = event.locals.tenant!.id;
+
+		if (provider === 'meta') {
+			await db
+				.update(table.metaAdsAccount)
+				.set({ alertMutedAtStatus: null })
+				.where(and(eq(table.metaAdsAccount.id, accountTableId), eq(table.metaAdsAccount.tenantId, tenantId)));
+		} else if (provider === 'google') {
+			await db
+				.update(table.googleAdsAccount)
+				.set({ alertMutedAtStatus: null })
+				.where(and(eq(table.googleAdsAccount.id, accountTableId), eq(table.googleAdsAccount.tenantId, tenantId)));
+		} else {
+			await db
+				.update(table.tiktokAdsAccount)
+				.set({ alertMutedAtStatus: null })
+				.where(and(eq(table.tiktokAdsAccount.id, accountTableId), eq(table.tiktokAdsAccount.tenantId, tenantId)));
+		}
+
+		await getAdsPaymentStatusDashboard({ showOnlyActiveClients: true }).refresh();
+		return { ok: true };
 	},
 );
 

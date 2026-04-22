@@ -1,0 +1,1 @@
+ALTER TABLE `google_ads_account` ADD COLUMN `alert_muted_at_status` text;
