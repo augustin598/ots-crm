@@ -14,6 +14,7 @@
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
+	import AdsHealthAlert from '$lib/components/client/ads-health-alert.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const isPrimary = $derived((page.data as any)?.isClientUserPrimary ?? true);
@@ -100,6 +101,10 @@
 		<h1 class="text-3xl font-bold">Client Dashboard</h1>
 		<p class="text-muted-foreground">Welcome to your client portal</p>
 	</div>
+
+	{#if clientId}
+		<AdsHealthAlert {clientId} />
+	{/if}
 
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>

@@ -17,6 +17,23 @@ function requireAdmin() {
 	return event;
 }
 
+export interface ClientAdsHealthItem {
+	provider: AdsProvider;
+	providerLabel: string;
+	externalAccountId: string;
+	accountName: string;
+	paymentStatus: AdsPaymentStatus;
+	statusLabel: string;
+	rawStatusCode: string;
+	billingUrl: string;
+}
+
+export interface ClientAdsHealth {
+	flagged: ClientAdsHealthItem[];
+	lastCheckedAt: string | null;
+	totalMonitored: number;
+}
+
 export interface FlaggedAccountRow {
 	provider: AdsProvider;
 	providerLabel: string;
@@ -212,6 +229,122 @@ export const getAdsPaymentStatusDashboard = query(
 	};
 	return dashboard;
 });
+
+/**
+ * Returns the list of ad accounts with non-ok payment status for a given
+ * client. Shown to client users on their dashboard as an at-a-glance alert.
+ * Excludes `closed` accounts (terminal — nothing for client to act on).
+ */
+export const getClientAdsHealth = query(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+
+		// Security: client users can only query their own client's accounts.
+		if (event.locals.isClientUser && event.locals.client) {
+			if (event.locals.client.id !== clientId) {
+				throw new Error('Unauthorized');
+			}
+		}
+
+		const [meta, google, tiktok] = await Promise.all([
+			db
+				.select({
+					externalId: table.metaAdsAccount.metaAdAccountId,
+					accountName: table.metaAdsAccount.accountName,
+					paymentStatus: table.metaAdsAccount.paymentStatus,
+					paymentStatusRaw: table.metaAdsAccount.paymentStatusRaw,
+					checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
+				})
+				.from(table.metaAdsAccount)
+				.where(
+					and(
+						eq(table.metaAdsAccount.tenantId, tenantId),
+						eq(table.metaAdsAccount.clientId, clientId),
+					),
+				),
+			db
+				.select({
+					externalId: table.googleAdsAccount.googleAdsCustomerId,
+					accountName: table.googleAdsAccount.accountName,
+					paymentStatus: table.googleAdsAccount.paymentStatus,
+					paymentStatusRaw: table.googleAdsAccount.paymentStatusRaw,
+					checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
+				})
+				.from(table.googleAdsAccount)
+				.where(
+					and(
+						eq(table.googleAdsAccount.tenantId, tenantId),
+						eq(table.googleAdsAccount.clientId, clientId),
+					),
+				),
+			db
+				.select({
+					externalId: table.tiktokAdsAccount.tiktokAdvertiserId,
+					accountName: table.tiktokAdsAccount.accountName,
+					paymentStatus: table.tiktokAdsAccount.paymentStatus,
+					paymentStatusRaw: table.tiktokAdsAccount.paymentStatusRaw,
+					checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
+				})
+				.from(table.tiktokAdsAccount)
+				.where(
+					and(
+						eq(table.tiktokAdsAccount.tenantId, tenantId),
+						eq(table.tiktokAdsAccount.clientId, clientId),
+					),
+				),
+		]);
+
+		const totalMonitored = meta.length + google.length + tiktok.length;
+		let lastCheckedAt: Date | null = null;
+		const flagged: ClientAdsHealthItem[] = [];
+
+		function addRow(provider: AdsProvider, row: typeof meta[number]) {
+			if (row.checkedAt && (!lastCheckedAt || row.checkedAt > lastCheckedAt)) {
+				lastCheckedAt = row.checkedAt;
+			}
+			const status = (row.paymentStatus as AdsPaymentStatus) ?? 'ok';
+			// Skip ok AND closed — closed is terminal, client can't act on it.
+			if (status === 'ok' || status === 'closed') return;
+			let rawCode = '';
+			try {
+				const parsed = row.paymentStatusRaw ? JSON.parse(row.paymentStatusRaw) : null;
+				rawCode = parsed?.code != null ? String(parsed.code) : '';
+			} catch {
+				rawCode = row.paymentStatusRaw ?? '';
+			}
+			flagged.push({
+				provider,
+				providerLabel: PROVIDER_LABEL[provider],
+				externalAccountId: row.externalId,
+				accountName: row.accountName || row.externalId,
+				paymentStatus: status,
+				statusLabel: PAYMENT_STATUS_LABEL_RO[status],
+				rawStatusCode: rawCode,
+				billingUrl: PROVIDER_BILLING_URL[provider](row.externalId),
+			});
+		}
+
+		for (const r of meta) addRow('meta', r);
+		for (const r of google) addRow('google', r);
+		for (const r of tiktok) addRow('tiktok', r);
+
+		// Sort: worst first (suspended → payment_failed → risk_review → grace_period)
+		const order: Record<AdsPaymentStatus, number> = {
+			suspended: 0, closed: 1, payment_failed: 2, risk_review: 3, grace_period: 4, ok: 5,
+		};
+		flagged.sort((a, b) => order[a.paymentStatus] - order[b.paymentStatus]);
+
+		const result: ClientAdsHealth = {
+			flagged,
+			lastCheckedAt: lastCheckedAt ? (lastCheckedAt as Date).toISOString() : null,
+			totalMonitored,
+		};
+		return result;
+	},
+);
 
 // Per-tenant cooldown for manual triggers to prevent spam-click API hammering
 const manualTriggerCooldownMs = 60_000;
