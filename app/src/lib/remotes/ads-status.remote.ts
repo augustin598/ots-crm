@@ -289,6 +289,7 @@ export const getClientAdsHealth = query(
 					paymentStatus: table.metaAdsAccount.paymentStatus,
 					paymentStatusRaw: table.metaAdsAccount.paymentStatusRaw,
 					checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
+					alertMutedAtStatus: table.metaAdsAccount.alertMutedAtStatus,
 				})
 				.from(table.metaAdsAccount)
 				.where(
@@ -304,6 +305,7 @@ export const getClientAdsHealth = query(
 					paymentStatus: table.googleAdsAccount.paymentStatus,
 					paymentStatusRaw: table.googleAdsAccount.paymentStatusRaw,
 					checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
+					alertMutedAtStatus: table.googleAdsAccount.alertMutedAtStatus,
 				})
 				.from(table.googleAdsAccount)
 				.where(
@@ -319,6 +321,7 @@ export const getClientAdsHealth = query(
 					paymentStatus: table.tiktokAdsAccount.paymentStatus,
 					paymentStatusRaw: table.tiktokAdsAccount.paymentStatusRaw,
 					checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
+					alertMutedAtStatus: table.tiktokAdsAccount.alertMutedAtStatus,
 				})
 				.from(table.tiktokAdsAccount)
 				.where(
@@ -340,6 +343,9 @@ export const getClientAdsHealth = query(
 			const status = (row.paymentStatus as AdsPaymentStatus) ?? 'ok';
 			// Skip ok AND closed — closed is terminal, client can't act on it.
 			if (status === 'ok' || status === 'closed') return;
+			// Skip accounts admin has muted at the current status. The client
+			// alert would be useless noise — admin has acknowledged this one.
+			if (row.alertMutedAtStatus && row.alertMutedAtStatus === status) return;
 			let rawCode = '';
 			let balanceCents: number | null = null;
 			let currency: string | null = null;
