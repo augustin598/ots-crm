@@ -171,10 +171,6 @@
 					<h3 class="text-sm font-bold uppercase tracking-wide" style="color: {accent};">
 						Atenție — conturi publicitate cu probleme
 					</h3>
-					<p class="mt-1 text-base font-semibold text-zinc-900">
-						{flagged.length}
-						{flagged.length === 1 ? 'cont necesită' : 'conturi necesită'} atenția ta
-					</p>
 				</div>
 				{#if headerBalance}
 					<div class="hidden shrink-0 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 shadow-sm md:inline-flex">
