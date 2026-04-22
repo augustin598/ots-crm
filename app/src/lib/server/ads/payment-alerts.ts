@@ -58,29 +58,52 @@ async function persistStatus(snap: PaymentStatusSnapshot) {
 	}
 }
 
-async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<AdsPaymentStatus | null> {
+interface PriorStatusInfo {
+	status: AdsPaymentStatus | null;
+	everChecked: boolean;
+}
+
+async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<PriorStatusInfo> {
 	if (snap.provider === 'meta') {
 		const [row] = await db
-			.select({ paymentStatus: table.metaAdsAccount.paymentStatus })
+			.select({
+				paymentStatus: table.metaAdsAccount.paymentStatus,
+				checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
+			})
 			.from(table.metaAdsAccount)
 			.where(eq(table.metaAdsAccount.id, snap.accountTableId))
 			.limit(1);
-		return (row?.paymentStatus as AdsPaymentStatus) ?? null;
+		return {
+			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
+			everChecked: row?.checkedAt != null,
+		};
 	}
 	if (snap.provider === 'google') {
 		const [row] = await db
-			.select({ paymentStatus: table.googleAdsAccount.paymentStatus })
+			.select({
+				paymentStatus: table.googleAdsAccount.paymentStatus,
+				checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
+			})
 			.from(table.googleAdsAccount)
 			.where(eq(table.googleAdsAccount.id, snap.accountTableId))
 			.limit(1);
-		return (row?.paymentStatus as AdsPaymentStatus) ?? null;
+		return {
+			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
+			everChecked: row?.checkedAt != null,
+		};
 	}
 	const [row] = await db
-		.select({ paymentStatus: table.tiktokAdsAccount.paymentStatus })
+		.select({
+			paymentStatus: table.tiktokAdsAccount.paymentStatus,
+			checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
+		})
 		.from(table.tiktokAdsAccount)
 		.where(eq(table.tiktokAdsAccount.id, snap.accountTableId))
 		.limit(1);
-	return (row?.paymentStatus as AdsPaymentStatus) ?? null;
+	return {
+		status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
+		everChecked: row?.checkedAt != null,
+	};
 }
 
 async function resolveAdminRecipients(tenantId: string): Promise<Array<{ userId: string; email: string }>> {
@@ -256,18 +279,26 @@ export async function reconcileAndAlert(
 		try {
 			const prior = await readPriorStatus(snap);
 
-			if (prior === snap.paymentStatus) {
+			// First observation: seed the status without firing alerts.
+			// Prevents a flood of "ok → bad" transitions the first time the monitor runs.
+			if (!prior.everChecked) {
 				await persistStatus(snap);
 				result.unchanged += 1;
 				continue;
 			}
 
-			const priorBad = prior !== null && isBadStatus(prior);
+			if (prior.status === snap.paymentStatus) {
+				await persistStatus(snap);
+				result.unchanged += 1;
+				continue;
+			}
+
+			const priorBad = prior.status !== null && isBadStatus(prior.status);
 			const currentBad = isBadStatus(snap.paymentStatus);
 
 			if (currentBad || (priorBad && !currentBad)) {
 				await persistStatus(snap);
-				await dispatchNotifications(snap, tenantId, prior);
+				await dispatchNotifications(snap, tenantId, prior.status);
 				if (!currentBad && priorBad) result.restored += 1;
 				else result.transitions += 1;
 			} else {
