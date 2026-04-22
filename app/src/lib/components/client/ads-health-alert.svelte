@@ -67,6 +67,28 @@
 			minute: '2-digit',
 		});
 	}
+
+	/** Explicit window.open avoids some popup blocker edge cases where
+	 * anchor + target=_blank silently fails inside iframed/embedded contexts. */
+	function openLink(url: string) {
+		window.open(url, '_blank', 'noopener,noreferrer');
+	}
+
+	/** CTA button color matches status severity so clients can see urgency at a glance. */
+	function ctaColorFor(status: string): string {
+		switch (status) {
+			case 'suspended':
+				return '#7f1d1d'; // dark red — terminal action
+			case 'payment_failed':
+				return '#dc2626'; // red — urgent pay
+			case 'grace_period':
+				return '#d97706'; // amber — pay soon
+			case 'risk_review':
+				return '#b45309'; // deep amber — verify
+			default:
+				return '#475569';
+		}
+	}
 </script>
 
 {#if flagged.length > 0}
@@ -126,16 +148,18 @@
 						>
 							{item.statusLabel}
 						</span>
-						<a
-							href={item.billingUrl}
-							target="_blank"
-							rel="noopener noreferrer"
-							class="inline-flex shrink-0 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors"
-							style="background: {accent}; color: white;"
-						>
-							Billing
-							<ArrowRightIcon class="size-3" />
-						</a>
+						{#if item.action}
+							{@const actionColor = ctaColorFor(item.paymentStatus)}
+							<button
+								type="button"
+								onclick={() => openLink(item.action!.url)}
+								class="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border-none px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+								style="background: {actionColor};"
+							>
+								{item.action.label}
+								<ArrowRightIcon class="size-3" />
+							</button>
+						{/if}
 					</li>
 				{/each}
 			</ul>

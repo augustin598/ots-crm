@@ -39,8 +39,41 @@ export const PROVIDER_LABEL: Record<AdsProvider, string> = {
 export const PROVIDER_BILLING_URL: Record<AdsProvider, (externalId: string) => string> = {
 	meta: (id) => `https://business.facebook.com/billing_hub/payment_settings?asset_id=${id.replace(/^act_/, '')}`,
 	google: (id) => `https://ads.google.com/aw/billing/summary?ocid=${id}`,
-	tiktok: () => 'https://ads.tiktok.com/i18n/payment/',
+	tiktok: (id) => `https://ads.tiktok.com/i18n/payment/?aadvid=${id}`,
 };
+
+/**
+ * Account management URL — for statuses that need non-billing intervention
+ * (suspended, risk_review) where opening the billing page is misleading.
+ */
+export const PROVIDER_ACCOUNT_URL: Record<AdsProvider, (externalId: string) => string> = {
+	meta: (id) => `https://business.facebook.com/settings/ad-accounts?selected_asset_id=${id.replace(/^act_/, '')}`,
+	google: (id) => `https://ads.google.com/aw/overview?ocid=${id}`,
+	tiktok: (id) => `https://ads.tiktok.com/i18n/dashboard?aadvid=${id}`,
+};
+
+/**
+ * Returns the best action URL + label for a given (provider, status) pair.
+ * Payment issues → billing page. Suspension/review → account settings page.
+ */
+export function actionForStatus(
+	provider: AdsProvider,
+	status: AdsPaymentStatus,
+	externalId: string,
+): { url: string; label: string } | null {
+	switch (status) {
+		case 'grace_period':
+		case 'payment_failed':
+			return { url: PROVIDER_BILLING_URL[provider](externalId), label: 'Plătește' };
+		case 'risk_review':
+			return { url: PROVIDER_ACCOUNT_URL[provider](externalId), label: 'Verifică' };
+		case 'suspended':
+			return { url: PROVIDER_ACCOUNT_URL[provider](externalId), label: 'Vezi contul' };
+		case 'ok':
+		case 'closed':
+			return null;
+	}
+}
 
 const BAD_STATUSES: ReadonlySet<AdsPaymentStatus> = new Set([
 	'grace_period',

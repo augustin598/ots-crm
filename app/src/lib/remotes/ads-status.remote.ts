@@ -4,7 +4,12 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, inArray, desc } from 'drizzle-orm';
 import type { AdsPaymentStatus, AdsProvider } from '$lib/server/ads/payment-status-types';
-import { PAYMENT_STATUS_LABEL_RO, PROVIDER_LABEL, PROVIDER_BILLING_URL } from '$lib/server/ads/payment-status-types';
+import {
+	PAYMENT_STATUS_LABEL_RO,
+	PROVIDER_LABEL,
+	PROVIDER_BILLING_URL,
+	actionForStatus,
+} from '$lib/server/ads/payment-status-types';
 
 function requireAdmin() {
 	const event = getRequestEvent();
@@ -25,7 +30,8 @@ export interface ClientAdsHealthItem {
 	paymentStatus: AdsPaymentStatus;
 	statusLabel: string;
 	rawStatusCode: string;
-	billingUrl: string;
+	/** Status-appropriate action — null means no actionable CTA */
+	action: { url: string; label: string } | null;
 }
 
 export interface ClientAdsHealth {
@@ -323,7 +329,7 @@ export const getClientAdsHealth = query(
 				paymentStatus: status,
 				statusLabel: PAYMENT_STATUS_LABEL_RO[status],
 				rawStatusCode: rawCode,
-				billingUrl: PROVIDER_BILLING_URL[provider](row.externalId),
+				action: actionForStatus(provider, status, row.externalId),
 			});
 		}
 
