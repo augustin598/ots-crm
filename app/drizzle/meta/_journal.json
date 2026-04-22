@@ -1079,6 +1079,90 @@
       "when": 1777420015000,
       "tag": "0153_service_package_request_services_json",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "6",
+      "when": 1777420016000,
+      "tag": "0154_meta_ads_account_payment_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "6",
+      "when": 1777420017000,
+      "tag": "0155_meta_ads_account_payment_status_raw",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "6",
+      "when": 1777420018000,
+      "tag": "0156_meta_ads_account_payment_status_checked_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "6",
+      "when": 1777420019000,
+      "tag": "0157_google_ads_account_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "6",
+      "when": 1777420020000,
+      "tag": "0158_google_ads_account_billing_setup_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "6",
+      "when": 1777420021000,
+      "tag": "0159_google_ads_account_payment_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "6",
+      "when": 1777420022000,
+      "tag": "0160_google_ads_account_payment_status_raw",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "6",
+      "when": 1777420023000,
+      "tag": "0161_google_ads_account_payment_status_checked_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "6",
+      "when": 1777420024000,
+      "tag": "0162_tiktok_ads_account_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 163,
+      "version": "6",
+      "when": 1777420025000,
+      "tag": "0163_tiktok_ads_account_payment_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "6",
+      "when": 1777420026000,
+      "tag": "0164_tiktok_ads_account_payment_status_raw",
+      "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "6",
+      "when": 1777420027000,
+      "tag": "0165_tiktok_ads_account_payment_status_checked_at",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,7 @@ import { processContractLifecycle } from './tasks/contract-lifecycle';
 import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
+import { processAdsStatusMonitor } from './tasks/ads-status-monitor';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
@@ -103,6 +104,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
+	ads_status_monitor: processAdsStatusMonitor,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
@@ -222,7 +224,7 @@ export const startScheduler = async () => {
 		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
-		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'meta-ads-leads-sync',
+		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'ads-status-monitor', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications'
@@ -465,6 +467,22 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Schedule ads status monitor hourly — detects payment/suspension status changes
+	await schedulerQueue.add(
+		'ads-status-monitor',
+		{
+			type: 'ads_status_monitor',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 * * * *', // Every hour on the hour
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-status-monitor'
+		}
+	);
+
 	// Schedule Meta Ads lead sync every 4 hours
 	await schedulerQueue.add(
 		'meta-ads-leads-sync',
@@ -671,6 +689,7 @@ export const JOB_LABELS: Record<string, string> = {
 	google_ads_invoice_sync: 'Sync Facturi Google Ads',
 	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
+	ads_status_monitor: 'Monitor Status Plată Ads (Meta/Google/TikTok)',
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
 	token_refresh: 'Refresh Token-uri Integrări',
 	token_refresh_frequent: 'Refresh Token-uri (Gmail/Google Ads)',

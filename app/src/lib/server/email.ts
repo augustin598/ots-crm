@@ -738,7 +738,8 @@ type EmailType =
 	| 'invoice-paid'
 	| 'invoice-overdue-reminder'
 	| 'notification_alert'
-	| 'report';
+	| 'report'
+	| 'ad_payment_alert';
 
 export type EmailSendContext = {
 	tenantId: string | null;
@@ -2758,6 +2759,121 @@ export async function sendPackageRequestEmail(
 	);
 }
 
+export async function sendAdPaymentAlertEmail(
+	tenantId: string,
+	recipientEmail: string,
+	params: {
+		provider: 'meta' | 'google' | 'tiktok';
+		providerLabel: string;
+		accountName: string;
+		externalAccountId: string;
+		statusLabelRo: string;
+		paymentStatus: string;
+		billingUrl: string;
+		rawStatusCode: string | number;
+		rawDisableReason?: string | number | null;
+		recipientType: 'admin' | 'client';
+		accentColor?: string;
+	}
+): Promise<void> {
+	const subject = `[OTS CRM] ⚠️ Cont ${params.providerLabel} ${params.accountName}: ${params.statusLabelRo}`;
+	const accent = params.accentColor
+		?? (params.paymentStatus === 'grace_period' || params.paymentStatus === 'risk_review' ? '#d97706' : '#dc2626');
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'ad_payment_alert',
+			metadata: {
+				provider: params.provider,
+				externalAccountId: params.externalAccountId,
+				paymentStatus: params.paymentStatus,
+				recipientType: params.recipientType,
+				rawStatusCode: params.rawStatusCode,
+				rawDisableReason: params.rawDisableReason ?? null
+			},
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendAdPaymentAlertEmail',
+				args: [tenantId, recipientEmail, params]
+			}
+		},
+		async () => {
+			const brand = await fetchTenantBrand(tenantId);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const safeName = escapeHtml(params.accountName);
+			const safeId = escapeHtml(params.externalAccountId);
+			const safeStatusLabel = escapeHtml(params.statusLabelRo);
+			const safeProvider = escapeHtml(params.providerLabel);
+			const safeBilling = escapeHtml(params.billingUrl);
+
+			const audienceIntro = params.recipientType === 'client'
+				? 'Am detectat o problemă la contul dvs. de publicitate. Vă rugăm să verificați și să rezolvați cât mai repede posibil.'
+				: 'Un cont de publicitate al unui client necesită atenție. Vă rugăm să verificați și, dacă e cazul, să anunțați clientul.';
+
+			const reasonLine = params.rawDisableReason
+				? `<div><span style="color: #6b7280;">Motiv</span> &nbsp;·&nbsp; <strong>${escapeHtml(String(params.rawDisableReason))}</strong></div>`
+				: '';
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${audienceIntro}</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fef2f2; border: 1px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
+							<div><span style="color: #6b7280;">Platformă</span> &nbsp;·&nbsp; <strong>${safeProvider}</strong></div>
+							<div><span style="color: #6b7280;">Cont</span> &nbsp;·&nbsp; <strong>${safeName}</strong></div>
+							<div><span style="color: #6b7280;">ID cont</span> &nbsp;·&nbsp; <code>${safeId}</code></div>
+							<div><span style="color: #6b7280;">Status curent</span> &nbsp;·&nbsp; <strong style="color: ${accent};">${safeStatusLabel}</strong></div>
+							${reasonLine}
+						</td>
+					</tr>
+				</table>
+				<div style="text-align: center; margin: 24px 0;">
+					<a href="${safeBilling}" style="background-color: ${accent}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 14px;">Deschide setările de plată</a>
+				</div>
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Dacă plata a fost deja efectuată, statusul se va actualiza automat în următoarele 1–2 ore.</p>
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: `Alertă cont ${params.providerLabel}`,
+				subtitle: params.statusLabelRo,
+				bodyHtml,
+				previewTitle: subject
+			});
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject,
+				html,
+				text: trimPlainText(`
+					Alerta cont ${params.providerLabel}
+
+					Cont: ${params.accountName}
+					ID: ${params.externalAccountId}
+					Status: ${params.statusLabelRo}
+
+					${audienceIntro.replace(/[ăâîșț]/gi, '?')}
+
+					Setari de plata: ${params.billingUrl}
+				`),
+				attachments: brand.logoAttachment ? [brand.logoAttachment] : []
+			};
+		}
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
 // and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
@@ -2792,7 +2908,8 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendOverdueReminderEmail,
 	sendTaskReminderEmail,
 	sendContractSigningEmail,
-	sendPackageRequestEmail
+	sendPackageRequestEmail,
+	sendAdPaymentAlertEmail
 	// NOTE: Intentionally omitted (payload: null, not replay-able):
 	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
 	//   (contain single-use auth tokens that must not be persisted)

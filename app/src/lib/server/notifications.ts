@@ -25,6 +25,12 @@ export type NotificationType =
 	| 'lead.imported'
 	| 'lead.status_changed'
 	| 'ad.spending_synced'
+	// Ads platform payment status
+	| 'ad.account_suspended'
+	| 'ad.payment_failed'
+	| 'ad.grace_period'
+	| 'ad.risk_review'
+	| 'ad.account_restored'
 	// Budget
 	| 'budget.exceeded'
 	| 'budget.warning'
@@ -102,6 +108,8 @@ const EMAIL_TYPES: Set<NotificationType> = new Set([
 	'contract.expiring',
 	'comment.mention',
 	'approval.requested',
+	// NOTE: ad.* types are emailed separately (branded template) by
+	// src/lib/server/ads/payment-alerts.ts — excluded here to avoid double send.
 ]);
 
 /**

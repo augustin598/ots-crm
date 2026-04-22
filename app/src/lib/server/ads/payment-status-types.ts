@@ -1,0 +1,61 @@
+export type AdsProvider = 'meta' | 'google' | 'tiktok';
+
+export type AdsPaymentStatus =
+	| 'ok'
+	| 'grace_period'
+	| 'risk_review'
+	| 'payment_failed'
+	| 'suspended'
+	| 'closed';
+
+export interface PaymentStatusSnapshot {
+	provider: AdsProvider;
+	integrationId: string;
+	accountTableId: string;
+	externalAccountId: string;
+	clientId: string | null;
+	accountName: string;
+	paymentStatus: AdsPaymentStatus;
+	rawStatusCode: string | number;
+	rawDisableReason?: string | number | null;
+	checkedAt: Date;
+}
+
+export const PAYMENT_STATUS_LABEL_RO: Record<AdsPaymentStatus, string> = {
+	ok: 'Activ',
+	grace_period: 'Perioadă de grație',
+	risk_review: 'Revizuire în curs',
+	payment_failed: 'Plată eșuată',
+	suspended: 'Suspendat',
+	closed: 'Închis',
+};
+
+export const PROVIDER_LABEL: Record<AdsProvider, string> = {
+	meta: 'Meta (Facebook)',
+	google: 'Google Ads',
+	tiktok: 'TikTok Ads',
+};
+
+export const PROVIDER_BILLING_URL: Record<AdsProvider, (externalId: string) => string> = {
+	meta: (id) => `https://business.facebook.com/billing_hub/payment_settings?asset_id=${id.replace(/^act_/, '')}`,
+	google: (id) => `https://ads.google.com/aw/billing/summary?ocid=${id}`,
+	tiktok: () => 'https://ads.tiktok.com/i18n/payment/',
+};
+
+const BAD_STATUSES: ReadonlySet<AdsPaymentStatus> = new Set([
+	'grace_period',
+	'risk_review',
+	'payment_failed',
+	'suspended',
+	'closed',
+]);
+
+export function isBadStatus(status: AdsPaymentStatus): boolean {
+	return BAD_STATUSES.has(status);
+}
+
+export function priorityFor(status: AdsPaymentStatus): 'low' | 'medium' | 'high' | 'urgent' {
+	if (status === 'suspended' || status === 'closed' || status === 'payment_failed') return 'urgent';
+	if (status === 'grace_period' || status === 'risk_review') return 'high';
+	return 'medium';
+}

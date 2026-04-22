@@ -1459,6 +1459,11 @@ export const googleAdsAccount = sqliteTable('google_ads_account', {
 	currencyCode: text('currency_code').notNull().default('USD'), // Account currency from Google Ads API
 	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
 	isActive: boolean('is_active').notNull().default(true),
+	status: text('status').notNull().default('ENABLED'), // ENABLED | SUSPENDED | CANCELLED | CLOSED
+	billingSetupStatus: text('billing_setup_status'), // APPROVED | CANCELLED | PENDING
+	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
+	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
+	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -1566,6 +1571,9 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	isActive: boolean('is_active').notNull().default(true),
 	accountStatus: integer('account_status').notNull().default(1), // 1=ACTIVE, 3=UNSETTLED, 9=IN_GRACE_PERIOD
 	disableReason: integer('disable_reason').notNull().default(0), // 0=none, 3=RISK_PAYMENT
+	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
+	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
+	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -1770,6 +1778,10 @@ export const tiktokAdsAccount = sqliteTable('tiktok_ads_account', {
 	accountName: text('account_name').notNull().default(''),
 	clientId: text('client_id').references(() => client.id), // Mapped CRM client (nullable)
 	isActive: boolean('is_active').notNull().default(true),
+	status: text('status').notNull().default('STATUS_ENABLE'), // TikTok advertiser status code
+	paymentStatus: text('payment_status').notNull().default('ok'), // unified AdsPaymentStatus
+	paymentStatusRaw: text('payment_status_raw'), // JSON snapshot of raw provider codes
+	paymentStatusCheckedAt: timestamp('payment_status_checked_at', { withTimezone: true, mode: 'date' }),
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()

@@ -21,6 +21,7 @@ import LinkIcon from '@lucide/svelte/icons/link';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import MailIcon from '@lucide/svelte/icons/mail';
@@ -441,6 +442,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 										<a href="/{tenantSlug}/admin/scheduler" {...props}>
 											<ClockIcon class="size-3.5" />
 											<span>Scheduler</span>
+										</a>
+									{/snippet}
+								</SidebarMenuSubButton>
+							</SidebarMenuSubItem>
+							<SidebarMenuSubItem>
+								<SidebarMenuSubButton isActive={currentPath === `/${tenantSlug}/admin/ads-payment-status`}>
+									{#snippet child({ props })}
+										<a href="/{tenantSlug}/admin/ads-payment-status" {...props}>
+											<TriangleAlertIcon class="size-3.5" />
+											<span>Status plată Ads</span>
 										</a>
 									{/snippet}
 								</SidebarMenuSubButton>

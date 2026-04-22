@@ -975,3 +975,45 @@ export function getSyncMonths(referenceDate?: Date): Array<{ year: string; month
 
 	return months;
 }
+
+/**
+ * Fetch the most recent billing_setup status for a given sub-account.
+ * Returns 'APPROVED' | 'CANCELLED' | 'PENDING' | 'NONE' (no billing setup) | null (error).
+ */
+export async function fetchBillingSetupStatus(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string
+): Promise<string | null> {
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+
+		const rows = await customer.query(`
+			SELECT billing_setup.id, billing_setup.status
+			FROM billing_setup
+		`);
+
+		if (!rows || rows.length === 0) return 'NONE';
+
+		const statusMap: Record<number, string> = {
+			2: 'PENDING',
+			3: 'APPROVED',
+			4: 'CANCELLED'
+		};
+
+		const statuses = (rows as any[])
+			.map((r) => statusMap[r.billing_setup?.status] || null)
+			.filter(Boolean) as string[];
+
+		if (statuses.includes('APPROVED')) return 'APPROVED';
+		if (statuses.includes('PENDING')) return 'PENDING';
+		if (statuses.includes('CANCELLED')) return 'CANCELLED';
+		return 'NONE';
+	} catch (err) {
+		logWarning('google-ads', `Failed to fetch billing_setup for ${customerId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) }
+		});
+		return null;
+	}
+}

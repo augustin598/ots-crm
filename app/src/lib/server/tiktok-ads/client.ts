@@ -1075,3 +1075,40 @@ export function getSyncDateRange(referenceDate?: Date): { startDate: string; end
 		endDate: formatLocal(date)
 	};
 }
+
+export interface TiktokAdvertiserStatusInfo {
+	advertiserId: string;
+	accountName: string;
+	status: string;
+}
+
+/**
+ * Fetch advertiser info with raw status strings for a list of advertiser IDs.
+ * Uses /advertiser/info/ endpoint.
+ */
+export async function fetchAdvertiserStatuses(
+	advertiserIds: string[],
+	accessToken: string
+): Promise<TiktokAdvertiserStatusInfo[]> {
+	if (advertiserIds.length === 0) return [];
+
+	const params = new URLSearchParams({
+		advertiser_ids: JSON.stringify(advertiserIds)
+	});
+
+	const res = await fetch(`${TIKTOK_API_URL}/advertiser/info/?${params.toString()}`, {
+		headers: { 'Access-Token': accessToken },
+		signal: AbortSignal.timeout(10_000)
+	});
+
+	const json = await res.json();
+	if (json.code !== 0 || !json.data?.list) {
+		throw new Error(`TikTok advertiser/info error: ${json.message || 'Unknown'}`);
+	}
+
+	return (json.data.list as any[]).map((adv) => ({
+		advertiserId: String(adv.advertiser_id),
+		accountName: adv.advertiser_name || adv.name || `Advertiser ${adv.advertiser_id}`,
+		status: adv.status || 'STATUS_ENABLE'
+	}));
+}
