@@ -5,6 +5,8 @@
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
+	import AlertOctagonIcon from '@lucide/svelte/icons/alert-octagon';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	interface Props {
@@ -131,10 +133,17 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4">
 			<div class="flex min-w-0 items-center gap-2.5">
-				<span
-					class="inline-block size-2 shrink-0 rounded-full"
-					style="background: {severityDot};"
-				></span>
+				<span class="relative flex size-4 shrink-0 items-center justify-center">
+					<span
+						class="absolute inline-flex size-full animate-ping rounded-full opacity-40"
+						style="background: {severityDot};"
+					></span>
+					{#if hasCritical}
+						<AlertOctagonIcon class="relative size-4" style="color: {severityDot};" />
+					{:else}
+						<AlertTriangleIcon class="relative size-4" style="color: {severityDot};" />
+					{/if}
+				</span>
 				<h3 class="truncate text-sm font-semibold text-zinc-900">
 					Atenție · conturi publicitate cu probleme
 				</h3>
@@ -197,7 +206,7 @@
 						<button
 							type="button"
 							onclick={() => openLink(item.action!.url)}
-							class="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-zinc-700"
+							class="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
 						>
 							{item.action.label}
 							<ArrowRightIcon class="size-3" />
