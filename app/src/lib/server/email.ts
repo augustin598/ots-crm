@@ -2890,6 +2890,23 @@ export interface AdDigestItem {
 	balanceFormatted?: string | null;
 }
 
+function statusPhraseFor(status: string): string {
+	switch (status) {
+		case 'grace_period':
+			return 'este în perioadă de grație cu o factură neachitată';
+		case 'payment_failed':
+			return 'are o plată eșuată';
+		case 'risk_review':
+			return 'este în curs de verificare de către platformă';
+		case 'suspended':
+			return 'a fost suspendat de platformă';
+		case 'closed':
+			return 'este închis';
+		default:
+			return 'necesită atenție';
+	}
+}
+
 export async function sendAdPaymentDigestEmail(
 	tenantId: string,
 	recipientEmail: string,
@@ -2901,7 +2918,15 @@ export async function sendAdPaymentDigestEmail(
 	if (params.items.length === 0) return;
 
 	const count = params.items.length;
-	const subject = `[OTS CRM] ⚠️ ${count} ${count === 1 ? 'cont publicitate' : 'conturi publicitate'} necesită atenție`;
+	const single = count === 1 ? params.items[0] : null;
+
+	// Subject: when it's a single account, be specific ("Contul Meta beonemedical.ro — Sold 446,51 RON").
+	// When it's multiple, use the aggregated count.
+	const subject = single
+		? single.balanceFormatted
+			? `[OTS CRM] ⚠️ Contul ${single.providerLabel} "${single.accountName}" — Sold ${single.balanceFormatted}`
+			: `[OTS CRM] ⚠️ Contul ${single.providerLabel} "${single.accountName}" — ${single.statusLabelRo}`
+		: `[OTS CRM] ⚠️ ${count} conturi publicitate necesită atenție`;
 
 	await sendWithPersistence(
 		{
@@ -2930,9 +2955,42 @@ export async function sendAdPaymentDigestEmail(
 				.limit(1);
 			const fromEmail = resolveFromEmail(emailSettings);
 
-			const intro = params.recipientType === 'client'
-				? 'Am detectat probleme pe conturile dvs. de publicitate. Vă rugăm să verificați și să rezolvați situația cât mai repede posibil.'
-				: 'Conturi ale clienților dvs. au detectat probleme de plată sau suspendare. Vă rugăm să verificați și să anunțați clienții dacă e cazul.';
+			// Look up first name by email (user table is tenant-scoped via tenant_user).
+			let firstName: string | null = null;
+			try {
+				const [u] = await db
+					.select({ firstName: table.user.firstName })
+					.from(table.user)
+					.where(eq(table.user.email, recipientEmail))
+					.limit(1);
+				firstName = u?.firstName?.trim() || null;
+			} catch {
+				firstName = null;
+			}
+
+			const greeting = firstName ? `Salut ${escapeHtml(firstName)},` : 'Bună ziua,';
+
+			// Intro paragraph:
+			//  - single item → specific phrasing with account + balance
+			//  - multiple → aggregate summary
+			let intro: string;
+			if (single) {
+				const balanceSuffix = single.balanceFormatted
+					? ` Sold restant: <strong>${escapeHtml(single.balanceFormatted)}</strong>.`
+					: '';
+				const actionPhrase =
+					single.paymentStatus === 'grace_period' || single.paymentStatus === 'payment_failed'
+						? 'Te rugăm să achiți cât mai repede pentru a preveni oprirea automată a reclamelor.'
+						: single.paymentStatus === 'suspended' || single.paymentStatus === 'closed'
+							? 'Te rugăm să verifici setările contului pentru detalii.'
+							: 'Te rugăm să verifici setările contului cât mai repede posibil.';
+				intro = `Contul tău de <strong>${escapeHtml(single.providerLabel)}</strong> <strong>${escapeHtml(single.accountName)}</strong> ${statusPhraseFor(single.paymentStatus)}.${balanceSuffix} ${actionPhrase}`;
+			} else {
+				intro =
+					params.recipientType === 'client'
+						? `Am detectat probleme pe <strong>${count}</strong> conturi de publicitate ale tale. Te rugăm să verifici și să rezolvi situația cât mai repede posibil.`
+						: `Conturi ale clienților tăi (<strong>${count}</strong>) au detectat probleme de plată sau suspendare. Te rugăm să verifici și să anunți clienții dacă e cazul.`;
+			}
 
 			const rowsHtml = params.items
 				.map((it) => {
@@ -2980,7 +3038,7 @@ export async function sendAdPaymentDigestEmail(
 				.join('');
 
 			const bodyHtml = `
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">${greeting}</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${intro}</p>
 				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px 0;">
 					<thead>
@@ -2996,18 +3054,27 @@ export async function sendAdPaymentDigestEmail(
 				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
 			`;
 
+			const title = single
+				? `Cont ${single.providerLabel} — ${single.statusLabelRo}`
+				: `${count} conturi publicitate — atenție`;
+
 			const html = renderBrandedEmail({
 				themeColor: brand.themeColor,
 				headerLogoHtml: brand.headerLogoHtml,
-				title: `${count} ${count === 1 ? 'cont publicitate' : 'conturi publicitate'} — atenție`,
-				subtitle: params.recipientType === 'admin' ? 'Raport alertă agenție' : 'Conturile dvs. de publicitate',
+				title,
+				subtitle: single ? single.accountName : params.recipientType === 'admin' ? 'Raport alertă agenție' : 'Conturile dvs. de publicitate',
 				bodyHtml,
 				previewTitle: subject,
 			});
 
-			const lines = params.items.map((it) =>
-				`- ${it.providerLabel} — ${it.accountName} (${it.externalAccountId}): ${it.statusLabelRo} [cod ${it.rawStatusCode}] — ${it.billingUrl}`,
-			).join('\n');
+			const lines = params.items.map((it) => {
+				const balance = it.balanceFormatted ? ` — Sold: ${it.balanceFormatted}` : '';
+				return `- ${it.providerLabel} — ${it.accountName} (${it.externalAccountId}): ${it.statusLabelRo}${balance} — ${it.billingUrl}`;
+			}).join('\n');
+
+			// Plain-text fallback (Romanian diacritics stripped for safety).
+			const plainIntro = intro.replace(/<[^>]+>/g, '').replace(/[ăâîșț]/gi, (c) => 'aaist'['ăâîșț'.indexOf(c.toLowerCase())] || c);
+			const plainGreeting = greeting.replace(/[ăâîșț]/gi, (c) => 'aaist'['ăâîșț'.indexOf(c.toLowerCase())] || c);
 
 			return {
 				from: `"${brand.tenantName}" <${fromEmail}>`,
@@ -3015,9 +3082,9 @@ export async function sendAdPaymentDigestEmail(
 				subject,
 				html,
 				text: trimPlainText(`
-					${count} conturi de publicitate necesita atentie.
+					${plainGreeting}
 
-					${intro.replace(/[ăâîșț]/gi, '?')}
+					${plainIntro}
 
 					${lines.replace(/[ăâîșț]/gi, '?')}
 				`),
