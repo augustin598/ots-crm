@@ -24,8 +24,6 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import BellOffIcon from '@lucide/svelte/icons/bell-off';
-	import BellIcon from '@lucide/svelte/icons/bell';
 	import { page } from '$app/state';
 
 	let showOnlyActive = $state(true);
@@ -274,6 +272,7 @@
 								<th class="py-3 pr-3">Status</th>
 								<th class="py-3 pr-3">Cod raw</th>
 								<th class="py-3 pr-3">Verificat</th>
+								<th class="py-3 pr-3">Alerte</th>
 								<th class="py-3">Acțiuni</th>
 							</tr>
 						</thead>
@@ -326,30 +325,28 @@
 									<td class="py-3 pr-3 text-xs text-muted-foreground">
 										{formatCheckedAt(row.checkedAt)}
 									</td>
-									<td class="py-3">
+									<td class="py-3 pr-3">
 										<div class="flex items-center gap-2">
-											<button
-												type="button"
-												onclick={() => handleToggleMute(row)}
-												title={row.isMuted ? 'Reactivează alertele' : 'Ignoră alertele'}
-												class="inline-flex size-7 items-center justify-center rounded-md hover:bg-muted {row.isMuted ? 'text-amber-600' : 'text-muted-foreground'}"
-											>
-												{#if row.isMuted}
-													<BellOffIcon class="size-3.5" />
-												{:else}
-													<BellIcon class="size-3.5" />
-												{/if}
-											</button>
-											<a
-												href={row.billingUrl}
-												target="_blank"
-												rel="noopener noreferrer"
-												class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-											>
-												<ExternalLinkIcon class="size-3" />
-												Billing
-											</a>
+											<Switch
+												checked={!row.isMuted}
+												onCheckedChange={() => handleToggleMute(row)}
+												aria-label={row.isMuted ? 'Reactivează alertele' : 'Ignoră alertele'}
+											/>
+											<span class="text-xs text-muted-foreground">
+												{row.isMuted ? 'Ignorat' : 'Activ'}
+											</span>
 										</div>
+									</td>
+									<td class="py-3">
+										<a
+											href={row.billingUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+										>
+											<ExternalLinkIcon class="size-3" />
+											Billing
+										</a>
 									</td>
 								</tr>
 							{/each}
