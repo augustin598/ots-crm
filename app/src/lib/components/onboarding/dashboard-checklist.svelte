@@ -1,17 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
 	import { getChecklistItems } from './tour-steps';
 	import { getClientUserPreferences, updateClientUserPreferences } from '$lib/remotes/client-user-preferences.remote';
 	import { tourState, tourActions } from '$lib/stores/onboarding-store.svelte';
-	import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Progress } from '$lib/components/ui/progress';
-	import { Badge } from '$lib/components/ui/badge';
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import CircleIcon from '@lucide/svelte/icons/circle';
 	import CompassIcon from '@lucide/svelte/icons/compass';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	let { isPrimary, tenantSlug }: { isPrimary: boolean; tenantSlug: string } = $props();
 
@@ -34,66 +30,87 @@
 </script>
 
 {#if !allDone || !tourState.completed}
-	<Card>
-		<CardHeader>
-			<div class="flex items-center justify-between">
-				<div>
-					<CardTitle class="flex items-center gap-2">
-						<CompassIcon class="h-5 w-5" />
-						Explorează portalul
-					</CardTitle>
-					<CardDescription>
-						{completedCount}/{items.length} secțiuni vizitate
-					</CardDescription>
+	<div class="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+		<div class="border-b border-zinc-100 px-5 py-4">
+			<div class="flex items-center justify-between gap-3">
+				<div class="flex min-w-0 items-center gap-2.5">
+					<CompassIcon class="size-4 shrink-0 text-zinc-500" />
+					<div>
+						<h3 class="text-sm font-semibold text-zinc-900">Explorează portalul</h3>
+						<p class="mt-0.5 text-xs text-zinc-500">
+							{completedCount}/{items.length} secțiuni vizitate
+						</p>
+					</div>
 				</div>
 				{#if allDone}
-					<Badge variant="success">Complet!</Badge>
+					<span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+						<span class="size-1.5 rounded-full bg-emerald-500"></span>
+						Complet
+					</span>
+				{:else}
+					<span class="shrink-0 text-xs font-semibold tabular-nums text-zinc-900">
+						{Math.round(progress)}%
+					</span>
 				{/if}
 			</div>
-		</CardHeader>
-		<CardContent class="space-y-4">
-			<Progress value={progress} max={100} class="h-2" />
-
-			<div class="space-y-1">
-				{#each items as item (item.id)}
-					{@const done = checklist[item.id]}
-					<button
-						onclick={() => {
-							if (!done) goto(`/client/${tenantSlug}/${item.path}`);
-						}}
-						class="flex items-center gap-3 w-full text-left p-2 rounded-md transition-colors {done
-							? 'text-muted-foreground'
-							: 'hover:bg-accent cursor-pointer'}"
-						disabled={done}
-					>
-						{#if done}
-							<CheckCircle2Icon class="h-4 w-4 text-green-500 shrink-0" />
-						{:else}
-							<CircleIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-						{/if}
-						<span class="text-sm {done ? 'line-through' : 'font-medium'}">{item.label}</span>
-					</button>
-				{/each}
+			<div class="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-100">
+				<div
+					class="h-full rounded-full transition-all duration-500"
+					class:bg-emerald-500={allDone}
+					class:bg-zinc-900={!allDone}
+					style="width: {progress}%"
+				></div>
 			</div>
+		</div>
 
-			{#if allDone}
-				<p class="text-sm text-muted-foreground text-center pt-2">
-					Felicitări! Ai explorat toate secțiunile portalului.
-				</p>
-			{/if}
+		<div class="p-2">
+			{#each items as item (item.id)}
+				{@const done = checklist[item.id]}
+				<button
+					type="button"
+					onclick={() => {
+						if (!done) goto(`/client/${tenantSlug}/${item.path}`);
+					}}
+					class="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
+					class:hover:bg-zinc-50={!done}
+					class:cursor-default={done}
+					disabled={done}
+				>
+					{#if done}
+						<CheckCircle2Icon class="size-4 shrink-0 text-emerald-500" />
+						<span class="flex-1 truncate text-sm text-zinc-400 line-through">{item.label}</span>
+					{:else}
+						<CircleIcon class="size-4 shrink-0 text-zinc-300" />
+						<span class="flex-1 truncate text-sm font-medium text-zinc-900">{item.label}</span>
+						<ArrowRightIcon class="size-3.5 shrink-0 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100" />
+					{/if}
+				</button>
+			{/each}
+		</div>
 
-			{#if tourState.completed}
-				<Button variant="outline" size="sm" class="w-full" onclick={async () => {
-					await updateClientUserPreferences({
-						onboardingTourCompleted: false,
-						onboardingChecklist: null
-					}).updates(prefsQuery);
-					tourActions.reset();
-				}}>
-					<RotateCcwIcon class="h-4 w-4 mr-2" />
+		{#if allDone}
+			<div class="border-t border-zinc-100 bg-zinc-50/50 px-5 py-3 text-center text-xs text-zinc-500">
+				Felicitări! Ai explorat toate secțiunile portalului.
+			</div>
+		{/if}
+
+		{#if tourState.completed}
+			<div class="border-t border-zinc-100 px-3 py-3">
+				<button
+					type="button"
+					onclick={async () => {
+						await updateClientUserPreferences({
+							onboardingTourCompleted: false,
+							onboardingChecklist: null
+						}).updates(prefsQuery);
+						tourActions.reset();
+					}}
+					class="inline-flex w-full items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+				>
+					<RotateCcwIcon class="size-3.5" />
 					Reia turul ghidat
-				</Button>
-			{/if}
-		</CardContent>
-	</Card>
+				</button>
+			</div>
+		{/if}
+	</div>
 {/if}

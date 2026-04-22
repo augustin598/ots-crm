@@ -14,7 +14,7 @@ export const badgeVariants = tv({
 			success:
 				"bg-success text-success-foreground [a&]:hover:bg-success/90 border-transparent",
 			warning:
-				"bg-warning text-warning-foreground [a&]:hover:bg-warning/90 border-transparent",
+				"bg-warning text-white [a&]:hover:bg-warning/90 border-transparent",
 		},
 	},
 	defaultVariants: {
