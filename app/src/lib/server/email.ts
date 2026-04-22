@@ -2886,6 +2886,8 @@ export interface AdDigestItem {
 	rawDisableReason?: string | number | null;
 	billingUrl: string;
 	clientLabel?: string | null; // "Client Name" shown only in admin digest
+	/** Outstanding balance pre-formatted (e.g., "430,40 RON"); null if unavailable */
+	balanceFormatted?: string | null;
 }
 
 export async function sendAdPaymentDigestEmail(
@@ -2944,12 +2946,16 @@ export async function sendAdPaymentDigestEmail(
 					const reasonLine = it.rawDisableReason
 						? ` <span style="color: #6b7280;">· ${escapeHtml(String(it.rawDisableReason))}</span>`
 						: '';
+					const balanceLine = it.balanceFormatted
+						? `<div style="color: ${accent}; font-weight: 700; font-size: 13px; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, monospace;">Sold: ${escapeHtml(it.balanceFormatted)}</div>`
+						: '';
 					return `
 						<tr>
 							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
 								<div style="font-weight: 600; color: #111827;">${escapeHtml(it.accountName)}</div>
 								<div style="color: #6b7280; font-size: 12px;"><code>${escapeHtml(it.externalAccountId)}</code></div>
 								${clientLine}
+								${balanceLine}
 							</td>
 							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 13px; color: #374151;">
 								${escapeHtml(it.providerLabel)}

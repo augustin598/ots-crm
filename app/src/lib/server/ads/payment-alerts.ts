@@ -282,6 +282,23 @@ async function collectTransitionNotifications(
 	// for 'closed' accounts (nothing actionable — already closed).
 	const suppressEmail = isRestored || isClosed;
 
+	// Format balance when present so clients see the exact amount owed.
+	let balanceFormatted: string | null = null;
+	if (snap.balanceCents != null && snap.balanceCents !== 0) {
+		const amount = Math.abs(snap.balanceCents) / 100;
+		const code = (snap.currencyCode || 'RON').toUpperCase();
+		try {
+			balanceFormatted = new Intl.NumberFormat('ro-RO', {
+				style: 'currency',
+				currency: code,
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			}).format(amount);
+		} catch {
+			balanceFormatted = `${amount.toFixed(2)} ${code}`;
+		}
+	}
+
 	const baseDigestItem: AdDigestItem = {
 		provider: snap.provider,
 		providerLabel,
@@ -292,6 +309,7 @@ async function collectTransitionNotifications(
 		rawStatusCode: snap.rawStatusCode,
 		rawDisableReason: snap.rawDisableReason,
 		billingUrl,
+		balanceFormatted,
 	};
 
 	// --- Admins ---
