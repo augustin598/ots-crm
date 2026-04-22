@@ -24,6 +24,19 @@
 		flagged.some((f) => f.paymentStatus === 'suspended' || f.paymentStatus === 'payment_failed'),
 	);
 
+	// Header balance pill: shown at the top-right of the alert card when
+	// there's a known outstanding balance. Single flagged account → show its
+	// balance; multiple → show count of accounts with balance to avoid
+	// misleading aggregation across currencies.
+	const headerBalance = $derived.by(() => {
+		const withBalance = flagged.filter((f) => f.balanceFormatted);
+		if (withBalance.length === 0) return null;
+		if (withBalance.length === 1) {
+			return { text: withBalance[0].balanceFormatted!, status: withBalance[0].paymentStatus };
+		}
+		return { text: `${withBalance.length} conturi cu sold`, status: 'payment_failed' };
+	});
+
 	// Banner-level accent color
 	const accent = $derived(hasCritical ? '#dc2626' : '#d97706');
 	const accentBg = $derived(hasCritical ? '#fef2f2' : '#fefce8');
@@ -154,7 +167,7 @@
 						<AlertTriangleIcon class="size-5" style="color: {accent};" />
 					{/if}
 				</div>
-				<div class="flex-1">
+				<div class="flex-1 min-w-0">
 					<h3 class="text-sm font-bold uppercase tracking-wide" style="color: {accent};">
 						Atenție — conturi publicitate cu probleme
 					</h3>
@@ -163,6 +176,19 @@
 						{flagged.length === 1 ? 'cont necesită' : 'conturi necesită'} atenția ta
 					</p>
 				</div>
+				{#if headerBalance}
+					<div class="hidden shrink-0 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 shadow-sm md:inline-flex">
+						<span class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+							Sold restant
+						</span>
+						<span
+							class="text-sm font-bold tabular-nums"
+							style="color: {ctaColorFor(headerBalance.status)};"
+						>
+							{headerBalance.text}
+						</span>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Account list -->
@@ -184,20 +210,7 @@
 								{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
 							</div>
 						</div>
-						{#if item.balanceFormatted}
-							<div class="hidden shrink-0 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 shadow-sm md:inline-flex">
-								<span class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-									Sold
-								</span>
-								<span
-									class="text-sm font-bold tabular-nums"
-									style="color: {ctaColorFor(item.paymentStatus)};"
-								>
-									{item.balanceFormatted}
-								</span>
-							</div>
-						{/if}
-						<Tooltip.Root>
+							<Tooltip.Root>
 							<Tooltip.Trigger>
 								<span
 									class="inline-flex shrink-0 cursor-help items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium {badgeClassFor(
