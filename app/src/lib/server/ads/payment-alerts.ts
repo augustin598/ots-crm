@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { createNotification, type NotificationType } from '$lib/server/notifications';
-import { sendAdPaymentAlertEmail } from '$lib/server/email';
+import { sendAdPaymentDigestEmail, type AdDigestItem } from '$lib/server/email';
 import { logError, logInfo } from '$lib/server/logger';
 import {
 	isBadStatus,
@@ -197,10 +197,31 @@ async function resolveClientRecipients(
 	return { userRecipients, clientEmails };
 }
 
-async function dispatchNotifications(
+interface DigestAccumulator {
+	adminByEmail: Map<string, AdDigestItem[]>;
+	clientByEmail: Map<string, AdDigestItem[]>;
+}
+
+async function resolveClientName(tenantId: string, clientId: string): Promise<string | null> {
+	const [c] = await db
+		.select({ name: table.client.name })
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+		.limit(1);
+	return c?.name ?? null;
+}
+
+/**
+ * For a single transition, create in-app notifications (per-recipient, dedup via
+ * fingerprint in `createNotification`) AND accumulate digest items for emails.
+ * Emails themselves are NOT sent here — the caller flushes the digest accumulator
+ * once after processing all transitions in a tenant run.
+ */
+async function collectTransitionNotifications(
 	snap: PaymentStatusSnapshot,
 	tenantId: string,
 	prior: AdsPaymentStatus | null,
+	digest: DigestAccumulator,
 ): Promise<void> {
 	const type = notificationTypeFor(snap.paymentStatus);
 	const priority = priorityFor(snap.paymentStatus);
@@ -226,6 +247,20 @@ async function dispatchNotifications(
 		rawDisableReason: snap.rawDisableReason ?? null,
 	};
 
+	const clientName = snap.clientId ? await resolveClientName(tenantId, snap.clientId) : null;
+
+	const baseDigestItem: AdDigestItem = {
+		provider: snap.provider,
+		providerLabel,
+		accountName: snap.accountName,
+		externalAccountId: snap.externalAccountId,
+		paymentStatus: snap.paymentStatus,
+		statusLabelRo: statusLabel,
+		rawStatusCode: snap.rawStatusCode,
+		rawDisableReason: snap.rawDisableReason,
+		billingUrl,
+	};
+
 	// --- Admins ---
 	const admins = await resolveAdminRecipients(tenantId);
 	for (const admin of admins) {
@@ -241,22 +276,13 @@ async function dispatchNotifications(
 				metadata,
 				priority,
 			});
-			if (!isRestored && admin.email) {
-				await sendAdPaymentAlertEmail(tenantId, admin.email, {
-					provider: snap.provider,
-					providerLabel,
-					accountName: snap.accountName,
-					externalAccountId: snap.externalAccountId,
-					statusLabelRo: statusLabel,
-					paymentStatus: snap.paymentStatus,
-					billingUrl,
-					rawStatusCode: snap.rawStatusCode,
-					rawDisableReason: snap.rawDisableReason,
-					recipientType: 'admin',
-				});
-			}
 		} catch (err) {
-			logError('server', `Failed to notify admin ${admin.userId} for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
+			logError('server', `Failed to create admin notification for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		if (!isRestored && admin.email) {
+			const list = digest.adminByEmail.get(admin.email) ?? [];
+			list.push({ ...baseDigestItem, clientLabel: clientName ?? undefined });
+			digest.adminByEmail.set(admin.email, list);
 		}
 	}
 
@@ -276,45 +302,38 @@ async function dispatchNotifications(
 					metadata,
 					priority,
 				});
-				if (!isRestored && u.email) {
-					await sendAdPaymentAlertEmail(tenantId, u.email, {
-						provider: snap.provider,
-						providerLabel,
-						accountName: snap.accountName,
-						externalAccountId: snap.externalAccountId,
-						statusLabelRo: statusLabel,
-						paymentStatus: snap.paymentStatus,
-						billingUrl,
-						rawStatusCode: snap.rawStatusCode,
-						rawDisableReason: snap.rawDisableReason,
-						recipientType: 'client',
-					});
-				}
 			} catch (err) {
-				logError('server', `Failed to notify client user ${u.userId} for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
+				logError('server', `Failed to create client notification for user ${u.userId}: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			if (!isRestored && u.email) {
+				const list = digest.clientByEmail.get(u.email) ?? [];
+				list.push({ ...baseDigestItem });
+				digest.clientByEmail.set(u.email, list);
 			}
 		}
-		// Also send to client.email (e.g., billing@) even when linked users exist,
-		// unless that same address is already covered by a linked user.
 		if (!isRestored) {
 			for (const email of clientEmails) {
-				try {
-					await sendAdPaymentAlertEmail(tenantId, email, {
-						provider: snap.provider,
-						providerLabel,
-						accountName: snap.accountName,
-						externalAccountId: snap.externalAccountId,
-						statusLabelRo: statusLabel,
-						paymentStatus: snap.paymentStatus,
-						billingUrl,
-						rawStatusCode: snap.rawStatusCode,
-						rawDisableReason: snap.rawDisableReason,
-						recipientType: 'client',
-					});
-				} catch (err) {
-					logError('server', `Failed to send client email ${email} for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
-				}
+				const list = digest.clientByEmail.get(email) ?? [];
+				list.push({ ...baseDigestItem });
+				digest.clientByEmail.set(email, list);
 			}
+		}
+	}
+}
+
+async function flushDigest(tenantId: string, digest: DigestAccumulator): Promise<void> {
+	for (const [email, items] of digest.adminByEmail) {
+		try {
+			await sendAdPaymentDigestEmail(tenantId, email, { recipientType: 'admin', items });
+		} catch (err) {
+			logError('server', `Failed to send admin digest to ${email}: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+	for (const [email, items] of digest.clientByEmail) {
+		try {
+			await sendAdPaymentDigestEmail(tenantId, email, { recipientType: 'client', items });
+		} catch (err) {
+			logError('server', `Failed to send client digest to ${email}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 }
@@ -332,6 +351,11 @@ export async function reconcileAndAlert(
 	snapshots: PaymentStatusSnapshot[],
 ): Promise<ReconcileResult> {
 	const result: ReconcileResult = { total: snapshots.length, unchanged: 0, transitions: 0, restored: 0, errors: 0 };
+
+	const digest: DigestAccumulator = {
+		adminByEmail: new Map(),
+		clientByEmail: new Map(),
+	};
 
 	for (const snap of snapshots) {
 		try {
@@ -356,7 +380,7 @@ export async function reconcileAndAlert(
 
 			if (currentBad || (priorBad && !currentBad)) {
 				await persistStatus(snap, tenantId);
-				await dispatchNotifications(snap, tenantId, prior.status);
+				await collectTransitionNotifications(snap, tenantId, prior.status, digest);
 				if (!currentBad && priorBad) result.restored += 1;
 				else result.transitions += 1;
 			} else {
@@ -369,6 +393,17 @@ export async function reconcileAndAlert(
 		}
 	}
 
-	logInfo('server', `Reconcile done tenant=${tenantId}`, { metadata: { ...result } });
+	// Flush per-recipient email digests — one email per admin/client per run,
+	// regardless of how many accounts transitioned. Prevents the email storm
+	// pattern observed on the initial seed incident.
+	await flushDigest(tenantId, digest);
+
+	logInfo('server', `Reconcile done tenant=${tenantId}`, {
+		metadata: {
+			...result,
+			adminDigestsSent: digest.adminByEmail.size,
+			clientDigestsSent: digest.clientByEmail.size,
+		},
+	});
 	return result;
 }

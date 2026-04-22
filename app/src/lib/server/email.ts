@@ -739,7 +739,8 @@ type EmailType =
 	| 'invoice-overdue-reminder'
 	| 'notification_alert'
 	| 'report'
-	| 'ad_payment_alert';
+	| 'ad_payment_alert'
+	| 'ad_payment_digest';
 
 export type EmailSendContext = {
 	tenantId: string | null;
@@ -2874,6 +2875,145 @@ export async function sendAdPaymentAlertEmail(
 	);
 }
 
+export interface AdDigestItem {
+	provider: 'meta' | 'google' | 'tiktok';
+	providerLabel: string;
+	accountName: string;
+	externalAccountId: string;
+	paymentStatus: string;
+	statusLabelRo: string;
+	rawStatusCode: string | number;
+	rawDisableReason?: string | number | null;
+	billingUrl: string;
+	clientLabel?: string | null; // "Client Name" shown only in admin digest
+}
+
+export async function sendAdPaymentDigestEmail(
+	tenantId: string,
+	recipientEmail: string,
+	params: {
+		recipientType: 'admin' | 'client';
+		items: AdDigestItem[];
+	}
+): Promise<void> {
+	if (params.items.length === 0) return;
+
+	const count = params.items.length;
+	const subject = `[OTS CRM] ⚠️ ${count} ${count === 1 ? 'cont publicitate' : 'conturi publicitate'} necesită atenție`;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'ad_payment_digest',
+			metadata: {
+				recipientType: params.recipientType,
+				count,
+				providers: Array.from(new Set(params.items.map((i) => i.provider))),
+				statuses: Array.from(new Set(params.items.map((i) => i.paymentStatus))),
+			},
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendAdPaymentDigestEmail',
+				args: [tenantId, recipientEmail, params],
+			},
+		},
+		async () => {
+			const brand = await fetchTenantBrand(tenantId);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const intro = params.recipientType === 'client'
+				? 'Am detectat probleme pe conturile dvs. de publicitate. Vă rugăm să verificați și să rezolvați situația cât mai repede posibil.'
+				: 'Conturi ale clienților dvs. au detectat probleme de plată sau suspendare. Vă rugăm să verificați și să anunțați clienții dacă e cazul.';
+
+			const rowsHtml = params.items
+				.map((it) => {
+					const accent =
+						it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
+							? '#d97706'
+							: '#dc2626';
+					const clientLine = it.clientLabel
+						? `<div style="color: #6b7280; font-size: 12px;">${escapeHtml(it.clientLabel)}</div>`
+						: '';
+					const reasonLine = it.rawDisableReason
+						? ` <span style="color: #6b7280;">· ${escapeHtml(String(it.rawDisableReason))}</span>`
+						: '';
+					return `
+						<tr>
+							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<div style="font-weight: 600; color: #111827;">${escapeHtml(it.accountName)}</div>
+								<div style="color: #6b7280; font-size: 12px;"><code>${escapeHtml(it.externalAccountId)}</code></div>
+								${clientLine}
+							</td>
+							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 13px; color: #374151;">
+								${escapeHtml(it.providerLabel)}
+							</td>
+							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<span style="display: inline-block; padding: 3px 8px; border-radius: 4px; background: #fee2e2; color: ${accent}; font-size: 12px; font-weight: 600;">${escapeHtml(it.statusLabelRo)}</span>
+								<div style="color: #6b7280; font-size: 11px; margin-top: 2px;">cod: ${escapeHtml(String(it.rawStatusCode))}${reasonLine}</div>
+							</td>
+							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<a href="${escapeHtml(it.billingUrl)}" style="color: ${brand.themeColor}; text-decoration: underline; font-size: 13px;">Billing →</a>
+							</td>
+						</tr>
+					`;
+				})
+				.join('');
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${intro}</p>
+				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px 0;">
+					<thead>
+						<tr style="background: #f9fafb;">
+							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Cont</th>
+							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Platformă</th>
+							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Status</th>
+							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Acțiune</th>
+						</tr>
+					</thead>
+					<tbody>${rowsHtml}</tbody>
+				</table>
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: `${count} ${count === 1 ? 'cont publicitate' : 'conturi publicitate'} — atenție`,
+				subtitle: params.recipientType === 'admin' ? 'Raport alertă agenție' : 'Conturile dvs. de publicitate',
+				bodyHtml,
+				previewTitle: subject,
+			});
+
+			const lines = params.items.map((it) =>
+				`- ${it.providerLabel} — ${it.accountName} (${it.externalAccountId}): ${it.statusLabelRo} [cod ${it.rawStatusCode}] — ${it.billingUrl}`,
+			).join('\n');
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject,
+				html,
+				text: trimPlainText(`
+					${count} conturi de publicitate necesita atentie.
+
+					${intro.replace(/[ăâîșț]/gi, '?')}
+
+					${lines.replace(/[ăâîșț]/gi, '?')}
+				`),
+				attachments: brand.logoAttachment ? [brand.logoAttachment] : [],
+			};
+		}
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
 // and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
@@ -2909,7 +3049,8 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendTaskReminderEmail,
 	sendContractSigningEmail,
 	sendPackageRequestEmail,
-	sendAdPaymentAlertEmail
+	sendAdPaymentAlertEmail,
+	sendAdPaymentDigestEmail
 	// NOTE: Intentionally omitted (payload: null, not replay-able):
 	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
 	//   (contain single-use auth tokens that must not be persisted)
