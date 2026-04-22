@@ -4,7 +4,6 @@
 	import { getContracts } from '$lib/remotes/contracts.remote';
 	import { getClientAccountBudgets } from '$lib/remotes/budget.remote';
 	import { page } from '$app/state';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { CheckSquare, FileText, Receipt } from '@lucide/svelte';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import { goto } from '$app/navigation';
@@ -107,76 +106,94 @@
 	{/if}
 
 	<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Pending Tasks</CardTitle>
-				<CheckSquare class="h-4 w-4 text-muted-foreground" />
-			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{pendingTasks}</div>
-				<p class="text-xs text-muted-foreground">Awaiting approval</p>
-			</CardContent>
-		</Card>
+		<button
+			type="button"
+			onclick={() => goto(`/client/${tenantSlug}/tasks`)}
+			class="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition-all hover:border-zinc-300 hover:shadow-md"
+		>
+			<div>
+				<p class="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Pending Tasks</p>
+				<p class="mt-2 text-3xl font-bold tabular-nums text-zinc-900">{pendingTasks}</p>
+				<p class="mt-1 text-xs text-zinc-500">Awaiting approval</p>
+			</div>
+			<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
+				<CheckSquare class="size-4 text-zinc-500" />
+			</div>
+		</button>
 
-		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/tasks`)}>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Active Tasks</CardTitle>
-				<CheckSquare class="h-4 w-4 text-muted-foreground" />
-			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{activeTasks}</div>
-				<p class="text-xs text-muted-foreground">In progress</p>
-			</CardContent>
-		</Card>
+		<button
+			type="button"
+			onclick={() => goto(`/client/${tenantSlug}/tasks`)}
+			class="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition-all hover:border-zinc-300 hover:shadow-md"
+		>
+			<div>
+				<p class="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Active Tasks</p>
+				<p class="mt-2 text-3xl font-bold tabular-nums text-zinc-900">{activeTasks}</p>
+				<p class="mt-1 text-xs text-zinc-500">In progress</p>
+			</div>
+			<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
+				<CheckSquare class="size-4 text-zinc-500" />
+			</div>
+		</button>
 
-		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/contracts`)}>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Contracts</CardTitle>
-				<FileText class="h-4 w-4 text-muted-foreground" />
-			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{totalContracts}</div>
-				<p class="text-xs text-muted-foreground">Total contracts</p>
-			</CardContent>
-		</Card>
+		<button
+			type="button"
+			onclick={() => goto(`/client/${tenantSlug}/contracts`)}
+			class="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition-all hover:border-zinc-300 hover:shadow-md"
+		>
+			<div>
+				<p class="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Contracts</p>
+				<p class="mt-2 text-3xl font-bold tabular-nums text-zinc-900">{totalContracts}</p>
+				<p class="mt-1 text-xs text-zinc-500">Total contracts</p>
+			</div>
+			<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
+				<FileText class="size-4 text-zinc-500" />
+			</div>
+		</button>
 
-		<Card class="cursor-pointer hover:border-primary/50 transition-colors" onclick={() => goto(`/client/${tenantSlug}/invoices`)}>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-				<CardTitle class="text-sm font-medium">Pending Invoices</CardTitle>
-				<Receipt class="h-4 w-4 text-muted-foreground" />
-			</CardHeader>
-			<CardContent>
-				<div class="text-2xl font-bold">{pendingInvoices}</div>
-				<p class="text-xs text-muted-foreground">Awaiting payment</p>
-			</CardContent>
-		</Card>
+		<button
+			type="button"
+			onclick={() => goto(`/client/${tenantSlug}/invoices`)}
+			class="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition-all hover:border-zinc-300 hover:shadow-md"
+		>
+			<div>
+				<p class="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Pending Invoices</p>
+				<p class="mt-2 text-3xl font-bold tabular-nums text-zinc-900">{pendingInvoices}</p>
+				<p class="mt-1 text-xs text-zinc-500">Awaiting payment</p>
+			</div>
+			<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
+				<Receipt class="size-4 text-zinc-500" />
+			</div>
+		</button>
 	</div>
 
 	<!-- Budget Overview -->
 	{#if budgetData && allBudgetAccounts.length > 0}
 		{@const totalColors = budgetColor(totalPct)}
-		<Card class="cursor-pointer hover:border-primary/50 transition-colors overflow-hidden" onclick={() => goto(`/client/${tenantSlug}/budgets`)}>
-			<CardHeader>
-				<CardTitle class="flex items-center justify-between">
-					<span class="flex items-center gap-2">
-						<WalletIcon class="h-5 w-5" />
-						Buget Publicitate — Luna Curentă
-					</span>
-					<span class="text-sm font-normal text-muted-foreground">Vezi detalii →</span>
-				</CardTitle>
-			</CardHeader>
-			<CardContent class="space-y-4">
+		<div class="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+			<button
+				type="button"
+				onclick={() => goto(`/client/${tenantSlug}/budgets`)}
+				class="flex w-full items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4 text-left transition-colors hover:bg-zinc-50/60"
+			>
+				<div class="flex items-center gap-2.5">
+					<WalletIcon class="size-4 text-zinc-500" />
+					<h3 class="text-sm font-semibold text-zinc-900">Buget Publicitate · Luna Curentă</h3>
+				</div>
+				<span class="text-xs font-medium text-zinc-500">Vezi detalii →</span>
+			</button>
+			<div class="space-y-4 p-5">
 				{#if totalBudget > 0}
 					<div class="space-y-2">
 						<div class="flex justify-between text-sm">
-							<span class={totalColors.text}>
-								Consumat: {totalSpend.toLocaleString('ro-RO')} / {totalBudget.toLocaleString('ro-RO')} RON
+							<span class="font-medium text-zinc-700 {totalColors.text}">
+								Consumat: <span class="tabular-nums">{totalSpend.toLocaleString('ro-RO')}</span> / <span class="tabular-nums">{totalBudget.toLocaleString('ro-RO')}</span> RON
 							</span>
-							<span class={totalColors.text}>{totalPct}%</span>
+							<span class="font-semibold tabular-nums text-zinc-700 {totalColors.text}">{totalPct}%</span>
 						</div>
-						<div class="relative h-3 rounded-full overflow-hidden bg-muted {totalColors.bar}">
+						<div class="relative h-2 overflow-hidden rounded-full bg-zinc-100 {totalColors.bar}">
 							<div
-								class="absolute inset-y-0 left-0 rounded-full budget-bar-glow"
+								class="budget-bar-glow absolute inset-y-0 left-0 rounded-full"
 								style="width: {Math.min(totalPct, 100)}%"
 							></div>
 						</div>
@@ -186,108 +203,108 @@
 					{#each accountsWithBudget as account (account.id)}
 						{@const pct = account.monthlyBudget && account.monthlyBudget > 0 ? Math.round((account.spendAmount / account.monthlyBudget) * 100) : 0}
 						{@const colors = budgetColor(pct)}
-						<div class="rounded-lg border p-3 space-y-2">
+						<div class="space-y-2 rounded-lg border border-zinc-200 bg-white p-3">
 							<div class="flex items-center gap-2">
 								{#if account.platform === 'meta'}
-									<IconFacebook class="h-4 w-4 text-blue-600 shrink-0" />
+									<IconFacebook class="size-4 shrink-0 text-blue-600" />
 								{:else if account.platform === 'tiktok'}
-									<IconTiktok class="h-4 w-4 shrink-0" />
+									<IconTiktok class="size-4 shrink-0" />
 								{:else}
-									<IconGoogleAds class="h-4 w-4 text-yellow-600 shrink-0" />
+									<IconGoogleAds class="size-4 shrink-0 text-yellow-600" />
 								{/if}
-								<span class="text-sm font-medium truncate">{account.accountName}</span>
+								<span class="truncate text-sm font-medium text-zinc-900">{account.accountName}</span>
 							</div>
-							<div class="flex justify-between text-xs text-muted-foreground">
-								<span class={colors.text}>{account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget?.toLocaleString('ro-RO')} RON</span>
-								<span class={colors.text}>{pct}%</span>
+							<div class="flex justify-between text-xs">
+								<span class="tabular-nums text-zinc-500 {colors.text}">{account.spendAmount.toLocaleString('ro-RO')} / {account.monthlyBudget?.toLocaleString('ro-RO')} RON</span>
+								<span class="font-semibold tabular-nums text-zinc-500 {colors.text}">{pct}%</span>
 							</div>
-							<div class="relative h-1.5 rounded-full overflow-hidden bg-muted {colors.bar}">
+							<div class="relative h-1.5 overflow-hidden rounded-full bg-zinc-100 {colors.bar}">
 								<div
-									class="absolute inset-y-0 left-0 rounded-full budget-bar-glow"
+									class="budget-bar-glow absolute inset-y-0 left-0 rounded-full"
 									style="width: {Math.min(pct, 100)}%"
 								></div>
 							</div>
 						</div>
 					{/each}
 				</div>
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	{/if}
 
 	<div class="grid gap-4 md:grid-cols-2">
-		<Card>
-			<CardHeader>
-				<CardTitle>Recent Tasks</CardTitle>
-				<CardDescription>Your latest tasks</CardDescription>
-			</CardHeader>
-			<CardContent>
+		<div class="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+			<div class="border-b border-zinc-100 px-5 py-4">
+				<h3 class="text-sm font-semibold text-zinc-900">Recent Tasks</h3>
+				<p class="mt-0.5 text-xs text-zinc-500">Your latest tasks</p>
+			</div>
+			<div class="p-2">
 				{#if tasksLoading}
-					<p class="text-sm text-muted-foreground">Loading...</p>
+					<p class="p-3 text-sm text-zinc-500">Loading...</p>
 				{:else if tasks.length === 0}
-					<p class="text-sm text-muted-foreground">No tasks yet</p>
+					<p class="p-3 text-sm text-zinc-500">No tasks yet</p>
 				{:else}
-					<div class="space-y-2">
+					<div>
 						{#each tasks.slice(0, 5) as task}
-							<div class="flex items-center justify-between p-2 rounded-lg hover:bg-accent">
-								<div class="flex-1 min-w-0">
-									<p class="text-sm font-medium">{task.title}</p>
+							<div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-50">
+								<div class="min-w-0 flex-1">
+									<p class="truncate text-sm font-medium text-zinc-900">{task.title}</p>
 								</div>
-								<Badge variant={getStatusBadgeVariant(task.status)} class="text-xs shrink-0 ml-2">
+								<Badge variant={getStatusBadgeVariant(task.status)} class="ml-2 shrink-0 text-xs">
 									{formatStatus(task.status)}
 								</Badge>
 							</div>
 						{/each}
 					</div>
 					{#if tasks.length > 5}
-						<div class="mt-4">
+						<div class="border-t border-zinc-100 px-3 pt-3 mt-2">
 							<button
 								onclick={() => goto(`/client/${tenantSlug}/tasks`)}
-								class="text-sm text-primary hover:underline"
+								class="text-xs font-medium text-zinc-600 hover:text-zinc-900"
 							>
 								View all tasks →
 							</button>
 						</div>
 					{/if}
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 
-		<Card>
-			<CardHeader>
-				<CardTitle>Recent Invoices</CardTitle>
-				<CardDescription>Your latest invoices</CardDescription>
-			</CardHeader>
-			<CardContent>
+		<div class="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+			<div class="border-b border-zinc-100 px-5 py-4">
+				<h3 class="text-sm font-semibold text-zinc-900">Recent Invoices</h3>
+				<p class="mt-0.5 text-xs text-zinc-500">Your latest invoices</p>
+			</div>
+			<div class="p-2">
 				{#if invoicesLoading}
-					<p class="text-sm text-muted-foreground">Loading...</p>
+					<p class="p-3 text-sm text-zinc-500">Loading...</p>
 				{:else if invoices.length === 0}
-					<p class="text-sm text-muted-foreground">No invoices yet</p>
+					<p class="p-3 text-sm text-zinc-500">No invoices yet</p>
 				{:else}
-					<div class="space-y-2">
+					<div>
 						{#each invoices.slice(0, 5) as invoice}
-							<div class="flex items-center justify-between p-2 rounded-lg hover:bg-accent">
-								<div class="flex-1 min-w-0">
-									<p class="text-sm font-medium">{invoice.invoiceNumber}</p>
+							<div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-50">
+								<div class="min-w-0 flex-1">
+									<p class="truncate text-sm font-medium text-zinc-900">{invoice.invoiceNumber}</p>
 								</div>
-								<Badge variant={getInvoiceStatusVariant(invoice.status)} class="text-xs shrink-0 ml-2">
+								<Badge variant={getInvoiceStatusVariant(invoice.status)} class="ml-2 shrink-0 text-xs">
 									{formatInvoiceStatus(invoice.status)}
 								</Badge>
 							</div>
 						{/each}
 					</div>
 					{#if invoices.length > 5}
-						<div class="mt-4">
+						<div class="border-t border-zinc-100 px-3 pt-3 mt-2">
 							<button
 								onclick={() => goto(`/client/${tenantSlug}/invoices`)}
-								class="text-sm text-primary hover:underline"
+								class="text-xs font-medium text-zinc-600 hover:text-zinc-900"
 							>
 								View all invoices →
 							</button>
 						</div>
 					{/if}
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	</div>
 
 	<DashboardChecklist {isPrimary} {tenantSlug} />
