@@ -30,6 +30,11 @@ export interface ClientAdsHealthItem {
 	paymentStatus: AdsPaymentStatus;
 	statusLabel: string;
 	rawStatusCode: string;
+	/**
+	 * Secondary reason code (e.g., 'budget_exceeded', 'no_delivery' for TikTok;
+	 * numeric disable_reason for Meta). Used for contextual tooltip messaging.
+	 */
+	rawDisableReason: string | null;
 	/** Outstanding balance formatted for display (e.g., "430,40 RON"); null if unavailable */
 	balanceFormatted: string | null;
 	/** Status-appropriate action — null means no actionable CTA */
@@ -347,11 +352,13 @@ export const getClientAdsHealth = query(
 			// alert would be useless noise — admin has acknowledged this one.
 			if (row.alertMutedAtStatus && row.alertMutedAtStatus === status) return;
 			let rawCode = '';
+			let rawDisableReason: string | null = null;
 			let balanceCents: number | null = null;
 			let currency: string | null = null;
 			try {
 				const parsed = row.paymentStatusRaw ? JSON.parse(row.paymentStatusRaw) : null;
 				rawCode = parsed?.code != null ? String(parsed.code) : '';
+				rawDisableReason = parsed?.disableReason != null ? String(parsed.disableReason) : null;
 				balanceCents = typeof parsed?.balanceCents === 'number' ? parsed.balanceCents : null;
 				currency = typeof parsed?.currency === 'string' ? parsed.currency : null;
 			} catch {
@@ -365,6 +372,7 @@ export const getClientAdsHealth = query(
 				paymentStatus: status,
 				statusLabel: PAYMENT_STATUS_LABEL_RO[status],
 				rawStatusCode: rawCode,
+				rawDisableReason,
 				balanceFormatted: formatBalance(balanceCents, currency),
 				action: actionForStatus(provider, status, row.externalId),
 			});

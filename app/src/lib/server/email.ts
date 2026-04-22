@@ -2890,7 +2890,14 @@ export interface AdDigestItem {
 	balanceFormatted?: string | null;
 }
 
-function statusPhraseFor(status: string): string {
+function statusPhraseFor(status: string, reason?: string | number | null): string {
+	// TikTok-specific sub-reasons layered on risk_review
+	if (status === 'risk_review' && reason === 'budget_exceeded') {
+		return 'are campaniile blocate — bugetul setat în platformă a fost consumat';
+	}
+	if (status === 'risk_review' && reason === 'no_delivery') {
+		return 'are toate campaniile oprite — nicio reclamă nu livrează acum';
+	}
 	switch (status) {
 		case 'grace_period':
 			return 'este în perioadă de grație cu o factură neachitată';
@@ -2984,7 +2991,7 @@ export async function sendAdPaymentDigestEmail(
 						: single.paymentStatus === 'suspended' || single.paymentStatus === 'closed'
 							? 'Te rugăm să verifici setările contului pentru detalii.'
 							: 'Te rugăm să verifici setările contului cât mai repede posibil.';
-				intro = `Contul tău de <strong>${escapeHtml(single.providerLabel)}</strong> <strong>${escapeHtml(single.accountName)}</strong> ${statusPhraseFor(single.paymentStatus)}.${balanceSuffix} ${actionPhrase}`;
+				intro = `Contul tău de <strong>${escapeHtml(single.providerLabel)}</strong> <strong>${escapeHtml(single.accountName)}</strong> ${statusPhraseFor(single.paymentStatus, single.rawDisableReason)}.${balanceSuffix} ${actionPhrase}`;
 			} else {
 				intro =
 					params.recipientType === 'client'

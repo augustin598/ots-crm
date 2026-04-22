@@ -1120,6 +1120,97 @@ export interface TiktokAdvertiserBalance {
 	currencyCode: string | null;
 }
 
+export interface TiktokAdvertiserDeliveryHealth {
+	advertiserId: string;
+	/** Campaigns user intends to run (operation_status = ENABLE). */
+	enabledCount: number;
+	/** Campaigns actively delivering (secondary_status = DELIVERY_OK). */
+	deliveringCount: number;
+	/** Campaigns that are enabled but blocked by budget exhaustion. */
+	budgetExceededCount: number;
+	/**
+	 * High-level reason when enabledCount > 0 but deliveringCount === 0.
+	 *   'none'             — at least one campaign is delivering
+	 *   'budget_exceeded'  — all enabled campaigns hit budget cap
+	 *   'no_delivery'      — enabled but blocked for other reasons (schedule, audit, etc.)
+	 *   'all_paused'       — no campaigns have operation_status = ENABLE (user intent)
+	 */
+	issue: 'none' | 'budget_exceeded' | 'no_delivery' | 'all_paused';
+}
+
+/**
+ * Fetches campaign-level delivery health for an advertiser. Used to detect
+ * cases where the account status says STATUS_ENABLE but no campaign is
+ * actually delivering (e.g., budget exhausted, audit rejected). One API call
+ * per advertiser.
+ */
+export async function fetchAdvertiserCampaignHealth(
+	advertiserId: string,
+	accessToken: string
+): Promise<TiktokAdvertiserDeliveryHealth> {
+	const empty: TiktokAdvertiserDeliveryHealth = {
+		advertiserId,
+		enabledCount: 0,
+		deliveringCount: 0,
+		budgetExceededCount: 0,
+		issue: 'none',
+	};
+
+	try {
+		const params = new URLSearchParams({
+			advertiser_id: advertiserId,
+			page_size: '1000',
+			fields: JSON.stringify(['campaign_id', 'operation_status', 'secondary_status']),
+		});
+		const res = await fetch(`${TIKTOK_API_URL}/campaign/get/?${params.toString()}`, {
+			headers: { 'Access-Token': accessToken },
+			signal: AbortSignal.timeout(10_000),
+		});
+		const json = await res.json();
+		if (json.code !== 0 || !json.data?.list) return empty;
+
+		let enabled = 0;
+		let delivering = 0;
+		let budgetExceeded = 0;
+
+		for (const c of json.data.list as any[]) {
+			const op = String(c.operation_status || '').toUpperCase();
+			const sec = String(c.secondary_status || '').toUpperCase();
+
+			// User-enabled campaigns (the ones expected to be running).
+			if (op === 'ENABLE' || op === 'CAMPAIGN_STATUS_ENABLE') {
+				enabled += 1;
+
+				// Actively delivering ad impressions.
+				if (sec === 'CAMPAIGN_STATUS_DELIVERY_OK' || sec === 'STATUS_DELIVERY_OK') {
+					delivering += 1;
+				} else if (
+					sec === 'CAMPAIGN_STATUS_BUDGET_EXCEED' ||
+					sec === 'CAMPAIGN_BUDGET_EXCEED'
+				) {
+					budgetExceeded += 1;
+				}
+			}
+		}
+
+		let issue: TiktokAdvertiserDeliveryHealth['issue'] = 'none';
+		if (enabled === 0) {
+			issue = 'all_paused';
+		} else if (delivering === 0) {
+			issue = budgetExceededCount(budgetExceeded, enabled) ? 'budget_exceeded' : 'no_delivery';
+		}
+
+		return { advertiserId, enabledCount: enabled, deliveringCount: delivering, budgetExceededCount: budgetExceeded, issue };
+	} catch {
+		return empty;
+	}
+}
+
+function budgetExceededCount(exceeded: number, enabled: number): boolean {
+	// Flag budget_exceeded if MOST enabled campaigns are blocked by budget (not just one).
+	return exceeded > 0 && exceeded >= Math.ceil(enabled / 2);
+}
+
 /**
  * Fetch current balance per advertiser. TikTok requires one call per advertiser.
  * Nice-to-have data — on per-advertiser error we return null balance rather than

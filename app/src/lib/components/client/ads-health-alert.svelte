@@ -90,7 +90,23 @@
 	 * Tooltip copy per status — mirrors the in-platform messaging clients see
 	 * on Facebook/Google/TikTok so they understand what to do next.
 	 */
-	function tooltipFor(status: string): { title: string; body: string } {
+	function tooltipFor(status: string, reason: string | null = null): { title: string; body: string } {
+		// TikTok sub-reasons layered on risk_review — account is STATUS_ENABLE
+		// but campaigns aren't actually delivering (budget exhausted, rejected).
+		if (status === 'risk_review' && reason === 'budget_exceeded') {
+			return {
+				title: 'Buget campanii consumat',
+				body:
+					'Campaniile tale au atins limita de buget setată în TikTok. Crește bugetul sau așteaptă reset-ul zilnic pentru ca reclamele să reînceapă livrarea.',
+			};
+		}
+		if (status === 'risk_review' && reason === 'no_delivery') {
+			return {
+				title: 'Reclame oprite',
+				body:
+					'Contul este activ, dar nicio campanie nu livrează acum (respinsă la verificare, în afara programului sau oprită din altă cauză). Verifică campaniile în TikTok Ads Manager.',
+			};
+		}
 		switch (status) {
 			case 'grace_period':
 				return {
@@ -172,7 +188,7 @@
 		<ul class="divide-y divide-zinc-100">
 			{#each flagged as item (item.provider + ':' + item.externalAccountId)}
 				{@const Icon = iconFor(item.provider)}
-				{@const tip = tooltipFor(item.paymentStatus)}
+				{@const tip = tooltipFor(item.paymentStatus, item.rawDisableReason)}
 				<li class="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
 					<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
 						{#if Icon}
