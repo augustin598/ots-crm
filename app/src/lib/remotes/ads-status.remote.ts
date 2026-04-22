@@ -189,18 +189,31 @@ export const getAdsPaymentStatusDashboard = query(async () => {
 	return dashboard;
 });
 
+// Per-tenant cooldown for manual triggers to prevent spam-click API hammering
+const manualTriggerCooldownMs = 60_000;
+const lastManualTriggerAt = new Map<string, number>();
+
 export const triggerAdsStatusMonitor = command(
 	v.object({}),
 	async () => {
 		const event = requireAdmin();
 		const tenantId = event.locals.tenant!.id;
 
+		const last = lastManualTriggerAt.get(tenantId);
+		if (last && Date.now() - last < manualTriggerCooldownMs) {
+			const waitSec = Math.ceil((manualTriggerCooldownMs - (Date.now() - last)) / 1000);
+			throw new Error(`Mai așteaptă ${waitSec}s înainte de următoarea verificare manuală.`);
+		}
+		lastManualTriggerAt.set(tenantId, Date.now());
+
 		const { getSchedulerQueue } = await import('$lib/server/scheduler');
 		const queue = getSchedulerQueue();
 
+		// Scope the manual job to the current tenant only — the scheduled hourly
+		// job runs unscoped for every tenant.
 		await queue.add(
 			'ads-status-monitor-manual',
-			{ type: 'ads_status_monitor', params: {} },
+			{ type: 'ads_status_monitor', params: { tenantIds: [tenantId] } },
 			{ removeOnComplete: true, removeOnFail: false },
 		);
 

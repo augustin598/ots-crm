@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { logWarning } from '$lib/server/logger';
 import { listMccSubAccounts, fetchBillingSetupStatus, formatCustomerId } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
 
@@ -15,11 +16,14 @@ export function mapGoogleStatusToPayment(
 		case 'CLOSED':
 			return 'closed';
 		case 'ENABLED':
-			if (billingSetupStatus === 'CANCELLED' || billingSetupStatus === 'NONE') return 'payment_failed';
-			if (billingSetupStatus === 'PENDING') return 'risk_review';
+			if (billingSetupStatus === 'CANCELLED') return 'payment_failed';
+			if (billingSetupStatus === 'PENDING' || billingSetupStatus === 'NONE') return 'risk_review';
 			return 'ok';
 		default:
-			return 'ok';
+			logWarning('google-ads', 'Unknown Google customer status; treating as risk_review', {
+				metadata: { customerStatus, billingSetupStatus },
+			});
+			return 'risk_review';
 	}
 }
 
@@ -32,6 +36,9 @@ export async function fetchGooglePaymentStatus(
 		integration.refreshToken,
 	);
 
+	// NOTE: googleAdsAccount has no integrationId column, so scoping is by
+	// tenantId only. For multi-MCC tenants this could collide (tracked as a
+	// follow-up: add `integration_id` column + migration).
 	const stored = await db
 		.select()
 		.from(table.googleAdsAccount)

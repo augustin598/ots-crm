@@ -46,7 +46,23 @@ function markFailure(tenantId: string, provider: AdsProvider): void {
 	breaker.set(key, next);
 }
 
-async function pollMeta(tenantId: string): Promise<PaymentStatusSnapshot[]> {
+interface PollResult {
+	snaps: PaymentStatusSnapshot[];
+	anySuccess: boolean;
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+	return Promise.race([
+		p,
+		new Promise<T>((_, reject) =>
+			setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms),
+		),
+	]);
+}
+
+const POLL_TIMEOUT_MS = 90_000;
+
+async function pollMeta(tenantId: string): Promise<PollResult> {
 	const integrations = await db
 		.select()
 		.from(table.metaAdsIntegration)
@@ -57,19 +73,25 @@ async function pollMeta(tenantId: string): Promise<PaymentStatusSnapshot[]> {
 			),
 		);
 	const all: PaymentStatusSnapshot[] = [];
+	let anySuccess = integrations.length === 0;
 	for (const integration of integrations) {
 		try {
-			const snaps = await fetchMetaPaymentStatus(integration);
+			const snaps = await withTimeout(
+				fetchMetaPaymentStatus(integration),
+				POLL_TIMEOUT_MS,
+				`meta:${integration.id}`,
+			);
 			all.push(...snaps);
+			anySuccess = true;
 		} catch (err) {
 			markFailure(tenantId, 'meta');
 			logError('scheduler', `Meta status fetch failed tenant=${tenantId} integration=${integration.id}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
-	return all;
+	return { snaps: all, anySuccess };
 }
 
-async function pollGoogle(tenantId: string): Promise<PaymentStatusSnapshot[]> {
+async function pollGoogle(tenantId: string): Promise<PollResult> {
 	const integrations = await db
 		.select()
 		.from(table.googleAdsIntegration)
@@ -80,19 +102,25 @@ async function pollGoogle(tenantId: string): Promise<PaymentStatusSnapshot[]> {
 			),
 		);
 	const all: PaymentStatusSnapshot[] = [];
+	let anySuccess = integrations.length === 0;
 	for (const integration of integrations) {
 		try {
-			const snaps = await fetchGooglePaymentStatus(integration);
+			const snaps = await withTimeout(
+				fetchGooglePaymentStatus(integration),
+				POLL_TIMEOUT_MS,
+				`google:${integration.id}`,
+			);
 			all.push(...snaps);
+			anySuccess = true;
 		} catch (err) {
 			markFailure(tenantId, 'google');
 			logError('scheduler', `Google status fetch failed tenant=${tenantId} integration=${integration.id}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
-	return all;
+	return { snaps: all, anySuccess };
 }
 
-async function pollTikTok(tenantId: string): Promise<PaymentStatusSnapshot[]> {
+async function pollTikTok(tenantId: string): Promise<PollResult> {
 	const integrations = await db
 		.select()
 		.from(table.tiktokAdsIntegration)
@@ -103,16 +131,22 @@ async function pollTikTok(tenantId: string): Promise<PaymentStatusSnapshot[]> {
 			),
 		);
 	const all: PaymentStatusSnapshot[] = [];
+	let anySuccess = integrations.length === 0;
 	for (const integration of integrations) {
 		try {
-			const snaps = await fetchTikTokPaymentStatus(integration);
+			const snaps = await withTimeout(
+				fetchTikTokPaymentStatus(integration),
+				POLL_TIMEOUT_MS,
+				`tiktok:${integration.id}`,
+			);
 			all.push(...snaps);
+			anySuccess = true;
 		} catch (err) {
 			markFailure(tenantId, 'tiktok');
 			logError('scheduler', `TikTok status fetch failed tenant=${tenantId} integration=${integration.id}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
-	return all;
+	return { snaps: all, anySuccess };
 }
 
 async function tenantsWithAnyAdsIntegration(): Promise<string[]> {
@@ -133,7 +167,9 @@ async function tenantsWithAnyAdsIntegration(): Promise<string[]> {
 	return [...tenantIds];
 }
 
-export async function processAdsStatusMonitor(): Promise<{
+export async function processAdsStatusMonitor(params?: {
+	tenantIds?: string[];
+}): Promise<{
 	tenants: number;
 	metaSnapshots: number;
 	googleSnapshots: number;
@@ -142,10 +178,13 @@ export async function processAdsStatusMonitor(): Promise<{
 	restored: number;
 	errors: number;
 }> {
-	logInfo('scheduler', 'Starting ads status monitor', { metadata: { trigger: 'scheduled' } });
+	const scope = params?.tenantIds?.length ? 'manual' : 'scheduled';
+	logInfo('scheduler', 'Starting ads status monitor', { metadata: { trigger: scope } });
 
-	const tenantIds = await tenantsWithAnyAdsIntegration();
-	logInfo('scheduler', `Polling ${tenantIds.length} tenants with ads integrations`);
+	const tenantIds = params?.tenantIds?.length
+		? params.tenantIds
+		: await tenantsWithAnyAdsIntegration();
+	logInfo('scheduler', `Polling ${tenantIds.length} tenants with ads integrations (${scope})`);
 
 	let metaCount = 0;
 	let googleCount = 0;
@@ -159,22 +198,22 @@ export async function processAdsStatusMonitor(): Promise<{
 			const snaps: PaymentStatusSnapshot[] = [];
 
 			if (!shouldSkip(tenantId, 'meta')) {
-				const metaSnaps = await pollMeta(tenantId);
-				if (metaSnaps.length > 0) markSuccess(tenantId, 'meta');
-				snaps.push(...metaSnaps);
-				metaCount += metaSnaps.length;
+				const r = await pollMeta(tenantId);
+				if (r.anySuccess) markSuccess(tenantId, 'meta');
+				snaps.push(...r.snaps);
+				metaCount += r.snaps.length;
 			}
 			if (!shouldSkip(tenantId, 'google')) {
-				const googleSnaps = await pollGoogle(tenantId);
-				if (googleSnaps.length > 0) markSuccess(tenantId, 'google');
-				snaps.push(...googleSnaps);
-				googleCount += googleSnaps.length;
+				const r = await pollGoogle(tenantId);
+				if (r.anySuccess) markSuccess(tenantId, 'google');
+				snaps.push(...r.snaps);
+				googleCount += r.snaps.length;
 			}
 			if (!shouldSkip(tenantId, 'tiktok')) {
-				const tiktokSnaps = await pollTikTok(tenantId);
-				if (tiktokSnaps.length > 0) markSuccess(tenantId, 'tiktok');
-				snaps.push(...tiktokSnaps);
-				tiktokCount += tiktokSnaps.length;
+				const r = await pollTikTok(tenantId);
+				if (r.anySuccess) markSuccess(tenantId, 'tiktok');
+				snaps.push(...r.snaps);
+				tiktokCount += r.snaps.length;
 			}
 
 			if (snaps.length === 0) continue;

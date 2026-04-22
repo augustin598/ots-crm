@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { createNotification, type NotificationType } from '$lib/server/notifications';
 import { sendAdPaymentAlertEmail } from '$lib/server/email';
 import { logError, logInfo } from '$lib/server/logger';
@@ -30,7 +30,7 @@ function notificationTypeFor(status: AdsPaymentStatus): NotificationType {
 	}
 }
 
-async function persistStatus(snap: PaymentStatusSnapshot) {
+async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
 	const raw = JSON.stringify({ code: snap.rawStatusCode, disableReason: snap.rawDisableReason ?? null });
 	const payload = {
 		paymentStatus: snap.paymentStatus,
@@ -40,7 +40,15 @@ async function persistStatus(snap: PaymentStatusSnapshot) {
 	};
 
 	if (snap.provider === 'meta') {
-		await db.update(table.metaAdsAccount).set(payload).where(eq(table.metaAdsAccount.id, snap.accountTableId));
+		await db
+			.update(table.metaAdsAccount)
+			.set(payload)
+			.where(
+				and(
+					eq(table.metaAdsAccount.id, snap.accountTableId),
+					eq(table.metaAdsAccount.tenantId, tenantId),
+				),
+			);
 	} else if (snap.provider === 'google') {
 		await db
 			.update(table.googleAdsAccount)
@@ -49,12 +57,22 @@ async function persistStatus(snap: PaymentStatusSnapshot) {
 				status: String(snap.rawStatusCode),
 				billingSetupStatus: snap.rawDisableReason ? String(snap.rawDisableReason) : null,
 			})
-			.where(eq(table.googleAdsAccount.id, snap.accountTableId));
+			.where(
+				and(
+					eq(table.googleAdsAccount.id, snap.accountTableId),
+					eq(table.googleAdsAccount.tenantId, tenantId),
+				),
+			);
 	} else if (snap.provider === 'tiktok') {
 		await db
 			.update(table.tiktokAdsAccount)
 			.set({ ...payload, status: String(snap.rawStatusCode) })
-			.where(eq(table.tiktokAdsAccount.id, snap.accountTableId));
+			.where(
+				and(
+					eq(table.tiktokAdsAccount.id, snap.accountTableId),
+					eq(table.tiktokAdsAccount.tenantId, tenantId),
+				),
+			);
 	}
 }
 
@@ -63,7 +81,7 @@ interface PriorStatusInfo {
 	everChecked: boolean;
 }
 
-async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<PriorStatusInfo> {
+async function readPriorStatus(snap: PaymentStatusSnapshot, tenantId: string): Promise<PriorStatusInfo> {
 	if (snap.provider === 'meta') {
 		const [row] = await db
 			.select({
@@ -71,7 +89,12 @@ async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<PriorStatus
 				checkedAt: table.metaAdsAccount.paymentStatusCheckedAt,
 			})
 			.from(table.metaAdsAccount)
-			.where(eq(table.metaAdsAccount.id, snap.accountTableId))
+			.where(
+				and(
+					eq(table.metaAdsAccount.id, snap.accountTableId),
+					eq(table.metaAdsAccount.tenantId, tenantId),
+				),
+			)
 			.limit(1);
 		return {
 			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
@@ -85,7 +108,12 @@ async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<PriorStatus
 				checkedAt: table.googleAdsAccount.paymentStatusCheckedAt,
 			})
 			.from(table.googleAdsAccount)
-			.where(eq(table.googleAdsAccount.id, snap.accountTableId))
+			.where(
+				and(
+					eq(table.googleAdsAccount.id, snap.accountTableId),
+					eq(table.googleAdsAccount.tenantId, tenantId),
+				),
+			)
 			.limit(1);
 		return {
 			status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
@@ -98,7 +126,12 @@ async function readPriorStatus(snap: PaymentStatusSnapshot): Promise<PriorStatus
 			checkedAt: table.tiktokAdsAccount.paymentStatusCheckedAt,
 		})
 		.from(table.tiktokAdsAccount)
-		.where(eq(table.tiktokAdsAccount.id, snap.accountTableId))
+		.where(
+			and(
+				eq(table.tiktokAdsAccount.id, snap.accountTableId),
+				eq(table.tiktokAdsAccount.tenantId, tenantId),
+			),
+		)
 		.limit(1);
 	return {
 		status: (row?.paymentStatus as AdsPaymentStatus) ?? null,
@@ -111,36 +144,57 @@ async function resolveAdminRecipients(tenantId: string): Promise<Array<{ userId:
 		.select({ userId: table.tenantUser.userId, email: table.user.email })
 		.from(table.tenantUser)
 		.innerJoin(table.user, eq(table.user.id, table.tenantUser.userId))
-		.where(eq(table.tenantUser.tenantId, tenantId));
-	return rows.filter((r) => r.email).filter((r) => {
-		return true;
-	}).map((r) => ({ userId: r.userId, email: r.email as string }));
+		.where(
+			and(
+				eq(table.tenantUser.tenantId, tenantId),
+				inArray(table.tenantUser.role, ['owner', 'admin']),
+			),
+		);
+	return rows
+		.filter((r): r is { userId: string; email: string } => !!r.email)
+		.map((r) => ({ userId: r.userId, email: r.email }));
 }
 
 async function resolveClientRecipients(
 	tenantId: string,
 	clientId: string,
-): Promise<{ userRecipients: Array<{ userId: string; email: string }>; clientEmailFallback: string | null }> {
+): Promise<{ userRecipients: Array<{ userId: string; email: string }>; clientEmails: string[] }> {
 	const users = await db
 		.select({ userId: table.clientUser.userId, email: table.user.email })
 		.from(table.clientUser)
 		.innerJoin(table.user, eq(table.user.id, table.clientUser.userId))
-		.where(eq(table.clientUser.clientId, clientId));
+		.where(
+			and(
+				eq(table.clientUser.tenantId, tenantId),
+				eq(table.clientUser.clientId, clientId),
+			),
+		);
 
-	let clientEmailFallback: string | null = null;
-	if (users.length === 0) {
-		const [c] = await db
-			.select({ email: table.client.email })
-			.from(table.client)
-			.where(eq(table.client.id, clientId))
-			.limit(1);
-		clientEmailFallback = c?.email ?? null;
+	const [c] = await db
+		.select({ email: table.client.email })
+		.from(table.client)
+		.where(
+			and(
+				eq(table.client.id, clientId),
+				eq(table.client.tenantId, tenantId),
+			),
+		)
+		.limit(1);
+
+	const userRecipients = users
+		.filter((u): u is { userId: string; email: string } => !!u.email)
+		.map((u) => ({ userId: u.userId, email: u.email }));
+
+	// Always include the client's primary email if present, even when there
+	// are linked users — the primary email (e.g. billing@) may not map to
+	// a CRM user but still needs the alert.
+	const userEmails = new Set(userRecipients.map((u) => u.email.toLowerCase()));
+	const clientEmails: string[] = [];
+	if (c?.email && !userEmails.has(c.email.toLowerCase())) {
+		clientEmails.push(c.email);
 	}
 
-	return {
-		userRecipients: users.map((u) => ({ userId: u.userId, email: u.email as string })).filter((u) => u.email),
-		clientEmailFallback,
-	};
+	return { userRecipients, clientEmails };
 }
 
 async function dispatchNotifications(
@@ -208,7 +262,7 @@ async function dispatchNotifications(
 
 	// --- Client recipients ---
 	if (snap.clientId) {
-		const { userRecipients, clientEmailFallback } = await resolveClientRecipients(tenantId, snap.clientId);
+		const { userRecipients, clientEmails } = await resolveClientRecipients(tenantId, snap.clientId);
 		for (const u of userRecipients) {
 			try {
 				await createNotification({
@@ -240,22 +294,26 @@ async function dispatchNotifications(
 				logError('server', `Failed to notify client user ${u.userId} for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
-		if (!isRestored && userRecipients.length === 0 && clientEmailFallback) {
-			try {
-				await sendAdPaymentAlertEmail(tenantId, clientEmailFallback, {
-					provider: snap.provider,
-					providerLabel,
-					accountName: snap.accountName,
-					externalAccountId: snap.externalAccountId,
-					statusLabelRo: statusLabel,
-					paymentStatus: snap.paymentStatus,
-					billingUrl,
-					rawStatusCode: snap.rawStatusCode,
-					rawDisableReason: snap.rawDisableReason,
-					recipientType: 'client',
-				});
-			} catch (err) {
-				logError('server', `Failed to send fallback email to client ${snap.clientId}: ${err instanceof Error ? err.message : String(err)}`);
+		// Also send to client.email (e.g., billing@) even when linked users exist,
+		// unless that same address is already covered by a linked user.
+		if (!isRestored) {
+			for (const email of clientEmails) {
+				try {
+					await sendAdPaymentAlertEmail(tenantId, email, {
+						provider: snap.provider,
+						providerLabel,
+						accountName: snap.accountName,
+						externalAccountId: snap.externalAccountId,
+						statusLabelRo: statusLabel,
+						paymentStatus: snap.paymentStatus,
+						billingUrl,
+						rawStatusCode: snap.rawStatusCode,
+						rawDisableReason: snap.rawDisableReason,
+						recipientType: 'client',
+					});
+				} catch (err) {
+					logError('server', `Failed to send client email ${email} for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
+				}
 			}
 		}
 	}
@@ -277,18 +335,18 @@ export async function reconcileAndAlert(
 
 	for (const snap of snapshots) {
 		try {
-			const prior = await readPriorStatus(snap);
+			const prior = await readPriorStatus(snap, tenantId);
 
 			// First observation: seed the status without firing alerts.
 			// Prevents a flood of "ok → bad" transitions the first time the monitor runs.
 			if (!prior.everChecked) {
-				await persistStatus(snap);
+				await persistStatus(snap, tenantId);
 				result.unchanged += 1;
 				continue;
 			}
 
 			if (prior.status === snap.paymentStatus) {
-				await persistStatus(snap);
+				await persistStatus(snap, tenantId);
 				result.unchanged += 1;
 				continue;
 			}
@@ -297,12 +355,12 @@ export async function reconcileAndAlert(
 			const currentBad = isBadStatus(snap.paymentStatus);
 
 			if (currentBad || (priorBad && !currentBad)) {
-				await persistStatus(snap);
+				await persistStatus(snap, tenantId);
 				await dispatchNotifications(snap, tenantId, prior.status);
 				if (!currentBad && priorBad) result.restored += 1;
 				else result.transitions += 1;
 			} else {
-				await persistStatus(snap);
+				await persistStatus(snap, tenantId);
 				result.unchanged += 1;
 			}
 		} catch (err) {

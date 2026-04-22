@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedToken } from './auth';
 import { listBusinessAdAccounts } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
@@ -30,7 +31,10 @@ export function mapMetaStatusToPayment(
 		case 101:
 			return 'closed';
 		default:
-			return 'ok';
+			logWarning('meta-ads', 'Unknown Meta account_status; treating as risk_review', {
+				metadata: { accountStatus, disableReason },
+			});
+			return 'risk_review';
 	}
 }
 

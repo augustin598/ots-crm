@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedToken } from './auth';
 import { fetchAdvertiserStatuses } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
@@ -22,7 +23,10 @@ export function mapTikTokStatusToPayment(status: string): PaymentStatusSnapshot[
 		case 'STATUS_WAIT_FOR_PUBLIC_AUTHORIZE':
 			return 'risk_review';
 		default:
-			return 'ok';
+			logWarning('tiktok-ads', 'Unknown TikTok advertiser status; treating as risk_review', {
+				metadata: { status },
+			});
+			return 'risk_review';
 	}
 }
 
