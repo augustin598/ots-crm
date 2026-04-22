@@ -3054,15 +3054,31 @@ export async function sendAdPaymentDigestEmail(
 				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
 			`;
 
-			const title = single
-				? `Cont ${single.providerLabel} — ${single.statusLabelRo}`
-				: `${count} conturi publicitate — atenție`;
+			// Title: concrete and specific for the single-account case (the
+			// visual equivalent of a newspaper headline), aggregated for batch.
+			let title: string;
+			let subtitle: string;
+			if (single) {
+				if (single.balanceFormatted) {
+					title = `Sold restant ${single.balanceFormatted}`;
+					subtitle = `${single.accountName} · ${single.providerLabel} · ${single.statusLabelRo}`;
+				} else {
+					title = `${single.accountName}: ${single.statusLabelRo}`;
+					subtitle = single.providerLabel;
+				}
+			} else {
+				title = `${count} conturi de publicitate cu probleme`;
+				subtitle =
+					params.recipientType === 'admin'
+						? 'Raport alertă agenție'
+						: 'Conturile tale de publicitate';
+			}
 
 			const html = renderBrandedEmail({
 				themeColor: brand.themeColor,
 				headerLogoHtml: brand.headerLogoHtml,
 				title,
-				subtitle: single ? single.accountName : params.recipientType === 'admin' ? 'Raport alertă agenție' : 'Conturile dvs. de publicitate',
+				subtitle,
 				bodyHtml,
 				previewTitle: subject,
 			});
