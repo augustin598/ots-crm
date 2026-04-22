@@ -4,6 +4,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import { Switch } from '$lib/components/ui/switch';
+	import { Label } from '$lib/components/ui/label';
 	import {
 		Select,
 		SelectContent,
@@ -19,13 +21,16 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 
-	const dashboardQuery = getAdsPaymentStatusDashboard();
-	const dashboard = $derived(dashboardQuery.current);
-
+	let showOnlyActive = $state(true);
 	let providerFilter = $state<string>('all');
 	let statusFilter = $state<string>('all');
 	let searchText = $state('');
 	let isTriggering = $state(false);
+
+	const dashboardQuery = $derived(
+		getAdsPaymentStatusDashboard({ showOnlyActiveClients: showOnlyActive }),
+	);
+	const dashboard = $derived(dashboardQuery.current);
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 
@@ -140,7 +145,11 @@
 				Toate conturile Meta, Google și TikTok cu probleme de plată sau suspendare. Verificare automată orară.
 			</p>
 		</div>
-		<div class="flex gap-2">
+		<div class="flex flex-wrap items-center gap-3">
+			<div class="flex items-center gap-2 rounded-md border px-3 py-2">
+				<Switch id="show-only-active" bind:checked={showOnlyActive} />
+				<Label for="show-only-active" class="cursor-pointer text-sm">Doar clienți activi</Label>
+			</div>
 			<Button variant="outline" onclick={handleRefresh} disabled={dashboardQuery.loading}>
 				<RefreshCwIcon class="mr-2 size-4" />
 				Reîncarcă

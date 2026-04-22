@@ -26,6 +26,7 @@ export interface FlaggedAccountRow {
 	clientId: string | null;
 	clientName: string | null;
 	clientEmail: string | null;
+	clientStatus: string | null; // 'active' | 'inactive' | 'prospect' | null (orphan)
 	paymentStatus: AdsPaymentStatus;
 	statusLabel: string;
 	rawStatusCode: string;
@@ -60,10 +61,15 @@ function parseRaw(raw: string | null): { code: string; disableReason: string | n
 async function resolveClientInfo(
 	tenantId: string,
 	clientIds: string[],
-): Promise<Map<string, { name: string; email: string | null }>> {
+): Promise<Map<string, { name: string; email: string | null; status: string | null }>> {
 	if (clientIds.length === 0) return new Map();
 	const rows = await db
-		.select({ id: table.client.id, name: table.client.name, email: table.client.email })
+		.select({
+			id: table.client.id,
+			name: table.client.name,
+			email: table.client.email,
+			status: table.client.status,
+		})
 		.from(table.client)
 		.where(
 			and(
@@ -71,12 +77,19 @@ async function resolveClientInfo(
 				inArray(table.client.id, clientIds),
 			),
 		);
-	return new Map(rows.map((r) => [r.id, { name: r.name, email: r.email ?? null }]));
+	return new Map(
+		rows.map((r) => [r.id, { name: r.name, email: r.email ?? null, status: r.status ?? null }]),
+	);
 }
 
-export const getAdsPaymentStatusDashboard = query(async () => {
-	const event = requireAdmin();
-	const tenantId = event.locals.tenant!.id;
+export const getAdsPaymentStatusDashboard = query(
+	v.object({
+		showOnlyActiveClients: v.optional(v.boolean(), true),
+	}),
+	async (args) => {
+		const event = requireAdmin();
+		const tenantId = event.locals.tenant!.id;
+		const showOnlyActiveClients = args.showOnlyActiveClients;
 
 	const [metaRows, googleRows, tiktokRows] = await Promise.all([
 		db
@@ -138,10 +151,19 @@ export const getAdsPaymentStatusDashboard = query(async () => {
 	function push(provider: AdsProvider, row: typeof metaRows[number] | typeof googleRows[number] | typeof tiktokRows[number]) {
 		const status = (row.paymentStatus as AdsPaymentStatus) ?? 'ok';
 		if (status === 'ok') return;
+
+		const client = row.clientId ? clientMap.get(row.clientId) ?? null : null;
+		const clientStatus = client?.status ?? null;
+
+		// Hide accounts whose client is not active (but always include orphan
+		// accounts — clientId null — so the admin sees unassigned issues).
+		if (showOnlyActiveClients && clientStatus && clientStatus !== 'active') {
+			return;
+		}
+
 		byStatus[status] = (byStatus[status] ?? 0) + 1;
 		byProvider[provider] = (byProvider[provider] ?? 0) + 1;
 
-		const client = row.clientId ? clientMap.get(row.clientId) ?? null : null;
 		const raw = parseRaw(row.paymentStatusRaw);
 
 		flagged.push({
@@ -153,6 +175,7 @@ export const getAdsPaymentStatusDashboard = query(async () => {
 			clientId: row.clientId ?? null,
 			clientName: client?.name ?? null,
 			clientEmail: client?.email ?? null,
+			clientStatus,
 			paymentStatus: status,
 			statusLabel: PAYMENT_STATUS_LABEL_RO[status],
 			rawStatusCode: raw.code,

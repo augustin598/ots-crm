@@ -206,13 +206,16 @@ interface DigestAccumulator {
 	clientByEmail: Map<string, AdDigestItem[]>;
 }
 
-async function resolveClientName(tenantId: string, clientId: string): Promise<string | null> {
+async function resolveClientInfo(
+	tenantId: string,
+	clientId: string,
+): Promise<{ name: string | null; status: string | null }> {
 	const [c] = await db
-		.select({ name: table.client.name })
+		.select({ name: table.client.name, status: table.client.status })
 		.from(table.client)
 		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
 		.limit(1);
-	return c?.name ?? null;
+	return { name: c?.name ?? null, status: c?.status ?? null };
 }
 
 /**
@@ -220,6 +223,13 @@ async function resolveClientName(tenantId: string, clientId: string): Promise<st
  * fingerprint in `createNotification`) AND accumulate digest items for emails.
  * Emails themselves are NOT sent here — the caller flushes the digest accumulator
  * once after processing all transitions in a tenant run.
+ *
+ * Suppression rules:
+ * - If the account's client has status != 'active' (e.g., 'inactive' or
+ *   'prospect'), we skip ALL notifications (no in-app, no email). Accounts
+ *   with no client (orphan) are treated as if the client were active.
+ * - If the account's new status is 'closed' OR restoration, we skip the email
+ *   digest item (in-app still fires for history).
  */
 async function collectTransitionNotifications(
 	snap: PaymentStatusSnapshot,
@@ -234,6 +244,17 @@ async function collectTransitionNotifications(
 	const billingUrl = PROVIDER_BILLING_URL[snap.provider](snap.externalAccountId);
 
 	const isRestored = snap.paymentStatus === 'ok' && prior !== null && isBadStatus(prior);
+	const isClosed = snap.paymentStatus === 'closed';
+
+	// Resolve client info (null for orphan accounts).
+	const clientInfo = snap.clientId ? await resolveClientInfo(tenantId, snap.clientId) : null;
+
+	// Suppress entirely for inactive/prospect clients. Orphans (no client) fall
+	// through to notify admins (they need to triage).
+	if (clientInfo && clientInfo.status && clientInfo.status !== 'active') {
+		return;
+	}
+
 	const title = isRestored
 		? `✅ Cont ${providerLabel} ${snap.accountName} — restabilit`
 		: `⚠️ Cont ${providerLabel} ${snap.accountName}: ${statusLabel}`;
@@ -251,7 +272,10 @@ async function collectTransitionNotifications(
 		rawDisableReason: snap.rawDisableReason ?? null,
 	};
 
-	const clientName = snap.clientId ? await resolveClientName(tenantId, snap.clientId) : null;
+	const clientName = clientInfo?.name ?? null;
+	// Email is suppressed for restored transitions (existing design) and
+	// for 'closed' accounts (nothing actionable — already closed).
+	const suppressEmail = isRestored || isClosed;
 
 	const baseDigestItem: AdDigestItem = {
 		provider: snap.provider,
@@ -283,7 +307,7 @@ async function collectTransitionNotifications(
 		} catch (err) {
 			logError('server', `Failed to create admin notification for ${snap.provider}:${snap.externalAccountId}: ${err instanceof Error ? err.message : String(err)}`);
 		}
-		if (!isRestored && admin.email) {
+		if (!suppressEmail && admin.email) {
 			const list = digest.adminByEmail.get(admin.email) ?? [];
 			list.push({ ...baseDigestItem, clientLabel: clientName ?? undefined });
 			digest.adminByEmail.set(admin.email, list);
@@ -309,13 +333,13 @@ async function collectTransitionNotifications(
 			} catch (err) {
 				logError('server', `Failed to create client notification for user ${u.userId}: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			if (!isRestored && u.email) {
+			if (!suppressEmail && u.email) {
 				const list = digest.clientByEmail.get(u.email) ?? [];
 				list.push({ ...baseDigestItem });
 				digest.clientByEmail.set(u.email, list);
 			}
 		}
-		if (!isRestored) {
+		if (!suppressEmail) {
 			for (const email of clientEmails) {
 				const list = digest.clientByEmail.get(email) ?? [];
 				list.push({ ...baseDigestItem });
