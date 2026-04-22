@@ -27,9 +27,14 @@
 	let searchText = $state('');
 	let isTriggering = $state(false);
 
-	const dashboardQuery = $derived(
-		getAdsPaymentStatusDashboard({ showOnlyActiveClients: showOnlyActive }),
+	let dashboardQuery = $state(
+		getAdsPaymentStatusDashboard({ showOnlyActiveClients: true }),
 	);
+
+	$effect(() => {
+		dashboardQuery = getAdsPaymentStatusDashboard({ showOnlyActiveClients: showOnlyActive });
+	});
+
 	const dashboard = $derived(dashboardQuery.current);
 
 	const tenantSlug = $derived(page.params.tenant ?? '');

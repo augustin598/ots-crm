@@ -155,10 +155,11 @@ export const getAdsPaymentStatusDashboard = query(
 		const client = row.clientId ? clientMap.get(row.clientId) ?? null : null;
 		const clientStatus = client?.status ?? null;
 
-		// Hide accounts whose client is not active (but always include orphan
-		// accounts — clientId null — so the admin sees unassigned issues).
-		if (showOnlyActiveClients && clientStatus && clientStatus !== 'active') {
-			return;
+		// With filter ON, show ONLY rows where the account is assigned to an
+		// active client. This hides both orphan (no client) and inactive/
+		// prospect clients — admin toggles the switch OFF to triage those.
+		if (showOnlyActiveClients) {
+			if (!row.clientId || clientStatus !== 'active') return;
 		}
 
 		byStatus[status] = (byStatus[status] ?? 0) + 1;
