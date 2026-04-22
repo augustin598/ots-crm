@@ -183,20 +183,20 @@
 							<div class="truncate text-xs text-zinc-500">
 								{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
 							</div>
-							{#if item.balanceFormatted}
-								<div class="mt-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 shadow-sm">
-									<span class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-										Sold neachitat
-									</span>
-									<span
-										class="text-sm font-bold tabular-nums"
-										style="color: {ctaColorFor(item.paymentStatus)};"
-									>
-										{item.balanceFormatted}
-									</span>
-								</div>
-							{/if}
 						</div>
+						{#if item.balanceFormatted}
+							<div class="hidden shrink-0 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 shadow-sm md:inline-flex">
+								<span class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+									Sold
+								</span>
+								<span
+									class="text-sm font-bold tabular-nums"
+									style="color: {ctaColorFor(item.paymentStatus)};"
+								>
+									{item.balanceFormatted}
+								</span>
+							</div>
+						{/if}
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								<span
