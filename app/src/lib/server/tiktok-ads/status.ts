@@ -3,7 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedToken } from './auth';
-import { fetchAdvertiserStatuses } from './client';
+import { fetchAdvertiserStatuses, fetchAdvertiserBalances } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
 import { mapTikTokStatusPure, isKnownTikTokStatus } from '$lib/server/ads/status-mappers';
 
@@ -36,7 +36,10 @@ export async function fetchTikTokPaymentStatus(
 	if (stored.length === 0) return [];
 
 	const advertiserIds = stored.map((row) => row.tiktokAdvertiserId);
-	const info = await fetchAdvertiserStatuses(advertiserIds, auth.accessToken);
+	const [info, balanceMap] = await Promise.all([
+		fetchAdvertiserStatuses(advertiserIds, auth.accessToken),
+		fetchAdvertiserBalances(advertiserIds, auth.accessToken),
+	]);
 	const infoById = new Map(info.map((i) => [i.advertiserId, i]));
 
 	const snapshots: PaymentStatusSnapshot[] = [];
@@ -45,6 +48,8 @@ export async function fetchTikTokPaymentStatus(
 	for (const row of stored) {
 		const adv = infoById.get(row.tiktokAdvertiserId);
 		if (!adv) continue;
+
+		const balance = balanceMap.get(row.tiktokAdvertiserId);
 
 		snapshots.push({
 			provider: 'tiktok',
@@ -56,6 +61,8 @@ export async function fetchTikTokPaymentStatus(
 			paymentStatus: mapTikTokStatusToPayment(adv.status),
 			rawStatusCode: adv.status,
 			rawDisableReason: null,
+			balanceCents: balance?.balanceCents ?? null,
+			currencyCode: balance?.currencyCode ?? null,
 			checkedAt,
 		});
 	}

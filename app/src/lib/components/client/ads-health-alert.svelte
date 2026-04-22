@@ -177,8 +177,19 @@
 							{/if}
 						</div>
 						<div class="min-w-0 flex-1">
-							<div class="truncate text-sm font-semibold text-zinc-900">
-								{item.accountName}
+							<div class="flex flex-wrap items-baseline gap-x-2 truncate">
+								<span class="truncate text-sm font-semibold text-zinc-900">
+									{item.accountName}
+								</span>
+								{#if item.balanceFormatted}
+									<span
+										class="shrink-0 font-mono text-xs font-bold"
+										style="color: {ctaColorFor(item.paymentStatus)};"
+										title="Sold neachitat"
+									>
+										{item.balanceFormatted}
+									</span>
+								{/if}
 							</div>
 							<div class="truncate text-xs text-zinc-500">
 								{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
@@ -199,6 +210,14 @@
 								class="max-w-xs rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-lg"
 							>
 								<p class="mb-1 text-xs font-bold text-zinc-900">{tip.title}</p>
+								{#if item.balanceFormatted}
+									<p
+										class="mb-2 font-mono text-xs font-bold"
+										style="color: {ctaColorFor(item.paymentStatus)};"
+									>
+										Sold neachitat: {item.balanceFormatted}
+									</p>
+								{/if}
 								<p class="text-xs leading-relaxed text-zinc-600">{tip.body}</p>
 							</Tooltip.Content>
 						</Tooltip.Root>

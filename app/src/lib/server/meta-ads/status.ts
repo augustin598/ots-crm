@@ -60,6 +60,8 @@ export async function fetchMetaPaymentStatus(
 			paymentStatus: mapMetaStatusToPayment(acc.accountStatus, acc.disableReason),
 			rawStatusCode: acc.accountStatus,
 			rawDisableReason: acc.disableReason,
+			balanceCents: acc.balanceCents,
+			currencyCode: acc.currencyCode,
 			checkedAt,
 		});
 	}

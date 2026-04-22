@@ -30,8 +30,26 @@ export interface ClientAdsHealthItem {
 	paymentStatus: AdsPaymentStatus;
 	statusLabel: string;
 	rawStatusCode: string;
+	/** Outstanding balance formatted for display (e.g., "430,40 RON"); null if unavailable */
+	balanceFormatted: string | null;
 	/** Status-appropriate action — null means no actionable CTA */
 	action: { url: string; label: string } | null;
+}
+
+function formatBalance(cents: number | null, currency: string | null): string | null {
+	if (cents == null || !Number.isFinite(cents) || cents === 0) return null;
+	const amount = Math.abs(cents) / 100;
+	const code = (currency || 'RON').toUpperCase();
+	try {
+		return new Intl.NumberFormat('ro-RO', {
+			style: 'currency',
+			currency: code,
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
+		}).format(amount);
+	} catch {
+		return `${amount.toFixed(2)} ${code}`;
+	}
 }
 
 export interface ClientAdsHealth {
@@ -315,9 +333,13 @@ export const getClientAdsHealth = query(
 			// Skip ok AND closed — closed is terminal, client can't act on it.
 			if (status === 'ok' || status === 'closed') return;
 			let rawCode = '';
+			let balanceCents: number | null = null;
+			let currency: string | null = null;
 			try {
 				const parsed = row.paymentStatusRaw ? JSON.parse(row.paymentStatusRaw) : null;
 				rawCode = parsed?.code != null ? String(parsed.code) : '';
+				balanceCents = typeof parsed?.balanceCents === 'number' ? parsed.balanceCents : null;
+				currency = typeof parsed?.currency === 'string' ? parsed.currency : null;
 			} catch {
 				rawCode = row.paymentStatusRaw ?? '';
 			}
@@ -329,6 +351,7 @@ export const getClientAdsHealth = query(
 				paymentStatus: status,
 				statusLabel: PAYMENT_STATUS_LABEL_RO[status],
 				rawStatusCode: rawCode,
+				balanceFormatted: formatBalance(balanceCents, currency),
 				action: actionForStatus(provider, status, row.externalId),
 			});
 		}

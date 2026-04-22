@@ -31,7 +31,12 @@ function notificationTypeFor(status: AdsPaymentStatus): NotificationType {
 }
 
 async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
-	const raw = JSON.stringify({ code: snap.rawStatusCode, disableReason: snap.rawDisableReason ?? null });
+	const raw = JSON.stringify({
+		code: snap.rawStatusCode,
+		disableReason: snap.rawDisableReason ?? null,
+		balanceCents: snap.balanceCents ?? null,
+		currency: snap.currencyCode ?? null,
+	});
 	const payload = {
 		paymentStatus: snap.paymentStatus,
 		paymentStatusRaw: raw,

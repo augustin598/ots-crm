@@ -9,6 +9,13 @@ export interface MetaAdsAdAccount {
 	accountStatus: number; // 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 9=IN_GRACE_PERIOD, etc.
 	isActive: boolean;
 	disableReason: number; // 0=none, 3=RISK_PAYMENT (stopped for payment issues)
+	/**
+	 * Outstanding balance in account currency smallest unit (integer cents).
+	 * Meta returns this as a positive string (amount owed). null if field absent.
+	 */
+	balanceCents: number | null;
+	/** ISO currency code (RON, EUR, USD). null if not returned. */
+	currencyCode: string | null;
 }
 
 export interface MetaAdsInsightData {
@@ -86,7 +93,10 @@ export async function listBusinessAdAccounts(
 	logInfo('meta-ads', `Listing ad accounts for BM`, { metadata: { businessId } });
 
 	const accounts: MetaAdsAdAccount[] = [];
-	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status,disable_reason&limit=100&access_token=${accessToken}`;
+	// Fields include: balance (outstanding, cents), currency (ISO), amount_spent
+	// (lifetime, cents). These let us show "430 RON outstanding" directly to the
+	// client, matching what Meta shows inside Ads Manager.
+	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status,disable_reason,balance,currency&limit=100&access_token=${accessToken}`;
 
 	try {
 		while (url) {
@@ -98,12 +108,22 @@ export async function listBusinessAdAccounts(
 			}
 
 			for (const acc of data.data || []) {
+				// Meta returns balance as a stringified integer in smallest unit.
+				const rawBalance = acc.balance;
+				const balanceCents =
+					rawBalance != null && rawBalance !== ''
+						? Number.isFinite(Number(rawBalance))
+							? Math.trunc(Number(rawBalance))
+							: null
+						: null;
 				accounts.push({
 					adAccountId: acc.id || '',
 					accountName: acc.name || '',
 					accountStatus: acc.account_status || 0,
 					isActive: acc.account_status === 1,
-					disableReason: acc.disable_reason ?? 0
+					disableReason: acc.disable_reason ?? 0,
+					balanceCents,
+					currencyCode: acc.currency ?? null,
 				});
 			}
 

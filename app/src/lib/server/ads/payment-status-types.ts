@@ -18,6 +18,10 @@ export interface PaymentStatusSnapshot {
 	paymentStatus: AdsPaymentStatus;
 	rawStatusCode: string | number;
 	rawDisableReason?: string | number | null;
+	/** Outstanding balance in smallest currency unit (cents). Negative or zero = no debt; positive = owed. null when unavailable. */
+	balanceCents?: number | null;
+	/** ISO currency code (RON, EUR, USD). null when unavailable. */
+	currencyCode?: string | null;
 	checkedAt: Date;
 }
 

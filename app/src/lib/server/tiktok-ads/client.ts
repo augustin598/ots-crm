@@ -1112,3 +1112,52 @@ export async function fetchAdvertiserStatuses(
 		status: adv.status || 'STATUS_ENABLE'
 	}));
 }
+
+export interface TiktokAdvertiserBalance {
+	advertiserId: string;
+	/** Balance in cents. TikTok returns it as a decimal string (could be negative). */
+	balanceCents: number | null;
+	currencyCode: string | null;
+}
+
+/**
+ * Fetch current balance per advertiser. TikTok requires one call per advertiser.
+ * Nice-to-have data — on per-advertiser error we return null balance rather than
+ * failing the whole batch.
+ */
+export async function fetchAdvertiserBalances(
+	advertiserIds: string[],
+	accessToken: string
+): Promise<Map<string, TiktokAdvertiserBalance>> {
+	const out = new Map<string, TiktokAdvertiserBalance>();
+	if (advertiserIds.length === 0) return out;
+
+	for (const advId of advertiserIds) {
+		try {
+			const params = new URLSearchParams({ advertiser_id: advId });
+			const res = await fetch(
+				`${TIKTOK_API_URL}/advertiser/balance/get/?${params.toString()}`,
+				{
+					headers: { 'Access-Token': accessToken },
+					signal: AbortSignal.timeout(10_000)
+				}
+			);
+			const json = await res.json();
+			if (json.code !== 0 || !json.data) {
+				out.set(advId, { advertiserId: advId, balanceCents: null, currencyCode: null });
+				continue;
+			}
+			const balanceStr = json.data.balance ?? json.data.cash_balance ?? null;
+			const balanceNum = balanceStr != null ? Number(balanceStr) : NaN;
+			const balanceCents = Number.isFinite(balanceNum) ? Math.round(balanceNum * 100) : null;
+			out.set(advId, {
+				advertiserId: advId,
+				balanceCents,
+				currencyCode: json.data.currency ?? null
+			});
+		} catch {
+			out.set(advId, { advertiserId: advId, balanceCents: null, currencyCode: null });
+		}
+	}
+	return out;
+}
