@@ -5,29 +5,16 @@ import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedToken } from './auth';
 import { fetchAdvertiserStatuses } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
+import { mapTikTokStatusPure, isKnownTikTokStatus } from '$lib/server/ads/status-mappers';
 
+/** Wraps the pure mapper with unknown-code logging. */
 export function mapTikTokStatusToPayment(status: string): PaymentStatusSnapshot['paymentStatus'] {
-	switch (status) {
-		case 'STATUS_ENABLE':
-			return 'ok';
-		case 'STATUS_CBD_DISABLE':
-			return 'payment_failed';
-		case 'STATUS_DISABLE':
-		case 'STATUS_PUNISH':
-		case 'STATUS_PUNISH_END_ADS':
-			return 'suspended';
-		case 'STATUS_CBT_ACCOUNT_CLOSED':
-			return 'closed';
-		case 'STATUS_CONTRACT_PENDING':
-		case 'STATUS_CONFIRM_FAIL':
-		case 'STATUS_WAIT_FOR_PUBLIC_AUTHORIZE':
-			return 'risk_review';
-		default:
-			logWarning('tiktok-ads', 'Unknown TikTok advertiser status; treating as risk_review', {
-				metadata: { status },
-			});
-			return 'risk_review';
+	if (!isKnownTikTokStatus(status)) {
+		logWarning('tiktok-ads', 'Unknown TikTok advertiser status; treating as risk_review', {
+			metadata: { status },
+		});
 	}
+	return mapTikTokStatusPure(status);
 }
 
 export async function fetchTikTokPaymentStatus(

@@ -42,7 +42,11 @@ async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
 	if (snap.provider === 'meta') {
 		await db
 			.update(table.metaAdsAccount)
-			.set(payload)
+			.set({
+				...payload,
+				accountStatus: Number(snap.rawStatusCode),
+				disableReason: Number(snap.rawDisableReason ?? 0),
+			})
 			.where(
 				and(
 					eq(table.metaAdsAccount.id, snap.accountTableId),

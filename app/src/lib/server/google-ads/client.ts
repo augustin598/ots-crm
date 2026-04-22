@@ -996,17 +996,25 @@ export async function fetchBillingSetupStatus(
 
 		if (!rows || rows.length === 0) return 'NONE';
 
+		// Google Ads BillingSetupStatus enum (verified against official docs):
+		//   0 UNSPECIFIED, 1 UNKNOWN, 2 PENDING, 3 APPROVED_HELD, 4 APPROVED, 5 CANCELLED
+		// Previous mapping had 3:APPROVED, 4:CANCELLED — this caused legitimately
+		// APPROVED accounts (enum=4) to be flagged as CANCELLED → payment_failed
+		// emails. Fixed 2026-04-22.
 		const statusMap: Record<number, string> = {
 			2: 'PENDING',
-			3: 'APPROVED',
-			4: 'CANCELLED'
+			3: 'APPROVED_HELD',
+			4: 'APPROVED',
+			5: 'CANCELLED',
 		};
 
 		const statuses = (rows as any[])
 			.map((r) => statusMap[r.billing_setup?.status] || null)
 			.filter(Boolean) as string[];
 
+		// Precedence for multiple setups on one account: prefer the best status.
 		if (statuses.includes('APPROVED')) return 'APPROVED';
+		if (statuses.includes('APPROVED_HELD')) return 'APPROVED_HELD';
 		if (statuses.includes('PENDING')) return 'PENDING';
 		if (statuses.includes('CANCELLED')) return 'CANCELLED';
 		return 'NONE';

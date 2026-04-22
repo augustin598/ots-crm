@@ -4,27 +4,19 @@ import { and, eq, isNull, or } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 import { listMccSubAccounts, fetchBillingSetupStatus, formatCustomerId } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
+import { mapGoogleStatusPure, isKnownGoogleCustomerStatus } from '$lib/server/ads/status-mappers';
 
+/** Wraps the pure mapper with unknown-code logging. */
 export function mapGoogleStatusToPayment(
 	customerStatus: string,
 	billingSetupStatus: string | null,
 ): PaymentStatusSnapshot['paymentStatus'] {
-	switch (customerStatus) {
-		case 'SUSPENDED':
-			return 'suspended';
-		case 'CANCELLED':
-		case 'CLOSED':
-			return 'closed';
-		case 'ENABLED':
-			if (billingSetupStatus === 'CANCELLED') return 'payment_failed';
-			if (billingSetupStatus === 'PENDING' || billingSetupStatus === 'NONE') return 'risk_review';
-			return 'ok';
-		default:
-			logWarning('google-ads', 'Unknown Google customer status; treating as risk_review', {
-				metadata: { customerStatus, billingSetupStatus },
-			});
-			return 'risk_review';
+	if (!isKnownGoogleCustomerStatus(customerStatus)) {
+		logWarning('google-ads', 'Unknown Google customer status; treating as risk_review', {
+			metadata: { customerStatus, billingSetupStatus },
+		});
 	}
+	return mapGoogleStatusPure(customerStatus, billingSetupStatus);
 }
 
 export async function fetchGooglePaymentStatus(

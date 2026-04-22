@@ -5,37 +5,22 @@ import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedToken } from './auth';
 import { listBusinessAdAccounts } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
+import { mapMetaStatusPure, isKnownMetaAccountStatus } from '$lib/server/ads/status-mappers';
 
+/**
+ * Wraps the pure mapper with unknown-code logging.
+ * See status-mappers.ts for the full enum reference.
+ */
 export function mapMetaStatusToPayment(
 	accountStatus: number,
 	disableReason: number,
 ): PaymentStatusSnapshot['paymentStatus'] {
-	if (disableReason === 3) return 'payment_failed';
-	if (disableReason === 5) return 'suspended';
-
-	switch (accountStatus) {
-		case 1:
-			return 'ok';
-		case 2:
-			return 'suspended';
-		case 3:
-			return 'payment_failed';
-		case 7:
-			return 'risk_review';
-		case 8:
-			return 'payment_failed';
-		case 9:
-			return 'grace_period';
-		case 100:
-			return 'suspended';
-		case 101:
-			return 'closed';
-		default:
-			logWarning('meta-ads', 'Unknown Meta account_status; treating as risk_review', {
-				metadata: { accountStatus, disableReason },
-			});
-			return 'risk_review';
+	if (!isKnownMetaAccountStatus(accountStatus)) {
+		logWarning('meta-ads', 'Unknown Meta account_status; treating as risk_review', {
+			metadata: { accountStatus, disableReason },
+		});
 	}
+	return mapMetaStatusPure(accountStatus, disableReason);
 }
 
 export async function fetchMetaPaymentStatus(
