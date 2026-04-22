@@ -7,6 +7,7 @@
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	interface Props {
 		clientId: string;
@@ -89,6 +90,47 @@
 				return '#475569';
 		}
 	}
+
+	/**
+	 * Tooltip copy per status — mirrors the in-platform messaging clients see
+	 * on Facebook/Google/TikTok so they understand what to do next.
+	 */
+	function tooltipFor(status: string): { title: string; body: string } {
+		switch (status) {
+			case 'grace_period':
+				return {
+					title: 'Factură neachitată — perioadă de grație',
+					body:
+						'Reclamele încă rulează, dar vor fi oprite automat dacă nu achiți soldul în zilele următoare. Apasă Plătește pentru a actualiza balanța.',
+				};
+			case 'payment_failed':
+				return {
+					title: 'Plata a eșuat',
+					body:
+						'Reclamele sunt oprite până când soldul este achitat sau metoda de plată actualizată. Apasă Plătește pentru a le reactiva.',
+				};
+			case 'risk_review':
+				return {
+					title: 'Cont în curs de verificare',
+					body:
+						'Platforma verifică contul. Livrarea reclamelor poate fi limitată temporar. Deschide setările contului pentru a vedea ce acțiuni sunt necesare.',
+				};
+			case 'suspended':
+				return {
+					title: 'Cont suspendat',
+					body:
+						'Platforma a suspendat acest cont și reclamele nu mai rulează. Deschide setările pentru detalii sau contactează suportul platformei.',
+				};
+			case 'closed':
+				return {
+					title: 'Cont închis',
+					body:
+						'Contul este închis definitiv. Contactează suportul platformei dacă este o eroare.',
+				};
+			default:
+				return { title: '', body: '' };
+		}
+	}
 </script>
 
 {#if flagged.length > 0}
@@ -127,6 +169,7 @@
 			<ul class="divide-y divide-zinc-200/70 overflow-hidden rounded-lg bg-white/70 backdrop-blur-sm">
 				{#each flagged as item (item.provider + ':' + item.externalAccountId)}
 					{@const Icon = iconFor(item.provider)}
+					{@const tip = tooltipFor(item.paymentStatus)}
 					<li class="flex items-center gap-3 p-3 transition-colors hover:bg-white">
 						<div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-zinc-50">
 							{#if Icon}
@@ -141,13 +184,24 @@
 								{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
 							</div>
 						</div>
-						<span
-							class="inline-flex shrink-0 items-center rounded-md border px-2 py-1 text-xs font-medium {badgeClassFor(
-								item.paymentStatus,
-							)}"
-						>
-							{item.statusLabel}
-						</span>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								<span
+									class="inline-flex shrink-0 cursor-help items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium {badgeClassFor(
+										item.paymentStatus,
+									)}"
+								>
+									{item.statusLabel}
+								</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content
+								side="top"
+								class="max-w-xs rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-lg"
+							>
+								<p class="mb-1 text-xs font-bold text-zinc-900">{tip.title}</p>
+								<p class="text-xs leading-relaxed text-zinc-600">{tip.body}</p>
+							</Tooltip.Content>
+						</Tooltip.Root>
 						{#if item.action}
 							{@const actionColor = ctaColorFor(item.paymentStatus)}
 							<button
