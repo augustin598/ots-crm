@@ -2686,16 +2686,36 @@ export async function sendPackageRequestEmail(
 			const categoryLabel = escapeHtml(request.categorySlug);
 			const tierLabel = escapeHtml(request.tier.charAt(0).toUpperCase() + request.tier.slice(1));
 
+			// Parse services JSON (bundle) if present
+			let bundleServices: string[] = [];
+			if (request.services) {
+				try {
+					const parsed = JSON.parse(request.services);
+					if (Array.isArray(parsed)) bundleServices = parsed;
+				} catch {
+					// ignore malformed JSON
+				}
+			}
+			const isBundle = bundleServices.length > 1;
+			const bundleIdLabel = request.bundleId ? escapeHtml(request.bundleId) : '';
+			const servicesListHtml = isBundle
+				? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Servicii incluse</span> &nbsp;·&nbsp; <strong>${bundleServices
+						.map((s) => escapeHtml(s))
+						.join(', ')}</strong></div>`
+				: '';
+
 			const adminUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/services?tab=requests&id=${requestId}`;
 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeRecipientName ? ` ${safeRecipientName}` : ''},</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat un pachet de servicii din CRM:</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat ${isBundle ? 'un bundle de servicii' : 'un serviciu'} din CRM:</p>
 				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
 							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
-							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div>
+							${isBundle
+								? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Bundle</span> &nbsp;·&nbsp; <strong>${bundleIdLabel}</strong></div>${servicesListHtml}`
+								: `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div>`}
 							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Pachet</span> &nbsp;·&nbsp; <strong>${tierLabel}</strong></div>
 							${safeNote ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #d1d5db;"><span style="color: #6b7280;">Notă client:</span><div style="margin-top: 6px; color: #111827; white-space: pre-line;">${safeNote}</div></div>` : ''}
 						</td>

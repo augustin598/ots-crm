@@ -18,6 +18,8 @@
 	import DiscountsDialog from '$lib/components/services/DiscountsDialog.svelte';
 	import {
 		CATEGORIES,
+		CATEGORY_GROUPS,
+		getCategoriesInGroup,
 		CRM_FEATURES,
 		TIERS,
 		TIER_LABELS,
@@ -73,6 +75,13 @@
 	let selectedCategory = $state<Category | null>(null);
 	let dialogOpen = $state(false);
 	let discountsOpen = $state(false);
+
+	let activeGroupId = $state<string>('all');
+	const visibleGroups = $derived(
+		activeGroupId === 'all'
+			? CATEGORY_GROUPS
+			: CATEGORY_GROUPS.filter((g) => g.id === activeGroupId)
+	);
 
 	function openCategory(cat: Category) {
 		selectedCategory = cat;
@@ -214,53 +223,104 @@
 			</div>
 		</section>
 
-		<h2 class="text-xl font-semibold mb-4">Categorii servicii</h2>
-		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-			{#each CATEGORIES as category (category.slug)}
-				<Card class="p-0 hover:border-primary/50 hover:shadow-sm transition-all">
-					<button
-						type="button"
-						class="w-full text-left p-6 cursor-pointer"
-						onclick={() => openCategory(category)}
-					>
-						<div class="flex items-start gap-3 mb-4">
-							<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
-								<CategoryIcon slug={category.slug} class="h-5 w-5" />
-							</div>
-							<div class="min-w-0 flex-1">
-								<h3 class="font-semibold text-lg leading-tight">{category.name}</h3>
-								<p class="text-xs text-muted-foreground mt-1">{category.tagline}</p>
-							</div>
-						</div>
-						<div class="space-y-2 mb-4">
-							{#each TIERS as tier (tier)}
-								{@const colors = TIER_COLORS[tier]}
-								{@const price = category.prices[tier]}
-								{@const setup = category.setupFees?.[tier]}
-								{#if price !== null || setup}
-									<div
-										class="flex items-center justify-between px-3 py-2 rounded-md border {colors.border} {colors.bg}"
-									>
-										<div class="flex items-center gap-2">
-											<span class="h-2 w-2 rounded-full {colors.dot}"></span>
-											<span class="text-xs font-semibold {colors.text}">{TIER_LABELS[tier]}</span>
-										</div>
-										<span class="text-xs font-bold {colors.text}">
-											{#if price !== null}
-												{formatEur(price)}<span class="font-normal opacity-70">/lună</span>
-											{:else if setup}
-												{formatEur(setup)}<span class="font-normal opacity-70"> one-time</span>
-											{/if}
-										</span>
-									</div>
-								{/if}
-							{/each}
-						</div>
-						<p class="text-xs text-primary font-medium">Vezi comparație tier-uri →</p>
-					</button>
-				</Card>
+		<div class="mb-5">
+			<h2 class="text-3xl font-bold tracking-tight">Categorii servicii</h2>
+			<p class="text-sm text-muted-foreground mt-1.5">
+				Grupate pe funcție — click pe orice categorie pentru detalii complete per pachet.
+			</p>
+		</div>
+
+		<div class="flex flex-wrap gap-2 mb-8">
+			<button
+				type="button"
+				onclick={() => (activeGroupId = 'all')}
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer {activeGroupId ===
+				'all'
+					? 'bg-primary text-primary-foreground border-primary'
+					: 'bg-background hover:bg-muted border-border'}"
+			>
+				Toate
+				<span class="text-[10px] opacity-70">({CATEGORIES.length})</span>
+			</button>
+			{#each CATEGORY_GROUPS as group (group.id)}
+				{@const count = getCategoriesInGroup(group.id).length}
+				<button
+					type="button"
+					onclick={() => (activeGroupId = group.id)}
+					class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer {activeGroupId ===
+					group.id
+						? 'bg-primary text-primary-foreground border-primary'
+						: 'bg-background hover:bg-muted border-border'}"
+				>
+					{group.label}
+					<span class="text-[10px] opacity-70">({count})</span>
+				</button>
 			{/each}
 		</div>
+
+		{#each visibleGroups as group (group.id)}
+			{@const items = getCategoriesInGroup(group.id)}
+			{#if items.length > 0}
+				<section class="mb-8">
+					<div class="mb-4">
+						<h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+							{group.label}
+						</h3>
+						<p class="text-xs text-muted-foreground/80 mt-0.5">{group.description}</p>
+					</div>
+					<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+						{#each items as category (category.slug)}
+							{@const monthlyPrices = TIERS.map((t) => category.prices[t]).filter(
+								(p): p is number => p !== null
+							)}
+							{@const setupOnly =
+								monthlyPrices.length === 0 && category.setupFees
+									? Object.values(category.setupFees).filter((p): p is number => p !== undefined)
+									: []}
+							<Card class="p-0 hover:border-primary/50 hover:shadow-sm transition-all">
+								<button
+									type="button"
+									class="w-full text-left p-6 cursor-pointer"
+									onclick={() => openCategory(category)}
+								>
+									<div class="flex items-start gap-3 mb-4">
+										<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
+											<CategoryIcon slug={category.slug} class="h-5 w-5" />
+										</div>
+										<div class="min-w-0 flex-1">
+											<h3 class="font-semibold text-lg leading-tight">{category.name}</h3>
+											<p class="text-xs text-muted-foreground mt-1">{category.tagline}</p>
+										</div>
+									</div>
+									<div class="flex items-baseline justify-between mt-2 mb-1">
+										{#if monthlyPrices.length > 0}
+											<span class="text-2xl font-bold">
+												{formatEur(Math.min(...monthlyPrices))}
+												<span class="text-sm font-normal text-muted-foreground">/lună</span>
+											</span>
+											<span class="text-xs text-muted-foreground">
+												până la {formatEur(Math.max(...monthlyPrices))}
+											</span>
+										{:else if setupOnly.length > 0}
+											<span class="text-2xl font-bold">
+												{formatEur(setupOnly[0])}
+												<span class="text-sm font-normal text-muted-foreground">one-time</span>
+											</span>
+										{/if}
+									</div>
+									<p class="text-xs text-muted-foreground mb-4">
+										{#if monthlyPrices.length > 0}
+											{monthlyPrices.length} pachete disponibile (Bronze → Platinum)
+										{/if}
+									</p>
+									<p class="text-xs text-primary font-medium">Vezi detalii →</p>
+								</button>
+							</Card>
+						{/each}
+					</div>
+				</section>
+			{/if}
+		{/each}
 	</TabsContent>
 
 	<TabsContent value="requests" class="mt-6">
@@ -298,13 +358,21 @@
 			<div class="space-y-3">
 				{#each filteredRequests as req (req.id)}
 					{@const tierColors = TIER_COLORS[req.tier as Tier]}
+					{@const isBundle = Array.isArray(req.services) && req.services.length > 1}
 					<Card class="p-4" id={`req-${req.id}`}>
 						<div class="flex items-start justify-between gap-4 flex-wrap">
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2 flex-wrap mb-1.5">
 									<div class="flex items-center gap-2">
-										<CategoryIcon slug={req.categorySlug} class="h-4 w-4" />
-										<h3 class="font-semibold">{categoryLabel(req.categorySlug)}</h3>
+										{#if isBundle}
+											<Badge class="bg-primary/10 text-primary border-primary/20">Bundle</Badge>
+											<h3 class="font-semibold">
+												{req.bundleId || 'Pachet custom'}
+											</h3>
+										{:else}
+											<CategoryIcon slug={req.categorySlug} class="h-4 w-4" />
+											<h3 class="font-semibold">{categoryLabel(req.categorySlug)}</h3>
+										{/if}
 									</div>
 									<span
 										class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border {tierColors.border} {tierColors.text} {tierColors.bg}"
@@ -316,6 +384,18 @@
 										{STATUS_LABEL[req.status] ?? req.status}
 									</Badge>
 								</div>
+								{#if isBundle && req.services}
+									<div class="flex flex-wrap gap-1.5 mb-2">
+										{#each req.services as slug (slug)}
+											<span
+												class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-muted"
+											>
+												<CategoryIcon {slug} class="h-3 w-3" />
+												{categoryLabel(slug)}
+											</span>
+										{/each}
+									</div>
+								{/if}
 								<p class="text-sm text-muted-foreground">
 									{req.clientName || '—'}
 									{#if req.clientEmail}

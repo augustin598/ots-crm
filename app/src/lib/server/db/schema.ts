@@ -1265,6 +1265,8 @@ export const servicePackageRequest = sqliteTable('service_package_request', {
 	clientId: text('client_id').references(() => client.id),
 	clientUserId: text('client_user_id').references(() => clientUser.id),
 	categorySlug: text('category_slug').notNull(),
+	bundleId: text('bundle_id'), // non-null when row represents a full bundle (from wizard)
+	services: text('services'), // JSON array of slugs; non-null when row is a bundle
 	tier: text('tier').notNull(), // 'bronze' | 'silver' | 'gold' | 'platinum'
 	note: text('note'),
 	status: text('status').notNull().default('pending'), // 'pending' | 'contacted' | 'accepted' | 'rejected'

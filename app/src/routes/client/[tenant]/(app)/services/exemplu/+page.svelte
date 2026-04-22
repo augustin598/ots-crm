@@ -22,6 +22,7 @@
 		getAvailableGoals,
 		isGoalValidForBusiness,
 		BUSINESS_TYPE_OPTIONS,
+		GOAL_OPTIONS,
 		BUDGET_OPTIONS,
 		PROJECT_STATUS_OPTIONS,
 		type WizardAnswers,
@@ -36,6 +37,7 @@
 		type Tier
 	} from '$lib/constants/ots-catalog';
 	import CategoryIcon from '$lib/components/services/CategoryIcon.svelte';
+	import WizardOptionIcon from '$lib/components/services/WizardOptionIcon.svelte';
 	import TierQuickGuide from '$lib/components/services/TierQuickGuide.svelte';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { createPackageRequest } from '$lib/remotes/packages.remote';
@@ -114,28 +116,23 @@
 			return;
 		}
 		submitting = true;
-		const note = buildContextNote(rec);
 		try {
-			// Trimitem câte o cerere per serviciu, la tier-ul recomandat
-			for (const slug of rec.bundle.services) {
-				try {
-					await createPackageRequest({
-						categorySlug: slug,
-						tier: rec.tier,
-						note
-					});
-				} catch (innerErr) {
-					console.error('[wizard] createPackageRequest failed for', slug, innerErr);
-					throw innerErr;
-				}
-			}
-			toast.success('Am trimis cererile pentru toate serviciile din bundle', {
+			const note = buildContextNote(rec);
+			// O singură cerere per bundle — backend stochează `bundleId` + lista `services`.
+			await createPackageRequest({
+				categorySlug: rec.bundle.services[0], // primul serviciu ca pivot pentru compat
+				bundleId: rec.bundle.id,
+				services: rec.bundle.services,
+				tier: rec.tier,
+				note
+			});
+			toast.success('Cererea a fost trimisă cu succes', {
 				description: 'Echipa OTS te contactează cu oferta finală consolidată.'
 			});
 			goto(`/client/${tenantSlug}/services`);
 		} catch (e) {
-			console.error('[wizard] requestBundle outer error:', e);
-			toast.error('Nu am putut trimite toate cererile', {
+			console.error('[wizard] requestBundle error:', e);
+			toast.error('Nu am putut trimite cererea', {
 				description: e instanceof Error ? e.message : 'Încearcă din nou peste câteva minute.'
 			});
 		} finally {
@@ -216,8 +213,15 @@
 								? 'border-primary bg-primary/5'
 								: 'border-border hover:border-primary/40'}"
 						>
-							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0">
+							<div class="flex items-start gap-3">
+								<div
+									class="rounded-lg p-2 shrink-0 {answers.businessType === opt.value
+										? 'bg-primary/15 text-primary'
+										: 'bg-muted/60 text-foreground'}"
+								>
+									<WizardOptionIcon icon={opt.icon} class="h-5 w-5" />
+								</div>
+								<div class="min-w-0 flex-1">
 									<div class="font-medium">{opt.label}</div>
 									<div class="text-xs text-muted-foreground mt-0.5">{opt.hint}</div>
 								</div>
@@ -257,8 +261,15 @@
 								? 'border-primary bg-primary/5'
 								: 'border-border hover:border-primary/40'}"
 						>
-							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0">
+							<div class="flex items-start gap-3">
+								<div
+									class="rounded-lg p-2 shrink-0 {answers.goal === opt.value
+										? 'bg-primary/15 text-primary'
+										: 'bg-muted/60 text-foreground'}"
+								>
+									<WizardOptionIcon icon={opt.icon} class="h-5 w-5" />
+								</div>
+								<div class="min-w-0 flex-1">
 									<div class="font-medium">{opt.label}</div>
 									<div class="text-xs text-muted-foreground mt-0.5">{opt.description}</div>
 								</div>

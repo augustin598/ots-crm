@@ -48,22 +48,32 @@ export function emptyAnswers(): WizardAnswers {
 	};
 }
 
-export const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string; hint: string }[] = [
-	{ value: 'ecommerce', label: 'E-commerce / magazin online', hint: 'Vinzi produse online (fashion, cosmetice, electronice, etc.)' },
-	{ value: 'b2b-services', label: 'Servicii B2B / SaaS / consultanță', hint: 'Vinzi servicii către alte firme sau profesioniști' },
-	{ value: 'local', label: 'Business local', hint: 'Restaurant, clinică, salon, atelier — clienți din zonă' },
-	{ value: 'content-media', label: 'Content / media / influencer', hint: 'Creator de conținut, publicație, podcast, YouTube' },
-	{ value: 'education', label: 'Educație / cursuri', hint: 'Cursuri online, training-uri, platforme de învățare' },
-	{ value: 'other', label: 'Altceva', hint: 'Descrie scurt domeniul tău' }
+export const BUSINESS_TYPE_OPTIONS: {
+	value: BusinessType;
+	label: string;
+	hint: string;
+	icon: string;
+}[] = [
+	{ value: 'ecommerce', label: 'E-commerce / magazin online', hint: 'Vinzi produse online (fashion, cosmetice, electronice, etc.)', icon: 'shopping-cart' },
+	{ value: 'b2b-services', label: 'Servicii B2B / SaaS / consultanță', hint: 'Vinzi servicii către alte firme sau profesioniști', icon: 'briefcase' },
+	{ value: 'local', label: 'Business local', hint: 'Restaurant, clinică, salon, atelier — clienți din zonă', icon: 'store' },
+	{ value: 'content-media', label: 'Content / media / influencer', hint: 'Creator de conținut, publicație, podcast, YouTube', icon: 'video' },
+	{ value: 'education', label: 'Educație / cursuri', hint: 'Cursuri online, training-uri, platforme de învățare', icon: 'graduation-cap' },
+	{ value: 'other', label: 'Altceva', hint: 'Descrie scurt domeniul tău', icon: 'sparkles' }
 ];
 
-export const GOAL_OPTIONS: { value: Goal; label: string; description: string }[] = [
-	{ value: 'sales-online', label: 'Vând produse online', description: 'Conversii directe, ROAS, comenzi în magazin' },
-	{ value: 'leads', label: 'Obțin lead-uri / cereri ofertă', description: 'Formulare, apeluri, cereri demo, MQL/SQL' },
-	{ value: 'brand-awareness', label: 'Creștere notorietate brand', description: 'Lansare produs, recunoaștere pe piață, reach' },
-	{ value: 'local-traffic', label: 'Trafic local / rezervări', description: 'Oameni care intră în magazin / rezervă online' },
-	{ value: 'retention', label: 'Păstrez clienții existenți', description: 'Repeat customers, LTV, lifecycle email' },
-	{ value: 'scale-all', label: 'Scale agresiv pe toate canalele', description: 'Stack complet, bugete mari, multi-channel' }
+export const GOAL_OPTIONS: {
+	value: Goal;
+	label: string;
+	description: string;
+	icon: string;
+}[] = [
+	{ value: 'sales-online', label: 'Vând produse online', description: 'Conversii directe, ROAS, comenzi în magazin', icon: 'credit-card' },
+	{ value: 'leads', label: 'Obțin lead-uri / cereri ofertă', description: 'Formulare, apeluri, cereri demo, MQL/SQL', icon: 'user-plus' },
+	{ value: 'brand-awareness', label: 'Creștere notorietate brand', description: 'Lansare produs, recunoaștere pe piață, reach', icon: 'megaphone' },
+	{ value: 'local-traffic', label: 'Trafic local / rezervări', description: 'Oameni care intră în magazin / rezervă online', icon: 'map-pin' },
+	{ value: 'retention', label: 'Păstrez clienții existenți', description: 'Repeat customers, LTV, lifecycle email', icon: 'repeat' },
+	{ value: 'scale-all', label: 'Scale agresiv pe toate canalele', description: 'Stack complet, bugete mari, multi-channel', icon: 'rocket' }
 ];
 
 // Which goals make sense per business type (contextual filtering step 1 → step 2)
@@ -288,17 +298,23 @@ function serviceOverlapScore(bundleServices: string[], userServices: string[]): 
 
 function funnelCoverageScore(bundle: Bundle, goal: Goal | null): number {
 	const hasAwareness = bundle.services.some((s) => ['meta-ads', 'tiktok-ads'].includes(s));
-	const hasConversion = bundle.services.some((s) => ['google-ads', 'cro'].includes(s));
+	const hasConversion = bundle.services.some((s) =>
+		['google-ads', 'cro', 'landing-page-dev'].includes(s)
+	);
 	const hasRetention = bundle.services.some((s) =>
 		['email-marketing', 'marketing-automation'].includes(s)
 	);
 	const hasOrganic = bundle.services.includes('seo');
+	const hasInfrastructure = bundle.services.some((s) =>
+		['website-dev', 'website-custom', 'woocommerce-dev', 'mobile-app'].includes(s)
+	);
 
 	if (goal === 'scale-all') {
 		const stages = [hasAwareness, hasConversion, hasRetention].filter(Boolean).length;
-		if (stages === 3) return 100;
-		if (stages === 2) return 70;
-		return 40;
+		let base = stages === 3 ? 100 : stages === 2 ? 70 : 40;
+		// Boost dacă include și infrastructură (site/magazin/app) pentru scale-all
+		if (hasInfrastructure) base = Math.min(100, base + 5);
+		return base;
 	}
 	if (goal === 'sales-online') {
 		let s = 50;
@@ -350,9 +366,13 @@ function platformBonus(
 
 	if (businessType === 'ecommerce' && has('meta-ads')) bonus += 12;
 	if (businessType === 'ecommerce' && has('google-ads') && has('meta-ads')) bonus += 18;
+	// E-com + magazin propriu (WooCommerce) + DPA pe Meta = combo câștigător
+	if (businessType === 'ecommerce' && has('woocommerce-dev') && has('meta-ads')) bonus += 15;
 	if (goal === 'leads' && has('google-ads') && (has('email-marketing') || has('marketing-automation'))) {
 		bonus += 15;
 	}
+	// Lead gen + LP optimizată + Google Ads = funnel premium
+	if (goal === 'leads' && has('landing-page-dev') && has('google-ads')) bonus += 12;
 	if (businessType === 'local' && has('google-ads') && has('seo')) bonus += 12;
 
 	if (goal === 'leads' && businessType === 'b2b-services' && has('tiktok-ads')) bonus -= 25;

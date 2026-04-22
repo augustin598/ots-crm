@@ -15,6 +15,11 @@
 	theme={mode.current}
 	class="toaster group"
 	style="--normal-bg: var(--color-popover); --normal-text: var(--color-popover-foreground); --normal-border: var(--color-border);"
+	toastOptions={{
+		classes: {
+			description: 'ots-sonner-description'
+		}
+	}}
 	{...restProps}
 	>{#snippet loadingIcon()}
 		<Loader2Icon class="size-4 animate-spin" />
@@ -32,3 +37,12 @@
 		<TriangleAlertIcon class="size-4" />
 	{/snippet}
 </Sonner>
+
+<style>
+	:global(.ots-sonner-description) {
+		color: var(--color-foreground) !important;
+		opacity: 0.85 !important;
+		font-size: 0.8125rem;
+		line-height: 1.4;
+	}
+</style>

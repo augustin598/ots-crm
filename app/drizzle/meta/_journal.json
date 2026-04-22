@@ -1065,6 +1065,20 @@
       "when": 1777420013000,
       "tag": "0151_service_package_request",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "6",
+      "when": 1777420014000,
+      "tag": "0152_service_package_request_bundle_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "6",
+      "when": 1777420015000,
+      "tag": "0153_service_package_request_services_json",
+      "breakpoints": true
     }
   ]
 }

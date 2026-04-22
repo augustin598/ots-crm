@@ -12,6 +12,8 @@
 	import DiscountsDialog from '$lib/components/services/DiscountsDialog.svelte';
 	import {
 		CATEGORIES,
+		CATEGORY_GROUPS,
+		getCategoriesInGroup,
 		CRM_FEATURES,
 		TIERS,
 		TIER_LABELS,
@@ -33,6 +35,13 @@
 	let requestOpen = $state(false);
 
 	let discountsOpen = $state(false);
+
+	let activeGroupId = $state<string>('all');
+	const visibleGroups = $derived(
+		activeGroupId === 'all'
+			? CATEGORY_GROUPS
+			: CATEGORY_GROUPS.filter((g) => g.id === activeGroupId)
+	);
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -160,65 +169,110 @@
 		</div>
 	</a>
 
-	<h2 class="text-2xl font-bold mb-2">Categorii servicii</h2>
-	<p class="text-sm text-muted-foreground mb-6">
-		Click pe categorie pentru a vedea detaliile complete ale fiecărui tier și pentru a trimite
-		cerere.
-	</p>
+	<div class="mb-5">
+		<h2 class="text-3xl font-bold tracking-tight">Categorii servicii</h2>
+		<p class="text-sm text-muted-foreground mt-1.5">
+			Grupate pe funcție. Click pe orice categorie pentru detalii complete și cerere.
+		</p>
+	</div>
 
-	<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-		{#each CATEGORIES as category (category.slug)}
-			<Card class="p-0 hover:border-primary/50 hover:shadow-md transition-all group">
-				<button
-					type="button"
-					class="w-full text-left p-6 cursor-pointer"
-					onclick={() => openCompare(category)}
-				>
-					<div class="flex items-start gap-3 mb-5">
-						<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
-							<CategoryIcon slug={category.slug} class="h-5 w-5" />
-						</div>
-						<div class="min-w-0 flex-1">
-							<h3 class="font-semibold text-lg leading-tight">{category.name}</h3>
-							<p class="text-xs text-muted-foreground mt-1">{category.tagline}</p>
-						</div>
-					</div>
-
-					<div class="space-y-2 mb-5">
-						{#each TIERS as tier (tier)}
-							{@const colors = TIER_COLORS[tier]}
-							{@const price = category.prices[tier]}
-							{@const setup = category.setupFees?.[tier]}
-							{#if price !== null || setup}
-								<div
-									class="flex items-center justify-between px-3 py-2 rounded-md border {colors.border} {colors.bg}"
-								>
-									<div class="flex items-center gap-2">
-										<span class="h-2 w-2 rounded-full {colors.dot}"></span>
-										<span class="text-xs font-semibold {colors.text}">{TIER_LABELS[tier]}</span>
-									</div>
-									<span class="text-xs font-bold {colors.text}">
-										{#if price !== null}
-											{formatEur(price)}<span class="font-normal opacity-70">/lună</span>
-										{:else if setup}
-											{formatEur(setup)}<span class="font-normal opacity-70"> one-time</span>
-										{/if}
-									</span>
-								</div>
-							{/if}
-						{/each}
-					</div>
-
-					<div
-						class="flex items-center justify-between text-xs font-medium text-primary group-hover:gap-2 transition-all"
-					>
-						<span>Vezi detalii + cere ofertă</span>
-						<ArrowRightIcon class="h-3.5 w-3.5" />
-					</div>
-				</button>
-			</Card>
+	<div class="flex flex-wrap gap-2 mb-8">
+		<button
+			type="button"
+			onclick={() => (activeGroupId = 'all')}
+			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer {activeGroupId ===
+			'all'
+				? 'bg-primary text-primary-foreground border-primary'
+				: 'bg-background hover:bg-muted border-border'}"
+		>
+			Toate
+			<span class="text-[10px] opacity-70">({CATEGORIES.length})</span>
+		</button>
+		{#each CATEGORY_GROUPS as group (group.id)}
+			{@const count = getCategoriesInGroup(group.id).length}
+			<button
+				type="button"
+				onclick={() => (activeGroupId = group.id)}
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer {activeGroupId ===
+				group.id
+					? 'bg-primary text-primary-foreground border-primary'
+					: 'bg-background hover:bg-muted border-border'}"
+			>
+				{group.label}
+				<span class="text-[10px] opacity-70">({count})</span>
+			</button>
 		{/each}
 	</div>
+
+	{#each visibleGroups as group (group.id)}
+		{@const items = getCategoriesInGroup(group.id)}
+		{#if items.length > 0}
+			<section class="mb-8">
+				<div class="mb-4">
+					<h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+						{group.label}
+					</h3>
+					<p class="text-xs text-muted-foreground/80 mt-0.5">{group.description}</p>
+				</div>
+				<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+					{#each items as category (category.slug)}
+						{@const monthlyPrices = TIERS.map((t) => category.prices[t]).filter(
+							(p): p is number => p !== null
+						)}
+						{@const setupOnly =
+							monthlyPrices.length === 0 && category.setupFees
+								? Object.values(category.setupFees).filter((p): p is number => p !== undefined)
+								: []}
+						<Card class="p-0 hover:border-primary/50 hover:shadow-md transition-all group">
+							<button
+								type="button"
+								class="w-full text-left p-6 cursor-pointer"
+								onclick={() => openCompare(category)}
+							>
+								<div class="flex items-start gap-3 mb-5">
+									<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
+										<CategoryIcon slug={category.slug} class="h-5 w-5" />
+									</div>
+									<div class="min-w-0 flex-1">
+										<h3 class="font-semibold text-lg leading-tight">{category.name}</h3>
+										<p class="text-xs text-muted-foreground mt-1">{category.tagline}</p>
+									</div>
+								</div>
+								<div class="flex items-baseline justify-between mt-2 mb-1">
+									{#if monthlyPrices.length > 0}
+										<span class="text-2xl font-bold">
+											{formatEur(Math.min(...monthlyPrices))}
+											<span class="text-sm font-normal text-muted-foreground">/lună</span>
+										</span>
+										<span class="text-xs text-muted-foreground">
+											până la {formatEur(Math.max(...monthlyPrices))}
+										</span>
+									{:else if setupOnly.length > 0}
+										<span class="text-2xl font-bold">
+											{formatEur(setupOnly[0])}
+											<span class="text-sm font-normal text-muted-foreground">one-time</span>
+										</span>
+									{/if}
+								</div>
+								<p class="text-xs text-muted-foreground mb-5">
+									{#if monthlyPrices.length > 0}
+										{monthlyPrices.length} pachete: Bronze → Platinum
+									{/if}
+								</p>
+
+								<div
+									class="flex items-center justify-between text-xs font-medium text-primary group-hover:gap-2 transition-all"
+								>
+									<span>Vezi detalii + cere ofertă</span>
+									<ArrowRightIcon class="h-3.5 w-3.5" />
+								</div>
+							</button>
+						</Card>
+					{/each}
+				</div>
+			</section>
+		{/if}
+	{/each}
 
 	<div class="mt-8 flex flex-wrap gap-2 items-center">
 		<Badge variant="outline">EUR fără TVA</Badge>

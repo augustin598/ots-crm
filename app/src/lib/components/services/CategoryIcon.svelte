@@ -8,6 +8,11 @@
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import LayoutIcon from '@lucide/svelte/icons/layout';
+	import CodeIcon from '@lucide/svelte/icons/code';
+	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
+	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import SmartphoneIcon from '@lucide/svelte/icons/smartphone';
 
 	type Props = {
 		slug: string;
@@ -33,6 +38,16 @@
 	<TrendingUpIcon class={className} />
 {:else if slug === 'marketing-automation'}
 	<ZapIcon class={className} />
+{:else if slug === 'website-dev'}
+	<LayoutIcon class={className} />
+{:else if slug === 'website-custom'}
+	<CodeIcon class={className} />
+{:else if slug === 'woocommerce-dev'}
+	<ShoppingBagIcon class={className} />
+{:else if slug === 'landing-page-dev'}
+	<MousePointerClickIcon class={className} />
+{:else if slug === 'mobile-app'}
+	<SmartphoneIcon class={className} />
 {:else}
 	<SettingsIcon class={className} />
 {/if}

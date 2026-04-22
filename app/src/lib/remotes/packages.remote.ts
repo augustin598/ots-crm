@@ -18,7 +18,9 @@ const tierSchema = v.picklist(TIERS);
 const createRequestSchema = v.object({
 	categorySlug: v.pipe(v.string(), v.minLength(1)),
 	tier: tierSchema,
-	note: v.optional(v.string())
+	note: v.optional(v.string()),
+	bundleId: v.optional(v.string()),
+	services: v.optional(v.array(v.string()))
 });
 
 const updateStatusSchema = v.object({
@@ -37,6 +39,8 @@ export const getPackageRequests = query(async () => {
 			.select({
 				id: table.servicePackageRequest.id,
 				categorySlug: table.servicePackageRequest.categorySlug,
+				bundleId: table.servicePackageRequest.bundleId,
+				services: table.servicePackageRequest.services,
 				tier: table.servicePackageRequest.tier,
 				note: table.servicePackageRequest.note,
 				status: table.servicePackageRequest.status,
@@ -51,7 +55,10 @@ export const getPackageRequests = query(async () => {
 			.where(eq(table.servicePackageRequest.tenantId, event.locals.tenant.id))
 			.orderBy(desc(table.servicePackageRequest.createdAt));
 
-		return rows;
+		return rows.map((r) => ({
+			...r,
+			services: r.services ? (JSON.parse(r.services) as string[]) : null
+		}));
 	} catch (err) {
 		const raw = err instanceof Error ? err : new Error(String(err));
 		// Expose the underlying SQL error so we can see "no such table / no such column"
@@ -89,6 +96,8 @@ export const createPackageRequest = command(createRequestSchema, async (data) =>
 			clientId: event.locals.client.id,
 			clientUserId: event.locals.clientUser.id,
 			categorySlug: data.categorySlug,
+			bundleId: data.bundleId || null,
+			services: data.services && data.services.length > 0 ? JSON.stringify(data.services) : null,
 			tier: data.tier,
 			note: data.note?.trim() || null,
 			status: 'pending'

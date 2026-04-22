@@ -13,12 +13,7 @@
 	import { createPackageRequest } from '$lib/remotes/packages.remote';
 	import { toast } from 'svelte-sonner';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
-	import {
-		Tooltip,
-		TooltipContent,
-		TooltipProvider,
-		TooltipTrigger
-	} from '$lib/components/ui/tooltip';
+	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import {
 		TIER_LABELS,
 		TIER_COLORS,
@@ -117,29 +112,23 @@
 						</div>
 					</div>
 					{#if setup && price !== null}
-						<TooltipProvider delayDuration={150}>
-							<Tooltip>
-								<TooltipTrigger
-									tabindex={-1}
-									class="text-xs text-muted-foreground text-right cursor-help"
-								>
-									<span class="inline-flex items-center gap-1">
-										Setup one-time
-										<HelpCircleIcon class="h-3 w-3 opacity-70" />
-									</span>
-									<br /><strong>{formatEur(setup)}</strong>
-								</TooltipTrigger>
-								<TooltipContent
-									class="max-w-[320px] !bg-popover !text-popover-foreground border border-border shadow-lg p-3 rounded-lg"
-									arrowClasses="!bg-popover"
-								>
-									<p class="font-semibold text-sm mb-1.5 text-foreground">Ce include setup-ul?</p>
-									<p class="text-[13px] text-foreground/90 leading-relaxed">
-										{category.setupDescription || SETUP_DEFAULT_DESCRIPTION}
-									</p>
-								</TooltipContent>
-							</Tooltip>
-						</TooltipProvider>
+						<Popover>
+							<PopoverTrigger
+								class="text-xs text-muted-foreground hover:text-foreground text-right cursor-pointer"
+							>
+								<span class="inline-flex items-center gap-1">
+									Setup one-time
+									<HelpCircleIcon class="h-3 w-3 opacity-70" />
+								</span>
+								<br /><strong>{formatEur(setup)}</strong>
+							</PopoverTrigger>
+							<PopoverContent class="max-w-[320px] p-3">
+								<p class="font-semibold text-sm mb-1.5">Ce include setup-ul?</p>
+								<p class="text-[13px] text-foreground/90 leading-relaxed">
+									{category.setupDescription || SETUP_DEFAULT_DESCRIPTION}
+								</p>
+							</PopoverContent>
+						</Popover>
 					{/if}
 				</div>
 				<p class="text-xs text-muted-foreground mt-3">

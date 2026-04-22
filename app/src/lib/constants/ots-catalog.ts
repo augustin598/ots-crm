@@ -370,11 +370,242 @@ export const CATEGORIES: Category[] = [
 			{ id: 'gs-9', label: 'Durata creare campanii', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
 			{ id: 'gs-10', label: 'Monitorizare post-lansare', values: { bronze: '30 zile', silver: '30 zile', gold: '30 zile', platinum: '30 zile' } }
 		]
+	},
+
+	// ============================================================
+	// DEZVOLTARE WEB & APPS (one-time, prețuri EUR fără TVA — RO 2026)
+	// ============================================================
+
+	{
+		slug: 'website-dev',
+		name: 'Dezvoltare Website WordPress',
+		tagline: 'Site de prezentare, custom sau funcțional',
+		icon: 'layout',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 500, silver: 1200, gold: 1800, platinum: 3000 },
+		setupDescription:
+			'Implementare one-time website WordPress: design, dezvoltare, SEO on-page, integrare tracking (GA4 + GTM), training administrare. Include mentenanță gratuită prima lună. Se plătește o singură dată.',
+		priceNote:
+			'Prețuri EUR fără TVA. Target OTS = Silver (pachetul standard recomandat). Hosting (10-20 €/lună) și mentenanță lunară (via abonament WP) se plătesc separat.',
+		features: [
+			{ id: 'web-1', label: 'Pagini (nr. maxim)', values: { bronze: 5, silver: 10, gold: 15, platinum: '50+' } },
+			{ id: 'web-2', label: 'Design personalizat (Figma → WP, nu template)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'web-3', label: 'Responsive mobile-first', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'web-4', label: 'SEO on-page (meta, schema, sitemap, Yoast)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'web-5', label: 'Google Analytics 4 + GTM', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'web-6', label: 'Google Search Console setup', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'web-7', label: 'Formulare avansate (Gravity / Forminator)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'web-8', label: 'Training editare conținut (ore)', values: { bronze: 0, silver: 2, gold: 3, platinum: 6 } },
+			{ id: 'web-9', label: 'Mentenanță gratuită inclusă (luni)', values: { bronze: 0, silver: 1, gold: 3, platinum: 6 } },
+			{ id: 'web-10', label: 'Funcționalitate majoră (booking / membership / API)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'web-11', label: 'Multilingv (WPML + Loco)', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'web-12', label: 'Integrări CRM / Email Marketing', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'web-13', label: 'SSL + banner GDPR', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'web-14', label: 'PageSpeed 80+ (Core Web Vitals)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'web-15', label: 'Revizii incluse (rounds)', values: { bronze: 1, silver: 3, gold: 5, platinum: '8+' } },
+			{ id: 'web-16', label: 'Durată livrare', values: { bronze: '2-3 săpt', silver: '3-4 săpt', gold: '4-6 săpt', platinum: '6-10 săpt' } }
+		]
+	},
+	{
+		slug: 'website-custom',
+		name: 'Dezvoltare Website Custom',
+		tagline: 'Next.js / Astro / React — fără CMS, cod propriu',
+		icon: 'code',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 2500, silver: 5000, gold: 9000, platinum: 18000 },
+		setupDescription:
+			'Dezvoltare one-time website custom cu framework modern (Next.js / Astro / SvelteKit / Vue). Fără CMS gata-făcut — cod propriu optimizat pentru performanță și scalabilitate. Recomandat pentru SaaS landing, marketing sites complexe, aplicații web cu logică particulară.',
+		priceNote:
+			'Prețuri EUR fără TVA. Target OTS = Silver (5.000 €). Hosting edge (Vercel / Cloudflare Pages) 0-40 €/lună; mentenanță via ore/lună.',
+		features: [
+			{ id: 'wc-1', label: 'Framework', values: { bronze: 'Next.js / Astro', silver: 'Next.js / Astro / SvelteKit', gold: 'Next.js custom + API routes', platinum: 'Full-stack custom (Next + tRPC + DB)' } },
+			{ id: 'wc-2', label: 'Pagini (nr. maxim)', values: { bronze: 5, silver: 10, gold: 20, platinum: '50+' } },
+			{ id: 'wc-3', label: 'Design custom (Figma → cod, nu template)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-4', label: 'Lighthouse score țintă', values: { bronze: '85+', silver: '95+', gold: '98+', platinum: '100' } },
+			{ id: 'wc-5', label: 'CMS / conținut editabil', values: { bronze: 'Markdown / statice', silver: 'Headless (Sanity / Contentful)', gold: 'Headless + admin panel custom', platinum: 'Admin propriu + DB' } },
+			{ id: 'wc-6', label: 'Rendering', values: { bronze: 'SSG', silver: 'SSG + ISR', gold: 'SSG + ISR + edge', platinum: 'SSR + edge + streaming' } },
+			{ id: 'wc-7', label: 'Animations (Framer Motion / GSAP)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-8', label: 'SEO tehnic (meta, schema, sitemap, robots)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-9', label: 'GA4 + GTM + Meta Pixel', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-10', label: 'Integrări API (CRM / Stripe / webhook-uri)', values: { bronze: false, silver: '1 integrare', gold: '3 integrări', platinum: 'Nelimitat' } },
+			{ id: 'wc-11', label: 'Multilingv (i18n)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'wc-12', label: 'Blog / sistem articole', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-13', label: 'Formulare avansate + validare custom', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-14', label: 'Autentificare utilizatori', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'wc-15', label: 'Database custom (PostgreSQL / Turso)', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'wc-16', label: 'Deploy CI/CD (GitHub Actions)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'wc-17', label: 'Post-launch support (luni)', values: { bronze: 1, silver: 3, gold: 6, platinum: 12 } },
+			{ id: 'wc-18', label: 'Durată livrare', values: { bronze: '3-4 săpt', silver: '5-8 săpt', gold: '8-12 săpt', platinum: '12-20 săpt' } }
+		]
+	},
+	{
+		slug: 'woocommerce-dev',
+		name: 'Dezvoltare Magazin WooCommerce',
+		tagline: 'Magazin online pe WordPress + WooCommerce',
+		icon: 'shopping-bag',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 1500, silver: 3200, gold: 5200, platinum: 10000 },
+		setupDescription:
+			'Implementare one-time magazin online: configurare WooCommerce, plăți (Stripe/MobilPay/Netopia), curieri automatizați, facturare electronică ANAF SPV, SEO e-com, integrări tracking. Target OTS = Silver MVP (3.200 €).',
+		priceNote:
+			'Prețuri EUR fără TVA. Target OTS = Silver. Hosting WooCommerce (25-50 €/lună) + mentenanță WP (150-280 €/lună) separat.',
+		features: [
+			{ id: 'woo-1', label: 'Produse (nr. maxim)', values: { bronze: 20, silver: 50, gold: 500, platinum: '5.000+' } },
+			{ id: 'woo-2', label: 'Variante produs (culoare, mărime, etc.)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-3', label: 'Filtre avansate + sistem review', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-4', label: 'Plăți online (Stripe / MobilPay / Netopia)', values: { bronze: 'Ramburs', silver: '3 metode', gold: '5+ metode', platinum: '10+ integrări' } },
+			{ id: 'woo-5', label: 'Curieri automatizați (Fan / FanCourier, AWB)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-6', label: 'Facturare electronică (SmartBill / ANAF SPV)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-7', label: 'SEO e-commerce + GA4 Enhanced E-com', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-8', label: 'Hotjar / Clarity (heatmaps + session recordings)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-9', label: 'Upsell / cross-sell (AutomateWoo)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'woo-10', label: 'ERP / CRM integrat (Tiny / Saga)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'woo-11', label: 'Inventory management real-time', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-12', label: 'Tax RO VAT automat', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-13', label: 'Notificări email + SMS (order, shipping)', values: { bronze: 'Email', silver: 'Email', gold: 'Email + SMS', platinum: 'Email + SMS' } },
+			{ id: 'woo-14', label: 'Integrare Meta DPA (Advantage+)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'woo-15', label: 'Google Shopping feed', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'woo-16', label: 'Multilingv (WPML + Loco)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'woo-17', label: 'Design 100% custom pe brand', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'woo-18', label: 'Training administrare (ore)', values: { bronze: 2, silver: 4, gold: 6, platinum: 10 } },
+			{ id: 'woo-19', label: 'Migrare de pe alte platforme (Shopify/Presta)', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'woo-20', label: 'Post-launch support (luni)', values: { bronze: 1, silver: 1, gold: 3, platinum: 6 } }
+		]
+	},
+	{
+		slug: 'mobile-app',
+		name: 'Aplicație Mobilă (iOS + Android)',
+		tagline: 'Cross-platform Flutter / React Native (sau Native)',
+		icon: 'smartphone',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 12000, silver: 22000, gold: 42000, platinum: 90000 },
+		setupDescription:
+			'Dezvoltare aplicație mobilă one-time: design UI/UX, development cross-platform (Flutter / React Native recomandat), backend, QA, publicare App Store + Play Store. Native (Swift + Kotlin) +50-80% peste Platinum.',
+		priceNote:
+			'Prețuri EUR fără TVA. Target OTS = Silver (Simplă Flutter/RN, 22.000 €). Backend hosting (50-150 €/lună) + mentenanță app (200-500 €/lună) separat.',
+		features: [
+			{ id: 'app-1', label: 'Platforme', values: { bronze: 'iOS+Android (hybrid)', silver: 'iOS+Android (Flutter/RN)', gold: 'iOS+Android (full-stack)', platinum: 'Native Swift + Kotlin' } },
+			{ id: 'app-2', label: 'Ecrane incluse', values: { bronze: 6, silver: 12, gold: 25, platinum: '40+' } },
+			{ id: 'app-3', label: 'Autentificare', values: { bronze: 'Email', silver: 'Email + Social (FB/Apple)', gold: 'Email + Social + biometrică', platinum: 'Multi-factor + SSO' } },
+			{ id: 'app-4', label: 'Push notifications (Firebase)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'app-5', label: 'Catalog + wishlist', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'app-6', label: 'Coș + checkout (Stripe / MobilPay)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'app-7', label: 'Istoric comenzi + profil utilizator', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'app-8', label: 'Rating + review', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'app-9', label: 'Backend', values: { bronze: 'Static', silver: 'Firebase', gold: 'Node.js + Firestore', platinum: 'Custom + AWS/GCP' } },
+			{ id: 'app-10', label: 'API (REST / GraphQL)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'app-11', label: 'Chat real-time', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'app-12', label: 'Geolocalizare + maps', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'app-13', label: 'AI / ML features', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'app-14', label: 'Sincronizare ERP / CRM', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'app-15', label: 'QA + testing complet', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'app-16', label: 'Publicare App Store + Play Store', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'app-17', label: 'Mentenanță post-launch (luni)', values: { bronze: 0, silver: 1, gold: 3, platinum: 6 } },
+			{ id: 'app-18', label: 'Durată livrare', values: { bronze: '8-10 săpt', silver: '10-12 săpt', gold: '14-20 săpt', platinum: '24-32 săpt' } }
+		]
+	},
+	{
+		slug: 'landing-page-dev',
+		name: 'Dezvoltare Landing Page',
+		tagline: 'LP optimizată pentru conversii + A/B testing',
+		icon: 'mouse-pointer-click',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 600, silver: 1200, gold: 2200, platinum: 4000 },
+		setupDescription:
+			'Dezvoltare one-time landing page pentru campanii Ads: design, copywriting, tracking, A/B testing setup, heatmap. Complementar pentru Google Ads / Meta Ads.',
+		priceNote:
+			'Prețuri EUR fără TVA. Combinabilă cu CRO lunar pentru optimizare continuă post-launch.',
+		features: [
+			{ id: 'lp-1', label: 'Pagini (nr. maxim)', values: { bronze: 1, silver: 2, gold: 5, platinum: '10+' } },
+			{ id: 'lp-2', label: 'Design personalizat (nu drag-drop)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-3', label: 'Copywriting + headline testing', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-4', label: 'Formular optimizat (Gravity / custom)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-5', label: 'GA4 + GTM tracking', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-6', label: 'Meta Pixel + conversie event', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-7', label: 'Heatmap + session recording (Hotjar/Clarity)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-8', label: 'A/B testing setup (VWO / Optimizely)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-9', label: 'Variante design (nr. incluse)', values: { bronze: 1, silver: 2, gold: 4, platinum: '6+' } },
+			{ id: 'lp-10', label: 'Video / multimedia integration', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'lp-11', label: 'Mobile UX specific (optimizat per device)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-12', label: 'PageSpeed optimization (90+)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'lp-13', label: 'Post-launch AB testing (zile)', values: { bronze: 0, silver: 0, gold: 7, platinum: 30 } },
+			{ id: 'lp-14', label: 'Report conversii + recomandări scale', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'lp-15', label: 'Revizii incluse (rounds)', values: { bronze: 1, silver: 2, gold: 4, platinum: '6+' } }
+		]
 	}
 ];
 
 export function getCategory(slug: string): Category | undefined {
 	return CATEGORIES.find((c) => c.slug === slug);
+}
+
+// Grouping used by the services UI to make the 9-category list scannable.
+// Order of groups is intentional (most common first).
+export interface CategoryGroup {
+	id: string;
+	label: string;
+	description: string;
+	slugs: string[];
+}
+
+export const CATEGORY_GROUPS: CategoryGroup[] = [
+	{
+		id: 'paid-ads',
+		label: 'Ads / Promovare plătită',
+		description: 'Campanii plătite pe platformele majore — trafic rapid și măsurabil.',
+		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
+	},
+	{
+		id: 'organic',
+		label: 'Organic & SEO',
+		description: 'Trafic organic pe termen lung, fără buget media.',
+		slugs: ['seo']
+	},
+	{
+		id: 'web-dev-apps',
+		label: 'Dezvoltare Web & Apps',
+		description: 'Site, magazin, landing page, aplicație mobilă — one-time, fixed-price.',
+		slugs: ['website-dev', 'website-custom', 'woocommerce-dev', 'landing-page-dev', 'mobile-app']
+	},
+	{
+		id: 'conversion-lifecycle',
+		label: 'Conversie & Lifecycle',
+		description: 'Optimizare conversie, retenție și automatizări lifecycle.',
+		slugs: ['cro', 'email-marketing', 'marketing-automation']
+	},
+	{
+		id: 'site-setup',
+		label: 'Site & Implementare',
+		description: 'Mentenanță tehnică și configurări one-time.',
+		slugs: ['wordpress-maintenance', 'google-ads-setup']
+	}
+];
+
+// Tarife orare pentru muncă peste scope-ul pachetelor fixed-price
+// (afișate în dialog pe serviciile din grupul `web-dev-apps`).
+export const HOURLY_RATES: { label: string; rate: number }[] = [
+	{ label: 'Development', rate: 35 },
+	{ label: 'Design UI/UX', rate: 40 },
+	{ label: 'Project Management', rate: 45 },
+	{ label: 'DevOps / API', rate: 50 }
+];
+
+// Sluguri pentru care `PackageComparisonDialog` afișează
+// badge „Recomandat OTS" pe Silver + tabel tarife orare.
+export const WEB_DEV_SLUGS = new Set([
+	'website-dev',
+	'website-custom',
+	'woocommerce-dev',
+	'mobile-app',
+	'landing-page-dev'
+]);
+
+export function getCategoriesInGroup(groupId: string): Category[] {
+	const group = CATEGORY_GROUPS.find((g) => g.id === groupId);
+	if (!group) return [];
+	return group.slugs
+		.map((slug) => getCategory(slug))
+		.filter((c): c is Category => c !== undefined);
 }
 
 export function formatFeatureValue(value: FeatureValue): string {
@@ -682,6 +913,50 @@ export const BUNDLES: Bundle[] = [
 		badge: 'new',
 		rationale:
 			'Stack complet pentru scale: achiziție multi-canal, organic, CRO, lifecycle email și automation cross-platform. Meeting strategic lunar + rapoarte custom incluse.'
+	},
+
+	// -------- Bundles Dezvoltare Web & Apps --------
+	{
+		id: 'launch-wp',
+		name: 'Launch WP Pro',
+		tagline: 'Website + Google Ads Setup + CRO',
+		useCase: 'branding',
+		services: ['website-dev', 'google-ads-setup', 'cro'],
+		discountPct: 12,
+		rationale:
+			'Combo de lansare pentru brand-uri / SaaS: site nou + implementare tehnică GTM/GA4/Pixel + audit CRO în prima lună. Fundația corectă înainte de a investi în Ads.'
+	},
+	{
+		id: 'shop-online-scale',
+		name: 'Shop Online Scale',
+		tagline: 'WooCommerce + Meta Ads + Email Marketing',
+		useCase: 'ecommerce',
+		services: ['woocommerce-dev', 'meta-ads', 'email-marketing'],
+		discountPct: 15,
+		badge: 'popular',
+		rationale:
+			'Pachetul complet pentru magazine online: construcție shop + trafic imediat via DPA/Advantage+ pe Meta + abandoned cart recovery via Email. Funnel închis din Day 1.'
+	},
+	{
+		id: 'leadgen-complet',
+		name: 'Lead Gen Complet',
+		tagline: 'Landing Page + Google Ads + Marketing Automation',
+		useCase: 'lead-gen',
+		services: ['landing-page-dev', 'google-ads', 'marketing-automation'],
+		discountPct: 16,
+		rationale:
+			'Pentru B2B și servicii: LP optimizată pentru conversii + trafic Google cu intenție mare + nurturing automat până la MQL/SQL. Tech stack complet de lead gen.'
+	},
+	{
+		id: 'mobile-first',
+		name: 'Mobile First',
+		tagline: 'Aplicație Mobilă + Website Companion',
+		useCase: 'full-stack',
+		services: ['mobile-app', 'website-dev'],
+		discountPct: 10,
+		badge: 'new',
+		rationale:
+			'App mobilă + site companion pentru brand presence. Recomandat pentru business-uri cu utilizatori recurrenți (fidelizare, comenzi repetitive, loyalty) care au nevoie și de prezență web.'
 	}
 ];
 
