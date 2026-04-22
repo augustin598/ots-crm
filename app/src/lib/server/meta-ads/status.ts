@@ -31,6 +31,9 @@ export async function fetchMetaPaymentStatus(
 
 	const accounts = await listBusinessAdAccounts(integration.businessId, auth.accessToken);
 
+	// Only poll accounts assigned to a client. Orphan accounts (clientId = null)
+	// are not in use — we skip them to avoid wasted API calls and DB writes.
+	// When an orphan is assigned, it'll be picked up on the next run.
 	const stored = await db
 		.select()
 		.from(table.metaAdsAccount)
@@ -41,7 +44,9 @@ export async function fetchMetaPaymentStatus(
 			),
 		);
 
-	const storedByExternal = new Map(stored.map((row) => [row.metaAdAccountId, row]));
+	const storedByExternal = new Map(
+		stored.filter((row) => row.clientId != null).map((row) => [row.metaAdAccountId, row]),
+	);
 
 	const snapshots: PaymentStatusSnapshot[] = [];
 	const checkedAt = new Date();

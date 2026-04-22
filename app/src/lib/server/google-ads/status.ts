@@ -44,7 +44,14 @@ export async function fetchGooglePaymentStatus(
 			),
 		);
 
-	const storedByCustomer = new Map(stored.map((row) => [formatCustomerId(row.googleAdsCustomerId), row]));
+	// Only poll accounts assigned to a client. MCC typically has many orphan
+	// sub-accounts (78 vs 9 assigned) — skipping them saves ~70 GAQL
+	// billing_setup queries per run.
+	const storedByCustomer = new Map(
+		stored
+			.filter((row) => row.clientId != null)
+			.map((row) => [formatCustomerId(row.googleAdsCustomerId), row]),
+	);
 
 	const snapshots: PaymentStatusSnapshot[] = [];
 	const checkedAt = new Date();

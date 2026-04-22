@@ -23,15 +23,19 @@ export async function fetchTikTokPaymentStatus(
 	const auth = await getAuthenticatedToken(integration.id);
 	if (!auth) return [];
 
-	const stored = await db
-		.select()
-		.from(table.tiktokAdsAccount)
-		.where(
-			and(
-				eq(table.tiktokAdsAccount.tenantId, integration.tenantId),
-				eq(table.tiktokAdsAccount.integrationId, integration.id),
-			),
-		);
+	// Only poll accounts assigned to a client. Saves one /advertiser/info/
+	// batch + N /balance/get/ calls for orphan advertisers we don't use.
+	const stored = (
+		await db
+			.select()
+			.from(table.tiktokAdsAccount)
+			.where(
+				and(
+					eq(table.tiktokAdsAccount.tenantId, integration.tenantId),
+					eq(table.tiktokAdsAccount.integrationId, integration.id),
+				),
+			)
+	).filter((row) => row.clientId != null);
 
 	if (stored.length === 0) return [];
 
