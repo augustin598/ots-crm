@@ -129,9 +129,17 @@
 </script>
 
 {#if flagged.length > 0}
-	<div class="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-		<!-- Header -->
-		<div class="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4">
+	<div
+		class="overflow-hidden rounded-xl border border-zinc-200 border-l-4 bg-white shadow-sm"
+		class:border-l-red-500={hasCritical}
+		class:border-l-amber-500={!hasCritical}
+	>
+		<!-- Header with subtle tint to draw attention -->
+		<div
+			class="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4"
+			class:bg-red-50={hasCritical}
+			class:bg-amber-50={!hasCritical}
+		>
 			<div class="flex min-w-0 items-center gap-2.5">
 				<span class="relative flex size-4 shrink-0 items-center justify-center">
 					<span
@@ -149,7 +157,7 @@
 				</h3>
 			</div>
 			{#if headerBalance}
-				<div class="hidden shrink-0 items-center gap-2 rounded-full bg-zinc-50 px-3 py-1 md:inline-flex">
+				<div class="hidden shrink-0 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 shadow-sm md:inline-flex">
 					<span class="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
 						Sold restant
 					</span>
