@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 import { listMccSubAccounts, fetchBillingSetupStatus, formatCustomerId } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
@@ -36,13 +36,21 @@ export async function fetchGooglePaymentStatus(
 		integration.refreshToken,
 	);
 
-	// NOTE: googleAdsAccount has no integrationId column, so scoping is by
-	// tenantId only. For multi-MCC tenants this could collide (tracked as a
-	// follow-up: add `integration_id` column + migration).
+	// Scope to this integration. Legacy rows inserted before migration 0166 may
+	// have integrationId NULL; include them so they still get status updates
+	// until the next fetchGoogleAdsAccounts run populates the column.
 	const stored = await db
 		.select()
 		.from(table.googleAdsAccount)
-		.where(eq(table.googleAdsAccount.tenantId, integration.tenantId));
+		.where(
+			and(
+				eq(table.googleAdsAccount.tenantId, integration.tenantId),
+				or(
+					eq(table.googleAdsAccount.integrationId, integration.id),
+					isNull(table.googleAdsAccount.integrationId),
+				),
+			),
+		);
 
 	const storedByCustomer = new Map(stored.map((row) => [formatCustomerId(row.googleAdsCustomerId), row]));
 

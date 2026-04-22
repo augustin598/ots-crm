@@ -1454,6 +1454,7 @@ export const googleAdsAccount = sqliteTable('google_ads_account', {
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
+	integrationId: text('integration_id').references(() => googleAdsIntegration.id), // nullable (legacy); backfilled via migration 0167
 	googleAdsCustomerId: text('google_ads_customer_id').notNull(), // Sub-account ID (no dashes)
 	accountName: text('account_name').notNull(), // Descriptive name from Google Ads
 	currencyCode: text('currency_code').notNull().default('USD'), // Account currency from Google Ads API

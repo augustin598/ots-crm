@@ -1,0 +1,1 @@
+UPDATE `google_ads_account` SET `integration_id` = (SELECT `id` FROM `google_ads_integration` WHERE `google_ads_integration`.`tenant_id` = `google_ads_account`.`tenant_id` LIMIT 1) WHERE `integration_id` IS NULL;

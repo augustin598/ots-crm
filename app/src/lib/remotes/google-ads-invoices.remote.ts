@@ -407,6 +407,7 @@ export const fetchGoogleAdsAccounts = command(async () => {
 			await db
 				.update(table.googleAdsAccount)
 				.set({
+					integrationId: integration.id,
 					accountName: account.descriptiveName,
 					currencyCode: account.currencyCode,
 					isActive: account.status === 'ENABLED',
@@ -418,6 +419,7 @@ export const fetchGoogleAdsAccounts = command(async () => {
 			await db.insert(table.googleAdsAccount).values({
 				id: crypto.randomUUID(),
 				tenantId,
+				integrationId: integration.id,
 				googleAdsCustomerId: cleanId,
 				accountName: account.descriptiveName,
 				currencyCode: account.currencyCode,
