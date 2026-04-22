@@ -2940,32 +2940,39 @@ export async function sendAdPaymentDigestEmail(
 						it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
 							? '#d97706'
 							: '#dc2626';
+					const balanceBg =
+						it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
+							? '#fffbeb'
+							: '#fef2f2';
 					const clientLine = it.clientLabel
-						? `<div style="color: #6b7280; font-size: 12px;">${escapeHtml(it.clientLabel)}</div>`
+						? `<div style="color: #6b7280; font-size: 12px; margin-top: 2px;">${escapeHtml(it.clientLabel)}</div>`
 						: '';
-					const reasonLine = it.rawDisableReason
-						? ` <span style="color: #6b7280;">· ${escapeHtml(String(it.rawDisableReason))}</span>`
-						: '';
-					const balanceLine = it.balanceFormatted
-						? `<div style="color: ${accent}; font-weight: 700; font-size: 13px; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, monospace;">Sold: ${escapeHtml(it.balanceFormatted)}</div>`
+					// Balance presented as its own column-right block — bold amount
+					// with a quiet "Sold neachitat" label above, framed in a warm tint.
+					const balanceBlock = it.balanceFormatted
+						? `
+							<div style="margin-top: 10px; display: inline-block; padding: 8px 12px; background: ${balanceBg}; border: 1px solid ${accent}30; border-radius: 6px;">
+								<div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; font-weight: 600;">Sold neachitat</div>
+								<div style="font-size: 18px; font-weight: 700; color: ${accent}; margin-top: 2px; font-variant-numeric: tabular-nums;">${escapeHtml(it.balanceFormatted)}</div>
+							</div>
+						`
 						: '';
 					return `
 						<tr>
-							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<div style="font-weight: 600; color: #111827;">${escapeHtml(it.accountName)}</div>
-								<div style="color: #6b7280; font-size: 12px;"><code>${escapeHtml(it.externalAccountId)}</code></div>
+							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<div style="font-weight: 600; color: #111827; font-size: 14px;">${escapeHtml(it.accountName)}</div>
+								<div style="color: #9ca3af; font-size: 11px; margin-top: 2px; font-family: ui-monospace, SFMono-Regular, monospace;">${escapeHtml(it.externalAccountId)}</div>
 								${clientLine}
-								${balanceLine}
+								${balanceBlock}
 							</td>
-							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 13px; color: #374151;">
+							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 13px; color: #374151;">
 								${escapeHtml(it.providerLabel)}
 							</td>
-							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<span style="display: inline-block; padding: 3px 8px; border-radius: 4px; background: #fee2e2; color: ${accent}; font-size: 12px; font-weight: 600;">${escapeHtml(it.statusLabelRo)}</span>
-								<div style="color: #6b7280; font-size: 11px; margin-top: 2px;">cod: ${escapeHtml(String(it.rawStatusCode))}${reasonLine}</div>
+							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<span style="display: inline-block; padding: 4px 10px; border-radius: 4px; background: ${balanceBg}; color: ${accent}; font-size: 12px; font-weight: 600;">${escapeHtml(it.statusLabelRo)}</span>
 							</td>
-							<td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<a href="${escapeHtml(it.billingUrl)}" style="color: ${brand.themeColor}; text-decoration: underline; font-size: 13px;">Billing →</a>
+							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+								<a href="${escapeHtml(it.billingUrl)}" style="color: ${brand.themeColor}; text-decoration: underline; font-size: 13px; white-space: nowrap;">Billing →</a>
 							</td>
 						</tr>
 					`;
