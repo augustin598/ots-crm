@@ -43,7 +43,10 @@ export const PROVIDER_LABEL: Record<AdsProvider, string> = {
 export const PROVIDER_BILLING_URL: Record<AdsProvider, (externalId: string) => string> = {
 	meta: (id) => `https://business.facebook.com/billing_hub/payment_settings?asset_id=${id.replace(/^act_/, '')}`,
 	google: (id) => `https://ads.google.com/aw/billing/summary?ocid=${id}`,
-	tiktok: (id) => `https://ads.tiktok.com/i18n/payment/?aadvid=${id}`,
+	// Payment/invoice view per advertiser — matches the URL pattern used by
+	// the invoice scraper (see tiktok-ads/invoice-downloader.ts). The older
+	// /i18n/payment/ path redirects to the homepage and doesn't work.
+	tiktok: (id) => `https://ads.tiktok.com/i18n/account/payment_invoice?aadvid=${id}`,
 };
 
 /**
