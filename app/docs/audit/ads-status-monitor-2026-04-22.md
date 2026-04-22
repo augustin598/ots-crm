@@ -125,11 +125,15 @@ Toate fix-urile CRITICE + MAJORE au fost implementate direct pe `main` în acela
 | M4 / G3 | Unknown status mappers → `logWarning` + `risk_review` default (fail-safer) | `meta-ads/status.ts:34-38`, `google-ads/status.ts:21-25`, `tiktok-ads/status.ts:24-28` |
 | M5 | `withTimeout(90s)` pe fiecare poll per-integration | `ads-status-monitor.ts:49-64` |
 | M8 | Eliminat filter no-op în `resolveAdminRecipients` | `payment-alerts.ts:109-121` |
-| G1 | Documentat (nu fixat — schema n-are `integrationId` pe `googleAdsAccount`, necesită migrație) | comment în `google-ads/status.ts:38-40` |
+| G1 | Migrații 0166 (ADD COLUMN) + 0167 (backfill); schema updated; `fetchGoogleAdsAccounts` populează; `status.ts` filter `integrationId = X OR IS NULL` | `drizzle/0166-0167_*.sql`, `schema.ts`, `google-ads/status.ts:38-53`, `google-ads-invoices.remote.ts:406-432` |
 | G4 | Introdus `anySuccess` flag per poll — markSuccess iese correct din start | `ads-status-monitor.ts:65-67, 89-92, 113-116, 169-181` |
 | G6 | `client.email` inclus mereu (dedup pe match cu userRecipient) | `payment-alerts.ts:120-157, 213-234` |
 
-**C4 (email digest)** — amânat ca follow-up: design nou necesar, nu blochează operațiunea (M-ul e redus semnificativ de C3 + noul role filter).
+**C4 (email digest) — IMPLEMENTAT (commit ulterior)**
+- Adăugat `sendAdPaymentDigestEmail` în `email.ts` — render brandat cu tabel per platformă/status/cont
+- `reconcileAndAlert` refactor: acumulează `DigestAccumulator { adminByEmail, clientByEmail }` pe parcurs, face flush la final → un singur email per recipient per run
+- Notificările in-app rămân per-cont (dedup via fingerprint)
+- Impact: incidentul inițial cu 89 conturi × 4 admini = 356 emailuri ar fi fost 4 emailuri totale
 
 ---
 
