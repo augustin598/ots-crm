@@ -24,6 +24,7 @@
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleIcon from '@lucide/svelte/icons/circle';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import KeyIcon from '@lucide/svelte/icons/key';
 
 	type WpSite = {
 		id: string;
@@ -54,6 +55,10 @@
 
 	let generatedSecret = $state<string | null>(null);
 	let generatedSecretOpen = $state(false);
+
+	let rotateOpen = $state(false);
+	let rotateForm = $state({ siteId: '', siteName: '', secret: '' });
+	let rotating = $state(false);
 
 	async function loadSites() {
 		loading = true;
@@ -130,6 +135,45 @@
 			console.error(err);
 		} finally {
 			refreshingIds.delete(id);
+		}
+	}
+
+	function openRotate(site: WpSite) {
+		rotateForm = { siteId: site.id, siteName: site.name, secret: '' };
+		rotateOpen = true;
+	}
+
+	async function saveRotatedSecret() {
+		const secret = rotateForm.secret.trim();
+		if (secret.length !== 64 || !/^[0-9a-f]+$/i.test(secret)) {
+			toast.error('Secretul trebuie să aibă exact 64 caractere hex');
+			return;
+		}
+		rotating = true;
+		try {
+			const res = await fetch(`${apiBase}/${rotateForm.siteId}/secret`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ secret })
+			});
+			const body = (await res.json().catch(() => ({}))) as { error?: string; success?: boolean };
+			if (!res.ok) {
+				toast.error(body.error || 'Eroare la salvare');
+				return;
+			}
+			if (body.success) {
+				toast.success('Secret actualizat. Site conectat.');
+			} else {
+				toast.error(`Secret salvat, dar health check a eșuat: ${body.error ?? 'necunoscut'}`);
+			}
+			rotateOpen = false;
+			rotateForm = { siteId: '', siteName: '', secret: '' };
+			await loadSites();
+		} catch (err) {
+			toast.error('Eroare de rețea');
+			console.error(err);
+		} finally {
+			rotating = false;
 		}
 	}
 
@@ -274,6 +318,9 @@
 							/>
 							Refresh
 						</Button>
+						<Button variant="outline" size="sm" onclick={() => openRotate(site)} title="Schimbă secret HMAC">
+							<KeyIcon class="size-4" />
+						</Button>
 					</div>
 				</Card>
 			{/each}
@@ -335,6 +382,38 @@
 </Dialog>
 
 <!-- Generated secret display -->
+<Dialog bind:open={rotateOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Schimbă secret HMAC</DialogTitle>
+			<DialogDescription>
+				Lipește aici secretul afișat de plugin-ul OTS Connector pe <strong>{rotateForm.siteName}</strong>.
+				CRM-ul îl va salva encriptat și va rula imediat un health check.
+			</DialogDescription>
+		</DialogHeader>
+
+		<div class="flex flex-col gap-1">
+			<Label for="wp-rotate-secret">Secret nou (64 caractere hex)</Label>
+			<Input
+				id="wp-rotate-secret"
+				bind:value={rotateForm.secret}
+				placeholder="f7d2ed84c9e1765c0d90ad2fb1a4d557a24c4452c5a6e3d4ebf1448a8b1f992e"
+				autocomplete="off"
+			/>
+			<p class="text-xs text-muted-foreground">
+				Deschide în WordPress: <strong>Settings → OTS Connector</strong> și copiază secretul de acolo.
+			</p>
+		</div>
+
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (rotateOpen = false)} disabled={rotating}>Anulează</Button>
+			<Button onclick={saveRotatedSecret} disabled={rotating}>
+				{rotating ? 'Se salvează…' : 'Salvează și verifică'}
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
 <Dialog bind:open={generatedSecretOpen}>
 	<DialogContent>
 		<DialogHeader>
