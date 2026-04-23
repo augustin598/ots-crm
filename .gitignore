@@ -4,3 +4,6 @@ app-config.json
 .claude/worktrees/
 skills-lock.json
 .DS_Store
+
+# Plugin build artifacts (use ots-wp-connector/build.sh to produce)
+ots-wp-connector*.zip
