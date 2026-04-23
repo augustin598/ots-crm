@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button';
 	import { Card } from '$lib/components/ui/card';
@@ -40,6 +41,9 @@
 		createdAt: string;
 	};
 
+	const tenantSlug = $derived(page.params.tenant);
+	const apiBase = $derived(`/${tenantSlug}/api/wordpress/sites`);
+
 	let sites = $state<WpSite[]>([]);
 	let loading = $state(true);
 	const refreshingIds = new SvelteSet<string>();
@@ -54,7 +58,7 @@
 	async function loadSites() {
 		loading = true;
 		try {
-			const res = await fetch('/api/wordpress/sites');
+			const res = await fetch(apiBase);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = (await res.json()) as { sites: WpSite[] };
 			sites = data.sites;
@@ -75,7 +79,7 @@
 		}
 		adding = true;
 		try {
-			const res = await fetch('/api/wordpress/sites', {
+			const res = await fetch(apiBase, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -111,7 +115,7 @@
 	async function refreshSite(id: string) {
 		refreshingIds.add(id);
 		try {
-			const res = await fetch(`/api/wordpress/sites/${id}/refresh`, { method: 'POST' });
+			const res = await fetch(`${apiBase}/${id}/refresh`, { method: 'POST' });
 			const body = (await res.json().catch(() => ({}))) as { error?: string };
 			if (!res.ok) {
 				toast.error(body.error || 'Eroare la refresh');
