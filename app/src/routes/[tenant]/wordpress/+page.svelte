@@ -36,6 +36,7 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import ServerIcon from '@lucide/svelte/icons/server';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 
 	type UpdateCounts = {
 		core: number;
@@ -763,6 +764,15 @@
 								>
 									<RefreshCwIcon class="h-3.5 w-3.5 {refreshingIds.has(site.id) ? 'animate-spin' : ''}" />
 								</Button>
+								<a href="/{tenantSlug}/wordpress/{site.id}/posts" title="Postări blog">
+									<Button
+										variant="outline"
+										size="icon"
+										class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									>
+										<NewspaperIcon class="h-3.5 w-3.5" />
+									</Button>
+								</a>
 								<Button
 									variant="outline"
 									size="icon"

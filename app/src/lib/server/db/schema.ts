@@ -3739,3 +3739,48 @@ export const wordpressBackupRelations = relations(wordpressBackup, ({ one }) => 
 		references: [user.id]
 	})
 }));
+
+// Cache of WP posts synced into the CRM. Not the source of truth — WP is.
+// We refresh this on demand (list page) and on each create/update we push.
+// Images referenced as `data:` inline base64 get extracted + uploaded to WP
+// media before publish; final HTML is what WP stores.
+export const wordpressPost = sqliteTable('wordpress_post', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	siteId: text('site_id')
+		.notNull()
+		.references(() => wordpressSite.id, { onDelete: 'cascade' }),
+	wpPostId: integer('wp_post_id').notNull(), // ID on the WP side
+	title: text('title').notNull().default(''),
+	slug: text('slug').notNull().default(''),
+	status: text('status').notNull().default('draft'), // 'draft', 'publish', 'future', 'private', 'pending', 'trash'
+	contentHtml: text('content_html').notNull().default(''),
+	excerpt: text('excerpt'),
+	featuredMediaId: integer('featured_media_id'), // WP attachment ID
+	featuredMediaUrl: text('featured_media_url'),
+	authorWpId: integer('author_wp_id'),
+	link: text('link'), // Public permalink
+	publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }),
+	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const wordpressPostRelations = relations(wordpressPost, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressPost.tenantId],
+		references: [tenant.id]
+	}),
+	site: one(wordpressSite, {
+		fields: [wordpressPost.siteId],
+		references: [wordpressSite.id]
+	})
+}));

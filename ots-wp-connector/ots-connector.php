@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.3.0
+ * Version:           0.4.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.3.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.4.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -673,6 +673,244 @@ function ots_connector_rrmdir( string $path ): void {
 	@rmdir( $path );
 }
 
+/* ─────────────────────────── Posts + Media ─────────────────────────── */
+
+/**
+ * Shape the response returned for a single post. Keeps the CRM client
+ * happy with stable field names regardless of how WordPress evolves.
+ */
+function ots_connector_shape_post( WP_Post $post ): array {
+	$thumb_id  = (int) get_post_thumbnail_id( $post->ID );
+	$thumb_url = $thumb_id ? (string) wp_get_attachment_url( $thumb_id ) : null;
+	return [
+		'id'              => (int) $post->ID,
+		'title'           => (string) $post->post_title,
+		'slug'            => (string) $post->post_name,
+		'status'          => (string) $post->post_status,
+		'contentHtml'     => (string) $post->post_content,
+		'excerpt'         => (string) $post->post_excerpt,
+		'featuredMediaId' => $thumb_id ?: null,
+		'featuredMediaUrl'=> $thumb_url,
+		'authorWpId'      => (int) $post->post_author,
+		'link'            => (string) get_permalink( $post->ID ),
+		'publishedAt'     => $post->post_status === 'publish' ? mysql_to_rfc3339( $post->post_date_gmt ) : null,
+		'createdAt'       => mysql_to_rfc3339( $post->post_date_gmt ),
+		'updatedAt'       => mysql_to_rfc3339( $post->post_modified_gmt ),
+	];
+}
+
+/**
+ * GET /posts — paginated list. Query params: status (any WP status or
+ * 'any'), search, per_page (default 20, max 100), page (default 1).
+ */
+function ots_connector_route_list_posts( WP_REST_Request $request ) {
+	$per_page = min( 100, max( 1, (int) ( $request->get_param( 'per_page' ) ?? 20 ) ) );
+	$page     = max( 1, (int) ( $request->get_param( 'page' ) ?? 1 ) );
+	$status   = (string) ( $request->get_param( 'status' ) ?? 'any' );
+	$search   = (string) ( $request->get_param( 'search' ) ?? '' );
+
+	$args = [
+		'post_type'      => 'post',
+		'post_status'    => $status === 'any' ? [ 'publish', 'draft', 'pending', 'private', 'future' ] : $status,
+		'posts_per_page' => $per_page,
+		'paged'          => $page,
+		'orderby'        => 'date',
+		'order'          => 'DESC',
+	];
+	if ( $search !== '' ) {
+		$args['s'] = $search;
+	}
+
+	$query = new WP_Query( $args );
+	$items = array_map( 'ots_connector_shape_post', $query->posts );
+
+	return rest_ensure_response( [
+		'items'      => $items,
+		'total'      => (int) $query->found_posts,
+		'totalPages' => (int) $query->max_num_pages,
+		'page'       => $page,
+		'perPage'    => $per_page,
+		'timestamp'  => time(),
+	] );
+}
+
+/** GET /posts/{id} — single post. */
+function ots_connector_route_get_post( WP_REST_Request $request ) {
+	$id   = (int) $request['id'];
+	$post = get_post( $id );
+	if ( ! $post || $post->post_type !== 'post' ) {
+		return new WP_Error( 'ots_post_not_found', 'Post not found', [ 'status' => 404 ] );
+	}
+	return rest_ensure_response( ots_connector_shape_post( $post ) );
+}
+
+/**
+ * Common payload → wp_insert_post args translation. `allowed_statuses`
+ * rejects anything weird the CRM might send (category=draft-typo etc.).
+ */
+function ots_connector_build_post_args( array $body, int $id = 0 ): array {
+	$allowed_statuses = [ 'publish', 'draft', 'pending', 'private', 'future' ];
+	$status = (string) ( $body['status'] ?? 'draft' );
+	if ( ! in_array( $status, $allowed_statuses, true ) ) {
+		$status = 'draft';
+	}
+
+	$args = [
+		'post_type'    => 'post',
+		'post_title'   => (string) ( $body['title'] ?? '' ),
+		'post_content' => (string) ( $body['contentHtml'] ?? '' ),
+		'post_excerpt' => (string) ( $body['excerpt'] ?? '' ),
+		'post_status'  => $status,
+	];
+	if ( ! empty( $body['slug'] ) ) {
+		$args['post_name'] = sanitize_title( (string) $body['slug'] );
+	}
+	// Scheduled publish — if status=future, publishedAt must be in the future.
+	if ( $status === 'future' && ! empty( $body['publishedAt'] ) ) {
+		$ts = strtotime( (string) $body['publishedAt'] );
+		if ( $ts && $ts > time() ) {
+			$args['post_date']     = gmdate( 'Y-m-d H:i:s', $ts );
+			$args['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
+		}
+	}
+	if ( $id > 0 ) {
+		$args['ID'] = $id;
+	}
+	return $args;
+}
+
+/** POST /posts — create. Also sets featured image if `featuredMediaId` is provided. */
+function ots_connector_route_create_post( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	if ( ! is_array( $body ) ) {
+		return new WP_Error( 'ots_bad_body', 'Invalid body', [ 'status' => 400 ] );
+	}
+
+	$args = ots_connector_build_post_args( $body, 0 );
+	$id   = wp_insert_post( $args, true );
+	if ( is_wp_error( $id ) ) {
+		return $id;
+	}
+
+	if ( ! empty( $body['featuredMediaId'] ) ) {
+		set_post_thumbnail( $id, (int) $body['featuredMediaId'] );
+	}
+
+	$post = get_post( $id );
+	return rest_ensure_response( ots_connector_shape_post( $post ) );
+}
+
+/** PUT /posts/{id} — update. Same payload shape as create. */
+function ots_connector_route_update_post( WP_REST_Request $request ) {
+	$id   = (int) $request['id'];
+	$post = get_post( $id );
+	if ( ! $post || $post->post_type !== 'post' ) {
+		return new WP_Error( 'ots_post_not_found', 'Post not found', [ 'status' => 404 ] );
+	}
+
+	$body = $request->get_json_params();
+	if ( ! is_array( $body ) ) {
+		return new WP_Error( 'ots_bad_body', 'Invalid body', [ 'status' => 400 ] );
+	}
+
+	$args = ots_connector_build_post_args( $body, $id );
+	$result = wp_update_post( $args, true );
+	if ( is_wp_error( $result ) ) {
+		return $result;
+	}
+
+	if ( array_key_exists( 'featuredMediaId', $body ) ) {
+		$thumb = (int) $body['featuredMediaId'];
+		if ( $thumb > 0 ) {
+			set_post_thumbnail( $id, $thumb );
+		} else {
+			delete_post_thumbnail( $id );
+		}
+	}
+
+	$post = get_post( $id );
+	return rest_ensure_response( ots_connector_shape_post( $post ) );
+}
+
+/** DELETE /posts/{id} — move to trash (preserves revision history). */
+function ots_connector_route_delete_post( WP_REST_Request $request ) {
+	$id   = (int) $request['id'];
+	$post = get_post( $id );
+	if ( ! $post || $post->post_type !== 'post' ) {
+		return new WP_Error( 'ots_post_not_found', 'Post not found', [ 'status' => 404 ] );
+	}
+	$result = wp_trash_post( $id );
+	if ( ! $result ) {
+		return new WP_Error( 'ots_trash_failed', 'Could not trash post', [ 'status' => 500 ] );
+	}
+	return rest_ensure_response( [ 'success' => true, 'id' => $id, 'timestamp' => time() ] );
+}
+
+/**
+ * POST /media — accepts a base64-encoded image in the body and attaches it
+ * to the media library. Returns { id, url } that the CRM uses to rewrite
+ * inline <img src="data:..."> before publishing.
+ *
+ * Body: { filename: "hero.png", mimeType: "image/png", dataBase64: "<raw base64>" }
+ */
+function ots_connector_route_upload_media( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	$filename = (string) ( $body['filename'] ?? '' );
+	$mime     = (string) ( $body['mimeType'] ?? '' );
+	$b64      = (string) ( $body['dataBase64'] ?? '' );
+
+	if ( $filename === '' || $mime === '' || $b64 === '' ) {
+		return new WP_Error( 'ots_media_missing_fields', 'Missing filename/mimeType/dataBase64', [ 'status' => 400 ] );
+	}
+	// Only permit safe image mime types.
+	$allowed_mimes = [ 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml' ];
+	if ( ! in_array( $mime, $allowed_mimes, true ) ) {
+		return new WP_Error( 'ots_media_bad_mime', 'Unsupported mime type: ' . $mime, [ 'status' => 400 ] );
+	}
+
+	$binary = base64_decode( $b64, true );
+	if ( $binary === false || strlen( $binary ) === 0 ) {
+		return new WP_Error( 'ots_media_bad_base64', 'Invalid base64 payload', [ 'status' => 400 ] );
+	}
+	if ( strlen( $binary ) > 25 * 1024 * 1024 ) {
+		return new WP_Error( 'ots_media_too_large', 'File exceeds 25 MB limit', [ 'status' => 413 ] );
+	}
+
+	// wp_handle_sideload expects a file on disk; write to a temp file first.
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/media.php';
+	require_once ABSPATH . 'wp-admin/includes/image.php';
+
+	$safe_name = sanitize_file_name( $filename );
+	$tmp_path  = wp_tempnam( $safe_name );
+	if ( ! $tmp_path || file_put_contents( $tmp_path, $binary ) === false ) {
+		return new WP_Error( 'ots_media_tmp_failed', 'Could not write temp file', [ 'status' => 500 ] );
+	}
+
+	$file_array = [
+		'name'     => $safe_name,
+		'tmp_name' => $tmp_path,
+		'type'     => $mime,
+		'error'    => 0,
+		'size'     => strlen( $binary ),
+	];
+
+	$attachment_id = media_handle_sideload( $file_array, 0 );
+	if ( is_wp_error( $attachment_id ) ) {
+		@unlink( $tmp_path );
+		return $attachment_id;
+	}
+
+	$url = (string) wp_get_attachment_url( $attachment_id );
+
+	return rest_ensure_response( [
+		'id'        => (int) $attachment_id,
+		'url'       => $url,
+		'filename'  => $safe_name,
+		'timestamp' => time(),
+	] );
+}
+
 add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/health', [
 		'methods'             => WP_REST_Server::READABLE,
@@ -707,6 +945,42 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/restore', [
 		'methods'             => WP_REST_Server::CREATABLE,
 		'callback'            => 'ots_connector_route_restore',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts', [
+		'methods'             => WP_REST_Server::READABLE,
+		'callback'            => 'ots_connector_route_list_posts',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_create_post',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts/(?P<id>\d+)', [
+		'methods'             => WP_REST_Server::READABLE,
+		'callback'            => 'ots_connector_route_get_post',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts/(?P<id>\d+)', [
+		'methods'             => WP_REST_Server::EDITABLE,
+		'callback'            => 'ots_connector_route_update_post',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts/(?P<id>\d+)', [
+		'methods'             => WP_REST_Server::DELETABLE,
+		'callback'            => 'ots_connector_route_delete_post',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/media', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_upload_media',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 } );

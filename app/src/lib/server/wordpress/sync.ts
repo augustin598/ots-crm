@@ -205,6 +205,90 @@ export async function syncUpdates(siteId: string): Promise<{
 }
 
 /**
+ * Fetch posts from WP (paginated, but we grab up to 100 at a time and stop)
+ * and upsert into the cache. The cache isn't authoritative — WP is — but it
+ * makes the list view fast and keeps post_content around for quick edits
+ * without a round-trip.
+ */
+export async function syncPosts(
+	siteId: string,
+	opts?: { status?: string; search?: string; perPage?: number }
+): Promise<{ ok: boolean; error?: string; count: number; total: number }> {
+	const { site, client } = await loadSiteAndClient(siteId);
+
+	let response: Awaited<ReturnType<WpClient['listPosts']>>;
+	try {
+		response = await client.listPosts(
+			{
+				status: opts?.status ?? 'any',
+				search: opts?.search,
+				page: 1,
+				perPage: opts?.perPage ?? 50
+			},
+			{ siteId }
+		);
+	} catch (err) {
+		const { message } = serializeError(err);
+		const code = WpError.isWpError(err) ? err.code : 'unknown_error';
+		logWarning('wordpress', `listPosts failed for ${site.siteUrl}: ${code}`, {
+			tenantId: site.tenantId,
+			metadata: { siteId, code }
+		});
+		return { ok: false, error: message, count: 0, total: 0 };
+	}
+
+	const now = new Date();
+
+	// Upsert each post. We key on (site_id, wp_post_id) — the unique index
+	// in the migration enforces this invariant.
+	for (const p of response.items) {
+		const [row] = await db
+			.select({ id: table.wordpressPost.id })
+			.from(table.wordpressPost)
+			.where(eq(table.wordpressPost.wpPostId, p.id))
+			.limit(1);
+
+		const values = {
+			tenantId: site.tenantId,
+			siteId,
+			wpPostId: p.id,
+			title: p.title,
+			slug: p.slug,
+			status: p.status,
+			contentHtml: p.contentHtml,
+			excerpt: p.excerpt,
+			featuredMediaId: p.featuredMediaId ?? null,
+			featuredMediaUrl: p.featuredMediaUrl ?? null,
+			authorWpId: p.authorWpId ?? null,
+			link: p.link,
+			publishedAt: p.publishedAt ? new Date(p.publishedAt) : null,
+			lastSyncedAt: now,
+			updatedAt: now
+		};
+
+		if (row) {
+			await db
+				.update(table.wordpressPost)
+				.set(values)
+				.where(eq(table.wordpressPost.id, row.id));
+		} else {
+			await db.insert(table.wordpressPost).values({
+				id: newId(),
+				...values,
+				createdAt: now
+			});
+		}
+	}
+
+	logInfo('wordpress', `Posts synced for ${site.siteUrl}: ${response.items.length} of ${response.total}`, {
+		tenantId: site.tenantId,
+		metadata: { siteId, count: response.items.length, total: response.total }
+	});
+
+	return { ok: true, count: response.items.length, total: response.total };
+}
+
+/**
  * Lightweight uptime ping: HEAD on the site root, no plugin required. Updates
  * `uptimeStatus` and `lastUptimePingAt`. This runs on a tight cadence (every
  * 5 min) and is independent from the authenticated /health endpoint — so

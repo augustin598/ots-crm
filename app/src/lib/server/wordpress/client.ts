@@ -57,6 +57,50 @@ export interface WpBackupResponse {
 	timestamp: number;
 }
 
+/** Post shape returned by the plugin for list & single. */
+export interface WpPost {
+	id: number;
+	title: string;
+	slug: string;
+	status: 'publish' | 'draft' | 'pending' | 'private' | 'future' | 'trash';
+	contentHtml: string;
+	excerpt: string;
+	featuredMediaId: number | null;
+	featuredMediaUrl: string | null;
+	authorWpId: number;
+	link: string;
+	publishedAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface WpPostListResponse {
+	items: WpPost[];
+	total: number;
+	totalPages: number;
+	page: number;
+	perPage: number;
+	timestamp: number;
+}
+
+/** Payload accepted by POST /posts and PUT /posts/{id}. */
+export interface WpPostPayload {
+	title: string;
+	contentHtml: string;
+	excerpt?: string;
+	slug?: string;
+	status?: 'publish' | 'draft' | 'pending' | 'private' | 'future';
+	publishedAt?: string; // ISO 8601, required for status=future
+	featuredMediaId?: number | null;
+}
+
+export interface WpMediaUploadResponse {
+	id: number;
+	url: string;
+	filename: string;
+	timestamp: number;
+}
+
 interface RequestOptions {
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	path: string; // e.g. '/health' — relative to /wp-json/ots-connector/v1
@@ -155,6 +199,86 @@ export class WpClient {
 			path: '/restore',
 			body: { filename },
 			timeoutMs: opts?.timeoutMs ?? 900_000, // 15 min — big sites can be slow
+			siteId: opts?.siteId
+		});
+	}
+
+	/* ─────────────────────── Posts + Media ─────────────────────── */
+
+	async listPosts(
+		params?: { status?: string; search?: string; page?: number; perPage?: number },
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<WpPostListResponse> {
+		const qs = new URLSearchParams();
+		if (params?.status) qs.set('status', params.status);
+		if (params?.search) qs.set('search', params.search);
+		if (params?.page) qs.set('page', String(params.page));
+		if (params?.perPage) qs.set('per_page', String(params.perPage));
+		const path = qs.toString() ? `/posts?${qs.toString()}` : '/posts';
+		return this.request<WpPostListResponse>({
+			method: 'GET',
+			path,
+			timeoutMs: opts?.timeoutMs ?? 20_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async getPost(id: number, opts?: { timeoutMs?: number; siteId?: string }): Promise<WpPost> {
+		return this.request<WpPost>({
+			method: 'GET',
+			path: `/posts/${id}`,
+			timeoutMs: opts?.timeoutMs ?? 15_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async createPost(payload: WpPostPayload, opts?: { timeoutMs?: number; siteId?: string }): Promise<WpPost> {
+		return this.request<WpPost>({
+			method: 'POST',
+			path: '/posts',
+			body: payload,
+			timeoutMs: opts?.timeoutMs ?? 45_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async updatePost(
+		id: number,
+		payload: WpPostPayload,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<WpPost> {
+		return this.request<WpPost>({
+			method: 'PUT',
+			path: `/posts/${id}`,
+			body: payload,
+			timeoutMs: opts?.timeoutMs ?? 45_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async deletePost(id: number, opts?: { timeoutMs?: number; siteId?: string }): Promise<{ success: boolean }> {
+		return this.request<{ success: boolean }>({
+			method: 'DELETE',
+			path: `/posts/${id}`,
+			timeoutMs: opts?.timeoutMs ?? 20_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Upload a base64-encoded image to the WP media library. Used to
+	 * materialize inline <img src="data:..."> images from the TipTap editor
+	 * before publishing. Returns the attachment ID + public URL.
+	 */
+	async uploadMedia(
+		payload: { filename: string; mimeType: string; dataBase64: string },
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<WpMediaUploadResponse> {
+		return this.request<WpMediaUploadResponse>({
+			method: 'POST',
+			path: '/media',
+			body: payload,
+			timeoutMs: opts?.timeoutMs ?? 120_000, // up to 25 MB on a slow host
 			siteId: opts?.siteId
 		});
 	}

@@ -1268,6 +1268,13 @@
       "when": 1777430012000,
       "tag": "0180_wordpress_site_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "6",
+      "when": 1777430013000,
+      "tag": "0181_wordpress_post",
+      "breakpoints": true
     }
   ]
 }
