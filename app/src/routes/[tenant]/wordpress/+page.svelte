@@ -34,6 +34,8 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import ServerIcon from '@lucide/svelte/icons/server';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 
 	type UpdateCounts = {
 		core: number;
@@ -613,132 +615,188 @@
 			</Button>
 		</Card>
 	{:else}
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+		<div class="space-y-4">
 			{#each sites as site (site.id)}
-				<Card class="flex flex-col gap-3 p-5">
-					<div class="flex items-start justify-between gap-2">
-						<div class="min-w-0 flex-1">
-							<div class="flex items-center gap-2">
-								<h3 class="truncate font-medium">{site.name}</h3>
-								{#if site.uptimeStatus === 'up'}
-									<CircleCheckIcon class="size-4 shrink-0 text-green-600" aria-label="Up" />
-								{:else if site.uptimeStatus === 'down'}
-									<CircleXIcon class="size-4 shrink-0 text-red-600" aria-label="Down" />
-								{:else}
-									<CircleIcon class="size-4 shrink-0 text-muted-foreground" aria-label="Unknown" />
+				<Card class="group relative overflow-hidden border-2 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5">
+					<!-- Modern gradient accent bar -->
+					<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-primary/80 to-primary/60"></div>
+
+					<div class="p-4 pt-5">
+						<div class="flex items-start justify-between gap-4">
+							<div class="flex-1 min-w-0">
+								<!-- Header with site name, uptime dot, status badges -->
+								<div class="flex items-center gap-2 mb-2 flex-wrap">
+									<div class="flex items-center gap-1.5">
+										<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+											<GlobeIcon class="h-3.5 w-3.5 text-primary" />
+										</div>
+										<h3 class="text-lg font-bold tracking-tight text-foreground">
+											{site.name}
+										</h3>
+										{#if site.uptimeStatus === 'up'}
+											<CircleCheckIcon class="size-4 text-green-600" aria-label="Uptime: Up" />
+										{:else if site.uptimeStatus === 'down'}
+											<CircleXIcon class="size-4 text-red-600" aria-label="Uptime: Down" />
+										{:else}
+											<CircleIcon class="size-4 text-muted-foreground" aria-label="Uptime: Unknown" />
+										{/if}
+									</div>
+									<Badge
+										variant={statusBadgeVariant(site.status)}
+										class="text-xs font-semibold px-2 py-0.5 shadow-sm"
+									>
+										{statusLabel(site.status)}
+									</Badge>
+									{#if site.paused}
+										<Badge variant="secondary" class="flex items-center gap-1 text-xs px-2 py-0.5">
+											<PauseIcon class="size-3" />
+											Pauzat
+										</Badge>
+									{/if}
+									{#if site.updates && site.updates.security > 0}
+										<Badge variant="destructive" class="flex items-center gap-1 text-xs px-2 py-0.5 shadow-sm">
+											<ShieldAlertIcon class="size-3" />
+											{site.updates.security} securitate
+										</Badge>
+									{/if}
+								</div>
+
+								<!-- URL + client -->
+								<p class="text-xs font-medium text-muted-foreground mb-4 flex items-center gap-1.5 flex-wrap">
+									<a
+										href={site.siteUrl}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="hover:text-primary hover:underline transition-colors"
+									>
+										{site.siteUrl}
+									</a>
+									{#if site.clientName}
+										<span class="w-1 h-1 rounded-full bg-muted-foreground/40"></span>
+										<span>Client: <span class="font-semibold text-foreground">{site.clientName}</span></span>
+									{/if}
+								</p>
+
+								<!-- Modern info grid with icons -->
+								<div class="grid gap-3 md:grid-cols-4">
+									<!-- WordPress version — featured -->
+									<div class="relative p-3 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/10 group-hover:border-primary/20 transition-all">
+										<div class="flex items-center gap-1.5 mb-1.5">
+											<GlobeIcon class="h-3.5 w-3.5 text-primary/60" />
+											<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">WordPress</p>
+										</div>
+										<p class="text-xl font-bold text-primary leading-tight">
+											{site.wpVersion ?? '—'}
+										</p>
+									</div>
+
+									<!-- PHP version -->
+									<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-all">
+										<div class="flex items-center gap-1.5 mb-1.5">
+											<ServerIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+											<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">PHP</p>
+										</div>
+										<p class="text-sm font-semibold text-foreground">
+											{site.phpVersion ?? '—'}
+										</p>
+									</div>
+
+									<!-- Updates pending (clickable if any) -->
+									{#if site.updates && site.updates.total > 0}
+										<button
+											type="button"
+											onclick={() => openUpdates(site)}
+											class="p-3 rounded-lg text-left bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15 hover:border-amber-500/40 transition-all"
+										>
+											<div class="flex items-center gap-1.5 mb-1.5">
+												<ArrowUpCircleIcon class="h-3.5 w-3.5 text-amber-600/70" />
+												<p class="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Updates</p>
+											</div>
+											<p class="text-sm font-semibold text-amber-700 dark:text-amber-400">
+												{site.updates.total}
+												<span class="ml-1 text-xs font-normal text-amber-600/70 dark:text-amber-500/80">
+													({site.updates.core}c · {site.updates.plugins}p · {site.updates.themes}t)
+												</span>
+											</p>
+										</button>
+									{:else}
+										<div class="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+											<div class="flex items-center gap-1.5 mb-1.5">
+												<CircleCheckIcon class="h-3.5 w-3.5 text-green-600/70" />
+												<p class="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide">Updates</p>
+											</div>
+											<p class="text-sm font-semibold text-green-700 dark:text-green-400">
+												La zi
+											</p>
+										</div>
+									{/if}
+
+									<!-- Last check -->
+									<div class="p-3 rounded-lg bg-muted/30 border border-border/50 group-hover:bg-muted/50 transition-all">
+										<div class="flex items-center gap-1.5 mb-1.5">
+											<CalendarIcon class="h-3.5 w-3.5 text-muted-foreground/60" />
+											<p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ultima verificare</p>
+										</div>
+										<p class="text-sm font-semibold text-foreground">
+											{formatDate(site.lastHealthCheckAt)}
+										</p>
+									</div>
+								</div>
+
+								{#if site.lastError && site.status === 'error'}
+									<div class="mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive">
+										<CircleAlertIcon class="size-4 shrink-0 mt-0.5" />
+										<span class="break-words">{site.lastError}</span>
+									</div>
 								{/if}
 							</div>
-							<a
-								href={site.siteUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="truncate text-xs text-muted-foreground hover:underline"
-							>
-								{site.siteUrl}
-							</a>
-							{#if site.clientName}
-								<p class="mt-1 truncate text-xs text-muted-foreground">
-									Client: <span class="font-medium">{site.clientName}</span>
-								</p>
-							{/if}
-						</div>
-						<div class="flex flex-col items-end gap-1">
-							<Badge variant={statusBadgeVariant(site.status)}>{statusLabel(site.status)}</Badge>
-							{#if site.paused}
-								<Badge variant="secondary" class="flex items-center gap-1 text-[10px]">
-									<PauseIcon class="size-3" />
-									Pauzat
-								</Badge>
-							{/if}
-						</div>
-					</div>
 
-					<div class="grid grid-cols-2 gap-2 text-xs">
-						<div>
-							<div class="text-muted-foreground">WordPress</div>
-							<div class="font-medium">{site.wpVersion ?? '—'}</div>
-						</div>
-						<div>
-							<div class="text-muted-foreground">PHP</div>
-							<div class="font-medium">{site.phpVersion ?? '—'}</div>
-						</div>
-						<div class="col-span-2">
-							<div class="text-muted-foreground">Ultima verificare</div>
-							<div class="font-medium">{formatDate(site.lastHealthCheckAt)}</div>
-						</div>
-					</div>
-
-					{#if site.updates && site.updates.total > 0}
-						<button
-							type="button"
-							class="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-muted/40 p-2 text-left text-xs transition-colors hover:bg-muted"
-							onclick={() => openUpdates(site)}
-						>
-							<div class="flex items-center gap-2">
-								<ArrowUpCircleIcon class="size-4 text-primary" />
-								<span class="font-medium">
-									{site.updates.total}
-									{site.updates.total === 1 ? 'update' : 'update-uri'}
-								</span>
-								<span class="text-muted-foreground">
-									({site.updates.core}c · {site.updates.plugins}p · {site.updates.themes}t)
-								</span>
+							<!-- Action buttons with modern styling -->
+							<div class="flex items-center gap-1.5 flex-shrink-0">
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									disabled={refreshingIds.has(site.id)}
+									onclick={() => refreshSite(site.id)}
+									title="Refresh"
+								>
+									<RefreshCwIcon class="h-3.5 w-3.5 {refreshingIds.has(site.id) ? 'animate-spin' : ''}" />
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									onclick={() => openBackups(site)}
+									title="Backup-uri"
+								>
+									<DatabaseBackupIcon class="h-3.5 w-3.5" />
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									onclick={() => togglePause(site)}
+									disabled={pausingIds.has(site.id)}
+									title={site.paused ? 'Reia monitorizarea' : 'Pune pe pauză'}
+								>
+									{#if site.paused}
+										<PlayIcon class="h-3.5 w-3.5" />
+									{:else}
+										<PauseIcon class="h-3.5 w-3.5" />
+									{/if}
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									onclick={() => openRotate(site)}
+									title="Schimbă secret HMAC"
+								>
+									<KeyIcon class="h-3.5 w-3.5" />
+								</Button>
 							</div>
-							{#if site.updates.security > 0}
-								<Badge variant="destructive" class="flex items-center gap-1">
-									<ShieldAlertIcon class="size-3" />
-									{site.updates.security} securitate
-								</Badge>
-							{/if}
-						</button>
-					{:else if site.status === 'connected' && site.lastUpdatesCheckAt}
-						<div class="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-2 text-xs text-muted-foreground">
-							<span class="flex items-center gap-2">
-								<ArrowUpCircleIcon class="size-4" />
-								Totul e la zi
-							</span>
 						</div>
-					{/if}
-
-					{#if site.lastError && site.status === 'error'}
-						<div class="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
-							<CircleAlertIcon class="size-4 shrink-0" />
-							<span class="break-words">{site.lastError}</span>
-						</div>
-					{/if}
-
-					<div class="flex gap-2 pt-1">
-						<Button
-							variant="outline"
-							size="sm"
-							class="flex-1"
-							disabled={refreshingIds.has(site.id)}
-							onclick={() => refreshSite(site.id)}
-						>
-							<RefreshCwIcon
-								class="mr-2 size-4 {refreshingIds.has(site.id) ? 'animate-spin' : ''}"
-							/>
-							Refresh
-						</Button>
-						<Button variant="outline" size="sm" onclick={() => openBackups(site)} title="Backup-uri">
-							<DatabaseBackupIcon class="size-4" />
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={() => togglePause(site)}
-							disabled={pausingIds.has(site.id)}
-							title={site.paused ? 'Reia monitorizarea' : 'Pune pe pauză'}
-						>
-							{#if site.paused}
-								<PlayIcon class="size-4" />
-							{:else}
-								<PauseIcon class="size-4" />
-							{/if}
-						</Button>
-						<Button variant="outline" size="sm" onclick={() => openRotate(site)} title="Schimbă secret HMAC">
-							<KeyIcon class="size-4" />
-						</Button>
 					</div>
 				</Card>
 			{/each}
