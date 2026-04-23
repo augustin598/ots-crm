@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.2.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.3.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -486,6 +486,193 @@ function ots_connector_dump_database( string $output_path ) {
 	return true;
 }
 
+/**
+ * DELETE /backup — delete one backup archive identified by its filename.
+ * Hardened against path traversal: only filenames matching the expected
+ * pattern `ots-backup-*.zip` inside the backup dir are accepted.
+ */
+function ots_connector_route_delete_backup( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	$filename = (string) ( $body['filename'] ?? '' );
+	if ( $filename === '' ) {
+		return new WP_Error( 'ots_missing_filename', 'Missing filename', [ 'status' => 400 ] );
+	}
+	// Reject anything with path separators or leading dots.
+	if ( strpbrk( $filename, "/\\" ) !== false || str_starts_with( $filename, '.' ) ) {
+		return new WP_Error( 'ots_bad_filename', 'Invalid filename', [ 'status' => 400 ] );
+	}
+	if ( ! preg_match( '/^ots-backup-[0-9\-]+\.zip$/', $filename ) ) {
+		return new WP_Error( 'ots_bad_filename', 'Filename does not match backup pattern', [ 'status' => 400 ] );
+	}
+
+	$upload_dir = wp_upload_dir();
+	$full_path  = trailingslashit( $upload_dir['basedir'] ) . 'ots-backups/' . $filename;
+
+	if ( ! file_exists( $full_path ) ) {
+		// Idempotent: already gone is a success from the caller's POV.
+		return rest_ensure_response( [ 'success' => true, 'deleted' => false, 'timestamp' => time() ] );
+	}
+
+	if ( ! @unlink( $full_path ) ) {
+		return new WP_Error( 'ots_delete_failed', 'Could not delete file', [ 'status' => 500 ] );
+	}
+
+	return rest_ensure_response( [ 'success' => true, 'deleted' => true, 'timestamp' => time() ] );
+}
+
+/**
+ * POST /restore — restore from a backup archive produced by this plugin.
+ * Extracts the ZIP to a temp dir, imports the SQL dump, then copies
+ * wp-content back into place. DESTRUCTIVE: overwrites DB + wp-content.
+ *
+ * Same filename validation as delete. Body: { filename: "ots-backup-...zip" }
+ */
+function ots_connector_route_restore( WP_REST_Request $request ) {
+	global $wpdb;
+	$body = $request->get_json_params();
+	$filename = (string) ( $body['filename'] ?? '' );
+	if ( $filename === '' ) {
+		return new WP_Error( 'ots_missing_filename', 'Missing filename', [ 'status' => 400 ] );
+	}
+	if ( strpbrk( $filename, "/\\" ) !== false || str_starts_with( $filename, '.' ) ) {
+		return new WP_Error( 'ots_bad_filename', 'Invalid filename', [ 'status' => 400 ] );
+	}
+	if ( ! preg_match( '/^ots-backup-[0-9\-]+\.zip$/', $filename ) ) {
+		return new WP_Error( 'ots_bad_filename', 'Filename does not match backup pattern', [ 'status' => 400 ] );
+	}
+
+	$started = microtime( true );
+
+	$upload_dir   = wp_upload_dir();
+	$backup_dir   = trailingslashit( $upload_dir['basedir'] ) . 'ots-backups';
+	$archive_path = $backup_dir . '/' . $filename;
+
+	if ( ! file_exists( $archive_path ) ) {
+		return new WP_Error( 'ots_archive_missing', 'Backup archive not found on disk', [ 'status' => 404 ] );
+	}
+	if ( ! class_exists( 'ZipArchive' ) ) {
+		return new WP_Error( 'ots_no_zip', 'PHP ZipArchive extension not available', [ 'status' => 500 ] );
+	}
+
+	// Extract to a temp dir under ots-backups/restore-<ts>
+	$temp_dir = $backup_dir . '/restore-' . gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 6, false, false );
+	if ( ! wp_mkdir_p( $temp_dir ) ) {
+		return new WP_Error( 'ots_mkdir_failed', 'Could not create temp dir for restore', [ 'status' => 500 ] );
+	}
+
+	$zip = new ZipArchive();
+	if ( $zip->open( $archive_path ) !== true ) {
+		return new WP_Error( 'ots_zip_open_failed', 'Could not open archive', [ 'status' => 500 ] );
+	}
+	$zip->extractTo( $temp_dir );
+	$zip->close();
+
+	// Import SQL dump
+	$sql_path = $temp_dir . '/database.sql';
+	if ( ! file_exists( $sql_path ) ) {
+		ots_connector_rrmdir( $temp_dir );
+		return new WP_Error( 'ots_sql_missing', 'database.sql missing from archive', [ 'status' => 500 ] );
+	}
+
+	$import_result = ots_connector_import_sql( $sql_path );
+	if ( is_wp_error( $import_result ) ) {
+		ots_connector_rrmdir( $temp_dir );
+		return $import_result;
+	}
+
+	// Copy wp-content back into place. We refuse to nuke the live
+	// ots-backups dir during the copy so the archive we just restored
+	// from stays around.
+	$src_wp_content = $temp_dir . '/wp-content';
+	if ( is_dir( $src_wp_content ) ) {
+		ots_connector_copy_tree( $src_wp_content, WP_CONTENT_DIR, [ 'ots-backups' ] );
+	}
+
+	// Cleanup temp
+	ots_connector_rrmdir( $temp_dir );
+
+	$elapsed = round( microtime( true ) - $started, 2 );
+
+	return rest_ensure_response( [
+		'success'    => true,
+		'filename'   => $filename,
+		'elapsedSec' => $elapsed,
+		'tablesImported' => $import_result,
+		'timestamp'  => time(),
+	] );
+}
+
+/**
+ * Execute a .sql file statement-by-statement against the WP database.
+ * Streams line-by-line so we don't blow memory on multi-GB dumps.
+ */
+function ots_connector_import_sql( string $sql_path ) {
+	global $wpdb;
+	$fh = @fopen( $sql_path, 'rb' );
+	if ( ! $fh ) {
+		return new WP_Error( 'ots_sql_open_failed', 'Could not open SQL file', [ 'status' => 500 ] );
+	}
+
+	$wpdb->query( 'SET FOREIGN_KEY_CHECKS=0' );
+
+	$statement = '';
+	$count = 0;
+	while ( ( $line = fgets( $fh ) ) !== false ) {
+		$trimmed = ltrim( $line );
+		if ( $trimmed === '' || str_starts_with( $trimmed, '--' ) ) continue;
+		$statement .= $line;
+		// Naive split on semicolon-newline — good enough for mysqldump-style
+		// output (no stored procedures with inline semicolons in WP data).
+		if ( preg_match( '/;\s*$/', rtrim( $line ) ) ) {
+			$wpdb->query( $statement );
+			$statement = '';
+			$count++;
+		}
+	}
+	fclose( $fh );
+
+	$wpdb->query( 'SET FOREIGN_KEY_CHECKS=1' );
+	return $count;
+}
+
+/** Recursively copy $src into $dst, skipping any top-level dirs in $skip. */
+function ots_connector_copy_tree( string $src, string $dst, array $skip = [] ): void {
+	if ( ! is_dir( $dst ) ) {
+		wp_mkdir_p( $dst );
+	}
+	$dh = opendir( $src );
+	if ( ! $dh ) return;
+	while ( ( $entry = readdir( $dh ) ) !== false ) {
+		if ( $entry === '.' || $entry === '..' ) continue;
+		if ( in_array( $entry, $skip, true ) ) continue;
+
+		$src_path = $src . '/' . $entry;
+		$dst_path = $dst . '/' . $entry;
+
+		if ( is_dir( $src_path ) ) {
+			ots_connector_copy_tree( $src_path, $dst_path );
+		} else {
+			@copy( $src_path, $dst_path );
+		}
+	}
+	closedir( $dh );
+}
+
+/** Recursively remove a directory tree. */
+function ots_connector_rrmdir( string $path ): void {
+	if ( ! is_dir( $path ) ) return;
+	$dh = opendir( $path );
+	if ( ! $dh ) return;
+	while ( ( $entry = readdir( $dh ) ) !== false ) {
+		if ( $entry === '.' || $entry === '..' ) continue;
+		$full = $path . '/' . $entry;
+		if ( is_dir( $full ) ) ots_connector_rrmdir( $full );
+		else @unlink( $full );
+	}
+	closedir( $dh );
+	@rmdir( $path );
+}
+
 add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/health', [
 		'methods'             => WP_REST_Server::READABLE,
@@ -508,6 +695,18 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/backup', [
 		'methods'             => WP_REST_Server::CREATABLE,
 		'callback'            => 'ots_connector_route_backup',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/backup', [
+		'methods'             => WP_REST_Server::DELETABLE,
+		'callback'            => 'ots_connector_route_delete_backup',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/restore', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_restore',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 } );

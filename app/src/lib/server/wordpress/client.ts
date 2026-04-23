@@ -128,6 +128,37 @@ export class WpClient {
 		});
 	}
 
+	/** Delete a single backup archive on the WP server. Idempotent. */
+	async deleteBackup(
+		filename: string,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{ success: boolean; deleted: boolean }> {
+		return this.request<{ success: boolean; deleted: boolean }>({
+			method: 'DELETE',
+			path: '/backup',
+			body: { filename },
+			timeoutMs: opts?.timeoutMs ?? 30_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Restore a backup archive — DESTRUCTIVE: overwrites DB + wp-content.
+	 * The plugin extracts the zip locally and replays the SQL dump.
+	 */
+	async restoreBackup(
+		filename: string,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{ success: boolean; filename: string; elapsedSec: number; tablesImported: number }> {
+		return this.request({
+			method: 'POST',
+			path: '/restore',
+			body: { filename },
+			timeoutMs: opts?.timeoutMs ?? 900_000, // 15 min — big sites can be slow
+			siteId: opts?.siteId
+		});
+	}
+
 	private async request<T>({
 		method,
 		path,

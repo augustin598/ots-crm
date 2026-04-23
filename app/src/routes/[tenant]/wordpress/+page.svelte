@@ -29,6 +29,11 @@
 	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
 	import ArrowUpCircleIcon from '@lucide/svelte/icons/arrow-up-circle';
 	import DatabaseBackupIcon from '@lucide/svelte/icons/database-backup';
+	import PauseIcon from '@lucide/svelte/icons/pause';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import HistoryIcon from '@lucide/svelte/icons/history';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 
 	type UpdateCounts = {
 		core: number;
@@ -52,6 +57,7 @@
 		lastError: string | null;
 		clientId: string | null;
 		clientName: string | null;
+		paused: number; // 1 = scheduler skips this site
 		createdAt: string;
 		updates: UpdateCounts;
 	};
@@ -115,6 +121,16 @@
 	let backupsList = $state<BackupRow[]>([]);
 	let backupsLoading = $state(false);
 	let triggeringBackup = $state(false);
+	const deletingBackupIds = new SvelteSet<string>();
+
+	// Restore confirm dialog state
+	let restoreOpen = $state(false);
+	let restoreTarget = $state<{ siteId: string; siteName: string; backupId: string; createdAt: string } | null>(null);
+	let restoreConfirmText = $state('');
+	let restoring = $state(false);
+
+	// Pausing state — used to disable the toggle while the PATCH is in-flight
+	const pausingIds = new SvelteSet<string>();
 
 	const totalSecurityUpdates = $derived(
 		sites.reduce((sum, s) => sum + (s.updates?.security ?? 0), 0)
@@ -375,6 +391,104 @@
 		}
 	}
 
+	async function togglePause(site: WpSite) {
+		const nextPaused = site.paused ? false : true;
+		pausingIds.add(site.id);
+		try {
+			const res = await fetch(`${apiBase}/${site.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ paused: nextPaused })
+			});
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error?: string };
+				toast.error(body.error || 'Eroare la schimbare');
+				return;
+			}
+			toast.success(nextPaused ? 'Monitorizare pauzată' : 'Monitorizare reactivată');
+			await loadSites();
+		} catch (err) {
+			toast.error('Eroare de rețea');
+			console.error(err);
+		} finally {
+			pausingIds.delete(site.id);
+		}
+	}
+
+	async function deleteBackup(backup: BackupRow) {
+		if (!backupsSite) return;
+		if (!confirm('Ștergi backup-ul? Fișierul va fi eliminat de pe serverul WordPress.')) return;
+		deletingBackupIds.add(backup.id);
+		try {
+			const res = await fetch(`${apiBase}/${backupsSite.id}/backups/${backup.id}`, {
+				method: 'DELETE'
+			});
+			const body = (await res.json().catch(() => ({}))) as { error?: string; warning?: string };
+			if (!res.ok) {
+				toast.error(body.error || 'Ștergerea a eșuat');
+				return;
+			}
+			if (body.warning) toast.warning(body.warning);
+			else toast.success('Backup șters');
+			backupsList = backupsList.filter((b) => b.id !== backup.id);
+		} catch (err) {
+			toast.error('Eroare de rețea');
+			console.error(err);
+		} finally {
+			deletingBackupIds.delete(backup.id);
+		}
+	}
+
+	function openRestore(backup: BackupRow) {
+		if (!backupsSite) return;
+		restoreTarget = {
+			siteId: backupsSite.id,
+			siteName: backupsSite.name,
+			backupId: backup.id,
+			createdAt: backup.createdAt
+		};
+		restoreConfirmText = '';
+		restoreOpen = true;
+	}
+
+	async function confirmRestore() {
+		if (!restoreTarget) return;
+		if (restoreConfirmText !== restoreTarget.siteName) {
+			toast.error('Numele site-ului nu corespunde');
+			return;
+		}
+		restoring = true;
+		try {
+			const res = await fetch(
+				`${apiBase}/${restoreTarget.siteId}/backups/${restoreTarget.backupId}/restore`,
+				{ method: 'POST' }
+			);
+			const body = (await res.json().catch(() => ({}))) as {
+				success?: boolean;
+				error?: string;
+				elapsedSec?: number;
+				tablesImported?: number;
+			};
+			if (!res.ok || !body.success) {
+				toast.error(body.error || 'Restore eșuat');
+				return;
+			}
+			toast.success(
+				`Restore OK — ${body.tablesImported} tabele în ${body.elapsedSec?.toFixed(1) ?? '?'}s`
+			);
+			restoreOpen = false;
+			restoreTarget = null;
+			restoreConfirmText = '';
+			// Health might be temporarily wonky right after a restore; refresh.
+			await loadSites();
+		} catch (err) {
+			toast.error('Eroare de rețea');
+			console.error(err);
+		} finally {
+			restoring = false;
+		}
+	}
+
 	function formatBytes(bytes: number | null): string {
 		if (!bytes) return '—';
 		const mb = bytes / 1024 / 1024;
@@ -528,7 +642,15 @@
 								</p>
 							{/if}
 						</div>
-						<Badge variant={statusBadgeVariant(site.status)}>{statusLabel(site.status)}</Badge>
+						<div class="flex flex-col items-end gap-1">
+							<Badge variant={statusBadgeVariant(site.status)}>{statusLabel(site.status)}</Badge>
+							{#if site.paused}
+								<Badge variant="secondary" class="flex items-center gap-1 text-[10px]">
+									<PauseIcon class="size-3" />
+									Pauzat
+								</Badge>
+							{/if}
+						</div>
 					</div>
 
 					<div class="grid grid-cols-2 gap-2 text-xs">
@@ -600,6 +722,19 @@
 						</Button>
 						<Button variant="outline" size="sm" onclick={() => openBackups(site)} title="Backup-uri">
 							<DatabaseBackupIcon class="size-4" />
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => togglePause(site)}
+							disabled={pausingIds.has(site.id)}
+							title={site.paused ? 'Reia monitorizarea' : 'Pune pe pauză'}
+						>
+							{#if site.paused}
+								<PlayIcon class="size-4" />
+							{:else}
+								<PauseIcon class="size-4" />
+							{/if}
 						</Button>
 						<Button variant="outline" size="sm" onclick={() => openRotate(site)} title="Schimbă secret HMAC">
 							<KeyIcon class="size-4" />
@@ -817,7 +952,7 @@
 		{:else}
 			<div class="flex flex-col divide-y divide-border rounded-md border border-border">
 				{#each backupsList as b (b.id)}
-					<div class="flex items-start gap-3 p-3 text-sm">
+					<div class="flex items-start gap-2 p-3 text-sm">
 						<div class="mt-0.5 shrink-0">
 							{#if b.status === 'success'}
 								<CircleCheckIcon class="size-4 text-green-600" />
@@ -837,19 +972,34 @@
 								<div class="mt-1 text-xs text-destructive break-words">{b.error}</div>
 							{/if}
 						</div>
-						{#if b.archiveUrl}
-							<a
-								href={b.archiveUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="shrink-0"
-							>
-								<Button variant="outline" size="sm">
-									<DownloadIcon class="mr-2 size-4" />
-									Descarcă
+						<div class="flex shrink-0 items-center gap-1">
+							{#if b.archiveUrl}
+								<a href={b.archiveUrl} target="_blank" rel="noopener noreferrer" title="Descarcă">
+									<Button variant="outline" size="sm">
+										<DownloadIcon class="size-4" />
+									</Button>
+								</a>
+							{/if}
+							{#if b.status === 'success'}
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => openRestore(b)}
+									title="Restore (destructiv)"
+								>
+									<HistoryIcon class="size-4" />
 								</Button>
-							</a>
-						{/if}
+							{/if}
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => deleteBackup(b)}
+								disabled={deletingBackupIds.has(b.id)}
+								title="Șterge"
+							>
+								<Trash2Icon class="size-4 text-destructive" />
+							</Button>
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -857,6 +1007,57 @@
 
 		<DialogFooter>
 			<Button variant="outline" onclick={() => (backupsOpen = false)}>Închide</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={restoreOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle class="flex items-center gap-2">
+				<TriangleAlertIcon class="size-5 text-destructive" />
+				Restore backup — acțiune distructivă
+			</DialogTitle>
+			<DialogDescription>
+				Restore-ul <strong>suprascrie</strong> complet baza de date WordPress și conținutul din
+				<code>wp-content</code> de pe <strong>{restoreTarget?.siteName ?? ''}</strong>.
+				Datele actuale vor fi înlocuite cu cele din backup-ul de la
+				<strong>{restoreTarget ? formatDate(restoreTarget.createdAt) : ''}</strong>.
+				<br /><br />
+				Această operație <strong>nu poate fi anulată</strong>. Orice conținut adăugat după acel backup va fi pierdut.
+			</DialogDescription>
+		</DialogHeader>
+
+		<div class="flex flex-col gap-1">
+			<Label for="restore-confirm">
+				Tastează numele site-ului pentru a confirma:
+				<code class="ml-1 rounded bg-muted px-1 py-0.5 text-xs">{restoreTarget?.siteName ?? ''}</code>
+			</Label>
+			<Input
+				id="restore-confirm"
+				bind:value={restoreConfirmText}
+				placeholder={restoreTarget?.siteName ?? ''}
+				autocomplete="off"
+			/>
+		</div>
+
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (restoreOpen = false)} disabled={restoring}>
+				Anulează
+			</Button>
+			<Button
+				onclick={confirmRestore}
+				disabled={restoring || restoreConfirmText !== (restoreTarget?.siteName ?? '__none__')}
+				class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+			>
+				{#if restoring}
+					<RefreshCwIcon class="mr-2 size-4 animate-spin" />
+					Se restaurează…
+				{:else}
+					<HistoryIcon class="mr-2 size-4" />
+					Restore (overwrite DB + files)
+				{/if}
+			</Button>
 		</DialogFooter>
 	</DialogContent>
 </Dialog>

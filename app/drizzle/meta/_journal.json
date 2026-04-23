@@ -1261,6 +1261,13 @@
       "when": 1777430011000,
       "tag": "0179_wordpress_backup",
       "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "6",
+      "when": 1777430012000,
+      "tag": "0180_wordpress_site_paused",
+      "breakpoints": true
     }
   ]
 }

@@ -3604,6 +3604,7 @@ export const wordpressSite = sqliteTable('wordpress_site', {
 	status: text('status').notNull().default('pending'), // 'connected', 'disconnected', 'error', 'pending'
 	lastError: text('last_error'),
 	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+	paused: integer('paused').notNull().default(0), // 1 = scheduler skips this site
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

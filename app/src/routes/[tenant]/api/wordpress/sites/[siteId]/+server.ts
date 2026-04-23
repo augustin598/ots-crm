@@ -74,6 +74,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const body = (await request.json().catch(() => null)) as {
 		name?: string;
 		clientId?: string | null;
+		paused?: boolean;
 	} | null;
 	if (!body) return json({ error: 'Body invalid' }, { status: 400 });
 
@@ -83,6 +84,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 
 	if (typeof body.name === 'string' && body.name.trim().length > 0) {
 		patch.name = body.name.trim();
+	}
+
+	if (typeof body.paused === 'boolean') {
+		patch.paused = body.paused ? 1 : 0;
 	}
 
 	if (body.clientId !== undefined) {

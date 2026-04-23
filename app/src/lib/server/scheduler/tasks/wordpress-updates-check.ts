@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { syncUpdates } from '$lib/server/wordpress/sync';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 
@@ -14,7 +14,12 @@ export async function processWordpressUpdatesCheck(_params: Record<string, unkno
 	const sites = await db
 		.select({ id: table.wordpressSite.id, siteUrl: table.wordpressSite.siteUrl, tenantId: table.wordpressSite.tenantId })
 		.from(table.wordpressSite)
-		.where(eq(table.wordpressSite.status, 'connected'));
+		.where(
+			and(
+				eq(table.wordpressSite.status, 'connected'),
+				eq(table.wordpressSite.paused, 0)
+			)
+		);
 
 	if (sites.length === 0) {
 		return { success: true, checked: 0, totalUpdates: 0 };
