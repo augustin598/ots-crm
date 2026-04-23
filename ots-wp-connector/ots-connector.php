@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.4.0
+ * Version:           0.5.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.4.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.5.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -911,6 +911,163 @@ function ots_connector_route_upload_media( WP_REST_Request $request ) {
 	] );
 }
 
+/* ─────────────────────── Plugins management ─────────────────────── */
+
+/**
+ * GET /plugins — list every plugin installed on this site, active or not.
+ * Includes update metadata (new_version + security flag when the .org
+ * registry exposes it) so the CRM can show "update available" in place.
+ */
+function ots_connector_route_list_plugins( WP_REST_Request $request ) {
+	if ( ! function_exists( 'get_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+	if ( ! function_exists( 'get_plugin_updates' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/update.php';
+	}
+
+	// Force refresh so "update available" matches the Updates screen.
+	wp_update_plugins();
+
+	$all          = get_plugins();
+	$updates      = get_plugin_updates();
+	$auto_updates = (array) get_site_option( 'auto_update_plugins', [] );
+
+	$items = [];
+	foreach ( $all as $plugin_file => $data ) {
+		$update = $updates[ $plugin_file ]->update ?? null;
+		$items[] = [
+			'plugin'         => (string) $plugin_file, // e.g. "akismet/akismet.php"
+			'name'           => (string) ( $data['Name'] ?? $plugin_file ),
+			'version'        => (string) ( $data['Version'] ?? '' ),
+			'description'    => wp_strip_all_tags( (string) ( $data['Description'] ?? '' ) ),
+			'author'         => wp_strip_all_tags( (string) ( $data['Author'] ?? '' ) ),
+			'authorUri'      => (string) ( $data['AuthorURI'] ?? '' ),
+			'pluginUri'      => (string) ( $data['PluginURI'] ?? '' ),
+			'requiresWp'     => (string) ( $data['RequiresWP'] ?? '' ),
+			'requiresPhp'    => (string) ( $data['RequiresPHP'] ?? '' ),
+			'network'        => (bool) ( $data['Network'] ?? false ),
+			'active'         => is_plugin_active( $plugin_file ),
+			'autoUpdate'     => in_array( $plugin_file, $auto_updates, true ),
+			'updateAvailable'=> isset( $updates[ $plugin_file ] ),
+			'newVersion'     => $update ? (string) $update->new_version : null,
+		];
+	}
+
+	// Alphabetical by name for a stable UI.
+	usort( $items, function ( $a, $b ) {
+		return strcasecmp( $a['name'], $b['name'] );
+	} );
+
+	return rest_ensure_response( [
+		'items'     => $items,
+		'total'     => count( $items ),
+		'timestamp' => time(),
+	] );
+}
+
+/**
+ * Internal: validate the plugin identifier in a request body. Must be a
+ * string like "slug/file.php" or "file.php" and exist in get_plugins().
+ */
+function ots_connector_resolve_plugin( WP_REST_Request $request ) {
+	if ( ! function_exists( 'get_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+	$body   = $request->get_json_params();
+	$plugin = (string) ( $body['plugin'] ?? '' );
+	if ( $plugin === '' ) {
+		return new WP_Error( 'ots_missing_plugin', 'Missing plugin field', [ 'status' => 400 ] );
+	}
+	// Reject path traversal attempts.
+	if ( strpos( $plugin, '..' ) !== false || strpos( $plugin, "\0" ) !== false ) {
+		return new WP_Error( 'ots_bad_plugin', 'Invalid plugin path', [ 'status' => 400 ] );
+	}
+	$all = get_plugins();
+	if ( ! isset( $all[ $plugin ] ) ) {
+		return new WP_Error( 'ots_plugin_not_found', 'Plugin not installed on this site', [ 'status' => 404 ] );
+	}
+	return $plugin;
+}
+
+/** POST /plugins/activate — body { plugin: "<slug>/<file>.php" }. */
+function ots_connector_route_activate_plugin( WP_REST_Request $request ) {
+	$plugin = ots_connector_resolve_plugin( $request );
+	if ( is_wp_error( $plugin ) ) return $plugin;
+
+	$result = activate_plugin( $plugin );
+	if ( is_wp_error( $result ) ) {
+		return new WP_Error(
+			'ots_activate_failed',
+			$result->get_error_message(),
+			[ 'status' => 500 ]
+		);
+	}
+	return rest_ensure_response( [ 'success' => true, 'plugin' => $plugin, 'active' => true, 'timestamp' => time() ] );
+}
+
+/** POST /plugins/deactivate — body { plugin }. Never silent, so e.g. the
+ * OTS Connector plugin itself cannot be deactivated via its own API (we
+ * block that here as a safety net). */
+function ots_connector_route_deactivate_plugin( WP_REST_Request $request ) {
+	$plugin = ots_connector_resolve_plugin( $request );
+	if ( is_wp_error( $plugin ) ) return $plugin;
+
+	if ( $plugin === plugin_basename( __FILE__ ) ) {
+		return new WP_Error(
+			'ots_cannot_deactivate_self',
+			'OTS Connector cannot deactivate itself',
+			[ 'status' => 400 ]
+		);
+	}
+
+	deactivate_plugins( $plugin, true ); // silent=true so no hooks fire that could break the REST response
+	return rest_ensure_response( [ 'success' => true, 'plugin' => $plugin, 'active' => false, 'timestamp' => time() ] );
+}
+
+/** POST /plugins/delete — body { plugin }. Must be inactive first. */
+function ots_connector_route_delete_plugin( WP_REST_Request $request ) {
+	$plugin = ots_connector_resolve_plugin( $request );
+	if ( is_wp_error( $plugin ) ) return $plugin;
+
+	if ( $plugin === plugin_basename( __FILE__ ) ) {
+		return new WP_Error(
+			'ots_cannot_delete_self',
+			'OTS Connector cannot delete itself',
+			[ 'status' => 400 ]
+		);
+	}
+
+	if ( is_plugin_active( $plugin ) ) {
+		return new WP_Error(
+			'ots_plugin_still_active',
+			'Deactivate the plugin before deleting it',
+			[ 'status' => 400 ]
+		);
+	}
+
+	if ( ! function_exists( 'delete_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+	if ( ! function_exists( 'request_filesystem_credentials' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+	}
+
+	// delete_plugins requires a writable filesystem; on managed hosts this
+	// typically works via WP_Filesystem('direct') without FTP credentials.
+	WP_Filesystem();
+	$result = delete_plugins( [ $plugin ] );
+
+	if ( is_wp_error( $result ) ) {
+		return new WP_Error( 'ots_delete_failed', $result->get_error_message(), [ 'status' => 500 ] );
+	}
+	if ( $result === false || $result === null ) {
+		return new WP_Error( 'ots_delete_failed', 'delete_plugins returned false — filesystem not writable?', [ 'status' => 500 ] );
+	}
+
+	return rest_ensure_response( [ 'success' => true, 'plugin' => $plugin, 'deleted' => true, 'timestamp' => time() ] );
+}
+
 add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/health', [
 		'methods'             => WP_REST_Server::READABLE,
@@ -981,6 +1138,30 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/media', [
 		'methods'             => WP_REST_Server::CREATABLE,
 		'callback'            => 'ots_connector_route_upload_media',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins', [
+		'methods'             => WP_REST_Server::READABLE,
+		'callback'            => 'ots_connector_route_list_plugins',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins/activate', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_activate_plugin',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins/deactivate', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_deactivate_plugin',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins/delete', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_delete_plugin',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 } );

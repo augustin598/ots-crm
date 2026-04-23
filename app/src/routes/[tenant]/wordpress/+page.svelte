@@ -37,6 +37,7 @@
 	import ServerIcon from '@lucide/svelte/icons/server';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
+	import PlugIcon from '@lucide/svelte/icons/plug';
 
 	type UpdateCounts = {
 		core: number;
@@ -771,6 +772,15 @@
 										class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
 									>
 										<NewspaperIcon class="h-3.5 w-3.5" />
+									</Button>
+								</a>
+								<a href="/{tenantSlug}/wordpress/{site.id}/plugins" title="Plugin-uri">
+									<Button
+										variant="outline"
+										size="icon"
+										class="h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									>
+										<PlugIcon class="h-3.5 w-3.5" />
 									</Button>
 								</a>
 								<Button

@@ -101,6 +101,30 @@ export interface WpMediaUploadResponse {
 	timestamp: number;
 }
 
+/** One row in the plugin manager. `plugin` is the WP identifier (e.g. "akismet/akismet.php"). */
+export interface WpPluginInfo {
+	plugin: string;
+	name: string;
+	version: string;
+	description: string;
+	author: string;
+	authorUri: string;
+	pluginUri: string;
+	requiresWp: string;
+	requiresPhp: string;
+	network: boolean;
+	active: boolean;
+	autoUpdate: boolean;
+	updateAvailable: boolean;
+	newVersion: string | null;
+}
+
+export interface WpPluginListResponse {
+	items: WpPluginInfo[];
+	total: number;
+	timestamp: number;
+}
+
 interface RequestOptions {
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	path: string; // e.g. '/health' — relative to /wp-json/ots-connector/v1
@@ -264,6 +288,58 @@ export class WpClient {
 			siteId: opts?.siteId
 		});
 	}
+
+	/* ─────────────────────── Plugins ─────────────────────── */
+
+	async listPlugins(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpPluginListResponse> {
+		return this.request<WpPluginListResponse>({
+			method: 'GET',
+			path: '/plugins',
+			timeoutMs: opts?.timeoutMs ?? 30_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async activatePlugin(
+		plugin: string,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{ success: boolean; plugin: string; active: boolean }> {
+		return this.request({
+			method: 'POST',
+			path: '/plugins/activate',
+			body: { plugin },
+			timeoutMs: opts?.timeoutMs ?? 60_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async deactivatePlugin(
+		plugin: string,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{ success: boolean; plugin: string; active: boolean }> {
+		return this.request({
+			method: 'POST',
+			path: '/plugins/deactivate',
+			body: { plugin },
+			timeoutMs: opts?.timeoutMs ?? 60_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async deletePlugin(
+		plugin: string,
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{ success: boolean; plugin: string; deleted: boolean }> {
+		return this.request({
+			method: 'POST',
+			path: '/plugins/delete',
+			body: { plugin },
+			timeoutMs: opts?.timeoutMs ?? 60_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/* ─────────────────────── Media ─────────────────────── */
 
 	/**
 	 * Upload a base64-encoded image to the WP media library. Used to
