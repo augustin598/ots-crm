@@ -4,7 +4,7 @@
 		createTaskComment,
 		updateTaskComment,
 		deleteTaskComment,
-		getCommentAttachmentUrl
+		getAttachmentUrl
 	} from '$lib/remotes/task-comments.remote';
 	import {
 		getTaskMaterials,
@@ -138,7 +138,7 @@
 	let lightboxSrc = $state('');
 	let lightboxOpen = $state(false);
 
-	// Cache for attachment URLs (commentId -> url)
+	// Cache for attachment URLs (attachmentId -> url)
 	let attachmentUrls = $state<Record<string, string>>({});
 
 	const commentsQuery = $derived(task ? getTaskComments(task.id) : null);
@@ -402,12 +402,12 @@
 		pendingAttachments = [];
 	}
 
-	async function loadAttachmentUrl(commentId: string) {
-		if (attachmentUrls[commentId]) return;
+	async function loadAttachmentUrl(attachmentId: string) {
+		if (attachmentUrls[attachmentId]) return;
 		try {
-			const result = await getCommentAttachmentUrl(commentId).current;
+			const result = await getAttachmentUrl(attachmentId).current;
 			if (result?.url) {
-				attachmentUrls = { ...attachmentUrls, [commentId]: result.url };
+				attachmentUrls = { ...attachmentUrls, [attachmentId]: result.url };
 			}
 		} catch {
 			// Silently fail
@@ -421,41 +421,22 @@
 
 	async function handleAddComment() {
 		const html = newCommentEditor?.getHTML() ?? '';
-		const text = newCommentEditor?.getText() ?? '';
 		const editorEmpty = newCommentEditor?.isEmpty() ?? true;
 
 		if ((editorEmpty && pendingAttachments.length === 0) || !task) return;
 
 		commentLoading = true;
 		try {
-			const firstAttachment = pendingAttachments[0] || null;
-			const commentContent = editorEmpty ? '' : html;
-			// First comment: text + first image (if any)
 			await createTaskComment({
 				taskId: task.id,
-				content: commentContent,
-				...(firstAttachment
-					? {
-							attachmentPath: firstAttachment.path,
-							attachmentMimeType: firstAttachment.mimeType,
-							attachmentFileName: firstAttachment.fileName,
-							attachmentFileSize: firstAttachment.size
-						}
-					: {})
+				content: editorEmpty ? '' : html,
+				attachments: pendingAttachments.map((a) => ({
+					path: a.path,
+					mimeType: a.mimeType,
+					fileName: a.fileName,
+					fileSize: a.size
+				}))
 			}).updates(getTaskComments(task.id), getTaskActivities(task.id));
-
-			// Additional images as separate comments
-			for (let i = 1; i < pendingAttachments.length; i++) {
-				const att = pendingAttachments[i];
-				await createTaskComment({
-					taskId: task.id,
-					content: '',
-					attachmentPath: att.path,
-					attachmentMimeType: att.mimeType,
-					attachmentFileName: att.fileName,
-					attachmentFileSize: att.size
-				}).updates(getTaskComments(task.id), getTaskActivities(task.id));
-			}
 
 			newCommentEditor?.clear();
 			removeAllPendingAttachments();
@@ -1027,20 +1008,24 @@
 											{@html comment.content}
 										</div>
 									{/if}
-									{#if comment.attachmentPath}
-										{@const url = attachmentUrls[comment.id]}
-										{#if !url}
-											{(loadAttachmentUrl(comment.id), '')}
-											<div class="mt-2 h-32 w-48 animate-pulse rounded-lg bg-muted"></div>
-										{:else}
-											<button class="mt-2 block cursor-pointer" onclick={() => openLightbox(url)}>
-												<img
-													src={url}
-													alt={comment.attachmentFileName || 'Attachment'}
-													class="max-h-48 rounded-lg border transition-opacity hover:opacity-90"
-												/>
-											</button>
-										{/if}
+									{#if comment.attachments?.length}
+										<div class="mt-2 flex flex-wrap gap-2">
+											{#each comment.attachments as att (att.id)}
+												{@const url = attachmentUrls[att.id]}
+												{#if !url}
+													{(loadAttachmentUrl(att.id), '')}
+													<div class="h-32 w-48 animate-pulse rounded-lg bg-muted"></div>
+												{:else}
+													<button class="block cursor-pointer" onclick={() => openLightbox(url)}>
+														<img
+															src={url}
+															alt={att.fileName || 'Attachment'}
+															class="max-h-48 rounded-lg border transition-opacity hover:opacity-90"
+														/>
+													</button>
+												{/if}
+											{/each}
+										</div>
 									{/if}
 
 									<!-- Replies -->

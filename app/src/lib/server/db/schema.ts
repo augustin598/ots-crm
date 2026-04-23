@@ -382,6 +382,20 @@ export const taskComment = sqliteTable('task_comment', {
 		.default(sql`current_date`)
 });
 
+export const taskCommentAttachment = sqliteTable('task_comment_attachment', {
+	id: text('id').primaryKey(),
+	commentId: text('comment_id')
+		.notNull()
+		.references(() => taskComment.id, { onDelete: 'cascade' }),
+	path: text('path').notNull(),
+	mimeType: text('mime_type'),
+	fileName: text('file_name'),
+	fileSize: integer('file_size'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
 export const taskWatcher = sqliteTable('task_watcher', {
 	id: text('id').primaryKey(),
 	taskId: text('task_id')
@@ -2225,7 +2239,7 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 	materials: many(taskMarketingMaterial)
 }));
 
-export const taskCommentRelations = relations(taskComment, ({ one }) => ({
+export const taskCommentRelations = relations(taskComment, ({ one, many }) => ({
 	task: one(task, {
 		fields: [taskComment.taskId],
 		references: [task.id]
@@ -2233,6 +2247,14 @@ export const taskCommentRelations = relations(taskComment, ({ one }) => ({
 	user: one(user, {
 		fields: [taskComment.userId],
 		references: [user.id]
+	}),
+	attachments: many(taskCommentAttachment)
+}));
+
+export const taskCommentAttachmentRelations = relations(taskCommentAttachment, ({ one }) => ({
+	comment: one(taskComment, {
+		fields: [taskCommentAttachment.commentId],
+		references: [taskComment.id]
 	})
 }));
 
@@ -3223,6 +3245,8 @@ export type Task = typeof task.$inferSelect;
 export type NewTask = typeof task.$inferInsert;
 export type TaskComment = typeof taskComment.$inferSelect;
 export type NewTaskComment = typeof taskComment.$inferInsert;
+export type TaskCommentAttachment = typeof taskCommentAttachment.$inferSelect;
+export type NewTaskCommentAttachment = typeof taskCommentAttachment.$inferInsert;
 export type TaskWatcher = typeof taskWatcher.$inferSelect;
 export type NewTaskWatcher = typeof taskWatcher.$inferInsert;
 export type DocumentTemplate = typeof documentTemplate.$inferSelect;

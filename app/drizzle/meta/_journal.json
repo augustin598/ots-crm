@@ -1219,6 +1219,20 @@
       "when": 1777430005000,
       "tag": "0173_tiktok_ads_account_alert_muted_at_status",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "6",
+      "when": 1777430006000,
+      "tag": "0174_task_comment_attachment_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "6",
+      "when": 1777430007000,
+      "tag": "0175_task_comment_attachment_backfill",
+      "breakpoints": true
     }
   ]
 }
