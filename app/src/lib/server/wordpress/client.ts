@@ -291,7 +291,12 @@ export class WpClient {
 		siteId
 	}: RequestOptions): Promise<T> {
 		const bodyString = body === undefined ? '' : JSON.stringify(body);
-		const signingPath = connectorSigningPath(path);
+		// The PHP side computes the signing path from $request->get_route(),
+		// which is the REST route WITHOUT any query string. If we include the
+		// query string in our signature, the HMACs diverge and the plugin
+		// returns 401. Strip it here.
+		const pathForSigning = path.split('?')[0];
+		const signingPath = connectorSigningPath(pathForSigning);
 		const headers = buildSignedHeaders(this.secret, method, signingPath, bodyString);
 		const url = connectorUrl(this.siteUrl, path);
 
