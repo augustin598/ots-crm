@@ -339,6 +339,36 @@ export class WpClient {
 		});
 	}
 
+	/**
+	 * Install (or update) a plugin from a ZIP file, optionally activating
+	 * it on success. Used by the bulk-upload flow in the CRM.
+	 */
+	async installPlugin(
+		payload: { filename: string; mimeType: string; dataBase64: string; activate?: boolean },
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<{
+		success: boolean;
+		installed: boolean;
+		plugin: string;
+		activated: boolean;
+		activationError: string | null;
+		filename: string;
+		sizeBytes: number;
+	}> {
+		return this.request({
+			method: 'POST',
+			path: '/plugins/install',
+			body: {
+				filename: payload.filename,
+				mimeType: payload.mimeType || 'application/zip',
+				dataBase64: payload.dataBase64,
+				activate: payload.activate ?? true
+			},
+			timeoutMs: opts?.timeoutMs ?? 300_000, // 5 min for big plugins
+			siteId: opts?.siteId
+		});
+	}
+
 	/* ─────────────────────── Media ─────────────────────── */
 
 	/**

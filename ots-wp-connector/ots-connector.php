@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.5.0
+ * Version:           0.6.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.5.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.6.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -1025,6 +1025,117 @@ function ots_connector_route_deactivate_plugin( WP_REST_Request $request ) {
 	return rest_ensure_response( [ 'success' => true, 'plugin' => $plugin, 'active' => false, 'timestamp' => time() ] );
 }
 
+/**
+ * POST /plugins/install — install (or overwrite / update) a plugin from
+ * a ZIP uploaded by the CRM as base64. Optionally activates it after
+ * successful install.
+ *
+ * Body: { filename, mimeType="application/zip", dataBase64, activate: true|false }
+ * Returns: { success, plugin: "slug/file.php", installed, activated, errors? }
+ *
+ * Uses WP's own Plugin_Upgrader with overwrite_package=true so the same
+ * endpoint handles both "new install" and "update existing" cleanly.
+ */
+function ots_connector_route_install_plugin( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	$filename = (string) ( $body['filename'] ?? '' );
+	$mime     = (string) ( $body['mimeType'] ?? 'application/zip' );
+	$b64      = (string) ( $body['dataBase64'] ?? '' );
+	$activate = ! empty( $body['activate'] );
+
+	if ( $filename === '' || $b64 === '' ) {
+		return new WP_Error( 'ots_missing_fields', 'Missing filename or dataBase64', [ 'status' => 400 ] );
+	}
+	$allowed_mimes = [ 'application/zip', 'application/x-zip-compressed', 'application/octet-stream' ];
+	if ( ! in_array( $mime, $allowed_mimes, true ) ) {
+		return new WP_Error( 'ots_bad_mime', 'Only ZIP archives are accepted', [ 'status' => 400 ] );
+	}
+
+	$binary = base64_decode( $b64, true );
+	if ( $binary === false || strlen( $binary ) === 0 ) {
+		return new WP_Error( 'ots_bad_base64', 'Invalid base64', [ 'status' => 400 ] );
+	}
+	if ( strlen( $binary ) > 50 * 1024 * 1024 ) {
+		return new WP_Error( 'ots_too_large', 'ZIP exceeds 50 MB limit', [ 'status' => 413 ] );
+	}
+
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/misc.php';
+	require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+	require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+	$safe_name = sanitize_file_name( $filename );
+	if ( ! preg_match( '/\.zip$/i', $safe_name ) ) {
+		$safe_name .= '.zip';
+	}
+	$tmp_path = wp_tempnam( $safe_name );
+	if ( ! $tmp_path || file_put_contents( $tmp_path, $binary ) === false ) {
+		return new WP_Error( 'ots_tmp_failed', 'Could not write temp file', [ 'status' => 500 ] );
+	}
+
+	WP_Filesystem();
+
+	$skin = new WP_Ajax_Upgrader_Skin();
+	$upgrader = new Plugin_Upgrader( $skin );
+
+	$install_result = $upgrader->install(
+		$tmp_path,
+		[
+			'overwrite_package' => true,
+			'clear_destination' => true,
+			'clear_working'     => true,
+		]
+	);
+
+	// Upgrader always cleans its temp files; ours should go too.
+	@unlink( $tmp_path );
+
+	if ( is_wp_error( $install_result ) ) {
+		return new WP_Error(
+			'ots_install_failed',
+			$install_result->get_error_message(),
+			[ 'status' => 500 ]
+		);
+	}
+	if ( $install_result !== true ) {
+		$messages = $skin->get_error_messages();
+		return new WP_Error(
+			'ots_install_failed',
+			! empty( $messages ) ? implode( '; ', $messages ) : 'Upgrader returned false',
+			[ 'status' => 500 ]
+		);
+	}
+
+	// Plugin_Upgrader exposes the relative path of the installed plugin.
+	$plugin_file = method_exists( $upgrader, 'plugin_info' ) ? $upgrader->plugin_info() : '';
+	if ( ! $plugin_file ) {
+		// Fallback: scan for the newest plugin directory + header.
+		$plugin_file = (string) ( $upgrader->result['destination_name'] ?? '' );
+	}
+
+	$activated = false;
+	$activation_error = null;
+	if ( $activate && $plugin_file ) {
+		$res = activate_plugin( $plugin_file );
+		if ( is_wp_error( $res ) ) {
+			$activation_error = $res->get_error_message();
+		} else {
+			$activated = true;
+		}
+	}
+
+	return rest_ensure_response( [
+		'success'         => true,
+		'installed'       => true,
+		'plugin'          => $plugin_file,
+		'activated'       => $activated,
+		'activationError' => $activation_error,
+		'filename'        => $safe_name,
+		'sizeBytes'       => strlen( $binary ),
+		'timestamp'       => time(),
+	] );
+}
+
 /** POST /plugins/delete — body { plugin }. Must be inactive first. */
 function ots_connector_route_delete_plugin( WP_REST_Request $request ) {
 	$plugin = ots_connector_resolve_plugin( $request );
@@ -1162,6 +1273,12 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins/delete', [
 		'methods'             => WP_REST_Server::CREATABLE,
 		'callback'            => 'ots_connector_route_delete_plugin',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/plugins/install', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_install_plugin',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 } );

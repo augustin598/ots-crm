@@ -8,6 +8,20 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { Label } from '$lib/components/ui/label';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
+	import XCircleIcon from '@lucide/svelte/icons/x-circle';
+	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import FileArchiveIcon from '@lucide/svelte/icons/file-archive';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -45,6 +59,20 @@
 	let searchQuery = $state('');
 	const busyPlugins = new SvelteSet<string>();
 
+	type UploadQueueItem = {
+		id: string;
+		file: File;
+		status: 'queued' | 'uploading' | 'installing' | 'success' | 'error';
+		installedAs?: string;
+		activated?: boolean;
+		message?: string;
+	};
+
+	let uploadOpen = $state(false);
+	let uploadQueue = $state<UploadQueueItem[]>([]);
+	let uploadAutoActivate = $state(true);
+	let uploading = $state(false);
+
 	const filtered = $derived.by(() => {
 		const query = searchQuery.trim().toLowerCase();
 		return plugins.filter((p) => {
@@ -81,6 +109,114 @@
 	}
 
 	onMount(loadPlugins);
+
+	function fileToBase64(file: File): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const dataUrl = String(reader.result);
+				// strip the "data:<mime>;base64," prefix, keep only the base64 body
+				const comma = dataUrl.indexOf(',');
+				resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+			};
+			reader.onerror = () => reject(reader.error);
+			reader.readAsDataURL(file);
+		});
+	}
+
+	function pickUploadFiles(event: Event) {
+		const input = event.target as HTMLInputElement;
+		if (!input.files) return;
+		const next: UploadQueueItem[] = [];
+		for (const f of Array.from(input.files)) {
+			if (!/\.zip$/i.test(f.name)) {
+				toast.error(`${f.name} nu e ZIP — omis`);
+				continue;
+			}
+			if (f.size > 50 * 1024 * 1024) {
+				toast.error(`${f.name} depășește 50 MB — omis`);
+				continue;
+			}
+			next.push({ id: `${f.name}-${f.size}-${f.lastModified}`, file: f, status: 'queued' });
+		}
+		uploadQueue = [...uploadQueue, ...next];
+		input.value = ''; // allow re-selecting the same file
+	}
+
+	function removeFromQueue(id: string) {
+		uploadQueue = uploadQueue.filter((i) => i.id !== id);
+	}
+
+	function resetQueue() {
+		uploadQueue = [];
+	}
+
+	async function runBulkUpload() {
+		if (uploadQueue.length === 0) return;
+		uploading = true;
+		const failures: string[] = [];
+		for (let i = 0; i < uploadQueue.length; i++) {
+			// Skip items already resolved (allows retry of failures only).
+			if (uploadQueue[i].status === 'success') continue;
+			uploadQueue[i] = { ...uploadQueue[i], status: 'uploading' };
+			uploadQueue = [...uploadQueue];
+			try {
+				const dataBase64 = await fileToBase64(uploadQueue[i].file);
+				uploadQueue[i] = { ...uploadQueue[i], status: 'installing' };
+				uploadQueue = [...uploadQueue];
+
+				const res = await fetch(`${apiBase}/install`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						filename: uploadQueue[i].file.name,
+						mimeType: uploadQueue[i].file.type || 'application/zip',
+						dataBase64,
+						activate: uploadAutoActivate
+					})
+				});
+				const body = (await res.json().catch(() => ({}))) as {
+					error?: string;
+					plugin?: string;
+					activated?: boolean;
+					activationError?: string | null;
+				};
+				if (!res.ok) {
+					uploadQueue[i] = {
+						...uploadQueue[i],
+						status: 'error',
+						message: body.error || `HTTP ${res.status}`
+					};
+					failures.push(uploadQueue[i].file.name);
+				} else {
+					uploadQueue[i] = {
+						...uploadQueue[i],
+						status: 'success',
+						installedAs: body.plugin,
+						activated: body.activated,
+						message: body.activationError ?? undefined
+					};
+				}
+			} catch (err) {
+				uploadQueue[i] = {
+					...uploadQueue[i],
+					status: 'error',
+					message: err instanceof Error ? err.message : 'Eroare necunoscută'
+				};
+				failures.push(uploadQueue[i].file.name);
+			}
+			uploadQueue = [...uploadQueue];
+		}
+		uploading = false;
+		if (failures.length === 0) {
+			toast.success(`${uploadQueue.length} plugin-uri procesate`);
+		} else {
+			toast.warning(
+				`${uploadQueue.length - failures.length} ok, ${failures.length} eșuate`
+			);
+		}
+		await loadPlugins();
+	}
 
 	async function runAction(p: WpPlugin, action: 'activate' | 'deactivate' | 'delete') {
 		if (action === 'delete') {
@@ -140,10 +276,16 @@
 				{/if}
 			</p>
 		</div>
-		<Button variant="outline" onclick={loadPlugins} disabled={loading} title="Refresh">
-			<RefreshCwIcon class="mr-2 size-4 {loading ? 'animate-spin' : ''}" />
-			Refresh
-		</Button>
+		<div class="flex items-center gap-2">
+			<Button onclick={() => (uploadOpen = true)}>
+				<UploadIcon class="mr-2 size-4" />
+				Upload plugin-uri (ZIP)
+			</Button>
+			<Button variant="outline" onclick={loadPlugins} disabled={loading} title="Refresh">
+				<RefreshCwIcon class="mr-2 size-4 {loading ? 'animate-spin' : ''}" />
+				Refresh
+			</Button>
+		</div>
 	</div>
 
 	<div class="flex items-center gap-2">
@@ -197,9 +339,11 @@
 						? 'hover:border-primary/20'
 						: 'opacity-75 hover:opacity-100 hover:border-muted-foreground/20'}"
 				>
-					<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r {p.active
-						? 'from-primary via-primary/80 to-primary/60'
-						: 'from-muted-foreground/30 to-muted-foreground/10'}"></div>
+					<div
+						class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r {p.active
+							? 'from-primary via-primary/80 to-primary/60'
+							: 'from-muted-foreground/30 to-muted-foreground/10'}"
+					></div>
 					<div class="p-4 pt-5">
 						<div class="flex items-start justify-between gap-4">
 							<div class="flex-1 min-w-0">
@@ -207,9 +351,7 @@
 									<div class="p-1.5 rounded-lg {p.active ? 'bg-primary/10' : 'bg-muted'}">
 										<PlugIcon class="h-3.5 w-3.5 {p.active ? 'text-primary' : 'text-muted-foreground'}" />
 									</div>
-									<h3 class="text-lg font-bold tracking-tight text-foreground">
-										{p.name}
-									</h3>
+									<h3 class="text-lg font-bold tracking-tight text-foreground">{p.name}</h3>
 									{#if p.active}
 										<Badge variant="default" class="text-xs">Activ</Badge>
 									{:else}
@@ -305,3 +447,119 @@
 		</div>
 	{/if}
 </div>
+
+<Dialog bind:open={uploadOpen}>
+	<DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto">
+		<DialogHeader>
+			<DialogTitle>Upload plugin-uri</DialogTitle>
+			<DialogDescription>
+				Selectează unul sau mai multe fișiere ZIP (max. 50 MB fiecare). CRM-ul le trimite pe rând la
+				site — plugin-uri noi sunt instalate, cele existente sunt suprascrise (update). Activarea
+				automată se poate debifa pentru instalări silențioase.
+			</DialogDescription>
+		</DialogHeader>
+
+		<div class="flex flex-col gap-3">
+			<label
+				class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-6 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-muted/40"
+			>
+				<FileArchiveIcon class="size-8" />
+				<span class="font-medium text-foreground">Alege fișiere ZIP</span>
+				<span class="text-xs">sau trage-le aici</span>
+				<input
+					type="file"
+					accept=".zip,application/zip"
+					multiple
+					class="hidden"
+					onchange={pickUploadFiles}
+					disabled={uploading}
+				/>
+			</label>
+
+			<div class="flex items-center gap-2 rounded-md bg-muted/40 p-2.5 text-xs">
+				<input
+					id="wp-auto-activate"
+					type="checkbox"
+					class="size-4"
+					bind:checked={uploadAutoActivate}
+					disabled={uploading}
+				/>
+				<Label for="wp-auto-activate" class="cursor-pointer">
+					Activează automat după install (recomandat)
+				</Label>
+			</div>
+
+			{#if uploadQueue.length > 0}
+				<div class="flex flex-col divide-y divide-border rounded-md border border-border">
+					{#each uploadQueue as item (item.id)}
+						<div class="flex items-center gap-2 p-2.5 text-sm">
+							<div class="shrink-0">
+								{#if item.status === 'queued'}
+									<FileArchiveIcon class="size-4 text-muted-foreground" />
+								{:else if item.status === 'uploading' || item.status === 'installing'}
+									<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
+								{:else if item.status === 'success'}
+									<CheckCircleIcon class="size-4 text-green-600" />
+								{:else}
+									<XCircleIcon class="size-4 text-red-600" />
+								{/if}
+							</div>
+							<div class="min-w-0 flex-1">
+								<div class="truncate font-medium">{item.file.name}</div>
+								<div class="flex items-center gap-2 text-xs text-muted-foreground">
+									<span>{(item.file.size / 1024 / 1024).toFixed(2)} MB</span>
+									{#if item.status === 'queued'}
+										<span>· în așteptare</span>
+									{:else if item.status === 'uploading'}
+										<span>· se urcă…</span>
+									{:else if item.status === 'installing'}
+										<span>· WP instalează…</span>
+									{:else if item.status === 'success'}
+										<span class="text-green-600">
+											· {item.installedAs}
+											{#if item.activated}· activat{:else}· nu s-a activat{/if}
+										</span>
+									{:else if item.status === 'error'}
+										<span class="text-red-600 break-all">· {item.message}</span>
+									{/if}
+								</div>
+							</div>
+							{#if !uploading && item.status !== 'uploading' && item.status !== 'installing'}
+								<Button
+									variant="ghost"
+									size="icon"
+									class="h-7 w-7"
+									onclick={() => removeFromQueue(item.id)}
+									title="Șterge din listă"
+								>
+									<XCircleIcon class="size-3.5" />
+								</Button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+
+		<DialogFooter>
+			{#if uploadQueue.length > 0 && !uploading}
+				<Button variant="ghost" onclick={resetQueue}>Golește lista</Button>
+			{/if}
+			<Button variant="outline" onclick={() => (uploadOpen = false)} disabled={uploading}>
+				Închide
+			</Button>
+			<Button
+				onclick={runBulkUpload}
+				disabled={uploading || uploadQueue.length === 0 || uploadQueue.every((i) => i.status === 'success')}
+			>
+				{#if uploading}
+					<LoaderIcon class="mr-2 size-4 animate-spin" />
+					Se procesează…
+				{:else}
+					<UploadIcon class="mr-2 size-4" />
+					Instalează {uploadQueue.filter((i) => i.status !== 'success').length} fișier(e)
+				{/if}
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
