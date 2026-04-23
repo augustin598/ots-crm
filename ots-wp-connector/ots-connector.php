@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.1.0
+ * Version:           0.1.1
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.1.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.1.1' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -193,6 +193,19 @@ function ots_connector_render_admin_page(): void {
 		echo '<div class="notice notice-success"><p>Secret regenerat. Copiază-l mai jos și actualizează-l în CRM.</p></div>';
 	}
 
+	// Handle manual secret set (for the case where the CRM generated the secret
+	// and the user needs to paste it into WordPress).
+	if ( ! empty( $_POST['ots_set_manual_secret'] ) && check_admin_referer( 'ots_connector_set_manual' ) ) {
+		$new_secret = trim( (string) wp_unslash( $_POST['manual_secret'] ?? '' ) );
+		if ( strlen( $new_secret ) === 64 && ctype_xdigit( $new_secret ) ) {
+			update_option( OTS_CONNECTOR_SECRET_OPTION, $new_secret, false );
+			update_option( OTS_CONNECTOR_SECRET_SHOWN_OPTION, 1, false );
+			echo '<div class="notice notice-success"><p>Secret actualizat. Apasă „Refresh" în CRM pentru a valida conexiunea.</p></div>';
+		} else {
+			echo '<div class="notice notice-error"><p>Secretul invalid: trebuie exact 64 de caractere hex (0-9, a-f).</p></div>';
+		}
+	}
+
 	$secret       = (string) get_option( OTS_CONNECTOR_SECRET_OPTION, '' );
 	$already_seen = (int) get_option( OTS_CONNECTOR_SECRET_SHOWN_OPTION, 0 ) === 1;
 
@@ -227,7 +240,29 @@ function ots_connector_render_admin_page(): void {
 			<li>În CRM → WordPress → „Adaugă site", lipește URL-ul și secretul de mai sus.</li>
 		</ol>
 
+		<h2>Setează secret manual (din CRM)</h2>
+		<p>
+			Dacă la „Adaugă site" în CRM ai lăsat câmpul „Secret HMAC" gol, CRM-ul a generat
+			un secret și l-a afișat o singură dată. Lipește-l aici pentru a sincroniza plugin-ul.
+		</p>
+		<form method="post">
+			<?php wp_nonce_field( 'ots_connector_set_manual' ); ?>
+			<p>
+				<textarea name="manual_secret" rows="2" style="width:100%;max-width:700px;font-family:monospace;"
+					placeholder="Lipește aici secretul hex de 64 caractere din CRM"></textarea>
+			</p>
+			<p>
+				<button type="submit" name="ots_set_manual_secret" value="1" class="button button-primary">
+					Salvează secret manual
+				</button>
+			</p>
+		</form>
+
 		<h2>Regenerare secret</h2>
+		<p>
+			Alternativ, generează aici un secret nou și copiază-l în CRM (la „Adaugă site" sau la
+			„Rotire secret" pentru un site existent).
+		</p>
 		<form method="post">
 			<?php wp_nonce_field( 'ots_connector_regen' ); ?>
 			<p>
