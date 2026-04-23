@@ -1,0 +1,117 @@
+import { buildSignedHeaders } from './hmac';
+import { connectorSigningPath, connectorUrl } from './url';
+import {
+	WpAuthError,
+	WpConnectionError,
+	WpPluginMissingError,
+	WpProtocolError,
+	WpSiteDownError
+} from './errors';
+
+/** Shape returned by the plugin's `/health` endpoint. */
+export interface WpHealth {
+	connectorVersion: string;
+	wpVersion: string;
+	phpVersion: string;
+	siteUrl: string;
+	sslExpiresAt?: string | null;
+	timestamp: number;
+}
+
+interface RequestOptions {
+	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	path: string; // e.g. '/health' — relative to /wp-json/ots-connector/v1
+	body?: unknown;
+	timeoutMs?: number;
+	siteId?: string; // only used to enrich thrown errors
+}
+
+/**
+ * Authenticated HTTP client for the OTS Connector plugin installed on a
+ * client's WordPress site. Signs every request with HMAC-SHA256 and maps
+ * network/HTTP failures to typed `WpError`s callers can dispatch on.
+ */
+export class WpClient {
+	constructor(
+		private readonly siteUrl: string,
+		private readonly secret: string
+	) {}
+
+	async health(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpHealth> {
+		return this.request<WpHealth>({
+			method: 'GET',
+			path: '/health',
+			timeoutMs: opts?.timeoutMs ?? 10_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	private async request<T>({
+		method,
+		path,
+		body,
+		timeoutMs = 15_000,
+		siteId
+	}: RequestOptions): Promise<T> {
+		const bodyString = body === undefined ? '' : JSON.stringify(body);
+		const signingPath = connectorSigningPath(path);
+		const headers = buildSignedHeaders(this.secret, method, signingPath, bodyString);
+		const url = connectorUrl(this.siteUrl, path);
+
+		let response: Response;
+		try {
+			response = await fetch(url, {
+				method,
+				headers,
+				body: method === 'GET' || method === 'DELETE' ? undefined : bodyString,
+				signal: AbortSignal.timeout(timeoutMs),
+				redirect: 'follow'
+			});
+		} catch (err) {
+			// Network-level failure — DNS, timeout, TLS, refused, reset, etc.
+			const cause = err instanceof Error ? err : new Error(String(err));
+			throw new WpConnectionError(
+				`Network error calling ${method} ${path}: ${cause.message}`,
+				{ siteId, cause }
+			);
+		}
+
+		if (response.status === 401 || response.status === 403) {
+			throw new WpAuthError(
+				`HMAC rejected by ${this.siteUrl} (HTTP ${response.status})`,
+				{ siteId }
+			);
+		}
+
+		if (response.status === 404) {
+			throw new WpPluginMissingError(
+				`OTS Connector plugin not found at ${this.siteUrl} (HTTP 404 on ${path})`,
+				{ siteId }
+			);
+		}
+
+		if (response.status >= 500) {
+			throw new WpSiteDownError(
+				`Site ${this.siteUrl} returned HTTP ${response.status}`,
+				{ siteId }
+			);
+		}
+
+		if (!response.ok) {
+			throw new WpProtocolError(
+				`Unexpected HTTP ${response.status} from ${this.siteUrl} on ${path}`,
+				{ siteId }
+			);
+		}
+
+		try {
+			return (await response.json()) as T;
+		} catch (err) {
+			const cause = err instanceof Error ? err : new Error(String(err));
+			throw new WpProtocolError(
+				`Invalid JSON response from ${this.siteUrl} on ${path}: ${cause.message}`,
+				{ siteId, cause }
+			);
+		}
+	}
+}

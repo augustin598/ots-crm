@@ -3578,3 +3578,47 @@ export const whatsappMessageRelations = relations(whatsappMessage, ({ one }) => 
 		references: [client.id]
 	})
 }));
+
+// ─── WordPress Sites ──────────────────────────────────────────────────────
+// Centralized management of client WordPress sites: health monitoring,
+// plugin/theme/core updates, blog post publishing. Each site is linked
+// to an optional client (agency-internal sites have clientId = null) and
+// authenticates to its WordPress via an HMAC-SHA256 secret stored encrypted.
+export const wordpressSite = sqliteTable('wordpress_site', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id').references(() => client.id),
+	name: text('name').notNull(), // Display label (e.g., "Acme — Blog")
+	siteUrl: text('site_url').notNull(), // Normalized: https://, no trailing slash
+	secretKey: text('secret_key').notNull(), // Encrypted via encrypt(tenantId, raw)
+	connectorVersion: text('connector_version'), // Set at first successful /health
+	wpVersion: text('wp_version'),
+	phpVersion: text('php_version'),
+	sslExpiresAt: timestamp('ssl_expires_at', { withTimezone: true, mode: 'date' }),
+	lastHealthCheckAt: timestamp('last_health_check_at', { withTimezone: true, mode: 'date' }),
+	lastUptimePingAt: timestamp('last_uptime_ping_at', { withTimezone: true, mode: 'date' }),
+	uptimeStatus: text('uptime_status').notNull().default('unknown'), // 'up', 'down', 'unknown'
+	lastUpdatesCheckAt: timestamp('last_updates_check_at', { withTimezone: true, mode: 'date' }),
+	status: text('status').notNull().default('pending'), // 'connected', 'disconnected', 'error', 'pending'
+	lastError: text('last_error'),
+	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const wordpressSiteRelations = relations(wordpressSite, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressSite.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [wordpressSite.clientId],
+		references: [client.id]
+	})
+}));
