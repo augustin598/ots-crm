@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getTask, reopenTask } from '$lib/remotes/tasks.remote';
-	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getCommentAttachmentUrl } from '$lib/remotes/task-comments.remote';
+	import { getTaskComments, createTaskComment, updateTaskComment, deleteTaskComment, getAttachmentUrl } from '$lib/remotes/task-comments.remote';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskMaterials } from '$lib/remotes/task-materials.remote';
@@ -205,12 +205,12 @@
 		}
 	}
 
-	async function loadAttachmentUrl(commentId: string) {
-		if (attachmentUrls[commentId]) return;
+	async function loadAttachmentUrl(attachmentId: string) {
+		if (attachmentUrls[attachmentId]) return;
 		try {
-			const result = await getCommentAttachmentUrl(commentId).current;
+			const result = await getAttachmentUrl(attachmentId).current;
 			if (result?.url) {
-				attachmentUrls = { ...attachmentUrls, [commentId]: result.url };
+				attachmentUrls = { ...attachmentUrls, [attachmentId]: result.url };
 			}
 		} catch {
 			// Silently fail
@@ -480,23 +480,27 @@
 												<div class="comment-display text-sm leading-relaxed">{@html comment.content}</div>
 											</div>
 										{/if}
-										{#if comment.attachmentPath}
-											{@const url = attachmentUrls[comment.id]}
-											{#if !url}
-												{(loadAttachmentUrl(comment.id), '')}
-												<div class="mt-2 h-32 w-48 bg-muted rounded-lg animate-pulse"></div>
-											{:else}
-												<button
-													class="mt-2 block cursor-pointer"
-													onclick={() => openLightbox(url)}
-												>
-													<img
-														src={url}
-														alt={comment.attachmentFileName || 'Attachment'}
-														class="max-h-48 rounded-lg border hover:opacity-90 transition-opacity"
-													/>
-												</button>
-											{/if}
+										{#if comment.attachments?.length}
+											<div class="mt-2 flex flex-wrap gap-2">
+												{#each comment.attachments as att (att.id)}
+													{@const url = attachmentUrls[att.id]}
+													{#if !url}
+														{(loadAttachmentUrl(att.id), '')}
+														<div class="h-32 w-48 bg-muted rounded-lg animate-pulse"></div>
+													{:else}
+														<button
+															class="block cursor-pointer"
+															onclick={() => openLightbox(url)}
+														>
+															<img
+																src={url}
+																alt={att.fileName || 'Attachment'}
+																class="max-h-48 rounded-lg border hover:opacity-90 transition-opacity"
+															/>
+														</button>
+													{/if}
+												{/each}
+											</div>
 										{/if}
 
 										<!-- Replies -->

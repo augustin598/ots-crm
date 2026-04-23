@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import sanitizeHtml from 'sanitize-html';
 import { recordTaskActivity } from '$lib/server/task-activity';
@@ -96,10 +96,6 @@ export const getTaskComments = query(
 				userId: table.taskComment.userId,
 				parentCommentId: table.taskComment.parentCommentId,
 				content: table.taskComment.content,
-				attachmentPath: table.taskComment.attachmentPath,
-				attachmentMimeType: table.taskComment.attachmentMimeType,
-				attachmentFileName: table.taskComment.attachmentFileName,
-				attachmentFileSize: table.taskComment.attachmentFileSize,
 				createdAt: table.taskComment.createdAt,
 				updatedAt: table.taskComment.updatedAt,
 				authorName: table.user.firstName,
@@ -111,9 +107,33 @@ export const getTaskComments = query(
 			.where(eq(table.taskComment.taskId, taskId))
 			.orderBy(table.taskComment.createdAt);
 
+		if (comments.length === 0) return [];
+
+		const commentIds = comments.map(c => c.id);
+		const attachments = await db
+			.select({
+				id: table.taskCommentAttachment.id,
+				commentId: table.taskCommentAttachment.commentId,
+				mimeType: table.taskCommentAttachment.mimeType,
+				fileName: table.taskCommentAttachment.fileName,
+				fileSize: table.taskCommentAttachment.fileSize,
+				createdAt: table.taskCommentAttachment.createdAt
+			})
+			.from(table.taskCommentAttachment)
+			.where(inArray(table.taskCommentAttachment.commentId, commentIds))
+			.orderBy(table.taskCommentAttachment.createdAt);
+
+		const attachmentsByComment = new Map<string, typeof attachments>();
+		for (const a of attachments) {
+			const existing = attachmentsByComment.get(a.commentId) || [];
+			existing.push(a);
+			attachmentsByComment.set(a.commentId, existing);
+		}
+
 		return comments.map(c => ({
 			...c,
-			authorName: `${c.authorName || ''} ${c.authorLastName || ''}`.trim() || c.authorEmail || c.userId
+			authorName: `${c.authorName || ''} ${c.authorLastName || ''}`.trim() || c.authorEmail || c.userId,
+			attachments: attachmentsByComment.get(c.id) || []
 		}));
 	}
 );
@@ -123,6 +143,17 @@ export const createTaskComment = command(
 		taskId: v.pipe(v.string(), v.minLength(1)),
 		content: v.string(),
 		parentCommentId: v.optional(v.string()),
+		attachments: v.optional(
+			v.array(
+				v.object({
+					path: v.pipe(v.string(), v.minLength(1)),
+					mimeType: v.optional(v.string()),
+					fileName: v.optional(v.string()),
+					fileSize: v.optional(v.number())
+				})
+			)
+		),
+		// Legacy single-attachment fields — kept for backward compatibility
 		attachmentPath: v.optional(v.string()),
 		attachmentMimeType: v.optional(v.string()),
 		attachmentFileName: v.optional(v.string()),
@@ -150,9 +181,21 @@ export const createTaskComment = command(
 			throw new Error('Unauthorized: You do not have access to this task');
 		}
 
+		// Normalize attachments: accept either new `attachments[]` shape or legacy single-attachment fields
+		const attachments = data.attachments?.length
+			? data.attachments
+			: data.attachmentPath
+				? [{
+						path: data.attachmentPath,
+						mimeType: data.attachmentMimeType,
+						fileName: data.attachmentFileName,
+						fileSize: data.attachmentFileSize
+					}]
+				: [];
+
 		// Strip empty TipTap HTML (e.g. "<p></p>", "<p> </p>")
 		const textContent = data.content.replace(/<[^>]*>/g, '').trim();
-		if (!textContent && !data.attachmentPath) {
+		if (!textContent && attachments.length === 0) {
 			throw new Error('Comment must have text or an image');
 		}
 
@@ -165,11 +208,25 @@ export const createTaskComment = command(
 			userId: event.locals.user.id,
 			parentCommentId: data.parentCommentId || null,
 			content: sanitizedContent,
-			attachmentPath: data.attachmentPath || null,
-			attachmentMimeType: data.attachmentMimeType || null,
-			attachmentFileName: data.attachmentFileName || null,
-			attachmentFileSize: data.attachmentFileSize || null
+			// Mirror the first attachment into legacy columns so older readers still see something
+			attachmentPath: attachments[0]?.path ?? null,
+			attachmentMimeType: attachments[0]?.mimeType ?? null,
+			attachmentFileName: attachments[0]?.fileName ?? null,
+			attachmentFileSize: attachments[0]?.fileSize ?? null
 		});
+
+		if (attachments.length > 0) {
+			await db.insert(table.taskCommentAttachment).values(
+				attachments.map((a) => ({
+					id: generateTaskCommentId(),
+					commentId,
+					path: a.path,
+					mimeType: a.mimeType ?? null,
+					fileName: a.fileName ?? null,
+					fileSize: a.fileSize ?? null
+				}))
+			);
+		}
 
 		await recordTaskActivity({
 			taskId: data.taskId,
@@ -438,5 +495,43 @@ export const getCommentAttachmentUrl = query(
 
 		const url = await storage.getDownloadUrl(comment.attachmentPath, 300);
 		return { url, fileName: comment.attachmentFileName, mimeType: comment.attachmentMimeType };
+	}
+);
+
+export const getAttachmentUrl = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (attachmentId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const [row] = await db
+			.select({
+				path: table.taskCommentAttachment.path,
+				fileName: table.taskCommentAttachment.fileName,
+				mimeType: table.taskCommentAttachment.mimeType,
+				taskTenantId: table.task.tenantId
+			})
+			.from(table.taskCommentAttachment)
+			.innerJoin(
+				table.taskComment,
+				eq(table.taskCommentAttachment.commentId, table.taskComment.id)
+			)
+			.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
+			.where(
+				and(
+					eq(table.taskCommentAttachment.id, attachmentId),
+					eq(table.task.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (!row) {
+			throw new Error('Attachment not found');
+		}
+
+		const url = await storage.getDownloadUrl(row.path, 300);
+		return { url, fileName: row.fileName, mimeType: row.mimeType };
 	}
 );
