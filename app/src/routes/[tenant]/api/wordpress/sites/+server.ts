@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { encryptVerified } from '$lib/server/plugins/smartbill/crypto';
 import { generateSecret } from '$lib/server/wordpress/hmac';
 import { normalizeSiteUrl } from '$lib/server/wordpress/url';
@@ -33,6 +33,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 			phpVersion: table.wordpressSite.phpVersion,
 			lastHealthCheckAt: table.wordpressSite.lastHealthCheckAt,
 			lastUptimePingAt: table.wordpressSite.lastUptimePingAt,
+			lastUpdatesCheckAt: table.wordpressSite.lastUpdatesCheckAt,
 			lastError: table.wordpressSite.lastError,
 			clientId: table.wordpressSite.clientId,
 			clientName: table.client.name,
@@ -43,7 +44,49 @@ export const GET: RequestHandler = async ({ locals }) => {
 		.where(eq(table.wordpressSite.tenantId, locals.tenant.id))
 		.orderBy(desc(table.wordpressSite.createdAt));
 
-	return json({ sites });
+	// Counts per site for the dashboard badges. One query instead of N+1 —
+	// group by site + type, then aggregate in JS.
+	const updateRows = await db
+		.select({
+			siteId: table.wordpressPendingUpdate.siteId,
+			type: table.wordpressPendingUpdate.type,
+			securityUpdate: table.wordpressPendingUpdate.securityUpdate,
+			count: sql<number>`count(*)`
+		})
+		.from(table.wordpressPendingUpdate)
+		.where(eq(table.wordpressPendingUpdate.tenantId, locals.tenant.id))
+		.groupBy(
+			table.wordpressPendingUpdate.siteId,
+			table.wordpressPendingUpdate.type,
+			table.wordpressPendingUpdate.securityUpdate
+		);
+
+	const countsBySite = new Map<
+		string,
+		{ core: number; plugins: number; themes: number; security: number; total: number }
+	>();
+	for (const row of updateRows) {
+		const current = countsBySite.get(row.siteId) ?? {
+			core: 0,
+			plugins: 0,
+			themes: 0,
+			security: 0,
+			total: 0
+		};
+		if (row.type === 'core') current.core += Number(row.count);
+		else if (row.type === 'plugin') current.plugins += Number(row.count);
+		else if (row.type === 'theme') current.themes += Number(row.count);
+		current.total += Number(row.count);
+		if (row.securityUpdate) current.security += Number(row.count);
+		countsBySite.set(row.siteId, current);
+	}
+
+	const sitesWithCounts = sites.map((s) => ({
+		...s,
+		updates: countsBySite.get(s.id) ?? { core: 0, plugins: 0, themes: 0, security: 0, total: 0 }
+	}));
+
+	return json({ sites: sitesWithCounts });
 };
 
 /**

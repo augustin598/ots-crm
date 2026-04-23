@@ -26,6 +26,7 @@ import { cleanupOldNotifications } from './tasks/notification-cleanup';
 import { processInvoiceReminderNotifications } from './tasks/invoice-reminder-notifications';
 import { processTaskOverdueNotifications } from './tasks/task-overdue-notifications';
 import { processWordpressUptimePing } from './tasks/wordpress-uptime-ping';
+import { processWordpressUpdatesCheck } from './tasks/wordpress-updates-check';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -116,7 +117,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	notification_cleanup: cleanupOldNotifications,
 	invoice_reminder_notifications: processInvoiceReminderNotifications,
 	task_overdue_notifications: processTaskOverdueNotifications,
-	wordpress_uptime_ping: processWordpressUptimePing
+	wordpress_uptime_ping: processWordpressUptimePing,
+	wordpress_updates_check: processWordpressUpdatesCheck
 };
 
 /**
@@ -230,7 +232,7 @@ export const startScheduler = async () => {
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
-		'wordpress-uptime-ping'
+		'wordpress-uptime-ping', 'wordpress-updates-check'
 	]);
 
 	try {
@@ -683,6 +685,23 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// WordPress updates check — daily at 04:00. Polls each connected site
+	// for core/plugin/theme updates and caches them for the dashboard.
+	await schedulerQueue.add(
+		'wordpress-updates-check',
+		{
+			type: 'wordpress_updates_check',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 4 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'wordpress-updates-check'
+		}
+	);
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -723,7 +742,8 @@ export const JOB_LABELS: Record<string, string> = {
 	notification_cleanup: 'Cleanup Notificari Vechi',
 	invoice_reminder_notifications: 'Notificari Facturi Restante',
 	task_overdue_notifications: 'Notificari Taskuri Intarziate',
-	wordpress_uptime_ping: 'Ping Uptime WordPress'
+	wordpress_uptime_ping: 'Ping Uptime WordPress',
+	wordpress_updates_check: 'Verificare Update-uri WordPress'
 };
 
 /** Default params for jobs that need specific parameters */

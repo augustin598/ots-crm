@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.1.1
+ * Version:           0.2.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.1.1' );
+define( 'OTS_CONNECTOR_VERSION', '0.2.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -161,10 +161,353 @@ function ots_connector_probe_ssl_expiry( string $host, int $port ): ?string {
 	return gmdate( 'c', (int) $cert['validTo_time_t'] );
 }
 
+/**
+ * GET /updates — enumerate available core, plugin, and theme updates.
+ * Uses the WP core functions that populate the Dashboard → Updates screen.
+ * We force-refresh transients so results aren't cached for 12 hours.
+ */
+function ots_connector_route_updates( WP_REST_Request $request ) {
+	// Force-refresh update transients so we return current data instead of
+	// whatever was cached the last time an admin loaded the Updates page.
+	wp_version_check( [], true );
+	wp_update_plugins();
+	wp_update_themes();
+
+	$items = [];
+
+	// Core updates
+	if ( ! function_exists( 'get_core_updates' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/update.php';
+	}
+	$core_updates = get_core_updates();
+	if ( is_array( $core_updates ) && ! empty( $core_updates ) ) {
+		foreach ( $core_updates as $core ) {
+			if ( isset( $core->response ) && $core->response === 'upgrade' ) {
+				global $wp_version;
+				$items[] = [
+					'type'           => 'core',
+					'slug'           => 'core',
+					'name'           => 'WordPress',
+					'currentVersion' => $wp_version,
+					'newVersion'     => $core->version,
+					'securityUpdate' => false,
+					'autoUpdate'     => false,
+				];
+				break; // Only one core update at a time
+			}
+		}
+	}
+
+	// Plugin updates
+	if ( ! function_exists( 'get_plugin_updates' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/update.php';
+	}
+	if ( ! function_exists( 'get_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+	$plugin_updates = get_plugin_updates();
+	$auto_plugins   = (array) get_site_option( 'auto_update_plugins', [] );
+	foreach ( $plugin_updates as $plugin_file => $plugin_data ) {
+		$slug = dirname( $plugin_file );
+		if ( $slug === '.' || $slug === '' ) {
+			$slug = basename( $plugin_file, '.php' );
+		}
+		$items[] = [
+			'type'           => 'plugin',
+			'slug'           => $plugin_file, // Full path needed for upgrader
+			'name'           => (string) ( $plugin_data->Name ?? $slug ),
+			'currentVersion' => (string) ( $plugin_data->Version ?? '' ),
+			'newVersion'     => (string) ( $plugin_data->update->new_version ?? '' ),
+			'securityUpdate' => false, // WP doesn't expose this flag on plugin updates
+			'autoUpdate'     => in_array( $plugin_file, $auto_plugins, true ),
+		];
+	}
+
+	// Theme updates
+	if ( ! function_exists( 'get_theme_updates' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/update.php';
+	}
+	$theme_updates = get_theme_updates();
+	$auto_themes   = (array) get_site_option( 'auto_update_themes', [] );
+	foreach ( $theme_updates as $stylesheet => $theme ) {
+		$update = $theme->update ?? null;
+		$items[] = [
+			'type'           => 'theme',
+			'slug'           => (string) $stylesheet,
+			'name'           => (string) ( $theme->get( 'Name' ) ?: $stylesheet ),
+			'currentVersion' => (string) $theme->get( 'Version' ),
+			'newVersion'     => (string) ( $update['new_version'] ?? '' ),
+			'securityUpdate' => false,
+			'autoUpdate'     => in_array( $stylesheet, $auto_themes, true ),
+		];
+	}
+
+	return rest_ensure_response( [
+		'items'     => $items,
+		'timestamp' => time(),
+	] );
+}
+
+/**
+ * POST /updates/apply — run the upgrader for each requested item. Returns
+ * a per-item status so the CRM can show granular feedback. Never throws —
+ * individual failures just get marked "failed" in the result array.
+ */
+function ots_connector_route_apply_updates( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	$items = is_array( $body['items'] ?? null ) ? $body['items'] : [];
+	if ( empty( $items ) ) {
+		return new WP_Error( 'ots_empty_items', 'No items to apply', [ 'status' => 400 ] );
+	}
+
+	// The upgrader classes aren't loaded on REST requests; pull them in.
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/misc.php';
+	require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+	require_once ABSPATH . 'wp-admin/includes/update.php';
+	require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+	// Refresh update caches so upgraders see the latest metadata.
+	wp_version_check( [], true );
+	wp_update_plugins();
+	wp_update_themes();
+
+	$results = [];
+	$overall_success = true;
+
+	foreach ( $items as $item ) {
+		$type = (string) ( $item['type'] ?? '' );
+		$slug = (string) ( $item['slug'] ?? '' );
+		if ( ! $type || ! $slug ) {
+			$results[] = [ 'type' => $type, 'slug' => $slug, 'success' => false, 'message' => 'Missing type or slug' ];
+			$overall_success = false;
+			continue;
+		}
+
+		$skin     = new WP_Ajax_Upgrader_Skin(); // Silent skin — captures output
+		$upgrader = null;
+		$outcome  = null;
+
+		try {
+			if ( $type === 'plugin' ) {
+				$upgrader = new Plugin_Upgrader( $skin );
+				$outcome  = $upgrader->upgrade( $slug );
+			} elseif ( $type === 'theme' ) {
+				$upgrader = new Theme_Upgrader( $skin );
+				$outcome  = $upgrader->upgrade( $slug );
+			} elseif ( $type === 'core' ) {
+				$core_updates = get_core_updates();
+				if ( is_array( $core_updates ) && ! empty( $core_updates ) ) {
+					$upgrader = new Core_Upgrader( $skin );
+					$outcome  = $upgrader->upgrade( reset( $core_updates ) );
+				} else {
+					$outcome = new WP_Error( 'no_core_update', 'No core update available' );
+				}
+			} else {
+				$outcome = new WP_Error( 'bad_type', "Unknown update type: {$type}" );
+			}
+		} catch ( \Throwable $e ) {
+			$outcome = new WP_Error( 'upgrader_exception', $e->getMessage() );
+		}
+
+		if ( is_wp_error( $outcome ) ) {
+			$results[] = [
+				'type'    => $type,
+				'slug'    => $slug,
+				'success' => false,
+				'message' => $outcome->get_error_message(),
+			];
+			$overall_success = false;
+		} elseif ( $outcome === false || $outcome === null ) {
+			$messages = $skin->get_error_messages();
+			$results[] = [
+				'type'    => $type,
+				'slug'    => $slug,
+				'success' => false,
+				'message' => ! empty( $messages ) ? implode( '; ', $messages ) : 'Upgrader returned false',
+			];
+			$overall_success = false;
+		} else {
+			$results[] = [
+				'type'    => $type,
+				'slug'    => $slug,
+				'success' => true,
+				'message' => 'ok',
+			];
+		}
+	}
+
+	return rest_ensure_response( [
+		'success'   => $overall_success,
+		'items'     => $results,
+		'timestamp' => time(),
+	] );
+}
+
+/**
+ * POST /backup — produce a ZIP snapshot of wp-content + a mysqldump-style
+ * SQL export of all tables, saved under wp-content/uploads/ots-backups/.
+ * Synchronous for Phase 2 (the plugin exposes the file via a download URL
+ * and the CRM records the path). Limited to 512 MB archive size.
+ */
+function ots_connector_route_backup( WP_REST_Request $request ) {
+	$started = microtime( true );
+
+	$upload_dir = wp_upload_dir();
+	$backup_dir = trailingslashit( $upload_dir['basedir'] ) . 'ots-backups';
+	if ( ! is_dir( $backup_dir ) ) {
+		if ( ! wp_mkdir_p( $backup_dir ) ) {
+			return new WP_Error( 'ots_mkdir_failed', 'Could not create backup dir', [ 'status' => 500 ] );
+		}
+		// Drop an .htaccess so the directory isn't web-browsable. The archive
+		// itself remains reachable by its individual filename.
+		@file_put_contents( $backup_dir . '/.htaccess', "Options -Indexes\n" );
+	}
+
+	$timestamp = gmdate( 'Ymd-His' );
+	$archive_name = sprintf( 'ots-backup-%s.zip', $timestamp );
+	$archive_path = $backup_dir . '/' . $archive_name;
+
+	if ( ! class_exists( 'ZipArchive' ) ) {
+		return new WP_Error( 'ots_no_zip', 'PHP ZipArchive extension is not installed', [ 'status' => 500 ] );
+	}
+
+	// 1) SQL dump to a temp file
+	$sql_file = $backup_dir . '/db-' . $timestamp . '.sql';
+	$dump_ok  = ots_connector_dump_database( $sql_file );
+	if ( is_wp_error( $dump_ok ) ) {
+		return $dump_ok;
+	}
+
+	// 2) Zip the DB dump + wp-content (excluding cache + the backup dir itself)
+	$zip = new ZipArchive();
+	if ( $zip->open( $archive_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
+		@unlink( $sql_file );
+		return new WP_Error( 'ots_zip_open_failed', 'Could not create archive', [ 'status' => 500 ] );
+	}
+
+	$zip->addFile( $sql_file, 'database.sql' );
+
+	$wp_content = trailingslashit( WP_CONTENT_DIR );
+	$exclude_substrings = [
+		DIRECTORY_SEPARATOR . 'cache' . DIRECTORY_SEPARATOR,
+		DIRECTORY_SEPARATOR . 'ots-backups' . DIRECTORY_SEPARATOR,
+	];
+
+	$iterator = new RecursiveIteratorIterator(
+		new RecursiveDirectoryIterator( $wp_content, RecursiveDirectoryIterator::SKIP_DOTS ),
+		RecursiveIteratorIterator::SELF_FIRST
+	);
+
+	foreach ( $iterator as $file ) {
+		$real_path = $file->getPathname();
+		$skip = false;
+		foreach ( $exclude_substrings as $needle ) {
+			if ( strpos( $real_path, $needle ) !== false ) {
+				$skip = true;
+				break;
+			}
+		}
+		if ( $skip ) continue;
+
+		$relative = 'wp-content/' . ltrim( str_replace( $wp_content, '', $real_path ), '/\\' );
+		if ( $file->isDir() ) {
+			$zip->addEmptyDir( $relative );
+		} else {
+			$zip->addFile( $real_path, $relative );
+		}
+	}
+
+	$zip->close();
+	@unlink( $sql_file );
+
+	$size = @filesize( $archive_path ) ?: 0;
+	$url  = trailingslashit( $upload_dir['baseurl'] ) . 'ots-backups/' . $archive_name;
+	$elapsed = round( microtime( true ) - $started, 2 );
+
+	return rest_ensure_response( [
+		'success'     => true,
+		'archiveUrl'  => $url,
+		'archivePath' => $archive_path,
+		'sizeBytes'   => $size,
+		'elapsedSec'  => $elapsed,
+		'timestamp'   => time(),
+	] );
+}
+
+/**
+ * Dump all tables in the WP DB to a single .sql file. Uses the mysqli
+ * connection wpdb is already holding — no shelling out to mysqldump (which
+ * may not be available on shared hosts).
+ */
+function ots_connector_dump_database( string $output_path ) {
+	global $wpdb;
+	$fh = @fopen( $output_path, 'wb' );
+	if ( ! $fh ) {
+		return new WP_Error( 'ots_dump_open_failed', 'Could not open SQL file for writing', [ 'status' => 500 ] );
+	}
+
+	fwrite( $fh, "-- OTS Connector backup\n" );
+	fwrite( $fh, '-- Generated: ' . gmdate( 'c' ) . "\n" );
+	fwrite( $fh, "SET FOREIGN_KEY_CHECKS=0;\n" );
+	fwrite( $fh, "SET NAMES utf8mb4;\n\n" );
+
+	$tables = $wpdb->get_col( 'SHOW TABLES' );
+	foreach ( $tables as $table ) {
+		// DROP + CREATE
+		$create = $wpdb->get_row( "SHOW CREATE TABLE `{$table}`", ARRAY_N );
+		if ( ! $create || empty( $create[1] ) ) continue;
+
+		fwrite( $fh, "DROP TABLE IF EXISTS `{$table}`;\n" );
+		fwrite( $fh, $create[1] . ";\n\n" );
+
+		// Data — stream in chunks of 500 rows to cap memory
+		$offset = 0;
+		while ( true ) {
+			$rows = $wpdb->get_results( "SELECT * FROM `{$table}` LIMIT {$offset}, 500", ARRAY_A );
+			if ( empty( $rows ) ) break;
+
+			foreach ( $rows as $row ) {
+				$cols = array_map( function ( $v ) use ( $wpdb ) {
+					if ( $v === null ) return 'NULL';
+					return "'" . $wpdb->_escape( (string) $v ) . "'";
+				}, array_values( $row ) );
+				fwrite( $fh, "INSERT INTO `{$table}` VALUES (" . implode( ',', $cols ) . ");\n" );
+			}
+
+			$offset += 500;
+			if ( count( $rows ) < 500 ) break;
+		}
+		fwrite( $fh, "\n" );
+	}
+
+	fwrite( $fh, "SET FOREIGN_KEY_CHECKS=1;\n" );
+	fclose( $fh );
+	return true;
+}
+
 add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/health', [
 		'methods'             => WP_REST_Server::READABLE,
 		'callback'            => 'ots_connector_route_health',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/updates', [
+		'methods'             => WP_REST_Server::READABLE,
+		'callback'            => 'ots_connector_route_updates',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/updates/apply', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_apply_updates',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/backup', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_backup',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 } );
@@ -275,8 +618,12 @@ function ots_connector_render_admin_page(): void {
 
 		<h2>Endpoint-uri active</h2>
 		<ul>
-			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/health</code> — verificare stare (necesită semnătură HMAC)</li>
+			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/health</code> — verificare stare</li>
+			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates</code> — listă update-uri disponibile</li>
+			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates/apply</code> — aplică update-uri</li>
+			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/backup</code> — creează backup ZIP + SQL</li>
 		</ul>
+		<p><em>Toate endpoint-urile necesită semnătură HMAC (header-e X-OTS-Timestamp + X-OTS-Signature).</em></p>
 
 		<p><small>Versiune plugin: <?php echo esc_html( OTS_CONNECTOR_VERSION ); ?></small></p>
 	</div>

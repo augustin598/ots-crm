@@ -2,9 +2,14 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
-import { WpClient } from './client';
+import { WpClient, type WpUpdateItem } from './client';
 import { WpError } from './errors';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
+
+function newId() {
+	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
 
 /**
  * Fetch a WordPress site row, decrypt its secret (retrying once on transient
@@ -114,6 +119,89 @@ export async function syncHealth(siteId: string): Promise<{
 
 		return { ok: false, error: message };
 	}
+}
+
+/**
+ * Fetch the plugin's /updates response and replace the site's cached pending
+ * updates with the fresh set. Deletion + insert happens in a single logical
+ * pass — we don't try to diff, because WP update transients are fully
+ * authoritative (updates applied elsewhere disappear from the response).
+ *
+ * Returns the count of pending updates, broken down by type.
+ */
+export async function syncUpdates(siteId: string): Promise<{
+	ok: boolean;
+	error?: string;
+	core: number;
+	plugins: number;
+	themes: number;
+	security: number;
+}> {
+	const { site, client } = await loadSiteAndClient(siteId);
+
+	let response: Awaited<ReturnType<WpClient['listUpdates']>>;
+	try {
+		response = await client.listUpdates({ siteId });
+	} catch (err) {
+		const { message } = serializeError(err);
+		const code = WpError.isWpError(err) ? err.code : 'unknown_error';
+		logWarning('wordpress', `listUpdates failed for ${site.siteUrl}: ${code}`, {
+			tenantId: site.tenantId,
+			metadata: { siteId, code }
+		});
+		await db
+			.update(table.wordpressSite)
+			.set({ lastUpdatesCheckAt: new Date(), updatedAt: new Date() })
+			.where(eq(table.wordpressSite.id, siteId));
+		return { ok: false, error: message, core: 0, plugins: 0, themes: 0, security: 0 };
+	}
+
+	// Replace the cached set atomically: delete old rows, insert new ones.
+	// We do it in a transaction so a crash mid-way doesn't leave us with an
+	// empty cache that the UI interprets as "no updates pending".
+	const now = new Date();
+	const items: WpUpdateItem[] = response.items ?? [];
+
+	await db.transaction(async (tx) => {
+		await tx
+			.delete(table.wordpressPendingUpdate)
+			.where(eq(table.wordpressPendingUpdate.siteId, siteId));
+
+		if (items.length > 0) {
+			await tx.insert(table.wordpressPendingUpdate).values(
+				items.map((item) => ({
+					id: newId(),
+					tenantId: site.tenantId,
+					siteId,
+					type: item.type,
+					slug: item.slug,
+					name: item.name || item.slug,
+					currentVersion: item.currentVersion,
+					newVersion: item.newVersion,
+					securityUpdate: item.securityUpdate ? 1 : 0,
+					autoUpdate: item.autoUpdate ? 1 : 0,
+					detectedAt: now
+				}))
+			);
+		}
+
+		await tx
+			.update(table.wordpressSite)
+			.set({ lastUpdatesCheckAt: now, updatedAt: now })
+			.where(eq(table.wordpressSite.id, siteId));
+	});
+
+	const core = items.filter((i) => i.type === 'core').length;
+	const plugins = items.filter((i) => i.type === 'plugin').length;
+	const themes = items.filter((i) => i.type === 'theme').length;
+	const security = items.filter((i) => i.securityUpdate).length;
+
+	logInfo('wordpress', `Updates synced for ${site.siteUrl}`, {
+		tenantId: site.tenantId,
+		metadata: { siteId, core, plugins, themes, security }
+	});
+
+	return { ok: true, core, plugins, themes, security };
 }
 
 /**

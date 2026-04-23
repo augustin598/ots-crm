@@ -18,6 +18,45 @@ export interface WpHealth {
 	timestamp: number;
 }
 
+/** One item in the plugin's `/updates` response. Same shape for core / plugin / theme. */
+export interface WpUpdateItem {
+	type: 'core' | 'plugin' | 'theme';
+	slug: string; // For plugins, this is the full path (e.g. "akismet/akismet.php")
+	name: string;
+	currentVersion: string;
+	newVersion: string;
+	securityUpdate: boolean;
+	autoUpdate: boolean;
+}
+
+export interface WpUpdatesResponse {
+	items: WpUpdateItem[];
+	timestamp: number;
+}
+
+/** Per-item outcome returned by `/updates/apply`. */
+export interface WpApplyResultItem {
+	type: string;
+	slug: string;
+	success: boolean;
+	message: string;
+}
+
+export interface WpApplyResponse {
+	success: boolean; // true only if every item succeeded
+	items: WpApplyResultItem[];
+	timestamp: number;
+}
+
+export interface WpBackupResponse {
+	success: boolean;
+	archiveUrl: string;
+	archivePath: string;
+	sizeBytes: number;
+	elapsedSec: number;
+	timestamp: number;
+}
+
 interface RequestOptions {
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	path: string; // e.g. '/health' — relative to /wp-json/ots-connector/v1
@@ -42,6 +81,49 @@ export class WpClient {
 			method: 'GET',
 			path: '/health',
 			timeoutMs: opts?.timeoutMs ?? 10_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/** Force-refreshes WP's update transients and returns the current set. */
+	async listUpdates(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpUpdatesResponse> {
+		return this.request<WpUpdatesResponse>({
+			method: 'GET',
+			path: '/updates',
+			timeoutMs: opts?.timeoutMs ?? 45_000, // refresh can be slow on cheap hosting
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Apply one or more updates. The plugin runs each item sequentially and
+	 * returns a per-item status — partial success is the normal case when a
+	 * single plugin fails mid-batch.
+	 */
+	async applyUpdates(
+		items: { type: 'core' | 'plugin' | 'theme'; slug: string }[],
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<WpApplyResponse> {
+		return this.request<WpApplyResponse>({
+			method: 'POST',
+			path: '/updates/apply',
+			body: { items },
+			timeoutMs: opts?.timeoutMs ?? 180_000, // big plugins like Woo/Elementor are slow
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Trigger a full backup (SQL dump + wp-content zip). Synchronous on the
+	 * plugin side — can take minutes on larger sites — so we give it a
+	 * generous timeout. Returns the archive's public URL and size.
+	 */
+	async triggerBackup(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpBackupResponse> {
+		return this.request<WpBackupResponse>({
+			method: 'POST',
+			path: '/backup',
+			body: {},
+			timeoutMs: opts?.timeoutMs ?? 600_000, // 10 min for big sites
 			siteId: opts?.siteId
 		});
 	}

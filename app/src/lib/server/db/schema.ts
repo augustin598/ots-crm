@@ -3612,7 +3612,7 @@ export const wordpressSite = sqliteTable('wordpress_site', {
 		.default(sql`current_date`)
 });
 
-export const wordpressSiteRelations = relations(wordpressSite, ({ one }) => ({
+export const wordpressSiteRelations = relations(wordpressSite, ({ one, many }) => ({
 	tenant: one(tenant, {
 		fields: [wordpressSite.tenantId],
 		references: [tenant.id]
@@ -3620,5 +3620,121 @@ export const wordpressSiteRelations = relations(wordpressSite, ({ one }) => ({
 	client: one(client, {
 		fields: [wordpressSite.clientId],
 		references: [client.id]
+	}),
+	pendingUpdates: many(wordpressPendingUpdate),
+	updateJobs: many(wordpressUpdateJob),
+	backups: many(wordpressBackup)
+}));
+
+// Cache of available core/plugin/theme updates per site. Populated by the
+// daily `wordpress_updates_check` scheduler task or by the user hitting
+// "Refresh updates" in the UI. Wiped and re-inserted on every refresh to
+// avoid stale rows for updates that were applied elsewhere.
+export const wordpressPendingUpdate = sqliteTable('wordpress_pending_update', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	siteId: text('site_id')
+		.notNull()
+		.references(() => wordpressSite.id, { onDelete: 'cascade' }),
+	type: text('type').notNull(), // 'core', 'plugin', 'theme'
+	slug: text('slug').notNull(), // e.g. 'woocommerce' (plugin), 'twentytwentyfour' (theme), 'core' (core)
+	name: text('name').notNull().default(''), // Human-readable label
+	currentVersion: text('current_version').notNull().default(''),
+	newVersion: text('new_version').notNull().default(''),
+	securityUpdate: integer('security_update').notNull().default(0), // 1 = security
+	autoUpdate: integer('auto_update').notNull().default(0), // 1 = WP auto-update is enabled (informational)
+	detectedAt: timestamp('detected_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const wordpressPendingUpdateRelations = relations(wordpressPendingUpdate, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressPendingUpdate.tenantId],
+		references: [tenant.id]
+	}),
+	site: one(wordpressSite, {
+		fields: [wordpressPendingUpdate.siteId],
+		references: [wordpressSite.id]
+	})
+}));
+
+// Audit trail for each apply-updates action. One row per user-initiated
+// batch. `items` holds the requested update list as JSON; `result` stores
+// the plugin's per-item response so we can surface failures granularly.
+export const wordpressUpdateJob = sqliteTable('wordpress_update_job', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	siteId: text('site_id')
+		.notNull()
+		.references(() => wordpressSite.id, { onDelete: 'cascade' }),
+	userId: text('user_id').references(() => user.id), // nullable: scheduled bulk jobs can be null
+	items: text('items').notNull().default('[]'), // JSON array of {type, slug, fromVersion, toVersion}
+	status: text('status').notNull().default('queued'), // 'queued', 'running', 'success', 'partial', 'failed'
+	result: text('result'), // JSON: plugin's response
+	error: text('error'),
+	startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const wordpressUpdateJobRelations = relations(wordpressUpdateJob, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressUpdateJob.tenantId],
+		references: [tenant.id]
+	}),
+	site: one(wordpressSite, {
+		fields: [wordpressUpdateJob.siteId],
+		references: [wordpressSite.id]
+	}),
+	user: one(user, {
+		fields: [wordpressUpdateJob.userId],
+		references: [user.id]
+	})
+}));
+
+// Backup records. `trigger` distinguishes manual user-initiated backups
+// from automatic pre-update snapshots. `archiveUrl` is populated by the
+// plugin after uploading the zip — may be null while pending.
+export const wordpressBackup = sqliteTable('wordpress_backup', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	siteId: text('site_id')
+		.notNull()
+		.references(() => wordpressSite.id, { onDelete: 'cascade' }),
+	userId: text('user_id').references(() => user.id),
+	trigger: text('trigger').notNull().default('manual'), // 'manual', 'pre_update'
+	status: text('status').notNull().default('queued'), // 'queued', 'running', 'success', 'failed'
+	archiveUrl: text('archive_url'), // HTTP(S) URL to the zip if the plugin exposes it
+	archivePath: text('archive_path'), // filesystem path on the WP server (wp-content/uploads/ots-backups/...)
+	sizeBytes: integer('size_bytes'),
+	error: text('error'),
+	startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+export const wordpressBackupRelations = relations(wordpressBackup, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressBackup.tenantId],
+		references: [tenant.id]
+	}),
+	site: one(wordpressSite, {
+		fields: [wordpressBackup.siteId],
+		references: [wordpressSite.id]
+	}),
+	user: one(user, {
+		fields: [wordpressBackup.userId],
+		references: [user.id]
 	})
 }));

@@ -1240,6 +1240,27 @@
       "when": 1777430008000,
       "tag": "0176_wordpress_site",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "6",
+      "when": 1777430009000,
+      "tag": "0177_wordpress_pending_update",
+      "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "6",
+      "when": 1777430010000,
+      "tag": "0178_wordpress_update_job",
+      "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "6",
+      "when": 1777430011000,
+      "tag": "0179_wordpress_backup",
+      "breakpoints": true
     }
   ]
 }
