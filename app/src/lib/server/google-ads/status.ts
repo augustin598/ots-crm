@@ -2,6 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
+import { getAuthenticatedClient } from './auth';
 import { listMccSubAccounts, fetchBillingSetupStatus, formatCustomerId } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
 import { mapGoogleStatusPure, isKnownGoogleCustomerStatus } from '$lib/server/ads/status-mappers';
@@ -22,10 +23,24 @@ export function mapGoogleStatusToPayment(
 export async function fetchGooglePaymentStatus(
 	integration: typeof table.googleAdsIntegration.$inferSelect,
 ): Promise<PaymentStatusSnapshot[]> {
+	// Route through getAuthenticatedClient so transient refresh failures get
+	// retried with backoff, and a permanently revoked refresh_token returns
+	// null instead of throwing the raw "Expected OAuth 2 access token" error
+	// every poll cycle.
+	const auth = await getAuthenticatedClient(integration.tenantId);
+	if (!auth) {
+		// Permanent (revoked) or transient-after-3-retries-with-expired-token.
+		// auth.ts already logged details. Returning [] keeps the scheduler quiet
+		// instead of bubbling a generic Google error every 15 minutes.
+		return [];
+	}
+
+	const refreshed = auth.integration;
+
 	const subAccounts = await listMccSubAccounts(
-		integration.mccAccountId,
-		integration.developerToken,
-		integration.refreshToken,
+		refreshed.mccAccountId,
+		refreshed.developerToken,
+		refreshed.refreshToken,
 	);
 
 	// Scope to this integration. Legacy rows inserted before migration 0166 may
@@ -63,16 +78,16 @@ export async function fetchGooglePaymentStatus(
 		let billingSetupStatus: string | null = null;
 		if (acc.status === 'ENABLED') {
 			billingSetupStatus = await fetchBillingSetupStatus(
-				integration.mccAccountId,
+				refreshed.mccAccountId,
 				acc.customerId,
-				integration.developerToken,
-				integration.refreshToken,
+				refreshed.developerToken,
+				refreshed.refreshToken,
 			);
 		}
 
 		snapshots.push({
 			provider: 'google',
-			integrationId: integration.id,
+			integrationId: refreshed.id,
 			accountTableId: row.id,
 			externalAccountId: acc.customerId,
 			clientId: row.clientId ?? null,

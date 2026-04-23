@@ -143,15 +143,22 @@ export async function getAuthenticatedClient(tenantId: string) {
 		// Retry up to 3 times with exponential backoff for transient errors
 		let lastError: Error | null = null;
 		let refreshed = false;
+		let refreshedAccessToken: string | null = null;
+		let refreshedExpiresAt: Date | null = null;
 
 		for (let attempt = 0; attempt <= 3; attempt++) {
 			try {
 				const { credentials } = await oauth2Client.refreshAccessToken();
+				refreshedAccessToken = credentials.access_token!;
+				refreshedExpiresAt = new Date(credentials.expiry_date || Date.now() + 3600 * 1000);
 				await db
 					.update(table.googleAdsIntegration)
 					.set({
-						accessToken: credentials.access_token!,
-						tokenExpiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
+						accessToken: refreshedAccessToken,
+						tokenExpiresAt: refreshedExpiresAt,
+						lastRefreshAttemptAt: new Date(),
+						lastRefreshError: null,
+						consecutiveRefreshFailures: 0,
 						updatedAt: new Date()
 					})
 					.where(eq(table.googleAdsIntegration.id, integration.id));
@@ -164,7 +171,18 @@ export async function getAuthenticatedClient(tenantId: string) {
 				const isPermanent = message.includes('invalid_grant') || message.includes('Token has been expired or revoked');
 
 				if (isPermanent) {
-					// Permanent error — return null, let scheduler handle deactivation via threshold
+					// Permanent error — bump counter so noisy-neighbor alerting and
+					// future deactivation logic can see it. Don't deactivate here;
+					// keep that decision in one place (scheduler/admin).
+					await db
+						.update(table.googleAdsIntegration)
+						.set({
+							lastRefreshAttemptAt: new Date(),
+							lastRefreshError: message.slice(0, 500),
+							consecutiveRefreshFailures: (integration.consecutiveRefreshFailures ?? 0) + 1,
+							updatedAt: new Date()
+						})
+						.where(eq(table.googleAdsIntegration.id, integration.id));
 					logWarning('google-ads', 'OAuth: Refresh token invalid/revoked', { tenantId, metadata: { email: integration.email, error: message } });
 					return null;
 				}
@@ -179,7 +197,18 @@ export async function getAuthenticatedClient(tenantId: string) {
 		}
 
 		if (!refreshed) {
-			// All retries failed — use old token if still valid, otherwise return null
+			// All retries failed — record the transient failure and decide based
+			// on whether the existing access token is still usable.
+			await db
+				.update(table.googleAdsIntegration)
+				.set({
+					lastRefreshAttemptAt: new Date(),
+					lastRefreshError: (lastError?.message ?? 'unknown').slice(0, 500),
+					consecutiveRefreshFailures: (integration.consecutiveRefreshFailures ?? 0) + 1,
+					updatedAt: new Date()
+				})
+				.where(eq(table.googleAdsIntegration.id, integration.id));
+
 			const isExpired = integration.tokenExpiresAt.getTime() < Date.now();
 			if (isExpired) {
 				logWarning('google-ads', 'Token refresh failed (transient) and access token already expired', {
@@ -190,6 +219,15 @@ export async function getAuthenticatedClient(tenantId: string) {
 			logWarning('google-ads', 'Token refresh failed (transient), using existing token', {
 				tenantId, metadata: { error: lastError?.message }
 			});
+		}
+
+		// Reflect the refresh into the in-memory integration so callers using
+		// integration.refreshToken/accessToken see fresh values without a re-read.
+		if (refreshed && refreshedAccessToken && refreshedExpiresAt) {
+			integration.accessToken = refreshedAccessToken;
+			integration.tokenExpiresAt = refreshedExpiresAt;
+			integration.lastRefreshError = null;
+			integration.consecutiveRefreshFailures = 0;
 		}
 	}
 

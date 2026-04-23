@@ -1223,7 +1223,12 @@ export async function fetchAdvertiserBalances(
 	const out = new Map<string, TiktokAdvertiserBalance>();
 	if (advertiserIds.length === 0) return out;
 
-	for (const advId of advertiserIds) {
+	// Concurrency cap: TikTok API doesn't publish a hard limit per token, but
+	// firing 50+ requests at once on a tenant with many advertisers could trip
+	// the per-app QPS ceiling. 5 in-flight keeps total wall time ~= ceil(N/5)*~3s
+	// instead of N*~3s, while staying well below any reasonable rate limit.
+	const CONCURRENCY = 5;
+	async function fetchOne(advId: string): Promise<TiktokAdvertiserBalance> {
 		try {
 			const params = new URLSearchParams({ advertiser_id: advId });
 			const res = await fetch(
@@ -1235,20 +1240,25 @@ export async function fetchAdvertiserBalances(
 			);
 			const json = await res.json();
 			if (json.code !== 0 || !json.data) {
-				out.set(advId, { advertiserId: advId, balanceCents: null, currencyCode: null });
-				continue;
+				return { advertiserId: advId, balanceCents: null, currencyCode: null };
 			}
 			const balanceStr = json.data.balance ?? json.data.cash_balance ?? null;
 			const balanceNum = balanceStr != null ? Number(balanceStr) : NaN;
 			const balanceCents = Number.isFinite(balanceNum) ? Math.round(balanceNum * 100) : null;
-			out.set(advId, {
+			return {
 				advertiserId: advId,
 				balanceCents,
 				currencyCode: json.data.currency ?? null
-			});
+			};
 		} catch {
-			out.set(advId, { advertiserId: advId, balanceCents: null, currencyCode: null });
+			return { advertiserId: advId, balanceCents: null, currencyCode: null };
 		}
+	}
+
+	for (let i = 0; i < advertiserIds.length; i += CONCURRENCY) {
+		const batch = advertiserIds.slice(i, i + CONCURRENCY);
+		const results = await Promise.all(batch.map(fetchOne));
+		for (const r of results) out.set(r.advertiserId, r);
 	}
 	return out;
 }
