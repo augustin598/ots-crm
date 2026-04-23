@@ -25,6 +25,7 @@ import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retr
 import { cleanupOldNotifications } from './tasks/notification-cleanup';
 import { processInvoiceReminderNotifications } from './tasks/invoice-reminder-notifications';
 import { processTaskOverdueNotifications } from './tasks/task-overdue-notifications';
+import { processWordpressUptimePing } from './tasks/wordpress-uptime-ping';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -114,7 +115,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	email_retry: processEmailRetry,
 	notification_cleanup: cleanupOldNotifications,
 	invoice_reminder_notifications: processInvoiceReminderNotifications,
-	task_overdue_notifications: processTaskOverdueNotifications
+	task_overdue_notifications: processTaskOverdueNotifications,
+	wordpress_uptime_ping: processWordpressUptimePing
 };
 
 /**
@@ -227,7 +229,8 @@ export const startScheduler = async () => {
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'ads-status-monitor', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
-		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications'
+		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
+		'wordpress-uptime-ping'
 	]);
 
 	try {
@@ -662,6 +665,24 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// WordPress uptime ping — every 5 minutes. HEAD requests to every site
+	// root so we surface outages independently of the plugin's /health endpoint.
+	await schedulerQueue.add(
+		'wordpress-uptime-ping',
+		{
+			type: 'wordpress_uptime_ping',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '*/5 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'wordpress-uptime-ping',
+			attempts: 1
+		}
+	);
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -701,7 +722,8 @@ export const JOB_LABELS: Record<string, string> = {
 	email_retry: 'Retry Emailuri Eșuate',
 	notification_cleanup: 'Cleanup Notificari Vechi',
 	invoice_reminder_notifications: 'Notificari Facturi Restante',
-	task_overdue_notifications: 'Notificari Taskuri Intarziate'
+	task_overdue_notifications: 'Notificari Taskuri Intarziate',
+	wordpress_uptime_ping: 'Ping Uptime WordPress'
 };
 
 /** Default params for jobs that need specific parameters */

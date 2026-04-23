@@ -16,6 +16,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 import LinkIcon from '@lucide/svelte/icons/link';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import ContactIcon from '@lucide/svelte/icons/contact';
@@ -304,6 +305,16 @@ import LinkIcon from '@lucide/svelte/icons/link';
 							<a href="/{tenantSlug}/seo-links" {...props}>
 								<LinkIcon />
 								<span>Linkuri SEO</span>
+							</a>
+						{/snippet}
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+				<SidebarMenuItem>
+					<SidebarMenuButton isActive={currentPath.startsWith(`/${tenantSlug}/wordpress`)}>
+						{#snippet child({ props })}
+							<a href="/{tenantSlug}/wordpress" {...props}>
+								<GlobeIcon />
+								<span>WordPress</span>
 							</a>
 						{/snippet}
 					</SidebarMenuButton>

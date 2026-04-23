@@ -36,7 +36,8 @@ export type LogSource =
 	| 'token-refresh'
 	| 'meta-ads-leads'
 	| 'tiktok-auto-assign'
-	| 'whatsapp';
+	| 'whatsapp'
+	| 'wordpress';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
