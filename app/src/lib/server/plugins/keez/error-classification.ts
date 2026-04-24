@@ -38,3 +38,28 @@ export function classifyKeezError(error: unknown): FailureKind {
 
 	return 'transient';
 }
+
+/**
+ * Detect Keez's "this invoice doesn't exist" signal across the two HTTP
+ * shapes the API actually returns:
+ *   1. HTTP 404 with plain `Error('Not found')` thrown by client.ts:308.
+ *   2. HTTP 400 with body `{"Code":"VALIDATION_ERROR","Message":"...nu exista..."}`
+ *      thrown as KeezClientError(400, "Keez API client error 400: {...}").
+ *      This is the common case — Keez does NOT pick 404 for missing records.
+ *      See memory/project_keez_400_for_missing_invoice.md.
+ *
+ * Used by the sync reconcile pass and the _debug-keez-invoice endpoint.
+ */
+export function isMissingOnKeez(err: unknown): boolean {
+	if (err instanceof Error && err.message === 'Not found') return true;
+	if (err instanceof KeezClientError) {
+		if (err.status === 404) return true;
+		if (err.status === 400) {
+			const msg = err.message || '';
+			if (/VALIDATION_ERROR/.test(msg) && /nu exista|Not Found/i.test(msg)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
