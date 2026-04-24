@@ -135,6 +135,11 @@ async function _syncKeezInvoicesForTenantInner(
 	// Per-run circuit breaker: if Keez is degraded, individual invoice fetches
 	// fail one after another. Stop hammering after 3 consecutive transient
 	// errors and let handleKeezSyncFailure schedule a delayed retry instead.
+	// "Consecutive" really means consecutive: the counter is reset on every
+	// successful iteration (each `continue` and the final fall-through), and
+	// also on a non-transient error in the catch block. Without those resets,
+	// 3 sporadic 502s spread across 500 healthy invoices would falsely trip
+	// the breaker.
 	let consecutiveTransient = 0;
 	for (const invoiceHeader of response.data || []) {
 		try {
@@ -153,6 +158,7 @@ async function _syncKeezInvoicesForTenantInner(
 				if (e instanceof Error && e.message === 'Not found') {
 					logWarning('keez', `Sync skipping invoice ${invoiceHeader.externalId} - not found in Keez`, { tenantId });
 					result.skipped++;
+					consecutiveTransient = 0;
 					continue;
 				}
 				throw e;
@@ -371,6 +377,7 @@ async function _syncKeezInvoicesForTenantInner(
 				}
 
 				result.updated++;
+				consecutiveTransient = 0;
 				continue;
 			}
 
@@ -382,6 +389,7 @@ async function _syncKeezInvoicesForTenantInner(
 
 			if (!clientId) {
 				result.skipped++;
+				consecutiveTransient = 0;
 				continue;
 			}
 
@@ -450,6 +458,7 @@ async function _syncKeezInvoicesForTenantInner(
 			});
 
 			result.imported++;
+			consecutiveTransient = 0;
 		} catch (error) {
 			const processErr = serializeError(error);
 			logError('keez', `Sync failed to process invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
