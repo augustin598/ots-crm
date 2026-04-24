@@ -21,6 +21,7 @@ function buildItem(overrides: Partial<AdDigestItem> & {
 	rejectReasonMessage?: string | null;
 	rejectReasonEndsAt?: string | null;
 	googleSuspensionReasons?: string[] | null;
+	rawStatusCode?: string | null;
 }): AdDigestItem {
 	const provider = (overrides.provider ?? 'tiktok') as 'meta' | 'google' | 'tiktok';
 	const paymentStatus = (overrides.paymentStatus ?? 'risk_review') as
@@ -38,6 +39,7 @@ function buildItem(overrides: Partial<AdDigestItem> & {
 		rejectReasonMessage: overrides.rejectReasonMessage ?? null,
 		rejectReasonEndsAt: overrides.rejectReasonEndsAt ?? null,
 		googleSuspensionReasons: overrides.googleSuspensionReasons ?? null,
+		rawStatusCode: typeof overrides.rawStatusCode === 'string' ? overrides.rawStatusCode : null,
 	});
 
 	return {
@@ -219,6 +221,35 @@ const demoItems: AdDigestItem[] = [
 		statusLabelRo: 'Suspendat',
 		rawStatusCode: 'SUSPENDED',
 		googleSuspensionReasons: ['SUSPICIOUS_PAYMENT_ACTIVITY', 'UNAUTHORIZED_ACCOUNT_ACTIVITY'],
+	}),
+	buildItem({
+		accountName: 'Client Meta — Heylux',
+		externalAccountId: 'act_1234567890',
+		provider: 'meta',
+		paymentStatus: 'suspended',
+		statusLabelRo: 'Suspendat',
+		rawStatusCode: '2', // DISABLED
+		rawDisableReason: '1', // ADS_INTEGRITY_POLICY
+	}),
+	buildItem({
+		accountName: 'Client Meta — DS Tech',
+		externalAccountId: 'act_9876543210',
+		provider: 'meta',
+		paymentStatus: 'payment_failed',
+		statusLabelRo: 'Plată eșuată',
+		rawStatusCode: '3', // UNSETTLED
+		rawDisableReason: '8', // PRE_PAYMENT_ADS_DISABLED
+		balanceFormatted: '342,18 RON',
+	}),
+	buildItem({
+		accountName: 'Client Meta — Beonemedical',
+		externalAccountId: 'act_5555555555',
+		provider: 'meta',
+		paymentStatus: 'grace_period',
+		statusLabelRo: 'Perioadă de grație',
+		rawStatusCode: '9', // IN_GRACE_PERIOD
+		rawDisableReason: null,
+		balanceFormatted: '218,40 RON',
 	}),
 ];
 

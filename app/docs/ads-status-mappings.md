@@ -62,6 +62,27 @@
 
 **Logică:** dacă status=1 → `ok` (ignorăm disable_reason pentru a preveni false positive din date stale). Altfel, consultăm întâi disable_reason; dacă nu e în listă, cădem la account_status.
 
+### `disable_reason` + `account_status` RO copy (2026-04-24)
+
+Capturate la nivel primar (numeric) în `paymentStatusRaw` (`code` + `disableReason`); afișate ca RO label + sugestie acționabilă în [`$lib/ads/status-copy.ts:translateMetaDisableReason`](../src/lib/ads/status-copy.ts) și `translateMetaAccountStatus`.
+
+Logica `describeStatus` pentru Meta:
+1. Dacă `disable_reason` ≠ 0 → headline + body + sugestie din `translateMetaDisableReason` (11 valori traduse)
+2. Dacă lipsește (status-uri ca `PENDING_RISK_REVIEW`/`IN_GRACE_PERIOD`/`PENDING_CLOSURE`/`CLOSED`) → cade pe `translateMetaAccountStatus` (7 valori cu copy specific: 2, 3, 7, 8, 9, 100, 101)
+3. Dacă nici una nu produce o traducere → cade la generic copy din ramura finală a `describeStatus`
+
+**Exemple live:**
+
+| account_status | disable_reason | UI label |
+|---|---|---|
+| 2 (DISABLED) | 1 (ADS_INTEGRITY_POLICY) | "Cont suspendat de Meta — Încălcare politici reclame" |
+| 3 (UNSETTLED) | 8 (PRE_PAYMENT_ADS_DISABLED) | "Plata a eșuat pe Meta — Sold restant neachitat" |
+| 9 (IN_GRACE_PERIOD) | 0 (NONE) | "Cont Meta — Perioadă de grație — factură neachitată" |
+| 7 (PENDING_RISK_REVIEW) | 0 (NONE) | "Cont Meta — Verificare cont în curs" |
+| 101 (CLOSED) | 0 (NONE) | "Cont închis definitiv" |
+
+Forward-compat: dacă Meta adaugă `disable_reason` necunoscut (e.g. cod 13+), translator-ul emite `console.warn('[ads-status] Unknown Meta disable_reason: ...')` ca să nu rămână blind spot.
+
 ---
 
 ## Google Ads API v17+
@@ -236,6 +257,7 @@ Fișierul de test [`payment-status.test.ts`](../src/lib/server/ads/payment-statu
 | 2026-04-22 | 7 TikTok `STATUS_LIMIT` silent `ok` | Mapper fără case explicit, default era 'ok' | Adăugat case + default fail-safer la `risk_review` |
 | 2026-04-24 | 1+ TikTok cont marcat `risk_review` greșit | `PARTIAL_AUDIT_DENY` era tratat ca "not delivering" deși campaniile livrau cu reclame aprobate | Introdus `isCampaignDelivering` + capturat `sub_status`/`reject_reason`/`display_status` în raw snapshot |
 | 2026-04-24 | Google suspendări afișate fără context | `customer.suspension_reasons` nu era interogat; doar `status=SUSPENDED` generic apărea în UI/email | Nouă funcție `fetchCustomerSuspensionReasons` (quota-aware: doar SUSPENDED), translate RO în `describeStatus`, dashboard + email digest cu copy bogat |
+| 2026-04-24 | Meta suspendări afișate fără context | `disable_reason` numeric era stocat dar nu tradus; clientul vedea doar "Cont suspendat" generic indiferent de motiv | Translatori RO `translateMetaDisableReason` (11 valori) + `translateMetaAccountStatus` (7 valori cu copy specific) integrați în `describeStatus`; partajat cu admin dashboard, card client și email digest |
 
 ---
 
