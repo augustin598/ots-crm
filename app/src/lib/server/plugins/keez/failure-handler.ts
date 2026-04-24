@@ -20,7 +20,7 @@ import { decideFailureAction, MAX_CONSECUTIVE_FAILURES } from './retry-policy';
 export async function handleKeezSyncFailure(
 	tenantId: string,
 	error: unknown,
-	options: { enqueueRetry: (tenantId: string, delayMs: number) => Promise<void> }
+	options: { enqueueRetry: (tenantId: string, delayMs: number, attempt: number) => Promise<void> }
 ): Promise<void> {
 	const { message, stack } = serializeError(error);
 	logError('keez', `Sync failure: ${message}`, { tenantId, stackTrace: stack });
@@ -60,17 +60,41 @@ export async function handleKeezSyncFailure(
 
 	if (action.kind === 'schedule_retry') {
 		try {
-			await options.enqueueRetry(tenantId, action.delayMs);
-			logInfo('keez', `Scheduled retry in ${action.delayMs / 60_000} min (failure ${newCount}/${MAX_CONSECUTIVE_FAILURES})`, { tenantId });
+			await options.enqueueRetry(tenantId, action.delayMs, newCount);
+			logInfo('keez', `Scheduled retry in ${humanizeDelay(action.delayMs)} (failure ${newCount}/${MAX_CONSECUTIVE_FAILURES})`, { tenantId });
+			return;
 		} catch (queueErr) {
 			const e = serializeError(queueErr);
-			logError('keez', `Failed to enqueue retry: ${e.message}`, { tenantId });
+			logError('keez', `Failed to enqueue retry, escalating to degraded: ${e.message}`, { tenantId });
+			// Force-degrade: without this, the integration would be a "ghost" —
+			// counter incremented, no retry queued, no operator visibility until
+			// the next daily cron. Fall through to the notification path below.
+			try {
+				await db
+					.update(table.keezIntegration)
+					.set({ isDegraded: true, updatedAt: new Date() })
+					.where(eq(table.keezIntegration.tenantId, tenantId));
+			} catch (writeErr) {
+				const we = serializeError(writeErr);
+				logWarning('keez', `Failed to mark degraded after enqueue failure: ${we.message}`, { tenantId });
+			}
 		}
-		return;
 	}
 
 	// mark_degraded → create admin notification
 	await createAdminNotificationsForTenant(tenantId, message).catch(() => {});
+}
+
+/**
+ * Format a millisecond delay as `30 min` or `2 h` for log readability.
+ * The retry delays cover 30 min → 6 h, so flat "min" is awkward at the high end.
+ * Exported only for unit-testing.
+ */
+export function humanizeDelay(ms: number): string {
+	const minutes = Math.round(ms / 60_000);
+	if (minutes < 60) return `${minutes} min`;
+	const hours = ms / (60 * 60_000);
+	return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
 }
 
 async function createAdminNotificationsForTenant(tenantId: string, reason: string): Promise<void> {

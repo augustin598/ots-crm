@@ -6,6 +6,7 @@ import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { clearNotificationsByType } from '$lib/server/notifications';
+import { classifyKeezError } from './error-classification';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -131,6 +132,15 @@ async function _syncKeezInvoicesForTenantInner(
 
 	logInfo('keez', `Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`, { tenantId });
 
+	// Per-run circuit breaker: if Keez is degraded, individual invoice fetches
+	// fail one after another. Stop hammering after 3 consecutive transient
+	// errors and let handleKeezSyncFailure schedule a delayed retry instead.
+	// "Consecutive" really means consecutive: the counter is reset on every
+	// successful iteration (each `continue` and the final fall-through), and
+	// also on a non-transient error in the catch block. Without those resets,
+	// 3 sporadic 502s spread across 500 healthy invoices would falsely trip
+	// the breaker.
+	let consecutiveTransient = 0;
 	for (const invoiceHeader of response.data || []) {
 		try {
 			// Check if invoice already exists in CRM
@@ -148,6 +158,7 @@ async function _syncKeezInvoicesForTenantInner(
 				if (e instanceof Error && e.message === 'Not found') {
 					logWarning('keez', `Sync skipping invoice ${invoiceHeader.externalId} - not found in Keez`, { tenantId });
 					result.skipped++;
+					consecutiveTransient = 0;
 					continue;
 				}
 				throw e;
@@ -366,6 +377,7 @@ async function _syncKeezInvoicesForTenantInner(
 				}
 
 				result.updated++;
+				consecutiveTransient = 0;
 				continue;
 			}
 
@@ -377,6 +389,7 @@ async function _syncKeezInvoicesForTenantInner(
 
 			if (!clientId) {
 				result.skipped++;
+				consecutiveTransient = 0;
 				continue;
 			}
 
@@ -445,10 +458,24 @@ async function _syncKeezInvoicesForTenantInner(
 			});
 
 			result.imported++;
+			consecutiveTransient = 0;
 		} catch (error) {
 			const processErr = serializeError(error);
 			logError('keez', `Sync failed to process invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
 			result.errors++;
+
+			// Re-throw after 3 consecutive transient errors so the caller routes
+			// through handleKeezSyncFailure (which schedules a delayed retry)
+			// instead of burning through the rest of the page on a degraded upstream.
+			if (classifyKeezError(error) === 'transient') {
+				consecutiveTransient++;
+				if (consecutiveTransient >= 3) {
+					logWarning('keez', `Aborting sync run after ${consecutiveTransient} consecutive transient errors`, { tenantId });
+					throw error;
+				}
+			} else {
+				consecutiveTransient = 0;
+			}
 		}
 	}
 
