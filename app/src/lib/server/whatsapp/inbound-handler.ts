@@ -1,10 +1,10 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { isPnUser, type WAMessage } from 'baileys';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logError, logInfo, logWarning } from '$lib/server/logger';
-import { jidToE164 } from './phone';
+import { jidToE164, phoneE164Variants } from './phone';
 import { detectMedia, downloadAndStoreMedia } from './media-handler';
 
 function generateId(): string {
@@ -62,11 +62,11 @@ function detectMessageType(msg: WAMessage): string | null {
 }
 
 async function findClientByPhone(tenantId: string, phoneE164: string): Promise<string | null> {
-	const normalized = phoneE164.replace(/\s/g, '');
+	const variants = phoneE164Variants(phoneE164);
 	const [row] = await db
 		.select({ id: table.client.id })
 		.from(table.client)
-		.where(and(eq(table.client.tenantId, tenantId), eq(table.client.phone, normalized)))
+		.where(and(eq(table.client.tenantId, tenantId), inArray(table.client.phone, variants)))
 		.limit(1);
 	return row?.id ?? null;
 }

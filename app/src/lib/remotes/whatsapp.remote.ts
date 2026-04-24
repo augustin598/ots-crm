@@ -1,6 +1,6 @@
 import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import {
@@ -13,7 +13,7 @@ import {
 } from '$lib/server/whatsapp/session-manager';
 import { getCachedQr } from '$lib/server/whatsapp/qr-broker';
 import { setDisplayName } from '$lib/server/whatsapp/contacts-store';
-import { toE164, InvalidPhoneError } from '$lib/server/whatsapp/phone';
+import { toE164, tryToE164, phoneE164Variants, InvalidPhoneError } from '$lib/server/whatsapp/phone';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logError } from '$lib/server/logger';
 
@@ -318,7 +318,15 @@ export const listWhatsappConversations = query(async () => {
 			.select({ id: table.client.id, name: table.client.name, phone: table.client.phone })
 			.from(table.client)
 			.where(eq(table.client.tenantId, tenantId));
-		const phoneToClient = new Map(clients.filter((c) => c.phone).map((c) => [c.phone as string, c]));
+		// Index clients by both normalized E.164 (handles +40/0/spaces/dashes variations)
+		// and raw-stored phone (fallback for exotic formats toE164 can't parse).
+		const phoneToClient = new Map<string, (typeof clients)[number]>();
+		for (const c of clients) {
+			if (!c.phone) continue;
+			const normalized = tryToE164(c.phone);
+			if (normalized) phoneToClient.set(normalized, c);
+			phoneToClient.set(c.phone, c);
+		}
 
 		const contacts = await db
 			.select({
@@ -393,11 +401,30 @@ export const getWhatsappThread = query(v.pipe(v.string(), v.minLength(3)), async
 		.orderBy(desc(table.whatsappMessage.createdAt))
 		.limit(500);
 
-	const [match] = await db
+	const variants = phoneE164Variants(remotePhoneE164);
+	let [match] = await db
 		.select({ id: table.client.id, name: table.client.name })
 		.from(table.client)
-		.where(and(eq(table.client.tenantId, tenantId), eq(table.client.phone, remotePhoneE164)))
+		.where(and(eq(table.client.tenantId, tenantId), inArray(table.client.phone, variants)))
 		.limit(1);
+	if (!match) {
+		// Fallback: scan tenant clients with matching tail digits and normalize each via toE164.
+		// Handles phones stored with spaces/dashes/parens that verbatim variants miss.
+		const tail = remotePhoneE164.slice(-9);
+		if (tail) {
+			const candidates = await db
+				.select({ id: table.client.id, name: table.client.name, phone: table.client.phone })
+				.from(table.client)
+				.where(eq(table.client.tenantId, tenantId));
+			for (const c of candidates) {
+				if (!c.phone || !c.phone.includes(tail)) continue;
+				if (tryToE164(c.phone) === remotePhoneE164) {
+					match = { id: c.id, name: c.name };
+					break;
+				}
+			}
+		}
+	}
 
 	const [contact] = await db
 		.select({
