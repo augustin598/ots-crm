@@ -392,6 +392,7 @@ async function collectTransitionNotifications(
 		rejectReasonMessage: rejectParsed?.message ?? null,
 		rejectReasonEndsAt: rejectParsed?.endsAt ?? null,
 		googleSuspensionReasons: snap.googleSecondary?.suspensionReasons ?? null,
+		rawStatusCode: snap.rawStatusCode != null ? String(snap.rawStatusCode) : null,
 	});
 
 	const baseDigestItem: AdDigestItem = {
