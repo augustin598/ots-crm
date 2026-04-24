@@ -1,0 +1,1 @@
+ALTER TABLE `invoice_settings` ADD COLUMN `keez_last_synced_number_hosting` text;
