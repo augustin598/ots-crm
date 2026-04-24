@@ -100,6 +100,24 @@
 
 **2026-04-22:** Mapperul inițial avea codurile 3→'APPROVED' și 4→'CANCELLED' (inversate). Rezultat: 39 din 78 conturi Google de la un tenant au fost clasificate `payment_failed` când erau de fapt APPROVED. Fix-ul e în [`google-ads/client.ts:999-1013`](../src/lib/server/google-ads/client.ts) cu comentariu inline.
 
+### `customer.suspension_reasons` (array — 2026-04-24)
+
+Stocat în `paymentStatusRaw.googleSecondary.suspensionReasons`. Enum names din Google Ads API v17+ `CustomerStatusEnum.SuspensionReason`. Capturate via `fetchCustomerSuspensionReasons` în [`google-ads/client.ts`](../src/lib/server/google-ads/client.ts) — query GAQL `SELECT customer.suspension_reasons FROM customer LIMIT 1`, rulat doar pentru conturi `SUSPENDED` (quota-aware, billing_setup rămâne pentru `ENABLED`).
+
+| Valoare | RO | Sugestie acționabilă |
+|---|---|---|
+| `UNPAID_BALANCE` | Sold neachitat | Deschide Google Ads → Billing → Summary, achită soldul restant. |
+| `SUSPICIOUS_PAYMENT_ACTIVITY` | Activitate de plată suspicioasă | Verifică metoda de plată, confirmă proprietatea cardului. |
+| `CIRCUMVENTING_SYSTEMS` | Eludarea sistemelor Google | Recurs oficial prin Google Ads Help Center cu documentație de conformitate. |
+| `MISREPRESENTATION` | Reprezentare falsă a afacerii | Apel oficial cu documente de identitate a firmei. |
+| `UNACCEPTABLE_BUSINESS_PRACTICES` | Practici comerciale inacceptabile | Revizuiește conform politicilor, appeal după remediere. |
+| `UNAUTHORIZED_ACCOUNT_ACTIVITY` | Activitate neautorizată | Schimbă parola, activează 2FA, revocă acces. |
+| `UNSPECIFIED` / `UNKNOWN` / alte | Motiv nespecificat | Deschide ticket Google Ads Support. |
+
+Translate + sugestii live în [`$lib/ads/status-copy.ts:translateGoogleSuspensionReason`](../src/lib/ads/status-copy.ts). Exprimate identic în UI admin, card client și email digest.
+
+Forward-compat: dacă Google adaugă enum nou (v18+), `fetchCustomerSuspensionReasons` emite `logWarning('google-ads', 'Unknown Google suspension_reasons enum', ...)` ca să nu rămână blind spot.
+
 ---
 
 ## TikTok Business API v1.3
@@ -217,6 +235,7 @@ Fișierul de test [`payment-status.test.ts`](../src/lib/server/ads/payment-statu
 | 2026-04-22 | 39 Google accounts false `payment_failed` | Enum BillingSetupStatus 4→'CANCELLED' în loc de 'APPROVED' | Remapare enum corectă |
 | 2026-04-22 | 7 TikTok `STATUS_LIMIT` silent `ok` | Mapper fără case explicit, default era 'ok' | Adăugat case + default fail-safer la `risk_review` |
 | 2026-04-24 | 1+ TikTok cont marcat `risk_review` greșit | `PARTIAL_AUDIT_DENY` era tratat ca "not delivering" deși campaniile livrau cu reclame aprobate | Introdus `isCampaignDelivering` + capturat `sub_status`/`reject_reason`/`display_status` în raw snapshot |
+| 2026-04-24 | Google suspendări afișate fără context | `customer.suspension_reasons` nu era interogat; doar `status=SUSPENDED` generic apărea în UI/email | Nouă funcție `fetchCustomerSuspensionReasons` (quota-aware: doar SUSPENDED), translate RO în `describeStatus`, dashboard + email digest cu copy bogat |
 
 ---
 

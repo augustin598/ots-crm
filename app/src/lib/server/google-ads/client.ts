@@ -1025,3 +1025,77 @@ export async function fetchBillingSetupStatus(
 		return null;
 	}
 }
+
+/**
+ * Fetch the `customer.suspension_reasons` array for a specific sub-account.
+ * Returns a string[] of enum labels (normalized to uppercase names) or [] if
+ * none present. Returns null on error (treated downstream as "unknown, don't
+ * override existing decision").
+ *
+ * Google Ads API CustomerStatusEnum.SuspensionReason (verified 2026-04-24):
+ *   0 UNSPECIFIED · 1 UNKNOWN · 2 SUSPICIOUS_PAYMENT_ACTIVITY
+ *   3 CIRCUMVENTING_SYSTEMS · 4 MISREPRESENTATION · 5 UNPAID_BALANCE
+ *   6 UNACCEPTABLE_BUSINESS_PRACTICES · 7 UNAUTHORIZED_ACCOUNT_ACTIVITY
+ *
+ * The google-ads-api lib may return either numeric or string enums; handle both.
+ * Unknown enum values are logged via logWarning so we update the translator
+ * before clients hit the generic fallback ("motiv nespecificat").
+ */
+export async function fetchCustomerSuspensionReasons(
+	mccAccountId: string,
+	customerId: string,
+	developerToken: string,
+	refreshToken: string,
+): Promise<string[] | null> {
+	const numericToString: Record<number, string> = {
+		0: 'UNSPECIFIED',
+		1: 'UNKNOWN',
+		2: 'SUSPICIOUS_PAYMENT_ACTIVITY',
+		3: 'CIRCUMVENTING_SYSTEMS',
+		4: 'MISREPRESENTATION',
+		5: 'UNPAID_BALANCE',
+		6: 'UNACCEPTABLE_BUSINESS_PRACTICES',
+		7: 'UNAUTHORIZED_ACCOUNT_ACTIVITY',
+	};
+	const KNOWN = new Set([
+		'SUSPICIOUS_PAYMENT_ACTIVITY',
+		'CIRCUMVENTING_SYSTEMS',
+		'MISREPRESENTATION',
+		'UNPAID_BALANCE',
+		'UNACCEPTABLE_BUSINESS_PRACTICES',
+		'UNAUTHORIZED_ACCOUNT_ACTIVITY',
+		'UNKNOWN',
+		'UNSPECIFIED',
+	]);
+	try {
+		const customer = getSubAccountClient(mccAccountId, customerId, developerToken, refreshToken);
+		const rows = await customer.query(`
+			SELECT customer.suspension_reasons
+			FROM customer
+			LIMIT 1
+		`);
+		if (!rows || rows.length === 0) return [];
+		const raw = (rows[0] as any).customer?.suspension_reasons ?? [];
+		if (!Array.isArray(raw)) return [];
+		return raw
+			.map((r: unknown) =>
+				// Unmapped numeric codes get tagged with their value (e.g. CODE_8) so
+				// they trip the unknown-enum logWarning below instead of being
+				// silently collapsed into 'UNKNOWN' (which IS a known enum).
+				typeof r === 'number' ? (numericToString[r] ?? `CODE_${r}`) : String(r).toUpperCase(),
+			)
+			.filter((s: string) => {
+				if (!KNOWN.has(s)) {
+					logWarning('google-ads', 'Unknown Google suspension_reasons enum', {
+						metadata: { reason: s, customerId },
+					});
+				}
+				return s !== 'UNSPECIFIED';
+			});
+	} catch (err) {
+		logWarning('google-ads', `Failed to fetch customer.suspension_reasons for ${customerId}`, {
+			metadata: { error: err instanceof Error ? err.message : String(err) },
+		});
+		return null;
+	}
+}

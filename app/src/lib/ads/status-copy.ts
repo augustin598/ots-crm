@@ -23,6 +23,8 @@ export interface DescribeStatusInput {
 	rejectReasonMessage: string | null;
 	/** TikTok only: parsed endtime from rejection_reason. */
 	rejectReasonEndsAt: string | null;
+	/** Google only: `customer.suspension_reasons` enum names (uppercase). */
+	googleSuspensionReasons?: string[] | null;
 }
 
 /**
@@ -42,6 +44,76 @@ export function parseTikTokRejectReason(raw: string | null): {
 	const codeMatch = withoutEnd.match(/^\d+:(.+)$/);
 	const message = codeMatch ? codeMatch[1].trim() : withoutEnd.trim();
 	return { message, endsAt };
+}
+
+/**
+ * RO translation + actionable suggestion for a single Google Ads
+ * `customer.suspension_reasons` enum value. Unknown codes fall through to
+ * a generic "motiv nespecificat" + "deschide ticket support" suggestion.
+ */
+export function translateGoogleSuspensionReason(reason: string): {
+	label: string;
+	suggestion: string;
+} {
+	switch (reason) {
+		case 'UNPAID_BALANCE':
+			return {
+				label: 'Sold neachitat',
+				suggestion:
+					'Deschide Google Ads → Billing → Summary și achită soldul restant pentru a relua livrarea reclamelor.',
+			};
+		case 'SUSPICIOUS_PAYMENT_ACTIVITY':
+			return {
+				label: 'Activitate de plată suspicioasă',
+				suggestion:
+					'Verifică metoda de plată în Google Ads → Billing, confirmă proprietatea cardului, contactează suportul dacă persistă.',
+			};
+		case 'CIRCUMVENTING_SYSTEMS':
+			return {
+				label: 'Eludarea sistemelor Google',
+				suggestion:
+					'Suspendare gravă pentru încercarea de a eluda politicile Google Ads. Depune un recurs oficial prin Google Ads Help Center și pregătește documentație care demonstrează conformitate cu politicile.',
+			};
+		case 'MISREPRESENTATION':
+			return {
+				label: 'Reprezentare falsă a afacerii',
+				suggestion:
+					'Google a identificat informații false sau inexacte despre afacere. Dacă datele din Google Ads sunt corecte, deschide un apel oficial prin Google Ads Help Center, cu documente de identitate a firmei.',
+			};
+		case 'UNACCEPTABLE_BUSINESS_PRACTICES':
+			return {
+				label: 'Practici comerciale inacceptabile',
+				suggestion:
+					'Revizuiește reclamele și landing page-ul conform politicilor Google Ads (înșelăciune utilizatori, taxe ascunse). Depune appeal după remediere.',
+			};
+		case 'UNAUTHORIZED_ACCOUNT_ACTIVITY':
+			return {
+				label: 'Activitate neautorizată',
+				suggestion:
+					'Schimbă parola Google imediat, activează 2FA, revocă accesul utilizatorilor suspecți din Google Ads → Access & security.',
+			};
+		default:
+			return {
+				label: 'Motiv nespecificat',
+				suggestion: 'Deschide un ticket în Google Ads Support pentru detalii despre suspendare.',
+			};
+	}
+}
+
+/**
+ * Combine multiple suspension reasons into one details block: labels joined
+ * with " · ", suggestion taken from the first (most relevant) reason. Returns
+ * null for empty/null input.
+ */
+export function translateGoogleSuspensionReasons(
+	reasons: string[] | null,
+): { label: string; suggestion: string } | null {
+	if (!reasons || reasons.length === 0) return null;
+	const translated = reasons.map(translateGoogleSuspensionReason);
+	return {
+		label: translated.map((r) => r.label).join(' · '),
+		suggestion: translated[0].suggestion,
+	};
 }
 
 /** Format `2036-03-15 13:26:50` → `15 martie 2036`. Returns raw on parse failure. */
@@ -120,6 +192,22 @@ export function describeStatus(input: DescribeStatusInput): StatusDetails | null
 				'Deschide TikTok Ads Manager și verifică în secțiunea „Ads" starea fiecărei reclame — vei vedea ce e respins și de ce.',
 			deadline: null,
 		};
+	}
+
+	// Google with explicit suspension_reasons — translate each + compose headline.
+	if (provider === 'google' && (paymentStatus === 'suspended' || paymentStatus === 'risk_review')) {
+		const translated = translateGoogleSuspensionReasons(input.googleSuspensionReasons ?? null);
+		if (translated) {
+			return {
+				headline:
+					paymentStatus === 'suspended'
+						? `Cont suspendat de Google — ${translated.label}`
+						: `Cont restricționat de Google — ${translated.label}`,
+				body: 'Google Ads a aplicat această restricție pe cont. Detalii de mai jos.',
+				suggestion: translated.suggestion,
+				deadline: null,
+			};
+		}
 	}
 
 	// Generic status-only variants — shared across Meta / Google / TikTok.

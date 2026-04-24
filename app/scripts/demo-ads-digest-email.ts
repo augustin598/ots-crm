@@ -20,6 +20,7 @@ function escapeHtml(s: string): string {
 function buildItem(overrides: Partial<AdDigestItem> & {
 	rejectReasonMessage?: string | null;
 	rejectReasonEndsAt?: string | null;
+	googleSuspensionReasons?: string[] | null;
 }): AdDigestItem {
 	const provider = (overrides.provider ?? 'tiktok') as 'meta' | 'google' | 'tiktok';
 	const paymentStatus = (overrides.paymentStatus ?? 'risk_review') as
@@ -36,6 +37,7 @@ function buildItem(overrides: Partial<AdDigestItem> & {
 			typeof overrides.rawDisableReason === 'string' ? overrides.rawDisableReason : null,
 		rejectReasonMessage: overrides.rejectReasonMessage ?? null,
 		rejectReasonEndsAt: overrides.rejectReasonEndsAt ?? null,
+		googleSuspensionReasons: overrides.googleSuspensionReasons ?? null,
 	});
 
 	return {
@@ -199,6 +201,24 @@ const demoItems: AdDigestItem[] = [
 		statusLabelRo: 'Perioadă de grație',
 		rawStatusCode: '9',
 		balanceFormatted: '218,00 RON',
+	}),
+	buildItem({
+		accountName: 'Client Google Ads demo',
+		externalAccountId: '123-456-7890',
+		provider: 'google',
+		paymentStatus: 'suspended',
+		statusLabelRo: 'Suspendat',
+		rawStatusCode: 'SUSPENDED',
+		googleSuspensionReasons: ['UNPAID_BALANCE'],
+	}),
+	buildItem({
+		accountName: 'Alt client Google Ads',
+		externalAccountId: '987-654-3210',
+		provider: 'google',
+		paymentStatus: 'suspended',
+		statusLabelRo: 'Suspendat',
+		rawStatusCode: 'SUSPENDED',
+		googleSuspensionReasons: ['SUSPICIOUS_PAYMENT_ACTIVITY', 'UNAUTHORIZED_ACCOUNT_ACTIVITY'],
 	}),
 ];
 

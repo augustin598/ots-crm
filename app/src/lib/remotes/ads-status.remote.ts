@@ -48,6 +48,8 @@ export interface ClientAdsHealthItem {
 	rejectReasonMessage: string | null;
 	/** TikTok only: ISO string when the rejection/limit expires (if any). */
 	rejectReasonEndsAt: string | null;
+	/** Google only: customer.suspension_reasons enum names. null for non-Google or when empty. */
+	googleSuspensionReasons: string[] | null;
 }
 
 
@@ -99,6 +101,8 @@ export interface FlaggedAccountRow {
 	rawDisplayStatus: string | null;
 	/** TikTok-only: aggregated delivery issue ('none'|'budget_exceeded'|'no_delivery'|'all_paused'). null otherwise. */
 	rawDeliveryIssue: string | null;
+	/** Google only: customer.suspension_reasons enum names. null for non-Google or when empty. */
+	googleSuspensionReasons: string[] | null;
 }
 
 export interface AdsStatusDashboard {
@@ -118,6 +122,7 @@ function parseRaw(raw: string | null): {
 	rejectReason: string | null;
 	displayStatus: string | null;
 	deliveryIssue: string | null;
+	googleSuspensionReasons: string[] | null;
 } {
 	const empty = {
 		code: '',
@@ -126,11 +131,13 @@ function parseRaw(raw: string | null): {
 		rejectReason: null,
 		displayStatus: null,
 		deliveryIssue: null,
+		googleSuspensionReasons: null,
 	};
 	if (!raw) return empty;
 	try {
 		const parsed = JSON.parse(raw);
 		const tt = parsed?.tiktokSecondary ?? null;
+		const googleSec = parsed?.googleSecondary ?? null;
 		return {
 			code: String(parsed.code ?? ''),
 			disableReason: parsed.disableReason != null ? String(parsed.disableReason) : null,
@@ -138,6 +145,9 @@ function parseRaw(raw: string | null): {
 			rejectReason: tt?.rejectReason ?? null,
 			displayStatus: tt?.displayStatus ?? null,
 			deliveryIssue: tt?.deliveryIssue ?? null,
+			googleSuspensionReasons: Array.isArray(googleSec?.suspensionReasons)
+				? (googleSec.suspensionReasons as string[])
+				: null,
 		};
 	} catch {
 		return { ...empty, code: raw };
@@ -279,6 +289,7 @@ export const getAdsPaymentStatusDashboard = query(
 			rawRejectReason: provider === 'tiktok' ? raw.rejectReason : null,
 			rawDisplayStatus: provider === 'tiktok' ? raw.displayStatus : null,
 			rawDeliveryIssue: provider === 'tiktok' ? raw.deliveryIssue : null,
+			googleSuspensionReasons: provider === 'google' ? raw.googleSuspensionReasons : null,
 		});
 	}
 
@@ -398,6 +409,7 @@ export const getClientAdsHealth = query(
 			let balanceCents: number | null = null;
 			let currency: string | null = null;
 			let parsedRejectReason: { message: string; endsAt: string | null } | null = null;
+			let googleSuspensionReasons: string[] | null = null;
 			try {
 				const parsed = row.paymentStatusRaw ? JSON.parse(row.paymentStatusRaw) : null;
 				rawCode = parsed?.code != null ? String(parsed.code) : '';
@@ -406,6 +418,9 @@ export const getClientAdsHealth = query(
 				currency = typeof parsed?.currency === 'string' ? parsed.currency : null;
 				if (provider === 'tiktok' && parsed?.tiktokSecondary?.rejectReason) {
 					parsedRejectReason = parseTikTokRejectReason(String(parsed.tiktokSecondary.rejectReason));
+				}
+				if (provider === 'google' && Array.isArray(parsed?.googleSecondary?.suspensionReasons)) {
+					googleSuspensionReasons = parsed.googleSecondary.suspensionReasons;
 				}
 			} catch {
 				rawCode = row.paymentStatusRaw ?? '';
@@ -423,6 +438,7 @@ export const getClientAdsHealth = query(
 				action: actionForStatus(provider, status, row.externalId),
 				rejectReasonMessage: parsedRejectReason?.message ?? null,
 				rejectReasonEndsAt: parsedRejectReason?.endsAt ?? null,
+				googleSuspensionReasons,
 			});
 		}
 

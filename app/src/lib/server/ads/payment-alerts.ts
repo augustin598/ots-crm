@@ -38,6 +38,7 @@ async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
 		balanceCents: snap.balanceCents ?? null,
 		currency: snap.currencyCode ?? null,
 		tiktokSecondary: snap.tiktokSecondary ?? null,
+		googleSecondary: snap.googleSecondary ?? null,
 	});
 	const payload = {
 		paymentStatus: snap.paymentStatus,
@@ -390,6 +391,7 @@ async function collectTransitionNotifications(
 			typeof snap.rawDisableReason === 'string' ? snap.rawDisableReason : null,
 		rejectReasonMessage: rejectParsed?.message ?? null,
 		rejectReasonEndsAt: rejectParsed?.endsAt ?? null,
+		googleSuspensionReasons: snap.googleSecondary?.suspensionReasons ?? null,
 	});
 
 	const baseDigestItem: AdDigestItem = {

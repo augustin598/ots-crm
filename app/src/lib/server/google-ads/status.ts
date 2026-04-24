@@ -3,7 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedClient } from './auth';
-import { listMccSubAccounts, fetchBillingSetupStatus, formatCustomerId } from './client';
+import { listMccSubAccounts, fetchBillingSetupStatus, fetchCustomerSuspensionReasons, formatCustomerId } from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
 import { mapGoogleStatusPure, isKnownGoogleCustomerStatus } from '$lib/server/ads/status-mappers';
 
@@ -76,13 +76,28 @@ export async function fetchGooglePaymentStatus(
 		if (!row) continue;
 
 		let billingSetupStatus: string | null = null;
-		if (acc.status === 'ENABLED') {
-			billingSetupStatus = await fetchBillingSetupStatus(
-				refreshed.mccAccountId,
-				acc.customerId,
-				refreshed.developerToken,
-				refreshed.refreshToken,
-			);
+		let suspensionReasons: string[] = [];
+		if (acc.status === 'ENABLED' || acc.status === 'SUSPENDED') {
+			const [billing, reasons] = await Promise.all([
+				acc.status === 'ENABLED'
+					? fetchBillingSetupStatus(
+							refreshed.mccAccountId,
+							acc.customerId,
+							refreshed.developerToken,
+							refreshed.refreshToken,
+						)
+					: Promise.resolve(null),
+				acc.status === 'SUSPENDED'
+					? fetchCustomerSuspensionReasons(
+							refreshed.mccAccountId,
+							acc.customerId,
+							refreshed.developerToken,
+							refreshed.refreshToken,
+						)
+					: Promise.resolve(null),
+			]);
+			billingSetupStatus = billing;
+			suspensionReasons = reasons ?? [];
 		}
 
 		snapshots.push({
@@ -96,6 +111,7 @@ export async function fetchGooglePaymentStatus(
 			rawStatusCode: acc.status,
 			rawDisableReason: billingSetupStatus,
 			checkedAt,
+			googleSecondary: suspensionReasons.length > 0 ? { suspensionReasons } : null,
 		});
 	}
 

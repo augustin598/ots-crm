@@ -184,3 +184,96 @@ describe('describeStatus', () => {
 		expect(out?.body).toContain('închis definitiv');
 	});
 });
+
+import { translateGoogleSuspensionReason, translateGoogleSuspensionReasons } from './status-copy';
+
+describe('translateGoogleSuspensionReason', () => {
+	test('UNPAID_BALANCE → billing copy', () => {
+		const out = translateGoogleSuspensionReason('UNPAID_BALANCE');
+		expect(out.label).toBe('Sold neachitat');
+		expect(out.suggestion).toContain('Billing');
+	});
+	test('SUSPICIOUS_PAYMENT_ACTIVITY → payment method copy', () => {
+		const out = translateGoogleSuspensionReason('SUSPICIOUS_PAYMENT_ACTIVITY');
+		expect(out.label).toBe('Activitate de plată suspicioasă');
+		expect(out.suggestion).toContain('metoda de plată');
+	});
+	test('CIRCUMVENTING_SYSTEMS → policy appeal copy', () => {
+		const out = translateGoogleSuspensionReason('CIRCUMVENTING_SYSTEMS');
+		expect(out.label).toBe('Eludarea sistemelor Google');
+		expect(out.suggestion).toContain('Help Center');
+	});
+	test('MISREPRESENTATION → identity copy', () => {
+		const out = translateGoogleSuspensionReason('MISREPRESENTATION');
+		expect(out.label).toBe('Reprezentare falsă a afacerii');
+	});
+	test('UNACCEPTABLE_BUSINESS_PRACTICES → practices copy', () => {
+		const out = translateGoogleSuspensionReason('UNACCEPTABLE_BUSINESS_PRACTICES');
+		expect(out.label).toBe('Practici comerciale inacceptabile');
+	});
+	test('UNAUTHORIZED_ACCOUNT_ACTIVITY → security copy', () => {
+		const out = translateGoogleSuspensionReason('UNAUTHORIZED_ACCOUNT_ACTIVITY');
+		expect(out.suggestion).toContain('2FA');
+	});
+	test('UNSPECIFIED / UNKNOWN → generic fallback', () => {
+		expect(translateGoogleSuspensionReason('UNSPECIFIED').label).toBe('Motiv nespecificat');
+		expect(translateGoogleSuspensionReason('UNKNOWN').label).toBe('Motiv nespecificat');
+	});
+	test('unknown string → generic fallback (forward-compat)', () => {
+		const out = translateGoogleSuspensionReason('SOMETHING_NEW');
+		expect(out.label).toBe('Motiv nespecificat');
+	});
+});
+
+describe('translateGoogleSuspensionReasons (array)', () => {
+	test('empty array / null → null', () => {
+		expect(translateGoogleSuspensionReasons([])).toBe(null);
+		expect(translateGoogleSuspensionReasons(null)).toBe(null);
+	});
+	test('single reason returns that translation', () => {
+		const out = translateGoogleSuspensionReasons(['UNPAID_BALANCE']);
+		expect(out?.label).toBe('Sold neachitat');
+	});
+	test('multiple reasons — joins labels with " · ", uses first suggestion', () => {
+		const out = translateGoogleSuspensionReasons(['UNPAID_BALANCE', 'SUSPICIOUS_PAYMENT_ACTIVITY']);
+		expect(out?.label).toBe('Sold neachitat · Activitate de plată suspicioasă');
+		expect(out?.suggestion).toContain('Billing');
+	});
+});
+
+describe('describeStatus — Google suspension', () => {
+	test('Google suspended with UNPAID_BALANCE → composed headline', () => {
+		const out = describeStatus({
+			provider: 'google',
+			paymentStatus: 'suspended',
+			rawDisableReason: null,
+			rejectReasonMessage: null,
+			rejectReasonEndsAt: null,
+			googleSuspensionReasons: ['UNPAID_BALANCE'],
+		});
+		expect(out?.headline).toBe('Cont suspendat de Google — Sold neachitat');
+		expect(out?.suggestion).toContain('Billing');
+	});
+	test('Google risk_review with SUSPICIOUS_PAYMENT_ACTIVITY', () => {
+		const out = describeStatus({
+			provider: 'google',
+			paymentStatus: 'risk_review',
+			rawDisableReason: null,
+			rejectReasonMessage: null,
+			rejectReasonEndsAt: null,
+			googleSuspensionReasons: ['SUSPICIOUS_PAYMENT_ACTIVITY'],
+		});
+		expect(out?.headline).toBe('Cont restricționat de Google — Activitate de plată suspicioasă');
+	});
+	test('Google suspended without suspension_reasons → falls through to generic', () => {
+		const out = describeStatus({
+			provider: 'google',
+			paymentStatus: 'suspended',
+			rawDisableReason: null,
+			rejectReasonMessage: null,
+			rejectReasonEndsAt: null,
+			googleSuspensionReasons: null,
+		});
+		expect(out?.headline).toBe('Cont suspendat');
+	});
+});
