@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import {
 	_resetAvatarFetcherForTests,
 	_inspectQueueForTests,
+	_acquireGlobalTokenForTests,
+	_setGlobalRateForTests,
 	enqueueFetch
 } from './avatar-fetcher';
 
@@ -32,5 +34,24 @@ describe('avatar-fetcher queue', () => {
 
 		enqueueFetch('tenant-a', '+40111', { skipWorker: true });
 		expect(q.pending).toEqual([]);
+	});
+});
+
+describe('global rate limiter', () => {
+	beforeEach(() => _resetAvatarFetcherForTests());
+
+	it('releases a token immediately when bucket is full', async () => {
+		_setGlobalRateForTests({ intervalMs: 1000, initialTokens: 1 });
+		const start = Date.now();
+		await _acquireGlobalTokenForTests();
+		expect(Date.now() - start).toBeLessThan(50);
+	});
+
+	it('delays a second acquire until the refill', async () => {
+		_setGlobalRateForTests({ intervalMs: 100, initialTokens: 1 });
+		await _acquireGlobalTokenForTests();
+		const start = Date.now();
+		await _acquireGlobalTokenForTests();
+		expect(Date.now() - start).toBeGreaterThanOrEqual(80); // allow small timer jitter
 	});
 });
