@@ -55,15 +55,23 @@ export async function enqueueKeezRetry(
  * Cancel any pending retry hops for a tenant (no-op if none queued).
  * Called from the manual remote command so a user-triggered sync doesn't run
  * concurrently with a queued retry. We don't know which hop is queued, so try
- * removing all possible attempt-suffixed ids.
+ * removing every possible attempt-suffixed id.
+ *
+ * Bound is `attempt < MAX_CONSECUTIVE_FAILURES` because `decideFailureAction`
+ * in retry-policy.ts short-circuits to `mark_degraded` when
+ * `nextCount >= MAX_CONSECUTIVE_FAILURES`, so `enqueueKeezRetry` is only ever
+ * called with `attempt` ∈ [1, MAX-1]. Keep the two in sync if MAX changes.
  */
 export async function cancelPendingKeezRetry(tenantId: string): Promise<void> {
 	const { schedulerQueue } = await import('../index');
 	for (let attempt = 1; attempt < MAX_CONSECUTIVE_FAILURES; attempt++) {
+		// BullMQ's Queue.remove() returns 0 (not present) / 1 (removed) and
+		// does not throw for missing ids; the try/catch is purely defensive
+		// against connection blips.
 		try {
 			await schedulerQueue.remove(retryJobId(tenantId, attempt));
 		} catch {
-			// No-op: most attempts won't exist; remove() throws on missing ids.
+			// No-op
 		}
 	}
 }

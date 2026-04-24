@@ -9,6 +9,7 @@ mock.module('$env/static/private', () => ({ SQLITE_PATH: ':memory:' }));
 
 const updateCalls: Array<Record<string, unknown>> = [];
 const errorLogs: string[] = [];
+const enqueueCalls: Array<{ tenantId: string; delayMs: number; attempt: number }> = [];
 
 const fakeDb = {
 	select: () => ({
@@ -43,12 +44,42 @@ mock.module('$lib/server/logger', () => ({
 	},
 }));
 
-const { handleKeezSyncFailure } = await import('./failure-handler');
+const { handleKeezSyncFailure, humanizeDelay } = await import('./failure-handler');
+
+describe('humanizeDelay', () => {
+	test('< 1h → "N min"', () => {
+		expect(humanizeDelay(30 * 60_000)).toBe('30 min');
+		expect(humanizeDelay(45 * 60_000)).toBe('45 min');
+	});
+	test('integer hours → "N h"', () => {
+		expect(humanizeDelay(2 * 60 * 60_000)).toBe('2 h');
+		expect(humanizeDelay(6 * 60 * 60_000)).toBe('6 h');
+	});
+	test('fractional hours → "N.M h"', () => {
+		expect(humanizeDelay(90 * 60_000)).toBe('1.5 h');
+	});
+});
 
 describe('handleKeezSyncFailure', () => {
 	beforeEach(() => {
 		updateCalls.length = 0;
 		errorLogs.length = 0;
+		enqueueCalls.length = 0;
+	});
+
+	test('passes (tenantId, delayMs, attempt) triple to enqueueRetry', async () => {
+		const enqueueRetry = (tenantId: string, delayMs: number, attempt: number) => {
+			enqueueCalls.push({ tenantId, delayMs, attempt });
+			return Promise.resolve();
+		};
+		await handleKeezSyncFailure('t1', new Error('Keez API error: 502'), { enqueueRetry });
+
+		expect(enqueueCalls).toHaveLength(1);
+		expect(enqueueCalls[0].tenantId).toBe('t1');
+		expect(enqueueCalls[0].attempt).toBe(1); // priorCount=0 + 1
+		// First hop in the [30min, 2h, 6h] schedule, allowing for ±10% jitter.
+		expect(enqueueCalls[0].delayMs).toBeGreaterThanOrEqual(27 * 60_000);
+		expect(enqueueCalls[0].delayMs).toBeLessThanOrEqual(33 * 60_000);
 	});
 
 	test('when enqueueRetry throws, force-marks integration degraded', async () => {
