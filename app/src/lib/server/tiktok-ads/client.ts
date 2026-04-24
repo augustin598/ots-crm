@@ -1081,6 +1081,12 @@ export interface TiktokAdvertiserStatusInfo {
 	advertiserId: string;
 	accountName: string;
 	status: string;
+	/** UI-facing status — poate diferi de `status` */
+	displayStatus: string | null;
+	/** Motiv granular (REASON_ADVERTISER_AUDIT, REASON_ADVERTISER_PUNISH, ...) */
+	subStatus: string | null;
+	/** Cod/string explicativ pt. rejected accounts */
+	rejectReason: string | null;
 }
 
 /**
@@ -1110,7 +1116,10 @@ export async function fetchAdvertiserStatuses(
 	return (json.data.list as any[]).map((adv) => ({
 		advertiserId: String(adv.advertiser_id),
 		accountName: adv.advertiser_name || adv.name || `Advertiser ${adv.advertiser_id}`,
-		status: adv.status || 'STATUS_ENABLE'
+		status: adv.status || 'STATUS_ENABLE',
+		displayStatus: adv.display_status ? String(adv.display_status) : null,
+		subStatus: adv.sub_status ? String(adv.sub_status) : null,
+		rejectReason: adv.reject_reason ? String(adv.reject_reason) : null,
 	}));
 }
 
