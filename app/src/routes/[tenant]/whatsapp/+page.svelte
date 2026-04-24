@@ -293,27 +293,36 @@
 
 	let messagesEl: HTMLDivElement | null = $state(null);
 	let prevThreadKey: string | null = null;
-	let prevMessageCount = 0;
+	let autoScroll = true;
+
+	function onMessagesScroll() {
+		const el = messagesEl;
+		if (!el) return;
+		autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+	}
+
+	function scrollToBottom() {
+		tick().then(() => {
+			if (!messagesEl) return;
+			messagesEl.scrollTop = messagesEl.scrollHeight;
+			// requestAnimationFrame covers cases where images/media inflate scrollHeight after paint
+			requestAnimationFrame(() => {
+				if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+			});
+		});
+	}
 
 	$effect(() => {
 		const key = selectedPhone;
-		const count = thread?.messages.length ?? 0;
-		const el = messagesEl;
-		if (!el) return;
+		void (thread?.messages.length ?? 0);
+		if (!messagesEl) return;
 
-		const isNewThread = key !== prevThreadKey;
-		const hasNewMessages = count > prevMessageCount;
-		const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-		const nearBottom = distanceFromBottom < 120;
-
-		prevThreadKey = key;
-		prevMessageCount = count;
-
-		if (isNewThread || (hasNewMessages && nearBottom)) {
-			tick().then(() => {
-				if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-			});
+		if (key !== prevThreadKey) {
+			prevThreadKey = key;
+			autoScroll = true;
 		}
+
+		if (autoScroll) scrollToBottom();
 	});
 
 	let lightboxUrl = $state<string | null>(null);
@@ -561,7 +570,7 @@
 							<Button variant="ghost" size="sm" onclick={() => (selectedPhone = null)}>Închide</Button>
 						</div>
 					</CardHeader>
-					<div bind:this={messagesEl} class="flex-1 overflow-y-auto bg-muted/30 p-4">
+					<div bind:this={messagesEl} onscroll={onMessagesScroll} class="flex-1 overflow-y-auto bg-muted/30 p-4">
 						{#if !thread}
 							<div class="text-center text-sm text-muted-foreground">Se încarcă...</div>
 						{:else if thread.messages.length === 0}
