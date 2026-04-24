@@ -408,20 +408,19 @@ export const getWhatsappThread = query(v.pipe(v.string(), v.minLength(3)), async
 		.where(and(eq(table.client.tenantId, tenantId), inArray(table.client.phone, variants)))
 		.limit(1);
 	if (!match) {
-		// Fallback: scan tenant clients with matching tail digits and normalize each via toE164.
+		// Fallback: scan tenant clients and normalize each stored phone via toE164.
 		// Handles phones stored with spaces/dashes/parens that verbatim variants miss.
-		const tail = remotePhoneE164.slice(-9);
-		if (tail) {
-			const candidates = await db
-				.select({ id: table.client.id, name: table.client.name, phone: table.client.phone })
-				.from(table.client)
-				.where(eq(table.client.tenantId, tenantId));
-			for (const c of candidates) {
-				if (!c.phone || !c.phone.includes(tail)) continue;
-				if (tryToE164(c.phone) === remotePhoneE164) {
-					match = { id: c.id, name: c.name };
-					break;
-				}
+		// We don't pre-filter by tail-includes because spaces break digit-sequence matching
+		// (e.g. "+40 753 755 327".includes("753755327") is false).
+		const candidates = await db
+			.select({ id: table.client.id, name: table.client.name, phone: table.client.phone })
+			.from(table.client)
+			.where(eq(table.client.tenantId, tenantId));
+		for (const c of candidates) {
+			if (!c.phone) continue;
+			if (tryToE164(c.phone) === remotePhoneE164) {
+				match = { id: c.id, name: c.name };
+				break;
 			}
 		}
 	}
