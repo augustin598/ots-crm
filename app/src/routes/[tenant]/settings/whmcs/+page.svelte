@@ -9,7 +9,8 @@
 		setWhmcsActive,
 		setEnableKeezPush,
 		saveWhmcsHostingSeries,
-		replayWhmcsSync
+		replayWhmcsSync,
+		testWhmcsConnection
 	} from '$lib/remotes/whmcs.remote';
 	import {
 		Card,
@@ -48,6 +49,7 @@
 		Play,
 		ShieldAlert
 	} from '@lucide/svelte';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import { toast } from 'svelte-sonner';
 	import { extractErrorMessage } from '$lib/utils';
 
@@ -78,6 +80,9 @@
 	let regenerateDialogOpen = $state(false);
 	let showSecretDialogOpen = $state(false);
 	let shownSecret = $state<string | null>(null);
+
+	let testing = $state(false);
+	let testResult = $state<Awaited<ReturnType<typeof testWhmcsConnection>> | null>(null);
 
 	let togglingActive = $state(false);
 	let togglingKeezPush = $state(false);
@@ -191,6 +196,24 @@
 			toast.error('A apărut o eroare: ' + extractErrorMessage(e, 'Nu s-a putut regenera secretul'));
 		} finally {
 			regenerating = false;
+		}
+	}
+
+	async function handleTestConnection() {
+		testing = true;
+		testResult = null;
+		try {
+			const result = await testWhmcsConnection();
+			testResult = result;
+			if (result.ok) {
+				toast.success('Conexiune OK — webhook-ul e accesibil și semnătura e validă');
+			} else {
+				toast.error(`Test eșuat la pasul ${result.step}: ${result.reason}`);
+			}
+		} catch (err) {
+			toast.error('A apărut o eroare: ' + (err instanceof Error ? err.message : String(err)));
+		} finally {
+			testing = false;
 		}
 	}
 
@@ -393,6 +416,63 @@
 					</div>
 
 					<Separator />
+
+					<div class="space-y-3">
+						<Button
+							type="button"
+							variant="secondary"
+							disabled={testing}
+							onclick={handleTestConnection}
+						>
+							<CircleCheck class="h-4 w-4 mr-2" />
+							{testing ? 'Se testează...' : 'Testează conexiunea'}
+						</Button>
+						<p class="text-xs text-muted-foreground">
+							Verifică end-to-end: integrare activă, decriptare secret, HMAC și round-trip HTTP la webhook.
+						</p>
+
+						{#if testResult?.ok === true}
+							<div
+								class="p-3 rounded-md border text-sm bg-green-50 border-green-300 text-green-900 dark:bg-green-950/40 dark:border-green-800 dark:text-green-100"
+							>
+								<p class="font-bold">✓ Conexiune validă</p>
+								<ul class="mt-2 space-y-0.5 text-xs">
+									<li>
+										<span class="font-medium">Connector version:</span>
+										<span class="font-mono">{testResult.connectorVersion}</span>
+									</li>
+									<li>
+										<span class="font-medium">Mod:</span>
+										{testResult.dryRun ? 'Dry-run' : 'Live'}
+									</li>
+									<li>
+										<span class="font-medium">Round-trip:</span>
+										{testResult.roundTripMs} ms
+									</li>
+									<li class="break-all">
+										<span class="font-medium">URL:</span>
+										<span class="font-mono">{testResult.url}</span>
+									</li>
+								</ul>
+							</div>
+						{:else if testResult && testResult.ok === false}
+							<div
+								class="p-3 rounded-md border text-sm bg-red-50 border-red-300 text-red-900 dark:bg-red-950/40 dark:border-red-800 dark:text-red-100"
+							>
+								<p class="font-bold">✗ Test eșuat la pasul: {testResult.step}</p>
+								<p class="mt-1">Motiv: {testResult.reason}</p>
+								{#if testResult.detail}
+									<p class="mt-1 text-xs font-mono break-all">Detalii: {testResult.detail}</p>
+								{/if}
+								{#if testResult.url}
+									<p class="mt-1 text-xs break-all">
+										<span class="font-medium">URL:</span>
+										<span class="font-mono">{testResult.url}</span>
+									</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
 
 					<div>
 						<Button
