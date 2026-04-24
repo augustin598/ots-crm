@@ -65,6 +65,10 @@ export interface SyncKeezInvoicesResult {
 	updated: number;
 	skipped: number;
 	errors: number;
+	/** Pages pulled from Keez during this run (≥1 on success, 0 if the integration was skipped). */
+	pagesFetched?: number;
+	/** CRM invoices that were marked cancelled because they no longer exist on Keez. */
+	reconciledCancelled?: number;
 }
 
 /**
