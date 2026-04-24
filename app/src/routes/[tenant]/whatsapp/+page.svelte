@@ -18,7 +18,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { CheckCircle2, XCircle, AlertTriangle, Loader2, Send, Plus, Search, Pencil, Paperclip, Download, FileText } from '@lucide/svelte';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 
@@ -291,6 +291,31 @@
 		}
 	}
 
+	let messagesEl: HTMLDivElement | null = $state(null);
+	let prevThreadKey: string | null = null;
+	let prevMessageCount = 0;
+
+	$effect(() => {
+		const key = selectedPhone;
+		const count = thread?.messages.length ?? 0;
+		const el = messagesEl;
+		if (!el) return;
+
+		const isNewThread = key !== prevThreadKey;
+		const hasNewMessages = count > prevMessageCount;
+		const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+		const nearBottom = distanceFromBottom < 120;
+
+		prevThreadKey = key;
+		prevMessageCount = count;
+
+		if (isNewThread || (hasNewMessages && nearBottom)) {
+			tick().then(() => {
+				if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+			});
+		}
+	});
+
 	let lightboxUrl = $state<string | null>(null);
 
 	function openLightbox(url: string) {
@@ -536,7 +561,7 @@
 							<Button variant="ghost" size="sm" onclick={() => (selectedPhone = null)}>Închide</Button>
 						</div>
 					</CardHeader>
-					<div class="flex-1 overflow-y-auto bg-muted/30 p-4">
+					<div bind:this={messagesEl} class="flex-1 overflow-y-auto bg-muted/30 p-4">
 						{#if !thread}
 							<div class="text-center text-sm text-muted-foreground">Se încarcă...</div>
 						{:else if thread.messages.length === 0}
