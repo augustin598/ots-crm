@@ -23,6 +23,13 @@ export interface PaymentStatusSnapshot {
 	/** ISO currency code (RON, EUR, USD). null when unavailable. */
 	currencyCode?: string | null;
 	checkedAt: Date;
+	/** TikTok-only secondary fields. null for Meta/Google snapshots. */
+	tiktokSecondary?: {
+		displayStatus: string | null;
+		subStatus: string | null;
+		rejectReason: string | null;
+		deliveryIssue: 'none' | 'budget_exceeded' | 'no_delivery' | 'all_paused' | null;
+	} | null;
 }
 
 export const PAYMENT_STATUS_LABEL_RO: Record<AdsPaymentStatus, string> = {
