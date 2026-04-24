@@ -36,6 +36,7 @@ async function persistStatus(snap: PaymentStatusSnapshot, tenantId: string) {
 		disableReason: snap.rawDisableReason ?? null,
 		balanceCents: snap.balanceCents ?? null,
 		currency: snap.currencyCode ?? null,
+		tiktokSecondary: snap.tiktokSecondary ?? null,
 	});
 	const payload = {
 		paymentStatus: snap.paymentStatus,
