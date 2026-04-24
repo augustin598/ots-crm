@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { logInfo, logError } from '$lib/server/logger';
+import { classifySecondaryStatus } from './campaign-health';
 
 const TIKTOK_API_URL = 'https://business-api.tiktok.com/open_api/v1.3';
 
@@ -1175,21 +1176,13 @@ export async function fetchAdvertiserCampaignHealth(
 
 		for (const c of json.data.list as any[]) {
 			const op = String(c.operation_status || '').toUpperCase();
-			const sec = String(c.secondary_status || '').toUpperCase();
+			const sec = String(c.secondary_status || '');
 
-			// User-enabled campaigns (the ones expected to be running).
 			if (op === 'ENABLE' || op === 'CAMPAIGN_STATUS_ENABLE') {
 				enabled += 1;
-
-				// Actively delivering ad impressions.
-				if (sec === 'CAMPAIGN_STATUS_DELIVERY_OK' || sec === 'STATUS_DELIVERY_OK') {
-					delivering += 1;
-				} else if (
-					sec === 'CAMPAIGN_STATUS_BUDGET_EXCEED' ||
-					sec === 'CAMPAIGN_BUDGET_EXCEED'
-				) {
-					budgetExceeded += 1;
-				}
+				const cls = classifySecondaryStatus(sec);
+				if (cls === 'delivering') delivering += 1;
+				else if (cls === 'budget_exceeded') budgetExceeded += 1;
 			}
 		}
 
