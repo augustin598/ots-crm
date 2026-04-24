@@ -81,6 +81,14 @@ export interface FlaggedAccountRow {
 	billingUrl: string;
 	/** True when admin has muted alerts for this account at its current status */
 	isMuted: boolean;
+	/** TikTok-only: sub_status from /advertiser/info/. null for Meta/Google or when absent. */
+	rawSubStatus: string | null;
+	/** TikTok-only: reject_reason from /advertiser/info/. null for Meta/Google or when absent. */
+	rawRejectReason: string | null;
+	/** TikTok-only: display_status from /advertiser/info/. null for Meta/Google or when absent. */
+	rawDisplayStatus: string | null;
+	/** TikTok-only: aggregated delivery issue ('none'|'budget_exceeded'|'no_delivery'|'all_paused'). null otherwise. */
+	rawDeliveryIssue: string | null;
 }
 
 export interface AdsStatusDashboard {
@@ -93,16 +101,36 @@ export interface AdsStatusDashboard {
 	totalAccountsMonitored: number;
 }
 
-function parseRaw(raw: string | null): { code: string; disableReason: string | null } {
-	if (!raw) return { code: '', disableReason: null };
+function parseRaw(raw: string | null): {
+	code: string;
+	disableReason: string | null;
+	subStatus: string | null;
+	rejectReason: string | null;
+	displayStatus: string | null;
+	deliveryIssue: string | null;
+} {
+	const empty = {
+		code: '',
+		disableReason: null,
+		subStatus: null,
+		rejectReason: null,
+		displayStatus: null,
+		deliveryIssue: null,
+	};
+	if (!raw) return empty;
 	try {
 		const parsed = JSON.parse(raw);
+		const tt = parsed?.tiktokSecondary ?? null;
 		return {
 			code: String(parsed.code ?? ''),
 			disableReason: parsed.disableReason != null ? String(parsed.disableReason) : null,
+			subStatus: tt?.subStatus ?? null,
+			rejectReason: tt?.rejectReason ?? null,
+			displayStatus: tt?.displayStatus ?? null,
+			deliveryIssue: tt?.deliveryIssue ?? null,
 		};
 	} catch {
-		return { code: raw, disableReason: null };
+		return { ...empty, code: raw };
 	}
 }
 
@@ -237,6 +265,10 @@ export const getAdsPaymentStatusDashboard = query(
 			checkedAt: row.checkedAt ? row.checkedAt.toISOString() : null,
 			billingUrl: PROVIDER_BILLING_URL[provider](row.externalId),
 			isMuted,
+			rawSubStatus: provider === 'tiktok' ? raw.subStatus : null,
+			rawRejectReason: provider === 'tiktok' ? raw.rejectReason : null,
+			rawDisplayStatus: provider === 'tiktok' ? raw.displayStatus : null,
+			rawDeliveryIssue: provider === 'tiktok' ? raw.deliveryIssue : null,
 		});
 	}
 
