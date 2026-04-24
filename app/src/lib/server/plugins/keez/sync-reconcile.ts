@@ -8,6 +8,8 @@ import { isMissingOnKeez } from './error-classification';
  *     candidates whose externalId is in `seen`)
  *   - `getInvoice`: per-invoice verification call (Keez API)
  *   - `markCancelled`: per-invoice cancellation write (DB)
+ *   - `concurrency` (optional, default 1): how many getInvoice calls run in
+ *     parallel. Keep this low to avoid hammering Keez during reconciliation.
  *
  * For each candidate not already seen, we call `getInvoice`. If Keez returns
  * the unambiguous "missing" signal (404 or 400+VALIDATION_ERROR+"nu exista"),
@@ -21,31 +23,47 @@ export async function reconcileMissingKeezInvoices(input: {
 	candidates: Array<{ id: string; externalId: string }>;
 	getInvoice: (externalId: string) => Promise<unknown>;
 	markCancelled: (id: string) => Promise<void>;
+	concurrency?: number;
 }): Promise<{ verified: number; cancelled: number; skipped: number }> {
-	const { seen, candidates, getInvoice, markCancelled } = input;
-	let verified = 0;
-	let cancelled = 0;
-	let skipped = 0;
+	const { seen, candidates, getInvoice, markCancelled, concurrency = 1 } = input;
 
+	// Pre-filter candidates already seen — separates "skipped" accounting from
+	// the parallel verification path, so chunking math stays simple.
+	const skippedIds: string[] = [];
+	const toVerify: Array<{ id: string; externalId: string }> = [];
 	for (const c of candidates) {
-		// Defensive: a candidate that's in `seen` was processed in pagination
-		// — never reconcile-cancel it.
 		if (seen.has(c.externalId)) {
-			skipped++;
-			continue;
-		}
-		verified++;
-		try {
-			await getInvoice(c.externalId);
-			// 200 → still exists upstream; race with creation. No-op.
-		} catch (err) {
-			if (isMissingOnKeez(err)) {
-				await markCancelled(c.id);
-				cancelled++;
-			}
-			// else: transient / unknown → leave alone, retry next sync.
+			skippedIds.push(c.id);
+		} else {
+			toVerify.push(c);
 		}
 	}
 
-	return { verified, cancelled, skipped };
+	let cancelled = 0;
+	const chunkSize = Math.max(1, concurrency);
+
+	const verifyOne = async (c: { id: string; externalId: string }): Promise<boolean> => {
+		try {
+			await getInvoice(c.externalId);
+			return false; // still exists upstream
+		} catch (err) {
+			if (isMissingOnKeez(err)) {
+				await markCancelled(c.id);
+				return true;
+			}
+			return false; // transient / unknown — leave alone, retry next sync
+		}
+	};
+
+	for (let i = 0; i < toVerify.length; i += chunkSize) {
+		const chunk = toVerify.slice(i, i + chunkSize);
+		const results = await Promise.all(chunk.map(verifyOne));
+		cancelled += results.filter(Boolean).length;
+	}
+
+	return {
+		verified: toVerify.length,
+		cancelled,
+		skipped: skippedIds.length,
+	};
 }

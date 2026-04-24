@@ -69,4 +69,56 @@ describe('reconcileMissingKeezInvoices', () => {
 		});
 		expect(result).toEqual({ verified: 0, cancelled: 0, skipped: 0 });
 	});
+
+	test('runs verifications in parallel chunks when concurrency > 1', async () => {
+		// Track how many getInvoice calls are in-flight at once. With chunkSize=3
+		// and a barrier that resolves only after all chunked calls have arrived,
+		// the test would hang past the timeout if the implementation were serial.
+		const candidates = Array.from({ length: 6 }, (_, i) => ({
+			id: `inv-${i}`,
+			externalId: `ext-${i}`,
+		}));
+		let inFlight = 0;
+		let maxObserved = 0;
+		const getInvoice = async () => {
+			inFlight++;
+			maxObserved = Math.max(maxObserved, inFlight);
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			inFlight--;
+			return {}; // exists
+		};
+
+		await reconcileMissingKeezInvoices({
+			seen: new Set(),
+			candidates,
+			getInvoice,
+			markCancelled: () => Promise.resolve(),
+			concurrency: 3,
+		});
+
+		expect(maxObserved).toBeGreaterThanOrEqual(2); // proof of parallelism
+		expect(maxObserved).toBeLessThanOrEqual(3); // chunk respects the cap
+	});
+
+	test('default concurrency is 1 (serial) for backwards compatibility', async () => {
+		const candidates = Array.from({ length: 4 }, (_, i) => ({ id: `i${i}`, externalId: `e${i}` }));
+		let inFlight = 0;
+		let maxObserved = 0;
+		const getInvoice = async () => {
+			inFlight++;
+			maxObserved = Math.max(maxObserved, inFlight);
+			await new Promise((resolve) => setTimeout(resolve, 2));
+			inFlight--;
+			return {};
+		};
+
+		await reconcileMissingKeezInvoices({
+			seen: new Set(),
+			candidates,
+			getInvoice,
+			markCancelled: () => Promise.resolve(),
+		});
+
+		expect(maxObserved).toBe(1);
+	});
 });
