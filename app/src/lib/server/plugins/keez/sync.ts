@@ -140,6 +140,12 @@ async function _syncKeezInvoicesForTenantInner(
 	// reset every page. "Consecutive" really means consecutive: the counter is
 	// reset on every successful iteration (each `continue` and the final
 	// fall-through), and also on a non-transient error in the catch block.
+	// Hard ceiling to prevent runaway pagination if Keez ever returns
+	// page after page without honouring offset (would never reach `recordsCount`
+	// or short-page exit). At pageSize=500 this is 100k invoices — well above
+	// any realistic tenant. Hitting this bound is a bug, log loudly.
+	const MAX_PAGES = 200;
+
 	const pageSize = options?.count || 500;
 	let offset = options?.offset ?? 0;
 	let totalRecords: number | null = null;
@@ -148,6 +154,13 @@ async function _syncKeezInvoicesForTenantInner(
 	let pagesFetched = 0;
 
 	pagination: while (true) {
+		if (pagesFetched >= MAX_PAGES) {
+			logError('keez', `Pagination MAX_PAGES (${MAX_PAGES}) exceeded — aborting to prevent runaway`, {
+				tenantId,
+				metadata: { pagesFetched, offset, totalRecords },
+			});
+			break pagination;
+		}
 		const response = await keezClient.getInvoices({
 			offset,
 			count: pageSize,
@@ -526,10 +539,17 @@ async function _syncKeezInvoicesForTenantInner(
 		.where(
 			and(eq(table.invoice.tenantId, tenantId), isNotNull(table.invoice.keezExternalId)),
 		);
+	// Only consider drafts. Per app/.claude/skills/keez-api/, Keez allows DELETE
+	// solely on draft/proforma — validated invoices can be cancelled but never
+	// deleted (they keep appearing in /invoices). So the only realistic source
+	// of a "missing on Keez" signal is a user-deleted draft. Excluding the
+	// other statuses (sent/paid/partially_paid/overdue) makes the reconcile
+	// fail-loud instead of fail-silent if a Keez bug or admin override ever
+	// makes a validated invoice appear missing — operator must investigate.
 	const candidates = crmKeezBacked
 		.filter(
 			(r): r is { id: string; externalId: string; status: string } =>
-				!!r.externalId && !seen.has(r.externalId) && r.status !== 'cancelled',
+				!!r.externalId && !seen.has(r.externalId) && r.status === 'draft',
 		)
 		.map((r) => ({ id: r.id, externalId: r.externalId }));
 
@@ -543,6 +563,10 @@ async function _syncKeezInvoicesForTenantInner(
 	const recon = await reconcileMissingKeezInvoices({
 		seen,
 		candidates,
+		// 5 concurrent verifies — safe under Keez's normal rate limits and keeps
+		// reconcile time bounded for tenants with many stale drafts (50 stale at
+		// concurrency=5 + ~100ms/call ≈ 1s vs 5s serial).
+		concurrency: 5,
 		getInvoice: (externalId) => keezClient.getInvoice(externalId),
 		markCancelled: async (invoiceId) => {
 			await db
