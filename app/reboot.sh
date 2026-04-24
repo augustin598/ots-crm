@@ -3,4 +3,4 @@ echo "Killing dev server..."
 lsof -ti :5173 | xargs kill -9 2>/dev/null
 sleep 1
 echo "Starting dev server..."
-NODE_TLS_REJECT_UNAUTHORIZED=0 bun run dev
+NODE_TLS_REJECT_UNAUTHORIZED=0 bun run dev --force
