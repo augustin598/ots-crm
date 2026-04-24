@@ -348,7 +348,8 @@ let createdInvoiceId: string | null = null;
 }
 
 // ─────────────────────────────────────────────
-// 6. Paid before created (out-of-order) → FAILED, retryable
+// 6. Paid without prior create → SYNTHESIZE invoice with status=paid
+//    (historical WHMCS invoices pre-integration)
 // ─────────────────────────────────────────────
 {
 	const body = invoicePayload({
@@ -357,12 +358,9 @@ let createdInvoiceId: string | null = null;
 		whmcsInvoiceNumber: 'OTS800'
 	});
 	const res = await POST(buildEvent(buildSignedRequest(JSON.stringify(body))) as any);
-	assert('out-of-order: 202 (DEAD_LETTER outcome but retryable FAILED state)', res.status === 202);
+	assert('synthesized-paid: 202', res.status === 202);
 	const parsed = await res.json();
-	assert(
-		'out-of-order: reason=invoice_missing_for_status_update',
-		parsed.reason === 'invoice_missing_for_status_update'
-	);
+	assert('synthesized-paid: outcome=created', parsed.outcome === 'created');
 
 	const sync = await db
 		.select()
@@ -374,11 +372,43 @@ let createdInvoiceId: string | null = null;
 			)
 		)
 		.get();
-	assert('out-of-order: sync state FAILED (retryable)', sync?.state === 'FAILED');
-	assert(
-		'out-of-order: sync lastErrorClass TRANSIENT',
-		sync?.lastErrorClass === 'TRANSIENT'
-	);
+	assert('synthesized-paid: sync state INVOICE_CREATED', sync?.state === 'INVOICE_CREATED');
+	assert('synthesized-paid: sync lastEvent=paid (real event)', sync?.lastEvent === 'paid');
+
+	const inv = await db
+		.select()
+		.from(table.invoice)
+		.where(
+			and(eq(table.invoice.tenantId, TENANT_ID), eq(table.invoice.externalInvoiceId, 800))
+		)
+		.get();
+	assert('synthesized-paid: invoice created', inv !== undefined);
+	assert('synthesized-paid: invoice status=paid', inv?.status === 'paid');
+	assert('synthesized-paid: paidDate set', inv?.paidDate !== null);
+}
+
+// ─────────────────────────────────────────────
+// 6b. Cancelled without prior create → SYNTHESIZE with status=cancelled
+// ─────────────────────────────────────────────
+{
+	const body = invoicePayload({
+		event: 'cancelled',
+		whmcsInvoiceId: 801,
+		whmcsInvoiceNumber: 'OTS801'
+	});
+	const res = await POST(buildEvent(buildSignedRequest(JSON.stringify(body))) as any);
+	const parsed = await res.json();
+	assert('synthesized-cancelled: outcome=created', parsed.outcome === 'created');
+
+	const inv = await db
+		.select()
+		.from(table.invoice)
+		.where(
+			and(eq(table.invoice.tenantId, TENANT_ID), eq(table.invoice.externalInvoiceId, 801))
+		)
+		.get();
+	assert('synthesized-cancelled: invoice status=cancelled', inv?.status === 'cancelled');
+	assert('synthesized-cancelled: paidDate null', inv?.paidDate === null);
 }
 
 // ─────────────────────────────────────────────
