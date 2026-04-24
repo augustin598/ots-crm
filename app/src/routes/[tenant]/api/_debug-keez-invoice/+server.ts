@@ -4,6 +4,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, or } from 'drizzle-orm';
 import { createKeezClientForTenant } from '$lib/server/plugins/keez/factory';
 import { KeezClientError } from '$lib/server/plugins/keez/errors';
+import { isMissingOnKeez } from '$lib/server/plugins/keez/error-classification';
 import { logInfo, logWarning } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
 
@@ -38,28 +39,6 @@ async function findInvoice(tenantId: string, series: string | null, number: stri
 		.select()
 		.from(table.invoice)
 		.where(and(eq(table.invoice.tenantId, tenantId), or(...matchers)));
-}
-
-/**
- * Detect Keez's "this invoice doesn't exist" signal across the two HTTP shapes
- * the API actually returns:
- *   1. HTTP 404 with `Error('Not found')` thrown by client.ts:308.
- *   2. HTTP 400 with body `{ Code: "VALIDATION_ERROR", Message: "...nu exista..." }`
- *      thrown as KeezClientError(400, "Keez API client error 400: {...}").
- *      This is the actual common case — Keez did NOT pick 404 for missing
- *      records. See memory/project_keez_400_for_missing_invoice.md.
- */
-function isMissingOnKeez(err: unknown): boolean {
-	if (err instanceof Error && err.message === 'Not found') return true;
-	if (err instanceof KeezClientError) {
-		if (err.status === 404) return true;
-		if (err.status === 400) {
-			const msg = err.message || '';
-			const looksMissing = /VALIDATION_ERROR/.test(msg) && /nu exista|Not Found/i.test(msg);
-			if (looksMissing) return true;
-		}
-	}
-	return false;
 }
 
 async function verifyOnKeez(tenantId: string, externalId: string) {

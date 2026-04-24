@@ -1,12 +1,13 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { clearNotificationsByType } from '$lib/server/notifications';
 import { classifyKeezError } from './error-classification';
+import { reconcileMissingKeezInvoices } from './sync-reconcile';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -65,6 +66,10 @@ export interface SyncKeezInvoicesResult {
 	updated: number;
 	skipped: number;
 	errors: number;
+	/** Pages pulled from Keez during this run (≥1 on success, 0 if the integration was skipped). */
+	pagesFetched?: number;
+	/** CRM invoices that were marked cancelled because they no longer exist on Keez. */
+	reconciledCancelled?: number;
 }
 
 /**
@@ -123,26 +128,57 @@ async function _syncKeezInvoicesForTenantInner(
 	}
 	const systemUserId = tenantOwner.userId;
 
-	// Get invoices from Keez
-	const response = await keezClient.getInvoices({
-		offset: options?.offset,
-		count: options?.count || 500,
-		filter: options?.filter
-	});
+	// Pagination + per-run circuit breaker.
+	//
+	// Pagination: loop offset += pageSize until we've consumed recordsCount or
+	// hit a short page (defensive). Without pagination the seen-set used by
+	// the reconcile pass below would only cover one page and we'd false-cancel
+	// every invoice on pages 2+.
+	//
+	// Circuit breaker (consecutiveTransient) lives OUTSIDE the page loop on
+	// purpose — a streak of 502s spanning pages should still trip after 3, not
+	// reset every page. "Consecutive" really means consecutive: the counter is
+	// reset on every successful iteration (each `continue` and the final
+	// fall-through), and also on a non-transient error in the catch block.
+	// Hard ceiling to prevent runaway pagination if Keez ever returns
+	// page after page without honouring offset (would never reach `recordsCount`
+	// or short-page exit). At pageSize=500 this is 100k invoices — well above
+	// any realistic tenant. Hitting this bound is a bug, log loudly.
+	const MAX_PAGES = 200;
 
-	logInfo('keez', `Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`, { tenantId });
-
-	// Per-run circuit breaker: if Keez is degraded, individual invoice fetches
-	// fail one after another. Stop hammering after 3 consecutive transient
-	// errors and let handleKeezSyncFailure schedule a delayed retry instead.
-	// "Consecutive" really means consecutive: the counter is reset on every
-	// successful iteration (each `continue` and the final fall-through), and
-	// also on a non-transient error in the catch block. Without those resets,
-	// 3 sporadic 502s spread across 500 healthy invoices would falsely trip
-	// the breaker.
+	const pageSize = options?.count || 500;
+	let offset = options?.offset ?? 0;
+	let totalRecords: number | null = null;
+	const seen = new Set<string>();
 	let consecutiveTransient = 0;
-	for (const invoiceHeader of response.data || []) {
-		try {
+	let pagesFetched = 0;
+
+	pagination: while (true) {
+		if (pagesFetched >= MAX_PAGES) {
+			logError('keez', `Pagination MAX_PAGES (${MAX_PAGES}) exceeded — aborting to prevent runaway`, {
+				tenantId,
+				metadata: { pagesFetched, offset, totalRecords },
+			});
+			break pagination;
+		}
+		const response = await keezClient.getInvoices({
+			offset,
+			count: pageSize,
+			filter: options?.filter,
+		});
+		pagesFetched++;
+		totalRecords = response.recordsCount ?? totalRecords;
+
+		logInfo(
+			'keez',
+			`Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`,
+			{ tenantId },
+		);
+
+		const pageData = response.data || [];
+		for (const invoiceHeader of pageData) {
+			seen.add(invoiceHeader.externalId);
+			try {
 			// Check if invoice already exists in CRM
 			const [existing] = await db
 				.select()
@@ -477,6 +513,79 @@ async function _syncKeezInvoicesForTenantInner(
 				consecutiveTransient = 0;
 			}
 		}
+		}
+
+		// Loop exit conditions, in order of safety:
+		offset += pageData.length;
+		if (pageData.length === 0) break pagination; // empty page → done
+		if (pageData.length < pageSize) break pagination; // short page → almost certainly the tail
+		if (totalRecords !== null && offset >= totalRecords) break pagination; // counted out
+	}
+
+	result.pagesFetched = pagesFetched;
+
+	// Reconcile pass: any CRM invoice whose Keez counterpart we did NOT see
+	// in any page, and which Keez confirms is gone (per-invoice getInvoice),
+	// is marked cancelled here. This runs only after a successful pagination
+	// — if the per-run circuit breaker threw earlier, control never reaches
+	// here, so a partial pagination cannot trigger false cancellations.
+	const crmKeezBacked = await db
+		.select({
+			id: table.invoice.id,
+			externalId: table.invoice.keezExternalId,
+			status: table.invoice.status,
+		})
+		.from(table.invoice)
+		.where(
+			and(eq(table.invoice.tenantId, tenantId), isNotNull(table.invoice.keezExternalId)),
+		);
+	// Only consider drafts. Per app/.claude/skills/keez-api/, Keez allows DELETE
+	// solely on draft/proforma — validated invoices can be cancelled but never
+	// deleted (they keep appearing in /invoices). So the only realistic source
+	// of a "missing on Keez" signal is a user-deleted draft. Excluding the
+	// other statuses (sent/paid/partially_paid/overdue) makes the reconcile
+	// fail-loud instead of fail-silent if a Keez bug or admin override ever
+	// makes a validated invoice appear missing — operator must investigate.
+	const candidates = crmKeezBacked
+		.filter(
+			(r): r is { id: string; externalId: string; status: string } =>
+				!!r.externalId && !seen.has(r.externalId) && r.status === 'draft',
+		)
+		.map((r) => ({ id: r.id, externalId: r.externalId }));
+
+	if (candidates.length > 0) {
+		logInfo(
+			'keez',
+			`Reconcile: ${candidates.length} CRM invoice(s) not seen in this run, verifying individually`,
+			{ tenantId },
+		);
+	}
+	const recon = await reconcileMissingKeezInvoices({
+		seen,
+		candidates,
+		// 5 concurrent verifies — safe under Keez's normal rate limits and keeps
+		// reconcile time bounded for tenants with many stale drafts (50 stale at
+		// concurrency=5 + ~100ms/call ≈ 1s vs 5s serial).
+		concurrency: 5,
+		getInvoice: (externalId) => keezClient.getInvoice(externalId),
+		markCancelled: async (invoiceId) => {
+			await db
+				.update(table.invoice)
+				.set({ status: 'cancelled', updatedAt: new Date() })
+				.where(eq(table.invoice.id, invoiceId));
+			logWarning('keez', `Reconcile: marked invoice cancelled (no longer on Keez)`, {
+				tenantId,
+				metadata: { invoiceId },
+			});
+		},
+	});
+	result.reconciledCancelled = recon.cancelled;
+	if (recon.cancelled > 0 || recon.verified > 0) {
+		logInfo(
+			'keez',
+			`Reconcile complete: verified=${recon.verified} cancelled=${recon.cancelled} skipped=${recon.skipped}`,
+			{ tenantId },
+		);
 	}
 
 	// Successful completion — always update lastSyncAt AND reset failure columns,
