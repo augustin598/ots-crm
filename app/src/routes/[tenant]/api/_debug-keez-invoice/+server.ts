@@ -40,6 +40,28 @@ async function findInvoice(tenantId: string, series: string | null, number: stri
 		.where(and(eq(table.invoice.tenantId, tenantId), or(...matchers)));
 }
 
+/**
+ * Detect Keez's "this invoice doesn't exist" signal across the two HTTP shapes
+ * the API actually returns:
+ *   1. HTTP 404 with `Error('Not found')` thrown by client.ts:308.
+ *   2. HTTP 400 with body `{ Code: "VALIDATION_ERROR", Message: "...nu exista..." }`
+ *      thrown as KeezClientError(400, "Keez API client error 400: {...}").
+ *      This is the actual common case — Keez did NOT pick 404 for missing
+ *      records. See memory/project_keez_400_for_missing_invoice.md.
+ */
+function isMissingOnKeez(err: unknown): boolean {
+	if (err instanceof Error && err.message === 'Not found') return true;
+	if (err instanceof KeezClientError) {
+		if (err.status === 404) return true;
+		if (err.status === 400) {
+			const msg = err.message || '';
+			const looksMissing = /VALIDATION_ERROR/.test(msg) && /nu exista|Not Found/i.test(msg);
+			if (looksMissing) return true;
+		}
+	}
+	return false;
+}
+
 async function verifyOnKeez(tenantId: string, externalId: string) {
 	const [integration] = await db
 		.select()
@@ -54,15 +76,16 @@ async function verifyOnKeez(tenantId: string, externalId: string) {
 		const remote = await client.getInvoice(externalId);
 		return { ok: true as const, exists: true, status: remote?.status, raw: remote };
 	} catch (err) {
-		if (err instanceof Error && err.message === 'Not found') {
-			return { ok: true as const, exists: false, reason: '404 Not found' };
-		}
-		if (err instanceof KeezClientError && err.status === 404) {
-			return { ok: true as const, exists: false, reason: 'KeezClientError 404' };
+		if (isMissingOnKeez(err)) {
+			const why =
+				err instanceof KeezClientError
+					? `Keez ${err.status} (VALIDATION_ERROR / nu exista)`
+					: '404 Not found';
+			return { ok: true as const, exists: false, reason: why };
 		}
 		return {
 			ok: false as const,
-			reason: `keez API error (not a clean 404): ${err instanceof Error ? err.message : String(err)}`,
+			reason: `keez API error (not a recognizable "missing" signal): ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
 }
