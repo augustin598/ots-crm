@@ -305,9 +305,16 @@ export async function processWhmcsInvoice(
 // Created event
 // ─────────────────────────────────────────────
 
+/**
+ * `statusOverride` — used when synthesizing a create from a paid/cancelled
+ * event that arrived without a prior create (historical WHMCS invoices
+ * pre-integration). With override, the resulting invoice gets the final
+ * status directly instead of the default 'sent', and paidDate is set.
+ */
 async function handleCreated(
 	ctx: ProcessInvoiceContext,
-	existingSync: typeof table.whmcsInvoiceSync.$inferSelect | undefined
+	existingSync: typeof table.whmcsInvoiceSync.$inferSelect | undefined,
+	statusOverride: 'paid' | 'cancelled' | null = null
 ): Promise<HandlerResult> {
 	const { tenant, payload, payloadHash } = ctx;
 	const tenantId = tenant.id;
@@ -363,6 +370,10 @@ async function handleCreated(
 				)
 			: null;
 
+	// Final status: override takes precedence for historical/out-of-order events.
+	const finalStatus: string = statusOverride ?? 'sent';
+	const paidDate = statusOverride === 'paid' ? now : null;
+
 	await db.transaction(async (tx) => {
 		await tx.insert(table.invoice).values({
 			id: invoiceId,
@@ -372,14 +383,14 @@ async function handleCreated(
 			projectId: null,
 			serviceId: null,
 			invoiceNumber,
-			status: 'sent',
+			status: finalStatus,
 			amount: subtotalCents,
 			taxRate: vatRate,
 			taxAmount: taxCents,
 			totalAmount: totalCents,
 			issueDate,
 			dueDate,
-			paidDate: null,
+			paidDate,
 			lastEmailSentAt: null,
 			lastEmailStatus: null,
 			overdueReminderCount: 0,
@@ -432,11 +443,15 @@ async function handleCreated(
 		}
 	});
 
+	// Record the ACTUAL event (created / paid / cancelled) so the admin UI
+	// shows the correct lifecycle step even for synthesized invoices.
+	const recordedEvent = statusOverride ?? 'created';
+
 	await upsertSync(existingSync, {
 		tenantId,
 		whmcsInvoiceId: payload.whmcsInvoiceId,
 		state: 'INVOICE_CREATED',
-		lastEvent: 'created',
+		lastEvent: recordedEvent,
 		matchType: match.matchType,
 		lastPayloadHash: payloadHash,
 		invoiceId,
@@ -446,7 +461,9 @@ async function handleCreated(
 		payload
 	});
 
-	logInfo('whmcs', 'WHMCS invoice created', {
+	logInfo('whmcs', statusOverride
+		? `WHMCS invoice created (synthesized from ${statusOverride} event)`
+		: 'WHMCS invoice created', {
 		tenantId,
 		metadata: {
 			whmcsInvoiceId: payload.whmcsInvoiceId,
@@ -454,7 +471,8 @@ async function handleCreated(
 			invoiceNumber,
 			matchType: match.matchType,
 			total: payload.total,
-			transactionId: payload.transactionId ?? null
+			transactionId: payload.transactionId ?? null,
+			synthesized: statusOverride !== null
 		}
 	});
 
@@ -474,27 +492,17 @@ async function handleStatusChange(
 	const event = payload.event as 'paid' | 'cancelled';
 
 	if (!existingSync || !existingSync.invoiceId) {
-		// Can happen if WHMCS retries a "paid" event that races the "created"
-		// we haven't received yet. Record as FAILED (not DEAD_LETTER) so WHMCS
-		// can retry; a re-send of "created" + "paid" later will succeed.
-		await upsertSync(existingSync, {
-			tenantId,
-			whmcsInvoiceId: payload.whmcsInvoiceId,
-			state: 'FAILED',
-			lastEvent: event,
-			lastErrorClass: 'TRANSIENT',
-			lastErrorMessage: 'invoice_missing_for_status_update',
-			lastPayloadHash: payloadHash,
-			payload
-		});
-		logWarning('whmcs', 'Status event arrived before invoice create — retryable', {
+		// Historical invoice scenario: the CRM-side WHMCS integration was
+		// activated AFTER this invoice was already created in WHMCS, so the
+		// InvoiceCreated hook never fired for it. The payload carries the full
+		// snapshot (client + items + totals) so we can synthesize the create
+		// record with the final status directly. Preserves idempotency — a
+		// later resend of the same event hits the exact-dup dedup branch.
+		logInfo('whmcs', `Synthesizing invoice from ${event} event (no prior create)`, {
 			tenantId,
 			metadata: { whmcsInvoiceId: payload.whmcsInvoiceId, event }
 		});
-		return {
-			outcome: 'dead_letter',
-			reason: 'invoice_missing_for_status_update'
-		};
+		return handleCreated(ctx, existingSync, event);
 	}
 
 	const now = new Date();
