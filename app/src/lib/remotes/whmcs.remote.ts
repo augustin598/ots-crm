@@ -21,6 +21,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { generateSecret, signRequest, verifySignature } from '$lib/server/whmcs/hmac';
+import { pushInvoiceNumberToWhmcs } from '$lib/server/whmcs/push-number-to-whmcs';
 
 // ─────────────────────────────────────────────
 // Auth helpers
@@ -505,6 +506,25 @@ export const testWhmcsConnection = command(async () => {
  * webhook will re-process it cleanly. Intended for manual review of stuck
  * invoices from the admin UI.
  */
+/**
+ * Push the CRM-assigned invoice number back to WHMCS so client-facing
+ * artifacts (PDF, emails, client portal) show the fiscal number instead
+ * of WHMCS's auto-generated one. Only works for invoices whose
+ * externalSource is 'whmcs'.
+ *
+ * Manually triggered from the sync event log — useful in dry-run mode or
+ * when the auto-trigger after Keez push didn't fire (e.g. Keez push is off
+ * or failed). Idempotent on the WHMCS side: re-pushing the same number is
+ * a no-op.
+ */
+export const pushWhmcsInvoiceNumber = command(
+	v.object({ invoiceId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ invoiceId }) => {
+		const { tenantId } = requireTenantAdmin();
+		return pushInvoiceNumberToWhmcs(tenantId, invoiceId);
+	}
+);
+
 export const replayWhmcsSync = command(
 	v.object({ syncId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ syncId }) => {
