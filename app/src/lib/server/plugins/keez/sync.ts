@@ -127,26 +127,44 @@ async function _syncKeezInvoicesForTenantInner(
 	}
 	const systemUserId = tenantOwner.userId;
 
-	// Get invoices from Keez
-	const response = await keezClient.getInvoices({
-		offset: options?.offset,
-		count: options?.count || 500,
-		filter: options?.filter
-	});
-
-	logInfo('keez', `Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`, { tenantId });
-
-	// Per-run circuit breaker: if Keez is degraded, individual invoice fetches
-	// fail one after another. Stop hammering after 3 consecutive transient
-	// errors and let handleKeezSyncFailure schedule a delayed retry instead.
-	// "Consecutive" really means consecutive: the counter is reset on every
-	// successful iteration (each `continue` and the final fall-through), and
-	// also on a non-transient error in the catch block. Without those resets,
-	// 3 sporadic 502s spread across 500 healthy invoices would falsely trip
-	// the breaker.
+	// Pagination + per-run circuit breaker.
+	//
+	// Pagination: loop offset += pageSize until we've consumed recordsCount or
+	// hit a short page (defensive). Without pagination the seen-set used by
+	// the reconcile pass below would only cover one page and we'd false-cancel
+	// every invoice on pages 2+.
+	//
+	// Circuit breaker (consecutiveTransient) lives OUTSIDE the page loop on
+	// purpose — a streak of 502s spanning pages should still trip after 3, not
+	// reset every page. "Consecutive" really means consecutive: the counter is
+	// reset on every successful iteration (each `continue` and the final
+	// fall-through), and also on a non-transient error in the catch block.
+	const pageSize = options?.count || 500;
+	let offset = options?.offset ?? 0;
+	let totalRecords: number | null = null;
+	const seen = new Set<string>();
 	let consecutiveTransient = 0;
-	for (const invoiceHeader of response.data || []) {
-		try {
+	let pagesFetched = 0;
+
+	pagination: while (true) {
+		const response = await keezClient.getInvoices({
+			offset,
+			count: pageSize,
+			filter: options?.filter,
+		});
+		pagesFetched++;
+		totalRecords = response.recordsCount ?? totalRecords;
+
+		logInfo(
+			'keez',
+			`Sync fetched ${response.data?.length || 0} invoices (recordsCount: ${response.recordsCount}, total: ${response.total ?? 'N/A'}) [${response.first}-${response.last}]`,
+			{ tenantId },
+		);
+
+		const pageData = response.data || [];
+		for (const invoiceHeader of pageData) {
+			seen.add(invoiceHeader.externalId);
+			try {
 			// Check if invoice already exists in CRM
 			const [existing] = await db
 				.select()
@@ -481,7 +499,16 @@ async function _syncKeezInvoicesForTenantInner(
 				consecutiveTransient = 0;
 			}
 		}
+		}
+
+		// Loop exit conditions, in order of safety:
+		offset += pageData.length;
+		if (pageData.length === 0) break pagination; // empty page → done
+		if (pageData.length < pageSize) break pagination; // short page → almost certainly the tail
+		if (totalRecords !== null && offset >= totalRecords) break pagination; // counted out
 	}
+
+	result.pagesFetched = pagesFetched;
 
 	// Successful completion — always update lastSyncAt AND reset failure columns,
 	// even for zero-invoice responses. Clearing failure state here is what lets
