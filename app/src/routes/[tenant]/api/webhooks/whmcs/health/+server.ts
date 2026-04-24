@@ -26,6 +26,18 @@ import { verifyWhmcsWebhook } from '$lib/server/whmcs/verify-webhook';
 /** Keep in sync with the PHP addon's reported version (package.json on that side). */
 const CONNECTOR_VERSION = '1.0.0';
 
+/**
+ * Server-side handler version. BUMP THIS EVERY TIME the invoice handler
+ * logic changes so ops can verify a deploy landed by hitting /health.
+ * Pre-deploy: undefined on the response. Post-deploy: matches expected.
+ * History:
+ *   synthesize-v1 — PR #26: synthesize invoice from paid/cancelled when
+ *                           no prior create row (fixes historical WHMCS
+ *                           invoices, obsoletes invoice_missing_for_status_update
+ *                           FAILED reason).
+ */
+const HANDLER_VERSION = 'synthesize-v1';
+
 export const GET: RequestHandler = async (event) => {
 	// GET has no body; HMAC canonical still includes the empty string.
 	const rawBody = '';
@@ -39,6 +51,7 @@ export const GET: RequestHandler = async (event) => {
 		ok: true,
 		tenantSlug: result.tenant.slug,
 		connectorVersion: CONNECTOR_VERSION,
+		handlerVersion: HANDLER_VERSION,
 		dryRun: !result.integration.enableKeezPush,
 		receivedAt: result.timestamp
 	});
