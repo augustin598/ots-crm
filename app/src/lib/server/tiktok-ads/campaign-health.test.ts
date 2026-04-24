@@ -12,6 +12,12 @@ describe('isCampaignDelivering', () => {
 		expect(isCampaignDelivering('CAMPAIGN_STATUS_PARTIAL_AUDIT_DENY')).toBe(true);
 	});
 
+	test('CAMPAIGN_STATUS_ENABLE → true (user-enabled, no platform blocker)', () => {
+		// Seen on Heylux TikTok account 2026-04-24 — TikTok returns this as
+		// secondary_status instead of DELIVERY_OK in some cases.
+		expect(isCampaignDelivering('CAMPAIGN_STATUS_ENABLE')).toBe(true);
+	});
+
 	test('BUDGET_EXCEED → false', () => {
 		expect(isCampaignDelivering('CAMPAIGN_STATUS_BUDGET_EXCEED')).toBe(false);
 		expect(isCampaignDelivering('CAMPAIGN_BUDGET_EXCEED')).toBe(false);

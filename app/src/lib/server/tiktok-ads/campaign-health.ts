@@ -18,6 +18,10 @@ const DELIVERING = new Set([
 	'CAMPAIGN_STATUS_DELIVERY_OK',
 	'STATUS_DELIVERY_OK',
 	'CAMPAIGN_STATUS_PARTIAL_AUDIT_DENY',
+	// TikTok returns `CAMPAIGN_STATUS_ENABLE` as secondary_status for
+	// user-enabled campaigns with no explicit platform blocker. Treating
+	// this as non-delivering caused the Heylux false-positive (April 2026).
+	'CAMPAIGN_STATUS_ENABLE',
 ]);
 
 const BUDGET_EXCEEDED = new Set([
