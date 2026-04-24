@@ -5,9 +5,17 @@
  */
 
 /**
- * 4xx (except 401 which the client already handled) from Keez — never retried.
- * Carries the status code so callers can decide between "log and skip" (404/409)
- * vs "show to user" (403).
+ * HTTP-error wrapper from the Keez client. Retry behaviour is determined by
+ * `status`, not by the type itself:
+ *   - 4xx (except 401, which the client handles inline) → permanent. Callers
+ *     must NOT retry; classifyKeezError() returns 'permanent'.
+ *   - 5xx → transient. The client's inline retry loop keeps retrying while
+ *     `status >= 500`; after exhaustion, classifyKeezError() returns
+ *     'transient' and retry-policy schedules a delayed cross-run retry.
+ * Callers that surface this to users must check `status < 500` first.
+ *
+ * 404 currently throws a plain `Error('Not found')` from the client and is
+ * caught upstream — it does not reach KeezClientError.
  */
 export class KeezClientError extends Error {
 	readonly status: number;
