@@ -3,6 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { createNotification, type NotificationType } from '$lib/server/notifications';
 import { sendAdPaymentDigestEmail, type AdDigestItem } from '$lib/server/email';
+import { describeStatus, parseTikTokRejectReason } from '$lib/ads/status-copy';
 import { logError, logInfo } from '$lib/server/logger';
 import {
 	isBadStatus,
@@ -374,6 +375,23 @@ async function collectTransitionNotifications(
 		}
 	}
 
+	// Derive the rich Romanian explainer so the email mirrors the client-side
+	// alert card. TikTok accounts with an explicit rejection_reason get a
+	// translated message + deadline; STATUS_ENABLE + no_delivery/budget_exceeded
+	// get the specific sub-reason copy; all other statuses get generic guidance.
+	const rejectParsed =
+		snap.provider === 'tiktok'
+			? parseTikTokRejectReason(snap.tiktokSecondary?.rejectReason ?? null)
+			: null;
+	const details = describeStatus({
+		provider: snap.provider,
+		paymentStatus: snap.paymentStatus,
+		rawDisableReason:
+			typeof snap.rawDisableReason === 'string' ? snap.rawDisableReason : null,
+		rejectReasonMessage: rejectParsed?.message ?? null,
+		rejectReasonEndsAt: rejectParsed?.endsAt ?? null,
+	});
+
 	const baseDigestItem: AdDigestItem = {
 		provider: snap.provider,
 		providerLabel,
@@ -385,6 +403,7 @@ async function collectTransitionNotifications(
 		rawDisableReason: snap.rawDisableReason,
 		billingUrl,
 		balanceFormatted,
+		details,
 	};
 
 	// Track whether this account landed in ANY email digest this run, so we can

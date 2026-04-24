@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getClientAdsHealth } from '$lib/remotes/ads-status.remote';
+	import { describeStatus, isCriticalStatus } from '$lib/ads/status-copy';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
@@ -85,135 +86,6 @@
 		}
 	}
 
-	interface StatusDetails {
-		headline: string;
-		body: string;
-		suggestion: string;
-		deadline: string | null;
-	}
-
-	/** Formats TikTok endtime strings like "2036-03-15 13:26:50" → "15 martie 2036". */
-	function formatDeadline(raw: string | null): string | null {
-		if (!raw) return null;
-		const iso = raw.includes('T') ? raw : raw.replace(' ', 'T');
-		const date = new Date(iso);
-		if (Number.isNaN(date.getTime())) return raw;
-		return date.toLocaleDateString('ro-RO', {
-			day: 'numeric',
-			month: 'long',
-			year: 'numeric',
-		});
-	}
-
-	/**
-	 * Rich Romanian explainer + actionable suggestion per status variant.
-	 * Shown inline in each account card so clients understand the cause and the
-	 * next step without hunting through tooltips or platform menus.
-	 */
-	function detailsFor(item: {
-		paymentStatus: string;
-		provider: string;
-		rawDisableReason: string | null;
-		rejectReasonMessage: string | null;
-		rejectReasonEndsAt: string | null;
-	}): StatusDetails | null {
-		const { paymentStatus, provider, rawDisableReason, rejectReasonMessage, rejectReasonEndsAt } =
-			item;
-		const deadline = formatDeadline(rejectReasonEndsAt);
-
-		// TikTok returned an explicit rejection message (STATUS_LIMIT / STATUS_DISABLE
-		// with a reason). Translate the well-known "suspicious or unusual activity"
-		// template to Romanian; for unknown messages fall back to the raw English
-		// string so the client still has actionable text for the appeal.
-		if (rejectReasonMessage && (paymentStatus === 'risk_review' || paymentStatus === 'suspended')) {
-			const isSuspiciousActivity = /suspicious or unusual activity|violation of the TikTok Advertising Guidelines/i.test(
-				rejectReasonMessage,
-			);
-			if (isSuspiciousActivity) {
-				return {
-					headline:
-						paymentStatus === 'suspended'
-							? 'Cont suspendat de TikTok'
-							: 'Cont restricționat de TikTok',
-					body: 'TikTok a restricționat acest cont din cauza unei activități suspecte sau a unei suspiciuni de încălcare a politicilor TikTok Ads.',
-					suggestion:
-						'Deschide un ticket „Account Review" în TikTok Business Support și depune appeal în maxim 3 zile lucrătoare.',
-					deadline,
-				};
-			}
-			return {
-				headline:
-					paymentStatus === 'suspended'
-						? 'Cont suspendat de TikTok'
-						: 'Cont restricționat de TikTok',
-				body: rejectReasonMessage,
-				suggestion:
-					'Deschide TikTok Ads Manager pentru detalii suplimentare sau contactează TikTok Business Support.',
-				deadline,
-			};
-		}
-
-		// TikTok-specific delivery issues (account is STATUS_ENABLE but no campaign delivers).
-		if (provider === 'tiktok' && paymentStatus === 'risk_review' && rawDisableReason === 'budget_exceeded') {
-			return {
-				headline: 'Buget consumat',
-				body: 'Campaniile au atins limita de buget. Reclamele nu mai rulează până la reset-ul zilnic sau o creștere de buget.',
-				suggestion:
-					'Deschide TikTok Ads Manager și crește bugetul campaniilor active, sau așteaptă reset-ul zilnic.',
-				deadline: null,
-			};
-		}
-		if (provider === 'tiktok' && paymentStatus === 'risk_review' && rawDisableReason === 'no_delivery') {
-			return {
-				headline: 'Reclame oprite',
-				body: 'Contul este activ, dar nicio reclamă nu este livrată momentan. Cauze posibile: reclame respinse la audit, programare în afara orelor, reguli de livrare.',
-				suggestion:
-					'Deschide TikTok Ads Manager și verifică în secțiunea „Ads" starea fiecărei reclame — vei vedea ce e respins și de ce.',
-				deadline: null,
-			};
-		}
-
-		// Generic status-only variants — shared across Meta / Google / TikTok.
-		switch (paymentStatus) {
-			case 'grace_period':
-				return {
-					headline: 'Factură neachitată — perioadă de grație',
-					body: 'Reclamele rulează, dar vor fi oprite automat dacă nu achiți soldul în zilele următoare.',
-					suggestion: 'Apasă „Plătește" pentru a achita soldul restant acum.',
-					deadline: null,
-				};
-			case 'payment_failed':
-				return {
-					headline: 'Plata a eșuat',
-					body: 'Reclamele sunt oprite până la achitarea soldului sau actualizarea metodei de plată.',
-					suggestion: 'Apasă „Plătește" sau actualizează cardul în setările contului de publicitate.',
-					deadline: null,
-				};
-			case 'risk_review':
-				return {
-					headline: 'Cont în curs de verificare',
-					body: 'Platforma verifică contul. Livrarea reclamelor poate fi limitată temporar.',
-					suggestion: 'Deschide setările contului pentru a vedea ce acțiuni sunt cerute.',
-					deadline: null,
-				};
-			case 'suspended':
-				return {
-					headline: 'Cont suspendat',
-					body: 'Platforma a suspendat contul și reclamele nu mai rulează.',
-					suggestion: 'Contactează suportul platformei pentru detalii și procedura de appeal.',
-					deadline: null,
-				};
-			case 'closed':
-				return {
-					headline: 'Cont închis',
-					body: 'Contul este închis definitiv.',
-					suggestion: 'Contactează suportul platformei dacă închiderea este o eroare.',
-					deadline: null,
-				};
-			default:
-				return null;
-		}
-	}
 </script>
 
 {#if flagged.length > 0}
@@ -260,8 +132,14 @@
 		<ul class="divide-y divide-zinc-100">
 			{#each flagged as item (item.provider + ':' + item.externalAccountId)}
 				{@const Icon = iconFor(item.provider)}
-				{@const details = detailsFor(item)}
-				{@const isCritical = item.paymentStatus === 'suspended' || item.paymentStatus === 'payment_failed'}
+				{@const details = describeStatus({
+					provider: item.provider,
+					paymentStatus: item.paymentStatus,
+					rawDisableReason: item.rawDisableReason,
+					rejectReasonMessage: item.rejectReasonMessage,
+					rejectReasonEndsAt: item.rejectReasonEndsAt,
+				})}
+				{@const isCritical = isCriticalStatus(item.paymentStatus)}
 				<li class="flex flex-col gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
 					<div class="flex items-center gap-3">
 						<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">

@@ -10,6 +10,7 @@ import {
 	PROVIDER_BILLING_URL,
 	actionForStatus,
 } from '$lib/server/ads/payment-status-types';
+import { parseTikTokRejectReason } from '$lib/ads/status-copy';
 
 function requireAdmin() {
 	const event = getRequestEvent();
@@ -49,24 +50,6 @@ export interface ClientAdsHealthItem {
 	rejectReasonEndsAt: string | null;
 }
 
-/**
- * Parse TikTok rejection_reason string into structured pieces.
- * Input shape observed 2026-04-24: `1:<message>,endtime:2035-09-03 15:25:11`.
- * Returns null if the input is null/empty; falls back to raw message if format
- * doesn't match (forward-compat with TikTok format changes).
- */
-function parseTikTokRejectReason(raw: string | null): {
-	message: string;
-	endsAt: string | null;
-} | null {
-	if (!raw) return null;
-	const endMatch = raw.match(/,endtime:(.+?)$/);
-	const endsAt = endMatch ? endMatch[1].trim() : null;
-	const withoutEnd = endMatch ? raw.slice(0, endMatch.index) : raw;
-	const codeMatch = withoutEnd.match(/^\d+:(.+)$/);
-	const message = codeMatch ? codeMatch[1].trim() : withoutEnd.trim();
-	return { message, endsAt };
-}
 
 function formatBalance(cents: number | null, currency: string | null): string | null {
 	if (cents == null || !Number.isFinite(cents) || cents === 0) return null;
