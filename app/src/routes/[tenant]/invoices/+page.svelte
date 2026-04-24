@@ -72,6 +72,8 @@ import CoinsIcon from '@lucide/svelte/icons/coins';
 import MailIcon from '@lucide/svelte/icons/mail';
 import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 import XCircleIcon from '@lucide/svelte/icons/x-circle';
+import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 import { goto } from '$app/navigation';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -103,6 +105,22 @@ import { goto } from '$app/navigation';
 	const invoices = $derived(invoicesQuery.current || []);
 	const invoicesLoading = $derived(invoicesQuery.loading);
 	const invoicesError = $derived(invoicesQuery.error);
+
+	// Client-side pagination — same shape as admin/logs page (emailPage etc.).
+	let invoicePage = $state(1);
+	let invoicePageSize = $state(20);
+	const invoiceTotalPages = $derived(Math.max(1, Math.ceil(invoices.length / invoicePageSize)));
+	const paginatedInvoices = $derived(
+		invoices.slice((invoicePage - 1) * invoicePageSize, invoicePage * invoicePageSize)
+	);
+
+	// Reset to page 1 whenever filters or page size change. Same pattern as
+	// the admin/logs page (emailPage / emailStatusFilter etc.).
+	$effect(() => {
+		filterParams;
+		invoicePageSize;
+		invoicePage = 1;
+	});
 
 	const recurringInvoicesQuery = getRecurringInvoices({});
 	const recurringInvoices = $derived(recurringInvoicesQuery.current || []);
@@ -696,7 +714,7 @@ import { goto } from '$app/navigation';
 				</Card>
 			{:else}
 				<div class="space-y-4">
-					{#each invoices as invoice}
+					{#each paginatedInvoices as invoice (invoice.id)}
 						<Card class="group relative overflow-hidden border-2 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5">
 							<!-- Modern gradient accent bar -->
 							<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-primary/80 to-primary/60"></div>
@@ -953,6 +971,37 @@ import { goto } from '$app/navigation';
 							</div>
 						</Card>
 					{/each}
+
+					{#if invoiceTotalPages > 1}
+						<div class="flex items-center justify-between pt-2">
+							<p class="text-sm text-muted-foreground">
+								Afișare {(invoicePage - 1) * invoicePageSize + 1}–{Math.min(invoicePage * invoicePageSize, invoices.length)} din {invoices.length}
+							</p>
+							<div class="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={invoicePage <= 1}
+									onclick={() => invoicePage--}
+								>
+									<ChevronLeftIcon class="h-4 w-4" />
+									Anterior
+								</Button>
+								<span class="text-sm text-muted-foreground">
+									Pagina {invoicePage} / {invoiceTotalPages}
+								</span>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={invoicePage >= invoiceTotalPages}
+									onclick={() => invoicePage++}
+								>
+									Următor
+									<ChevronRightIcon class="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</TabsContent>
