@@ -30,6 +30,9 @@ mock.module('../../db', () => ({ db: fakeDb }));
 mock.module('$lib/server/db', () => ({ db: fakeDb }));
 mock.module('$lib/server/notifications', () => ({
 	createNotification: () => Promise.resolve(),
+	// Other modules in the keez test suite (e.g. sync.ts) also import from
+	// this module — keep the surface complete so cross-file mocks don't break.
+	clearNotificationsByType: () => Promise.resolve(),
 }));
 mock.module('$lib/server/logger', () => ({
 	serializeError: (e: any) => ({ message: e?.message ?? String(e), stack: '' }),
