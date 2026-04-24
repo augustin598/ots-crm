@@ -131,6 +131,8 @@ export const client = sqliteTable('client', {
 	restrictedAccess: text('restricted_access'), // null=auto (based on invoices), 'forced'=admin ban, 'unrestricted'=admin unban
 	monthlyBudget: integer('monthly_budget'), // Monthly ad budget in cents (e.g., 500000 = 5000 RON), nullable
 	budgetWarningThreshold: integer('budget_warning_threshold').default(80),
+	avatarPath: text('avatar_path'),
+	avatarSource: text('avatar_source').notNull().default('whatsapp'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -3541,6 +3543,10 @@ export const whatsappContact = sqliteTable('whatsapp_contact', {
 	displayName: text('display_name'), // user-edited label
 	pushName: text('push_name'), // auto-captured from WhatsApp profile/contacts
 	notes: text('notes'),
+	avatarPath: text('avatar_path'),
+	avatarMimeType: text('avatar_mime_type'),
+	avatarFetchedAt: timestamp('avatar_fetched_at', { withTimezone: true, mode: 'date' }),
+	avatarHidden: boolean('avatar_hidden').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),

@@ -1275,6 +1275,48 @@
       "when": 1777430013000,
       "tag": "0181_wordpress_post",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "6",
+      "when": 1745488800000,
+      "tag": "0182_client_avatar_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "6",
+      "when": 1745488801000,
+      "tag": "0183_client_avatar_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "6",
+      "when": 1745488802000,
+      "tag": "0184_whatsapp_contact_avatar_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "6",
+      "when": 1745488803000,
+      "tag": "0185_whatsapp_contact_avatar_mime_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "6",
+      "when": 1745488804000,
+      "tag": "0186_whatsapp_contact_avatar_fetched_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "6",
+      "when": 1745488805000,
+      "tag": "0187_whatsapp_contact_avatar_hidden",
+      "breakpoints": true
     }
   ]
 }

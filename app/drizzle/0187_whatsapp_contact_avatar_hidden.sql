@@ -1,0 +1,1 @@
+ALTER TABLE `whatsapp_contact` ADD COLUMN `avatar_hidden` integer NOT NULL DEFAULT 0;
