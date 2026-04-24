@@ -7,7 +7,6 @@
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import AlertOctagonIcon from '@lucide/svelte/icons/alert-octagon';
-	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	interface Props {
 		clientId: string;
@@ -86,72 +85,133 @@
 		}
 	}
 
+	interface StatusDetails {
+		headline: string;
+		body: string;
+		suggestion: string;
+		deadline: string | null;
+	}
+
+	/** Formats TikTok endtime strings like "2036-03-15 13:26:50" → "15 martie 2036". */
+	function formatDeadline(raw: string | null): string | null {
+		if (!raw) return null;
+		const iso = raw.includes('T') ? raw : raw.replace(' ', 'T');
+		const date = new Date(iso);
+		if (Number.isNaN(date.getTime())) return raw;
+		return date.toLocaleDateString('ro-RO', {
+			day: 'numeric',
+			month: 'long',
+			year: 'numeric',
+		});
+	}
+
 	/**
-	 * Tooltip copy per status — mirrors the in-platform messaging clients see
-	 * on Facebook/Google/TikTok so they understand what to do next.
+	 * Rich Romanian explainer + actionable suggestion per status variant.
+	 * Shown inline in each account card so clients understand the cause and the
+	 * next step without hunting through tooltips or platform menus.
 	 */
-	function tooltipFor(
-		status: string,
-		reason: string | null = null,
-		rejectMessage: string | null = null,
-	): { title: string; body: string } {
-		// TikTok gave us an explicit reason string — use it verbatim (clients need
-		// the exact wording to raise an appeal with TikTok support).
-		if (rejectMessage && (status === 'risk_review' || status === 'suspended')) {
+	function detailsFor(item: {
+		paymentStatus: string;
+		provider: string;
+		rawDisableReason: string | null;
+		rejectReasonMessage: string | null;
+		rejectReasonEndsAt: string | null;
+	}): StatusDetails | null {
+		const { paymentStatus, provider, rawDisableReason, rejectReasonMessage, rejectReasonEndsAt } =
+			item;
+		const deadline = formatDeadline(rejectReasonEndsAt);
+
+		// TikTok returned an explicit rejection message (STATUS_LIMIT / STATUS_DISABLE
+		// with a reason). Translate the well-known "suspicious or unusual activity"
+		// template to Romanian; for unknown messages fall back to the raw English
+		// string so the client still has actionable text for the appeal.
+		if (rejectReasonMessage && (paymentStatus === 'risk_review' || paymentStatus === 'suspended')) {
+			const isSuspiciousActivity = /suspicious or unusual activity|violation of the TikTok Advertising Guidelines/i.test(
+				rejectReasonMessage,
+			);
+			if (isSuspiciousActivity) {
+				return {
+					headline:
+						paymentStatus === 'suspended'
+							? 'Cont suspendat de TikTok'
+							: 'Cont restricționat de TikTok',
+					body: 'TikTok a restricționat acest cont din cauza unei activități suspecte sau a unei suspiciuni de încălcare a politicilor TikTok Ads.',
+					suggestion:
+						'Deschide un ticket „Account Review" în TikTok Business Support și depune appeal în maxim 3 zile lucrătoare.',
+					deadline,
+				};
+			}
 			return {
-				title: status === 'suspended' ? 'Cont suspendat de TikTok' : 'Cont restricționat de TikTok',
-				body: rejectMessage,
+				headline:
+					paymentStatus === 'suspended'
+						? 'Cont suspendat de TikTok'
+						: 'Cont restricționat de TikTok',
+				body: rejectReasonMessage,
+				suggestion:
+					'Deschide TikTok Ads Manager pentru detalii suplimentare sau contactează TikTok Business Support.',
+				deadline,
 			};
 		}
-		// TikTok sub-reasons layered on risk_review — account is STATUS_ENABLE
-		// but campaigns aren't actually delivering (budget exhausted, rejected).
-		if (status === 'risk_review' && reason === 'budget_exceeded') {
+
+		// TikTok-specific delivery issues (account is STATUS_ENABLE but no campaign delivers).
+		if (provider === 'tiktok' && paymentStatus === 'risk_review' && rawDisableReason === 'budget_exceeded') {
 			return {
-				title: 'Buget campanii consumat',
-				body:
-					'Campaniile tale au atins limita de buget setată în TikTok. Crește bugetul sau așteaptă reset-ul zilnic pentru ca reclamele să reînceapă livrarea.',
+				headline: 'Buget consumat',
+				body: 'Campaniile au atins limita de buget. Reclamele nu mai rulează până la reset-ul zilnic sau o creștere de buget.',
+				suggestion:
+					'Deschide TikTok Ads Manager și crește bugetul campaniilor active, sau așteaptă reset-ul zilnic.',
+				deadline: null,
 			};
 		}
-		if (status === 'risk_review' && reason === 'no_delivery') {
+		if (provider === 'tiktok' && paymentStatus === 'risk_review' && rawDisableReason === 'no_delivery') {
 			return {
-				title: 'Reclame oprite',
-				body:
-					'Contul este activ, dar nicio campanie nu livrează acum (respinsă la verificare, în afara programului sau oprită din altă cauză). Verifică campaniile în TikTok Ads Manager.',
+				headline: 'Reclame oprite',
+				body: 'Contul este activ, dar nicio reclamă nu este livrată momentan. Cauze posibile: reclame respinse la audit, programare în afara orelor, reguli de livrare.',
+				suggestion:
+					'Deschide TikTok Ads Manager și verifică în secțiunea „Ads" starea fiecărei reclame — vei vedea ce e respins și de ce.',
+				deadline: null,
 			};
 		}
-		switch (status) {
+
+		// Generic status-only variants — shared across Meta / Google / TikTok.
+		switch (paymentStatus) {
 			case 'grace_period':
 				return {
-					title: 'Factură neachitată — perioadă de grație',
-					body:
-						'Reclamele încă rulează, dar vor fi oprite automat dacă nu achiți soldul în zilele următoare. Apasă Plătește pentru a actualiza balanța.',
+					headline: 'Factură neachitată — perioadă de grație',
+					body: 'Reclamele rulează, dar vor fi oprite automat dacă nu achiți soldul în zilele următoare.',
+					suggestion: 'Apasă „Plătește" pentru a achita soldul restant acum.',
+					deadline: null,
 				};
 			case 'payment_failed':
 				return {
-					title: 'Plata a eșuat',
-					body:
-						'Reclamele sunt oprite până când soldul este achitat sau metoda de plată actualizată. Apasă Plătește pentru a le reactiva.',
+					headline: 'Plata a eșuat',
+					body: 'Reclamele sunt oprite până la achitarea soldului sau actualizarea metodei de plată.',
+					suggestion: 'Apasă „Plătește" sau actualizează cardul în setările contului de publicitate.',
+					deadline: null,
 				};
 			case 'risk_review':
 				return {
-					title: 'Cont în curs de verificare',
-					body:
-						'Platforma verifică contul. Livrarea reclamelor poate fi limitată temporar. Deschide setările contului pentru a vedea ce acțiuni sunt necesare.',
+					headline: 'Cont în curs de verificare',
+					body: 'Platforma verifică contul. Livrarea reclamelor poate fi limitată temporar.',
+					suggestion: 'Deschide setările contului pentru a vedea ce acțiuni sunt cerute.',
+					deadline: null,
 				};
 			case 'suspended':
 				return {
-					title: 'Cont suspendat',
-					body:
-						'Platforma a suspendat acest cont și reclamele nu mai rulează. Deschide setările pentru detalii sau contactează suportul platformei.',
+					headline: 'Cont suspendat',
+					body: 'Platforma a suspendat contul și reclamele nu mai rulează.',
+					suggestion: 'Contactează suportul platformei pentru detalii și procedura de appeal.',
+					deadline: null,
 				};
 			case 'closed':
 				return {
-					title: 'Cont închis',
-					body:
-						'Contul este închis definitiv. Contactează suportul platformei dacă este o eroare.',
+					headline: 'Cont închis',
+					body: 'Contul este închis definitiv.',
+					suggestion: 'Contactează suportul platformei dacă închiderea este o eroare.',
+					deadline: null,
 				};
 			default:
-				return { title: '', body: '' };
+				return null;
 		}
 	}
 </script>
@@ -200,58 +260,90 @@
 		<ul class="divide-y divide-zinc-100">
 			{#each flagged as item (item.provider + ':' + item.externalAccountId)}
 				{@const Icon = iconFor(item.provider)}
-				{@const tip = tooltipFor(item.paymentStatus, item.rawDisableReason, item.rejectReasonMessage)}
-				<li class="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
-					<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
-						{#if Icon}
-							<Icon class="size-4" />
-						{/if}
-					</div>
-					<div class="min-w-0 flex-1">
-						<div class="truncate text-sm font-medium text-zinc-900">
-							{item.accountName}
+				{@const details = detailsFor(item)}
+				{@const isCritical = item.paymentStatus === 'suspended' || item.paymentStatus === 'payment_failed'}
+				<li class="flex flex-col gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
+					<div class="flex items-center gap-3">
+						<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
+							{#if Icon}
+								<Icon class="size-4" />
+							{/if}
 						</div>
-						<div class="truncate text-xs text-zinc-500">
-							{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
-						</div>
-						{#if item.rejectReasonMessage}
-							<div class="mt-0.5 truncate text-xs text-amber-700" title={item.rejectReasonMessage}>
-								{item.rejectReasonMessage}
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-sm font-medium text-zinc-900">
+								{item.accountName}
 							</div>
+							<div class="truncate text-xs text-zinc-500">
+								{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
+							</div>
+						</div>
+						<span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
+							<span
+								class="size-1.5 rounded-full"
+								style="background: {ctaColorFor(item.paymentStatus)};"
+							></span>
+							{item.statusLabel}
+						</span>
+						{#if item.action}
+							<button
+								type="button"
+								onclick={() => openLink(item.action!.url)}
+								class="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+							>
+								{item.action.label}
+								<ArrowRightIcon class="size-3" />
+							</button>
 						{/if}
 					</div>
-					<Tooltip.Root>
-						<Tooltip.Trigger>
-							<span class="inline-flex shrink-0 cursor-help items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
-								<span
-									class="size-1.5 rounded-full"
-									style="background: {ctaColorFor(item.paymentStatus)};"
-								></span>
-								{item.statusLabel}
-							</span>
-						</Tooltip.Trigger>
-						<Tooltip.Content
-							side="top"
-							class="max-w-xs rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-lg"
+					{#if details}
+						<div
+							class="rounded-lg border p-3 sm:ml-12"
+							class:border-red-200={isCritical}
+							class:bg-red-50={isCritical}
+							class:border-amber-200={!isCritical}
+							class:bg-amber-50={!isCritical}
 						>
-							<p class="mb-1 text-xs font-semibold text-zinc-900">{tip.title}</p>
+							<p
+								class="text-xs font-semibold"
+								class:text-red-900={isCritical}
+								class:text-amber-900={!isCritical}
+							>
+								{details.headline}
+							</p>
+							<p
+								class="mt-0.5 text-xs leading-relaxed"
+								class:text-red-800={isCritical}
+								class:text-amber-800={!isCritical}
+							>
+								{details.body}
+							</p>
 							{#if item.balanceFormatted}
-								<p class="mb-2 text-xs font-semibold tabular-nums text-zinc-900">
+								<p
+									class="mt-1.5 text-xs font-semibold tabular-nums"
+									class:text-red-900={isCritical}
+									class:text-amber-900={!isCritical}
+								>
 									Sold restant: {item.balanceFormatted}
 								</p>
 							{/if}
-							<p class="text-xs leading-relaxed text-zinc-600">{tip.body}</p>
-						</Tooltip.Content>
-					</Tooltip.Root>
-					{#if item.action}
-						<button
-							type="button"
-							onclick={() => openLink(item.action!.url)}
-							class="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
-						>
-							{item.action.label}
-							<ArrowRightIcon class="size-3" />
-						</button>
+							{#if details.deadline}
+								<p
+									class="mt-1.5 text-xs font-medium"
+									class:text-red-900={isCritical}
+									class:text-amber-900={!isCritical}
+								>
+									Termen expirare: {details.deadline}
+								</p>
+							{/if}
+							<p
+								class="mt-2 flex items-start gap-1.5 text-xs font-medium"
+								class:text-red-900={isCritical}
+								class:text-amber-900={!isCritical}
+							>
+								<span aria-hidden="true">💡</span>
+								<span>{details.suggestion}</span>
+							</p>
+						</div>
 					{/if}
 				</li>
 			{/each}
