@@ -1079,7 +1079,10 @@ export async function fetchCustomerSuspensionReasons(
 		if (!Array.isArray(raw)) return [];
 		return raw
 			.map((r: unknown) =>
-				typeof r === 'number' ? (numericToString[r] ?? 'UNKNOWN') : String(r).toUpperCase(),
+				// Unmapped numeric codes get tagged with their value (e.g. CODE_8) so
+				// they trip the unknown-enum logWarning below instead of being
+				// silently collapsed into 'UNKNOWN' (which IS a known enum).
+				typeof r === 'number' ? (numericToString[r] ?? `CODE_${r}`) : String(r).toUpperCase(),
 			)
 			.filter((s: string) => {
 				if (!KNOWN.has(s)) {
