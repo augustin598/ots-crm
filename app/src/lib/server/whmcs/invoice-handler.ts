@@ -343,12 +343,20 @@ async function handleCreated(
 	const match = await matchOrCreateClient(tenantId, payload.client);
 
 	// Resolve invoice number (caller may pre-fetch; otherwise fall back).
+	// WHMCS invoice numbers often carry their own prefix (e.g. "OTS567"). If we
+	// naively concatenated "series + whmcsInvoiceNumber" we'd produce duplicates
+	// like "OTS OTS567". Extract only the numeric tail, then prepend OUR series.
 	const series = await pickInvoiceSeries(tenantId);
 	let invoiceNumber: string;
 	if (ctx.nextInvoiceNumber) {
 		invoiceNumber = ctx.nextInvoiceNumber;
 	} else if (series) {
-		invoiceNumber = `${series} ${payload.whmcsInvoiceNumber ?? payload.whmcsInvoiceId}`;
+		const numericPart =
+			payload.whmcsInvoiceNumber?.match(/\d+/)?.[0] ?? String(payload.whmcsInvoiceId);
+		invoiceNumber = `${series} ${numericPart}`;
+	} else if (payload.whmcsInvoiceNumber) {
+		// No series configured — preserve the WHMCS number verbatim.
+		invoiceNumber = payload.whmcsInvoiceNumber;
 	} else {
 		invoiceNumber = fallbackInvoiceNumber(payload);
 	}
