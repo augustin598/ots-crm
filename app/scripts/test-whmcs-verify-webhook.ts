@@ -35,56 +35,13 @@ import { encrypt } from '../src/lib/server/plugins/smartbill/crypto';
 import { signRequest } from '../src/lib/server/whmcs/hmac';
 import { verifyWhmcsWebhook } from '../src/lib/server/whmcs/verify-webhook';
 import { redis } from 'bun';
+import { bootstrapTestSchema } from './_test-schema-bootstrap';
 
 // ─────────────────────────────────────────────
-// Bootstrap schema (minimal — just what verify-webhook touches)
+// Bootstrap schema (shared helper)
 // ─────────────────────────────────────────────
 
-// Full tenant schema from schema.ts — Drizzle SELECT expands to every declared
-// column so the physical table must match shape exactly.
-await db.run(sql`CREATE TABLE IF NOT EXISTS tenant (
-	id text PRIMARY KEY NOT NULL,
-	name text NOT NULL,
-	slug text NOT NULL UNIQUE,
-	website text,
-	company_type text,
-	cui text,
-	registration_number text,
-	trade_register text,
-	vat_number text,
-	legal_representative text,
-	iban text,
-	iban_euro text,
-	bank_name text,
-	address text,
-	city text,
-	county text,
-	postal_code text,
-	country text DEFAULT 'România',
-	phone text,
-	email text,
-	contract_prefix text DEFAULT 'CTR',
-	theme_color text,
-	favicon text,
-	created_at timestamp DEFAULT current_date NOT NULL,
-	updated_at timestamp DEFAULT current_date NOT NULL
-)`);
-
-await db.run(sql`CREATE TABLE IF NOT EXISTS whmcs_integration (
-	id text PRIMARY KEY,
-	tenant_id text NOT NULL REFERENCES tenant(id),
-	whmcs_url text NOT NULL,
-	shared_secret text NOT NULL,
-	is_active integer NOT NULL DEFAULT 0,
-	enable_keez_push integer NOT NULL DEFAULT 0,
-	circuit_breaker_until timestamp,
-	consecutive_failures integer NOT NULL DEFAULT 0,
-	last_successful_sync_at timestamp,
-	last_failure_reason text,
-	created_at timestamp NOT NULL DEFAULT current_date,
-	updated_at timestamp NOT NULL DEFAULT current_date
-)`);
-await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS whmcs_integration_tenant_unique ON whmcs_integration(tenant_id)`);
+await bootstrapTestSchema();
 
 // ─────────────────────────────────────────────
 // Monkey-patch redis — cheap in-memory SETNX

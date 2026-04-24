@@ -16,6 +16,7 @@
  */
 import { plugin } from 'bun';
 import { unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // ─── Environment ───────────────────────────────────────────────────
 // Each test file that runs through this preload shares the same DB.
@@ -27,6 +28,8 @@ process.env.ENCRYPTION_SECRET =
 	process.env.ENCRYPTION_SECRET ?? 'test-only-encryption-secret-do-not-use-prod-xx';
 
 // ─── SvelteKit virtual-module shims ────────────────────────────────
+const APP_ROOT = resolve(import.meta.dir, '..');
+
 plugin({
 	name: 'stub-sveltekit-virtuals',
 	setup(build) {
@@ -34,5 +37,12 @@ plugin({
 			contents: 'export const env = process.env;',
 			loader: 'ts'
 		}));
+
+		// $lib alias — SvelteKit's convention maps `$lib` to `src/lib`.
+		// Tests importing endpoints (+server.ts) need this to resolve.
+		build.onResolve({ filter: /^\$lib(\/|$)/ }, (args) => {
+			const rel = args.path.replace(/^\$lib/, 'src/lib');
+			return { path: resolve(APP_ROOT, rel) };
+		});
 	}
 });
