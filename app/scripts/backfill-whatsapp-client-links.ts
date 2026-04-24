@@ -36,7 +36,8 @@ const table = schema;
 
 async function resolveClientId(
 	tenantId: string,
-	remotePhoneE164: string
+	remotePhoneE164: string,
+	tenantClientsCache: Map<string, Array<{ id: string; phone: string | null }>>
 ): Promise<string | null> {
 	const variants = phoneE164Variants(remotePhoneE164);
 	const [fast] = await db
@@ -46,15 +47,19 @@ async function resolveClientId(
 		.limit(1);
 	if (fast) return fast.id;
 
-	// Fallback: tail-match + toE164 normalize (covers spaces/dashes/parens in stored phone)
-	const tail = remotePhoneE164.slice(-9);
-	if (!tail) return null;
-	const candidates = await db
-		.select({ id: table.client.id, phone: table.client.phone })
-		.from(table.client)
-		.where(eq(table.client.tenantId, tenantId));
+	// Fallback: normalize every stored phone via toE164 and compare.
+	// Pre-filtering by tail-includes is unreliable — spaces in stored phones
+	// (e.g. "+40 753 755 327") break contiguous-digit matching.
+	let candidates = tenantClientsCache.get(tenantId);
+	if (!candidates) {
+		candidates = await db
+			.select({ id: table.client.id, phone: table.client.phone })
+			.from(table.client)
+			.where(eq(table.client.tenantId, tenantId));
+		tenantClientsCache.set(tenantId, candidates);
+	}
 	for (const c of candidates) {
-		if (!c.phone || !c.phone.includes(tail)) continue;
+		if (!c.phone) continue;
 		if (tryToE164(c.phone) === remotePhoneE164) return c.id;
 	}
 	return null;
@@ -93,9 +98,10 @@ async function main() {
 	let resolvedPairs = 0;
 	let unresolvedPairs = 0;
 	let totalUpdated = 0;
+	const tenantClientsCache = new Map<string, Array<{ id: string; phone: string | null }>>();
 
 	for (const { tenantId, phone } of pairs.values()) {
-		const clientId = await resolveClientId(tenantId, phone);
+		const clientId = await resolveClientId(tenantId, phone, tenantClientsCache);
 		if (!clientId) {
 			unresolvedPairs += 1;
 			continue;
