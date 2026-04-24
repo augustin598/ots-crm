@@ -1119,7 +1119,14 @@ export async function fetchAdvertiserStatuses(
 		status: adv.status || 'STATUS_ENABLE',
 		displayStatus: adv.display_status ? String(adv.display_status) : null,
 		subStatus: adv.sub_status ? String(adv.sub_status) : null,
-		rejectReason: adv.reject_reason ? String(adv.reject_reason) : null,
+		// TikTok uses `rejection_reason` in /advertiser/info/ (verified against
+		// live API 2026-04-24). Fallback to `reject_reason` in case a different
+		// API version returns it under that name.
+		rejectReason: adv.rejection_reason
+			? String(adv.rejection_reason)
+			: adv.reject_reason
+				? String(adv.reject_reason)
+				: null,
 	}));
 }
 
