@@ -112,11 +112,29 @@ export interface WpPluginInfo {
 	pluginUri: string;
 	requiresWp: string;
 	requiresPhp: string;
+	/** WordPress Text Domain — stable identifier across versions, used for matching. */
+	textDomain?: string;
+	/** Update URI hint — authoritative identifier when set. */
+	updateUri?: string;
 	network: boolean;
 	active: boolean;
 	autoUpdate: boolean;
 	updateAvailable: boolean;
 	newVersion: string | null;
+	/**
+	 * Which mechanism detected the update:
+	 *   - `get_plugin_updates`: standard WP flow, upgrade likely installable
+	 *   - `transient`: license-gated pro plugin — upgrade known but package
+	 *     may not be downloadable without license activation
+	 *   - `none`: no update
+	 */
+	updateSource?: 'get_plugin_updates' | 'transient' | 'none';
+	/** ZIP download URL when available. Empty/null for license-gated pros. */
+	updatePackage?: string | null;
+	/** WP directory changelog URL or vendor update details URL. */
+	updateUrl?: string | null;
+	/** Vendor's "activate license to update" message, when set. */
+	updateMessage?: string | null;
 }
 
 export interface WpPluginListResponse {
@@ -303,7 +321,18 @@ export class WpClient {
 	async activatePlugin(
 		plugin: string,
 		opts?: { timeoutMs?: number; siteId?: string }
-	): Promise<{ success: boolean; plugin: string; active: boolean }> {
+	): Promise<{
+		success: boolean;
+		plugin: string;
+		active: boolean;
+		already_active?: boolean;
+		/** Populated when the connector (v0.6.2+) reports a structured failure. */
+		error?: string;
+		/** Classifier from the connector (activation_fatal | activation_redirect | ...). */
+		subcode?: string;
+		/** Sanitized stdout captured during the activation hook (0.6.2+). */
+		output_captured?: string;
+	}> {
 		return this.request({
 			method: 'POST',
 			path: '/plugins/activate',
@@ -418,9 +447,15 @@ export class WpClient {
 		} catch (err) {
 			// Network-level failure — DNS, timeout, TLS, refused, reset, etc.
 			const cause = err instanceof Error ? err : new Error(String(err));
+			// AbortSignal.timeout() throws a DOMException with name='TimeoutError'
+			// — worth distinguishing because a timeout hints at a slow/overloaded
+			// site that might recover, while a refused/reset hints at a hard down.
+			const isTimeout =
+				err instanceof DOMException && err.name === 'TimeoutError';
+			const kind = isTimeout ? 'Timeout' : 'Network error';
 			throw new WpConnectionError(
-				`Network error calling ${method} ${path}: ${cause.message}`,
-				{ siteId, cause }
+				`${kind} calling ${method} ${path}: ${cause.message}`,
+				{ siteId, cause, subcode: isTimeout ? 'timeout' : 'network_fail' }
 			);
 		}
 
@@ -439,9 +474,16 @@ export class WpClient {
 		}
 
 		if (response.status >= 500) {
+			// Capture a sanitized snippet of the response body so logs can
+			// tell a 503 maintenance page apart from a fatal PHP error or
+			// a plugin's welcome-redirect HTML. Bodies larger than 2 KB
+			// are truncated to keep logs readable. Content-Type is used to
+			// pick a sensible strip strategy.
+			const bodySnippet = await readBodySnippet(response);
+			const subcode = classifyServerErrorBody(response.status, bodySnippet);
 			throw new WpSiteDownError(
-				`Site ${this.siteUrl} returned HTTP ${response.status}`,
-				{ siteId }
+				`Site ${this.siteUrl} returned HTTP ${response.status}${subcode ? ` [${subcode}]` : ''}`,
+				{ siteId, bodySnippet, httpStatus: response.status, subcode }
 			);
 		}
 
@@ -462,4 +504,74 @@ export class WpClient {
 			);
 		}
 	}
+}
+
+/**
+ * Read up to ~2 KB of the response body, strip HTML tags, normalize
+ * whitespace. Returns '' on failure — diagnostics must never throw.
+ */
+async function readBodySnippet(response: Response): Promise<string> {
+	try {
+		const raw = await response.text();
+		if (!raw) return '';
+		// Keep it short for logs/storage. 2 KB is enough to catch a WP
+		// fatal stack trace or a maintenance notice; anything longer is
+		// almost always repetitive HTML.
+		const clipped = raw.length > 2048 ? raw.slice(0, 2048) + '…' : raw;
+		// Strip HTML tags conservatively — good enough for one-line logs.
+		const text = clipped.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+		return text.length > 1000 ? text.slice(0, 1000) + '…' : text;
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * Classify a 5xx response body into a subcode so callers can decide
+ * whether a retry is worth it. Heuristics are conservative: we only
+ * assign a subcode when the body has an unambiguous signal.
+ */
+function classifyServerErrorBody(status: number, snippet: string): string | undefined {
+	if (!snippet) return status === 503 ? 'maintenance_mode' : undefined;
+	const lower = snippet.toLowerCase();
+
+	// WP's own maintenance page (503) — written by wp-activate-plugins during upgrade.
+	if (
+		status === 503 ||
+		lower.includes('briefly unavailable for scheduled maintenance') ||
+		lower.includes('temporar indisponibil') // RO locale
+	) {
+		return 'maintenance_mode';
+	}
+
+	// PHP fatals surface via either the default error handler or
+	// wp_php_error_handler. Both include the word "Fatal error" or
+	// "parse error" verbatim when display_errors is on.
+	if (
+		lower.includes('fatal error') ||
+		lower.includes('parse error') ||
+		lower.includes('allowed memory size') ||
+		lower.includes('maximum execution time')
+	) {
+		return 'php_fatal';
+	}
+
+	// Plugin activation hook redirected (wp_safe_redirect + exit) — the
+	// "Location:" response or a stub HTML body from Apache's default
+	// "Moved Permanently" template end up surfaced as a 500 via the
+	// connector because the response was never sent cleanly.
+	if (
+		lower.includes('headers already sent') ||
+		lower.includes('location:') ||
+		lower.includes('wp_safe_redirect')
+	) {
+		return 'activation_hook_fatal';
+	}
+
+	// Cloudflare or provider error pages (cheap hosting loves these).
+	if (lower.includes('cloudflare') || lower.includes('gateway')) {
+		return 'provider_error';
+	}
+
+	return 'generic_5xx';
 }

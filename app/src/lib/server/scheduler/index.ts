@@ -27,6 +27,7 @@ import { processInvoiceReminderNotifications } from './tasks/invoice-reminder-no
 import { processTaskOverdueNotifications } from './tasks/task-overdue-notifications';
 import { processWordpressUptimePing } from './tasks/wordpress-uptime-ping';
 import { processWordpressUpdatesCheck } from './tasks/wordpress-updates-check';
+import { processWordpressConnectorAutoUpdate } from './tasks/wordpress-connector-auto-update';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -118,7 +119,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	invoice_reminder_notifications: processInvoiceReminderNotifications,
 	task_overdue_notifications: processTaskOverdueNotifications,
 	wordpress_uptime_ping: processWordpressUptimePing,
-	wordpress_updates_check: processWordpressUpdatesCheck
+	wordpress_updates_check: processWordpressUpdatesCheck,
+	wordpress_connector_auto_update: processWordpressConnectorAutoUpdate
 };
 
 /**
@@ -232,7 +234,7 @@ export const startScheduler = async () => {
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
-		'wordpress-uptime-ping', 'wordpress-updates-check'
+		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update'
 	]);
 
 	try {
@@ -699,6 +701,26 @@ export const startScheduler = async () => {
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'wordpress-updates-check'
+		}
+	);
+
+	// OTS Connector auto-update — daily at 04:30, right after the updates
+	// check run. Pushes the latest connector release (from MinIO) to every
+	// unpaused site whose installed version is older than the release.
+	// Manual push is still available via the /connector-update endpoint
+	// when operators need to ship a fix outside the daily window.
+	await schedulerQueue.add(
+		'wordpress-connector-auto-update',
+		{
+			type: 'wordpress_connector_auto_update',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '30 4 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'wordpress-connector-auto-update'
 		}
 	);
 

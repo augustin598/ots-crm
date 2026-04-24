@@ -25,7 +25,10 @@
 		"import:smartbill": "bun --bun scripts/import-smartbill-excel.ts",
 		"test:anaf-oauth": "bun --bun scripts/test-anaf-oauth.ts",
 		"test:smtp": "bun --bun scripts/test-smtp.ts",
-		"test:report-pdf": "bun --bun test-report-pdf.ts"
+		"test:report-pdf": "bun --bun test-report-pdf.ts",
+		"connector:build": "cd ../ots-wp-connector && ./build.sh",
+		"connector:publish": "bun --bun scripts/publish-connector.ts",
+		"connector:release": "bun run connector:build && bun run connector:publish"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.0",

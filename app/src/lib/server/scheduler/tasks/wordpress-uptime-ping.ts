@@ -2,7 +2,23 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, ne } from 'drizzle-orm';
 import { pingUptime } from '$lib/server/wordpress/sync';
+import { WpError } from '$lib/server/wordpress/errors';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
+
+/**
+ * Classify a ping failure reason into a stable subcode so operators can
+ * grep logs and tell timeouts apart from hard-down sites at a glance.
+ */
+function classifyPingFailure(reason: unknown): string {
+	if (WpError.isWpError(reason)) {
+		if (reason.subcode === 'timeout') return 'slow_response';
+		if (reason.code === 'wp_connection_error') return 'network_down';
+		if (reason.code === 'wp_auth_error') return 'auth_failed';
+		if (reason.code === 'wp_plugin_missing') return 'connector_missing';
+		return reason.code;
+	}
+	return 'unknown_failure';
+}
 
 /**
  * Ping every WordPress site's root URL with a HEAD request to detect
@@ -46,10 +62,15 @@ export async function processWordpressUptimePing(_params: Record<string, unknown
 			} else {
 				down++;
 				const { message } = serializeError(r.reason);
-				logWarning('wordpress', `Uptime ping errored for ${site.siteUrl}: ${message}`, {
-					tenantId: site.tenantId,
-					metadata: { siteId: site.id }
-				});
+				const subcode = classifyPingFailure(r.reason);
+				logWarning(
+					'wordpress',
+					`Uptime ping errored for ${site.siteUrl}: ${subcode} (${message})`,
+					{
+						tenantId: site.tenantId,
+						metadata: { siteId: site.id, siteUrl: site.siteUrl, subcode }
+					}
+				);
 			}
 		});
 	}

@@ -31,12 +31,14 @@ export const GET: RequestHandler = async ({ locals }) => {
 			uptimeStatus: table.wordpressSite.uptimeStatus,
 			wpVersion: table.wordpressSite.wpVersion,
 			phpVersion: table.wordpressSite.phpVersion,
+			connectorVersion: table.wordpressSite.connectorVersion,
 			lastHealthCheckAt: table.wordpressSite.lastHealthCheckAt,
 			lastUptimePingAt: table.wordpressSite.lastUptimePingAt,
 			lastUpdatesCheckAt: table.wordpressSite.lastUpdatesCheckAt,
 			lastError: table.wordpressSite.lastError,
 			clientId: table.wordpressSite.clientId,
 			clientName: table.client.name,
+			paused: table.wordpressSite.paused,
 			createdAt: table.wordpressSite.createdAt
 		})
 		.from(table.wordpressSite)

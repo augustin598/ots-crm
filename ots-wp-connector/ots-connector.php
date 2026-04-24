@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.6.0
+ * Version:           0.6.8
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.6.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.6.8' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -288,6 +288,18 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 		$upgrader = null;
 		$outcome  = null;
 
+		// For plugin upgrades: capture active state so we can restore it.
+		// WordPress's Plugin_Upgrader::upgrade() deactivates the plugin via
+		// deactivate_plugins() internally and does NOT re-activate it. That's
+		// fine in wp-admin (a separate re-activation step happens there) but
+		// over REST the plugin stays inactive. We re-activate below.
+		$was_active = false;
+		$was_network_active = false;
+		if ( $type === 'plugin' ) {
+			$was_active = is_plugin_active( $slug );
+			$was_network_active = is_multisite() ? is_plugin_active_for_network( $slug ) : false;
+		}
+
 		try {
 			if ( $type === 'plugin' ) {
 				$upgrader = new Plugin_Upgrader( $skin );
@@ -328,11 +340,33 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 			];
 			$overall_success = false;
 		} else {
+			// Restore active state for plugin upgrades using the safe wrapper.
+			// ots_safe_activate_plugin() captures output from the activation
+			// hook (welcome-page redirects, upsell HTML) and catches fatals,
+			// so an unfriendly plugin activation doesn't pollute the REST
+			// response. It also fast-paths if WP already reactivated.
+			$reactivated = null;
+			$reactivation_error = null;
+			$reactivation_subcode = null;
+			$reactivation_output = '';
+			if ( $type === 'plugin' && $was_active ) {
+				$act = ots_safe_activate_plugin( $slug, $was_network_active );
+				$reactivated = (bool) $act['success'];
+				$reactivation_error = $act['error'] ?? null;
+				$reactivation_subcode = $act['subcode'] ?? null;
+				$reactivation_output = $act['output_captured'] ?? '';
+			}
+
 			$results[] = [
-				'type'    => $type,
-				'slug'    => $slug,
-				'success' => true,
-				'message' => 'ok',
+				'type'                  => $type,
+				'slug'                  => $slug,
+				'success'               => true,
+				'message'               => 'ok',
+				'was_active'            => $was_active,
+				'reactivated'           => $reactivated,
+				'reactivation_error'    => $reactivation_error,
+				'reactivation_subcode'  => $reactivation_subcode,
+				'reactivation_output'   => $reactivation_output,
 			];
 		}
 	}
@@ -926,31 +960,157 @@ function ots_connector_route_list_plugins( WP_REST_Request $request ) {
 		require_once ABSPATH . 'wp-admin/includes/update.php';
 	}
 
-	// Force refresh so "update available" matches the Updates screen.
-	wp_update_plugins();
+	// ─── Update detection: aggressive refresh + dual-source read ───
+	//
+	// Why this is non-trivial:
+	//
+	// 1) wp_update_plugins() is rate-limited. It checks a last-checked
+	//    timestamp on the `update_plugins` transient and skips the fetch
+	//    if queried recently. We delete the transient first to force a
+	//    true refresh every time the CRM asks.
+	//
+	// 2) Many commercial "Pro" plugins (WP Mail SMTP Pro, Astra Pro,
+	//    Elementor Pro, LiteSpeed paid add-ons) don't register their
+	//    updates via wordpress.org. They hook `site_transient_update_plugins`
+	//    filter and inject their own update info. Some of those filters
+	//    only fire on admin_init or in admin context; others require a
+	//    valid license before they include the plugin in the transient.
+	//
+	// 3) get_plugin_updates() filters to what's actively installable —
+	//    but the site_transient itself may hold a pending update entry
+	//    (with just a "new_version" and a message) even when no upgrade
+	//    package is available. We read BOTH so the CRM can surface
+	//    "update available" even for license-gated plugins.
+	//
+	// 4) We simulate the admin-init update check hooks that some pro
+	//    plugins rely on. Safe: these hooks are idempotent.
+	//
+	// NB: on multisite, `delete_site_transient('update_plugins')` clears
+	// the network-wide cache — every sub-site loses its update cache,
+	// not just the one we're listing. For multisite we use the per-site
+	// `delete_transient()` instead. Single-site installs behave identically
+	// either way, but the explicit branch documents the intent.
+	if ( is_multisite() ) {
+		delete_transient( 'update_plugins' );
+	} else {
+		delete_site_transient( 'update_plugins' );
+	}
+
+	// Best-effort update-cache refresh. We wrap each step individually and
+	// swallow Throwables — a misbehaving third-party plugin must not take
+	// down the plugin LIST response (which is all most operators need).
+	//
+	// Historical context: an earlier release defined `WP_ADMIN` here to
+	// coax license-gated plugins into populating update info. That
+	// constant leaks across PHP-FPM requests, so even after we removed
+	// the `define()`, workers that handled the old version still have
+	// WP_ADMIN set — and some plugins' admin hooks fatal in REST context.
+	// Defensive try/catch keeps the endpoint usable until those workers
+	// cycle out.
+	//
+	// We also do NOT call `do_action('load-plugins.php')` anymore. That
+	// hook is the biggest offender — many plugins register admin-screen
+	// init here and explode when the REST context doesn't match their
+	// assumptions. Licence-gated plugins we actually care about
+	// (`site_transient_update_plugins` filter) still fire via
+	// `wp_update_plugins()` below.
+	try { do_action( 'wp_update_plugins' ); } catch ( \Throwable $e ) {}
+	try { wp_update_plugins(); } catch ( \Throwable $e ) {}
 
 	$all          = get_plugins();
-	$updates      = get_plugin_updates();
+	// get_plugin_updates() can internally call update_plugins hooks that
+	// license-gated pros throw from when their admin context is confused.
+	// Same treatment.
+	$updates = [];
+	try { $updates = get_plugin_updates(); } catch ( \Throwable $e ) { $updates = []; }
+	$transient    = get_site_transient( 'update_plugins' );
 	$auto_updates = (array) get_site_option( 'auto_update_plugins', [] );
+
+	// Transient response may hold plugins not in get_plugin_updates()
+	// (e.g. license-required pros). Merge by plugin_file.
+	$transient_response = ( $transient && isset( $transient->response ) && is_array( $transient->response ) )
+		? $transient->response
+		: [];
 
 	$items = [];
 	foreach ( $all as $plugin_file => $data ) {
-		$update = $updates[ $plugin_file ]->update ?? null;
+		$update_source = 'none';
+		$new_version = null;
+		$update_package = null;
+		$update_message = null;
+		$update_url = null;
+
+		if ( isset( $updates[ $plugin_file ]->update ) ) {
+			$u = $updates[ $plugin_file ]->update;
+			$new_version = isset( $u->new_version ) ? (string) $u->new_version : null;
+			$update_package = isset( $u->package ) ? (string) $u->package : null;
+			$update_url = isset( $u->url ) ? (string) $u->url : null;
+			$update_source = 'get_plugin_updates';
+		} elseif ( isset( $transient_response[ $plugin_file ] ) ) {
+			$u = $transient_response[ $plugin_file ];
+			$new_version = isset( $u->new_version ) ? (string) $u->new_version : null;
+			$update_package = isset( $u->package ) ? (string) $u->package : null;
+			$update_url = isset( $u->url ) ? (string) $u->url : null;
+			$update_source = 'transient';
+		}
+
+		// Only count as "update available" if we actually have a new version
+		// that's different from the installed one. Guards against empty
+		// response entries (common for pro plugins without a valid license).
+		$installed_version = (string) ( $data['Version'] ?? '' );
+		$has_update = $new_version
+			&& $installed_version
+			&& version_compare( $new_version, $installed_version, '>' );
+
+		// Capture the vendor-specific "activate license to update" notice so
+		// the CRM can surface why a package URL is missing. Buffer output of
+		// the action the admin plugin list uses to render that notice.
+		// Wrapped in try/catch so one misbehaving plugin's notice hook can't
+		// kill the whole enumeration — if it throws, we just skip the notice
+		// for that plugin and keep listing the rest.
+		if ( $has_update ) {
+			try {
+				ob_start();
+				do_action(
+					"in_plugin_update_message-{$plugin_file}",
+					$data,
+					$updates[ $plugin_file ]->update ?? $transient_response[ $plugin_file ] ?? null
+				);
+				$captured = trim( (string) ob_get_clean() );
+				if ( $captured !== '' ) {
+					$update_message = wp_strip_all_tags( $captured );
+					if ( strlen( $update_message ) > 500 ) {
+						$update_message = substr( $update_message, 0, 500 ) . '…';
+					}
+				}
+			} catch ( \Throwable $e ) {
+				// Make sure any buffer we opened is cleaned up even on failure.
+				if ( ob_get_level() > 0 ) { @ob_end_clean(); }
+				$update_message = null;
+			}
+		}
+
 		$items[] = [
 			'plugin'         => (string) $plugin_file, // e.g. "akismet/akismet.php"
 			'name'           => (string) ( $data['Name'] ?? $plugin_file ),
-			'version'        => (string) ( $data['Version'] ?? '' ),
+			'version'        => $installed_version,
 			'description'    => wp_strip_all_tags( (string) ( $data['Description'] ?? '' ) ),
 			'author'         => wp_strip_all_tags( (string) ( $data['Author'] ?? '' ) ),
 			'authorUri'      => (string) ( $data['AuthorURI'] ?? '' ),
 			'pluginUri'      => (string) ( $data['PluginURI'] ?? '' ),
 			'requiresWp'     => (string) ( $data['RequiresWP'] ?? '' ),
 			'requiresPhp'    => (string) ( $data['RequiresPHP'] ?? '' ),
+			'textDomain'     => (string) ( $data['TextDomain'] ?? '' ),
+			'updateUri'      => (string) ( $data['UpdateURI'] ?? '' ),
 			'network'        => (bool) ( $data['Network'] ?? false ),
 			'active'         => is_plugin_active( $plugin_file ),
 			'autoUpdate'     => in_array( $plugin_file, $auto_updates, true ),
-			'updateAvailable'=> isset( $updates[ $plugin_file ] ),
-			'newVersion'     => $update ? (string) $update->new_version : null,
+			'updateAvailable'=> (bool) $has_update,
+			'newVersion'     => $new_version,
+			'updateSource'   => $update_source, // 'get_plugin_updates' | 'transient' | 'none'
+			'updatePackage'  => $update_package, // null when license-gated
+			'updateUrl'      => $update_url,
+			'updateMessage'  => $update_message, // vendor's "activate license" text when relevant
 		];
 	}
 
@@ -990,20 +1150,182 @@ function ots_connector_resolve_plugin( WP_REST_Request $request ) {
 	return $plugin;
 }
 
+/**
+ * Safely activate a plugin from a REST context.
+ *
+ * WordPress's activate_plugin() loads the plugin file and runs its
+ * activation hook. Many real-world plugins do things in that hook
+ * that break a REST request:
+ *   - call wp_safe_redirect() to a welcome/setup page
+ *   - echo HTML (upsells, notices)
+ *   - call exit()/die() defensively
+ *   - reference wp-admin-only globals/functions
+ *
+ * When that happens, activate_plugin() itself does not raise a fatal —
+ * but the redirect/output corrupts the REST response, or (worse) wp-admin
+ * bootstrap code inside the plugin file fatals because no admin screen
+ * is registered. Result: HTTP 500 back to CRM, even though the site is
+ * otherwise healthy.
+ *
+ * This helper wraps the call in a protective envelope:
+ *   1) Declare WP_ADMIN context so plugins that guard on it behave.
+ *   2) Buffer all output with ob_start() — anything the plugin prints
+ *      goes into the buffer and is discarded instead of polluting JSON.
+ *   3) Register a shutdown handler as a last-ditch fatal reporter
+ *      (activate_plugin itself catches most errors via
+ *      plugin_sandbox_scrape, but our own code around it can fatal).
+ *   4) Catch \Throwable so modern PHP 7+ fatals surface as structured
+ *      errors, not 500s.
+ *
+ * Returns a structured array — never throws, never echoes.
+ */
+function ots_safe_activate_plugin( string $plugin, bool $network_wide = false ): array {
+	// Load the functions we need, in case WP hasn't already.
+	if ( ! function_exists( 'activate_plugin' ) || ! function_exists( 'is_plugin_active' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+
+	// Declare admin context. Some plugins (and WP core in spots) check
+	// WP_ADMIN/is_admin() and behave differently on activation. Defining
+	// the constant is the only way to force `is_admin()` true; note it
+	// becomes sticky for the remainder of the request, so keep the helper
+	// scoped to activation-only requests.
+	if ( ! defined( 'WP_ADMIN' ) ) {
+		define( 'WP_ADMIN', true );
+	}
+
+	// Fast-path: already active, nothing to do. Avoids re-running the
+	// activation hook (which some plugins aren't idempotent about).
+	if ( is_plugin_active( $plugin ) ) {
+		return [
+			'success'          => true,
+			'plugin'           => $plugin,
+			'active'           => true,
+			'already_active'   => true,
+			'output_captured'  => '',
+			'subcode'          => null,
+		];
+	}
+
+	// Capture any echo/print/HTML emitted by the plugin's activation hook.
+	// We deliberately use a nested buffer: if ob_end_clean() is called by
+	// something inside the plugin, our outer level still exists.
+	$outer_level = ob_get_level();
+	ob_start();
+
+	$captured_output = '';
+	$throwable = null;
+	$result = null;
+
+	try {
+		// silent=true: WP won't fire 'activated_plugin'/'activate_<plugin>'
+		// action-cycle shortcuts that in some setups trigger further output.
+		// The plugin's own register_activation_hook still fires.
+		$result = activate_plugin( $plugin, '', $network_wide, true );
+	} catch ( \Throwable $e ) {
+		$throwable = $e;
+	}
+
+	// Drain every level we opened (and any the plugin forgot to close).
+	while ( ob_get_level() > $outer_level ) {
+		$captured_output .= ob_get_clean();
+	}
+
+	// Classify the outcome for the CRM's retry logic.
+	if ( $throwable ) {
+		return [
+			'success'         => false,
+			'plugin'          => $plugin,
+			'active'          => is_plugin_active( $plugin ),
+			'error'           => $throwable->getMessage(),
+			'output_captured' => ots_connector_snip( $captured_output ),
+			'subcode'         => 'activation_fatal',
+		];
+	}
+
+	if ( is_wp_error( $result ) ) {
+		$msg = $result->get_error_message();
+		// Redirects show up as WP errors with specific markers on some setups.
+		$subcode = ( stripos( $msg, 'redirect' ) !== false ) ? 'activation_redirect' : 'activation_wp_error';
+		return [
+			'success'         => false,
+			'plugin'          => $plugin,
+			'active'          => is_plugin_active( $plugin ),
+			'error'           => $msg,
+			'output_captured' => ots_connector_snip( $captured_output ),
+			'subcode'         => $subcode,
+		];
+	}
+
+	// activate_plugin() returns null on success. Double-check via options
+	// cache because some activation hooks deactivate self if prerequisites
+	// fail — the REST response should reflect the post-activation reality.
+	$now_active = is_plugin_active( $plugin );
+	if ( ! $now_active ) {
+		return [
+			'success'         => false,
+			'plugin'          => $plugin,
+			'active'          => false,
+			'error'           => 'Plugin a fost procesat dar nu apare activ (probabil hook-ul de activare a apelat deactivate_plugins)',
+			'output_captured' => ots_connector_snip( $captured_output ),
+			'subcode'         => 'activation_self_deactivated',
+		];
+	}
+
+	return [
+		'success'         => true,
+		'plugin'          => $plugin,
+		'active'          => true,
+		'already_active'  => false,
+		'output_captured' => ots_connector_snip( $captured_output ),
+		'subcode'         => null,
+	];
+}
+
+/** Truncate+sanitize captured output for inclusion in JSON responses. */
+function ots_connector_snip( string $s, int $max = 500 ): string {
+	if ( $s === '' ) return '';
+	$s = wp_strip_all_tags( $s );
+	$s = trim( preg_replace( '/\s+/', ' ', $s ) );
+	if ( strlen( $s ) > $max ) {
+		$s = substr( $s, 0, $max ) . '…';
+	}
+	return $s;
+}
+
 /** POST /plugins/activate — body { plugin: "<slug>/<file>.php" }. */
 function ots_connector_route_activate_plugin( WP_REST_Request $request ) {
 	$plugin = ots_connector_resolve_plugin( $request );
 	if ( is_wp_error( $plugin ) ) return $plugin;
 
-	$result = activate_plugin( $plugin );
-	if ( is_wp_error( $result ) ) {
-		return new WP_Error(
-			'ots_activate_failed',
-			$result->get_error_message(),
-			[ 'status' => 500 ]
-		);
+	$network_wide = is_multisite() && (bool) ( $request->get_json_params()['network_wide'] ?? false );
+	$outcome = ots_safe_activate_plugin( $plugin, $network_wide );
+
+	if ( $outcome['success'] ) {
+		return rest_ensure_response( [
+			'success'         => true,
+			'plugin'          => $plugin,
+			'active'          => true,
+			'already_active'  => $outcome['already_active'] ?? false,
+			'output_captured' => $outcome['output_captured'] ?? '',
+			'timestamp'       => time(),
+		] );
 	}
-	return rest_ensure_response( [ 'success' => true, 'plugin' => $plugin, 'active' => true, 'timestamp' => time() ] );
+
+	// Return 200 with structured failure instead of 500.
+	// Rationale: a plugin-side activation problem is a *product* error,
+	// not a transport error. Bubbling as 500 confuses the CRM's retry
+	// logic (which treats 5xx as site-down → transient → retry). The
+	// CRM inspects subcode to decide whether to retry or surface.
+	return rest_ensure_response( [
+		'success'         => false,
+		'plugin'          => $plugin,
+		'active'          => $outcome['active'] ?? false,
+		'error'           => $outcome['error'] ?? 'Activare eșuată',
+		'subcode'         => $outcome['subcode'] ?? 'activation_unknown',
+		'output_captured' => $outcome['output_captured'] ?? '',
+		'timestamp'       => time(),
+	] );
 }
 
 /** POST /plugins/deactivate — body { plugin }. Never silent, so e.g. the
@@ -1113,26 +1435,64 @@ function ots_connector_route_install_plugin( WP_REST_Request $request ) {
 		$plugin_file = (string) ( $upgrader->result['destination_name'] ?? '' );
 	}
 
-	$activated = false;
-	$activation_error = null;
-	if ( $activate && $plugin_file ) {
-		$res = activate_plugin( $plugin_file );
-		if ( is_wp_error( $res ) ) {
-			$activation_error = $res->get_error_message();
-		} else {
-			$activated = true;
+	// Invalidate PHP opcache for the just-written plugin files. Without
+	// this, PHP keeps serving the OLD bytecode of the plugin's main PHP
+	// file until the opcache entry expires or the worker restarts. For
+	// the OTS Connector self-update specifically this was biting us:
+	// `/health` would keep returning the pre-update `OTS_CONNECTOR_VERSION`
+	// constant value for minutes, and the CRM would roll the DB field
+	// back to the stale version.
+	//
+	// Guards:
+	//   - `extension_loaded('Zend OPcache')` — on APC / WinCache hosts the
+	//     opcache_* stubs may not exist at all, making function_exists()
+	//     unreliable. Extension check is the authoritative signal.
+	//   - `opcache.enable` ini — opcache can be compiled-in but disabled
+	//     via runtime config. Calling `opcache_reset()` then would issue
+	//     a PHP warning, which WordPress's admin UI surfaces as a notice.
+	//   - Per-file invalidate only on the installed main file — we used
+	//     to sweep the whole plugin directory with `glob('*.php')` which
+	//     could evict bytecode for files this install didn't touch.
+	if (
+		extension_loaded( 'Zend OPcache' )
+		&& (int) @ini_get( 'opcache.enable' ) === 1
+	) {
+		if ( function_exists( 'opcache_invalidate' ) && $plugin_file ) {
+			$abs = trailingslashit( WP_PLUGIN_DIR ) . $plugin_file;
+			@opcache_invalidate( $abs, true );
+		} elseif ( function_exists( 'opcache_reset' ) ) {
+			// Fallback: no plugin_file path — reset as last resort.
+			@opcache_reset();
 		}
 	}
 
+	$activated = false;
+	$activation_error = null;
+	$activation_subcode = null;
+	$activation_output = '';
+	if ( $activate && $plugin_file ) {
+		// Use the safe wrapper so a plugin whose activation hook prints
+		// HTML, calls wp_safe_redirect(), or fatal-throws doesn't corrupt
+		// this JSON response. `ots_safe_activate_plugin()` captures output
+		// with ob_start() and wraps the call in try/catch \Throwable.
+		$outcome = ots_safe_activate_plugin( $plugin_file );
+		$activated = (bool) $outcome['success'];
+		$activation_error = $outcome['error'] ?? null;
+		$activation_subcode = $outcome['subcode'] ?? null;
+		$activation_output = $outcome['output_captured'] ?? '';
+	}
+
 	return rest_ensure_response( [
-		'success'         => true,
-		'installed'       => true,
-		'plugin'          => $plugin_file,
-		'activated'       => $activated,
-		'activationError' => $activation_error,
-		'filename'        => $safe_name,
-		'sizeBytes'       => strlen( $binary ),
-		'timestamp'       => time(),
+		'success'            => true,
+		'installed'          => true,
+		'plugin'             => $plugin_file,
+		'activated'          => $activated,
+		'activationError'    => $activation_error,
+		'activationSubcode'  => $activation_subcode,
+		'activationOutput'   => $activation_output,
+		'filename'           => $safe_name,
+		'sizeBytes'          => strlen( $binary ),
+		'timestamp'          => time(),
 	] );
 }
 

@@ -55,6 +55,7 @@
 		uptimeStatus: 'up' | 'down' | 'unknown';
 		wpVersion: string | null;
 		phpVersion: string | null;
+		connectorVersion?: string | null;
 		lastHealthCheckAt: string | null;
 		lastUptimePingAt: string | null;
 		lastUpdatesCheckAt: string | null;
@@ -136,6 +137,106 @@
 	// Pausing state — used to disable the toggle while the PATCH is in-flight
 	const pausingIds = new SvelteSet<string>();
 
+	// Connector-update state — tracks which sites are mid-push so the icon
+	// shows a spinner. `connectorLatest` is fetched once on mount; UI
+	// compares each site's own `connectorVersion` against this to decide
+	// whether to badge the button.
+	const connectorUpdatingIds = new SvelteSet<string>();
+	let connectorLatest = $state<{
+		version: string;
+		uploadedAt: string;
+		size: number;
+		sha256: string;
+		notes: string | null;
+	} | null>(null);
+
+	/**
+	 * Per-site result flash — green dot for ~2s after success, red dot
+	 * after failure until the operator retries. Distinct from the amber
+	 * "update available" indicator which reflects persistent state.
+	 */
+	let connectorUpdateResult = $state<Record<string, 'success' | 'error'>>({});
+
+	// Confirmation modal state for connector updates. Modern Dialog
+	// replaces native `confirm()` so the UX matches the rest of the
+	// app (styled buttons, backdrop blur, consistent spacing).
+	let connectorConfirmOpen = $state(false);
+	let connectorConfirmSite = $state<WpSite | null>(null);
+
+	// Bulk update flow state.
+	type BulkResult = {
+		siteId: string;
+		name: string;
+		url: string;
+		status: 'updated' | 'already_current' | 'failed' | 'skipped_paused' | 'skipped_disconnected';
+		fromVersion?: string | null;
+		toVersion?: string | null;
+		error?: string;
+	};
+	let bulkConfirmOpen = $state(false);
+	let bulkRunning = $state(false);
+	let bulkResultsOpen = $state(false);
+	let bulkResults = $state<BulkResult[]>([]);
+	let bulkSummary = $state<{
+		total: number;
+		updated: number;
+		alreadyCurrent: number;
+		failed: number;
+		skipped: number;
+	} | null>(null);
+	let bulkTargetVersion = $state<string | null>(null);
+
+	// Compare semver-ish — mirrors compareConnectorVersions() on server.
+	function cmpVer(a: string, b: string): number {
+		if (a === b) return 0;
+		const norm = (v: string) =>
+			v
+				.toLowerCase()
+				.replace(/[-_+]/g, '.')
+				.replace(/([0-9])([a-z])/g, '$1.$2')
+				.replace(/([a-z])([0-9])/g, '$1.$2');
+		const pa = norm(a).split('.').filter(Boolean);
+		const pb = norm(b).split('.').filter(Boolean);
+		const len = Math.max(pa.length, pb.length);
+		for (let i = 0; i < len; i++) {
+			const x = pa[i] ?? '0';
+			const y = pb[i] ?? '0';
+			if (x === y) continue;
+			const nx = /^\d+$/.test(x) ? Number(x) : null;
+			const ny = /^\d+$/.test(y) ? Number(y) : null;
+			if (nx !== null && ny !== null) {
+				if (nx !== ny) return nx < ny ? -1 : 1;
+				continue;
+			}
+			return x < y ? -1 : 1;
+		}
+		return 0;
+	}
+
+	function connectorUpdateAvailable(site: WpSite): boolean {
+		if (!connectorLatest) return false;
+		if (!site.connectorVersion) return true; // unknown = show indicator
+		return cmpVer(site.connectorVersion, connectorLatest.version) < 0;
+	}
+
+	/**
+	 * Build the URL to Google's favicon CDN for a site. Google picks the
+	 * best available icon (Apple touch, PNG, ICO) at the requested size
+	 * and falls back to a generic globe if the site has none — so we
+	 * always get *something* to display.
+	 *
+	 * Matches the pattern used in backlinks + client-edit pages so the
+	 * same logo shows up across the app for the same domain.
+	 */
+	function getFaviconUrl(siteUrl: string): string {
+		try {
+			const host = new URL(siteUrl).hostname.replace(/^www\./, '');
+			return `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+		} catch {
+			return '';
+		}
+	}
+
 	const totalSecurityUpdates = $derived(
 		sites.reduce((sum, s) => sum + (s.updates?.security ?? 0), 0)
 	);
@@ -155,7 +256,160 @@
 		}
 	}
 
-	onMount(loadSites);
+	async function loadConnectorLatest() {
+		try {
+			const res = await fetch(`/${tenantSlug}/api/wordpress/connector-release`);
+			if (!res.ok) return;
+			const data = (await res.json()) as { latest: typeof connectorLatest };
+			connectorLatest = data.latest;
+		} catch {
+			// Silent — no release published yet is a valid state.
+		}
+	}
+
+	/**
+	 * Opens the styled confirmation modal. The actual push happens in
+	 * `confirmConnectorUpdate()` after the operator clicks "Actualizează".
+	 */
+	function updateConnectorOnSite(site: WpSite) {
+		if (connectorUpdatingIds.has(site.id)) return;
+		if (!connectorLatest) {
+			toast.error('Nicio versiune publicată. Rulează scripts/publish-connector.ts.');
+			return;
+		}
+		connectorConfirmSite = site;
+		connectorConfirmOpen = true;
+	}
+
+	/**
+	 * Fire the update for the site currently staged in the confirm
+	 * dialog. Closes the modal immediately; progress shows on the
+	 * site card (spinner icon) while the push is in flight.
+	 */
+	async function confirmConnectorUpdate() {
+		const site = connectorConfirmSite;
+		if (!site || !connectorLatest) return;
+		connectorConfirmOpen = false;
+		connectorConfirmSite = null;
+
+		connectorUpdatingIds.add(site.id);
+		// Clear any prior flash for this site before starting.
+		if (connectorUpdateResult[site.id]) {
+			const { [site.id]: _, ...rest } = connectorUpdateResult;
+			connectorUpdateResult = rest;
+		}
+		try {
+			const res = await fetch(`${apiBase}/${site.id}/connector-update`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({})
+			});
+			const body = (await res.json().catch(() => ({}))) as {
+				success?: boolean;
+				skipped?: boolean;
+				reason?: string;
+				fromVersion?: string | null;
+				toVersion?: string;
+				error?: string;
+			};
+			if (!res.ok) {
+				toast.error(body.error || `Update eșuat (HTTP ${res.status})`);
+				connectorUpdateResult = { ...connectorUpdateResult, [site.id]: 'error' };
+				return;
+			}
+			if (body.skipped) {
+				toast.info(`${site.name}: deja la zi (v${body.toVersion})`);
+			} else {
+				toast.success(
+					`${site.name}: connector v${body.fromVersion ?? '?'} → v${body.toVersion}`
+				);
+			}
+			connectorUpdateResult = { ...connectorUpdateResult, [site.id]: 'success' };
+			// Auto-clear the green flash after 3s — the persistent state
+			// (no amber dot) will reflect that the site is now up-to-date.
+			// Errors stick around until a new attempt; they're louder on
+			// purpose so operators don't miss them.
+			setTimeout(() => {
+				if (connectorUpdateResult[site.id] === 'success') {
+					const { [site.id]: _, ...rest } = connectorUpdateResult;
+					connectorUpdateResult = rest;
+				}
+			}, 3000);
+			await loadSites();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Eroare de rețea');
+			connectorUpdateResult = { ...connectorUpdateResult, [site.id]: 'error' };
+		} finally {
+			connectorUpdatingIds.delete(site.id);
+		}
+	}
+
+	/**
+	 * Trigger the bulk connector update sweep. Hits the server endpoint
+	 * that mirrors the daily cron's logic: for every unpaused, connected
+	 * site scoped to this tenant, probe /health, compare versions, push
+	 * the ZIP from MinIO if outdated.
+	 *
+	 * Results dialog opens once the sweep completes — single round-trip,
+	 * no streaming. For a fleet of ~20 sites the total wait is under
+	 * ~60s (4 concurrent, each health + install ≤ ~8s on average).
+	 */
+	async function runBulkConnectorUpdate() {
+		bulkConfirmOpen = false;
+		bulkRunning = true;
+		bulkResults = [];
+		bulkSummary = null;
+		try {
+			const res = await fetch(`/${tenantSlug}/api/wordpress/connector-bulk-update`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({})
+			});
+			const body = (await res.json().catch(() => ({}))) as {
+				success?: boolean;
+				targetVersion?: string;
+				summary?: typeof bulkSummary;
+				results?: BulkResult[];
+				error?: string;
+			};
+			if (!res.ok || !body.success) {
+				toast.error(body.error || `Bulk update eșuat (HTTP ${res.status})`);
+				return;
+			}
+			bulkResults = body.results ?? [];
+			bulkSummary = body.summary ?? null;
+			bulkTargetVersion = body.targetVersion ?? null;
+			bulkResultsOpen = true;
+
+			// Quick toast summary — operator usually just wants the headline.
+			if (bulkSummary) {
+				const { updated, failed, alreadyCurrent, skipped } = bulkSummary;
+				if (failed > 0) {
+					toast.warning(
+						`${updated} actualizate, ${failed} eșuate, ${alreadyCurrent} deja la zi${skipped ? `, ${skipped} sărite` : ''}`
+					);
+				} else if (updated > 0) {
+					toast.success(
+						`${updated} site-uri actualizate la v${body.targetVersion}${alreadyCurrent > 0 ? `, ${alreadyCurrent} deja la zi` : ''}`
+					);
+				} else {
+					toast.info(
+						`Toate site-urile sunt deja la v${body.targetVersion}${skipped ? ` (${skipped} sărite)` : ''}`
+					);
+				}
+			}
+			await loadSites();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Eroare de rețea la bulk update');
+		} finally {
+			bulkRunning = false;
+		}
+	}
+
+	onMount(() => {
+		void loadSites();
+		void loadConnectorLatest();
+	});
 
 	async function addSite() {
 		if (!addForm.name.trim() || !addForm.siteUrl.trim()) {
@@ -592,6 +846,35 @@
 					{totalSecurityUpdates} update-uri de securitate în total
 				</Badge>
 			{/if}
+			<a href="/{tenantSlug}/wordpress/diagnostics">
+				<Button variant="outline" title="Dashboard live cu status per site">
+					<ServerIcon class="mr-2 size-4" />
+					Diagnostics
+				</Button>
+			</a>
+			<!-- Bulk connector update: same logic as the daily cron, on demand.
+			     Disabled during a sweep and when no release is published. -->
+			<Button
+				variant="outline"
+				disabled={bulkRunning || !connectorLatest}
+				onclick={() => (bulkConfirmOpen = true)}
+				title={connectorLatest
+					? `Push OTS Connector v${connectorLatest.version} pe toate site-urile`
+					: 'Niciun release publicat'}
+			>
+				{#if bulkRunning}
+					<RefreshCwIcon class="mr-2 size-4 animate-spin" />
+					Se actualizează…
+				{:else}
+					<ArrowUpCircleIcon class="mr-2 size-4" />
+					Update connector
+					{#if connectorLatest}
+						<span class="ml-1.5 text-xs text-muted-foreground font-mono">
+							v{connectorLatest.version}
+						</span>
+					{/if}
+				{/if}
+			</Button>
 			<Button onclick={() => (addOpen = true)}>
 				<PlusIcon class="mr-2 size-4" />
 				Adaugă site
@@ -629,8 +912,26 @@
 								<!-- Header with site name, uptime dot, status badges -->
 								<div class="flex items-center gap-2 mb-2 flex-wrap">
 									<div class="flex items-center gap-1.5">
-										<div class="p-1.5 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
-											<GlobeIcon class="h-3.5 w-3.5 text-primary" />
+										<!-- Site favicon via Google's s2 CDN. Falls back to the
+										     generic globe when the image can't load (dead site,
+										     CSP blocking Google, etc.).
+										     Square container (rounded-md = 6px) — matches the
+										     client-edit / backlinks look elsewhere in the app. -->
+										<div class="p-1 rounded-md bg-primary/10 group-hover:bg-primary/20 transition-colors flex items-center justify-center h-7 w-7 shrink-0">
+											<img
+												src={getFaviconUrl(site.siteUrl)}
+												alt=""
+												class="h-5 w-5 object-contain rounded-sm"
+												loading="lazy"
+												onerror={(e) => {
+													const img = e.currentTarget as HTMLImageElement;
+													img.style.display = 'none';
+													const parent = img.parentElement;
+													if (parent && !parent.querySelector('svg')) {
+														parent.innerHTML = '<svg xmlns=\'http://www.w3.org/2000/svg\' class=\'h-3.5 w-3.5 text-primary\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><path d=\'M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\'/></svg>';
+													}
+												}}
+											/>
 										</div>
 										<h3 class="text-lg font-bold tracking-tight text-foreground">
 											{site.name}
@@ -755,6 +1056,47 @@
 
 							<!-- Action buttons with modern styling -->
 							<div class="flex items-center gap-1.5 flex-shrink-0">
+								<!-- OTS Connector self-update.
+								     Dot color semantics:
+								       - (none)       site up-to-date and no recent activity
+								       - amber pulse  update available on MinIO
+								       - green        update succeeded (auto-clears after 3s)
+								       - red          update failed (sticks until next attempt)
+								     Inner icon spins while the push is in flight. -->
+								<Button
+									variant="outline"
+									size="icon"
+									class="relative h-8 w-8 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all"
+									disabled={connectorUpdatingIds.has(site.id)}
+									onclick={() => updateConnectorOnSite(site)}
+									title={connectorLatest
+										? connectorUpdateResult[site.id] === 'error'
+											? 'Ultima încercare a eșuat — click pentru retry'
+											: connectorUpdateResult[site.id] === 'success'
+												? `OTS Connector actualizat la v${connectorLatest.version}`
+												: connectorUpdateAvailable(site)
+													? `Update OTS Connector v${site.connectorVersion ?? '?'} → v${connectorLatest.version}`
+													: `OTS Connector la zi (v${site.connectorVersion ?? connectorLatest.version})`
+										: 'Niciun release publicat'}
+								>
+									{#if connectorUpdatingIds.has(site.id)}
+										<RefreshCwIcon class="h-3.5 w-3.5 animate-spin text-amber-600" />
+									{:else if connectorUpdateResult[site.id] === 'success'}
+										<ArrowUpCircleIcon class="h-3.5 w-3.5 text-green-600" />
+										<span class="absolute -top-0.5 -right-0.5 inline-flex h-2.5 w-2.5 rounded-full bg-green-500"></span>
+									{:else if connectorUpdateResult[site.id] === 'error'}
+										<ArrowUpCircleIcon class="h-3.5 w-3.5 text-red-600" />
+										<span class="absolute -top-0.5 -right-0.5 inline-flex h-2.5 w-2.5 rounded-full bg-red-500"></span>
+									{:else if connectorUpdateAvailable(site)}
+										<ArrowUpCircleIcon class="h-3.5 w-3.5 text-amber-600" />
+										<span class="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+											<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+											<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+										</span>
+									{:else}
+										<ArrowUpCircleIcon class="h-3.5 w-3.5" />
+									{/if}
+								</Button>
 								<Button
 									variant="outline"
 									size="icon"
@@ -868,11 +1210,241 @@
 			</div>
 		</div>
 
+		<DialogFooter class="sm:justify-between gap-2">
+			<!-- Left side: download the connector ZIP so the operator can install
+			     it on the new WP site before/while they fill in the form above. -->
+			{#if connectorLatest}
+				<a
+					href="/{tenantSlug}/api/wordpress/connector-release/download"
+					download={`ots-wp-connector-v${connectorLatest.version}.zip`}
+					class="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+					title="Descarcă ZIP pentru upload manual pe site"
+				>
+					<DownloadIcon class="size-3.5" />
+					Descarcă OTS Connector v{connectorLatest.version}
+				</a>
+			{:else}
+				<span class="text-xs text-muted-foreground italic">
+					Niciun release publicat — rulează <code class="rounded bg-muted px-1">bun run connector:release</code>
+				</span>
+			{/if}
+
+			<div class="flex gap-2">
+				<Button variant="outline" onclick={() => (addOpen = false)} disabled={adding}>Anulează</Button>
+				<Button onclick={addSite} disabled={adding}>
+					{adding ? 'Se adaugă…' : 'Adaugă'}
+				</Button>
+			</div>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<!-- Connector update confirmation -->
+<Dialog bind:open={connectorConfirmOpen}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<div class="flex items-center gap-3">
+				<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950/60">
+					<ArrowUpCircleIcon class="h-5 w-5 text-amber-600 dark:text-amber-400" />
+				</div>
+				<div>
+					<DialogTitle>Actualizare OTS Connector</DialogTitle>
+					<DialogDescription class="mt-1">
+						Vei trimite cea mai nouă versiune a plugin-ului nostru către site-ul selectat.
+					</DialogDescription>
+				</div>
+			</div>
+		</DialogHeader>
+
+		{#if connectorConfirmSite && connectorLatest}
+			<div class="space-y-3 py-2">
+				<div class="rounded-lg border bg-muted/30 p-3 text-sm space-y-1.5">
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">Site</span>
+						<span class="font-medium truncate ml-3">{connectorConfirmSite.name}</span>
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">URL</span>
+						<span class="font-mono text-xs truncate ml-3">{connectorConfirmSite.siteUrl}</span>
+					</div>
+					<div class="border-t my-1.5"></div>
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">Versiune actuală</span>
+						<span class="font-mono">
+							{connectorConfirmSite.connectorVersion
+								? `v${connectorConfirmSite.connectorVersion}`
+								: 'necunoscută'}
+						</span>
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">Versiune nouă</span>
+						<span class="font-mono font-semibold text-amber-700 dark:text-amber-400">
+							v{connectorLatest.version}
+						</span>
+					</div>
+				</div>
+
+				{#if connectorLatest.notes}
+					<div class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+						<span class="font-semibold block mb-0.5">Changelog</span>
+						{connectorLatest.notes}
+					</div>
+				{/if}
+
+				<p class="text-xs text-muted-foreground">
+					Site-ul rămâne online pe durata operației. În caz de eșec, plugin-ul
+					existent rămâne activ — nu se pierde nimic.
+				</p>
+			</div>
+		{/if}
+
 		<DialogFooter>
-			<Button variant="outline" onclick={() => (addOpen = false)} disabled={adding}>Anulează</Button>
-			<Button onclick={addSite} disabled={adding}>
-				{adding ? 'Se adaugă…' : 'Adaugă'}
+			<Button
+				variant="outline"
+				onclick={() => {
+					connectorConfirmOpen = false;
+					connectorConfirmSite = null;
+				}}
+			>
+				Anulează
 			</Button>
+			<Button class="bg-amber-500 hover:bg-amber-600 text-white" onclick={confirmConnectorUpdate}>
+				<ArrowUpCircleIcon class="mr-2 size-4" />
+				Actualizează
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<!-- Bulk connector update — confirmation -->
+<Dialog bind:open={bulkConfirmOpen}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<div class="flex items-center gap-3">
+				<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950/60">
+					<ArrowUpCircleIcon class="h-5 w-5 text-amber-600 dark:text-amber-400" />
+				</div>
+				<div>
+					<DialogTitle>Update OTS Connector — toate site-urile</DialogTitle>
+					<DialogDescription class="mt-1">
+						Verifică fiecare site și instalează ultima versiune acolo unde e nevoie.
+					</DialogDescription>
+				</div>
+			</div>
+		</DialogHeader>
+
+		{#if connectorLatest}
+			<div class="space-y-3 py-2">
+				<div class="rounded-lg border bg-muted/30 p-3 text-sm space-y-1.5">
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">Versiune țintă</span>
+						<span class="font-mono font-semibold text-amber-700 dark:text-amber-400">
+							v{connectorLatest.version}
+						</span>
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="text-muted-foreground">Site-uri eligibile</span>
+						<span class="font-mono">
+							{sites.filter((s) => s.status !== 'disconnected' && s.paused === 0).length}
+							din {sites.length}
+						</span>
+					</div>
+					{#if sites.some((s) => s.paused === 1)}
+						<div class="flex items-center justify-between text-xs text-muted-foreground">
+							<span>· pauzate</span>
+							<span>{sites.filter((s) => s.paused === 1).length}</span>
+						</div>
+					{/if}
+					{#if sites.some((s) => s.status === 'disconnected')}
+						<div class="flex items-center justify-between text-xs text-muted-foreground">
+							<span>· deconectate</span>
+							<span>{sites.filter((s) => s.status === 'disconnected').length}</span>
+						</div>
+					{/if}
+				</div>
+
+				<p class="text-xs text-muted-foreground">
+					Site-urile care au deja v{connectorLatest.version} sunt sărite automat.
+					Operațiunea durează tipic 30-90 secunde în funcție de numărul de site-uri.
+				</p>
+			</div>
+		{/if}
+
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (bulkConfirmOpen = false)} disabled={bulkRunning}>
+				Anulează
+			</Button>
+			<Button
+				class="bg-amber-500 hover:bg-amber-600 text-white"
+				onclick={runBulkConnectorUpdate}
+				disabled={bulkRunning}
+			>
+				<ArrowUpCircleIcon class="mr-2 size-4" />
+				Pornește update
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<!-- Bulk connector update — per-site results -->
+<Dialog bind:open={bulkResultsOpen}>
+	<DialogContent class="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+		<DialogHeader>
+			<DialogTitle>
+				Rezultat bulk update
+				{#if bulkTargetVersion}
+					<span class="font-mono text-sm font-normal text-muted-foreground">
+						v{bulkTargetVersion}
+					</span>
+				{/if}
+			</DialogTitle>
+			{#if bulkSummary}
+				<DialogDescription>
+					{bulkSummary.updated} actualizate · {bulkSummary.alreadyCurrent} deja la zi ·
+					{bulkSummary.failed} eșuate · {bulkSummary.skipped} sărite
+				</DialogDescription>
+			{/if}
+		</DialogHeader>
+
+		<div class="flex flex-col divide-y divide-border rounded-md border border-border">
+			{#each bulkResults as r (r.siteId)}
+				<div class="flex items-start gap-3 p-3 text-sm">
+					<div class="shrink-0 pt-0.5">
+						{#if r.status === 'updated'}
+							<CircleCheckIcon class="size-4 text-green-600" />
+						{:else if r.status === 'already_current'}
+							<CircleCheckIcon class="size-4 text-muted-foreground" />
+						{:else if r.status === 'failed'}
+							<CircleXIcon class="size-4 text-red-600" />
+						{:else}
+							<CircleAlertIcon class="size-4 text-amber-500" />
+						{/if}
+					</div>
+					<div class="min-w-0 flex-1">
+						<div class="font-medium truncate">{r.name}</div>
+						<div class="text-xs text-muted-foreground truncate">{r.url}</div>
+						<div class="text-xs mt-0.5">
+							{#if r.status === 'updated'}
+								<span class="text-green-700 dark:text-green-400">
+									v{r.fromVersion ?? '?'} → v{r.toVersion}
+								</span>
+							{:else if r.status === 'already_current'}
+								<span class="text-muted-foreground">deja la v{r.toVersion}</span>
+							{:else if r.status === 'failed'}
+								<span class="text-red-600 break-words">{r.error ?? 'eroare necunoscută'}</span>
+							{:else if r.status === 'skipped_paused'}
+								<span class="text-amber-600">sărit (pauzat)</span>
+							{:else if r.status === 'skipped_disconnected'}
+								<span class="text-amber-600">sărit (deconectat)</span>
+							{/if}
+						</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+
+		<DialogFooter>
+			<Button onclick={() => (bulkResultsOpen = false)}>Închide</Button>
 		</DialogFooter>
 	</DialogContent>
 </Dialog>

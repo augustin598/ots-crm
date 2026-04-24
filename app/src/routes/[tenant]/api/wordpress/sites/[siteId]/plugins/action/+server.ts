@@ -61,7 +61,15 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	}
 
 	try {
-		let result: { success: boolean };
+		let result:
+			| {
+					success: boolean;
+					error?: string;
+					subcode?: string;
+					output_captured?: string;
+					active?: boolean;
+			  }
+			| { success: boolean };
 		if (body.action === 'activate') {
 			result = await ctx.client.activatePlugin(body.plugin, { siteId: ctx.site.id });
 		} else if (body.action === 'deactivate') {
@@ -70,6 +78,35 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 			result = await ctx.client.deletePlugin(body.plugin, { siteId: ctx.site.id });
 		} else {
 			return json({ error: `Acțiune necunoscută: ${body.action}` }, { status: 400 });
+		}
+
+		// Connector v0.6.2+ may return 200 with `success: false` for plugin-side
+		// activation problems (the plugin itself fatals or redirects on activate).
+		// Log it as a warning — not an error — because the transport worked.
+		if (!result.success) {
+			const activateResult = result as {
+				success: boolean;
+				error?: string;
+				subcode?: string;
+				output_captured?: string;
+			};
+			logWarning(
+				'wordpress',
+				`Plugin ${body.action} returned success=false: ${body.plugin} on ${ctx.site.siteUrl} [${activateResult.subcode ?? 'no-subcode'}]`,
+				{
+					tenantId: ctx.site.tenantId,
+					userId: locals.user.id,
+					metadata: {
+						siteId: ctx.site.id,
+						plugin: body.plugin,
+						action: body.action,
+						subcode: activateResult.subcode,
+						error: activateResult.error,
+						output: activateResult.output_captured?.slice(0, 300)
+					}
+				}
+			);
+			return json(result);
 		}
 
 		logInfo('wordpress', `Plugin ${body.action}: ${body.plugin} on ${ctx.site.siteUrl}`, {
@@ -82,11 +119,40 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	} catch (err) {
 		const { message } = serializeError(err);
 		const code = WpError.isWpError(err) ? err.code : 'unknown_error';
-		logWarning('wordpress', `Plugin ${body.action} failed: ${body.plugin} on ${ctx.site.siteUrl}: ${code}`, {
-			tenantId: ctx.site.tenantId,
-			userId: locals.user.id,
-			metadata: { siteId: ctx.site.id, plugin: body.plugin, action: body.action, code }
-		});
-		return json({ error: `${code}: ${message}` }, { status: 502 });
+		const subcode = WpError.isWpError(err) ? err.subcode : undefined;
+		const bodySnippet = WpError.isWpError(err) ? err.bodySnippet : undefined;
+		const httpStatus = WpError.isWpError(err) ? err.httpStatus : undefined;
+		logWarning(
+			'wordpress',
+			`Plugin ${body.action} failed: ${body.plugin} on ${ctx.site.siteUrl}: ${code}${subcode ? `/${subcode}` : ''}`,
+			{
+				tenantId: ctx.site.tenantId,
+				userId: locals.user.id,
+				metadata: {
+					siteId: ctx.site.id,
+					plugin: body.plugin,
+					action: body.action,
+					code,
+					subcode,
+					httpStatus,
+					bodySnippet: bodySnippet?.slice(0, 300)
+				}
+			}
+		);
+		// Return 200-with-structured-failure for activation-hook fatals so the
+		// CRM client can distinguish plugin-side errors from transport errors.
+		// Maintenance / generic 5xx keep returning 502 so the client treats
+		// them as transient and retries.
+		const isPermanent = subcode === 'activation_hook_fatal' || subcode === 'php_fatal';
+		return json(
+			{
+				error: `${code}: ${message}`,
+				code,
+				subcode,
+				bodySnippet,
+				httpStatus
+			},
+			{ status: isPermanent ? 200 : 502 }
+		);
 	}
 };

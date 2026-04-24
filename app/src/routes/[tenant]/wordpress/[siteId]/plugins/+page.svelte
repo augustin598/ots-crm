@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import {
 		Dialog,
 		DialogContent,
@@ -42,11 +43,19 @@
 		pluginUri: string;
 		requiresWp: string;
 		requiresPhp: string;
+		textDomain?: string;
+		updateUri?: string;
 		network: boolean;
 		active: boolean;
 		autoUpdate: boolean;
 		updateAvailable: boolean;
 		newVersion: string | null;
+		updateSource?: 'get_plugin_updates' | 'transient' | 'none';
+		/** Null when a license is required to actually download the upgrade. */
+		updatePackage?: string | null;
+		updateUrl?: string | null;
+		/** Vendor's "activate license" notice when we can't auto-update. */
+		updateMessage?: string | null;
 	};
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -59,10 +68,65 @@
 	let searchQuery = $state('');
 	const busyPlugins = new SvelteSet<string>();
 
+	type PluginZipInfo = {
+		slug: string;
+		pluginFile: string;
+		name: string;
+		version: string;
+		description: string;
+		author: string;
+		requiresWp: string;
+		requiresPhp: string;
+		textDomain: string;
+		pluginUri: string;
+		updateUri: string;
+		sizeBytes: number;
+	};
+
+	type MatchCandidate = {
+		plugin: string;
+		installedVersion: string;
+		installedName: string;
+		score: number;
+		reasons: string[];
+	};
+
+	/**
+	 * Verdict returned by /plugins/inspect. Mirrors the server-side type.
+	 *
+	 *   - `new`          → safe to install
+	 *   - `upgrade`      → ZIP version > installed — green-light
+	 *   - `same_version` → identical; default skip
+	 *   - `downgrade`    → ZIP version < installed; default skip
+	 *   - `ambiguous`    → multiple plausible matches; operator must pick
+	 */
+	type InspectVerdict =
+		| { kind: 'new' }
+		| {
+				kind: 'upgrade' | 'same_version' | 'downgrade';
+				match: MatchCandidate;
+				installedVersion: string;
+		  }
+		| { kind: 'ambiguous'; candidates: MatchCandidate[] };
+
 	type UploadQueueItem = {
 		id: string;
 		file: File;
-		status: 'queued' | 'uploading' | 'installing' | 'success' | 'error';
+		status:
+			| 'queued' // waiting to be inspected
+			| 'inspecting' // POST /plugins/inspect in flight
+			| 'inspected' // inspection ok; verdict computed (will install)
+			| 'skipped' // verdict says skip (same/downgrade/ambiguous unresolved)
+			| 'uploading' // base64 -> /plugins/install
+			| 'installing' // WP is extracting/activating
+			| 'success'
+			| 'error';
+		info?: PluginZipInfo;
+		verdict?: InspectVerdict;
+		/** When verdict is same_version/downgrade, operator can force-install. */
+		forceInstall?: boolean;
+		/** For ambiguous verdict: which candidate plugin slug did the operator pick. */
+		disambiguatedMatch?: string;
 		installedAs?: string;
 		activated?: boolean;
 		message?: string;
@@ -98,8 +162,15 @@
 				const body = (await res.json().catch(() => ({}))) as { error?: string };
 				throw new Error(body.error || `HTTP ${res.status}`);
 			}
-			const data = (await res.json()) as { items: WpPlugin[] };
-			plugins = data.items;
+			// Defensive: a misbehaving connector could return `null` (e.g. if its
+			// handler fatal-ed after `rest_ensure_response`) or an object missing
+			// `items`. Treat anything that isn't a plain array as an empty list
+			// rather than crashing the page with "Cannot read properties of null".
+			const data = (await res.json().catch(() => null)) as { items?: WpPlugin[] } | null;
+			plugins = Array.isArray(data?.items) ? data.items : [];
+			if (!Array.isArray(data?.items)) {
+				console.warn('loadPlugins: unexpected response shape', data);
+			}
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Nu s-au putut încărca plugin-urile');
 			console.error(err);
@@ -141,6 +212,159 @@
 		}
 		uploadQueue = [...uploadQueue, ...next];
 		input.value = ''; // allow re-selecting the same file
+
+		// Kick off inspection for every new item. This runs sequentially to
+		// avoid hammering the CRM with 5 × 20 MB base64 payloads at once,
+		// which is mean to both the browser and the server.
+		void inspectQueue();
+	}
+
+	/**
+	 * Minimal concurrency limiter — like p-limit but inline to avoid a
+	 * dependency for ~15 lines. Ensures no more than `max` async tasks
+	 * run at once; useful for bounding simultaneous base64→server round
+	 * trips when the user queues 10+ ZIPs.
+	 */
+	function createLimiter(max: number) {
+		let active = 0;
+		const queue: Array<() => void> = [];
+		const next = () => {
+			if (active >= max || queue.length === 0) return;
+			active++;
+			const run = queue.shift()!;
+			run();
+		};
+		return async function <T>(fn: () => Promise<T>): Promise<T> {
+			return new Promise<T>((resolve, reject) => {
+				queue.push(() => {
+					fn()
+						.then(resolve, reject)
+						.finally(() => {
+							active--;
+							next();
+						});
+				});
+				next();
+			});
+		};
+	}
+
+	/**
+	 * Inspect every queued item that hasn't been looked at yet.
+	 *
+	 * Uses a concurrency limit of 3 so the server never sees more than
+	 * 3 × 50 MB base64 payloads in flight at once. Sequential flow per
+	 * item: File → base64 → POST /inspect → classify.
+	 *
+	 * Items with ambiguous / same-version / downgrade verdicts start in
+	 * `skipped` status; the operator can opt back in via force-install
+	 * (for same/downgrade) or by picking a candidate (ambiguous).
+	 */
+	async function inspectQueue() {
+		const limit = createLimiter(3);
+		const indices = uploadQueue
+			.map((item, i) => (item.status === 'queued' ? i : -1))
+			.filter((i) => i >= 0);
+
+		await Promise.all(
+			indices.map((i) =>
+				limit(async () => {
+					uploadQueue[i] = { ...uploadQueue[i], status: 'inspecting' };
+					uploadQueue = [...uploadQueue];
+					try {
+						const dataBase64 = await fileToBase64(uploadQueue[i].file);
+						const res = await fetch(`${apiBase}/inspect`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ filename: uploadQueue[i].file.name, dataBase64 })
+						});
+						const body = (await res.json().catch(() => ({}))) as {
+							info?: PluginZipInfo;
+							verdict?: InspectVerdict;
+							error?: string;
+						};
+						if (!res.ok || !body.info || !body.verdict) {
+							uploadQueue[i] = {
+								...uploadQueue[i],
+								status: 'error',
+								message: body.error || `HTTP ${res.status}`
+							};
+							uploadQueue = [...uploadQueue];
+							return;
+						}
+						// Auto-skip verdicts that don't warrant install.
+						const shouldSkip =
+							body.verdict.kind === 'same_version' ||
+							body.verdict.kind === 'downgrade' ||
+							body.verdict.kind === 'ambiguous';
+						uploadQueue[i] = {
+							...uploadQueue[i],
+							status: shouldSkip ? 'skipped' : 'inspected',
+							info: body.info,
+							verdict: body.verdict,
+							forceInstall: false,
+							disambiguatedMatch: undefined
+						};
+					} catch (err) {
+						uploadQueue[i] = {
+							...uploadQueue[i],
+							status: 'error',
+							message: err instanceof Error ? err.message : 'Inspect failed'
+						};
+					}
+					uploadQueue = [...uploadQueue];
+				})
+			)
+		);
+
+		// The inspect endpoint probes /plugins fresh on the site. That data
+		// is usually newer than what the page rendered on mount (WordPress's
+		// own auto-update cron may have bumped a plugin between the two
+		// calls). Re-sync the page's plugin list so the badge shown on the
+		// card matches the installed version the verdict used — otherwise
+		// operators see "list says 4.12.2 → 4.13.1" and "inspect says same
+		// version 4.13.1" at the same time, which looks like a bug.
+		await loadPlugins();
+	}
+
+	/**
+	 * Operator toggles force-install for same-version / downgrade items.
+	 * Flipping on moves status back to 'inspected' so it participates in
+	 * the bulk upload; flipping off sends it to 'skipped' again.
+	 */
+	function toggleForce(id: string) {
+		const idx = uploadQueue.findIndex((i) => i.id === id);
+		if (idx < 0) return;
+		const item = uploadQueue[idx];
+		if (!item.verdict) return;
+		if (item.verdict.kind !== 'same_version' && item.verdict.kind !== 'downgrade') return;
+		const next = !item.forceInstall;
+		uploadQueue[idx] = {
+			...item,
+			forceInstall: next,
+			status: next ? 'inspected' : 'skipped'
+		};
+		uploadQueue = [...uploadQueue];
+	}
+
+	/**
+	 * For ambiguous verdicts, the operator picks which installed plugin
+	 * the ZIP corresponds to. Selecting "install as new" (empty value)
+	 * moves the item to `inspected` with no disambiguation.
+	 * Selecting an installed plugin slug also moves to `inspected`.
+	 * Selecting "skip" puts it back into `skipped`.
+	 */
+	function disambiguate(id: string, choice: string) {
+		const idx = uploadQueue.findIndex((i) => i.id === id);
+		if (idx < 0) return;
+		const item = uploadQueue[idx];
+		if (item.verdict?.kind !== 'ambiguous') return;
+		if (choice === '__skip__') {
+			uploadQueue[idx] = { ...item, status: 'skipped', disambiguatedMatch: undefined };
+		} else {
+			uploadQueue[idx] = { ...item, status: 'inspected', disambiguatedMatch: choice };
+		}
+		uploadQueue = [...uploadQueue];
 	}
 
 	function removeFromQueue(id: string) {
@@ -155,10 +379,21 @@
 		if (uploadQueue.length === 0) return;
 		uploading = true;
 		const failures: string[] = [];
+		let skippedCount = 0;
 		for (let i = 0; i < uploadQueue.length; i++) {
-			// Skip items already resolved (allows retry of failures only).
-			if (uploadQueue[i].status === 'success') continue;
-			uploadQueue[i] = { ...uploadQueue[i], status: 'uploading' };
+			const current = uploadQueue[i];
+			// Skip items already resolved (allows retry of failures only) and
+			// items we've explicitly marked as skipped (same version etc.).
+			if (current.status === 'success' || current.status === 'skipped') {
+				if (current.status === 'skipped') skippedCount++;
+				continue;
+			}
+			// Don't start an upload on an item that hasn't been inspected yet
+			// — means the inspect pass is still running. Leave it and keep going.
+			if (current.status === 'inspecting' || current.status === 'queued') {
+				continue;
+			}
+			uploadQueue[i] = { ...current, status: 'uploading' };
 			uploadQueue = [...uploadQueue];
 			try {
 				const dataBase64 = await fileToBase64(uploadQueue[i].file);
@@ -208,14 +443,205 @@
 			uploadQueue = [...uploadQueue];
 		}
 		uploading = false;
-		if (failures.length === 0) {
-			toast.success(`${uploadQueue.length} plugin-uri procesate`);
+		const processed = uploadQueue.length - skippedCount;
+		if (failures.length === 0 && skippedCount === 0) {
+			toast.success(`${processed} plugin-uri procesate`);
+		} else if (failures.length === 0) {
+			toast.success(
+				`${processed} procesate, ${skippedCount} sărite (aceeași versiune sau downgrade)`
+			);
 		} else {
 			toast.warning(
-				`${uploadQueue.length - failures.length} ok, ${failures.length} eșuate`
+				`${processed - failures.length} ok, ${failures.length} eșuate${skippedCount > 0 ? `, ${skippedCount} sărite` : ''}`
 			);
 		}
 		await loadPlugins();
+	}
+
+	/**
+	 * Shape of the reactivation outcome. `status` drives the toast; the
+	 * optional fields feed the "manual intervention" affordance.
+	 */
+	type ReactivationOutcome = {
+		status: 'not_needed' | 'ok' | 'permanent_failure' | 'transient_failure';
+		error?: string;
+		subcode?: string;
+		output?: string;
+	};
+
+	/**
+	 * Try to bring a plugin back to active after an upgrade.
+	 *
+	 * Distinguishes three buckets via the connector's subcode (v0.6.2+)
+	 * and the CRM-side classifier of the 5xx body:
+	 *   - `maintenance_mode` / `generic_5xx`      → transient, retry a few times
+	 *   - `activation_hook_fatal` / `php_fatal`   → permanent, fail fast
+	 *   - `activation_fatal` / `activation_redirect` from connector → permanent
+	 *
+	 * Never retries permanent errors: re-running the activation hook risks
+	 * side effects (extra DB writes, duplicate default data).
+	 */
+	async function tryReactivate(plugin: string): Promise<ReactivationOutcome> {
+		const transientBackoffs = [2000, 5000, 10000]; // ~17s total
+		let lastError: ReactivationOutcome = {
+			status: 'transient_failure',
+			error: 'Nicio încercare nu a fost făcută'
+		};
+
+		for (let attempt = 0; attempt <= transientBackoffs.length; attempt++) {
+			if (attempt > 0) {
+				await new Promise((r) => setTimeout(r, transientBackoffs[attempt - 1]));
+			}
+			try {
+				const actRes = await fetch(`${apiBase}/action`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'activate', plugin })
+				});
+				const actBody = (await actRes.json().catch(() => ({}))) as {
+					success?: boolean;
+					active?: boolean;
+					error?: string;
+					code?: string;
+					subcode?: string;
+					output_captured?: string;
+					bodySnippet?: string;
+				};
+
+				// Transport OK (200) and activation reported success.
+				if (actRes.ok && actBody.success !== false) {
+					return { status: 'ok' };
+				}
+
+				// Connector v0.6.2+ reports structured failure at 200. Any of
+				// the activation_* subcodes mean "the plugin is broken in a way
+				// that retrying won't fix". Bail immediately.
+				if (
+					actRes.ok &&
+					actBody.success === false &&
+					actBody.subcode &&
+					actBody.subcode.startsWith('activation_')
+				) {
+					return {
+						status: 'permanent_failure',
+						error: actBody.error || 'Hook-ul de activare a eșuat',
+						subcode: actBody.subcode,
+						output: actBody.output_captured
+					};
+				}
+
+				// Permanent classifier from the CRM side (body looked like a PHP fatal).
+				if (actBody.subcode === 'php_fatal' || actBody.subcode === 'activation_hook_fatal') {
+					return {
+						status: 'permanent_failure',
+						error: actBody.error || 'PHP fatal după activare',
+						subcode: actBody.subcode,
+						output: actBody.bodySnippet
+					};
+				}
+
+				// Transient — record and keep trying.
+				lastError = {
+					status: 'transient_failure',
+					error: actBody.error || `HTTP ${actRes.status}`,
+					subcode: actBody.subcode || 'generic_5xx',
+					output: actBody.bodySnippet
+				};
+			} catch (err) {
+				lastError = {
+					status: 'transient_failure',
+					error: err instanceof Error ? err.message : 'eroare rețea'
+				};
+			}
+		}
+
+		return lastError;
+	}
+
+	/**
+	 * Update a single plugin by calling the batch apply-updates endpoint
+	 * with a one-item list, then explicitly reactivate if it was active
+	 * before. The connector plugin (v0.6.2+) already attempts a silent
+	 * reactivation server-side; this second pass handles older connectors
+	 * and real transient failures.
+	 */
+	async function updateSingle(p: WpPlugin) {
+		if (!p.updateAvailable) return;
+		const wasActive = p.active;
+		busyPlugins.add(p.plugin);
+		try {
+			const res = await fetch(
+				`/${tenantSlug}/api/wordpress/sites/${siteId}/apply-updates`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ items: [{ type: 'plugin', slug: p.plugin }] })
+				}
+			);
+			const body = (await res.json().catch(() => ({}))) as {
+				error?: string;
+				status?: 'success' | 'partial' | 'failed';
+				items?: Array<{
+					success: boolean;
+					message?: string | null;
+					error?: string | null;
+					was_active?: boolean;
+					reactivated?: boolean | null;
+					reactivation_error?: string | null;
+					reactivation_subcode?: string | null;
+					reactivation_output?: string | null;
+				}>;
+			};
+			if (!res.ok || body.status === 'failed') {
+				const first = body.items?.[0];
+				const detail = first?.message || first?.error || body.error || 'Update eșuat';
+				toast.error(`${p.name}: ${detail}`);
+				return;
+			}
+
+			// Refresh list first — WP may have reactivated the plugin on its own,
+			// or the connector's own safe-activate ran successfully.
+			await loadPlugins();
+
+			let outcome: ReactivationOutcome = { status: 'not_needed' };
+			if (wasActive) {
+				const fresh = plugins.find((x) => x.plugin === p.plugin);
+				const connectorAlreadyReactivated = body.items?.[0]?.reactivated === true;
+				if (fresh && !fresh.active && !connectorAlreadyReactivated) {
+					outcome = await tryReactivate(p.plugin);
+					if (outcome.status === 'ok') {
+						await loadPlugins();
+					}
+				} else {
+					outcome = { status: 'ok' };
+				}
+			}
+
+			if (body.status === 'partial') {
+				toast.warning(`${p.name}: update parțial`);
+			} else if (outcome.status === 'permanent_failure') {
+				// Plugin's activation hook itself is broken (redirect, fatal,
+				// self-deactivate). Retrying won't help — operator must inspect
+				// in wp-admin/plugins.php directly.
+				const reason = outcome.error ?? 'hook de activare eșuat';
+				toast.error(
+					`${p.name}: activare imposibilă (${outcome.subcode ?? 'activation_hook_fatal'}). ${reason}. Activează manual din wp-admin.`,
+					{ duration: 12000 }
+				);
+			} else if (outcome.status === 'transient_failure') {
+				toast.warning(
+					`${p.name} actualizat la ${p.newVersion}, dar reactivarea a eșuat după 3 încercări: ${outcome.error ?? 'unknown'}. Încearcă manual butonul Activează.`,
+					{ duration: 10000 }
+				);
+			} else {
+				toast.success(`${p.name} actualizat la ${p.newVersion}`);
+			}
+		} catch (err) {
+			toast.error('Eroare de rețea la update');
+			console.error(err);
+		} finally {
+			busyPlugins.delete(p.plugin);
+		}
 	}
 
 	async function runAction(p: WpPlugin, action: 'activate' | 'deactivate' | 'delete') {
@@ -406,6 +832,56 @@
 							</div>
 
 							<div class="flex shrink-0 items-center gap-1.5">
+								{#if p.updateAvailable && p.updatePackage}
+									<!-- Update is auto-installable via Plugin_Upgrader. -->
+									<Button
+										size="sm"
+										class="bg-amber-500 hover:bg-amber-600 text-white border-amber-500"
+										disabled={busyPlugins.has(p.plugin)}
+										onclick={() => updateSingle(p)}
+										title="Actualizează la {p.newVersion}"
+									>
+										{#if busyPlugins.has(p.plugin)}
+											<LoaderIcon class="mr-2 size-3.5 animate-spin" />
+										{:else}
+											<ArrowUpCircleIcon class="mr-2 size-3.5" />
+										{/if}
+										Update {p.newVersion}
+									</Button>
+								{:else if p.updateAvailable && !p.updatePackage}
+									<!-- Update known but license-gated. Offer a clear manual path:
+									     upload ZIP manually via the dialog, or click for details. -->
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											{#snippet child({ props })}
+												<a
+													{...props}
+													href={p.updateUrl || p.pluginUri || '#'}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 px-3 py-1.5 text-xs font-medium transition-colors dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700"
+												>
+													<ArrowUpCircleIcon class="size-3.5" />
+													v{p.newVersion} (license)
+												</a>
+											{/snippet}
+										</Tooltip.Trigger>
+										<Tooltip.Content class="max-w-xs">
+											<!-- Tooltip background is solid `bg-primary` (blue), so
+											     the default `text-muted-foreground` subtitle turns
+											     near-invisible. Force `text-primary-foreground` with
+											     85 % opacity for the secondary line — matches the
+											     inverted-surface treatment used elsewhere. -->
+											<p class="text-xs font-semibold mb-1 text-primary-foreground">
+												Update disponibil: v{p.newVersion}
+											</p>
+											<p class="text-xs text-primary-foreground/85 leading-relaxed">
+												{p.updateMessage ||
+													'Necesită licență activă. Activează licența în wp-admin sau uploadează ZIP manual.'}
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								{/if}
 								{#if p.active}
 									<Button
 										variant="outline"
@@ -492,48 +968,120 @@
 			{#if uploadQueue.length > 0}
 				<div class="flex flex-col divide-y divide-border rounded-md border border-border">
 					{#each uploadQueue as item (item.id)}
-						<div class="flex items-center gap-2 p-2.5 text-sm">
-							<div class="shrink-0">
-								{#if item.status === 'queued'}
-									<FileArchiveIcon class="size-4 text-muted-foreground" />
-								{:else if item.status === 'uploading' || item.status === 'installing'}
-									<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
-								{:else if item.status === 'success'}
-									<CheckCircleIcon class="size-4 text-green-600" />
-								{:else}
-									<XCircleIcon class="size-4 text-red-600" />
-								{/if}
-							</div>
-							<div class="min-w-0 flex-1">
-								<div class="truncate font-medium">{item.file.name}</div>
-								<div class="flex items-center gap-2 text-xs text-muted-foreground">
-									<span>{(item.file.size / 1024 / 1024).toFixed(2)} MB</span>
+						<div class="flex flex-col gap-1.5 p-2.5 text-sm">
+							<div class="flex items-center gap-2">
+								<div class="shrink-0">
 									{#if item.status === 'queued'}
-										<span>· în așteptare</span>
-									{:else if item.status === 'uploading'}
-										<span>· se urcă…</span>
-									{:else if item.status === 'installing'}
-										<span>· WP instalează…</span>
+										<FileArchiveIcon class="size-4 text-muted-foreground" />
+									{:else if item.status === 'inspecting' || item.status === 'uploading' || item.status === 'installing'}
+										<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
 									{:else if item.status === 'success'}
-										<span class="text-green-600">
-											· {item.installedAs}
-											{#if item.activated}· activat{:else}· nu s-a activat{/if}
-										</span>
-									{:else if item.status === 'error'}
-										<span class="text-red-600 break-all">· {item.message}</span>
+										<CheckCircleIcon class="size-4 text-green-600" />
+									{:else if item.status === 'skipped'}
+										<FileArchiveIcon class="size-4 text-amber-500" />
+									{:else if item.status === 'inspected'}
+										<FileArchiveIcon class="size-4 text-blue-500" />
+									{:else}
+										<XCircleIcon class="size-4 text-red-600" />
 									{/if}
 								</div>
+								<div class="min-w-0 flex-1">
+									<div class="truncate font-medium">
+										{item.info?.name ?? item.file.name}
+									</div>
+									<div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+										<span>{(item.file.size / 1024 / 1024).toFixed(2)} MB</span>
+										{#if item.info?.slug}
+											<span>· <code class="rounded bg-muted px-1">{item.info.slug}</code></span>
+										{/if}
+
+										{#if item.status === 'queued'}
+											<span>· în așteptare</span>
+										{:else if item.status === 'inspecting'}
+											<span>· se inspectează…</span>
+										{/if}
+
+										{#if item.verdict?.kind === 'new'}
+											<span class="text-blue-600 font-medium">· NOU v{item.info?.version}</span>
+										{:else if item.verdict?.kind === 'upgrade'}
+											<span class="text-green-600 font-medium">
+												· UPGRADE v{item.verdict.installedVersion} → v{item.info?.version}
+											</span>
+											<span class="text-muted-foreground/70">
+												· match: {item.verdict.match.reasons.join(', ')} ({item.verdict.match.score})
+											</span>
+										{:else if item.verdict?.kind === 'same_version'}
+											<span class="text-amber-600 font-medium">
+												· ACEEAȘI VERSIUNE v{item.verdict.installedVersion} — skip
+											</span>
+										{:else if item.verdict?.kind === 'downgrade'}
+											<span class="text-red-600 font-medium">
+												· DOWNGRADE v{item.verdict.installedVersion} → v{item.info?.version} — skip
+											</span>
+										{:else if item.verdict?.kind === 'ambiguous'}
+											<span class="text-purple-600 font-medium">
+												· AMBIGUU — alege manual
+											</span>
+										{/if}
+
+										{#if item.status === 'uploading'}
+											<span>· se urcă…</span>
+										{:else if item.status === 'installing'}
+											<span>· WP instalează…</span>
+										{:else if item.status === 'success'}
+											<span class="text-green-600">
+												· {item.installedAs}
+												{#if item.activated}· activat{:else}· nu s-a activat{/if}
+											</span>
+										{:else if item.status === 'error'}
+											<span class="text-red-600 break-all">· {item.message}</span>
+										{/if}
+									</div>
+								</div>
+
+								{#if (item.verdict?.kind === 'same_version' || item.verdict?.kind === 'downgrade') && !uploading && item.status !== 'success'}
+									<label class="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none shrink-0">
+										<input
+											type="checkbox"
+											class="size-3.5"
+											checked={item.forceInstall ?? false}
+											onchange={() => toggleForce(item.id)}
+										/>
+										Force
+									</label>
+								{/if}
+
+								{#if !uploading && item.status !== 'uploading' && item.status !== 'installing' && item.status !== 'inspecting'}
+									<Button
+										variant="ghost"
+										size="icon"
+										class="h-7 w-7"
+										onclick={() => removeFromQueue(item.id)}
+										title="Șterge din listă"
+									>
+										<XCircleIcon class="size-3.5" />
+									</Button>
+								{/if}
 							</div>
-							{#if !uploading && item.status !== 'uploading' && item.status !== 'installing'}
-								<Button
-									variant="ghost"
-									size="icon"
-									class="h-7 w-7"
-									onclick={() => removeFromQueue(item.id)}
-									title="Șterge din listă"
-								>
-									<XCircleIcon class="size-3.5" />
-								</Button>
+
+							<!-- Ambiguous verdict: inline disambiguation control. -->
+							{#if item.verdict?.kind === 'ambiguous' && !uploading && item.status !== 'success'}
+								<div class="ml-6 flex items-center gap-2 text-xs">
+									<span class="text-muted-foreground shrink-0">Match cu:</span>
+									<select
+										class="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+										value={item.disambiguatedMatch ?? '__skip__'}
+										onchange={(e) => disambiguate(item.id, (e.target as HTMLSelectElement).value)}
+									>
+										<option value="__skip__">-- Skip --</option>
+										{#each item.verdict.candidates as c}
+											<option value={c.plugin}>
+												{c.installedName} (v{c.installedVersion}, scor {c.score})
+											</option>
+										{/each}
+										<option value="__new__">-- Instalează ca nou --</option>
+									</select>
+								</div>
 							{/if}
 						</div>
 					{/each}
@@ -550,14 +1098,18 @@
 			</Button>
 			<Button
 				onclick={runBulkUpload}
-				disabled={uploading || uploadQueue.length === 0 || uploadQueue.every((i) => i.status === 'success')}
+				disabled={uploading ||
+					uploadQueue.length === 0 ||
+					uploadQueue.filter((i) => i.status === 'inspected').length === 0}
 			>
 				{#if uploading}
 					<LoaderIcon class="mr-2 size-4 animate-spin" />
 					Se procesează…
 				{:else}
 					<UploadIcon class="mr-2 size-4" />
-					Instalează {uploadQueue.filter((i) => i.status !== 'success').length} fișier(e)
+					{@const installCount = uploadQueue.filter((i) => i.status === 'inspected').length}
+					{@const skipCount = uploadQueue.filter((i) => i.status === 'skipped').length}
+					Instalează {installCount} fișier(e){skipCount > 0 ? ` (${skipCount} skip)` : ''}
 				{/if}
 			</Button>
 		</DialogFooter>

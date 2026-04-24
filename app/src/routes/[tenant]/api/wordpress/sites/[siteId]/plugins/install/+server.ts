@@ -64,6 +64,18 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		return json({ error: 'filename și dataBase64 sunt obligatorii' }, { status: 400 });
 	}
 
+	// Reject oversized payloads before we spend time round-tripping to the
+	// target WP site. Base64 inflates by ~4/3, so 70 MB of base64 text
+	// decodes to ~52 MB — slightly above the 50 MB hard cap that the
+	// connector's PHP side enforces. Leaving slack avoids off-by-a-few-bytes
+	// rejects on the WP side.
+	if (body.dataBase64.length > 70_000_000) {
+		return json(
+			{ error: 'ZIP depășește 50 MB' },
+			{ status: 413 }
+		);
+	}
+
 	try {
 		const result = await ctx.client.installPlugin(
 			{

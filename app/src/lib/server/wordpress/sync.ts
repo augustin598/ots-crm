@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { WpClient, type WpUpdateItem } from './client';
 import { WpError } from './errors';
+import { compareConnectorVersions } from './connector-release';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
@@ -68,10 +69,26 @@ export async function syncHealth(siteId: string): Promise<{
 		const health = await client.health({ siteId });
 		const now = new Date();
 
+		// Never allow connectorVersion to *regress* on a health sync.
+		// PHP opcache can serve a stale OTS_CONNECTOR_VERSION constant
+		// for minutes after a plugin self-update (the constant was defined
+		// when the old code was first loaded; replacing the .php file on
+		// disk doesn't evict the bytecode until opcache invalidates).
+		// Without this guard, a refresh right after a successful update
+		// would roll the DB field back to the previous version, re-arming
+		// the "update available" amber dot.
+		const storedVersion = site.connectorVersion;
+		const nextConnectorVersion =
+			storedVersion &&
+			health.connectorVersion &&
+			compareConnectorVersions(health.connectorVersion, storedVersion) < 0
+				? storedVersion
+				: health.connectorVersion;
+
 		await db
 			.update(table.wordpressSite)
 			.set({
-				connectorVersion: health.connectorVersion,
+				connectorVersion: nextConnectorVersion,
 				wpVersion: health.wpVersion,
 				phpVersion: health.phpVersion,
 				sslExpiresAt: health.sslExpiresAt ? new Date(health.sslExpiresAt) : null,

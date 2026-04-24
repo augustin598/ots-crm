@@ -65,9 +65,11 @@
 			qs.set('perPage', '50');
 			const res = await fetch(`${apiBase}?${qs.toString()}`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = (await res.json()) as { items: WpPost[]; total: number };
-			posts = data.items;
-			total = data.total;
+			// Defensive against null/malformed bodies — same reasoning as
+			// in the plugins page.
+			const data = (await res.json().catch(() => null)) as { items?: WpPost[]; total?: number } | null;
+			posts = Array.isArray(data?.items) ? data.items : [];
+			total = typeof data?.total === 'number' ? data.total : 0;
 		} catch (err) {
 			toast.error('Nu s-au putut încărca postările');
 			console.error(err);
