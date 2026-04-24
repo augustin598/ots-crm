@@ -100,6 +100,9 @@ export function mapUblInvoiceToCrm(
 		keezExternalId: null,
 		keezStatus: null,
 		spvId: null, // Will be set when synced
+		externalSource: null,
+		externalInvoiceId: null,
+		externalTransactionId: null,
 		createdByUserId: userId,
 		lineItems
 	};
@@ -239,7 +242,10 @@ export function mapAnafCompanyToClient(
 		googleAdsCustomerId: null,
 		restrictedAccess: null,
 		monthlyBudget: null,
-		budgetWarningThreshold: null
+		budgetWarningThreshold: null,
+		avatarPath: null,
+		avatarSource: 'whatsapp',
+		whmcsClientId: null
 	};
 }
 

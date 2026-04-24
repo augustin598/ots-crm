@@ -1317,6 +1317,97 @@
       "when": 1777430105000,
       "tag": "0187_whatsapp_contact_avatar_hidden",
       "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "6",
+      "when": 1777430106000,
+      "tag": "0188_whmcs_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "6",
+      "when": 1777430107000,
+      "tag": "0189_whmcs_invoice_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "6",
+      "when": 1777430108000,
+      "tag": "0190_whmcs_client_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "6",
+      "when": 1777430109000,
+      "tag": "0191_whmcs_product_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "6",
+      "when": 1777430110000,
+      "tag": "0192_whmcs_transaction_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "6",
+      "when": 1777430111000,
+      "tag": "0193_client_whmcs_client_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "6",
+      "when": 1777430112000,
+      "tag": "0194_invoice_external_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "6",
+      "when": 1777430113000,
+      "tag": "0195_invoice_external_invoice_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "6",
+      "when": 1777430114000,
+      "tag": "0196_invoice_external_transaction_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "6",
+      "when": 1777430115000,
+      "tag": "0197_invoice_settings_keez_series_hosting",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "6",
+      "when": 1777430116000,
+      "tag": "0198_invoice_settings_keez_start_number_hosting",
+      "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "6",
+      "when": 1777430117000,
+      "tag": "0199_invoice_settings_keez_last_synced_number_hosting",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "6",
+      "when": 1777430118000,
+      "tag": "0200_invoice_settings_whmcs_auto_push_to_keez",
+      "breakpoints": true
     }
   ]
 }

@@ -37,7 +37,8 @@ export type LogSource =
 	| 'meta-ads-leads'
 	| 'tiktok-auto-assign'
 	| 'whatsapp'
-	| 'wordpress';
+	| 'wordpress'
+	| 'whmcs';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

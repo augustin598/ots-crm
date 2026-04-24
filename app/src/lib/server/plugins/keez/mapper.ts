@@ -986,7 +986,10 @@ export function mapKeezPartnerToClient(
 		googleAdsCustomerId: null,
 		restrictedAccess: null,
 		monthlyBudget: null,
-		budgetWarningThreshold: null
+		budgetWarningThreshold: null,
+		avatarPath: null,
+		avatarSource: 'whatsapp',
+		whmcsClientId: null
 	};
 }
 

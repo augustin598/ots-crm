@@ -1,0 +1,1 @@
+ALTER TABLE `invoice_settings` ADD COLUMN `whmcs_auto_push_to_keez` integer NOT NULL DEFAULT 0;

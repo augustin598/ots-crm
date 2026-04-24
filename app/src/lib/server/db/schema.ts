@@ -1,4 +1,4 @@
-import { customType, sqliteTable, integer as serial, integer, text, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { customType, sqliteTable, integer as serial, integer, text, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
 const timestamp = customType<{ data: Date }>({
@@ -133,6 +133,7 @@ export const client = sqliteTable('client', {
 	budgetWarningThreshold: integer('budget_warning_threshold').default(80),
 	avatarPath: text('avatar_path'),
 	avatarSource: text('avatar_source').notNull().default('whatsapp'),
+	whmcsClientId: integer('whmcs_client_id'), // WHMCS user ID — stable match key after first sync
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -496,6 +497,9 @@ export const invoice = sqliteTable('invoice', {
 	keezExternalId: text('keez_external_id'),
 	keezStatus: text('keez_status'), // 'Draft' (proforma), 'Valid' (fiscal), 'Cancelled'
 	spvId: text('spv_id'), // ANAF SPV invoice ID
+	externalSource: text('external_source'), // 'whmcs', 'manual', 'meta-ads' — discriminator for origin
+	externalInvoiceId: integer('external_invoice_id'), // WHMCS invoice ID (or other source)
+	externalTransactionId: text('external_transaction_id'), // Stripe txn_... or other payment provider ref
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -618,6 +622,11 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	keezLastSyncedNumber: text('keez_last_synced_number'),
 	keezAutoSync: boolean('keez_auto_sync').notNull().default(false),
 	keezDefaultPaymentTypeId: integer('keez_default_payment_type_id').default(3), // 1=BFCash, 2=BFCard, 3=Bank, 4=ChitCash, etc.
+	// WHMCS-specific hosting series (separate from main keezSeries so hosting invoices can be tracked apart)
+	keezSeriesHosting: text('keez_series_hosting'),
+	keezStartNumberHosting: text('keez_start_number_hosting'),
+	keezLastSyncedNumberHosting: text('keez_last_synced_number_hosting'),
+	whmcsAutoPushToKeez: boolean('whmcs_auto_push_to_keez').notNull().default(false),
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
 	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
@@ -3788,5 +3797,201 @@ export const wordpressPostRelations = relations(wordpressPost, ({ one }) => ({
 	site: one(wordpressSite, {
 		fields: [wordpressPost.siteId],
 		references: [wordpressSite.id]
+	})
+}));
+
+// ============================================================================
+// WHMCS Integration (receiver-side connector; replaces legacy keez_integration PHP module)
+// Plan: docs/whmcs-integration.md
+// ============================================================================
+
+/**
+ * Per-tenant credentials + state for the WHMCS connector.
+ * sharedSecret is encrypted via lib/server/crypto (same pattern as other integrations).
+ * enableKeezPush starts as false to enforce a dry-run phase before fiscal sync activates.
+ */
+export const whmcsIntegration = sqliteTable('whmcs_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id)
+		.unique(),
+	whmcsUrl: text('whmcs_url').notNull(),
+	sharedSecret: text('shared_secret').notNull(), // encrypted
+	isActive: boolean('is_active').notNull().default(false),
+	enableKeezPush: boolean('enable_keez_push').notNull().default(false), // dry-run gate
+	circuitBreakerUntil: timestamp('circuit_breaker_until', { withTimezone: true, mode: 'date' }),
+	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+	lastSuccessfulSyncAt: timestamp('last_successful_sync_at', { withTimezone: true, mode: 'date' }),
+	lastFailureReason: text('last_failure_reason'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
+
+/**
+ * Invoice sync tracking + state machine for WHMCS webhooks.
+ * State: PENDING → CLIENT_MATCHED → INVOICE_CREATED → KEEZ_PUSHED (terminal).
+ * Retry happens only on the failed step; earlier steps are skipped on resume.
+ * originalTotalHash snapshots line items at first sync to detect post-payment mutations.
+ */
+export const whmcsInvoiceSync = sqliteTable(
+	'whmcs_invoice_sync',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		whmcsInvoiceId: integer('whmcs_invoice_id').notNull(),
+		invoiceId: text('invoice_id').references(() => invoice.id),
+		state: text('state').notNull(), // 'PENDING'|'CLIENT_MATCHED'|'INVOICE_CREATED'|'KEEZ_PUSHED'|'FAILED'|'DEAD_LETTER'
+		lastEvent: text('last_event'), // 'created'|'paid'|'cancelled'|'refunded'
+		matchType: text('match_type'), // 'WHMCS_ID'|'CUI'|'EMAIL'|'NEW'
+		lastPayloadHash: text('last_payload_hash'),
+		originalAmount: real('original_amount'),
+		originalCurrency: text('original_currency'),
+		originalTotalHash: text('original_total_hash'),
+		retryCount: integer('retry_count').notNull().default(0),
+		lastErrorClass: text('last_error_class'), // 'TRANSIENT'|'PERMANENT'
+		lastErrorMessage: text('last_error_message'),
+		rawPayload: text('raw_payload'), // redacted JSON
+		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+	},
+	(t) => ({
+		uniqPair: uniqueIndex('uniq_whmcs_tenant_invoice').on(t.tenantId, t.whmcsInvoiceId),
+		byTenantState: index('idx_whmcs_invoice_sync_tenant_state').on(t.tenantId, t.state)
+	})
+);
+
+/**
+ * Client sync tracking. One row per (tenant, whmcsClientId) pair.
+ * matchType records how the CRM client was located: existing whmcsClientId, CUI, email, or new create.
+ */
+export const whmcsClientSync = sqliteTable(
+	'whmcs_client_sync',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		whmcsClientId: integer('whmcs_client_id').notNull(),
+		clientId: text('client_id').references(() => client.id),
+		state: text('state').notNull(), // 'PENDING'|'MATCHED'|'CREATED'|'FAILED'
+		matchType: text('match_type'), // 'WHMCS_ID'|'CUI'|'EMAIL'|'NEW'
+		lastEvent: text('last_event'), // 'added'|'updated'
+		lastPayloadHash: text('last_payload_hash'),
+		lastErrorMessage: text('last_error_message'),
+		rawPayload: text('raw_payload'),
+		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+	},
+	(t) => ({
+		uniqPair: uniqueIndex('uniq_whmcs_tenant_client').on(t.tenantId, t.whmcsClientId)
+	})
+);
+
+/**
+ * Product sync tracking. v1 logs-only (no service creation in v1 to keep scope tight).
+ * Schema provisioned now to avoid future DDL deploys.
+ */
+export const whmcsProductSync = sqliteTable(
+	'whmcs_product_sync',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		whmcsProductId: integer('whmcs_product_id').notNull(),
+		serviceId: text('service_id').references(() => service.id),
+		state: text('state').notNull().default('LOGGED'), // v1: just log
+		lastPayloadHash: text('last_payload_hash'),
+		rawPayload: text('raw_payload'),
+		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => ({
+		uniqPair: uniqueIndex('uniq_whmcs_tenant_product').on(t.tenantId, t.whmcsProductId)
+	})
+);
+
+/**
+ * Transaction sync tracking. v1 logs-only; v2 will link to bank transactions.
+ */
+export const whmcsTransactionSync = sqliteTable(
+	'whmcs_transaction_sync',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		whmcsTransactionId: text('whmcs_transaction_id').notNull(), // WHMCS uses string IDs for some gateways
+		bankTransactionId: text('bank_transaction_id'), // future link to bankTransaction table
+		state: text('state').notNull().default('LOGGED'),
+		lastPayloadHash: text('last_payload_hash'),
+		rawPayload: text('raw_payload'),
+		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => ({
+		uniqPair: uniqueIndex('uniq_whmcs_tenant_transaction').on(t.tenantId, t.whmcsTransactionId)
+	})
+);
+
+// --- WHMCS relations ---
+
+export const whmcsIntegrationRelations = relations(whmcsIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whmcsIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const whmcsInvoiceSyncRelations = relations(whmcsInvoiceSync, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whmcsInvoiceSync.tenantId],
+		references: [tenant.id]
+	}),
+	invoice: one(invoice, {
+		fields: [whmcsInvoiceSync.invoiceId],
+		references: [invoice.id]
+	})
+}));
+
+export const whmcsClientSyncRelations = relations(whmcsClientSync, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whmcsClientSync.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [whmcsClientSync.clientId],
+		references: [client.id]
+	})
+}));
+
+export const whmcsProductSyncRelations = relations(whmcsProductSync, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whmcsProductSync.tenantId],
+		references: [tenant.id]
+	}),
+	service: one(service, {
+		fields: [whmcsProductSync.serviceId],
+		references: [service.id]
+	})
+}));
+
+export const whmcsTransactionSyncRelations = relations(whmcsTransactionSync, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whmcsTransactionSync.tenantId],
+		references: [tenant.id]
 	})
 }));
