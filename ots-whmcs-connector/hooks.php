@@ -53,13 +53,10 @@ function ots_crm_connector_settings(): array
             $out[$row->setting] = $row->value;
         }
 
-        // Decrypt sharedSecret if WHMCS stored it encrypted
-        if (!empty($out['sharedSecret'])) {
-            $decrypted = localAPI('DecryptPassword', ['password2' => $out['sharedSecret']]);
-            if (!empty($decrypted['password'])) {
-                $out['sharedSecret'] = $decrypted['password'];
-            }
-        }
+        // Note: sharedSecret is stored plaintext (Type=text in _config). WHMCS
+        // Type=password would encrypt with CC_ENCRYPTION_HASH in DB but
+        // localAPI('DecryptPassword') does NOT undo that for addon module fields,
+        // so the decrypted value reaching HMAC would be junk → signature_mismatch.
 
         return $out;
     } catch (\Throwable $e) {
