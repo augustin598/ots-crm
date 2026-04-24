@@ -320,10 +320,16 @@ export class KeezClient {
 					);
 				}
 
-				// 5xx: server error, retryable.
+				// 5xx: server error, retryable. Throw KeezClientError (not a generic
+				// Error) so downstream classifyKeezError() decides via instanceof +
+				// status, not by regex on the message body — Keez nginx returns HTML
+				// on 502 and a future provider change to JSON would silently misclassify.
 				if (!response.ok) {
 					const errorText = await response.text();
-					throw new Error(`Keez API error: ${response.status} ${errorText}`);
+					throw new KeezClientError(
+						`Keez API error: ${response.status} ${errorText.substring(0, 500)}`,
+						response.status
+					);
 				}
 
 				// Handle PDF responses
@@ -343,8 +349,10 @@ export class KeezClient {
 
 				return response.text() as unknown as T;
 			} catch (error) {
-				// Non-retryable → throw immediately regardless of attempt count.
-				if (error instanceof KeezClientError) {
+				// Non-retryable client errors → throw immediately regardless of
+				// attempt count. 5xx is now also a KeezClientError (above), so
+				// discriminate by status: only 4xx short-circuits the retry loop.
+				if (error instanceof KeezClientError && error.status < 500) {
 					throw error;
 				}
 				if (attempt === retries - 1) {
