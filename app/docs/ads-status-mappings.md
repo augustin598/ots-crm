@@ -2,7 +2,7 @@
 
 **Scop:** document single-source-of-truth pentru cum statusurile raw de la Meta, Google și TikTok sunt mapate la categoria noastră unificată `AdsPaymentStatus`. Consultă acest document când adaugi un status nou, investighezi o alertă sau scrii teste.
 
-**Ultima verificare împotriva docs oficiale:** 2026-04-22 (Claude Opus 4.7 + Gemini review)
+**Ultima verificare împotriva docs oficiale:** 2026-04-24 (Claude Opus 4.7 + Gemini review) — added TikTok secondary fields
 
 ---
 
@@ -124,6 +124,30 @@ TikTok folosește **string enums**, nu coduri numerice. Toate valorile încep cu
 | `STATUS_ADVERTISER_AUTHORIZATION_PENDING` | `risk_review` | Legacy, echivalent |
 | altele | `risk_review` + log | fail-safer |
 
+### Status secundar (stocat în `paymentStatusRaw.tiktokSecondary`)
+
+Pentru diagnostic mai fin, din `/advertiser/info/` capturăm acum și:
+
+| Câmp | Descriere | Apariții tipice |
+|---|---|---|
+| `display_status` | Status UI-facing (poate diferi de `status`) | rar diferit |
+| `sub_status` | Motiv granular: `REASON_ADVERTISER_AUDIT`, `REASON_ADVERTISER_PUNISH`, ... | la conturi cu probleme active |
+| `reject_reason` | Cod explicativ pt. conturi respinse: `INVALID_BUSINESS_LICENSE`, ... | doar la STATUS_REJECTED |
+| `deliveryIssue` | Agregat la nivel de cont din campaign health: `none \| budget_exceeded \| no_delivery \| all_paused` | override-ul nostru |
+
+Fișiere: [`campaign-health.ts`](../src/lib/server/tiktok-ads/campaign-health.ts), [`client.ts:fetchAdvertiserStatuses`](../src/lib/server/tiktok-ads/client.ts). Persistate via `paymentStatusRaw` JSON (fără migrație).
+
+### Campaign `secondary_status` — `delivering` vs `blocked`
+
+Contul TikTok e marcat `risk_review` când primary = `STATUS_ENABLE` dar `deliveringCount === 0` peste toate campaniile user-enabled. "Delivering" include:
+
+- `CAMPAIGN_STATUS_DELIVERY_OK` — normal
+- `CAMPAIGN_STATUS_PARTIAL_AUDIT_DENY` — **unele reclame respinse la nivel de ad, dar campania livrează cu cele aprobate**
+
+Toate celelalte (`BUDGET_EXCEED`, `NOT_DELIVERY`, `ADVERTISER_AUDIT_DENY`, `ADVERTISER_ACCOUNT_PUNISH`, lifecycle `DONE`/`NOT_START`/`TIME_DONE`/`NO_SCHEDULE`, `DISABLE`, `DELETE`) nu contează ca delivering.
+
+Clasificatorul pur: [`campaign-health.ts:classifySecondaryStatus`](../src/lib/server/tiktok-ads/campaign-health.ts). Testat în [`campaign-health.test.ts`](../src/lib/server/tiktok-ads/campaign-health.test.ts) (13 teste, 28 aserții).
+
 ---
 
 ## Date reale observate (tenant OTS, 2026-04-22)
@@ -192,6 +216,7 @@ Fișierul de test [`payment-status.test.ts`](../src/lib/server/ads/payment-statu
 | 2026-04-22 | ~90 emailuri false-positive la prima rulare | `payment_status` default 'ok' vs status real → tranziție fantomă | seed-without-alert când `paymentStatusCheckedAt IS NULL` ([`a5623ff`](https://github.com/)) |
 | 2026-04-22 | 39 Google accounts false `payment_failed` | Enum BillingSetupStatus 4→'CANCELLED' în loc de 'APPROVED' | Remapare enum corectă |
 | 2026-04-22 | 7 TikTok `STATUS_LIMIT` silent `ok` | Mapper fără case explicit, default era 'ok' | Adăugat case + default fail-safer la `risk_review` |
+| 2026-04-24 | 1+ TikTok cont marcat `risk_review` greșit | `PARTIAL_AUDIT_DENY` era tratat ca "not delivering" deși campaniile livrau cu reclame aprobate | Introdus `isCampaignDelivering` + capturat `sub_status`/`reject_reason`/`display_status` în raw snapshot |
 
 ---
 
