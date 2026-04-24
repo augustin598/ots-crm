@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { logInfo, logError } from '$lib/server/logger';
+import { classifySecondaryStatus } from './campaign-health';
 
 const TIKTOK_API_URL = 'https://business-api.tiktok.com/open_api/v1.3';
 
@@ -1080,6 +1081,12 @@ export interface TiktokAdvertiserStatusInfo {
 	advertiserId: string;
 	accountName: string;
 	status: string;
+	/** UI-facing status — poate diferi de `status` */
+	displayStatus: string | null;
+	/** Motiv granular (REASON_ADVERTISER_AUDIT, REASON_ADVERTISER_PUNISH, ...) */
+	subStatus: string | null;
+	/** Cod/string explicativ pt. rejected accounts */
+	rejectReason: string | null;
 }
 
 /**
@@ -1109,7 +1116,10 @@ export async function fetchAdvertiserStatuses(
 	return (json.data.list as any[]).map((adv) => ({
 		advertiserId: String(adv.advertiser_id),
 		accountName: adv.advertiser_name || adv.name || `Advertiser ${adv.advertiser_id}`,
-		status: adv.status || 'STATUS_ENABLE'
+		status: adv.status || 'STATUS_ENABLE',
+		displayStatus: adv.display_status ? String(adv.display_status) : null,
+		subStatus: adv.sub_status ? String(adv.sub_status) : null,
+		rejectReason: adv.reject_reason ? String(adv.reject_reason) : null,
 	}));
 }
 
@@ -1175,21 +1185,13 @@ export async function fetchAdvertiserCampaignHealth(
 
 		for (const c of json.data.list as any[]) {
 			const op = String(c.operation_status || '').toUpperCase();
-			const sec = String(c.secondary_status || '').toUpperCase();
+			const sec = String(c.secondary_status || '');
 
-			// User-enabled campaigns (the ones expected to be running).
 			if (op === 'ENABLE' || op === 'CAMPAIGN_STATUS_ENABLE') {
 				enabled += 1;
-
-				// Actively delivering ad impressions.
-				if (sec === 'CAMPAIGN_STATUS_DELIVERY_OK' || sec === 'STATUS_DELIVERY_OK') {
-					delivering += 1;
-				} else if (
-					sec === 'CAMPAIGN_STATUS_BUDGET_EXCEED' ||
-					sec === 'CAMPAIGN_BUDGET_EXCEED'
-				) {
-					budgetExceeded += 1;
-				}
+				const cls = classifySecondaryStatus(sec);
+				if (cls === 'delivering') delivering += 1;
+				else if (cls === 'budget_exceeded') budgetExceeded += 1;
 			}
 		}
 

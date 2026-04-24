@@ -77,11 +77,12 @@ export async function fetchTikTokPaymentStatus(
 		let rawStatusCode: string = adv.status;
 		let rawDisableReason: string | null = null;
 
+		const health = healthByAdvertiser.get(row.tiktokAdvertiserId) ?? null;
+
 		// Override when advertiser is enabled but campaigns aren't delivering.
 		// 'all_paused' means user chose to pause — no alert. 'budget_exceeded'
 		// or 'no_delivery' are platform-level blocks worth surfacing.
 		if (paymentStatus === 'ok') {
-			const health = healthByAdvertiser.get(row.tiktokAdvertiserId);
 			if (health && (health.issue === 'budget_exceeded' || health.issue === 'no_delivery')) {
 				paymentStatus = 'risk_review';
 				rawDisableReason = health.issue;
@@ -101,6 +102,12 @@ export async function fetchTikTokPaymentStatus(
 			balanceCents: balance?.balanceCents ?? null,
 			currencyCode: balance?.currencyCode ?? null,
 			checkedAt,
+			tiktokSecondary: {
+				displayStatus: adv.displayStatus,
+				subStatus: adv.subStatus,
+				rejectReason: adv.rejectReason,
+				deliveryIssue: health?.issue ?? null,
+			},
 		});
 	}
 
