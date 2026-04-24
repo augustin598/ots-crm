@@ -10,7 +10,8 @@
 		setEnableKeezPush,
 		saveWhmcsHostingSeries,
 		replayWhmcsSync,
-		testWhmcsConnection
+		testWhmcsConnection,
+		pushWhmcsInvoiceNumber
 	} from '$lib/remotes/whmcs.remote';
 	import {
 		Card,
@@ -43,6 +44,7 @@
 	} from '$lib/components/ui/dialog';
 	import {
 		AlertTriangle,
+		ArrowUpFromLine,
 		CheckCircle2,
 		Copy,
 		RotateCw,
@@ -83,6 +85,7 @@
 
 	let testing = $state(false);
 	let testResult = $state<Awaited<ReturnType<typeof testWhmcsConnection>> | null>(null);
+	let pushingNumberId: string | null = $state(null);
 
 	let togglingActive = $state(false);
 	let togglingKeezPush = $state(false);
@@ -214,6 +217,22 @@
 			toast.error('A apărut o eroare: ' + (err instanceof Error ? err.message : String(err)));
 		} finally {
 			testing = false;
+		}
+	}
+
+	async function handlePushNumber(invoiceId: string) {
+		pushingNumberId = invoiceId;
+		try {
+			const r = await pushWhmcsInvoiceNumber({ invoiceId });
+			if (r.ok) {
+				toast.success(`Număr sincronizat la WHMCS: ${r.oldNumber} → ${r.newNumber}`);
+			} else {
+				toast.error(`Eșec: ${r.reason}${r.detail ? ' — ' + r.detail : ''}`);
+			}
+		} catch (err) {
+			toast.error('A apărut o eroare: ' + (err instanceof Error ? err.message : String(err)));
+		} finally {
+			pushingNumberId = null;
 		}
 	}
 
@@ -635,6 +654,7 @@
 										<TableHead>Match</TableHead>
 										<TableHead>Sumă</TableHead>
 										<TableHead>Eroare</TableHead>
+										<TableHead class="text-right">Acțiuni</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -659,6 +679,24 @@
 													</span>
 												{:else}
 													—
+												{/if}
+											</TableCell>
+											<TableCell class="text-right">
+												{#if sync.invoiceId}
+													{@const invId = sync.invoiceId}
+													<Button
+														type="button"
+														size="sm"
+														variant="ghost"
+														title="Propagă numărul fiscal înapoi la WHMCS (overwrite invoicenum)"
+														disabled={pushingNumberId === invId}
+														onclick={() => handlePushNumber(invId)}
+													>
+														<ArrowUpFromLine class="h-3 w-3 mr-1" />
+														{pushingNumberId === invId ? '...' : 'Sync nr.'}
+													</Button>
+												{:else}
+													<span class="text-muted-foreground text-xs">—</span>
 												{/if}
 											</TableCell>
 										</TableRow>

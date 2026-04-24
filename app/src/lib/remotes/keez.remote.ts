@@ -1281,6 +1281,17 @@ export const validateInvoiceInKeez = command(
 			})
 			.where(eq(table.invoice.id, data.invoiceId));
 
+		// Auto-propagate number back to WHMCS if the invoice originated there.
+		// Fire-and-forget — failure is logged inside pushInvoiceNumberToWhmcs,
+		// doesn't abort the Keez-validation success path. Admin can retry
+		// manually via pushWhmcsInvoiceNumber from the settings page.
+		if (invoice.externalSource === 'whmcs' && invoice.externalInvoiceId) {
+			void import('$lib/server/whmcs/push-number-to-whmcs').then(
+				({ pushInvoiceNumberToWhmcs }) =>
+					pushInvoiceNumberToWhmcs(event.locals.tenant!.id, data.invoiceId)
+			);
+		}
+
 		return { success: true };
 	}
 );
