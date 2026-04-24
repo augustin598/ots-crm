@@ -294,11 +294,10 @@ async function upsertContactAvatar(
 	logInfo('whatsapp', 'avatar stored', { tenantId, metadata: { phone: phoneE164, key } });
 }
 
-async function propagateToClient(
+async function findClientByPhone(
 	tenantId: string,
-	phoneE164: string,
-	key: string
-): Promise<void> {
+	phoneE164: string
+): Promise<{ id: string; avatarSource: string | null } | null> {
 	const { db } = await import('$lib/server/db');
 	const table = await import('$lib/server/db/schema');
 	const { and, eq, inArray } = await import('drizzle-orm');
@@ -310,25 +309,32 @@ async function propagateToClient(
 		.from(table.client)
 		.where(and(eq(table.client.tenantId, tenantId), inArray(table.client.phone, variants)))
 		.limit(1);
+	if (fast) return fast;
 
-	let match = fast;
-	if (!match) {
-		const candidates = await db
-			.select({ id: table.client.id, phone: table.client.phone, avatarSource: table.client.avatarSource })
-			.from(table.client)
-			.where(eq(table.client.tenantId, tenantId));
-		for (const c of candidates) {
-			if (!c.phone) continue;
-			if (tryToE164(c.phone) === phoneE164) {
-				match = { id: c.id, avatarSource: c.avatarSource };
-				break;
-			}
+	const candidates = await db
+		.select({ id: table.client.id, phone: table.client.phone, avatarSource: table.client.avatarSource })
+		.from(table.client)
+		.where(eq(table.client.tenantId, tenantId));
+	for (const c of candidates) {
+		if (!c.phone) continue;
+		if (tryToE164(c.phone) === phoneE164) {
+			return { id: c.id, avatarSource: c.avatarSource };
 		}
 	}
+	return null;
+}
 
-	if (!match) return;
-	if (match.avatarSource !== 'whatsapp') return; // manual override respected
+async function propagateToClient(
+	tenantId: string,
+	phoneE164: string,
+	key: string
+): Promise<void> {
+	const match = await findClientByPhone(tenantId, phoneE164);
+	if (!match || match.avatarSource !== 'whatsapp') return;
 
+	const { db } = await import('$lib/server/db');
+	const table = await import('$lib/server/db/schema');
+	const { eq } = await import('drizzle-orm');
 	await db
 		.update(table.client)
 		.set({ avatarPath: key, updatedAt: new Date() })
@@ -339,33 +345,12 @@ async function clearClientAvatarIfWhatsappSourced(
 	tenantId: string,
 	phoneE164: string
 ): Promise<void> {
+	const match = await findClientByPhone(tenantId, phoneE164);
+	if (!match || match.avatarSource !== 'whatsapp') return;
+
 	const { db } = await import('$lib/server/db');
 	const table = await import('$lib/server/db/schema');
-	const { and, eq, inArray } = await import('drizzle-orm');
-	const { phoneE164Variants, tryToE164 } = await import('./phone');
-
-	const variants = phoneE164Variants(phoneE164);
-	const [fast] = await db
-		.select({ id: table.client.id, avatarSource: table.client.avatarSource })
-		.from(table.client)
-		.where(and(eq(table.client.tenantId, tenantId), inArray(table.client.phone, variants)))
-		.limit(1);
-
-	let match = fast;
-	if (!match) {
-		const candidates = await db
-			.select({ id: table.client.id, phone: table.client.phone, avatarSource: table.client.avatarSource })
-			.from(table.client)
-			.where(eq(table.client.tenantId, tenantId));
-		for (const c of candidates) {
-			if (!c.phone) continue;
-			if (tryToE164(c.phone) === phoneE164) {
-				match = { id: c.id, avatarSource: c.avatarSource };
-				break;
-			}
-		}
-	}
-	if (!match || match.avatarSource !== 'whatsapp') return;
+	const { eq } = await import('drizzle-orm');
 	await db
 		.update(table.client)
 		.set({ avatarPath: null, updatedAt: new Date() })
