@@ -18,6 +18,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { CheckCircle2, XCircle, AlertTriangle, Loader2, Send, Plus, Search, Pencil, Paperclip, Download, FileText } from '@lucide/svelte';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { onDestroy, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -510,7 +511,13 @@
 										class="w-full px-4 py-3 text-left transition-colors hover:bg-muted/50 {isSelected ? 'bg-muted' : ''}"
 										onclick={() => selectConversation(c.remotePhoneE164)}
 									>
-										<div class="flex items-center justify-between gap-2">
+										<div class="flex items-center gap-3">
+											<ContactAvatar
+												src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(c.remotePhoneE164)}`}
+												name={label}
+												phoneE164={c.remotePhoneE164}
+												size="md"
+											/>
 											<div class="min-w-0 flex-1">
 												<div class="flex items-center gap-2">
 													<span class="truncate font-medium">{label}</span>
@@ -548,7 +555,13 @@
 				{:else}
 					<CardHeader class="border-b pb-3">
 						{@const threadLabel = activeConversation ? displayLabel(activeConversation) : (thread?.contact?.displayName ?? thread?.client?.name ?? thread?.contact?.pushName ?? selectedPhone)}
-						<div class="flex items-center justify-between">
+						<div class="flex items-center gap-3">
+							<ContactAvatar
+								src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(selectedPhone)}`}
+								name={threadLabel}
+								phoneE164={selectedPhone}
+								size="lg"
+							/>
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center gap-2">
 									<CardTitle class="truncate text-base">{threadLabel}</CardTitle>
