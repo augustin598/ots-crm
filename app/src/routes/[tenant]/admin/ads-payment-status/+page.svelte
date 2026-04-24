@@ -338,7 +338,7 @@
 												</div>
 											{/if}
 											{#if row.rawDeliveryIssue && row.rawDeliveryIssue !== 'none'}
-												<div class="text-xs text-amber-600 dark:text-amber-400">
+												<div class="text-xs text-amber-700 dark:text-amber-300">
 													delivery: {row.rawDeliveryIssue}
 												</div>
 											{/if}

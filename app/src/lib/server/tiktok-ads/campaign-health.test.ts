@@ -55,11 +55,14 @@ describe('classifySecondaryStatus', () => {
 	test('budget exceed → budget_exceeded', () => {
 		expect(classifySecondaryStatus('CAMPAIGN_STATUS_BUDGET_EXCEED')).toBe('budget_exceeded');
 		expect(classifySecondaryStatus('CAMPAIGN_BUDGET_EXCEED')).toBe('budget_exceeded');
+		expect(classifySecondaryStatus('CAMPAIGN_STATUS_BALANCE_EXCEED')).toBe('budget_exceeded');
 	});
 
-	test('audit deny / punish → blocked', () => {
+	test('audit deny / punish / pending → blocked', () => {
 		expect(classifySecondaryStatus('CAMPAIGN_STATUS_ADVERTISER_AUDIT_DENY')).toBe('blocked');
 		expect(classifySecondaryStatus('CAMPAIGN_STATUS_ADVERTISER_ACCOUNT_PUNISH')).toBe('blocked');
+		expect(classifySecondaryStatus('CAMPAIGN_STATUS_ADVERTISER_AUDIT')).toBe('blocked');
+		expect(classifySecondaryStatus('CAMPAIGN_STATUS_ADVERTISER_CONTRACT_PENDING')).toBe('blocked');
 	});
 
 	test('lifecycle / disabled → inactive', () => {
