@@ -1,12 +1,13 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { clearNotificationsByType } from '$lib/server/notifications';
 import { classifyKeezError } from './error-classification';
+import { reconcileMissingKeezInvoices } from './sync-reconcile';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -509,6 +510,59 @@ async function _syncKeezInvoicesForTenantInner(
 	}
 
 	result.pagesFetched = pagesFetched;
+
+	// Reconcile pass: any CRM invoice whose Keez counterpart we did NOT see
+	// in any page, and which Keez confirms is gone (per-invoice getInvoice),
+	// is marked cancelled here. This runs only after a successful pagination
+	// — if the per-run circuit breaker threw earlier, control never reaches
+	// here, so a partial pagination cannot trigger false cancellations.
+	const crmKeezBacked = await db
+		.select({
+			id: table.invoice.id,
+			externalId: table.invoice.keezExternalId,
+			status: table.invoice.status,
+		})
+		.from(table.invoice)
+		.where(
+			and(eq(table.invoice.tenantId, tenantId), isNotNull(table.invoice.keezExternalId)),
+		);
+	const candidates = crmKeezBacked
+		.filter(
+			(r): r is { id: string; externalId: string; status: string } =>
+				!!r.externalId && !seen.has(r.externalId) && r.status !== 'cancelled',
+		)
+		.map((r) => ({ id: r.id, externalId: r.externalId }));
+
+	if (candidates.length > 0) {
+		logInfo(
+			'keez',
+			`Reconcile: ${candidates.length} CRM invoice(s) not seen in this run, verifying individually`,
+			{ tenantId },
+		);
+	}
+	const recon = await reconcileMissingKeezInvoices({
+		seen,
+		candidates,
+		getInvoice: (externalId) => keezClient.getInvoice(externalId),
+		markCancelled: async (invoiceId) => {
+			await db
+				.update(table.invoice)
+				.set({ status: 'cancelled', updatedAt: new Date() })
+				.where(eq(table.invoice.id, invoiceId));
+			logWarning('keez', `Reconcile: marked invoice cancelled (no longer on Keez)`, {
+				tenantId,
+				metadata: { invoiceId },
+			});
+		},
+	});
+	result.reconciledCancelled = recon.cancelled;
+	if (recon.cancelled > 0 || recon.verified > 0) {
+		logInfo(
+			'keez',
+			`Reconcile complete: verified=${recon.verified} cancelled=${recon.cancelled} skipped=${recon.skipped}`,
+			{ tenantId },
+		);
+	}
 
 	// Successful completion — always update lastSyncAt AND reset failure columns,
 	// even for zero-invoice responses. Clearing failure state here is what lets
