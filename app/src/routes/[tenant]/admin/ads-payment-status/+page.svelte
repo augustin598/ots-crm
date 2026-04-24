@@ -321,6 +321,28 @@
 												reason: {row.rawDisableReason}
 											</div>
 										{/if}
+										{#if row.provider === 'tiktok'}
+											{#if row.rawSubStatus}
+												<div class="text-xs text-muted-foreground">
+													sub: <code>{row.rawSubStatus}</code>
+												</div>
+											{/if}
+											{#if row.rawDisplayStatus && row.rawDisplayStatus !== row.rawStatusCode}
+												<div class="text-xs text-muted-foreground">
+													display: <code>{row.rawDisplayStatus}</code>
+												</div>
+											{/if}
+											{#if row.rawRejectReason}
+												<div class="text-xs text-muted-foreground">
+													reject: <code>{row.rawRejectReason}</code>
+												</div>
+											{/if}
+											{#if row.rawDeliveryIssue && row.rawDeliveryIssue !== 'none'}
+												<div class="text-xs text-amber-600 dark:text-amber-400">
+													delivery: {row.rawDeliveryIssue}
+												</div>
+											{/if}
+										{/if}
 									</td>
 									<td class="py-3 pr-3 text-xs text-muted-foreground">
 										{formatCheckedAt(row.checkedAt)}
