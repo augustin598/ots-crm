@@ -13,9 +13,12 @@ import {
 } from '$lib/server/whatsapp/session-manager';
 import { getCachedQr } from '$lib/server/whatsapp/qr-broker';
 import { setDisplayName } from '$lib/server/whatsapp/contacts-store';
+import { enqueueFetch } from '$lib/server/whatsapp/avatar-fetcher';
 import { toE164, tryToE164, phoneE164Variants, InvalidPhoneError } from '$lib/server/whatsapp/phone';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logError } from '$lib/server/logger';
+
+const AVATAR_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — retry hidden/failed weekly
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -288,6 +291,7 @@ export const listWhatsappConversations = query(async () => {
 		clientName: string | null;
 		displayName: string | null;
 		pushName: string | null;
+		avatarPath: string | null;
 		unread: number;
 	};
 	const map = new Map<string, Conversation>();
@@ -305,6 +309,7 @@ export const listWhatsappConversations = query(async () => {
 				clientName: null,
 				displayName: null,
 				pushName: null,
+				avatarPath: null,
 				unread: isUnread ? 1 : 0
 			});
 		} else if (isUnread) {
@@ -332,7 +337,10 @@ export const listWhatsappConversations = query(async () => {
 			.select({
 				phoneE164: table.whatsappContact.phoneE164,
 				displayName: table.whatsappContact.displayName,
-				pushName: table.whatsappContact.pushName
+				pushName: table.whatsappContact.pushName,
+				avatarPath: table.whatsappContact.avatarPath,
+				avatarFetchedAt: table.whatsappContact.avatarFetchedAt,
+				avatarHidden: table.whatsappContact.avatarHidden
 			})
 			.from(table.whatsappContact)
 			.where(eq(table.whatsappContact.tenantId, tenantId));
@@ -348,7 +356,18 @@ export const listWhatsappConversations = query(async () => {
 			if (contact) {
 				c.displayName = contact.displayName;
 				c.pushName = contact.pushName;
+				c.avatarPath = contact.avatarPath ?? null;
 			}
+		}
+
+		const now = Date.now();
+		for (const c of conversations) {
+			if (c.avatarPath) continue;
+			const contact = phoneToContact.get(c.remotePhoneE164);
+			const hidden = contact?.avatarHidden ?? false;
+			const fetchedAt = contact?.avatarFetchedAt?.getTime() ?? 0;
+			if (hidden && now - fetchedAt < AVATAR_STALE_MS) continue;
+			enqueueFetch(tenantId, c.remotePhoneE164);
 		}
 	}
 
@@ -428,7 +447,8 @@ export const getWhatsappThread = query(v.pipe(v.string(), v.minLength(3)), async
 	const [contact] = await db
 		.select({
 			displayName: table.whatsappContact.displayName,
-			pushName: table.whatsappContact.pushName
+			pushName: table.whatsappContact.pushName,
+			avatarPath: table.whatsappContact.avatarPath
 		})
 		.from(table.whatsappContact)
 		.where(
