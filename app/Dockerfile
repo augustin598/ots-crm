@@ -15,8 +15,14 @@ RUN bun install --frozen-lockfile
 FROM deps AS builder
 ARG GIT_REF
 ENV GIT_REF=$GIT_REF
+# Cache invalidation strategy:
+#   - GIT_REF: set by CI per commit → each commit forces fresh bun run build
+#   - BUILD_MARKER: manual bump for one-off force-rebuilds (when CI didn't
+#     pass GIT_REF correctly, or when base images changed in a non-content
+#     way). Bump the value inline below when you need to force a full rebuild.
 ARG CACHE_BUST=1
-RUN echo "cache-bust: $CACHE_BUST"
+ARG BUILD_MARKER=whmcs-synthesize-v1-2026-04-25
+RUN echo "cache-bust: ${GIT_REF:-$CACHE_BUST}-${BUILD_MARKER}"
 COPY app ./
 RUN bun run build
 
