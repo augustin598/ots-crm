@@ -90,7 +90,19 @@
 	 * Tooltip copy per status — mirrors the in-platform messaging clients see
 	 * on Facebook/Google/TikTok so they understand what to do next.
 	 */
-	function tooltipFor(status: string, reason: string | null = null): { title: string; body: string } {
+	function tooltipFor(
+		status: string,
+		reason: string | null = null,
+		rejectMessage: string | null = null,
+	): { title: string; body: string } {
+		// TikTok gave us an explicit reason string — use it verbatim (clients need
+		// the exact wording to raise an appeal with TikTok support).
+		if (rejectMessage && (status === 'risk_review' || status === 'suspended')) {
+			return {
+				title: status === 'suspended' ? 'Cont suspendat de TikTok' : 'Cont restricționat de TikTok',
+				body: rejectMessage,
+			};
+		}
 		// TikTok sub-reasons layered on risk_review — account is STATUS_ENABLE
 		// but campaigns aren't actually delivering (budget exhausted, rejected).
 		if (status === 'risk_review' && reason === 'budget_exceeded') {
@@ -188,7 +200,7 @@
 		<ul class="divide-y divide-zinc-100">
 			{#each flagged as item (item.provider + ':' + item.externalAccountId)}
 				{@const Icon = iconFor(item.provider)}
-				{@const tip = tooltipFor(item.paymentStatus, item.rawDisableReason)}
+				{@const tip = tooltipFor(item.paymentStatus, item.rawDisableReason, item.rejectReasonMessage)}
 				<li class="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
 					<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-50">
 						{#if Icon}
@@ -202,6 +214,11 @@
 						<div class="truncate text-xs text-zinc-500">
 							{item.providerLabel} · <code class="font-mono">{item.externalAccountId}</code>
 						</div>
+						{#if item.rejectReasonMessage}
+							<div class="mt-0.5 truncate text-xs text-amber-700" title={item.rejectReasonMessage}>
+								{item.rejectReasonMessage}
+							</div>
+						{/if}
 					</div>
 					<Tooltip.Root>
 						<Tooltip.Trigger>

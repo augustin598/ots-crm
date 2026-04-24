@@ -39,6 +39,33 @@ export interface ClientAdsHealthItem {
 	balanceFormatted: string | null;
 	/** Status-appropriate action — null means no actionable CTA */
 	action: { url: string; label: string } | null;
+	/**
+	 * TikTok only: human-readable rejection/limit reason from `/advertiser/info/`.
+	 * Raw TikTok format: `<code>:<message>,endtime:<iso>`. We parse out the
+	 * message portion only; endtime is exposed separately.
+	 */
+	rejectReasonMessage: string | null;
+	/** TikTok only: ISO string when the rejection/limit expires (if any). */
+	rejectReasonEndsAt: string | null;
+}
+
+/**
+ * Parse TikTok rejection_reason string into structured pieces.
+ * Input shape observed 2026-04-24: `1:<message>,endtime:2035-09-03 15:25:11`.
+ * Returns null if the input is null/empty; falls back to raw message if format
+ * doesn't match (forward-compat with TikTok format changes).
+ */
+function parseTikTokRejectReason(raw: string | null): {
+	message: string;
+	endsAt: string | null;
+} | null {
+	if (!raw) return null;
+	const endMatch = raw.match(/,endtime:(.+?)$/);
+	const endsAt = endMatch ? endMatch[1].trim() : null;
+	const withoutEnd = endMatch ? raw.slice(0, endMatch.index) : raw;
+	const codeMatch = withoutEnd.match(/^\d+:(.+)$/);
+	const message = codeMatch ? codeMatch[1].trim() : withoutEnd.trim();
+	return { message, endsAt };
 }
 
 function formatBalance(cents: number | null, currency: string | null): string | null {
@@ -387,12 +414,16 @@ export const getClientAdsHealth = query(
 			let rawDisableReason: string | null = null;
 			let balanceCents: number | null = null;
 			let currency: string | null = null;
+			let parsedRejectReason: { message: string; endsAt: string | null } | null = null;
 			try {
 				const parsed = row.paymentStatusRaw ? JSON.parse(row.paymentStatusRaw) : null;
 				rawCode = parsed?.code != null ? String(parsed.code) : '';
 				rawDisableReason = parsed?.disableReason != null ? String(parsed.disableReason) : null;
 				balanceCents = typeof parsed?.balanceCents === 'number' ? parsed.balanceCents : null;
 				currency = typeof parsed?.currency === 'string' ? parsed.currency : null;
+				if (provider === 'tiktok' && parsed?.tiktokSecondary?.rejectReason) {
+					parsedRejectReason = parseTikTokRejectReason(String(parsed.tiktokSecondary.rejectReason));
+				}
 			} catch {
 				rawCode = row.paymentStatusRaw ?? '';
 			}
@@ -407,6 +438,8 @@ export const getClientAdsHealth = query(
 				rawDisableReason,
 				balanceFormatted: formatBalance(balanceCents, currency),
 				action: actionForStatus(provider, status, row.externalId),
+				rejectReasonMessage: parsedRejectReason?.message ?? null,
+				rejectReasonEndsAt: parsedRejectReason?.endsAt ?? null,
 			});
 		}
 
