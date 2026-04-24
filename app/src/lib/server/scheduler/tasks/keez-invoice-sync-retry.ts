@@ -10,7 +10,8 @@ import { logInfo } from '$lib/server/logger';
  * per tenant at a time, so repeated failures don't stack up.
  */
 export function retryJobId(tenantId: string): string {
-	return `keez-invoice-sync-retry:${tenantId}`;
+	// BullMQ rejects ':' in custom jobIds (Redis key namespace separator).
+	return `keez-invoice-sync-retry-${tenantId}`;
 }
 
 /**
