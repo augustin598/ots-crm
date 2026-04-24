@@ -19,6 +19,7 @@
 	import FileSignatureIcon from '@lucide/svelte/icons/file-signature';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import WebhookIcon from '@lucide/svelte/icons/webhook';
 	import IconGmail from '$lib/components/marketing/icon-gmail.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
@@ -29,6 +30,7 @@
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
 	import { getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
 	import { getWhatsappConnectionStatus } from '$lib/remotes/whatsapp.remote';
+	import { getWhmcsStatus } from '$lib/remotes/whmcs.remote';
 	import { getBnrRates, refreshBnrRates } from '$lib/remotes/bnr.remote';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { goto, invalidateAll } from '$app/navigation';
@@ -120,6 +122,10 @@
 	// Gmail status
 	const gmailStatusQuery = getGmailConnectionStatus();
 	const gmailStatus = $derived(gmailStatusQuery.current);
+
+	// WHMCS integration status
+	const whmcsStatusQuery = getWhmcsStatus();
+	const whmcsStatus = $derived(whmcsStatusQuery.current);
 
 	// Google Ads status
 	const googleAdsStatusQuery = getGoogleAdsConnectionStatus();
@@ -728,6 +734,40 @@
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/whmcs`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<WebhookIcon class="h-5 w-5" />
+						<div>
+							<CardTitle>Integrare WHMCS</CardTitle>
+							<CardDescription>
+								{#if whmcsStatus?.connected && whmcsStatus.integration?.isActive}
+									Activă — {whmcsStatus.integration.enableKeezPush ? 'push automat la Keez' : 'mod dry-run (fără push Keez)'}
+								{:else if whmcsStatus?.connected}
+									Configurată dar inactivă
+								{:else}
+									Sincronizează facturile hosting din WHMCS către CRM
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if whmcsStatus?.connected && whmcsStatus.integration?.isActive && whmcsStatus.integration?.enableKeezPush}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Activă (live)</Badge>
+						{:else if whmcsStatus?.connected && whmcsStatus.integration?.isActive}
+							<Badge variant="secondary" class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">Dry-run</Badge>
+						{:else if whmcsStatus?.connected}
+							<Badge variant="outline">Inactivă</Badge>
+						{:else}
+							<Badge variant="outline">Neconfigurată</Badge>
 						{/if}
 						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
 					</div>
