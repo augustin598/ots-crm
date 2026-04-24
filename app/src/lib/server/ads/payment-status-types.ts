@@ -30,6 +30,10 @@ export interface PaymentStatusSnapshot {
 		rejectReason: string | null;
 		deliveryIssue: 'none' | 'budget_exceeded' | 'no_delivery' | 'all_paused' | null;
 	} | null;
+	/** Google-only secondary fields. null for Meta/TikTok. */
+	googleSecondary?: {
+		suspensionReasons: string[];
+	} | null;
 }
 
 export const PAYMENT_STATUS_LABEL_RO: Record<AdsPaymentStatus, string> = {
