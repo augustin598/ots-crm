@@ -143,6 +143,26 @@ function ots_crm_connector_output(array $vars): void
         $testResult = \OtsCrm\Api::testConnection($vars);
     }
 
+    // Handle "Resend invoice" action — manual retrigger (for historical backfill
+    // or replay after a CRM downtime). Builds the payload with the same mapper
+    // the hooks use, so behavior is identical.
+    $resendResult = null;
+    $resendInvoiceId = (int)($_GET['resend_invoice'] ?? 0);
+    if ($resendInvoiceId > 0 && $hasSecret && $crmBaseUrl && $tenantSlug) {
+        $resendEvent = (string)($_GET['resend_event'] ?? 'created'); // default to 'created' for a dry backfill
+        $validEvents = ['created', 'paid', 'cancelled', 'refunded'];
+        if (!in_array($resendEvent, $validEvents, true)) {
+            $resendEvent = 'created';
+        }
+        $payload = \OtsCrm\InvoiceMapper::fromInvoiceId($resendInvoiceId, $resendEvent);
+        if ($payload === null) {
+            $resendResult = ['ok' => false, 'reason' => 'invoice_not_found', 'invoiceId' => $resendInvoiceId];
+        } else {
+            $ok = \OtsCrm\Api::send($vars, 'invoices', $payload);
+            $resendResult = ['ok' => $ok, 'event' => $resendEvent, 'invoiceId' => $resendInvoiceId, 'number' => $payload['whmcsInvoiceNumber'] ?? ''];
+        }
+    }
+
     // Retry queue stats
     $retryStats = \OtsCrm\RetryQueue::stats();
 
@@ -182,6 +202,27 @@ function ots_crm_connector_output(array $vars): void
         }
     }
 
+    // Resend result banner
+    if ($resendResult !== null) {
+        if ($resendResult['ok']) {
+            echo '<div style="padding:10px;background:#d1e7dd;border:1px solid #198754;margin:10px 0;">';
+            echo '<strong>✓ Invoice ' . htmlspecialchars($resendResult['number'] ?? ('#' . $resendResult['invoiceId'])) . ' resent to CRM</strong> ';
+            echo '(event=' . htmlspecialchars($resendResult['event']) . ').';
+            echo '</div>';
+        } else {
+            echo '<div style="padding:10px;background:#f8d7da;border:1px solid #dc3545;margin:10px 0;">';
+            echo '<strong>✗ Resend failed for invoice #' . (int)$resendResult['invoiceId'] . ':</strong> ';
+            echo htmlspecialchars($resendResult['reason'] ?? 'network_error');
+            echo '</div>';
+        }
+    }
+
+    // Recent invoices + manual resend — useful for backfilling invoices created
+    // before the connector was live, or for debugging after a CRM outage.
+    if ($hasSecret && $crmBaseUrl && $tenantSlug) {
+        ots_crm_connector_render_invoices_table($modulelink);
+    }
+
     // Retry queue stats
     echo '<h4>Retry queue</h4>';
     echo '<table class="table table-bordered" style="width:auto;">';
@@ -214,4 +255,96 @@ function ots_crm_connector_output(array $vars): void
     echo '<li>În CRM, activează switch-ul „Integrare activă".</li>';
     echo '<li><strong>Dezactivează modulul vechi <em>keez_integration</em>!</strong> Altfel apar duplicate în Keez.</li>';
     echo '</ol>';
+}
+
+/**
+ * Renders a table of the last 30 WHMCS invoices with a per-row "Resend to CRM"
+ * action. Useful for:
+ *   - Backfilling invoices that predate the connector's activation
+ *   - Replaying after a CRM outage (the retry queue covers transients, this
+ *     covers invoices whose payload has since changed)
+ *   - Spot-checking which invoices would be a CUI match in CRM (warning icon
+ *     flags invoices with missing/empty tax_id)
+ */
+function ots_crm_connector_render_invoices_table(string $modulelink): void
+{
+    try {
+        $rows = \Illuminate\Database\Capsule\Manager::table('tblinvoices as i')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'i.userid')
+            ->orderBy('i.id', 'desc')
+            ->limit(30)
+            ->select([
+                'i.id',
+                'i.invoicenum',
+                'i.date',
+                'i.total',
+                'i.status',
+                'c.companyname',
+                'c.firstname',
+                'c.lastname',
+                'c.tax_id',
+            ])
+            ->get();
+    } catch (\Throwable $e) {
+        echo '<p style="color:#dc3545;">Could not list invoices: ' . htmlspecialchars($e->getMessage()) . '</p>';
+        return;
+    }
+
+    if ($rows->isEmpty()) {
+        return;
+    }
+
+    echo '<h4 style="margin-top:24px;">Facturi WHMCS recente (ultimele 30)</h4>';
+    echo '<p style="color:#666;font-size:13px;">';
+    echo 'Folosește <strong>Resend</strong> pentru a (re)trimite manual o factură la CRM — util pentru istoric sau după o indisponibilitate.';
+    echo ' <span style="color:#856404;">⚠</span> în coloana CUI = factura nu se va potrivi în CRM după CUI (se va încerca email sau se va crea client nou).';
+    echo '</p>';
+
+    echo '<table class="table table-striped table-hover" style="font-size:13px;">';
+    echo '<thead>';
+    echo '<tr>';
+    echo '<th>ID</th><th>Număr</th><th>Client</th><th>CUI</th><th>Data</th><th>Total</th><th>Status</th><th style="width:160px;">Acțiuni</th>';
+    echo '</tr>';
+    echo '</thead><tbody>';
+
+    foreach ($rows as $r) {
+        $clientName = !empty($r->companyname)
+            ? $r->companyname
+            : trim(((string)($r->firstname ?? '')) . ' ' . ((string)($r->lastname ?? '')));
+        $hasCui = !empty(trim((string)($r->tax_id ?? '')));
+        $cuiCell = $hasCui
+            ? '<span style="color:#198754;" title="CUI: ' . htmlspecialchars((string)$r->tax_id) . '">✓ ' . htmlspecialchars((string)$r->tax_id) . '</span>'
+            : '<span style="color:#856404;" title="CUI lipsă — CRM va încerca match pe email">⚠ lipsă</span>';
+        $statusLower = strtolower((string)$r->status);
+        $statusClass = [
+            'paid'       => 'background:#d1e7dd;color:#0f5132;',
+            'unpaid'     => 'background:#f8d7da;color:#842029;',
+            'cancelled'  => 'background:#e2e3e5;color:#41464b;',
+            'refunded'   => 'background:#cff4fc;color:#055160;',
+            'collections'=> 'background:#fff3cd;color:#664d03;',
+        ][$statusLower] ?? 'background:#e9ecef;color:#495057;';
+
+        $whmcsLink    = 'invoices.php?action=edit&id=' . (int)$r->id;
+        $resendCreated = htmlspecialchars($modulelink . '&resend_invoice=' . (int)$r->id . '&resend_event=created');
+        $resendPaid    = htmlspecialchars($modulelink . '&resend_invoice=' . (int)$r->id . '&resend_event=paid');
+
+        echo '<tr>';
+        echo '<td>' . (int)$r->id . '</td>';
+        echo '<td><strong>' . htmlspecialchars((string)($r->invoicenum ?: '(draft)')) . '</strong></td>';
+        echo '<td>' . htmlspecialchars($clientName) . '</td>';
+        echo '<td>' . $cuiCell . '</td>';
+        echo '<td>' . htmlspecialchars(date('d.m.Y', strtotime((string)$r->date))) . '</td>';
+        echo '<td>' . number_format((float)$r->total, 2) . '</td>';
+        echo '<td><span style="padding:2px 8px;border-radius:3px;font-size:12px;' . $statusClass . '">' . htmlspecialchars((string)$r->status) . '</span></td>';
+        echo '<td>';
+        echo '<a href="' . htmlspecialchars($whmcsLink) . '" target="_blank" style="margin-right:6px;" title="Open in WHMCS">Open</a>';
+        echo '<a href="' . $resendCreated . '" onclick="return confirm(\'Resend invoice ' . (int)$r->id . ' as `created` to CRM?\');" title="Send as created event">Resend(c)</a>';
+        if ($statusLower === 'paid') {
+            echo ' <a href="' . $resendPaid . '" onclick="return confirm(\'Resend invoice ' . (int)$r->id . ' as `paid` to CRM?\');" title="Send as paid event">Resend(p)</a>';
+        }
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
 }

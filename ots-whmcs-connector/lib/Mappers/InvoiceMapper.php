@@ -18,6 +18,42 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 class InvoiceMapper
 {
     /**
+     * Map WHMCS payment gateway names → Keez-ready payment types.
+     *
+     * Keez classifies payments as Bank (card/transfer), ChitCash (cash/chitanță),
+     * or Ramburs (COD). Ported from the legacy keez_export_invoices.php report
+     * so CRM receives already-normalized values and can forward to Keez without
+     * a second translation pass.
+     */
+    private const PAYMENT_MAP = [
+        'banktransfer' => 'Bank',
+        'stripe'       => 'Bank',
+        'card'         => 'Bank',
+        'paypal'       => 'Bank',
+        'twocheckout'  => 'Bank',
+        'authorize'    => 'Bank',
+        'braintree'    => 'Bank',
+        'checkout'     => 'Bank',
+        'coinpayments' => 'Bank',
+        'eway'         => 'Bank',
+        'gocardless'   => 'Bank',
+        'mollie'       => 'Bank',
+        'paymentwall'  => 'Bank',
+        'securepay'    => 'Bank',
+        'worldpay'     => 'Bank',
+        'cash'         => 'ChitCash',
+        'mailin'       => 'ChitCash',
+        'cod'          => 'Ramburs',
+    ];
+
+    private static function normalizePaymentMethod(?string $raw): ?string
+    {
+        if (!$raw) return null;
+        $key = strtolower(trim($raw));
+        return self::PAYMENT_MAP[$key] ?? 'Bank'; // default Bank for unknown card-like gateways
+    }
+
+    /**
      * Build the full invoice payload.
      *
      * @param int    $invoiceId  WHMCS invoice id
@@ -69,7 +105,9 @@ class InvoiceMapper
             'tax'                 => (float)$invoice->tax + (float)$invoice->tax2,
             'total'               => (float)$invoice->total,
             'currency'            => $currencyCode,
-            'paymentMethod'       => !empty($invoice->paymentmethod) ? (string)$invoice->paymentmethod : null,
+            'paymentMethod'       => self::normalizePaymentMethod(
+                                         !empty($invoice->paymentmethod) ? (string)$invoice->paymentmethod : null
+                                     ),
             'transactionId'       => $transactionId !== '' ? $transactionId : null,
             'notes'               => !empty($invoice->notes) ? (string)$invoice->notes : null,
             'client'              => $client,
