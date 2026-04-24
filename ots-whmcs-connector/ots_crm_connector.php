@@ -64,9 +64,10 @@ function ots_crm_connector_config(): array
             ],
             'sharedSecret' => [
                 'FriendlyName' => 'Shared Secret (HMAC)',
-                'Type'         => 'password',
+                'Type'         => 'text',
                 'Size'         => '80',
-                'Description'  => '64 hex chars. Generat de CRM la setup/rotate. NU împărți.',
+                'Description'  => '64 hex chars. Generat de CRM la setup/rotate. NU împărți. '
+                                . '(Stocat plaintext — WHMCS password-type corupe valoarea la decrypt.)',
             ],
             'eventsInvoices' => [
                 'FriendlyName' => 'Trimite evenimente facturi',
