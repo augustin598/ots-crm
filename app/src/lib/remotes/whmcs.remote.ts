@@ -19,8 +19,8 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { encryptVerified } from '$lib/server/plugins/smartbill/crypto';
-import { generateSecret } from '$lib/server/whmcs/hmac';
+import { decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
+import { generateSecret, signRequest, verifySignature } from '$lib/server/whmcs/hmac';
 
 // ─────────────────────────────────────────────
 // Auth helpers
@@ -364,6 +364,141 @@ export const saveWhmcsHostingSeries = command(
 		return { saved: true };
 	}
 );
+
+/**
+ * End-to-end self-test for the admin UI "Testează conexiunea" button.
+ * Validates the full webhook pipeline:
+ *   1. Integration row exists + active
+ *   2. Shared secret decrypts (AES-GCM round-trip)
+ *   3. HMAC self-verify passes (sign locally, verify locally)
+ *   4. Health endpoint reachable (real HTTP round-trip to /health)
+ *   5. Endpoint returns ok=true with correct tenant slug
+ *
+ * Intentionally separate from the WHMCS-side Test Connection button:
+ *   - WHMCS side tests that WHMCS can reach CRM + signature is accepted.
+ *   - CRM side (this one) tests that DB+crypto are healthy and the endpoint
+ *     self-round-trips. Useful when debugging "why does WHMCS say 401?".
+ */
+export const testWhmcsConnection = command(async () => {
+	const { tenantId, tenantSlug } = requireTenantAdmin();
+	const event = getRequestEvent();
+	const origin = event?.url.origin ?? '';
+
+	// 1. Load integration
+	const integration = await db
+		.select()
+		.from(table.whmcsIntegration)
+		.where(eq(table.whmcsIntegration.tenantId, tenantId))
+		.get();
+	if (!integration) {
+		return {
+			ok: false as const,
+			step: 'load_integration',
+			reason: 'not_configured',
+			detail: 'Nu există row în whmcs_integration pentru tenant-ul curent. Apasă Configurează mai întâi.'
+		};
+	}
+	if (!integration.isActive) {
+		return {
+			ok: false as const,
+			step: 'check_active',
+			reason: 'integration_inactive',
+			detail: 'Toggle-ul "Integrare activă" e oprit. Activează-l pentru a testa.'
+		};
+	}
+
+	// 2. Decrypt secret
+	let secret: string;
+	try {
+		secret = decrypt(tenantId, integration.sharedSecret);
+	} catch (e) {
+		return {
+			ok: false as const,
+			step: 'decrypt_secret',
+			reason: e instanceof DecryptionError ? 'decrypt_failed' : 'decrypt_unexpected',
+			detail: e instanceof Error ? e.message : String(e)
+		};
+	}
+	if (secret.length !== 64) {
+		return {
+			ok: false as const,
+			step: 'validate_secret',
+			reason: 'secret_wrong_length',
+			detail: `Secretul are ${secret.length} caractere, așteptat 64 hex. Regenerează.`
+		};
+	}
+
+	// 3. HMAC self-verify (math sanity check)
+	const ts = Math.floor(Date.now() / 1000);
+	const nonce = crypto.randomUUID();
+	const pathname = `/${tenantSlug}/api/webhooks/whmcs/health`;
+	const signature = signRequest(secret, ts, 'GET', pathname, tenantSlug, nonce, '');
+	const hmacOk = verifySignature(secret, ts, 'GET', pathname, tenantSlug, nonce, '', signature);
+	if (!hmacOk) {
+		return {
+			ok: false as const,
+			step: 'hmac_self_verify',
+			reason: 'hmac_bug',
+			detail: 'Sign/verify asimetric — bug intern în hmac.ts.'
+		};
+	}
+
+	// 4. Real HTTP round-trip to /health (tests the route + handler + Redis nonce claim)
+	const url = `${origin}${pathname}`;
+	let httpStatus = 0;
+	let responseBody: unknown = null;
+	try {
+		const res = await fetch(url, {
+			method: 'GET',
+			headers: {
+				'X-OTS-Timestamp': ts.toString(),
+				'X-OTS-Signature': signature,
+				'X-OTS-Tenant': tenantSlug,
+				'X-OTS-Nonce': nonce
+			},
+			signal: AbortSignal.timeout(10_000)
+		});
+		httpStatus = res.status;
+		responseBody = await res.json().catch(() => null);
+	} catch (e) {
+		return {
+			ok: false as const,
+			step: 'http_roundtrip',
+			reason: 'network_error',
+			detail: e instanceof Error ? e.message : String(e),
+			url
+		};
+	}
+
+	if (httpStatus !== 200 || !responseBody || (responseBody as { ok?: boolean }).ok !== true) {
+		return {
+			ok: false as const,
+			step: 'http_response',
+			reason: 'unexpected_response',
+			detail: JSON.stringify(responseBody).slice(0, 200),
+			httpStatus,
+			url
+		};
+	}
+
+	const body = responseBody as {
+		ok: true;
+		tenantSlug: string;
+		connectorVersion: string;
+		dryRun: boolean;
+		receivedAt: number;
+	};
+
+	return {
+		ok: true as const,
+		tenantSlug: body.tenantSlug,
+		connectorVersion: body.connectorVersion,
+		dryRun: body.dryRun,
+		roundTripMs: Math.abs(Date.now() - body.receivedAt * 1000),
+		httpStatus,
+		url
+	};
+});
 
 /**
  * Reset a DEAD_LETTER / FAILED sync row back to PENDING so a retry WHMCS
