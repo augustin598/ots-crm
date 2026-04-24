@@ -11,6 +11,7 @@ import { removePrefix } from './minio-helpers';
 import { publish as publishQr } from './qr-broker';
 import { handleInbound, handleMessageUpdate } from './inbound-handler';
 import { upsertPushNames, upsertChatNames } from './contacts-store';
+import { enqueueFetch, dropTenant } from './avatar-fetcher';
 import { humanizedDelay } from './rate-limiter';
 import { e164ToJid, jidToE164 } from './phone';
 
@@ -180,6 +181,7 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 				});
 
 				sessions.delete(tenantId);
+				dropTenant(tenantId);
 
 				if (code === DisconnectReason.loggedOut) {
 					await auth.clear().catch(() => {});
@@ -289,12 +291,27 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 
 	sock.ev.on('contacts.update', (updates) => {
 		if (updates.length === 0) return;
+		// Live push-name updates (existing behavior)
 		upsertPushNames(tenantId, updates).catch((err) => {
 			logError('whatsapp', 'upsertPushNames (update) failed', {
 				tenantId,
 				metadata: { err: err instanceof Error ? err.message : String(err) }
 			});
 		});
+		// Avatar events
+		for (const u of updates) {
+			const id = u.id;
+			if (!id) continue;
+			if (!id.endsWith('@s.whatsapp.net')) continue; // skip groups
+			const phoneE164 = `+${id.split('@')[0].split(':')[0]}`;
+			if ((u as { imgUrl?: unknown }).imgUrl === 'changed') {
+				enqueueFetch(tenantId, phoneE164);
+			} else if ((u as { imgUrl?: unknown }).imgUrl === null) {
+				// Fire-and-forget: enqueue a "markHidden" by re-using the fetch pipeline.
+				// The worker will see profilePictureUrl returning undefined and mark as hidden.
+				enqueueFetch(tenantId, phoneE164);
+			}
+		}
 	});
 
 	sock.ev.on('messages.update', (updates) => {
