@@ -20,7 +20,7 @@ import { decideFailureAction, MAX_CONSECUTIVE_FAILURES } from './retry-policy';
 export async function handleKeezSyncFailure(
 	tenantId: string,
 	error: unknown,
-	options: { enqueueRetry: (tenantId: string, delayMs: number) => Promise<void> }
+	options: { enqueueRetry: (tenantId: string, delayMs: number, attempt: number) => Promise<void> }
 ): Promise<void> {
 	const { message, stack } = serializeError(error);
 	logError('keez', `Sync failure: ${message}`, { tenantId, stackTrace: stack });
@@ -60,7 +60,7 @@ export async function handleKeezSyncFailure(
 
 	if (action.kind === 'schedule_retry') {
 		try {
-			await options.enqueueRetry(tenantId, action.delayMs);
+			await options.enqueueRetry(tenantId, action.delayMs, newCount);
 			logInfo('keez', `Scheduled retry in ${action.delayMs / 60_000} min (failure ${newCount}/${MAX_CONSECUTIVE_FAILURES})`, { tenantId });
 			return;
 		} catch (queueErr) {
