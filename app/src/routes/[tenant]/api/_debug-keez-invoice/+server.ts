@@ -23,17 +23,21 @@ import type { RequestHandler } from './$types';
  * Admin-only.
  */
 async function findInvoice(tenantId: string, series: string | null, number: string) {
-	const where = series
-		? and(
-				eq(table.invoice.tenantId, tenantId),
-				eq(table.invoice.invoiceSeries, series),
-				eq(table.invoice.invoiceNumber, number),
-			)
-		: and(
-				eq(table.invoice.tenantId, tenantId),
-				or(eq(table.invoice.invoiceNumber, number), eq(table.invoice.invoiceNumber, `${number}`)),
-			);
-	return db.select().from(table.invoice).where(where);
+	// Two storage shapes co-exist in the DB:
+	//   A) split:    invoiceSeries='OTS', invoiceNumber='542'  (manual creation)
+	//   B) combined: invoiceSeries=null,  invoiceNumber='OTS 542'  (Keez sync mapper)
+	// Match either so the operator doesn't have to know which one applies.
+	const combined = series ? `${series} ${number}` : number;
+	const matchers = [eq(table.invoice.invoiceNumber, number), eq(table.invoice.invoiceNumber, combined)];
+	if (series) {
+		matchers.push(
+			and(eq(table.invoice.invoiceSeries, series), eq(table.invoice.invoiceNumber, number))!,
+		);
+	}
+	return db
+		.select()
+		.from(table.invoice)
+		.where(and(eq(table.invoice.tenantId, tenantId), or(...matchers)));
 }
 
 async function verifyOnKeez(tenantId: string, externalId: string) {
