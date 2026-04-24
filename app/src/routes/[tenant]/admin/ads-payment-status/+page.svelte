@@ -343,6 +343,11 @@
 												</div>
 											{/if}
 										{/if}
+										{#if row.provider === 'google' && row.googleSuspensionReasons && row.googleSuspensionReasons.length > 0}
+											<div class="text-xs text-muted-foreground">
+												suspension: <code>{row.googleSuspensionReasons.join(', ')}</code>
+											</div>
+										{/if}
 									</td>
 									<td class="py-3 pr-3 text-xs text-muted-foreground">
 										{formatCheckedAt(row.checkedAt)}

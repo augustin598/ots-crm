@@ -138,6 +138,7 @@
 					rawDisableReason: item.rawDisableReason,
 					rejectReasonMessage: item.rejectReasonMessage,
 					rejectReasonEndsAt: item.rejectReasonEndsAt,
+					googleSuspensionReasons: item.googleSuspensionReasons,
 				})}
 				{@const isCritical = isCriticalStatus(item.paymentStatus)}
 				<li class="flex flex-col gap-3 px-5 py-3.5 transition-colors hover:bg-zinc-50/60">
