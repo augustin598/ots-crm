@@ -2888,6 +2888,16 @@ export interface AdDigestItem {
 	clientLabel?: string | null; // "Client Name" shown only in admin digest
 	/** Outstanding balance pre-formatted (e.g., "430,40 RON"); null if unavailable */
 	balanceFormatted?: string | null;
+	/**
+	 * Rich explainer + actionable suggestion for this account, in Romanian.
+	 * Shared with the client-side alert card via $lib/ads/status-copy.
+	 */
+	details?: {
+		headline: string;
+		body: string;
+		suggestion: string;
+		deadline: string | null;
+	} | null;
 }
 
 function statusPhraseFor(status: string, reason?: string | number | null): string {
@@ -2999,66 +3009,91 @@ export async function sendAdPaymentDigestEmail(
 						: `Conturi ale clienților tăi (<strong>${count}</strong>) au detectat probleme de plată sau suspendare. Te rugăm să verifici și să anunți clienții dacă e cazul.`;
 			}
 
-			const rowsHtml = params.items
+			// Modern per-account card stack. Each flagged account renders as its
+			// own bordered table (email-client-safe) with header line, optional
+			// rich details block in a status-colored frame, and a pill CTA.
+			const cardsHtml = params.items
 				.map((it) => {
-					const accent =
-						it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
-							? '#d97706'
-							: '#dc2626';
-					const balanceBg =
-						it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
-							? '#fffbeb'
-							: '#fef2f2';
+					const isCritical =
+						it.paymentStatus === 'suspended' || it.paymentStatus === 'payment_failed';
+					const accent = isCritical ? '#dc2626' : '#d97706';
+					const accentDark = isCritical ? '#7f1d1d' : '#92400e';
+					const accentDarker = isCritical ? '#450a0a' : '#78350f';
+					const accentBg = isCritical ? '#fef2f2' : '#fffbeb';
+					const accentBorder = isCritical ? '#fecaca' : '#fde68a';
+					const accentPill = isCritical ? '#b91c1c' : '#b45309';
+
 					const clientLine = it.clientLabel
-						? `<div style="color: #6b7280; font-size: 12px; margin-top: 2px;">${escapeHtml(it.clientLabel)}</div>`
+						? `<div style="color: #6b7280; font-size: 12px; margin-top: 3px;">${escapeHtml(it.clientLabel)}</div>`
 						: '';
-					// Balance presented as its own column-right block — bold amount
-					// with a quiet "Sold neachitat" label above, framed in a warm tint.
-					const balanceBlock = it.balanceFormatted
+
+					const deadlineLine = it.details?.deadline
+						? `<div style="font-size: 12px; font-weight: 600; color: ${accentDark}; margin-top: 8px;">Termen expirare: ${escapeHtml(it.details.deadline)}</div>`
+						: '';
+
+					const balanceLine = it.balanceFormatted
+						? `<div style="font-size: 12px; font-weight: 700; color: ${accentDark}; margin-top: 6px; font-variant-numeric: tabular-nums;">Sold restant: ${escapeHtml(it.balanceFormatted)}</div>`
+						: '';
+
+					const detailsBlock = it.details
 						? `
-							<div style="margin-top: 10px; display: inline-block; padding: 8px 12px; background: ${balanceBg}; border: 1px solid ${accent}30; border-radius: 6px;">
-								<div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; font-weight: 600;">Sold neachitat</div>
-								<div style="font-size: 18px; font-weight: 700; color: ${accent}; margin-top: 2px; font-variant-numeric: tabular-nums;">${escapeHtml(it.balanceFormatted)}</div>
+							<div style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
+								<div style="font-size: 14px; font-weight: 700; color: ${accentDark}; letter-spacing: -0.01em;">${escapeHtml(it.details.headline)}</div>
+								<div style="font-size: 13px; color: ${accentDarker}; line-height: 1.6; margin-top: 6px;">${escapeHtml(it.details.body)}</div>
+								${deadlineLine}
+								${balanceLine}
+								<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 12px; border-collapse: collapse;">
+									<tr>
+										<td style="vertical-align: top; padding-right: 8px; font-size: 14px; color: ${accentDark};">💡</td>
+										<td style="vertical-align: top; font-size: 13px; color: ${accentDarker}; line-height: 1.55; font-weight: 500;">${escapeHtml(it.details.suggestion)}</td>
+									</tr>
+								</table>
 							</div>
 						`
 						: '';
+
+					const ctaLabel = isCritical
+						? 'Deschide contul'
+						: it.paymentStatus === 'grace_period' || it.paymentStatus === 'risk_review'
+							? 'Rezolvă acum'
+							: 'Vezi detalii';
+
 					return `
-						<tr>
-							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<div style="font-weight: 600; color: #111827; font-size: 14px;">${escapeHtml(it.accountName)}</div>
-								<div style="color: #9ca3af; font-size: 11px; margin-top: 2px; font-family: ui-monospace, SFMono-Regular, monospace;">${escapeHtml(it.externalAccountId)}</div>
-								${clientLine}
-								${balanceBlock}
-							</td>
-							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 13px; color: #374151;">
-								${escapeHtml(it.providerLabel)}
-							</td>
-							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<span style="display: inline-block; padding: 4px 10px; border-radius: 4px; background: ${balanceBg}; color: ${accent}; font-size: 12px; font-weight: 600;">${escapeHtml(it.statusLabelRo)}</span>
-							</td>
-							<td style="padding: 14px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-								<a href="${escapeHtml(it.billingUrl)}" style="color: ${brand.themeColor}; text-decoration: underline; font-size: 13px; white-space: nowrap;">Billing →</a>
-							</td>
-						</tr>
+						<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; margin: 0 0 14px 0; overflow: hidden;">
+							<tr>
+								<td style="padding: 18px 20px;">
+									<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+										<tr>
+											<td style="vertical-align: top; padding-right: 12px;">
+												<div style="font-weight: 700; color: #111827; font-size: 15px; line-height: 1.3;">${escapeHtml(it.accountName)}</div>
+												<div style="color: #6b7280; font-size: 12px; margin-top: 3px;">
+													${escapeHtml(it.providerLabel)}
+													<span style="color: #d1d5db;"> · </span>
+													<span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; color: #9ca3af;">${escapeHtml(String(it.externalAccountId))}</span>
+												</div>
+												${clientLine}
+											</td>
+											<td style="vertical-align: top; text-align: right; white-space: nowrap;">
+												<span style="display: inline-block; padding: 5px 12px; border-radius: 999px; background: ${accentBg}; color: ${accentPill}; font-size: 12px; font-weight: 600; border: 1px solid ${accentBorder};">${escapeHtml(it.statusLabelRo)}</span>
+											</td>
+										</tr>
+									</table>
+									${detailsBlock}
+									<div style="margin-top: 14px;">
+										<a href="${escapeHtml(it.billingUrl)}" style="display: inline-block; padding: 9px 18px; background: ${accent}; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.01em;">${ctaLabel} →</a>
+									</div>
+								</td>
+							</tr>
+						</table>
 					`;
 				})
 				.join('');
 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">${greeting}</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${intro}</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px 0;">
-					<thead>
-						<tr style="background: #f9fafb;">
-							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Cont</th>
-							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Platformă</th>
-							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Status</th>
-							<th align="left" style="padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Acțiune</th>
-						</tr>
-					</thead>
-					<tbody>${rowsHtml}</tbody>
-				</table>
-				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 24px 0;">${intro}</p>
+				${cardsHtml}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 12px 0 0 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
 			`;
 
 			// Title: concrete and specific for the single-account case (the
@@ -3090,10 +3125,19 @@ export async function sendAdPaymentDigestEmail(
 				previewTitle: subject,
 			});
 
-			const lines = params.items.map((it) => {
-				const balance = it.balanceFormatted ? ` — Sold: ${it.balanceFormatted}` : '';
-				return `- ${it.providerLabel} — ${it.accountName} (${it.externalAccountId}): ${it.statusLabelRo}${balance} — ${it.billingUrl}`;
-			}).join('\n');
+			const lines = params.items
+				.map((it) => {
+					const header = `• ${it.providerLabel} — ${it.accountName} (${it.externalAccountId}): ${it.statusLabelRo}`;
+					const parts: string[] = [header];
+					if (it.details?.headline) parts.push(`  ${it.details.headline}`);
+					if (it.details?.body) parts.push(`  ${it.details.body}`);
+					if (it.balanceFormatted) parts.push(`  Sold restant: ${it.balanceFormatted}`);
+					if (it.details?.deadline) parts.push(`  Termen expirare: ${it.details.deadline}`);
+					if (it.details?.suggestion) parts.push(`  → ${it.details.suggestion}`);
+					parts.push(`  ${it.billingUrl}`);
+					return parts.join('\n');
+				})
+				.join('\n\n');
 
 			// Plain-text fallback (Romanian diacritics stripped for safety).
 			const plainIntro = intro.replace(/<[^>]+>/g, '').replace(/[ăâîșț]/gi, (c) => 'aaist'['ăâîșț'.indexOf(c.toLowerCase())] || c);
