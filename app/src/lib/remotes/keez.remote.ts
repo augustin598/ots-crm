@@ -802,7 +802,7 @@ export const syncInvoicesFromKeez = command(
 
 		const result = await syncKeezInvoicesForTenant(event.locals.tenant.id, {
 			offset: filters.offset,
-			count: filters.count ?? 100, // manual default: 100 for UI responsiveness (scheduler uses 500)
+			count: filters.count ?? 500, // matches scheduler — pagination loop fetches all pages anyway; this is just the per-page size
 			filter: filters.filter
 		});
 
