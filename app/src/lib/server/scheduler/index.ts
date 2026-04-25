@@ -147,7 +147,13 @@ function createSchedulerWorker() {
 
 			return await handler(params || {});
 		},
-		{ connection }
+		{
+			connection,
+			// Tasks like meta_ads_leads_sync iterate many external API calls and can
+			// legitimately run for several minutes. Default 30s lockDuration causes
+			// "could not renew lock" noise on long jobs.
+			lockDuration: 5 * 60 * 1000
+		}
 	);
 
 	worker.on('completed', (job) => {

@@ -1278,7 +1278,7 @@ export async function getLeadsByForm(
 
 	try {
 		while (url) {
-			const res: Response = await fetch(url);
+			const res: Response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
 			const data: any = await res.json();
 
 			if (data.error) {
