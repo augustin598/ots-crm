@@ -113,9 +113,15 @@ export async function pushInvoiceNumberToWhmcs(
 	}
 
 	// 4. Build signed POST to the WHMCS callback endpoint.
+	// IMPORTANT: WHMCS is often mounted in a subdirectory (e.g. /host/). We
+	// must concatenate manually with a trim-slash, NOT use `new URL(path, base)`
+	// — the latter treats path-with-leading-slash as absolute and drops the
+	// directory prefix from base, so https://example.com/host/ + /modules/...
+	// becomes https://example.com/modules/... (which doesn't exist).
+	const baseUrl = integration.whmcsUrl.replace(/\/+$/, '');
 	let url: URL;
 	try {
-		url = new URL(DEFAULT_CALLBACK_PATH, integration.whmcsUrl);
+		url = new URL(baseUrl + DEFAULT_CALLBACK_PATH);
 	} catch {
 		return { ok: false, reason: 'bad_whmcs_url', detail: integration.whmcsUrl };
 	}
