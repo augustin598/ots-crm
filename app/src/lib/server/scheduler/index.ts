@@ -244,7 +244,8 @@ export const startScheduler = async () => {
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
-		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update'
+		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
+		'whmcs-invoice-reconcile'
 	]);
 
 	try {
