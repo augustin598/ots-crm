@@ -349,7 +349,22 @@ export async function mapInvoiceToKeez(
 	const details: KeezInvoiceDetail[] =
 		invoice.lineItems.length > 0
 			? invoice.lineItems.map((item) => {
-					// Get item external ID from map or use item ID as fallback
+					// Resolve Keez article externalId for this line item.
+					// Strict order:
+					//   1. The map populated by auto-push.ts on the most recent push
+					//      (this is ALWAYS a Keez-issued externalId for an article
+					//      that exists in Keez under our code CRM_<invoice>_<line>).
+					//   2. The persisted keezItemExternalId on the line-item row
+					//      (only valid if a previous push already wrote it back —
+					//      auto-push.ts always overwrites the WHMCS MD5 GUID with
+					//      the real Keez externalId after createItem).
+					//   3. The CRM line-item id as a last resort. Keez will create
+					//      a new article on its side; not ideal but better than
+					//      sending a non-existent externalId.
+					// We intentionally do NOT fall back to the WHMCS-side GUID
+					// (the MD5 from InvoiceMapper.php) — those don't correspond
+					// to real Keez articles and would silently link to whatever
+					// legacy article happens to share the same string.
 					const itemExternalId =
 						itemExternalIds?.get(item.id) || item.keezItemExternalId || item.id;
 
