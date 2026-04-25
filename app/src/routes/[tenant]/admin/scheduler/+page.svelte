@@ -406,8 +406,12 @@
 		if (!ok) return;
 		deletingLevel = level;
 		try {
-			await deleteSchedulerLogsByLevel(level);
-			toast.success(`Loguri "${label}" sterse`);
+			const { deleted } = await deleteSchedulerLogsByLevel(level);
+			if (deleted > 0) {
+				toast.success(`${deleted} loguri "${label}" sterse`);
+			} else {
+				toast.info(`Nu exista loguri "${label}" de sters`);
+			}
 			await Promise.all([historyQuery.refresh(), statsQuery.refresh(), jobStatsQuery.refresh()]);
 		} catch (e: any) {
 			clientLogger.apiError('scheduler_delete_logs', e);
