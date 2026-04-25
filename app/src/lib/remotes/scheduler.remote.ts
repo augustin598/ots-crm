@@ -340,7 +340,7 @@ export const deleteSchedulerLogsByLevel = command(
 		const tenantId = event.locals.tenant!.id;
 		const userId = event.locals.user!.id;
 
-		await db
+		const deletedRows = await db
 			.delete(table.debugLog)
 			.where(
 				and(
@@ -351,16 +351,19 @@ export const deleteSchedulerLogsByLevel = command(
 						isNull(table.debugLog.tenantId)
 					)
 				)
-			);
+			)
+			.returning({ id: table.debugLog.id });
+
+		const deleted = deletedRows.length;
 
 		// Audit trail
 		logInfo('scheduler', `Admin action: logs deleted for level ${level}`, {
 			tenantId,
 			userId,
 			action: 'scheduler.delete_logs',
-			metadata: { level }
+			metadata: { level, deleted }
 		});
 
-		return { success: true };
+		return { success: true, deleted };
 	}
 );
