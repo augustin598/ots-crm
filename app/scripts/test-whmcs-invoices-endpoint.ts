@@ -186,7 +186,9 @@ let createdInvoiceId: string | null = null;
 	assert('created: matchType=NEW (no prior CRM client)', parsed.matchType === 'NEW');
 	createdInvoiceId = parsed.invoiceId;
 	assert('created: invoiceId returned', typeof createdInvoiceId === 'string');
-	assert('created: hosting series used', parsed.invoiceNumber === 'HOST OTS555');
+	// PR #29: WHMCS invoice number prefix is stripped before our series is prepended,
+	// so "OTS555" → "555" → "HOST 555" (no duplicated OTS).
+	assert('created: hosting series used', parsed.invoiceNumber === 'HOST 555');
 
 	const inv = await db.select().from(table.invoice).where(eq(table.invoice.id, createdInvoiceId!)).get();
 	assert('created: invoice row exists', inv !== undefined);
