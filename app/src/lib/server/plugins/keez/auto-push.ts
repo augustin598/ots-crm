@@ -150,11 +150,13 @@ export async function pushInvoiceToKeez(
 			//      HTTP 500. We append the line-item id as a discrete suffix to
 			//      guarantee uniqueness without depending on description being
 			//      unique (e.g. for repeated test descriptions like FIX-TEST-A).
+			//      Branded as `#OTSH-<4>` so it reads as a SKU code in Keez UI
+			//      and on client PDFs instead of a bare random hash.
 			//   3. `code` is also unique per (invoice, line-item) so retries on
 			//      the same logical line resolve to different articles, which is
 			//      acceptable (Keez doesn't bill us per article entry).
 			const itemCode = `CRM_${invoiceId.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
-			const uniqueName = `${desiredName} · #${lineItem.id.slice(0, 6)}`;
+			const uniqueName = `${desiredName} · #OTSH-${lineItem.id.slice(0, 4)}`;
 
 			let resolvedExternalId: string | null = null;
 
@@ -335,8 +337,8 @@ export async function pushInvoiceToKeez(
 		// for a different one, that's the silent-substitution bug. A pure name
 		// drift (sent name is a prefix of stored name) is benign — Keez
 		// reflects the article's nomenclator name on the invoice line, and we
-		// intentionally append a `· #<lineId6>` suffix to the article name in
-		// auto-push for uniqueness, so the stored name is expected to be the
+		// intentionally append a `· #OTSH-<lineId4>` suffix to the article name
+		// in auto-push for uniqueness, so the stored name is expected to be the
 		// sent name + suffix. Only flag drift that isn't this prefix relation.
 		if (keezInvoiceData?.invoiceDetails && Array.isArray(keezInvoiceData.invoiceDetails)) {
 			const sentDetails = keezInvoice.invoiceDetails;
@@ -348,8 +350,8 @@ export async function pushInvoiceToKeez(
 				const sentName = sent?.itemName || '';
 				const storedName = kd.itemName || '';
 				// "Real" drift: stored name doesn't even start with sent name.
-				// (sent="Foo", stored="Foo · #abc" → benign suffix; sent="Foo",
-				// stored="Bar" → real drift.)
+				// (sent="Foo", stored="Foo · #OTSH-abcd" → benign suffix;
+				//  sent="Foo", stored="Bar" → real drift.)
 				const nameDrift =
 					!!sentName && !!storedName && !storedName.startsWith(sentName);
 				return {

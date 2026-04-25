@@ -142,9 +142,10 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		// See app/src/lib/server/plugins/keez/auto-push.ts for full rationale —
 		// Keez `?filter=code eq` is not honored on /items so getItemByCode
 		// silently returns the wrong article. Keez also requires unique `name`,
-		// so we append a discrete `· #<lineItemIdShort>` suffix.
+		// so we append a discrete `· #OTSH-<lineId4>` suffix (branded SKU look
+		// for client-facing PDFs instead of a bare random hash).
 		const itemCode = `CRM_${invoice.id.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
-		const uniqueName = `${lineItem.description || 'Item'} · #${lineItem.id.slice(0, 6)}`;
+		const uniqueName = `${lineItem.description || 'Item'} · #OTSH-${lineItem.id.slice(0, 4)}`;
 
 		// Use per-item tax rate if available, otherwise use invoice tax rate
 		const itemVatPercent = lineItem.taxRate ? lineItem.taxRate / 100 : defaultVatPercent;
