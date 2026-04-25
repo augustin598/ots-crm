@@ -180,10 +180,14 @@ export interface KeezItemResponse {
 }
 
 export class KeezClient {
-	private clientEid: string;
+	// Exposed (read-only at the type level) so debug endpoints can issue raw
+	// fetches that bypass the inner retry loop and reveal the true upstream
+	// error rate. These remain mutable internally — `baseUrl` is reassigned
+	// from the token response in some Keez environments.
+	clientEid: string;
 	private applicationId: string;
 	private secret: string;
-	private baseUrl: string;
+	baseUrl: string;
 	private tokenUrl: string;
 	private cachedToken: string | null = null;
 	private tokenExpiresAt: Date | null = null;

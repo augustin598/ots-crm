@@ -6,13 +6,27 @@ import { createNotification } from '$lib/server/notifications';
 import { decideFailureAction, MAX_CONSECUTIVE_FAILURES } from './retry-policy';
 
 /**
+ * Summary returned to callers so they can display feedback (e.g. the manual
+ * sync command surfaces `retryAt` in the UI). Never thrown — see comment below.
+ */
+export interface KeezSyncFailureOutcome {
+	/** Integration was flipped to degraded (after MAX_CONSECUTIVE_FAILURES or unrecoverable error). */
+	degraded: boolean;
+	/** Wall-clock time at which the next automatic retry will run, or null if degraded / no retry. */
+	retryAt: Date | null;
+	/** Failure count after this incident. */
+	attempt: number;
+}
+
+/**
  * Handle a Keez sync failure for a single tenant:
  *   1. Classify the error
  *   2. Atomically update failure columns on keez_integration
  *   3. Either enqueue a retry job OR create an admin notification and mark degraded
  *
- * Called from the daily cron task and the retry task. Never throws —
- * worst case logs and moves on, so one tenant's bad state can't stall others.
+ * Called from the daily cron task, the retry task, AND the manual remote command.
+ * Never throws — worst case logs and moves on, so one tenant's bad state can't
+ * stall others.
  *
  * `enqueueRetry` is injected to avoid a circular import between this module
  * and the scheduler/tasks folder.
@@ -21,7 +35,7 @@ export async function handleKeezSyncFailure(
 	tenantId: string,
 	error: unknown,
 	options: { enqueueRetry: (tenantId: string, delayMs: number, attempt: number) => Promise<void> }
-): Promise<void> {
+): Promise<KeezSyncFailureOutcome> {
 	const { message, stack } = serializeError(error);
 	logError('keez', `Sync failure: ${message}`, { tenantId, stackTrace: stack });
 
@@ -62,7 +76,7 @@ export async function handleKeezSyncFailure(
 		try {
 			await options.enqueueRetry(tenantId, action.delayMs, newCount);
 			logInfo('keez', `Scheduled retry in ${humanizeDelay(action.delayMs)} (failure ${newCount}/${MAX_CONSECUTIVE_FAILURES})`, { tenantId });
-			return;
+			return { degraded: false, retryAt: new Date(Date.now() + action.delayMs), attempt: newCount };
 		} catch (queueErr) {
 			const e = serializeError(queueErr);
 			logError('keez', `Failed to enqueue retry, escalating to degraded: ${e.message}`, { tenantId });
@@ -83,6 +97,7 @@ export async function handleKeezSyncFailure(
 
 	// mark_degraded → create admin notification
 	await createAdminNotificationsForTenant(tenantId, message).catch(() => {});
+	return { degraded: true, retryAt: null, attempt: newCount };
 }
 
 /**

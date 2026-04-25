@@ -6,8 +6,10 @@ import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
 import { encrypt, decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/keez/crypto';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/factory';
-import { syncKeezInvoicesForTenant } from '$lib/server/plugins/keez/sync';
-import { cancelPendingKeezRetry } from '$lib/server/scheduler/tasks/keez-invoice-sync-retry';
+import { syncKeezInvoicesForTenant, KeezSyncAbortedError } from '$lib/server/plugins/keez/sync';
+import { cancelPendingKeezRetry, enqueueKeezRetry } from '$lib/server/scheduler/tasks/keez-invoice-sync-retry';
+import { handleKeezSyncFailure } from '$lib/server/plugins/keez/failure-handler';
+import { classifyKeezError } from '$lib/server/plugins/keez/error-classification';
 import {
 	mapInvoiceToKeez,
 	mapKeezInvoiceToCRM,
@@ -800,7 +802,8 @@ export const syncInvoicesFromKeez = command(
 	v.object({
 		offset: v.optional(v.number()),
 		count: v.optional(v.number()),
-		filter: v.optional(v.string())
+		filter: v.optional(v.string()),
+		force: v.optional(v.boolean())
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -814,19 +817,57 @@ export const syncInvoicesFromKeez = command(
 		// Cancel any pending scheduler retry so we don't do the work twice.
 		await cancelPendingKeezRetry(event.locals.tenant.id);
 
-		const result = await syncKeezInvoicesForTenant(event.locals.tenant.id, {
-			offset: filters.offset,
-			count: filters.count ?? 500, // matches scheduler — pagination loop fetches all pages anyway; this is just the per-page size
-			filter: filters.filter
-		});
+		try {
+			const result = await syncKeezInvoicesForTenant(event.locals.tenant.id, {
+				offset: filters.offset,
+				count: filters.count ?? 500, // matches scheduler — pagination loop fetches all pages anyway; this is just the per-page size
+				filter: filters.filter,
+				force: filters.force
+			});
 
-		return {
-			success: true,
-			imported: result.imported,
-			updated: result.updated,
-			skipped: result.skipped,
-			errors: result.errors
-		};
+			return {
+				success: true as const,
+				partial: false as const,
+				imported: result.imported,
+				updated: result.updated,
+				unchanged: result.unchanged,
+				skipped: result.skipped,
+				errors: result.errors
+			};
+		} catch (e) {
+			// Route manual-sync failures through the same pipeline the cron task uses:
+			// increment consecutiveFailures, schedule a BullMQ retry (30m/2h/6h),
+			// flip isDegraded after MAX_CONSECUTIVE_FAILURES, notify admins.
+			// Without this, manual sync would 500 to the UI with raw nginx HTML
+			// and no retry would ever be queued.
+			const aborted = e instanceof KeezSyncAbortedError;
+			const partial = aborted
+				? e.partial
+				: { imported: 0, updated: 0, unchanged: 0, skipped: 0, errors: 0 };
+			const cause = aborted ? e.cause : e;
+
+			const outcome = await handleKeezSyncFailure(event.locals.tenant.id, cause, {
+				enqueueRetry: enqueueKeezRetry
+			});
+
+			const kind = classifyKeezError(cause);
+			return {
+				success: false as const,
+				partial: aborted,
+				degraded: outcome.degraded,
+				retryAt: outcome.retryAt ? outcome.retryAt.toISOString() : null,
+				imported: partial.imported,
+				updated: partial.updated,
+				unchanged: partial.unchanged,
+				skipped: partial.skipped,
+				errors: partial.errors + 1, // +1 for the run-aborting failure
+				errorKind: kind,
+				message:
+					kind === 'transient'
+						? 'Keez este momentan indisponibil. Sincronizarea va fi reluată automat.'
+						: 'Sincronizarea a eșuat. Verifică setările integrării Keez.'
+			};
+		}
 	}
 );
 

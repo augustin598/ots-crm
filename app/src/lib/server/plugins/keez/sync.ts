@@ -1,8 +1,9 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from './factory';
+import type { KeezInvoiceHeader } from './client';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { clearNotificationsByType } from '$lib/server/notifications';
@@ -64,6 +65,9 @@ function parseKeezDate(dateValue: string | number | undefined): Date | null {
 export interface SyncKeezInvoicesResult {
 	imported: number;
 	updated: number;
+	/** Header fingerprint matched CRM, getInvoice() skipped — smart-sync no-op for this row. */
+	unchanged: number;
+	/** 404 / "nu exista" on Keez — invoice was deleted upstream. */
 	skipped: number;
 	errors: number;
 	/** Pages pulled from Keez during this run (≥1 on success, 0 if the integration was skipped). */
@@ -73,14 +77,73 @@ export interface SyncKeezInvoicesResult {
 }
 
 /**
+ * Smart-sync fingerprint: returns true when the Keez header indicates the
+ * invoice has not changed in any way the user can see in CRM, so we can
+ * skip the expensive per-invoice getInvoice() call.
+ *
+ * Compares 4 fields, all normalized to integers (cents / ms timestamp) to
+ * avoid float precision pitfalls:
+ *   1. status (Draft / Valid / Cancelled)
+ *   2. grossAmount → cents
+ *   3. remainingAmount → cents
+ *   4. dueDate → ms since epoch
+ *
+ * Trade-off: line-item / note / partner-CUI changes that leave the total and
+ * status untouched are invisible. Mitigation is the user-facing "Force re-sync"
+ * button which bypasses this check (passes `force: true` down).
+ *
+ * Exported for unit testing — the per-invoice loop in this file is the only
+ * production call site.
+ */
+export function headerMatchesExisting(
+	header: KeezInvoiceHeader,
+	existing: typeof table.invoice.$inferSelect
+): boolean {
+	// Status (trim defensive — Keez occasionally returns trailing spaces)
+	if ((header.status ?? '').trim() !== (existing.keezStatus ?? '').trim()) return false;
+
+	// Gross total in cents (integer comparison, no floats)
+	const headerGrossCents = Math.round((header.grossAmount ?? 0) * 100);
+	if (headerGrossCents !== (existing.totalAmount ?? 0)) return false;
+
+	// Remaining amount in cents
+	const headerRemainingCents = Math.round((header.remainingAmount ?? 0) * 100);
+	if (headerRemainingCents !== (existing.remainingAmount ?? 0)) return false;
+
+	// Due date — both sides parsed to a ms timestamp (or null). Strict equality.
+	const headerDue = parseKeezDate(header.dueDate);
+	const headerDueMs = headerDue?.getTime() ?? null;
+	const existingDueMs = existing.dueDate?.getTime() ?? null;
+	if (headerDueMs !== existingDueMs) return false;
+
+	return true;
+}
+
+/**
+ * Thrown by the per-invoice loop when 3 consecutive transient errors trip
+ * the in-run circuit breaker. Carries a snapshot of progress made so far
+ * so callers (manual remote command, scheduler) can surface partial results
+ * instead of treating the run as a total loss.
+ */
+export class KeezSyncAbortedError extends Error {
+	constructor(
+		public readonly partial: SyncKeezInvoicesResult,
+		public readonly cause: unknown
+	) {
+		super('Keez sync aborted after consecutive transient errors');
+		this.name = 'KeezSyncAbortedError';
+	}
+}
+
+/**
  * Sync invoices from Keez for a specific tenant.
  * Can be called from the scheduler (no request context needed).
  */
 export async function syncKeezInvoicesForTenant(
 	tenantId: string,
-	options?: { offset?: number; count?: number; filter?: string }
+	options?: { offset?: number; count?: number; filter?: string; force?: boolean }
 ): Promise<SyncKeezInvoicesResult> {
-	const result: SyncKeezInvoicesResult = { imported: 0, updated: 0, skipped: 0, errors: 0 };
+	const result: SyncKeezInvoicesResult = { imported: 0, updated: 0, unchanged: 0, skipped: 0, errors: 0 };
 
 	// Prevent concurrent syncs for same tenant
 	if (activeSyncs.has(tenantId)) {
@@ -97,7 +160,7 @@ export async function syncKeezInvoicesForTenant(
 
 async function _syncKeezInvoicesForTenantInner(
 	tenantId: string,
-	options: { offset?: number; count?: number; filter?: string } | undefined,
+	options: { offset?: number; count?: number; filter?: string; force?: boolean } | undefined,
 	result: SyncKeezInvoicesResult
 ): Promise<SyncKeezInvoicesResult> {
 
@@ -146,12 +209,26 @@ async function _syncKeezInvoicesForTenantInner(
 	// any realistic tenant. Hitting this bound is a bug, log loudly.
 	const MAX_PAGES = 200;
 
+	// In-run resilience: when we hit 3 consecutive transient errors, pause briefly
+	// and continue rather than aborting and falling back to the cross-run BullMQ
+	// retry (30 min delay). 30s × 2 covers most observed Keez nginx flaps (10–60s)
+	// without making the user wait too long. Beyond 2 pauses, abort and let
+	// handleKeezSyncFailure schedule a proper retry.
+	const MAX_IN_RUN_PAUSES = 2;
+	const IN_RUN_PAUSE_MS = 30_000;
+
 	const pageSize = options?.count || 500;
 	let offset = options?.offset ?? 0;
 	let totalRecords: number | null = null;
 	const seen = new Set<string>();
 	let consecutiveTransient = 0;
+	let pausesUsed = 0;
 	let pagesFetched = 0;
+	// Smart-sync: invoice IDs that matched the header fingerprint and were
+	// skipped. We bump their lastSyncedAt in a single batched UPDATE after
+	// the pagination loop instead of per-row to avoid 500+ individual writes
+	// on a fast sync run.
+	const unchangedIds: string[] = [];
 
 	pagination: while (true) {
 		if (pagesFetched >= MAX_PAGES) {
@@ -185,6 +262,18 @@ async function _syncKeezInvoicesForTenantInner(
 				.from(table.invoice)
 				.where(eq(table.invoice.keezExternalId, invoiceHeader.externalId))
 				.limit(1);
+
+			// Smart-sync: if the header's status/totals/dueDate match what we
+			// already have in CRM, skip the expensive getInvoice() roundtrip.
+			// `force: true` (from the UI dropdown "Re-sync complet") bypasses
+			// this check and forces a full fetch — escape hatch for the rare
+			// case where Keez changed line-items / notes without moving totals.
+			if (existing && !options?.force && headerMatchesExisting(invoiceHeader, existing)) {
+				unchangedIds.push(existing.id);
+				result.unchanged++;
+				consecutiveTransient = 0;
+				continue;
+			}
 
 			// Get full invoice details from Keez
 			let keezInvoice;
@@ -500,14 +589,38 @@ async function _syncKeezInvoicesForTenantInner(
 			logError('keez', `Sync failed to process invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
 			result.errors++;
 
-			// Re-throw after 3 consecutive transient errors so the caller routes
-			// through handleKeezSyncFailure (which schedules a delayed retry)
-			// instead of burning through the rest of the page on a degraded upstream.
+			// On 3 consecutive transient errors: try to ride out the flap in-run
+			// with up to MAX_IN_RUN_PAUSES short pauses before falling back to
+			// the cross-run BullMQ retry. Empirically, Keez nginx flaps last
+			// 10-60s, so 30s × 2 catches most. Skipped invoices come back via
+			// upsert idempotency on keezExternalId in the next sync run — no
+			// data loss, just delayed by one run.
 			if (classifyKeezError(error) === 'transient') {
 				consecutiveTransient++;
 				if (consecutiveTransient >= 3) {
-					logWarning('keez', `Aborting sync run after ${consecutiveTransient} consecutive transient errors`, { tenantId });
-					throw error;
+					if (pausesUsed < MAX_IN_RUN_PAUSES) {
+						pausesUsed++;
+						logWarning(
+							'keez',
+							`Hit ${consecutiveTransient} consecutive transient errors — pausing ${IN_RUN_PAUSE_MS / 1000}s before resuming (pause ${pausesUsed}/${MAX_IN_RUN_PAUSES})`,
+							{
+								tenantId,
+								metadata: {
+									offset,
+									invoicesProcessed: result.imported + result.updated + result.skipped,
+								},
+							},
+						);
+						await new Promise((r) => setTimeout(r, IN_RUN_PAUSE_MS));
+						consecutiveTransient = 0;
+						continue;
+					}
+					logWarning(
+						'keez',
+						`Aborting sync run after ${pausesUsed} in-run pauses + ${consecutiveTransient} consecutive transient errors`,
+						{ tenantId },
+					);
+					throw new KeezSyncAbortedError({ ...result }, error);
 				}
 			} else {
 				consecutiveTransient = 0;
@@ -523,6 +636,16 @@ async function _syncKeezInvoicesForTenantInner(
 	}
 
 	result.pagesFetched = pagesFetched;
+
+	// Smart-sync: bump lastSyncedAt for all the rows whose header matched.
+	// Single batched UPDATE instead of N individual writes — keeps fast-sync
+	// wall time low (most invoices land here on a steady-state run).
+	if (unchangedIds.length > 0) {
+		await db
+			.update(table.keezInvoiceSync)
+			.set({ lastSyncedAt: new Date() })
+			.where(inArray(table.keezInvoiceSync.invoiceId, unchangedIds));
+	}
 
 	// Reconcile pass: any CRM invoice whose Keez counterpart we did NOT see
 	// in any page, and which Keez confirms is gone (per-invoice getInvoice),

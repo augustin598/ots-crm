@@ -66,6 +66,7 @@
 	import PowerOffIcon from '@lucide/svelte/icons/power-off';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 import FileTextIcon from '@lucide/svelte/icons/file-text';
 import CoinsIcon from '@lucide/svelte/icons/coins';
@@ -543,30 +544,79 @@ import { goto } from '$app/navigation';
 	// Keez sync state
 	let syncingInvoices = $state(false);
 	let syncError = $state<string | null>(null);
-	let syncResult = $state<{ imported: number; updated: number; skipped: number } | null>(null);
+	let syncResult = $state<{
+		imported: number;
+		updated: number;
+		unchanged: number;
+		skipped: number;
+	} | null>(null);
+	let syncWarning = $state<{
+		message: string;
+		imported: number;
+		updated: number;
+		skipped: number;
+		retryAt: string | null;
+		degraded: boolean;
+	} | null>(null);
 
-	async function handleSyncInvoices() {
+	function stripHtml(s: string): string {
+		return s.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 240);
+	}
+
+	function formatRelativeTime(date: Date | string | null | undefined): string {
+		if (!date) return '—';
+		const d = typeof date === 'string' ? new Date(date) : date;
+		const minutes = Math.floor((Date.now() - d.getTime()) / 60_000);
+		if (minutes < 1) return 'acum';
+		if (minutes < 60) return `acum ${minutes} min`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `acum ${hours} h`;
+		const days = Math.floor(hours / 24);
+		return `acum ${days} ${days === 1 ? 'zi' : 'zile'}`;
+	}
+
+	async function handleSyncInvoices(force = false) {
 		syncingInvoices = true;
 		syncError = null;
 		syncResult = null;
-		console.log('[Keez-Debug] Starting sync invoices from Keez...');
+		syncWarning = null;
+		console.log('[Keez-Debug] Starting sync invoices from Keez...', { force });
 
 		try {
-			const result = await syncInvoicesFromKeez({}).updates(invoicesQuery, keezStatusQuery);
+			const result = await syncInvoicesFromKeez({ force }).updates(invoicesQuery, keezStatusQuery);
 			console.log('[Keez-Debug] syncInvoicesFromKeez result:', JSON.stringify(result, null, 2));
 
 			if (result.success) {
-				syncResult = { imported: result.imported, updated: result.updated || 0, skipped: result.skipped };
-				console.log('[Keez-Debug] Sync success:', syncResult);
+				syncResult = {
+					imported: result.imported,
+					updated: result.updated || 0,
+					unchanged: result.unchanged || 0,
+					skipped: result.skipped
+				};
+				console.log('[Keez-Debug] Sync success:', $state.snapshot(syncResult));
 				await invoicesQuery.refresh();
 				setTimeout(() => {
 					syncResult = null;
 				}, 5000);
+			} else if (result.partial) {
+				// Sync stopped mid-page on transient upstream errors. DB rows from
+				// successful invoices are persisted; show a warning + retry ETA.
+				syncWarning = {
+					message: result.message,
+					imported: result.imported,
+					updated: result.updated,
+					skipped: result.skipped,
+					retryAt: result.retryAt,
+					degraded: result.degraded
+				};
+				await invoicesQuery.refresh();
 			} else {
-				console.error('[Keez-Debug] Sync returned success=false:', result);
+				// Hard error (4xx, credentials, etc.) — show as red error.
+				syncError = stripHtml(result.message);
 			}
 		} catch (e) {
-			syncError = e instanceof Error ? e.message : 'Failed to sync invoices from Keez';
+			// Network/transport errors that escaped the server-side wrapper.
+			syncError = stripHtml(e instanceof Error ? e.message : 'Failed to sync invoices from Keez');
 			console.error('[Keez-Debug] syncInvoicesFromKeez ERROR:', e);
 		} finally {
 			syncingInvoices = false;
@@ -647,19 +697,46 @@ import { goto } from '$app/navigation';
 		</div>
 		<div class="flex gap-2">
 			{#if isKeezActive}
-				<Button
-					variant="default"
-					onclick={handleSyncInvoices}
-					disabled={syncingInvoices}
-				>
-					{#if syncingInvoices}
-						<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
-						Syncing...
-					{:else}
-						<RefreshCwIcon class="mr-2 h-4 w-4" />
-						Sync Invoices from Keez
+				<div class="flex items-center gap-2">
+					{#if keezStatus?.lastSyncAt}
+						<span class="text-xs text-muted-foreground hidden md:inline">
+							Ultima verificare: {formatRelativeTime(keezStatus.lastSyncAt)}
+						</span>
 					{/if}
-				</Button>
+					<div class="inline-flex">
+						<Button
+							variant="default"
+							class="rounded-r-none"
+							onclick={() => handleSyncInvoices(false)}
+							disabled={syncingInvoices}
+						>
+							{#if syncingInvoices}
+								<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
+								Syncing...
+							{:else}
+								<RefreshCwIcon class="mr-2 h-4 w-4" />
+								Sync Invoices from Keez
+							{/if}
+						</Button>
+						<DropdownMenu>
+							<DropdownMenuTrigger>
+								<Button
+									variant="default"
+									class="rounded-l-none border-l border-primary-foreground/20 px-2"
+									disabled={syncingInvoices}
+									aria-label="Mai multe opțiuni de sincronizare"
+								>
+									<ChevronDownIcon class="h-4 w-4" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem onclick={() => handleSyncInvoices(true)}>
+									Re-sync complet (ignoră cache)
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
+				</div>
 			{/if}
 		
 
@@ -676,7 +753,22 @@ import { goto } from '$app/navigation';
 		</div>
 	</div>
 
-	{#if syncError}
+	{#if syncWarning}
+		<div class="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-1">
+			<p class="text-sm text-amber-800 dark:text-amber-200">
+				⚠ {syncWarning.message}
+			</p>
+			<p class="text-xs text-amber-700 dark:text-amber-300">
+				Progres parțial salvat: {syncWarning.imported} importate · {syncWarning.updated} actualizate · {syncWarning.skipped} sărite.
+				{#if syncWarning.retryAt}
+					Următoarea încercare automată: {new Date(syncWarning.retryAt).toLocaleString('ro-RO')}.
+				{/if}
+				{#if syncWarning.degraded}
+					Integrarea este marcată ca degradată; verifică setările.
+				{/if}
+			</p>
+		</div>
+	{:else if syncError}
 		<div class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
 			<p class="text-sm text-red-800 dark:text-red-200">{syncError}</p>
 		</div>
@@ -685,7 +777,12 @@ import { goto } from '$app/navigation';
 	{#if syncResult}
 		<div class="rounded-md bg-green-50 dark:bg-green-900/20 p-3">
 			<p class="text-sm text-green-800 dark:text-green-200">
-				Sync completed: {syncResult.imported} imported{syncResult.updated > 0 ? `, ${syncResult.updated} updated` : ''}{syncResult.skipped > 0 ? `, ${syncResult.skipped} skipped` : ''}
+				Sync completat:
+				{#if syncResult.imported > 0}{syncResult.imported} importate{#if syncResult.updated > 0 || syncResult.unchanged > 0 || syncResult.skipped > 0}, {/if}{/if}
+				{#if syncResult.updated > 0}{syncResult.updated} actualizate{#if syncResult.unchanged > 0 || syncResult.skipped > 0}, {/if}{/if}
+				{#if syncResult.unchanged > 0}{syncResult.unchanged} neschimbate{#if syncResult.skipped > 0}, {/if}{/if}
+				{#if syncResult.skipped > 0}{syncResult.skipped} sărite{/if}
+				{#if syncResult.imported === 0 && syncResult.updated === 0 && syncResult.unchanged === 0 && syncResult.skipped === 0}nimic de procesat{/if}
 			</p>
 		</div>
 	{/if}
