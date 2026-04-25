@@ -17,6 +17,11 @@ import type { RequestHandler } from './$types';
  * POST ?series=OTS&number=542  body { purge: true }
  *   → if Keez returns 404, marks invoice cancelled and clears keez fields
  *
+ * POST ?series=OTS&number=542  body { hardDelete: true }
+ *   → if Keez returns 404 (or invoice already purged), detaches FK refs
+ *     (bank_transaction.matched_invoice_id, whmcs_invoice_sync) and
+ *     hard-deletes the invoice. Cascades clean line items, payments, etc.
+ *
  * Until the sync engine grows reconciliation (see PR for soft-delete on
  * disappearance), this endpoint is the operational way to clean up CRM
  * invoices that were deleted on Keez.
@@ -143,8 +148,13 @@ export const POST: RequestHandler = async (event) => {
 	const tenantId = event.locals.tenant!.id;
 
 	const body = await event.request.json().catch(() => ({}));
-	if (body?.purge !== true) {
-		throw error(400, 'POST body must be {"purge": true}');
+	const wantsPurge = body?.purge === true;
+	const wantsHardDelete = body?.hardDelete === true;
+	if (!wantsPurge && !wantsHardDelete) {
+		throw error(400, 'POST body must be {"purge": true} or {"hardDelete": true}');
+	}
+	if (wantsPurge && wantsHardDelete) {
+		throw error(400, 'POST body must specify exactly one of purge or hardDelete');
 	}
 
 	const matches = await findInvoice(tenantId, series, number);
@@ -152,33 +162,92 @@ export const POST: RequestHandler = async (event) => {
 	if (matches.length > 1) throw error(409, `${matches.length} matches — refine the query`);
 
 	const inv = matches[0];
-	if (!inv.keezExternalId) throw error(400, 'invoice has no keezExternalId — nothing to purge');
 
-	const keezResult = await verifyOnKeez(tenantId, inv.keezExternalId);
-	if (!keezResult.ok) {
-		throw error(502, `cannot verify on Keez (refusing to purge on ambiguous response): ${keezResult.reason}`);
-	}
-	if (keezResult.exists) {
-		throw error(409, `invoice still exists on Keez (status=${keezResult.status}) — refusing to purge`);
+	if (wantsPurge) {
+		if (!inv.keezExternalId) throw error(400, 'invoice has no keezExternalId — nothing to purge');
+
+		const keezResult = await verifyOnKeez(tenantId, inv.keezExternalId);
+		if (!keezResult.ok) {
+			throw error(502, `cannot verify on Keez (refusing to purge on ambiguous response): ${keezResult.reason}`);
+		}
+		if (keezResult.exists) {
+			throw error(409, `invoice still exists on Keez (status=${keezResult.status}) — refusing to purge`);
+		}
+
+		logWarning('keez', `_debug purge: marking invoice cancelled (Keez 404)`, {
+			tenantId,
+			metadata: { invoiceId: inv.id, series: inv.invoiceSeries, number: inv.invoiceNumber, keezExternalId: inv.keezExternalId },
+		});
+
+		await db
+			.update(table.invoice)
+			.set({ status: 'cancelled', keezInvoiceId: null, keezExternalId: null, updatedAt: new Date() })
+			.where(eq(table.invoice.id, inv.id));
+
+		logInfo('keez', `_debug purge: invoice marked cancelled`, {
+			tenantId,
+			metadata: { invoiceId: inv.id },
+		});
+
+		return json({
+			purged: true,
+			invoice: { id: inv.id, series: inv.invoiceSeries, number: inv.invoiceNumber, newStatus: 'cancelled' },
+		});
 	}
 
-	logWarning('keez', `_debug purge: marking invoice cancelled (Keez 404)`, {
+	// wantsHardDelete: verify Keez agrees the invoice is gone (only if we still
+	// have an externalId — a prior purge call clears it). Then detach FK refs
+	// that aren't ON DELETE CASCADE and hard-delete. Cascades handle line
+	// items, payments, push sync rows, etc.
+	if (inv.keezExternalId) {
+		const keezResult = await verifyOnKeez(tenantId, inv.keezExternalId);
+		if (!keezResult.ok) {
+			throw error(502, `cannot verify on Keez (refusing to hard-delete on ambiguous response): ${keezResult.reason}`);
+		}
+		if (keezResult.exists) {
+			throw error(409, `invoice still exists on Keez (status=${keezResult.status}) — refusing to hard-delete`);
+		}
+	}
+
+	logWarning('keez', `_debug hardDelete: removing invoice and detaching FK refs`, {
 		tenantId,
 		metadata: { invoiceId: inv.id, series: inv.invoiceSeries, number: inv.invoiceNumber, keezExternalId: inv.keezExternalId },
 	});
 
-	await db
-		.update(table.invoice)
-		.set({ status: 'cancelled', keezInvoiceId: null, keezExternalId: null, updatedAt: new Date() })
-		.where(eq(table.invoice.id, inv.id));
+	// Bank transactions are detached (not deleted) so the bank statement record
+	// stays for reconciliation. WHMCS sync rows are deleted because the user
+	// explicitly wants the journal entry gone too — rationale: Keez is the
+	// source of truth, so if Keez says the invoice never existed, the entire
+	// CRM-side trail (invoice + WHMCS event row that produced it) should be
+	// removed in one operation.
+	let detachedTransactions = 0;
+	let deletedWhmcsRows = 0;
+	await db.transaction(async (tx) => {
+		const txnDetach = await tx
+			.update(table.bankTransaction)
+			.set({ matchedInvoiceId: null, matchingMethod: null, updatedAt: new Date() })
+			.where(eq(table.bankTransaction.matchedInvoiceId, inv.id))
+			.returning({ id: table.bankTransaction.id });
+		detachedTransactions = txnDetach.length;
 
-	logInfo('keez', `_debug purge: invoice marked cancelled`, {
+		const whmcsDel = await tx
+			.delete(table.whmcsInvoiceSync)
+			.where(eq(table.whmcsInvoiceSync.invoiceId, inv.id))
+			.returning({ id: table.whmcsInvoiceSync.id });
+		deletedWhmcsRows = whmcsDel.length;
+
+		await tx.delete(table.invoice).where(eq(table.invoice.id, inv.id));
+	});
+
+	logInfo('keez', `_debug hardDelete: invoice removed`, {
 		tenantId,
-		metadata: { invoiceId: inv.id },
+		metadata: { invoiceId: inv.id, detachedTransactions, deletedWhmcsRows },
 	});
 
 	return json({
-		purged: true,
-		invoice: { id: inv.id, series: inv.invoiceSeries, number: inv.invoiceNumber, newStatus: 'cancelled' },
+		hardDeleted: true,
+		invoice: { id: inv.id, series: inv.invoiceSeries, number: inv.invoiceNumber },
+		detachedTransactions,
+		deletedWhmcsRows,
 	});
 };
