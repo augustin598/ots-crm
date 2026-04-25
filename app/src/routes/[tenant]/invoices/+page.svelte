@@ -295,14 +295,35 @@ import { goto } from '$app/navigation';
 
 
 	async function handleDeleteInvoice(invoiceId: string) {
-		if (!confirm('Are you sure you want to delete this invoice?')) {
+		if (!confirm('Sigur ștergi factura? Acțiunea e permisă doar pentru status Draft.')) {
 			return;
 		}
 
 		try {
 			await deleteInvoice(invoiceId).updates(invoicesQuery);
+			toast.success('Factura a fost ștearsă');
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to delete invoice');
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergerea facturii');
+		}
+	}
+
+	async function handleCancelInvoice(invoiceId: string) {
+		if (!confirm('Anulează factura? Statusul devine "Anulată" în CRM și — dacă e sincronizată — și pe Keez.')) {
+			return;
+		}
+
+		try {
+			const result = await cancelInvoiceInKeez({ invoiceId }).updates(invoicesQuery);
+			if ((result as any)?.cancelledOn === 'keez') {
+				toast.success('Factura a fost anulată (CRM + Keez)');
+			} else if ((result as any)?.alreadyCancelled) {
+				toast.success('Factura era deja anulată');
+			} else {
+				toast.success('Factura a fost anulată în CRM');
+			}
+		} catch (e) {
+			clientLogger.apiError('invoice_cancel', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la anularea facturii');
 		}
 	}
 
@@ -599,22 +620,6 @@ import { goto } from '$app/navigation';
 		} catch (e) {
 			console.error('[Keez-Debug] sendInvoiceToEFactura ERROR:', e);
 			clientLogger.apiError('invoice_send_efactura', e);
-		}
-	}
-
-	async function handleCancelInKeez(invoiceId: string) {
-		if (!confirm('Anulează factura în Keez? Această acțiune va schimba statusul facturii în Cancelled.')) {
-			return;
-		}
-		console.log('[Keez-Debug] Cancelling invoice in Keez:', invoiceId);
-		try {
-			const result = await cancelInvoiceInKeez({ invoiceId });
-			console.log('[Keez-Debug] cancelInvoiceInKeez result:', result);
-			toast.success('Factura a fost anulată în Keez');
-			await invoicesQuery.refresh();
-		} catch (e) {
-			console.error('[Keez-Debug] cancelInvoiceInKeez ERROR:', e);
-			clientLogger.apiError('invoice_cancel_keez', e);
 		}
 	}
 
@@ -954,16 +959,19 @@ import { goto } from '$app/navigation';
 													<DropdownMenuItem onclick={() => handleSendToEFactura(invoice.id)}>
 														Trimite eFactura
 													</DropdownMenuItem>
-													<DropdownMenuItem onclick={() => handleCancelInKeez(invoice.id)}>
-														Anulează în Keez
-													</DropdownMenuItem>
 													<DropdownMenuItem onclick={() => handleCreateStorno(invoice.id)}>
 														Storno în Keez
 													</DropdownMenuItem>
 												{/if}
-												<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteInvoice(invoice.id)}>
-													Delete
-												</DropdownMenuItem>
+												{#if invoice.status === 'draft'}
+													<DropdownMenuItem class="text-destructive" onclick={() => handleDeleteInvoice(invoice.id)}>
+														Șterge
+													</DropdownMenuItem>
+												{:else if invoice.status !== 'cancelled'}
+													<DropdownMenuItem class="text-destructive" onclick={() => handleCancelInvoice(invoice.id)}>
+														Anulează
+													</DropdownMenuItem>
+												{/if}
 											</DropdownMenuContent>
 										</DropdownMenu>
 									</div>

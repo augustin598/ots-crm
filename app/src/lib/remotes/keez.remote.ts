@@ -1102,6 +1102,17 @@ export const sendInvoiceToEFactura = command(
 	}
 );
 
+/**
+ * Cancel an invoice. Two paths depending on Keez sync state:
+ *   - Synced (keezExternalId set + active integration) → POST /invoices/canceled
+ *     on Keez first, then UPDATE local status='cancelled', keezStatus='Cancelled'
+ *   - Local-only (no keezExternalId, or no active integration) → UPDATE local
+ *     status='cancelled' only
+ *
+ * Used by the unified "Anulează" UI action for any non-draft invoice. Drafts
+ * still go through deleteInvoice; that's enforced in the UI but not here, so
+ * cancelling a draft is allowed if called directly.
+ */
 export const cancelInvoiceInKeez = command(
 	v.object({
 		invoiceId: v.pipe(v.string(), v.minLength(1))
@@ -1127,35 +1138,53 @@ export const cancelInvoiceInKeez = command(
 			.limit(1);
 
 		if (!invoice) throw new Error('Invoice not found');
-		if (!invoice.keezExternalId) throw new Error('Invoice is not synced with Keez');
+		if (invoice.status === 'cancelled') {
+			return { success: true, alreadyCancelled: true };
+		}
 
-		const [integration] = await db
-			.select()
-			.from(table.keezIntegration)
-			.where(
-				and(
-					eq(table.keezIntegration.tenantId, event.locals.tenant.id),
-					eq(table.keezIntegration.isActive, true)
+		if (invoice.keezExternalId) {
+			const [integration] = await db
+				.select()
+				.from(table.keezIntegration)
+				.where(
+					and(
+						eq(table.keezIntegration.tenantId, event.locals.tenant.id),
+						eq(table.keezIntegration.isActive, true)
+					)
 				)
-			)
-			.limit(1);
+				.limit(1);
 
-		if (!integration) throw new Error('Keez integration not connected');
+			if (integration) {
+				// Synced + active integration → cancel upstream first, then locally.
+				const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
+				await keezClient.cancelInvoice(invoice.keezExternalId);
 
-		const keezClient = await createKeezClientForTenant(event.locals.tenant.id, integration);
-		await keezClient.cancelInvoice(invoice.keezExternalId);
+				await db
+					.update(table.invoice)
+					.set({
+						keezStatus: 'Cancelled',
+						status: 'cancelled',
+						updatedAt: new Date()
+					})
+					.where(eq(table.invoice.id, data.invoiceId));
 
-		// Update local invoice status
+				return { success: true, cancelledOn: 'keez' as const };
+			}
+			// keezExternalId set but no active integration: fall through to local-only
+			// cancel. The next time Keez reconnects + syncs, status will reconcile if
+			// the upstream invoice still exists.
+		}
+
+		// Local-only path: invoice never synced or integration disconnected.
 		await db
 			.update(table.invoice)
 			.set({
-				keezStatus: 'Cancelled',
 				status: 'cancelled',
 				updatedAt: new Date()
 			})
 			.where(eq(table.invoice.id, data.invoiceId));
 
-		return { success: true };
+		return { success: true, cancelledOn: 'local' as const };
 	}
 );
 

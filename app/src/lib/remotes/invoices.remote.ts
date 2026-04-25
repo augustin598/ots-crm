@@ -739,6 +739,18 @@ export const updateInvoice = command(
 	}
 );
 
+/**
+ * Hard-delete a draft invoice. Validated invoices (sent/paid/etc.) cannot be
+ * deleted — they must be cancelled with cancelInvoiceInKeez (or the equivalent
+ * UI "Anulează" action) so the fiscal record stays intact.
+ *
+ * The bare `DELETE FROM invoice` fails with a FK violation when the invoice
+ * has either a matched bank transaction (bank_transaction.matched_invoice_id
+ * is not ON DELETE CASCADE) or a WHMCS sync row (whmcs_invoice_sync.invoice_id
+ * same). We detach/clear those refs in the same transaction as the delete.
+ * The other FKs to invoice.id (line items, payments, keezInvoiceSync,
+ * transactionInvoiceMatch) ARE cascading, so they're handled implicitly.
+ */
 export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (invoiceId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
@@ -756,6 +768,12 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 		throw new Error('Invoice not found');
 	}
 
+	if (existing.status !== 'draft') {
+		throw new Error(
+			`Facturile validate fiscal nu pot fi șterse — folosiți "Anulează" în meniu. Status curent: ${existing.status}`
+		);
+	}
+
 	// Emit invoice.deleted hook (before database deletion)
 	const hooks = getHooksManager();
 	await hooks.emit({
@@ -765,7 +783,18 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 		userId: event.locals.user.id
 	});
 
-	await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+	await db.transaction(async (tx) => {
+		await tx
+			.update(table.bankTransaction)
+			.set({ matchedInvoiceId: null, matchingMethod: null, updatedAt: new Date() })
+			.where(eq(table.bankTransaction.matchedInvoiceId, invoiceId));
+
+		await tx
+			.delete(table.whmcsInvoiceSync)
+			.where(eq(table.whmcsInvoiceSync.invoiceId, invoiceId));
+
+		await tx.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+	});
 
 	return { success: true };
 });
