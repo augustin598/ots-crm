@@ -689,51 +689,9 @@ export async function mapInvoiceToKeez(
 	const invoiceTotalVatCurrency = Math.round(details.reduce((s, d) => s + (d.vatAmountCurrency ?? d.vatAmount), 0) * 100) / 100;
 	const invoiceTotalGrossCurrency = Math.round(details.reduce((s, d) => s + (d.grossAmountCurrency ?? d.grossAmount), 0) * 100) / 100;
 
-	// Map CRM paymentMethod to Keez paymentTypeId.
-	// Keez codes: 1=BFCash, 2=BFCard, 3=Bank, 4=ChitCash, 5=Ramburs,
-	//             6=ProcesatorPlati, 7=PlatformaDistributie, 8=VoucherVacantaCard,
-	//             9=VoucherVacantaTichet.
-	//
-	// Important: code 2 'BFCard' is for retail POS card payments issued as
-	// Bon Fiscal (cash register receipt). Online card processing (Stripe,
-	// PayU, Netopia, mobilpay, etc.) is code 6 'ProcesatorPlati'. The earlier
-	// fuzzy `card → 2` rule was WRONG for invoice context — re-routed to 6.
 	const settingsDefaultPaymentTypeId = settings?.keezDefaultPaymentTypeId ?? 3;
-	const mapPaymentTypeId = (paymentMethod: string | null | undefined): number => {
-		if (!paymentMethod) return settingsDefaultPaymentTypeId;
-		const pm = paymentMethod.toLowerCase().trim();
-		// Exact Keez code matches (the WHMCS PHP normalizer sends these directly)
-		if (pm === 'bfcash') return 1;
-		if (pm === 'bfcard') return 2;
-		if (pm === 'bank') return 3;
-		if (pm === 'chitcash' || pm === 'chitantacash') return 4;
-		if (pm === 'ramburs' || pm === 'cod') return 5;
-		if (pm === 'procesatorplati') return 6;
-		if (pm === 'platformadistributie') return 7;
-		if (pm === 'vouchervacantacard') return 8;
-		if (pm === 'vouchervacantatichet') return 9;
-		// Fuzzy matches (legacy values / unmapped gateways).
-		if (pm.includes('bon fiscal') && pm.includes('card')) return 2;
-		if (pm.includes('bon fiscal') && (pm.includes('cash') || pm.includes('numerar'))) return 1;
-		if (pm.includes('bank') || pm.includes('transfer') || pm.includes('virament')) return 3;
-		if (pm.includes('chitanta') || pm.includes('chit')) return 4;
-		if (pm.includes('numerar') || pm.includes('cash')) return 4;
-		// All online card / processor mentions → ProcesatorPlati. Order matters:
-		// must come AFTER bank/cash/chit checks so 'bank card' still maps to 3.
-		if (
-			pm.includes('card') ||
-			pm.includes('online') ||
-			pm.includes('stripe') ||
-			pm.includes('paypal') ||
-			pm.includes('payu') ||
-			pm.includes('netopia') ||
-			pm.includes('euplatesc') ||
-			pm.includes('mobilpay') ||
-			pm.includes('procesator')
-		) return 6;
-		if (pm.includes('emag') || pm.includes('platforma')) return 7;
-		return settingsDefaultPaymentTypeId;
-	};
+	const mapPaymentTypeId = (paymentMethod: string | null | undefined): number =>
+		mapPaymentTypeIdForKeez(paymentMethod, settingsDefaultPaymentTypeId);
 
 	const keezInvoice: KeezInvoice = {
 		externalId,
@@ -1261,4 +1219,61 @@ export function generateNextInvoiceNumber(lastNumber: string | null | undefined)
 	// Preserve leading zeros
 	const padding = match[1].length;
 	return nextNum.toString().padStart(padding, '0');
+}
+
+/**
+ * Map a CRM `invoice.paymentMethod` string to the Keez `paymentTypeId`
+ * enum. Pure function — extracted from `mapInvoiceToKeez` so unit tests can
+ * exercise the matrix without standing up a full invoice + tenant + Keez
+ * integration row.
+ *
+ * Keez codes:
+ *   1 BFCash, 2 BFCard, 3 Bank, 4 ChitCash, 5 Ramburs, 6 ProcesatorPlati,
+ *   7 PlatformaDistributie, 8 VoucherVacantaCard, 9 VoucherVacantaTichet.
+ *
+ * Important: code 2 'BFCard' is for retail POS card payments issued as Bon
+ * Fiscal (cash register receipt). Online card processing (Stripe, PayU,
+ * Netopia, mobilpay, etc.) is code 6 'ProcesatorPlati'. The earlier fuzzy
+ * `card → 2` rule was WRONG for invoice context — re-routed to 6.
+ */
+export function mapPaymentTypeIdForKeez(
+	paymentMethod: string | null | undefined,
+	defaultPaymentTypeId: number = 3
+): number {
+	if (!paymentMethod) return defaultPaymentTypeId;
+	const pm = paymentMethod.toLowerCase().trim();
+
+	// Exact Keez code matches (the WHMCS PHP normalizer sends these directly)
+	if (pm === 'bfcash') return 1;
+	if (pm === 'bfcard') return 2;
+	if (pm === 'bank') return 3;
+	if (pm === 'chitcash' || pm === 'chitantacash' || pm === 'mailin') return 4;
+	if (pm === 'ramburs' || pm === 'cod') return 5;
+	if (pm === 'procesatorplati') return 6;
+	if (pm === 'platformadistributie') return 7;
+	if (pm === 'vouchervacantacard') return 8;
+	if (pm === 'vouchervacantatichet') return 9;
+
+	// Fuzzy matches (legacy values / unmapped gateways).
+	if (pm.includes('bon fiscal') && pm.includes('card')) return 2;
+	if (pm.includes('bon fiscal') && (pm.includes('cash') || pm.includes('numerar'))) return 1;
+	if (pm.includes('bank') || pm.includes('transfer') || pm.includes('virament')) return 3;
+	if (pm.includes('chitanta') || pm.includes('chit')) return 4;
+	if (pm.includes('numerar') || pm.includes('cash')) return 4;
+	// All online card / processor mentions → ProcesatorPlati. Order matters:
+	// must come AFTER bank/cash/chit checks so 'bank card' still maps to 3.
+	if (
+		pm.includes('card') ||
+		pm.includes('online') ||
+		pm.includes('stripe') ||
+		pm.includes('paypal') ||
+		pm.includes('payu') ||
+		pm.includes('netopia') ||
+		pm.includes('euplatesc') ||
+		pm.includes('mobilpay') ||
+		pm.includes('procesator')
+	) return 6;
+	if (pm.includes('emag') || pm.includes('platforma')) return 7;
+
+	return defaultPaymentTypeId;
 }
