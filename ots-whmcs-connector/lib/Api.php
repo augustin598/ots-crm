@@ -130,6 +130,44 @@ class Api
     }
 
     /**
+     * Bulk-fetch sync + Keez status for a list of WHMCS invoice IDs from the
+     * CRM. Powers the "Keez" column in the recent-invoices admin table —
+     * single HMAC GET instead of N per-row requests.
+     *
+     * Returns: ['99' => ['syncState'=>..., 'keezStatus'=>..., 'invoiceNumber'=>..., ...], ...]
+     * Returns empty array on any failure (UI shows "—" for those rows).
+     */
+    public static function fetchInvoiceStatuses(array $settings, array $invoiceIds): array
+    {
+        if (empty($invoiceIds)) return [];
+
+        $idsClean = array_values(array_filter(array_map('intval', $invoiceIds), fn($i) => $i > 0));
+        if (empty($idsClean)) return [];
+
+        $slug = trim((string)$settings['tenantSlug'], '/ ');
+        $path = '/' . $slug . '/api/webhooks/whmcs/status';
+        $url  = rtrim((string)$settings['crmBaseUrl'], '/') . $path . '?ids=' . urlencode(implode(',', $idsClean));
+
+        // HMAC canonical does NOT include the query string — only the path.
+        // Body is empty for GET.
+        $headers = Hmac::buildHeaders(
+            (string)$settings['sharedSecret'],
+            'GET',
+            $path,
+            $slug,
+            ''
+        );
+
+        $result = self::httpGet($url, $headers, self::timeout($settings));
+        if (!$result['ok']) {
+            return [];
+        }
+
+        $body = json_decode((string)($result['responseBody'] ?? ''), true);
+        return is_array($body) ? $body : [];
+    }
+
+    /**
      * Drain the retry queue. Called from the admin UI button and from the
      * WHMCS daily cron (see hooks.php).
      */
