@@ -243,6 +243,7 @@ export async function bootstrapTestSchema(): Promise<void> {
 	)`);
 
 	// --- whmcs_invoice_sync ---
+	// Mirrors migrations 0xxx (initial) + 0201/0202/0203/0204 (resilience cols).
 	await db.run(sql`CREATE TABLE IF NOT EXISTS whmcs_invoice_sync (
 		id text PRIMARY KEY NOT NULL,
 		tenant_id text NOT NULL REFERENCES tenant(id),
@@ -260,12 +261,18 @@ export async function bootstrapTestSchema(): Promise<void> {
 		last_error_message text,
 		raw_payload text,
 		received_at timestamp NOT NULL DEFAULT current_date,
-		processed_at timestamp
+		processed_at timestamp,
+		next_retry_at timestamp,
+		last_push_attempt_at timestamp,
+		keez_push_status text
 	)`);
 	await db.run(
 		sql`CREATE UNIQUE INDEX IF NOT EXISTS uniq_whmcs_tenant_invoice ON whmcs_invoice_sync(tenant_id, whmcs_invoice_id)`
 	);
 	await db.run(
 		sql`CREATE INDEX IF NOT EXISTS idx_whmcs_invoice_sync_tenant_state ON whmcs_invoice_sync(tenant_id, state)`
+	);
+	await db.run(
+		sql`CREATE INDEX IF NOT EXISTS idx_whmcs_invoice_sync_keez_push_status ON whmcs_invoice_sync(tenant_id, keez_push_status)`
 	);
 }
