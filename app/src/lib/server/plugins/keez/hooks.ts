@@ -138,10 +138,13 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			continue;
 		}
 
-		// Generate code for item (similar to WHMCS implementation)
-		const itemCode = `CRM_${lineItem.id}`;
-
-		logInfo('keez', `Checking item ${itemCode} for line item ${lineItem.id}`, { tenantId });
+		// Strategy: always create a fresh Keez article per (invoice, line-item).
+		// See app/src/lib/server/plugins/keez/auto-push.ts for full rationale —
+		// Keez `?filter=code eq` is not honored on /items so getItemByCode
+		// silently returns the wrong article. Keez also requires unique `name`,
+		// so we append a discrete `· #<lineItemIdShort>` suffix.
+		const itemCode = `CRM_${invoice.id.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
+		const uniqueName = `${lineItem.description || 'Item'} · #${lineItem.id.slice(0, 6)}`;
 
 		// Use per-item tax rate if available, otherwise use invoice tax rate
 		const itemVatPercent = lineItem.taxRate ? lineItem.taxRate / 100 : defaultVatPercent;
@@ -159,38 +162,37 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 			measureUnitId = unitMap[lineItem.unitOfMeasure] || 1;
 		}
 
-		// Check if item exists in Keez by code
-		let keezItem = await keezClient.getItemByCode(itemCode);
+		let resolvedExternalId: string;
+		try {
+			const newItem = await keezClient.createItem({
+				code: itemCode,
+				name: uniqueName,
+				currencyCode: itemCurrency,
+				measureUnitId,
+				vatRate: itemVatPercent,
+				isActive: true,
+				categoryExternalId: 'MISCSRV', // Required category (Misc Services)
+				categoryName: 'Misc Services',
+				isStockable: false
+			});
 
-		if (!keezItem) {
-			// Item doesn't exist, create it
-			logInfo('keez', `Item ${itemCode} not found, creating new item in Keez`, { tenantId });
+			logInfo('keez', `Created item ${itemCode} with externalId: ${newItem.externalId}`, { tenantId });
+			resolvedExternalId = newItem.externalId;
+		} catch (itemError) {
+			const err = serializeError(itemError);
+			logError('keez', `Failed to create item ${itemCode}: ${err.message}`, { tenantId, stackTrace: err.stack });
+			// Fallback to lineItem.id so the invoice push doesn't blow up.
+			resolvedExternalId = lineItem.id;
+		}
 
-			try {
-				const newItem = await keezClient.createItem({
-					code: itemCode,
-					name: lineItem.description || 'Item',
-					currencyCode: itemCurrency,
-					measureUnitId,
-					vatRate: itemVatPercent,
-					isActive: true,
-					categoryExternalId: 'MISCSRV', // Required category (Misc Services)
-					categoryName: 'Misc Services',
-					isStockable: false
-				});
+		itemExternalIds.set(lineItem.id, resolvedExternalId);
 
-				logInfo('keez', `Created item ${itemCode} with externalId: ${newItem.externalId}`, { tenantId });
-				itemExternalIds.set(lineItem.id, newItem.externalId);
-			} catch (itemError) {
-				const err = serializeError(itemError);
-				logError('keez', `Failed to create item ${itemCode}: ${err.message}`, { tenantId, stackTrace: err.stack });
-				// Try to continue with item ID as fallback
-				itemExternalIds.set(lineItem.id, lineItem.id);
-			}
-		} else {
-			// Item exists, use its externalId
-			logInfo('keez', `Found existing item ${itemCode} with externalId: ${keezItem.externalId}`, { tenantId });
-			itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
+		// Persist the Keez externalId on the CRM line-item row.
+		if (resolvedExternalId !== lineItem.keezItemExternalId) {
+			await db
+				.update(table.invoiceLineItem)
+				.set({ keezItemExternalId: resolvedExternalId })
+				.where(eq(table.invoiceLineItem.id, lineItem.id));
 		}
 	}
 

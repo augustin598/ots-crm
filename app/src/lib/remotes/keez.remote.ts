@@ -445,28 +445,42 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 	const currency = invoice.currency || settings?.defaultCurrency || 'RON';
 
 	for (const lineItem of lineItems) {
-		const itemCode = `CRM_${lineItem.id}`;
-		let keezItem = await keezClient.getItemByCode(itemCode);
+		// Strategy: always create a fresh Keez article per (invoice, line-item).
+		// See app/src/lib/server/plugins/keez/auto-push.ts for the full
+		// rationale — short version: Keez `?filter=code eq` is not honored on
+		// /items so getItemByCode silently returned the wrong article and the
+		// rename branch corrupted the nomenclator. Per Keez docs, `name` must
+		// be globally unique → append a discrete `#<lineItemIdShort>` suffix.
+		const itemCode = `CRM_${invoiceId.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
+		const uniqueName = `${lineItem.description || 'Item'} · #${lineItem.id.slice(0, 6)}`;
 
-		if (!keezItem) {
-			try {
-				const newItem = await keezClient.createItem({
-					code: itemCode,
-					name: lineItem.description || 'Item',
-					description: lineItem.description || undefined,
-					currencyCode: currency,
-					measureUnitId: 1,
-					vatRate: vatPercent,
-					isActive: true,
-					categoryExternalId: 'MISCSRV'
-				});
-				itemExternalIds.set(lineItem.id, newItem.externalId);
-			} catch (itemError) {
-				console.error(`[Keez] Failed to create item ${itemCode}:`, itemError);
-				itemExternalIds.set(lineItem.id, lineItem.id);
-			}
-		} else {
-			itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
+		let resolvedExternalId: string;
+		try {
+			const newItem = await keezClient.createItem({
+				code: itemCode,
+				name: uniqueName,
+				description: lineItem.description || undefined,
+				currencyCode: currency,
+				measureUnitId: 1,
+				vatRate: vatPercent,
+				isActive: true,
+				categoryExternalId: 'MISCSRV'
+			});
+			resolvedExternalId = newItem.externalId;
+		} catch (itemError) {
+			console.error(`[Keez] Failed to create item ${itemCode}:`, itemError);
+			resolvedExternalId = lineItem.id;
+		}
+
+		itemExternalIds.set(lineItem.id, resolvedExternalId);
+
+		// Persist the Keez externalId on the CRM line-item row so the next
+		// push has a real article to fall back to.
+		if (resolvedExternalId !== lineItem.keezItemExternalId) {
+			await db
+				.update(table.invoiceLineItem)
+				.set({ keezItemExternalId: resolvedExternalId })
+				.where(eq(table.invoiceLineItem.id, lineItem.id));
 		}
 	}
 

@@ -484,6 +484,29 @@ async function handleCreated(
 		}
 	});
 
+	// Trace exactly what WHMCS sent for each line item — most importantly the
+	// externalItemId (MD5 GUID from InvoiceMapper.php). When a future Keez
+	// push uses the wrong article, this is the input to start tracing from.
+	logInfo('whmcs', `[trace] WHMCS items received for invoice ${invoiceId}`, {
+		tenantId,
+		action: 'whmcs_keez_trace',
+		metadata: {
+			invoiceId,
+			whmcsInvoiceId: payload.whmcsInvoiceId,
+			itemCount: payload.items.length,
+			items: payload.items.map((it) => ({
+				whmcsItemId: it.whmcsItemId,
+				externalItemId: it.externalItemId,
+				description: it.description,
+				quantity: it.quantity,
+				unitPrice: it.unitPrice,
+				vatPercent: it.vatPercent,
+				relId: it.relId ?? null,
+				relIdType: it.relIdType ?? null
+			}))
+		}
+	});
+
 	// Auto-push to Keez when:
 	//  - tenant opted in (whmcs_integration.enable_keez_push = true), AND
 	//  - the invoice was created in a "paid" state (synthesize from paid event,

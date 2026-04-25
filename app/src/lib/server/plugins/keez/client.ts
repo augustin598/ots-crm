@@ -594,7 +594,21 @@ export class KeezClient {
 	}
 
 	/**
-	 * Get item by code
+	 * Get item by code.
+	 *
+	 * IMPORTANT: Keez has been observed to NOT honor the `?filter=code eq '...'`
+	 * query parameter on /items — it returns the full nomenclator (or the first
+	 * `count` rows) regardless. Without an explicit code-equality check on the
+	 * client side, `response[0]` would always resolve to whatever happens to be
+	 * the first article in the account (typically `#1 - Realizare Film
+	 * Documentar`, externalId `04c73804...`). Auto-push.ts would then call
+	 * updateItem on that externalId, silently RENAMING the unrelated article
+	 * to the current invoice's line description. This caused every WHMCS push
+	 * to rewrite article #1 with the latest invoice text.
+	 *
+	 * Defensive fix: only return a match when the returned `code` field equals
+	 * the requested code. Otherwise treat the article as missing so the caller
+	 * goes down the createItem path.
 	 */
 	async getItemByCode(code: string): Promise<KeezItem | null> {
 		try {
@@ -603,11 +617,28 @@ export class KeezClient {
 				filter: `code eq '${code.replace(/'/g, "''")}'`
 			});
 
-			if (response && response.length > 0) {
-				return response[0];
+			if (!response || response.length === 0) {
+				return null;
 			}
 
-			return null;
+			const exactMatch = response.find((item) => item.code === code);
+			if (!exactMatch) {
+				logWarning(
+					'keez',
+					`getItemByCode(${code}): server returned ${response.length} item(s) but none matched the code — treating as missing (filter not honored)`,
+					{
+						metadata: {
+							requestedCode: code,
+							returnedCount: response.length,
+							firstReturnedCode: response[0]?.code,
+							firstReturnedExternalId: response[0]?.externalId
+						}
+					}
+				);
+				return null;
+			}
+
+			return exactMatch;
 		} catch (error) {
 			const itemErr = serializeError(error);
 			logError('keez', `Error getting item by code ${code}: ${itemErr.message}`, { stackTrace: itemErr.stack });

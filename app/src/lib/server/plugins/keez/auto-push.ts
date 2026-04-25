@@ -108,81 +108,95 @@ export async function pushInvoiceToKeez(
 		const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
 		const currency = invoice.currency || settings?.defaultCurrency || 'RON';
 
+		// Trace entry: snapshot of CRM-side line items *before* we touch Keez.
+		// Compare this against the post-fetch trace to see what Keez actually
+		// stored vs what we asked for.
+		logInfo('keez', `[trace] auto-push starting for invoice ${invoiceId}`, {
+			tenantId,
+			action: 'whmcs_keez_trace',
+			metadata: {
+				invoiceId,
+				externalId,
+				externalSource: invoice.externalSource,
+				externalInvoiceId: invoice.externalInvoiceId,
+				lineItemCount: lineItems.length,
+				lineItems: lineItems.map((li) => ({
+					id: li.id,
+					description: li.description,
+					keezItemExternalIdBefore: li.keezItemExternalId,
+					quantity: li.quantity,
+					rate: li.rate,
+					amount: li.amount,
+					taxRate: li.taxRate,
+					note: li.note
+				}))
+			}
+		});
+
 		for (const lineItem of lineItems) {
 			const desiredName = lineItem.description || 'Item';
 
-			// Article code is per-(invoice, line-item) so different invoices
-			// always get fresh articles (avoids name reuse from legacy data
-			// e.g. WHMCS invoices that picked up "Realizare Film Documentar"
-			// because of an MD5 GUID collision with an old article).
+			// Strategy: ALWAYS create a fresh Keez article per (invoice, line-item).
+			// We do NOT try to match against existing articles, because:
+			//   1. Keez `?filter=code eq '...'` is not honored on /items — it
+			//      returns the full nomenclator, so getItemByCode would falsely
+			//      match the first article (typically `#1 - Realizare Film
+			//      Documentar`, externalId `04c73804...`) and the rename branch
+			//      would overwrite that article with the current invoice's
+			//      description. Every WHMCS push was silently rewriting the
+			//      same article. See debug_log filter `whmcs_keez_trace`.
+			//   2. Per Keez Public API docs (https://app.keez.ro/help/api/item.html)
+			//      `name` MUST be unique across all articles — duplicates throw
+			//      HTTP 500. We append the line-item id as a discrete suffix to
+			//      guarantee uniqueness without depending on description being
+			//      unique (e.g. for repeated test descriptions like FIX-TEST-A).
+			//   3. `code` is also unique per (invoice, line-item) so retries on
+			//      the same logical line resolve to different articles, which is
+			//      acceptable (Keez doesn't bill us per article entry).
 			const itemCode = `CRM_${invoiceId.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
-			let keezItem = await keezClient.getItemByCode(itemCode);
+			const uniqueName = `${desiredName} · #${lineItem.id.slice(0, 6)}`;
 
 			let resolvedExternalId: string | null = null;
 
-			if (!keezItem) {
-				try {
-					const newItem = await keezClient.createItem({
-						code: itemCode,
-						name: desiredName,
-						description: lineItem.description || undefined,
-						currencyCode: currency,
-						measureUnitId: 1,
-						vatRate: vatPercent,
-						isActive: true,
-						categoryExternalId: 'MISCSRV'
-					});
-					resolvedExternalId = newItem.externalId;
-					logInfo('keez', 'Created fresh Keez article for line item', {
-						tenantId,
-						metadata: {
-							lineItemId: lineItem.id,
-							itemCode,
-							externalId: newItem.externalId,
-							name: desiredName
-						}
-					});
-				} catch (itemError) {
-					logWarning('keez', `Failed to create Keez item ${itemCode}`, {
-						tenantId,
-						metadata: {
-							error: itemError instanceof Error ? itemError.message : String(itemError)
-						}
-					});
-					resolvedExternalId = lineItem.id;
-				}
-			} else {
-				// Same code → retry on the same (invoice, line-item) pair.
-				// Realign name if it drifted (e.g. line-item description was edited
-				// in CRM between pushes).
-				if (keezItem.name !== desiredName && keezItem.externalId) {
-					try {
-						await keezClient.updateItem(keezItem.externalId, {
-							...keezItem,
-							name: desiredName,
-							description: lineItem.description || keezItem.description
-						});
-						logInfo('keez', 'Renamed Keez article to match CRM line-item description', {
-							tenantId,
-							metadata: {
-								itemCode,
-								oldName: keezItem.name,
-								newName: desiredName
-							}
-						});
-					} catch (updateError) {
-						logWarning('keez', `Failed to rename Keez item ${itemCode}`, {
-							tenantId,
-							metadata: {
-								error:
-									updateError instanceof Error
-										? updateError.message
-										: String(updateError)
-							}
-						});
+			try {
+				const newItem = await keezClient.createItem({
+					code: itemCode,
+					name: uniqueName,
+					description: lineItem.description || undefined,
+					currencyCode: currency,
+					measureUnitId: 1,
+					vatRate: vatPercent,
+					isActive: true,
+					categoryExternalId: 'MISCSRV'
+				});
+				resolvedExternalId = newItem.externalId;
+				logInfo('keez', `[trace] createItem succeeded for ${itemCode}`, {
+					tenantId,
+					action: 'whmcs_keez_trace',
+					metadata: {
+						invoiceId,
+						lineItemId: lineItem.id,
+						itemCode,
+						sentName: uniqueName,
+						sentCurrency: currency,
+						sentVatRate: vatPercent,
+						returnedExternalId: newItem.externalId
 					}
-				}
-				resolvedExternalId = keezItem.externalId || lineItem.id;
+				});
+			} catch (itemError) {
+				logError('keez', `[trace] createItem FAILED for ${itemCode} — falling back to lineItem.id`, {
+					tenantId,
+					action: 'whmcs_keez_trace',
+					metadata: {
+						invoiceId,
+						lineItemId: lineItem.id,
+						itemCode,
+						sentName: uniqueName,
+						error: itemError instanceof Error ? itemError.message : String(itemError),
+						stack: itemError instanceof Error ? itemError.stack : undefined
+					}
+				});
+				resolvedExternalId = lineItem.id;
 			}
 
 			itemExternalIds.set(lineItem.id, resolvedExternalId);
@@ -196,6 +210,21 @@ export async function pushInvoiceToKeez(
 					.set({ keezItemExternalId: resolvedExternalId })
 					.where(eq(table.invoiceLineItem.id, lineItem.id));
 			}
+
+			logInfo('keez', `[trace] resolved externalId for lineItem ${lineItem.id}`, {
+				tenantId,
+				action: 'whmcs_keez_trace',
+				metadata: {
+					invoiceId,
+					lineItemId: lineItem.id,
+					itemCode,
+					previousKeezItemExternalId: lineItem.keezItemExternalId,
+					resolvedExternalId,
+					didOverwrite:
+						!!resolvedExternalId &&
+						resolvedExternalId !== lineItem.keezItemExternalId
+				}
+			});
 		}
 
 		// Resolve series + number from settings (Keez-side getNextInvoiceNumber)
@@ -245,7 +274,36 @@ export async function pushInvoiceToKeez(
 			keezInvoice.number = parseInt(invoiceNumber, 10);
 		}
 
+		// Trace the EXACT payload we're about to POST to /invoices. The
+		// invoiceDetails snapshot is what proves whether the mapper sent the
+		// right itemExternalId / itemName per line.
+		logInfo('keez', `[trace] createInvoice payload prepared`, {
+			tenantId,
+			action: 'whmcs_keez_trace',
+			metadata: {
+				invoiceId,
+				externalId: keezInvoice.externalId,
+				series: keezInvoice.series,
+				number: keezInvoice.number,
+				currency: keezInvoice.currencyCode,
+				detailsSent: keezInvoice.invoiceDetails.map((d) => ({
+					itemExternalId: d.itemExternalId,
+					itemName: d.itemName,
+					itemDescription: d.itemDescription,
+					quantity: d.quantity,
+					unitPrice: d.unitPrice,
+					vatPercent: d.vatPercent
+				}))
+			}
+		});
+
 		const response = await keezClient.createInvoice(keezInvoice);
+
+		logInfo('keez', `[trace] createInvoice response`, {
+			tenantId,
+			action: 'whmcs_keez_trace',
+			metadata: { invoiceId, returnedExternalId: response.externalId }
+		});
 
 		// Fetch back from Keez for canonical data
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -270,6 +328,60 @@ export async function pushInvoiceToKeez(
 				tenantId,
 				metadata: { error: error instanceof Error ? error.message : String(error) }
 			});
+		}
+
+		// Trace what Keez ACTUALLY stored vs what we sent. The critical signal
+		// is `externalIdSubstituted` — if Keez swapped the article id we sent
+		// for a different one, that's the silent-substitution bug. A pure name
+		// drift (sent name is a prefix of stored name) is benign — Keez
+		// reflects the article's nomenclator name on the invoice line, and we
+		// intentionally append a `· #<lineId6>` suffix to the article name in
+		// auto-push for uniqueness, so the stored name is expected to be the
+		// sent name + suffix. Only flag drift that isn't this prefix relation.
+		if (keezInvoiceData?.invoiceDetails && Array.isArray(keezInvoiceData.invoiceDetails)) {
+			const sentDetails = keezInvoice.invoiceDetails;
+			const stored = keezInvoiceData.invoiceDetails;
+			const comparisons = stored.map((kd: any, idx: number) => {
+				const sent = sentDetails[idx];
+				const externalIdSubstituted =
+					sent && sent.itemExternalId && kd.itemExternalId !== sent.itemExternalId;
+				const sentName = sent?.itemName || '';
+				const storedName = kd.itemName || '';
+				// "Real" drift: stored name doesn't even start with sent name.
+				// (sent="Foo", stored="Foo · #abc" → benign suffix; sent="Foo",
+				// stored="Bar" → real drift.)
+				const nameDrift =
+					!!sentName && !!storedName && !storedName.startsWith(sentName);
+				return {
+					idx,
+					sentItemExternalId: sent?.itemExternalId,
+					storedItemExternalId: kd.itemExternalId,
+					externalIdSubstituted,
+					sentItemName: sentName,
+					storedItemName: storedName,
+					nameDrift,
+					storedItemDescription: kd.itemDescription
+				};
+			});
+			const anyRealMismatch = comparisons.some(
+				(c: any) => c.externalIdSubstituted || c.nameDrift
+			);
+
+			(anyRealMismatch ? logError : logInfo)(
+				'keez',
+				anyRealMismatch
+					? `[trace] MISMATCH detected — Keez substituted itemExternalId or returned an unrelated itemName`
+					: `[trace] post-fetch — Keez stored details match what we sent (suffix drift on name is expected)`,
+				{
+					tenantId,
+					action: 'whmcs_keez_trace',
+					metadata: {
+						invoiceId,
+						keezExternalId: response.externalId,
+						comparisons
+					}
+				}
+			);
 		}
 
 		// Build update payload from Keez response
