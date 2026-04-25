@@ -51,7 +51,16 @@ if (redisHost === '0.0.0.0') {
 const connection = {
 	host: redisHost,
 	port: parseInt(parsedRedisUrl.port, 10),
-	password: parsedRedisUrl.password || undefined
+	password: parsedRedisUrl.password || undefined,
+	// Node 18+ resolves "localhost" (and dual-stack k8s services) to both ::1 and
+	// 127.0.0.1 → Happy Eyeballs. If Redis only binds IPv4, the parallel IPv6
+	// attempt surfaces as an opaque NodeAggregateError on the Queue/Worker.
+	family: 4,
+	// Required by BullMQ Workers (blocking commands like bzpopmin). With the
+	// default of 20, transient Redis hiccups cascade into reconnect storms.
+	maxRetriesPerRequest: null,
+	// Cap reconnect backoff so we don't churn during a Redis restart.
+	retryStrategy: (times: number) => Math.min(times * 200, 3000)
 };
 
 // Use global symbols to store singleton instances (survives HMR)
