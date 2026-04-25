@@ -484,7 +484,79 @@ async function handleCreated(
 		}
 	});
 
+	// Auto-push to Keez when:
+	//  - tenant opted in (whmcs_integration.enable_keez_push = true), AND
+	//  - the invoice was created in a "paid" state (synthesize from paid event,
+	//    or normal created → quickly followed by paid). For pure 'sent'/draft
+	//    invoices we wait for the paid event before pushing fiscal.
+	// Fire-and-forget so the webhook response stays fast; failures are logged
+	// inside auto-push.ts and admin can retrigger manually.
+	if (ctx.integration.enableKeezPush && (statusOverride === 'paid' || statusOverride === 'cancelled')) {
+		triggerAutoPushKeez(tenantId, invoiceId, payload.whmcsInvoiceId);
+	}
+
 	return { outcome: 'created', invoiceId, invoiceNumber, matchType: match.matchType };
+}
+
+/**
+ * Fire-and-forget chain: push invoice to Keez (Draft) → validate (Valid).
+ * Validate auto-triggers pushInvoiceNumberToWhmcs which writes the fiscal
+ * number back to WHMCS. Updates whmcs_invoice_sync.state to KEEZ_PUSHED on
+ * full success.
+ */
+function triggerAutoPushKeez(tenantId: string, invoiceId: string, whmcsInvoiceId: number): void {
+	void (async () => {
+		try {
+			const { pushInvoiceToKeez, validateInvoiceInKeezForTenant } = await import(
+				'$lib/server/plugins/keez/auto-push'
+			);
+
+			const pushResult = await pushInvoiceToKeez(tenantId, invoiceId);
+			if (!pushResult.success) {
+				logWarning('whmcs', 'Auto-push to Keez failed (will need manual retrigger)', {
+					tenantId,
+					metadata: { invoiceId, whmcsInvoiceId, error: pushResult.error }
+				});
+				return;
+			}
+
+			// Push succeeded — invoice is in Keez as Draft. Validate immediately
+			// so fiscal number propagates and downstream push-back fires.
+			const validateResult = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
+			if (!validateResult.success) {
+				logWarning('whmcs', 'Auto-validate in Keez failed (Draft remains, manual retrigger needed)', {
+					tenantId,
+					metadata: { invoiceId, whmcsInvoiceId, error: validateResult.error }
+				});
+				return;
+			}
+
+			// All steps OK — bump sync row to KEEZ_PUSHED for the admin UI.
+			await db
+				.update(table.whmcsInvoiceSync)
+				.set({ state: 'KEEZ_PUSHED', processedAt: new Date() })
+				.where(
+					and(
+						eq(table.whmcsInvoiceSync.tenantId, tenantId),
+						eq(table.whmcsInvoiceSync.whmcsInvoiceId, whmcsInvoiceId)
+					)
+				);
+
+			logInfo('whmcs', 'Auto-push chain complete: Keez pushed + validated + WHMCS notified', {
+				tenantId,
+				metadata: { invoiceId, whmcsInvoiceId }
+			});
+		} catch (err) {
+			logError('whmcs', 'triggerAutoPushKeez crashed', {
+				tenantId,
+				metadata: {
+					invoiceId,
+					whmcsInvoiceId,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		}
+	})();
 }
 
 // ─────────────────────────────────────────────
@@ -526,12 +598,20 @@ async function handleStatusChange(
 	await upsertSync(existingSync, {
 		tenantId,
 		whmcsInvoiceId: payload.whmcsInvoiceId,
-		state: 'INVOICE_CREATED', // terminal for v1 (no Keez push yet)
+		state: 'INVOICE_CREATED', // bumped to KEEZ_PUSHED inside triggerAutoPushKeez on success
 		lastEvent: event,
 		lastPayloadHash: payloadHash,
 		invoiceId: existingSync.invoiceId,
 		payload
 	});
+
+	// Auto-push when invoice was just paid AND tenant opted into Keez push.
+	// pushInvoiceToKeez is idempotent — if the invoice already has a keezExternalId
+	// (e.g. someone pushed manually before paid landed), Keez API call updates
+	// instead of duplicating.
+	if (event === 'paid' && ctx.integration.enableKeezPush) {
+		triggerAutoPushKeez(tenantId, existingSync.invoiceId, payload.whmcsInvoiceId);
+	}
 
 	logInfo('whmcs', `WHMCS invoice ${event}`, {
 		tenantId,
