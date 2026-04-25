@@ -9,7 +9,8 @@ import * as table from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { getLatestBnrRate } from '$lib/server/bnr/client';
+import { getLatestBnrRate, getLatestBnrRateWithDate } from '$lib/server/bnr/client';
+import { BnrRateStaleError } from '$lib/server/whmcs/errors';
 import { logWarning, logError, serializeError } from '$lib/server/logger';
 import type {
 	KeezInvoice,
@@ -334,14 +335,44 @@ export async function mapInvoiceToKeez(
 	const allSameCurrency = !isRON && nonRONCurrencies.size <= 1 && [...nonRONCurrencies][0] === currency;
 	// Ensure we have a meaningful exchange rate when needed
 	if (needsExchangeRate && exchangeRate <= 1 && !allSameCurrency) {
-		// Try BNR rate from DB before using hardcoded fallback
+		// Try BNR rate from DB before using hardcoded fallback.
+		// Strict mode (settings.whmcsStrictBnrConversion) raises BnrRateStaleError
+		// when the cached rate is missing or older than 26h (allows 24h normal
+		// cycle + 2h grace for cron drift). Push-failure classifier treats it as
+		// transient → BullMQ retry chain waits for the next BNR sync.
 		const targetCurrency = referenceCurrencyCode || (isRON ? 'EUR' : currency);
-		const bnrRate = await getLatestBnrRate(targetCurrency);
-		if (bnrRate) {
-			exchangeRate = bnrRate;
+		const strictMode = settings?.whmcsStrictBnrConversion ?? false;
+		const STALE_HOURS = 26;
+		const fresh = await getLatestBnrRateWithDate(targetCurrency);
+		const ageHours = fresh
+			? (Date.now() - fresh.rateDate.getTime()) / 3_600_000
+			: Number.POSITIVE_INFINITY;
+		if (fresh && ageHours <= STALE_HOURS) {
+			exchangeRate = fresh.rate;
+		} else if (strictMode) {
+			throw new BnrRateStaleError(
+				targetCurrency,
+				fresh?.rateDate ?? null,
+				STALE_HOURS
+			);
 		} else {
-			logWarning('keez', `No BNR exchange rate for ${targetCurrency} — invoice amounts may be inaccurate`, {});
-			exchangeRate = 1;
+			// Non-strict legacy fallback. Loud warning so ops sees what happened.
+			const bnrRate = await getLatestBnrRate(targetCurrency);
+			if (bnrRate) {
+				exchangeRate = bnrRate;
+				logWarning(
+					'keez',
+					`Using stale BNR rate for ${targetCurrency} (~${Math.round(ageHours)}h old) — enable whmcs_strict_bnr_conversion to abort instead`,
+					{}
+				);
+			} else {
+				logWarning(
+					'keez',
+					`No BNR exchange rate for ${targetCurrency} — falling back to 1.0 (invoice amounts will be wrong)`,
+					{}
+				);
+				exchangeRate = 1;
+			}
 		}
 	}
 

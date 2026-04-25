@@ -45,3 +45,29 @@ export class WhmcsKeezPushAbortedError extends Error {
 		this.retryAt = retryAt;
 	}
 }
+
+/**
+ * Raised by the Keez mapper when a non-RON invoice needs an exchange rate
+ * but the BNR cache is stale (older than the configured freshness window)
+ * and `whmcs_strict_bnr_conversion` is enabled. Treated as TRANSIENT by the
+ * push-failure classifier so the BullMQ retry chain waits for the next BNR
+ * sync — better than committing an exchangeRate=1 fallback that would emit
+ * a fiscal document with sums off by ~5x.
+ */
+export class BnrRateStaleError extends Error {
+	readonly currency: string;
+	readonly rateDate: Date | null;
+	readonly maxAgeHours: number;
+	constructor(currency: string, rateDate: Date | null, maxAgeHours: number) {
+		const ageDesc = rateDate
+			? `${Math.round((Date.now() - rateDate.getTime()) / 3_600_000)}h old`
+			: 'missing';
+		super(
+			`BNR rate for ${currency} is ${ageDesc} (max ${maxAgeHours}h allowed in strict mode). Aborting push; will retry after next BNR sync.`
+		);
+		this.name = 'BnrRateStaleError';
+		this.currency = currency;
+		this.rateDate = rateDate;
+		this.maxAgeHours = maxAgeHours;
+	}
+}

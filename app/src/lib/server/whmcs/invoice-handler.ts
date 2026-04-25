@@ -36,6 +36,12 @@ import { redactAndStringify } from './redact';
 import type { WhmcsInvoicePayload, WhmcsMatchType } from './types';
 import { handleWhmcsKeezPushFailure, resetWhmcsConsecutiveFailures } from './failure-handler';
 import { enqueueWhmcsKeezPushRetry } from '$lib/server/scheduler/tasks/whmcs-keez-push-retry';
+import {
+	classifyZeroVat,
+	buildZeroVatNote,
+	shouldForceTaxApplicationNone,
+	appendZeroVatNote
+} from './zero-vat-detection';
 
 /**
  * In-memory lock keyed on `${tenantId}:${invoiceId}`. Prevents concurrent
@@ -406,6 +412,59 @@ async function handleCreated(
 	const finalStatus: string = statusOverride ?? 'sent';
 	const paidDate = statusOverride === 'paid' ? now : null;
 
+	// Zero-VAT classification: if WHMCS sent tax=0, append the legally-required
+	// note + flag taxApplicationType='none' so Keez forces 0% on every line.
+	// Operator can disable per-tenant via invoice_settings.whmcs_zero_vat_auto_detect.
+	let finalNotes: string | null = payload.notes ?? null;
+	let finalTaxApplicationType: string | null = null;
+	if (payload.tax === 0) {
+		const settings = await db
+			.select({
+				whmcsZeroVatNoteIntracom: table.invoiceSettings.whmcsZeroVatNoteIntracom,
+				whmcsZeroVatNoteExport: table.invoiceSettings.whmcsZeroVatNoteExport,
+				whmcsZeroVatAutoDetect: table.invoiceSettings.whmcsZeroVatAutoDetect
+			})
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, tenantId))
+			.get();
+		const autoDetectEnabled = settings?.whmcsZeroVatAutoDetect ?? true;
+		if (autoDetectEnabled) {
+			const classification = classifyZeroVat(payload);
+			const noteToAppend = buildZeroVatNote(classification, {
+				intracomNote: settings?.whmcsZeroVatNoteIntracom,
+				exportNote: settings?.whmcsZeroVatNoteExport
+			});
+			finalNotes = appendZeroVatNote(finalNotes, noteToAppend);
+			if (shouldForceTaxApplicationNone(classification)) {
+				finalTaxApplicationType = 'none';
+			}
+			logInfo(
+				'whmcs',
+				`Zero-VAT detected (${classification}) — note ${noteToAppend ? 'appended' : 'skipped'}`,
+				{
+					tenantId,
+					metadata: {
+						whmcsInvoiceId: payload.whmcsInvoiceId,
+						classification,
+						clientCountry: payload.client?.countryCode ?? null,
+						taxApplicationType: finalTaxApplicationType,
+						noteAppended: noteToAppend !== null
+					}
+				}
+			);
+			if (classification === 'unknown') {
+				logWarning(
+					'whmcs',
+					'Zero-VAT invoice without client country — defaulted to export note. Operator should review.',
+					{
+						tenantId,
+						metadata: { whmcsInvoiceId: payload.whmcsInvoiceId }
+					}
+				);
+			}
+		}
+	}
+
 	await db.transaction(async (tx) => {
 		await tx.insert(table.invoice).values({
 			id: invoiceId,
@@ -428,7 +487,7 @@ async function handleCreated(
 			overdueReminderCount: 0,
 			lastOverdueReminderAt: null,
 			currency: payload.currency || 'RON',
-			notes: payload.notes ?? null,
+			notes: finalNotes,
 			invoiceSeries: series,
 			invoiceCurrency: null,
 			paymentTerms: null,
@@ -436,7 +495,7 @@ async function handleCreated(
 			exchangeRate: null,
 			vatOnCollection: false,
 			isCreditNote: false,
-			taxApplicationType: null,
+			taxApplicationType: finalTaxApplicationType,
 			discountType: null,
 			discountValue: null,
 			smartbillSeries: null,

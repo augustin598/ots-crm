@@ -627,6 +627,15 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	keezStartNumberHosting: text('keez_start_number_hosting'),
 	keezLastSyncedNumberHosting: text('keez_last_synced_number_hosting'),
 	whmcsAutoPushToKeez: boolean('whmcs_auto_push_to_keez').notNull().default(false),
+	// Zero-VAT note text appended to invoice.notes when WHMCS sends tax=0.
+	// Nullable → in-code defaults from zero-vat-detection.ts kick in.
+	whmcsZeroVatNoteIntracom: text('whmcs_zero_vat_note_intracom'),
+	whmcsZeroVatNoteExport: text('whmcs_zero_vat_note_export'),
+	// When false, zero-VAT detection is skipped entirely (operator opt-out).
+	whmcsZeroVatAutoDetect: boolean('whmcs_zero_vat_auto_detect').notNull().default(true),
+	// When true, EUR (or other non-RON) WHMCS push fails with a retryable
+	// error if BNR rate is stale (>24h). Prevents silent exchangeRate=1 fallback.
+	whmcsStrictBnrConversion: boolean('whmcs_strict_bnr_conversion').notNull().default(true),
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
 	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),

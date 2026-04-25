@@ -1,0 +1,1 @@
+ALTER TABLE `invoice_settings` ADD COLUMN `whmcs_strict_bnr_conversion` integer NOT NULL DEFAULT 1;

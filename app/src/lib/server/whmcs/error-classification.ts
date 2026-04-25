@@ -12,7 +12,7 @@
  */
 import { classifyKeezError } from '$lib/server/plugins/keez/error-classification';
 import { KeezClientError, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/errors';
-import { WhmcsKeezPushAbortedError, WhmcsPushBackError } from './errors';
+import { BnrRateStaleError, WhmcsKeezPushAbortedError, WhmcsPushBackError } from './errors';
 
 export type FailureKind = 'transient' | 'permanent';
 
@@ -21,6 +21,12 @@ const TRANSIENT_NETWORK_PATTERN =
 	/timeout|timed out|ECONNRESET|ENOTFOUND|fetch failed|AbortError|aborted|EAI_AGAIN/i;
 
 export function classifyWhmcsPushError(error: unknown): FailureKind {
+	// Stale BNR rate: by definition transient. Daily BNR sync at 10:00 RO
+	// time refreshes it; the BullMQ retry chain will absorb the wait.
+	if (error instanceof BnrRateStaleError) {
+		return 'transient';
+	}
+
 	if (error instanceof WhmcsKeezPushAbortedError) {
 		// Already classified upstream — the abort itself isn't "the cause", we
 		// just want the caller to keep treating it as transient so the retry

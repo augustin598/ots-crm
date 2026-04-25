@@ -95,7 +95,11 @@ export const getWhmcsStatus = query(async () => {
 			keezSeriesHosting: table.invoiceSettings.keezSeriesHosting,
 			keezStartNumberHosting: table.invoiceSettings.keezStartNumberHosting,
 			keezLastSyncedNumberHosting: table.invoiceSettings.keezLastSyncedNumberHosting,
-			whmcsAutoPushToKeez: table.invoiceSettings.whmcsAutoPushToKeez
+			whmcsAutoPushToKeez: table.invoiceSettings.whmcsAutoPushToKeez,
+			whmcsZeroVatNoteIntracom: table.invoiceSettings.whmcsZeroVatNoteIntracom,
+			whmcsZeroVatNoteExport: table.invoiceSettings.whmcsZeroVatNoteExport,
+			whmcsZeroVatAutoDetect: table.invoiceSettings.whmcsZeroVatAutoDetect,
+			whmcsStrictBnrConversion: table.invoiceSettings.whmcsStrictBnrConversion
 		})
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
@@ -699,5 +703,55 @@ export const replayAllFailedWhmcsPushes = command(
 		}
 
 		return { replayed, totalCandidates: rows.length };
+	}
+);
+
+/**
+ * Save the zero-VAT compliance settings + the BNR strict-mode toggle.
+ * All four fields are nullable on the DB side so the UI can clear them
+ * (auto-detect with code defaults) or set custom per-tenant text.
+ */
+export const saveWhmcsZeroVatSettings = command(
+	v.object({
+		whmcsZeroVatAutoDetect: v.boolean(),
+		whmcsZeroVatNoteIntracom: v.nullable(v.string()),
+		whmcsZeroVatNoteExport: v.nullable(v.string()),
+		whmcsStrictBnrConversion: v.boolean()
+	}),
+	async (data) => {
+		const { tenantId } = requireTenantAdmin();
+
+		const existing = await db
+			.select({ id: table.invoiceSettings.id })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, tenantId))
+			.get();
+
+		const intracom = data.whmcsZeroVatNoteIntracom?.trim() || null;
+		const exportNote = data.whmcsZeroVatNoteExport?.trim() || null;
+
+		if (existing) {
+			await db
+				.update(table.invoiceSettings)
+				.set({
+					whmcsZeroVatAutoDetect: data.whmcsZeroVatAutoDetect,
+					whmcsZeroVatNoteIntracom: intracom,
+					whmcsZeroVatNoteExport: exportNote,
+					whmcsStrictBnrConversion: data.whmcsStrictBnrConversion,
+					updatedAt: new Date()
+				})
+				.where(eq(table.invoiceSettings.id, existing.id));
+		} else {
+			await db.insert(table.invoiceSettings).values({
+				id: generateId(),
+				tenantId,
+				whmcsZeroVatAutoDetect: data.whmcsZeroVatAutoDetect,
+				whmcsZeroVatNoteIntracom: intracom,
+				whmcsZeroVatNoteExport: exportNote,
+				whmcsStrictBnrConversion: data.whmcsStrictBnrConversion
+			});
+		}
+
+		return { saved: true };
 	}
 );

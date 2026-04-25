@@ -133,6 +133,35 @@ export async function getLatestBnrRate(currency: string): Promise<number | null>
 }
 
 /**
+ * Same as getLatestBnrRate but also returns the rate's effective date so
+ * callers can implement freshness gates (e.g. WHMCS strict mode rejecting
+ * non-RON pushes when the rate is stale > N hours). The rateDate column
+ * stores the date BNR published the rate for, which is typically T-1
+ * working day from `now`.
+ */
+export async function getLatestBnrRateWithDate(
+	currency: string
+): Promise<{ rate: number; rateDate: Date } | null> {
+	const result = await db
+		.select({
+			rate: table.bnrExchangeRate.rate,
+			rateDate: table.bnrExchangeRate.rateDate
+		})
+		.from(table.bnrExchangeRate)
+		.where(eq(table.bnrExchangeRate.currency, currency.toUpperCase()))
+		.orderBy(desc(table.bnrExchangeRate.rateDate))
+		.limit(1);
+
+	if (result.length === 0) return null;
+	// bnr_exchange_rate.rate_date is `text` (YYYY-MM-DD per BNR convention).
+	// Parse as UTC midnight so age comparisons against Date.now() are stable
+	// across timezones.
+	const parsed = new Date(`${result[0].rateDate}T00:00:00.000Z`);
+	if (Number.isNaN(parsed.getTime())) return null;
+	return { rate: result[0].rate, rateDate: parsed };
+}
+
+/**
  * Get the latest BNR rates for display (Settings page).
  * Returns all rates from the most recent date.
  */

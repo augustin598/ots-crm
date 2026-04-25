@@ -151,7 +151,7 @@ export async function processWhmcsInvoiceReconcile(): Promise<ReconcileResult> {
 
 		if (result.stuckInFlightReset + result.missingRetryHopRescheduled > 0) {
 			logInfo('scheduler', `WHMCS reconcile complete`, {
-				metadata: result
+				metadata: { ...result } as Record<string, unknown>
 			});
 		}
 

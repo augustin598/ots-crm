@@ -171,6 +171,10 @@ export async function bootstrapTestSchema(): Promise<void> {
 		keez_start_number_hosting text,
 		keez_last_synced_number_hosting text,
 		whmcs_auto_push_to_keez integer NOT NULL DEFAULT 0,
+		whmcs_zero_vat_note_intracom text,
+		whmcs_zero_vat_note_export text,
+		whmcs_zero_vat_auto_detect integer NOT NULL DEFAULT 1,
+		whmcs_strict_bnr_conversion integer NOT NULL DEFAULT 1,
 		created_at timestamp NOT NULL DEFAULT current_date,
 		updated_at timestamp NOT NULL DEFAULT current_date
 	)`);
