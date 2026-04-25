@@ -1408,6 +1408,34 @@
       "when": 1777430118000,
       "tag": "0200_invoice_settings_whmcs_auto_push_to_keez",
       "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "6",
+      "when": 1777430120000,
+      "tag": "0201_whmcs_invoice_sync_next_retry_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "6",
+      "when": 1777430121000,
+      "tag": "0202_whmcs_invoice_sync_last_push_attempt_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "6",
+      "when": 1777430122000,
+      "tag": "0203_whmcs_invoice_sync_keez_push_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "6",
+      "when": 1777430123000,
+      "tag": "0204_whmcs_invoice_sync_keez_push_status_idx",
+      "breakpoints": true
     }
   ]
 }

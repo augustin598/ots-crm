@@ -75,6 +75,70 @@ Shared secret criptat per tenant cu `encrypt()`/`decrypt()` existente, retry 2-3
 - Multi-currency (RON/EUR/USD cu exchangeRate) — v1 assumă RON dominant
 - Migrare istorică facturi vechi — separat, script batch dedicat
 
+## Resilience (v1.1 — branch `feat/whmcs-resilience-debug`)
+
+Înainte: push-ul Keez declanșat din webhook era **fire-and-forget**; un singur 502 transient la upstream
+înseamna factură pierdută până la replay manual. Acum:
+
+### Per-invoice retry chain
+
+| Modul | Rol |
+|-------|-----|
+| `whmcs/errors.ts` | `WhmcsKeezPushAbortedError`, `WhmcsPushBackError` (status-based) |
+| `whmcs/error-classification.ts` | `classifyWhmcsPushError(err) → 'transient' \| 'permanent'` (deferă la Keez classifier pentru shape-uri Keez) |
+| `whmcs/retry-policy.ts` | Backoff `[2m, 10m, 30m, 2h]`, `MAX_PUSH_ATTEMPTS=5`, jitter ±10% |
+| `whmcs/failure-handler.ts` | `handleWhmcsKeezPushFailure(...)` — citește `retryCount`, decide retry vs FAILED, persistă pe `whmcs_invoice_sync` (`nextRetryAt`, `keezPushStatus`, `lastPushAttemptAt`), bumpează `consecutiveFailures` la nivel de integration |
+| `scheduler/tasks/whmcs-keez-push-retry.ts` | BullMQ delayed job; `jobId = whmcs-keez-push-retry-{tenant}-{invoice}-{attempt}` (attempt-suffix anti-dedup, identic Keez) |
+| `scheduler/tasks/whmcs-invoice-reconcile.ts` | Cron 10 min — recuperează rândurile orfane (`in_flight` >15 min sau `retrying` cu `nextRetryAt` în trecut + 5 min) |
+
+### Concurrent dedup
+
+`activeKeezPushes: Set<"${tenantId}:${invoiceId}">` în `invoice-handler.ts` — previne push-uri paralele
+pentru aceeași factură când `created` și `paid` ajung back-to-back.
+
+### Coloane noi pe `whmcs_invoice_sync`
+
+| Coloană | Tip | Rol |
+|---------|-----|-----|
+| `keez_push_status` | text | `null` \| `in_flight` \| `retrying` \| `failed` \| `success` |
+| `next_retry_at` | timestamp | Când va rula următorul hop BullMQ |
+| `last_push_attempt_at` | timestamp | Pentru detectarea rândurilor orfane |
+
+Migrate-uri: `0201..0203`.
+
+### Correlation ID
+
+Webhook stamps `correlationId = whk_<6 hex>` care e propagat la fiecare log line subsecvent
+(push, retry hops, validate, push-back). Răspunsul HTTP îl returnează ca `correlationId`
+pentru ca administratorul să poată face grep complet în loguri.
+
+## Debug & observabilitate
+
+### `GET /[tenant]/api/_debug-whmcs-health`
+
+Endpoint admin-only cu mai multe moduri. Toate răspunsurile sunt JSON.
+
+| Mode | Ce face |
+|------|---------|
+| `?mode=summary` (default) | integration state + queue summary + callback round-trip probe |
+| `?mode=callback` | Doar HMAC POST round-trip la `callback.php` (latency + status) |
+| `?mode=queue` | Histograme: `state`, `keezPushStatus`, count BullMQ retry-jobs, scheduled retries |
+| `?mode=stuck&minutes=N` | Rânduri `in_flight` mai vechi de N min (default 15) |
+| `?syncId=<id>` | Deep inspect un sync row + jobs BullMQ asociate |
+| `?invoiceId=<id>&action=trigger` | Anulează retry-urile pendinte și re-enqueue cu delay=0 |
+
+### UI admin
+
+- **Coloana "Push Keez"** în Event log + Dead Letters — badge cu status + retryCount + ETA reîncercare
+- **Buton "Retry now"** pe rândurile cu push eșuat / în reîncercare — anulează hop-ul programat și forțează un retry imediat
+- **Buton "Reîncearcă toate push-urile eșuate"** — batch replay (max 100/run) doar pentru `keezPushStatus='failed'`, NU pentru `DEAD_LETTER` (acelea necesită review manual)
+
+### Replay command updates
+
+`replayWhmcsSync(syncId)` are acum două moduri:
+- `push_retry_enqueued` — dacă invoice există + push e failed/retrying/in_flight → cancel pending retries, reset error state, enqueue retry imediat
+- `reset_to_pending` — fallback (DEAD_LETTER fără invoice creat) → reset state, așteaptă următorul webhook
+
 ## Referințe
 
 - Plan complet: `~/.claude/plans/vreau-sa-facem-un-buzzing-cray.md`

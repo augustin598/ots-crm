@@ -23,15 +23,24 @@
  */
 import type { RequestHandler } from './$types';
 import { json } from '@sveltejs/kit';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
-import { logError } from '$lib/server/logger';
+import { logError, logInfo } from '$lib/server/logger';
 import { verifyWhmcsWebhook } from '$lib/server/whmcs/verify-webhook';
 import { processWhmcsInvoice } from '$lib/server/whmcs/invoice-handler';
 import type { WhmcsInvoicePayload } from '$lib/server/whmcs/types';
 
 function sha256Hex(input: string): string {
 	return createHash('sha256').update(input).digest('hex');
+}
+
+/**
+ * Short opaque ID stamped on every webhook receipt and propagated to all
+ * downstream log lines (push, retry hops, validate, push-back) so a single
+ * end-to-end request can be reconstructed via grep.
+ */
+function newCorrelationId(): string {
+	return `whk_${randomBytes(6).toString('hex')}`;
 }
 
 /**
@@ -75,6 +84,19 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const payloadHash = sha256Hex(rawBody);
+	const correlationId = newCorrelationId();
+
+	logInfo('whmcs', 'Webhook received', {
+		tenantId: verify.tenant.id,
+		metadata: {
+			correlationId,
+			event: payload.event,
+			whmcsInvoiceId: payload.whmcsInvoiceId,
+			whmcsInvoiceNumber: payload.whmcsInvoiceNumber ?? null,
+			total: payload.total,
+			currency: payload.currency
+		}
+	});
 
 	let result;
 	try {
@@ -82,31 +104,33 @@ export const POST: RequestHandler = async (event) => {
 			tenant: verify.tenant,
 			integration: verify.integration,
 			payload,
-			payloadHash
+			payloadHash,
+			correlationId
 		});
 	} catch (err) {
 		logError('whmcs', 'Invoice handler threw — transient failure, WHMCS will retry', {
 			tenantId: verify.tenant.id,
 			metadata: {
+				correlationId,
 				whmcsInvoiceId: payload.whmcsInvoiceId,
 				event: payload.event,
 				error: err instanceof Error ? err.message : String(err),
 				stack: err instanceof Error ? err.stack : undefined
 			}
 		});
-		return json({ ok: false, reason: 'handler_error' }, { status: 500 });
+		return json({ ok: false, reason: 'handler_error', correlationId }, { status: 500 });
 	}
 
 	// Map handler outcome → HTTP status
 	switch (result.outcome) {
 		case 'dedup':
-			return json({ ok: true, ...result }, { status: 200 });
+			return json({ ok: true, correlationId, ...result }, { status: 200 });
 		case 'created':
 		case 'updated':
-			return json({ ok: true, ...result }, { status: 202 });
+			return json({ ok: true, correlationId, ...result }, { status: 202 });
 		case 'dead_letter':
 			// Intentional 202: we received the event cleanly, but need human review.
 			// Returning 5xx would invite WHMCS retry storms against a stuck row.
-			return json({ ok: true, ...result }, { status: 202 });
+			return json({ ok: true, correlationId, ...result }, { status: 202 });
 	}
 };
