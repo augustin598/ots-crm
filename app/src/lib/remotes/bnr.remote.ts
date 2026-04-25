@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import {
 	getLatestBnrRates,
@@ -6,6 +7,7 @@ import {
 	syncBnrRates,
 	getLastFetchTime
 } from '$lib/server/bnr/client';
+import { logError, serializeError } from '$lib/server/logger';
 
 /**
  * Get latest BNR rates from DB (for Settings page display).
@@ -14,7 +16,7 @@ import {
 export const getBnrRates = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	return await getLatestBnrRates();
@@ -26,7 +28,7 @@ export const getBnrRates = query(async () => {
 export const getBnrRate = query(v.string(), async (currency) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	const rate = await getLatestBnrRate(currency);
@@ -39,7 +41,7 @@ export const getBnrRate = query(v.string(), async (currency) => {
 export const refreshBnrRates = command(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
+		throw error(401, 'Unauthorized');
 	}
 
 	// Rate limit: max 1 request per 5 minutes
@@ -47,12 +49,32 @@ export const refreshBnrRates = command(async () => {
 	if (lastFetch) {
 		const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 		if (lastFetch > fiveMinutesAgo) {
-			throw new Error(
+			throw error(
+				429,
 				'Cursul a fost actualizat recent. Încearcă din nou peste câteva minute.'
 			);
 		}
 	}
 
-	const result = await syncBnrRates();
-	return result;
+	try {
+		return await syncBnrRates();
+	} catch (err) {
+		const { message, stack } = serializeError(err);
+		const code = (err as { code?: string } | null)?.code;
+		await logError('bnr', `refreshBnrRates failed: ${message}`, {
+			stackTrace: stack,
+			tenantId: event.locals.tenant.id,
+			userId: event.locals.user.id,
+			action: 'bnr_refresh',
+			metadata: { code }
+		});
+
+		if (code === 'CERT_HAS_EXPIRED' || /certificate has expired/i.test(message)) {
+			throw error(
+				503,
+				'BNR are momentan certificat SSL invalid pe server. Încearcă din nou peste câteva ore.'
+			);
+		}
+		throw error(503, 'Serviciul BNR este temporar indisponibil. Încearcă din nou mai târziu.');
+	}
 });
