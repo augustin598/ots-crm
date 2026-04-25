@@ -220,7 +220,7 @@ function ots_crm_connector_output(array $vars): void
     // Recent invoices + manual resend — useful for backfilling invoices created
     // before the connector was live, or for debugging after a CRM outage.
     if ($hasSecret && $crmBaseUrl && $tenantSlug) {
-        ots_crm_connector_render_invoices_table($modulelink);
+        ots_crm_connector_render_invoices_table($modulelink, $vars);
     }
 
     // Retry queue stats
@@ -266,7 +266,7 @@ function ots_crm_connector_output(array $vars): void
  *   - Spot-checking which invoices would be a CUI match in CRM (warning icon
  *     flags invoices with missing/empty tax_id)
  */
-function ots_crm_connector_render_invoices_table(string $modulelink): void
+function ots_crm_connector_render_invoices_table(string $modulelink, array $vars): void
 {
     try {
         $rows = \Illuminate\Database\Capsule\Manager::table('tblinvoices as i')
@@ -294,16 +294,31 @@ function ots_crm_connector_render_invoices_table(string $modulelink): void
         return;
     }
 
+    // Bulk-fetch CRM + Keez status for all rows in one HMAC round-trip.
+    $invoiceIds = [];
+    foreach ($rows as $r) {
+        $invoiceIds[] = (int)$r->id;
+    }
+    $statuses = \OtsCrm\Api::fetchInvoiceStatuses($vars, $invoiceIds);
+
     echo '<h4 style="margin-top:24px;">Facturi WHMCS recente (ultimele 30)</h4>';
     echo '<p style="color:#666;font-size:13px;">';
-    echo 'Folosește <strong>Resend</strong> pentru a (re)trimite manual o factură la CRM — util pentru istoric sau după o indisponibilitate.';
-    echo ' <span style="color:#856404;">⚠</span> în coloana CUI = factura nu se va potrivi în CRM după CUI (se va încerca email sau se va crea client nou).';
+    echo 'Folosește butonul <i class="fas fa-paper-plane"></i> pentru a retrimite manual la CRM (util pentru istoric).';
+    echo ' <i class="fas fa-exclamation-triangle text-warning"></i> în coloana CUI = factura nu se va potrivi în CRM după CUI (se va încerca email sau se va crea client nou).';
     echo '</p>';
 
     echo '<table class="table table-striped table-hover" style="font-size:13px;">';
     echo '<thead>';
     echo '<tr>';
-    echo '<th>ID</th><th>Număr</th><th>Client</th><th>CUI</th><th>Data</th><th>Total</th><th>Status</th><th style="width:160px;">Acțiuni</th>';
+    echo '<th>ID</th>';
+    echo '<th>Număr</th>';
+    echo '<th>Client</th>';
+    echo '<th>CUI</th>';
+    echo '<th>Data</th>';
+    echo '<th>Total</th>';
+    echo '<th>Status WHMCS</th>';
+    echo '<th>Status Keez</th>';
+    echo '<th style="width:130px;">Acțiuni</th>';
     echo '</tr>';
     echo '</thead><tbody>';
 
@@ -313,8 +328,9 @@ function ots_crm_connector_render_invoices_table(string $modulelink): void
             : trim(((string)($r->firstname ?? '')) . ' ' . ((string)($r->lastname ?? '')));
         $hasCui = !empty(trim((string)($r->tax_id ?? '')));
         $cuiCell = $hasCui
-            ? '<span style="color:#198754;" title="CUI: ' . htmlspecialchars((string)$r->tax_id) . '">✓ ' . htmlspecialchars((string)$r->tax_id) . '</span>'
-            : '<span style="color:#856404;" title="CUI lipsă — CRM va încerca match pe email">⚠ lipsă</span>';
+            ? '<span class="text-success" title="CUI: ' . htmlspecialchars((string)$r->tax_id) . '"><i class="fas fa-check"></i> ' . htmlspecialchars((string)$r->tax_id) . '</span>'
+            : '<span class="text-warning" title="CUI lipsă — CRM va încerca match pe email"><i class="fas fa-exclamation-triangle"></i> lipsă</span>';
+
         $statusLower = strtolower((string)$r->status);
         $statusClass = [
             'paid'       => 'background:#d1e7dd;color:#0f5132;',
@@ -323,6 +339,9 @@ function ots_crm_connector_render_invoices_table(string $modulelink): void
             'refunded'   => 'background:#cff4fc;color:#055160;',
             'collections'=> 'background:#fff3cd;color:#664d03;',
         ][$statusLower] ?? 'background:#e9ecef;color:#495057;';
+
+        // Keez status cell — derived from CRM bulk status response
+        $keezCell = ots_crm_connector_keez_status_cell($statuses[(string)(int)$r->id] ?? null);
 
         $whmcsLink    = 'invoices.php?action=edit&id=' . (int)$r->id;
         $resendCreated = htmlspecialchars($modulelink . '&resend_invoice=' . (int)$r->id . '&resend_event=created');
@@ -336,15 +355,92 @@ function ots_crm_connector_render_invoices_table(string $modulelink): void
         echo '<td>' . htmlspecialchars(date('d.m.Y', strtotime((string)$r->date))) . '</td>';
         echo '<td>' . number_format((float)$r->total, 2) . '</td>';
         echo '<td><span style="padding:2px 8px;border-radius:3px;font-size:12px;' . $statusClass . '">' . htmlspecialchars((string)$r->status) . '</span></td>';
+        echo '<td>' . $keezCell . '</td>';
         echo '<td>';
-        echo '<a href="' . htmlspecialchars($whmcsLink) . '" target="_blank" style="margin-right:6px;" title="Open in WHMCS">Open</a>';
-        echo '<a href="' . $resendCreated . '" onclick="return confirm(\'Resend invoice ' . (int)$r->id . ' as `created` to CRM?\');" title="Send as created event">Resend(c)</a>';
+        echo '<a href="' . htmlspecialchars($whmcsLink) . '" target="_blank" class="btn btn-sm btn-default" title="Deschide factura în WHMCS"><i class="fas fa-external-link-alt"></i></a> ';
+        echo '<a href="' . $resendCreated . '" onclick="return confirm(\'Trimite factura ' . (int)$r->id . ' la CRM ca eveniment `created`?\');" class="btn btn-sm btn-info" title="Resend ca event=created"><i class="fas fa-paper-plane"></i></a>';
         if ($statusLower === 'paid') {
-            echo ' <a href="' . $resendPaid . '" onclick="return confirm(\'Resend invoice ' . (int)$r->id . ' as `paid` to CRM?\');" title="Send as paid event">Resend(p)</a>';
+            echo ' <a href="' . $resendPaid . '" onclick="return confirm(\'Trimite factura ' . (int)$r->id . ' la CRM ca eveniment `paid`?\');" class="btn btn-sm btn-success" title="Resend ca event=paid"><i class="fas fa-money-check-alt"></i></a>';
         }
         echo '</td>';
         echo '</tr>';
     }
 
     echo '</tbody></table>';
+
+    // Legend
+    echo '<div style="margin-top:8px;font-size:12px;color:#666;">';
+    echo '<strong>Legendă Keez:</strong> ';
+    echo '<i class="fas fa-check-circle text-success"></i> Validată (fiscal) ';
+    echo '&nbsp;<i class="fas fa-clock text-warning"></i> Doar în CRM (nu push) ';
+    echo '&nbsp;<i class="fas fa-times-circle text-danger"></i> Eșuat / Dead-letter ';
+    echo '&nbsp;<span style="color:#aaa;">—</span> Nu a fost trimisă';
+    echo '</div>';
+}
+
+/**
+ * Render the "Status Keez" cell for one invoice row.
+ * $status is the per-id object from /api/webhooks/whmcs/status, or null.
+ */
+function ots_crm_connector_keez_status_cell($status): string
+{
+    if (!is_array($status)) {
+        return '<span style="color:#aaa;">—</span>';
+    }
+
+    $keezStatus = (string)($status['keezStatus'] ?? '');
+    $syncState  = (string)($status['syncState']  ?? '');
+    $invoiceNum = (string)($status['invoiceNumber'] ?? '');
+
+    // Validated fiscal invoice — best case
+    if ($keezStatus === 'Valid') {
+        return '<span class="text-success" title="Validată în Keez (fiscal)">'
+             . '<i class="fas fa-check-circle"></i> '
+             . htmlspecialchars($invoiceNum !== '' ? $invoiceNum : 'Validată')
+             . '</span>';
+    }
+
+    // Pushed to Keez but not validated yet (rare)
+    if ($keezStatus === 'Draft') {
+        return '<span class="text-info" title="Proformă în Keez (neactivată)">'
+             . '<i class="fas fa-file-alt"></i> Proformă'
+             . '</span>';
+    }
+
+    // Dead letter / failed states
+    if ($syncState === 'DEAD_LETTER') {
+        return '<span class="text-danger" title="Necesită review manual în CRM">'
+             . '<i class="fas fa-times-circle"></i> Blocat'
+             . '</span>';
+    }
+    if ($syncState === 'FAILED') {
+        return '<span class="text-danger" title="Sincronizare eșuată în CRM">'
+             . '<i class="fas fa-times-circle"></i> Eșuat'
+             . '</span>';
+    }
+
+    // Pushed by Keez
+    if ($syncState === 'KEEZ_PUSHED') {
+        return '<span class="text-success" title="Pushed la Keez">'
+             . '<i class="fas fa-check"></i> Push OK'
+             . '</span>';
+    }
+
+    // Created in CRM but no Keez push yet
+    if ($syncState === 'INVOICE_CREATED') {
+        $label = 'În CRM';
+        if ($invoiceNum !== '') $label .= ' (' . htmlspecialchars($invoiceNum) . ')';
+        return '<span class="text-warning" title="Creată în CRM, încă nu pushed la Keez">'
+             . '<i class="fas fa-clock"></i> ' . $label
+             . '</span>';
+    }
+
+    // Pending or unknown
+    if ($syncState !== '') {
+        return '<span class="text-muted" title="Stare CRM: ' . htmlspecialchars($syncState) . '">'
+             . '<i class="fas fa-hourglass-half"></i> ' . htmlspecialchars($syncState)
+             . '</span>';
+    }
+
+    return '<span style="color:#aaa;">—</span>';
 }

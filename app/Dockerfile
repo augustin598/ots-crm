@@ -21,7 +21,7 @@ ENV GIT_REF=$GIT_REF
 #     pass GIT_REF correctly, or when base images changed in a non-content
 #     way). Bump the value inline below when you need to force a full rebuild.
 ARG CACHE_BUST=1
-ARG BUILD_MARKER=whmcs-pushback-url-fix-2026-04-25-03
+ARG BUILD_MARKER=whmcs-status-endpoint-2026-04-25-04
 RUN echo "cache-bust: ${GIT_REF:-$CACHE_BUST}-${BUILD_MARKER}"
 COPY app ./
 RUN bun run build
