@@ -25,22 +25,39 @@ class InvoiceMapper
      * so CRM receives already-normalized values and can forward to Keez without
      * a second translation pass.
      */
+    /**
+     * Map WHMCS gateway slugs to Keez paymentType codes.
+     *
+     * Important nuance: Keez code 2 'BFCard' is for *retail POS card payments
+     * issued as Bon Fiscal* (cash register receipt) — NOT for online card
+     * processing. All gateway-mediated card payments (Stripe, PayU, Netopia,
+     * etc.) are 'ProcesatorPlati' (6). Wire transfer is 'Bank' (3); cash with
+     * receipt is 'ChitCash' (4); cash on delivery is 'Ramburs' (5).
+     */
     private const PAYMENT_MAP = [
+        // Wire transfer
         'banktransfer' => 'Bank',
-        'stripe'       => 'Bank',
-        'card'         => 'Bank',
-        'paypal'       => 'Bank',
-        'twocheckout'  => 'Bank',
-        'authorize'    => 'Bank',
-        'braintree'    => 'Bank',
-        'checkout'     => 'Bank',
-        'coinpayments' => 'Bank',
-        'eway'         => 'Bank',
-        'gocardless'   => 'Bank',
-        'mollie'       => 'Bank',
-        'paymentwall'  => 'Bank',
-        'securepay'    => 'Bank',
-        'worldpay'     => 'Bank',
+        'wire'         => 'Bank',
+        // Online card processors → ProcesatorPlati (6)
+        'stripe'       => 'ProcesatorPlati',
+        'card'         => 'ProcesatorPlati',
+        'paypal'       => 'ProcesatorPlati',
+        'twocheckout'  => 'ProcesatorPlati',
+        'authorize'    => 'ProcesatorPlati',
+        'braintree'    => 'ProcesatorPlati',
+        'checkout'     => 'ProcesatorPlati',
+        'coinpayments' => 'ProcesatorPlati',
+        'eway'         => 'ProcesatorPlati',
+        'gocardless'   => 'ProcesatorPlati',
+        'mollie'       => 'ProcesatorPlati',
+        'paymentwall'  => 'ProcesatorPlati',
+        'securepay'    => 'ProcesatorPlati',
+        'worldpay'     => 'ProcesatorPlati',
+        'payu'         => 'ProcesatorPlati',
+        'netopia'      => 'ProcesatorPlati',
+        'euplatesc'    => 'ProcesatorPlati',
+        'mobilpay'     => 'ProcesatorPlati',
+        // Cash + alt
         'cash'         => 'ChitCash',
         'mailin'       => 'ChitCash',
         'cod'          => 'Ramburs',
@@ -50,7 +67,9 @@ class InvoiceMapper
     {
         if (!$raw) return null;
         $key = strtolower(trim($raw));
-        return self::PAYMENT_MAP[$key] ?? 'Bank'; // default Bank for unknown card-like gateways
+        // Default unknown gateway → ProcesatorPlati. Most modern WHMCS gateways
+        // are online card processors; bank transfer is the explicit named slug.
+        return self::PAYMENT_MAP[$key] ?? 'ProcesatorPlati';
     }
 
     /**
