@@ -103,7 +103,12 @@ export async function processKeezInvoiceSyncRetry(params: Record<string, any> = 
 		const result = await syncKeezInvoicesForTenant(tenantId);
 		logInfo('scheduler', `Keez retry: succeeded`, {
 			tenantId,
-			metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped }
+			metadata: {
+				imported: result.imported,
+				updated: result.updated,
+				unchanged: result.unchanged,
+				skipped: result.skipped
+			}
 		});
 		return { success: true, ...result };
 	} catch (error) {

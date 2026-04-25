@@ -550,6 +550,8 @@ import { goto } from '$app/navigation';
 		unchanged: number;
 		skipped: number;
 	} | null>(null);
+	// Held so we can clear an in-flight 5s clear-timer when a new sync starts.
+	let syncResultClearTimer: ReturnType<typeof setTimeout> | null = null;
 	let syncWarning = $state<{
 		message: string;
 		imported: number;
@@ -576,6 +578,23 @@ import { goto } from '$app/navigation';
 	}
 
 	async function handleSyncInvoices(force = false) {
+		// Force re-sync hits Keez ~555 times instead of ~2 (smart-sync), takes ~3
+		// minutes, and bypasses the cache. Confirm so a stray click doesn't lock
+		// the user into a long wait.
+		if (force) {
+			const ok = confirm(
+				'Re-sync complet va ignora cache-ul și va aduce TOATE detaliile facturilor de la Keez. Durează ~3 minute. Continui?'
+			);
+			if (!ok) return;
+		}
+
+		// Clear any pending 5s clear-timer from a previous sync so we don't end up
+		// with stacked timers racing to null `syncResult`.
+		if (syncResultClearTimer) {
+			clearTimeout(syncResultClearTimer);
+			syncResultClearTimer = null;
+		}
+
 		syncingInvoices = true;
 		syncError = null;
 		syncResult = null;
@@ -595,8 +614,9 @@ import { goto } from '$app/navigation';
 				};
 				console.log('[Keez-Debug] Sync success:', $state.snapshot(syncResult));
 				await invoicesQuery.refresh();
-				setTimeout(() => {
+				syncResultClearTimer = setTimeout(() => {
 					syncResult = null;
+					syncResultClearTimer = null;
 				}, 5000);
 			} else if (result.partial) {
 				// Sync stopped mid-page on transient upstream errors. DB rows from
@@ -725,6 +745,7 @@ import { goto } from '$app/navigation';
 									class="rounded-l-none border-l border-primary-foreground/20 px-2"
 									disabled={syncingInvoices}
 									aria-label="Mai multe opțiuni de sincronizare"
+									aria-haspopup="menu"
 								>
 									<ChevronDownIcon class="h-4 w-4" />
 								</Button>

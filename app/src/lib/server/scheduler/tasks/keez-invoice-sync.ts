@@ -20,12 +20,13 @@ export async function processKeezInvoiceSync(_params: Record<string, any> = {}) 
 
 	if (integrations.length === 0) {
 		logInfo('scheduler', 'Keez invoice sync: no active integrations, skipping', { metadata: { activeIntegrations: 0 } });
-		return { success: true, tenantsProcessed: 0, totalImported: 0, totalUpdated: 0, totalSkipped: 0, totalErrors: 0 };
+		return { success: true, tenantsProcessed: 0, totalImported: 0, totalUpdated: 0, totalUnchanged: 0, totalSkipped: 0, totalErrors: 0 };
 	}
 
 	let tenantsProcessed = 0;
 	let totalImported = 0;
 	let totalUpdated = 0;
+	let totalUnchanged = 0;
 	let totalSkipped = 0;
 	let totalErrors = 0;
 
@@ -36,11 +37,12 @@ export async function processKeezInvoiceSync(_params: Record<string, any> = {}) 
 			tenantsProcessed++;
 			totalImported += result.imported;
 			totalUpdated += result.updated;
+			totalUnchanged += result.unchanged;
 			totalSkipped += result.skipped;
 			totalErrors += result.errors;
 			logInfo('scheduler', `Keez invoice sync: tenant completed`, {
 				tenantId: integration.tenantId,
-				metadata: { imported: result.imported, updated: result.updated, skipped: result.skipped, errors: result.errors }
+				metadata: { imported: result.imported, updated: result.updated, unchanged: result.unchanged, skipped: result.skipped, errors: result.errors }
 			});
 		} catch (error) {
 			// Transient decrypt failure — retry once with fresh DB read before classifying.
@@ -55,6 +57,7 @@ export async function processKeezInvoiceSync(_params: Record<string, any> = {}) 
 					tenantsProcessed++;
 					totalImported += retryResult.imported;
 					totalUpdated += retryResult.updated;
+					totalUnchanged += retryResult.unchanged;
 					totalSkipped += retryResult.skipped;
 					totalErrors += retryResult.errors;
 					continue;
@@ -69,8 +72,8 @@ export async function processKeezInvoiceSync(_params: Record<string, any> = {}) 
 	}
 
 	logInfo('scheduler', `Keez invoice sync completed`, {
-		metadata: { tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors }
+		metadata: { tenantsProcessed, totalImported, totalUpdated, totalUnchanged, totalSkipped, totalErrors }
 	});
 
-	return { success: true, tenantsProcessed, totalImported, totalUpdated, totalSkipped, totalErrors };
+	return { success: true, tenantsProcessed, totalImported, totalUpdated, totalUnchanged, totalSkipped, totalErrors };
 }

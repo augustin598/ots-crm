@@ -37,6 +37,16 @@ function requireAdmin(event: Parameters<RequestHandler>[0]) {
 	}
 }
 
+/**
+ * Defensive shape check on Keez `externalId` before interpolating into the
+ * upstream URL. Keez uses 32-char lowercase hex (no hyphens) — we accept the
+ * superset [a-f0-9-]{32,36} so both classic UUIDs and Keez's compact form pass.
+ * Rejects any path-traversal attempt (`..`, `/`, ...) outright.
+ */
+function isValidKeezExternalId(s: string): boolean {
+	return /^[a-f0-9-]{32,36}$/i.test(s);
+}
+
 interface ProbeResult {
 	attempt: number;
 	ok: boolean;
@@ -302,6 +312,9 @@ export const GET: RequestHandler = async (event) => {
 
 	// 2b. Single-invoice probe (most useful when sync fails on a specific invoice)
 	if (externalId) {
+		if (!isValidKeezExternalId(externalId)) {
+			throw error(400, 'externalId must be 32-36 lowercase hex chars (UUID-like)');
+		}
 		const single = await probeRaw(
 			client.baseUrl,
 			client.clientEid,
