@@ -109,9 +109,16 @@ export async function pushInvoiceToKeez(
 		const currency = invoice.currency || settings?.defaultCurrency || 'RON';
 
 		for (const lineItem of lineItems) {
-			const itemCode = `CRM_${lineItem.id}`;
 			const desiredName = lineItem.description || 'Item';
+
+			// Article code is per-(invoice, line-item) so different invoices
+			// always get fresh articles (avoids name reuse from legacy data
+			// e.g. WHMCS invoices that picked up "Realizare Film Documentar"
+			// because of an MD5 GUID collision with an old article).
+			const itemCode = `CRM_${invoiceId.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
 			let keezItem = await keezClient.getItemByCode(itemCode);
+
+			let resolvedExternalId: string | null = null;
 
 			if (!keezItem) {
 				try {
@@ -125,19 +132,29 @@ export async function pushInvoiceToKeez(
 						isActive: true,
 						categoryExternalId: 'MISCSRV'
 					});
-					itemExternalIds.set(lineItem.id, newItem.externalId);
+					resolvedExternalId = newItem.externalId;
+					logInfo('keez', 'Created fresh Keez article for line item', {
+						tenantId,
+						metadata: {
+							lineItemId: lineItem.id,
+							itemCode,
+							externalId: newItem.externalId,
+							name: desiredName
+						}
+					});
 				} catch (itemError) {
 					logWarning('keez', `Failed to create Keez item ${itemCode}`, {
 						tenantId,
-						metadata: { error: itemError instanceof Error ? itemError.message : String(itemError) }
+						metadata: {
+							error: itemError instanceof Error ? itemError.message : String(itemError)
+						}
 					});
-					itemExternalIds.set(lineItem.id, lineItem.id);
+					resolvedExternalId = lineItem.id;
 				}
 			} else {
-				// Keez ignores `itemName` on the invoice detail when an external
-				// item already exists — it shows the article's nomenclator name.
-				// If that drifted from the CRM line-item description (legacy or
-				// manually-renamed in Keez), realign by updating the article first.
+				// Same code → retry on the same (invoice, line-item) pair.
+				// Realign name if it drifted (e.g. line-item description was edited
+				// in CRM between pushes).
 				if (keezItem.name !== desiredName && keezItem.externalId) {
 					try {
 						await keezClient.updateItem(keezItem.externalId, {
@@ -165,7 +182,19 @@ export async function pushInvoiceToKeez(
 						});
 					}
 				}
-				itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
+				resolvedExternalId = keezItem.externalId || lineItem.id;
+			}
+
+			itemExternalIds.set(lineItem.id, resolvedExternalId);
+
+			// Persist the Keez externalId on the CRM line-item row so future
+			// queries see the SAME article id Keez has, not the WHMCS-generated
+			// MD5 GUID that got there from the inbound payload.
+			if (resolvedExternalId && resolvedExternalId !== lineItem.keezItemExternalId) {
+				await db
+					.update(table.invoiceLineItem)
+					.set({ keezItemExternalId: resolvedExternalId })
+					.where(eq(table.invoiceLineItem.id, lineItem.id));
 			}
 		}
 
