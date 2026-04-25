@@ -110,13 +110,14 @@ export async function pushInvoiceToKeez(
 
 		for (const lineItem of lineItems) {
 			const itemCode = `CRM_${lineItem.id}`;
+			const desiredName = lineItem.description || 'Item';
 			let keezItem = await keezClient.getItemByCode(itemCode);
 
 			if (!keezItem) {
 				try {
 					const newItem = await keezClient.createItem({
 						code: itemCode,
-						name: lineItem.description || 'Item',
+						name: desiredName,
 						description: lineItem.description || undefined,
 						currencyCode: currency,
 						measureUnitId: 1,
@@ -133,6 +134,37 @@ export async function pushInvoiceToKeez(
 					itemExternalIds.set(lineItem.id, lineItem.id);
 				}
 			} else {
+				// Keez ignores `itemName` on the invoice detail when an external
+				// item already exists — it shows the article's nomenclator name.
+				// If that drifted from the CRM line-item description (legacy or
+				// manually-renamed in Keez), realign by updating the article first.
+				if (keezItem.name !== desiredName && keezItem.externalId) {
+					try {
+						await keezClient.updateItem(keezItem.externalId, {
+							...keezItem,
+							name: desiredName,
+							description: lineItem.description || keezItem.description
+						});
+						logInfo('keez', 'Renamed Keez article to match CRM line-item description', {
+							tenantId,
+							metadata: {
+								itemCode,
+								oldName: keezItem.name,
+								newName: desiredName
+							}
+						});
+					} catch (updateError) {
+						logWarning('keez', `Failed to rename Keez item ${itemCode}`, {
+							tenantId,
+							metadata: {
+								error:
+									updateError instanceof Error
+										? updateError.message
+										: String(updateError)
+							}
+						});
+					}
+				}
 				itemExternalIds.set(lineItem.id, keezItem.externalId || lineItem.id);
 			}
 		}

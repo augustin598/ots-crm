@@ -502,20 +502,24 @@ export async function mapInvoiceToKeez(
 						measureUnitId = unitMap[item.unitOfMeasure] || 1;
 					}
 
-					// Build item description with note if available
-					let itemDescription = item.description || 'Item';
-					if (item.note) {
-						itemDescription = `${itemDescription}${itemDescription !== item.note ? ` - ${item.note}` : ''}`;
-					}
+					// itemDescription becomes the "Notă Articol" field on the Keez
+					// invoice line. Use ONLY the line note (e.g. "Transaction ID: ...")
+					// — keep it separate from the article name. The previous logic
+					// concatenated description + note into the note field which was
+					// confusing for users (note showed both the article name and the
+					// transaction id).
+					const itemDescription = item.note ? String(item.note).trim() : '';
 
-					// NOTE: When itemExternalId is set, Keez ignores itemName and uses the
-					// article name from its nomenclator. itemName is only used as fallback
-					// when no itemExternalId exists. CRM description is preserved on re-fetch
-					// in hooks.ts to avoid overwriting user's intended item name.
+					// NOTE: When itemExternalId is set, Keez ignores itemName and uses
+					// the article name from its nomenclator. The auto-push helper
+					// (plugins/keez/auto-push.ts) updates the article name in Keez
+					// before sending the invoice if it has drifted from the CRM
+					// line-item description, so by the time we get here the names
+					// are aligned.
 					const detail: KeezInvoiceDetail = {
 						itemExternalId,
 						itemName: item.description || 'Item',
-						itemDescription: itemDescription !== item.description ? itemDescription : undefined,
+						itemDescription: itemDescription !== '' ? itemDescription : undefined,
 						measureUnitId,
 						quantity: Math.round(quantity * 100) / 100, // 2 decimals
 						unitPrice: Math.round(unitPriceRON * 10000) / 10000, // 4 decimals
