@@ -10,6 +10,7 @@
 		setEnableKeezPush,
 		saveWhmcsHostingSeries,
 		replayWhmcsSync,
+		replayAllFailedWhmcsPushes,
 		testWhmcsConnection,
 		pushWhmcsInvoiceNumber
 	} from '$lib/remotes/whmcs.remote';
@@ -102,6 +103,7 @@
 	let savingHostingSeries = $state(false);
 
 	let replayingId = $state<string | null>(null);
+	let replayingAll = $state(false);
 
 	$effect(() => {
 		if (!formInitialized && status?.settings) {
@@ -279,13 +281,65 @@
 	async function handleReplay(syncId: string) {
 		replayingId = syncId;
 		try {
-			await replayWhmcsSync({ syncId }).updates(syncsQuery, deadLettersQuery);
-			toast.success('Sincronizare replay-uită. Se va reprocesa.');
+			const r = await replayWhmcsSync({ syncId }).updates(syncsQuery, deadLettersQuery);
+			toast.success(
+				r.mode === 'push_retry_enqueued'
+					? 'Push reprogramat. Se reîncearcă imediat.'
+					: 'Sincronizare resetată la PENDING. Se reprocesează la următorul webhook.'
+			);
 		} catch (e) {
 			toast.error('A apărut o eroare: ' + extractErrorMessage(e, 'Replay eșuat'));
 		} finally {
 			replayingId = null;
 		}
+	}
+
+	async function handleReplayAll() {
+		replayingAll = true;
+		try {
+			const r = await replayAllFailedWhmcsPushes({ limit: 100 }).updates(
+				syncsQuery,
+				deadLettersQuery
+			);
+			if (r.replayed === 0) {
+				toast.info('Nu există push-uri eșuate de reîncercat.');
+			} else {
+				toast.success(`${r.replayed} push-uri reprogramate (din ${r.totalCandidates ?? 0}).`);
+			}
+		} catch (e) {
+			toast.error(
+				'A apărut o eroare: ' + extractErrorMessage(e, 'Replay batch eșuat')
+			);
+		} finally {
+			replayingAll = false;
+		}
+	}
+
+	function pushStatusBadge(status: string | null | undefined) {
+		switch (status) {
+			case 'success':
+				return { variant: 'default' as const, label: 'Push OK' };
+			case 'in_flight':
+				return { variant: 'secondary' as const, label: 'Push în curs' };
+			case 'retrying':
+				return { variant: 'warning' as const, label: 'Reîncercare' };
+			case 'failed':
+				return { variant: 'destructive' as const, label: 'Push eșuat' };
+			default:
+				return null;
+		}
+	}
+
+	function formatRelative(d: Date | string | null | undefined): string {
+		if (!d) return '—';
+		const t = new Date(d).getTime();
+		const diffMs = t - Date.now();
+		const abs = Math.abs(diffMs);
+		const minutes = Math.round(abs / 60_000);
+		if (minutes < 1) return diffMs > 0 ? 'în <1 min' : 'acum';
+		if (minutes < 60) return diffMs > 0 ? `în ${minutes} min` : `${minutes} min`;
+		const hours = Math.round(minutes / 60);
+		return diffMs > 0 ? `în ${hours} h` : `${hours} h`;
 	}
 
 	function closeSecretDialog() {
@@ -650,6 +704,7 @@
 										<TableHead>Data</TableHead>
 										<TableHead>ID factură WHMCS</TableHead>
 										<TableHead>Stare</TableHead>
+										<TableHead>Push Keez</TableHead>
 										<TableHead>Eveniment</TableHead>
 										<TableHead>Match</TableHead>
 										<TableHead>Sumă</TableHead>
@@ -659,6 +714,7 @@
 								</TableHeader>
 								<TableBody>
 									{#each syncs as sync (sync.id)}
+										{@const pushBadge = pushStatusBadge(sync.keezPushStatus)}
 										<TableRow>
 											<TableCell class="text-xs whitespace-nowrap">
 												{formatDate(sync.receivedAt)}
@@ -666,6 +722,23 @@
 											<TableCell class="font-mono text-xs">{sync.whmcsInvoiceId}</TableCell>
 											<TableCell>
 												<Badge variant={stateBadgeVariant(sync.state)}>{sync.state ?? '—'}</Badge>
+											</TableCell>
+											<TableCell class="text-xs">
+												{#if pushBadge}
+													<Badge variant={pushBadge.variant} class="gap-1">
+														{pushBadge.label}
+														{#if sync.retryCount > 0}
+															<span class="text-[10px] opacity-70">·{sync.retryCount}x</span>
+														{/if}
+													</Badge>
+													{#if sync.nextRetryAt && sync.keezPushStatus === 'retrying'}
+														<div class="text-[10px] text-muted-foreground mt-0.5" title={formatDate(sync.nextRetryAt)}>
+															reîncercare {formatRelative(sync.nextRetryAt)}
+														</div>
+													{/if}
+												{:else}
+													<span class="text-muted-foreground">—</span>
+												{/if}
 											</TableCell>
 											<TableCell class="text-xs">{sync.lastEvent ?? '—'}</TableCell>
 											<TableCell class="text-xs">{sync.matchType ?? '—'}</TableCell>
@@ -682,22 +755,38 @@
 												{/if}
 											</TableCell>
 											<TableCell class="text-right">
-												{#if sync.invoiceId}
-													{@const invId = sync.invoiceId}
-													<Button
-														type="button"
-														size="sm"
-														variant="ghost"
-														title="Propagă numărul fiscal înapoi la WHMCS (overwrite invoicenum)"
-														disabled={pushingNumberId === invId}
-														onclick={() => handlePushNumber(invId)}
-													>
-														<ArrowUpFromLine class="h-3 w-3 mr-1" />
-														{pushingNumberId === invId ? '...' : 'Sync nr.'}
-													</Button>
-												{:else}
-													<span class="text-muted-foreground text-xs">—</span>
-												{/if}
+												<div class="inline-flex gap-1 justify-end">
+													{#if sync.keezPushStatus === 'failed' || sync.keezPushStatus === 'retrying'}
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															title="Anulează retry-ul programat și reîncearcă imediat"
+															disabled={replayingId === sync.id}
+															onclick={() => handleReplay(sync.id)}
+														>
+															<Play class="h-3 w-3 mr-1" />
+															{replayingId === sync.id ? '...' : 'Retry now'}
+														</Button>
+													{/if}
+													{#if sync.invoiceId}
+														{@const invId = sync.invoiceId}
+														<Button
+															type="button"
+															size="sm"
+															variant="ghost"
+															title="Propagă numărul fiscal înapoi la WHMCS (overwrite invoicenum)"
+															disabled={pushingNumberId === invId}
+															onclick={() => handlePushNumber(invId)}
+														>
+															<ArrowUpFromLine class="h-3 w-3 mr-1" />
+															{pushingNumberId === invId ? '...' : 'Sync nr.'}
+														</Button>
+													{/if}
+													{#if !sync.invoiceId && sync.keezPushStatus !== 'failed' && sync.keezPushStatus !== 'retrying'}
+														<span class="text-muted-foreground text-xs">—</span>
+													{/if}
+												</div>
 											</TableCell>
 										</TableRow>
 									{/each}
@@ -710,17 +799,32 @@
 
 			<!-- Section 5: Dead letter queue -->
 			{#if deadLetters.length > 0}
+				{@const hasFailedPushes = deadLetters.some((d) => d.keezPushStatus === 'failed')}
 				<Card>
 					<CardHeader>
-						<div class="flex items-center gap-2">
-							<CardTitle>Probleme care necesită atenție</CardTitle>
-							<Badge variant="destructive" class="gap-1">
-								<AlertTriangle class="h-3 w-3" />
-								{deadLetters.length}
-							</Badge>
+						<div class="flex items-center justify-between gap-2 flex-wrap">
+							<div class="flex items-center gap-2">
+								<CardTitle>Probleme care necesită atenție</CardTitle>
+								<Badge variant="destructive" class="gap-1">
+									<AlertTriangle class="h-3 w-3" />
+									{deadLetters.length}
+								</Badge>
+							</div>
+							{#if hasFailedPushes}
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onclick={handleReplayAll}
+									disabled={replayingAll}
+								>
+									<RotateCw class="h-3 w-3 mr-1" />
+									{replayingAll ? 'Se reprogramează...' : 'Reîncearcă toate push-urile eșuate'}
+								</Button>
+							{/if}
 						</div>
 						<CardDescription>
-							Facturi blocate în stare DEAD_LETTER sau FAILED. Replay după ce ai rezolvat cauza erorii.
+							Facturi blocate (DEAD_LETTER/FAILED) sau push Keez eșuat. Replay individual sau în masă (doar push-urile eșuate, nu DEAD_LETTER care necesită review manual).
 						</CardDescription>
 					</CardHeader>
 					<CardContent>
@@ -731,6 +835,7 @@
 										<TableHead>Data</TableHead>
 										<TableHead>ID WHMCS</TableHead>
 										<TableHead>Stare</TableHead>
+										<TableHead>Push Keez</TableHead>
 										<TableHead>Eveniment</TableHead>
 										<TableHead>Tip eroare</TableHead>
 										<TableHead>Mesaj</TableHead>
@@ -739,6 +844,7 @@
 								</TableHeader>
 								<TableBody>
 									{#each deadLetters as dl (dl.id)}
+										{@const dlPush = pushStatusBadge(dl.keezPushStatus)}
 										<TableRow>
 											<TableCell class="text-xs whitespace-nowrap">
 												{formatDate(dl.receivedAt)}
@@ -746,6 +852,18 @@
 											<TableCell class="font-mono text-xs">{dl.whmcsInvoiceId}</TableCell>
 											<TableCell>
 												<Badge variant={stateBadgeVariant(dl.state)}>{dl.state ?? '—'}</Badge>
+											</TableCell>
+											<TableCell class="text-xs">
+												{#if dlPush}
+													<Badge variant={dlPush.variant} class="gap-1">
+														{dlPush.label}
+														{#if dl.retryCount > 0}
+															<span class="text-[10px] opacity-70">·{dl.retryCount}x</span>
+														{/if}
+													</Badge>
+												{:else}
+													<span class="text-muted-foreground">—</span>
+												{/if}
 											</TableCell>
 											<TableCell class="text-xs">{dl.lastEvent ?? '—'}</TableCell>
 											<TableCell class="text-xs">{dl.lastErrorClass ?? '—'}</TableCell>

@@ -7,6 +7,8 @@ import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
 import { processRevolutTransactionSync } from './tasks/revolut-transaction-sync';
 import { processKeezInvoiceSync } from './tasks/keez-invoice-sync';
 import { processKeezInvoiceSyncRetry } from './tasks/keez-invoice-sync-retry';
+import { processWhmcsKeezPushRetry } from './tasks/whmcs-keez-push-retry';
+import { processWhmcsInvoiceReconcile } from './tasks/whmcs-invoice-reconcile';
 import { processGmailInvoiceSync } from './tasks/gmail-invoice-sync';
 import { processBnrRateSync } from './tasks/bnr-rate-sync';
 import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminders';
@@ -100,6 +102,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	revolut_transaction_sync: processRevolutTransactionSync,
 	keez_invoice_sync: processKeezInvoiceSync,
 	keez_invoice_sync_retry: processKeezInvoiceSyncRetry,
+	whmcs_keez_push_retry: processWhmcsKeezPushRetry,
+	whmcs_invoice_reconcile: processWhmcsInvoiceReconcile,
 	gmail_invoice_sync: processGmailInvoiceSync,
 	bnr_rate_sync: processBnrRateSync,
 	invoice_overdue_reminders: processInvoiceOverdueReminders,
@@ -349,6 +353,23 @@ export const startScheduler = async () => {
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'keez-invoice-sync'
+		}
+	);
+
+	// Schedule WHMCS invoice reconcile every 10 min — picks up orphaned in_flight
+	// rows (from process restarts mid-push) and re-enqueues lost retry hops.
+	await schedulerQueue.add(
+		'whmcs-invoice-reconcile',
+		{
+			type: 'whmcs_invoice_reconcile',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '*/10 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'whmcs-invoice-reconcile'
 		}
 	);
 

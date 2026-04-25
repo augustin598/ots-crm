@@ -34,6 +34,24 @@ import { logInfo, logWarning, logError } from '$lib/server/logger';
 import { matchOrCreateClient } from './client-matching';
 import { redactAndStringify } from './redact';
 import type { WhmcsInvoicePayload, WhmcsMatchType } from './types';
+import { handleWhmcsKeezPushFailure, resetWhmcsConsecutiveFailures } from './failure-handler';
+import { enqueueWhmcsKeezPushRetry } from '$lib/server/scheduler/tasks/whmcs-keez-push-retry';
+
+/**
+ * In-memory lock keyed on `${tenantId}:${invoiceId}`. Prevents concurrent
+ * `triggerAutoPushKeez` invocations for the same invoice — e.g. when the
+ * `created` and `paid` events arrive back-to-back and both opt-in to push,
+ * we don't want two parallel Keez API calls racing each other (the second
+ * would observe a half-written keezExternalId and could create a duplicate
+ * Draft). Cleared in the finally block of each invocation.
+ *
+ * Single-process scope only. The CRM runs as a single StatefulSet pod (per
+ * deployment notes) so this is sufficient. If we ever scale to multiple
+ * replicas the lock would need to move to Redis (SETNX with TTL). The DB
+ * `keez_push_status` column also gates duplicate work via the retry-task's
+ * "skip if already success" check — the in-memory lock is the fast path.
+ */
+const activeKeezPushes = new Set<string>();
 
 // ─────────────────────────────────────────────
 // Types
@@ -187,6 +205,12 @@ export interface ProcessInvoiceContext {
 	 * synthetic fallback.
 	 */
 	nextInvoiceNumber?: string | null;
+	/**
+	 * Opaque ID set by the webhook endpoint so subsequent log lines (push
+	 * attempts, retries, validate, push-back) can be linked to the originating
+	 * webhook receipt. Falls back to a generated id if the caller omits it.
+	 */
+	correlationId?: string;
 }
 
 export async function processWhmcsInvoice(
@@ -512,52 +536,53 @@ async function handleCreated(
 	//  - the invoice was created in a "paid" state (synthesize from paid event,
 	//    or normal created → quickly followed by paid). For pure 'sent'/draft
 	//    invoices we wait for the paid event before pushing fiscal.
-	// Fire-and-forget so the webhook response stays fast; failures are logged
-	// inside auto-push.ts and admin can retrigger manually.
+	// Async (returns instantly) so the webhook response stays fast; failures
+	// flow through handleWhmcsKeezPushFailure → BullMQ retry / admin replay.
 	if (ctx.integration.enableKeezPush && (statusOverride === 'paid' || statusOverride === 'cancelled')) {
-		triggerAutoPushKeez(tenantId, invoiceId, payload.whmcsInvoiceId);
+		triggerAutoPushKeez(tenantId, invoiceId, payload.whmcsInvoiceId, ctx.correlationId ?? generateId());
 	}
 
 	return { outcome: 'created', invoiceId, invoiceNumber, matchType: match.matchType };
 }
 
 /**
- * Fire-and-forget chain: push invoice to Keez (Draft) → validate (Valid).
- * Validate auto-triggers pushInvoiceNumberToWhmcs which writes the fiscal
- * number back to WHMCS. Updates whmcs_invoice_sync.state to KEEZ_PUSHED on
- * full success.
+ * Async chain: push invoice to Keez (Draft) → validate (Valid). Validate
+ * auto-triggers pushInvoiceNumberToWhmcs which writes the fiscal number back
+ * to WHMCS. Updates whmcs_invoice_sync state on success/failure.
+ *
+ * Resilience:
+ *   - Concurrent dedup via activeKeezPushes Set (per-invoice in-memory lock)
+ *   - On any failure, hands off to handleWhmcsKeezPushFailure which classifies
+ *     the error and either enqueues a delayed BullMQ retry or marks the row
+ *     FAILED for admin replay.
+ *   - Webhook handler stays fast: this still returns immediately via void IIFE.
+ *
+ * `correlationId` ties webhook receipt → push attempts → retry hops in logs.
  */
-function triggerAutoPushKeez(tenantId: string, invoiceId: string, whmcsInvoiceId: number): void {
+function triggerAutoPushKeez(
+	tenantId: string,
+	invoiceId: string,
+	whmcsInvoiceId: number,
+	correlationId: string
+): void {
+	const lockKey = `${tenantId}:${invoiceId}`;
+	if (activeKeezPushes.has(lockKey)) {
+		logInfo('whmcs', 'Auto-push already in flight for this invoice — skipping concurrent trigger', {
+			tenantId,
+			metadata: { invoiceId, whmcsInvoiceId, correlationId }
+		});
+		return;
+	}
+	activeKeezPushes.add(lockKey);
+
 	void (async () => {
+		const startedAt = new Date();
 		try {
-			const { pushInvoiceToKeez, validateInvoiceInKeezForTenant } = await import(
-				'$lib/server/plugins/keez/auto-push'
-			);
-
-			const pushResult = await pushInvoiceToKeez(tenantId, invoiceId);
-			if (!pushResult.success) {
-				logWarning('whmcs', 'Auto-push to Keez failed (will need manual retrigger)', {
-					tenantId,
-					metadata: { invoiceId, whmcsInvoiceId, error: pushResult.error }
-				});
-				return;
-			}
-
-			// Push succeeded — invoice is in Keez as Draft. Validate immediately
-			// so fiscal number propagates and downstream push-back fires.
-			const validateResult = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
-			if (!validateResult.success) {
-				logWarning('whmcs', 'Auto-validate in Keez failed (Draft remains, manual retrigger needed)', {
-					tenantId,
-					metadata: { invoiceId, whmcsInvoiceId, error: validateResult.error }
-				});
-				return;
-			}
-
-			// All steps OK — bump sync row to KEEZ_PUSHED for the admin UI.
+			// Mark as in-flight up front so admin UI shows live state instead of
+			// the prior "INVOICE_CREATED, no push status" ambiguity.
 			await db
 				.update(table.whmcsInvoiceSync)
-				.set({ state: 'KEEZ_PUSHED', processedAt: new Date() })
+				.set({ keezPushStatus: 'in_flight', lastPushAttemptAt: startedAt })
 				.where(
 					and(
 						eq(table.whmcsInvoiceSync.tenantId, tenantId),
@@ -565,19 +590,51 @@ function triggerAutoPushKeez(tenantId: string, invoiceId: string, whmcsInvoiceId
 					)
 				);
 
+			const { pushInvoiceToKeez, validateInvoiceInKeezForTenant } = await import(
+				'$lib/server/plugins/keez/auto-push'
+			);
+
+			const pushResult = await pushInvoiceToKeez(tenantId, invoiceId);
+			if (!pushResult.success) {
+				throw new Error(`pushInvoiceToKeez: ${pushResult.error}`);
+			}
+
+			const validateResult = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
+			if (!validateResult.success) {
+				throw new Error(`validateInvoiceInKeezForTenant: ${validateResult.error}`);
+			}
+
+			// All steps OK — bump sync row to KEEZ_PUSHED for the admin UI.
+			await db
+				.update(table.whmcsInvoiceSync)
+				.set({
+					state: 'KEEZ_PUSHED',
+					keezPushStatus: 'success',
+					nextRetryAt: null,
+					lastErrorClass: null,
+					lastErrorMessage: null,
+					processedAt: new Date()
+				})
+				.where(
+					and(
+						eq(table.whmcsInvoiceSync.tenantId, tenantId),
+						eq(table.whmcsInvoiceSync.whmcsInvoiceId, whmcsInvoiceId)
+					)
+				);
+
+			await resetWhmcsConsecutiveFailures(tenantId);
+
 			logInfo('whmcs', 'Auto-push chain complete: Keez pushed + validated + WHMCS notified', {
 				tenantId,
-				metadata: { invoiceId, whmcsInvoiceId }
+				metadata: { invoiceId, whmcsInvoiceId, correlationId }
 			});
 		} catch (err) {
-			logError('whmcs', 'triggerAutoPushKeez crashed', {
-				tenantId,
-				metadata: {
-					invoiceId,
-					whmcsInvoiceId,
-					error: err instanceof Error ? err.message : String(err)
-				}
+			await handleWhmcsKeezPushFailure(tenantId, invoiceId, whmcsInvoiceId, err, {
+				correlationId,
+				enqueueRetry: enqueueWhmcsKeezPushRetry
 			});
+		} finally {
+			activeKeezPushes.delete(lockKey);
 		}
 	})();
 }
@@ -633,7 +690,12 @@ async function handleStatusChange(
 	// (e.g. someone pushed manually before paid landed), Keez API call updates
 	// instead of duplicating.
 	if (event === 'paid' && ctx.integration.enableKeezPush) {
-		triggerAutoPushKeez(tenantId, existingSync.invoiceId, payload.whmcsInvoiceId);
+		triggerAutoPushKeez(
+			tenantId,
+			existingSync.invoiceId,
+			payload.whmcsInvoiceId,
+			ctx.correlationId ?? generateId()
+		);
 	}
 
 	logInfo('whmcs', `WHMCS invoice ${event}`, {

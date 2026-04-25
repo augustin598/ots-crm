@@ -137,7 +137,11 @@ export const getWhmcsRecentSyncs = query(async () => {
 			lastErrorMessage: table.whmcsInvoiceSync.lastErrorMessage,
 			receivedAt: table.whmcsInvoiceSync.receivedAt,
 			processedAt: table.whmcsInvoiceSync.processedAt,
-			invoiceId: table.whmcsInvoiceSync.invoiceId
+			invoiceId: table.whmcsInvoiceSync.invoiceId,
+			keezPushStatus: table.whmcsInvoiceSync.keezPushStatus,
+			retryCount: table.whmcsInvoiceSync.retryCount,
+			nextRetryAt: table.whmcsInvoiceSync.nextRetryAt,
+			lastPushAttemptAt: table.whmcsInvoiceSync.lastPushAttemptAt
 		})
 		.from(table.whmcsInvoiceSync)
 		.where(eq(table.whmcsInvoiceSync.tenantId, tenantId))
@@ -189,6 +193,8 @@ export const getWhmcsMatchStats = query(async () => {
 export const getWhmcsDeadLetters = query(async () => {
 	const { tenantId } = requireTenantMember();
 
+	// Includes Keez-push failures (state=INVOICE_CREATED + keezPushStatus=failed)
+	// alongside DEAD_LETTER / FAILED rows — operators care about both.
 	return db
 		.select({
 			id: table.whmcsInvoiceSync.id,
@@ -198,17 +204,22 @@ export const getWhmcsDeadLetters = query(async () => {
 			lastErrorClass: table.whmcsInvoiceSync.lastErrorClass,
 			lastErrorMessage: table.whmcsInvoiceSync.lastErrorMessage,
 			receivedAt: table.whmcsInvoiceSync.receivedAt,
-			processedAt: table.whmcsInvoiceSync.processedAt
+			processedAt: table.whmcsInvoiceSync.processedAt,
+			keezPushStatus: table.whmcsInvoiceSync.keezPushStatus,
+			retryCount: table.whmcsInvoiceSync.retryCount,
+			nextRetryAt: table.whmcsInvoiceSync.nextRetryAt,
+			invoiceId: table.whmcsInvoiceSync.invoiceId
 		})
 		.from(table.whmcsInvoiceSync)
 		.where(
 			and(
 				eq(table.whmcsInvoiceSync.tenantId, tenantId),
-				sql`${table.whmcsInvoiceSync.state} IN ('DEAD_LETTER', 'FAILED')`
+				sql`(${table.whmcsInvoiceSync.state} IN ('DEAD_LETTER', 'FAILED')
+					OR ${table.whmcsInvoiceSync.keezPushStatus} = 'failed')`
 			)
 		)
 		.orderBy(desc(table.whmcsInvoiceSync.receivedAt))
-		.limit(20);
+		.limit(50);
 });
 
 // ─────────────────────────────────────────────
@@ -525,10 +536,80 @@ export const pushWhmcsInvoiceNumber = command(
 	}
 );
 
+/**
+ * Admin replay for a stuck/failed sync row. Two modes depending on row state:
+ *
+ * 1. Push failed but invoice exists in CRM (invoiceId set, state stayed
+ *    INVOICE_CREATED, keezPushStatus in {failed,retrying,in_flight}):
+ *    cancel pending BullMQ retries, reset error state, kick off a fresh
+ *    push attempt immediately via the retry queue (delay=0, attempt=1).
+ *
+ * 2. Otherwise (no invoiceId, or in DEAD_LETTER): just reset to PENDING
+ *    so the next webhook resend re-runs the full create flow.
+ */
 export const replayWhmcsSync = command(
 	v.object({ syncId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ syncId }) => {
 		const { tenantId } = requireTenantAdmin();
+
+		const [row] = await db
+			.select({
+				invoiceId: table.whmcsInvoiceSync.invoiceId,
+				whmcsInvoiceId: table.whmcsInvoiceSync.whmcsInvoiceId,
+				state: table.whmcsInvoiceSync.state,
+				keezPushStatus: table.whmcsInvoiceSync.keezPushStatus
+			})
+			.from(table.whmcsInvoiceSync)
+			.where(
+				and(
+					eq(table.whmcsInvoiceSync.tenantId, tenantId),
+					eq(table.whmcsInvoiceSync.id, syncId)
+				)
+			)
+			.limit(1);
+
+		if (!row) {
+			return { replayed: false, reason: 'sync row not found' };
+		}
+
+		const isPushReplay =
+			row.invoiceId &&
+			(row.keezPushStatus === 'failed' ||
+				row.keezPushStatus === 'retrying' ||
+				row.keezPushStatus === 'in_flight');
+
+		if (isPushReplay && row.invoiceId) {
+			// Lazy import to keep the remote command out of the scheduler import graph.
+			const {
+				cancelPendingWhmcsKeezPushRetry,
+				enqueueWhmcsKeezPushRetry
+			} = await import('$lib/server/scheduler/tasks/whmcs-keez-push-retry');
+
+			await cancelPendingWhmcsKeezPushRetry(tenantId, row.invoiceId);
+
+			await db
+				.update(table.whmcsInvoiceSync)
+				.set({
+					lastErrorClass: null,
+					lastErrorMessage: null,
+					retryCount: 0,
+					nextRetryAt: null,
+					keezPushStatus: 'retrying',
+					processedAt: null
+				})
+				.where(
+					and(
+						eq(table.whmcsInvoiceSync.tenantId, tenantId),
+						eq(table.whmcsInvoiceSync.id, syncId)
+					)
+				);
+
+			// delay=0 so the worker picks it up immediately; attempt=1 keeps the
+			// jobId fresh so any leftover hop with the prior id can't dedup it.
+			await enqueueWhmcsKeezPushRetry(tenantId, row.invoiceId, row.whmcsInvoiceId, 0, 1);
+
+			return { replayed: true, mode: 'push_retry_enqueued' };
+		}
 
 		await db
 			.update(table.whmcsInvoiceSync)
@@ -537,6 +618,8 @@ export const replayWhmcsSync = command(
 				lastErrorClass: null,
 				lastErrorMessage: null,
 				retryCount: 0,
+				nextRetryAt: null,
+				keezPushStatus: null,
 				processedAt: null
 			})
 			.where(
@@ -546,6 +629,75 @@ export const replayWhmcsSync = command(
 				)
 			);
 
-		return { replayed: true };
+		return { replayed: true, mode: 'reset_to_pending' };
+	}
+);
+
+/**
+ * Batch replay all push-failed rows for the tenant. Useful after a Keez/WHMCS
+ * outage when many invoices piled up in keezPushStatus='failed'. Each row gets
+ * the same push_retry_enqueued treatment as single replay (cancel pending hops,
+ * reset counters, enqueue immediate retry). DEAD_LETTER rows are skipped — they
+ * need individual review.
+ *
+ * Returns a count, not a list, to keep the response cheap; admins can refresh
+ * the event log to see updated rows.
+ */
+export const replayAllFailedWhmcsPushes = command(
+	v.object({
+		// Optional cap so a runaway tenant can't enqueue thousands at once.
+		limit: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(500)), 100)
+	}),
+	async ({ limit }) => {
+		const { tenantId } = requireTenantAdmin();
+
+		const rows = await db
+			.select({
+				id: table.whmcsInvoiceSync.id,
+				invoiceId: table.whmcsInvoiceSync.invoiceId,
+				whmcsInvoiceId: table.whmcsInvoiceSync.whmcsInvoiceId
+			})
+			.from(table.whmcsInvoiceSync)
+			.where(
+				and(
+					eq(table.whmcsInvoiceSync.tenantId, tenantId),
+					eq(table.whmcsInvoiceSync.keezPushStatus, 'failed'),
+					sql`${table.whmcsInvoiceSync.invoiceId} IS NOT NULL`
+				)
+			)
+			.limit(limit);
+
+		if (rows.length === 0) {
+			return { replayed: 0, message: 'no failed push rows found' };
+		}
+
+		const { cancelPendingWhmcsKeezPushRetry, enqueueWhmcsKeezPushRetry } = await import(
+			'$lib/server/scheduler/tasks/whmcs-keez-push-retry'
+		);
+
+		let replayed = 0;
+		for (const row of rows) {
+			if (!row.invoiceId) continue;
+			try {
+				await cancelPendingWhmcsKeezPushRetry(tenantId, row.invoiceId);
+				await db
+					.update(table.whmcsInvoiceSync)
+					.set({
+						lastErrorClass: null,
+						lastErrorMessage: null,
+						retryCount: 0,
+						nextRetryAt: null,
+						keezPushStatus: 'retrying',
+						processedAt: null
+					})
+					.where(eq(table.whmcsInvoiceSync.id, row.id));
+				await enqueueWhmcsKeezPushRetry(tenantId, row.invoiceId, row.whmcsInvoiceId, 0, 1);
+				replayed += 1;
+			} catch {
+				// Best-effort batch — don't let one bad row stall the rest.
+			}
+		}
+
+		return { replayed, totalCandidates: rows.length };
 	}
 );

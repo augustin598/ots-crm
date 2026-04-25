@@ -3861,11 +3861,24 @@ export const whmcsInvoiceSync = sqliteTable(
 		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_date`),
-		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' }),
+		// Keez auto-push state-machine, separate from `state` so the upstream
+		// Keez/CRM lifecycle and the downstream Keez push lifecycle don't conflict.
+		// null='idle'|'in_flight'|'retrying'|'failed'|'success'
+		keezPushStatus: text('keez_push_status'),
+		nextRetryAt: timestamp('next_retry_at', { withTimezone: true, mode: 'date' }),
+		lastPushAttemptAt: timestamp('last_push_attempt_at', { withTimezone: true, mode: 'date' })
 	},
 	(t) => ({
 		uniqPair: uniqueIndex('uniq_whmcs_tenant_invoice').on(t.tenantId, t.whmcsInvoiceId),
-		byTenantState: index('idx_whmcs_invoice_sync_tenant_state').on(t.tenantId, t.state)
+		byTenantState: index('idx_whmcs_invoice_sync_tenant_state').on(t.tenantId, t.state),
+		// Powers the reconcile cron + debug-health queries which scan by
+		// keez_push_status. Without this, the `groupBy(keez_push_status)`
+		// histogram in /api/_debug-whmcs-health is a full table scan.
+		byTenantPushStatus: index('idx_whmcs_invoice_sync_keez_push_status').on(
+			t.tenantId,
+			t.keezPushStatus
+		)
 	})
 );
 
