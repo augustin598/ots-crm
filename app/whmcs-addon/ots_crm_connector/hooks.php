@@ -1,0 +1,176 @@
+<?php
+/**
+ * WHMCS hook registrations for OTS CRM Connector.
+ *
+ * WHMCS auto-loads this file on every request. Hooks are declared via
+ * `add_hook($point, $priority, $callable)`. We dispatch to \OtsCrm\Api
+ * which handles HMAC + retry queue + dry-run logic.
+ *
+ * Hook points covered (per plan):
+ *   - InvoiceCreated         → event=created
+ *   - InvoicePaid            → event=paid
+ *   - InvoiceCancelled       → event=cancelled
+ *   - InvoiceRefunded        → event=refunded
+ *   - ClientAdd              → event=added
+ *   - ClientEdit             → event=updated
+ *   - DailyCronJob           → flushRetryQueue
+ *
+ * Config is loaded lazily from the addon module settings row.
+ */
+
+if (!defined('WHMCS')) {
+    die('This file cannot be accessed directly');
+}
+
+require_once __DIR__ . '/lib/Hmac.php';
+require_once __DIR__ . '/lib/Api.php';
+require_once __DIR__ . '/lib/RetryQueue.php';
+require_once __DIR__ . '/lib/NonceStore.php';
+require_once __DIR__ . '/lib/Mappers/ClientMapper.php';
+require_once __DIR__ . '/lib/Mappers/InvoiceMapper.php';
+require_once __DIR__ . '/lib/Extractors/TransactionIdExtractor.php';
+
+use Illuminate\Database\Capsule\Manager as Capsule;
+
+/**
+ * Load addon config from tblconfiguration / addonmodules tables.
+ * WHMCS stores per-module settings in tbladdonmodules, keyed by module name.
+ *
+ * Returns empty array if the module is not configured yet.
+ */
+function ots_crm_connector_settings(): array
+{
+    try {
+        $rows = Capsule::table('tbladdonmodules')
+            ->where('module', 'ots_crm_connector')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[$row->setting] = $row->value;
+        }
+
+        // Note: sharedSecret is stored plaintext (Type=text in _config). WHMCS
+        // Type=password would encrypt with CC_ENCRYPTION_HASH in DB but
+        // localAPI('DecryptPassword') does NOT undo that for addon module fields,
+        // so the decrypted value reaching HMAC would be junk → signature_mismatch.
+
+        return $out;
+    } catch (\Throwable $e) {
+        return [];
+    }
+}
+
+/**
+ * Guard: should we process an invoice hook?
+ */
+function ots_crm_connector_invoices_enabled(array $settings): bool
+{
+    if (empty($settings['sharedSecret']) || empty($settings['crmBaseUrl']) || empty($settings['tenantSlug'])) {
+        return false;
+    }
+    return (($settings['eventsInvoices'] ?? 'yes') !== 'no' && ($settings['eventsInvoices'] ?? 'on') !== 'off');
+}
+
+/**
+ * Guard: should we process a client hook?
+ */
+function ots_crm_connector_clients_enabled(array $settings): bool
+{
+    if (empty($settings['sharedSecret']) || empty($settings['crmBaseUrl']) || empty($settings['tenantSlug'])) {
+        return false;
+    }
+    return (($settings['eventsClients'] ?? 'yes') !== 'no' && ($settings['eventsClients'] ?? 'on') !== 'off');
+}
+
+// ─── Invoice hooks ──────────────────────────────────────────────────────
+
+add_hook('InvoiceCreated', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_invoices_enabled($settings)) return;
+
+    $payload = \OtsCrm\InvoiceMapper::fromInvoiceId((int)$vars['invoiceid'], 'created');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'invoices', $payload);
+});
+
+add_hook('InvoicePaid', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_invoices_enabled($settings)) return;
+
+    $payload = \OtsCrm\InvoiceMapper::fromInvoiceId((int)$vars['invoiceid'], 'paid');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'invoices', $payload);
+});
+
+add_hook('InvoiceCancelled', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_invoices_enabled($settings)) return;
+
+    $payload = \OtsCrm\InvoiceMapper::fromInvoiceId((int)$vars['invoiceid'], 'cancelled');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'invoices', $payload);
+});
+
+add_hook('InvoiceRefunded', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_invoices_enabled($settings)) return;
+
+    $payload = \OtsCrm\InvoiceMapper::fromInvoiceId((int)$vars['invoiceid'], 'refunded');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'invoices', $payload);
+});
+
+// ─── Client hooks ───────────────────────────────────────────────────────
+
+add_hook('ClientAdd', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_clients_enabled($settings)) return;
+
+    $payload = \OtsCrm\ClientMapper::fromUserId((int)$vars['userid'], 'added');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'clients', $payload);
+});
+
+add_hook('ClientEdit', 1, function (array $vars) {
+    $settings = ots_crm_connector_settings();
+    if (!ots_crm_connector_clients_enabled($settings)) return;
+
+    $payload = \OtsCrm\ClientMapper::fromUserId((int)$vars['userid'], 'updated');
+    if ($payload === null) return;
+
+    \OtsCrm\Api::send($settings, 'clients', $payload);
+});
+
+// ─── Cron: drain retry queue every cron tick (typically 5 min) ──────────
+//
+// CronJob fires on every WHMCS cron run, not once a day like DailyCronJob.
+// On default WHMCS scheduling that's every 5 min — perfect for replaying
+// transient webhook failures quickly without waiting until midnight.
+//
+// Api::flushRetryQueue caps at 50 jobs/run and is safe to call concurrently
+// (Capsule update on `last_try_at` serialises hops on the same row).
+
+add_hook('CronJob', 1, function () {
+    $settings = ots_crm_connector_settings();
+    if (empty($settings['sharedSecret'])) return;
+
+    // Idempotent: makes sure the nonce table exists for tenants who upgraded
+    // the addon without re-running activation. Cheap (single hasTable check).
+    try {
+        \OtsCrm\NonceStore::install();
+    } catch (\Throwable $e) {
+        // Don't block retry-queue flush on schema hiccup.
+    }
+
+    \OtsCrm\Api::flushRetryQueue($settings);
+});
