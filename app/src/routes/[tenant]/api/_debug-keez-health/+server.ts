@@ -2,9 +2,13 @@ import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createKeezClientForTenant } from '$lib/server/plugins/keez/factory';
 import { KeezClientError } from '$lib/server/plugins/keez/errors';
 import { classifyKeezError } from '$lib/server/plugins/keez/error-classification';
+import { mapKeezDetailsToLineItems } from '$lib/server/plugins/keez/mapper';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
+import { logInfo, serializeError } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
 
 /**
@@ -223,6 +227,121 @@ export const GET: RequestHandler = async (event) => {
 	const externalId = event.url.searchParams.get('externalId');
 	const tokenOnly = event.url.searchParams.get('token') === 'true';
 	const mode = event.url.searchParams.get('mode');
+
+	// Inspect a single CRM invoice + probe Keez upstream to confirm whether it
+	// still exists there. Returns the invoice number (so the operator can search
+	// it in the Keez UI), Keez status, and counts of every related row that
+	// would be affected by a delete. No side-effects.
+	if (mode === 'lookup-invoice') {
+		const invoiceId = event.url.searchParams.get('invoiceId');
+		if (!invoiceId) throw error(400, 'invoiceId query param is required');
+		if (!/^[a-z0-9]{20,32}$/i.test(invoiceId)) {
+			throw error(400, 'invoiceId must be a CRM id (20-32 alphanumeric chars)');
+		}
+
+		const [inv] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, tenantId)))
+			.limit(1);
+		if (!inv) {
+			return json({ ok: false, found: false, reason: 'invoice not found in this tenant' }, { status: 404 });
+		}
+
+		const [client_] = inv.clientId
+			? await db
+				.select({ id: table.client.id, name: table.client.name, cui: table.client.cui })
+				.from(table.client)
+				.where(eq(table.client.id, inv.clientId))
+				.limit(1)
+			: [null];
+
+		const lineItems = await db
+			.select({ id: table.invoiceLineItem.id, description: table.invoiceLineItem.description, amount: table.invoiceLineItem.amount })
+			.from(table.invoiceLineItem)
+			.where(eq(table.invoiceLineItem.invoiceId, inv.id));
+
+		const keezSyncs = await db
+			.select({ id: table.keezInvoiceSync.id, syncStatus: table.keezInvoiceSync.syncStatus, lastSyncedAt: table.keezInvoiceSync.lastSyncedAt })
+			.from(table.keezInvoiceSync)
+			.where(eq(table.keezInvoiceSync.invoiceId, inv.id));
+
+		const bankMatches = await db
+			.select({ id: table.bankTransaction.id, amount: table.bankTransaction.amount, date: table.bankTransaction.date })
+			.from(table.bankTransaction)
+			.where(eq(table.bankTransaction.matchedInvoiceId, inv.id));
+
+		// Probe Keez upstream — distinguishes "Keez says it doesn't exist" (safe to delete)
+		// from "Keez is down right now" (don't delete; could be transient).
+		// Per memory: Keez returns 400 VALIDATION_ERROR with "nu exista" for deleted invoices, NOT 404.
+		let keezProbe: {
+			attempted: boolean;
+			exists?: boolean;
+			status?: number | null;
+			classification?: 'transient' | 'permanent' | 'missing';
+			errorMessage?: string;
+		} = { attempted: false };
+		if (inv.keezExternalId) {
+			const [integration] = await db
+				.select()
+				.from(table.keezIntegration)
+				.where(and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true)))
+				.limit(1);
+			if (integration) {
+				try {
+					const c = await createKeezClientForTenant(tenantId, integration);
+					await c.getInvoice(inv.keezExternalId);
+					keezProbe = { attempted: true, exists: true, status: 200, classification: 'permanent' };
+				} catch (err) {
+					const status = err instanceof KeezClientError ? err.status : null;
+					const msg = err instanceof Error ? err.message : String(err);
+					const looksMissing =
+						status === 404 ||
+						(status === 400 && /VALIDATION_ERROR|nu exista/i.test(msg));
+					keezProbe = {
+						attempted: true,
+						exists: looksMissing ? false : undefined,
+						status,
+						classification: looksMissing ? 'missing' : classifyKeezError(err),
+						errorMessage: msg.slice(0, 300)
+					};
+				}
+			}
+		}
+
+		return json({
+			ok: true,
+			invoice: {
+				id: inv.id,
+				number: inv.invoiceNumber,
+				status: inv.status,
+				keezStatus: inv.keezStatus,
+				keezInvoiceId: inv.keezInvoiceId,
+				keezExternalId: inv.keezExternalId,
+				amount: inv.amount,
+				totalAmount: inv.totalAmount,
+				currency: inv.currency,
+				issueDate: inv.issueDate,
+				dueDate: inv.dueDate,
+				createdAt: inv.createdAt
+			},
+			client: client_,
+			counts: {
+				lineItems: lineItems.length,
+				keezInvoiceSyncs: keezSyncs.length,
+				bankTransactionMatches: bankMatches.length
+			},
+			lineItems,
+			keezSyncs,
+			bankMatches,
+			keezProbe,
+			deleteSafetyHint: keezProbe.exists === false
+				? 'Keez confirms the invoice no longer exists upstream — safe to delete.'
+				: keezProbe.exists === true
+					? 'Keez says the invoice DOES exist — DO NOT delete; investigate why sync fails.'
+					: 'Keez probe inconclusive (transient or no integration). Try again later before deleting.'
+		});
+	}
 	const concurrency = Math.min(
 		20,
 		Math.max(1, Number(event.url.searchParams.get('concurrency') ?? '5')),
@@ -387,5 +506,103 @@ export const GET: RequestHandler = async (event) => {
 		tokenProbe,
 		results,
 		summary: summarize(results),
+	});
+};
+
+/**
+ * Repair an invoice whose line items got wiped or never inserted (e.g. Turso
+ * write-lock during sync). Re-fetches the full invoice from Keez, deletes any
+ * surviving line items, and inserts fresh ones — atomically, with busy-retry.
+ *
+ *   POST ?mode=relink-line-items&invoiceId=<crm-invoice-id>
+ *
+ * Idempotent: safe to run repeatedly. Operates only on the tenant's own invoice.
+ */
+export const POST: RequestHandler = async (event) => {
+	requireAdmin(event);
+	const tenantId = event.locals.tenant!.id;
+	const mode = event.url.searchParams.get('mode');
+
+	if (mode !== 'relink-line-items') {
+		throw error(400, 'Unsupported POST mode. Use ?mode=relink-line-items&invoiceId=...');
+	}
+
+	const invoiceId = event.url.searchParams.get('invoiceId');
+	if (!invoiceId) throw error(400, 'invoiceId query param is required');
+	if (!/^[a-z0-9]{20,32}$/i.test(invoiceId)) {
+		throw error(400, 'invoiceId must be a CRM id (20-32 alphanumeric chars)');
+	}
+
+	const [invoice] = await db
+		.select({
+			id: table.invoice.id,
+			tenantId: table.invoice.tenantId,
+			keezExternalId: table.invoice.keezExternalId
+		})
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, tenantId)))
+		.limit(1);
+	if (!invoice) throw error(404, 'Invoice not found in this tenant');
+	if (!invoice.keezExternalId) {
+		throw error(400, 'Invoice has no keezExternalId — nothing to re-fetch from Keez');
+	}
+
+	const [integration] = await db
+		.select()
+		.from(table.keezIntegration)
+		.where(
+			and(eq(table.keezIntegration.tenantId, tenantId), eq(table.keezIntegration.isActive, true))
+		)
+		.limit(1);
+	if (!integration) throw error(404, 'No active Keez integration for this tenant');
+
+	const client = await createKeezClientForTenant(tenantId, integration);
+	const keezInvoice = await client.getInvoice(invoice.keezExternalId);
+	const details = keezInvoice.invoiceDetails ?? [];
+	const lineItemsData = mapKeezDetailsToLineItems(details, invoice.id);
+
+	const beforeCount = await db
+		.select({ id: table.invoiceLineItem.id })
+		.from(table.invoiceLineItem)
+		.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
+
+	try {
+		await withTursoBusyRetry(
+			() =>
+				db.transaction(async (tx) => {
+					await tx
+						.delete(table.invoiceLineItem)
+						.where(eq(table.invoiceLineItem.invoiceId, invoice.id));
+					if (lineItemsData.length > 0) {
+						await tx.insert(table.invoiceLineItem).values(
+							lineItemsData.map((item) => ({
+								...item,
+								id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)))
+							}))
+						);
+					}
+				}),
+			{ tenantId, label: `relink line items for invoice ${invoice.id}` }
+		);
+	} catch (err) {
+		const e = serializeError(err);
+		throw error(500, `Re-link failed: ${e.message}`);
+	}
+
+	logInfo('keez', `Relinked line items for invoice ${invoice.id}`, {
+		tenantId,
+		metadata: {
+			before: beforeCount.length,
+			after: lineItemsData.length,
+			keezExternalId: invoice.keezExternalId
+		}
+	});
+
+	return json({
+		ok: true,
+		invoiceId: invoice.id,
+		keezExternalId: invoice.keezExternalId,
+		lineItemsBefore: beforeCount.length,
+		lineItemsAfter: lineItemsData.length
 	});
 };

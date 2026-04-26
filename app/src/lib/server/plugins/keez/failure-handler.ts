@@ -4,6 +4,8 @@ import { eq, and, or } from 'drizzle-orm';
 import { serializeError, logInfo, logWarning, logError } from '$lib/server/logger';
 import { createNotification } from '$lib/server/notifications';
 import { decideFailureAction, MAX_CONSECUTIVE_FAILURES } from './retry-policy';
+import { KeezSyncAbortedError } from './sync';
+import { classifyKeezError } from './error-classification';
 
 /**
  * Summary returned to callers so they can display feedback (e.g. the manual
@@ -37,7 +39,24 @@ export async function handleKeezSyncFailure(
 	options: { enqueueRetry: (tenantId: string, delayMs: number, attempt: number) => Promise<void> }
 ): Promise<KeezSyncFailureOutcome> {
 	const { message, stack } = serializeError(error);
-	logError('keez', `Sync failure: ${message}`, { tenantId, stackTrace: stack });
+	// A KeezSyncAbortedError carries partial progress and is by-design — the in-run
+	// circuit breaker tripped on transient upstream errors and we'll retry. Same for
+	// classified-transient errors (502/503/504 and network blips). These are not
+	// real failures: don't pollute the dashboard with red. Real failures (auth gone,
+	// permanent 4xx, schema corruption, etc.) still log at error level.
+	const isExpectedTransient =
+		error instanceof KeezSyncAbortedError || classifyKeezError(error) === 'transient';
+	const initialLogFn = isExpectedTransient ? logWarning : logError;
+	initialLogFn('keez', `Sync failure: ${message}`, { tenantId, stackTrace: stack });
+
+	if (error instanceof KeezSyncAbortedError) {
+		const p = error.partial;
+		logInfo(
+			'keez',
+			`Sync partial progress preserved: imported=${p.imported}, updated=${p.updated}, unchanged=${p.unchanged}, skipped=${p.skipped}, errors=${p.errors}`,
+			{ tenantId }
+		);
+	}
 
 	let priorCount = 0;
 	try {

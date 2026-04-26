@@ -1,6 +1,8 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { serializeError as _serializeError } from './error-serializer';
+export { serializeError } from './error-serializer';
 
 export type LogLevel = 'info' | 'warning' | 'error';
 export type LogSource =
@@ -50,32 +52,11 @@ const CONSOLE_METHOD: Record<LogLevel, 'log' | 'warn' | 'error'> = {
 	error: 'error'
 };
 
-export function serializeError(err: unknown): { message: string; stack?: string } {
-	if (err instanceof Error) {
-		// AggregateError (incl. Node's internal one from Happy Eyeballs multi-connect)
-		// hides the real ECONNREFUSED/ETIMEDOUT/ENOTFOUND with host:port inside .errors[].
-		// Unwrap so we can diagnose connection failures instead of reading empty messages.
-		const aggregate = (err as { errors?: unknown[] }).errors;
-		if (Array.isArray(aggregate) && aggregate.length > 0) {
-			const inner = aggregate
-				.map((e) => {
-					if (e instanceof Error) {
-						const code = (e as { code?: string }).code;
-						const address = (e as { address?: string }).address;
-						const port = (e as { port?: number }).port;
-						const target = address ? `${address}${port ? `:${port}` : ''}` : '';
-						return [code, target, e.message].filter(Boolean).join(' ');
-					}
-					return String(e);
-				})
-				.join(' | ');
-			const message = err.message ? `${err.message} (${inner})` : inner;
-			return { message, stack: err.stack };
-		}
-		return { message: err.message, stack: err.stack };
-	}
-	return { message: String(err) };
-}
+// serializeError is re-exported from ./error-serializer above so it can be
+// imported without pulling in $lib/server/db (keeps unit tests independent
+// of SvelteKit virtual modules). The local _serializeError binding lets us
+// reference it inside this module if needed without a re-import dance.
+void _serializeError;
 
 // ---------------------------------------------------------------------------
 // Buffered batch-write system

@@ -9,6 +9,7 @@ import { logInfo, logWarning, logError, serializeError } from '$lib/server/logge
 import { clearNotificationsByType } from '$lib/server/notifications';
 import { classifyKeezError } from './error-classification';
 import { reconcileMissingKeezInvoices } from './sync-reconcile';
+import { withTursoBusyRetry } from './db-retry';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -449,21 +450,27 @@ async function _syncKeezInvoicesForTenantInner(
 
 				await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, existing.id));
 
-				// Update line items
+				// Update line items atomically: delete + insert in a single transaction
+				// so a mid-write failure can't leave the invoice with zero line items.
 				if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
 					try {
-						await db
-							.delete(table.invoiceLineItem)
-							.where(eq(table.invoiceLineItem.invoiceId, existing.id));
 						const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, existing.id);
-						if (lineItemsData.length > 0) {
-							await db.insert(table.invoiceLineItem).values(
-								lineItemsData.map((item) => ({
-									...item,
-									id: generateId()
-								}))
-							);
-						}
+						await withTursoBusyRetry(
+							() => db.transaction(async (tx) => {
+								await tx
+									.delete(table.invoiceLineItem)
+									.where(eq(table.invoiceLineItem.invoiceId, existing.id));
+								if (lineItemsData.length > 0) {
+									await tx.insert(table.invoiceLineItem).values(
+										lineItemsData.map((item) => ({
+											...item,
+											id: generateId()
+										}))
+									);
+								}
+							}),
+							{ tenantId, label: `update line items for invoice ${existing.id}` }
+						);
 					} catch (lineItemError) {
 						const lineErr = serializeError(lineItemError);
 						logError('keez', `Sync failed to update line items for invoice ${existing.id}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
@@ -557,11 +564,14 @@ async function _syncKeezInvoicesForTenantInner(
 				try {
 					const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, invoiceId);
 					if (lineItemsData.length > 0) {
-						await db.insert(table.invoiceLineItem).values(
-							lineItemsData.map((item) => ({
-								...item,
-								id: generateId()
-							}))
+						await withTursoBusyRetry(
+							() => db.insert(table.invoiceLineItem).values(
+								lineItemsData.map((item) => ({
+									...item,
+									id: generateId()
+								}))
+							),
+							{ tenantId, label: `insert line items for new invoice ${invoiceId}` }
 						);
 					}
 				} catch (lineItemError) {
@@ -586,7 +596,11 @@ async function _syncKeezInvoicesForTenantInner(
 			consecutiveTransient = 0;
 		} catch (error) {
 			const processErr = serializeError(error);
-			logError('keez', `Sync failed to process invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
+			const classification = classifyKeezError(error);
+			// Downgrade transient errors (502/503/504, network) to warning — they're handled
+			// by the in-run circuit breaker and cross-run retry, so they're not real failures.
+			const logFn = classification === 'transient' ? logWarning : logError;
+			logFn('keez', `Sync ${classification} on invoice ${invoiceHeader.externalId}: ${processErr.message}`, { tenantId, stackTrace: processErr.stack });
 			result.errors++;
 
 			// On 3 consecutive transient errors: try to ride out the flap in-run
@@ -595,7 +609,7 @@ async function _syncKeezInvoicesForTenantInner(
 			// 10-60s, so 30s × 2 catches most. Skipped invoices come back via
 			// upsert idempotency on keezExternalId in the next sync run — no
 			// data loss, just delayed by one run.
-			if (classifyKeezError(error) === 'transient') {
+			if (classification === 'transient') {
 				consecutiveTransient++;
 				if (consecutiveTransient >= 3) {
 					if (pausesUsed < MAX_IN_RUN_PAUSES) {
