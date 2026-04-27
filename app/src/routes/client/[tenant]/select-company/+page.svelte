@@ -10,6 +10,12 @@
 	const layoutData = $derived(page.data as Record<string, unknown>);
 	const tenant = $derived(layoutData?.tenant as { name?: string } | null | undefined);
 	const invoiceLogo = $derived(layoutData?.invoiceLogo as string | null | undefined);
+	const user = $derived(
+		layoutData?.user as { firstName?: string; email?: string } | null | undefined
+	);
+	const greetingName = $derived(
+		user?.firstName?.trim() || user?.email?.split('@')[0] || ''
+	);
 
 	let submitting = $state<string | null>(null);
 
@@ -67,6 +73,11 @@
 			</div>
 
 			<div class="space-y-2 mb-8">
+				{#if greetingName}
+					<p class="text-sm font-medium text-primary">
+						Salut, {greetingName}! <span aria-hidden="true">👋</span>
+					</p>
+				{/if}
 				<h1 class="text-2xl font-bold tracking-tight">Selectați compania</h1>
 				<p class="text-sm text-muted-foreground">
 					Aveți acces la {data.companies.length} companii. Alegeți compania pentru această sesiune.
