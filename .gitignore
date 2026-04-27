@@ -5,5 +5,8 @@ app-config.json
 skills-lock.json
 .DS_Store
 
+# Database backups (taken before risky migrations; never committed)
+backups/
+
 # Plugin build artifacts (use ots-wp-connector/build.sh to produce)
 ots-wp-connector*.zip
