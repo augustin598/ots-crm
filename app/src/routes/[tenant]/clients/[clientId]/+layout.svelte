@@ -12,7 +12,13 @@
 	import { goto } from '$app/navigation';
 	import { Pencil as Edit, ArrowLeft } from '@lucide/svelte';
 	import ClientLogo from '$lib/components/client-logo.svelte';
-	import { generateClientMagicLink, sendClientMagicLinkEmail } from '$lib/remotes/client-auth.remote';
+	import {
+		generateClientMagicLink,
+		sendClientMagicLinkEmail,
+		generateClientMultiCompanyMagicLink,
+		sendClientMultiCompanyMagicLinkEmail,
+		getClientLinkedCompanies
+	} from '$lib/remotes/client-auth.remote';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from 'svelte-sonner';
@@ -20,6 +26,7 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import LayersIcon from '@lucide/svelte/icons/layers';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -60,16 +67,44 @@
 	let copied = $state(false);
 	let emailSending = $state(false);
 	let emailSent = $state(false);
+	let magicLinkMode = $state<'single' | 'multi'>('single');
+	let magicLinkMatchedCount = $state(0);
+
+	// Linked companies — drives whether the multi-company button is shown.
+	const linkedQuery = $derived(getClientLinkedCompanies({ clientId }));
+	const linkedCompanies = $derived(linkedQuery.current?.companies ?? []);
+	const linkedCount = $derived(linkedCompanies.length);
 
 	async function handleOpenMagicLink() {
 		magicLinkLoading = true;
 		magicLinkUrl = '';
+		magicLinkMode = 'single';
+		magicLinkMatchedCount = 1;
 		copied = false;
 		emailSent = false;
 		try {
 			const result = await generateClientMagicLink({ clientId });
 			magicLinkUrl = result.url;
 			magicLinkEmail = result.email;
+			magicLinkDialogOpen = true;
+		} catch (e: any) {
+			toast.error(e?.message || (typeof e === 'string' ? e : 'Eroare la generare'));
+		} finally {
+			magicLinkLoading = false;
+		}
+	}
+
+	async function handleOpenMultiCompanyMagicLink() {
+		magicLinkLoading = true;
+		magicLinkUrl = '';
+		magicLinkMode = 'multi';
+		copied = false;
+		emailSent = false;
+		try {
+			const result = await generateClientMultiCompanyMagicLink({ clientId });
+			magicLinkUrl = result.url;
+			magicLinkEmail = result.email;
+			magicLinkMatchedCount = result.matchedCount;
 			magicLinkDialogOpen = true;
 		} catch (e: any) {
 			toast.error(e?.message || (typeof e === 'string' ? e : 'Eroare la generare'));
@@ -87,7 +122,11 @@
 	async function handleSendEmail() {
 		emailSending = true;
 		try {
-			await sendClientMagicLinkEmail({ clientId });
+			if (magicLinkMode === 'multi') {
+				await sendClientMultiCompanyMagicLinkEmail({ clientId });
+			} else {
+				await sendClientMagicLinkEmail({ clientId });
+			}
 			emailSent = true;
 			toast.success(`Magic link trimis pe ${magicLinkEmail}`);
 		} catch (e) {
@@ -139,8 +178,21 @@
 			<div class="flex items-center gap-2">
 				<Button variant="outline" onclick={handleOpenMagicLink} disabled={magicLinkLoading}>
 					<SparklesIcon class="mr-2 h-4 w-4" />
-					{magicLinkLoading ? 'Se generează...' : 'Magic Link'}
+					{magicLinkLoading && magicLinkMode === 'single' ? 'Se generează...' : 'Magic Link'}
 				</Button>
+				{#if linkedCount >= 2}
+					<Button
+						variant="outline"
+						onclick={handleOpenMultiCompanyMagicLink}
+						disabled={magicLinkLoading}
+						title="Generează un link care permite accesul la toate cele {linkedCount} firme legate prin acest email."
+					>
+						<LayersIcon class="mr-2 h-4 w-4" />
+						{magicLinkLoading && magicLinkMode === 'multi'
+							? 'Se generează...'
+							: `Magic Link multi-company (${linkedCount})`}
+					</Button>
+				{/if}
 				<Button onclick={() => goto(`/${tenantSlug}/clients/${clientId}/edit`)}>
 					<Edit class="mr-2 h-4 w-4" />
 					Edit Client
@@ -153,11 +205,22 @@
 		<Dialog.Content class="sm:max-w-md max-h-[85vh] overflow-y-auto">
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
-					<SparklesIcon class="h-5 w-5 text-primary" />
-					Magic Link acces client
+					{#if magicLinkMode === 'multi'}
+						<LayersIcon class="h-5 w-5 text-primary" />
+						Magic Link multi-company
+					{:else}
+						<SparklesIcon class="h-5 w-5 text-primary" />
+						Magic Link acces client
+					{/if}
 				</Dialog.Title>
 				<Dialog.Description>
-					Link valabil 24 de ore, utilizabil o singură dată. Trimite-l clientului prin orice canal.
+					{#if magicLinkMode === 'multi'}
+						Link valabil 24h, utilizabil o singură dată. Clientul va vedea un selector cu toate
+						cele {magicLinkMatchedCount} firme la care are acces prin acest email.
+					{:else}
+						Link valabil 24 de ore, utilizabil o singură dată. Trimite-l clientului prin orice
+						canal.
+					{/if}
 				</Dialog.Description>
 			</Dialog.Header>
 			<div class="space-y-4 pt-2">

@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { command } from '$app/server';
+import { query, command } from '$app/server';
 import { getRequestEvent } from '$app/server';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -345,6 +345,231 @@ export const sendClientMagicLinkEmail = command(
 			metadata: { clientId, clientEmail: client.email, adminUserId: event.locals.user.id }
 		});
 		return { sent: true, email: client.email };
+	}
+);
+
+/**
+ * Admin: list every client in the tenant whose primary or secondary email
+ * matches THIS client's primary email. Used to decide whether to show the
+ * multi-company magic link button on the client detail page (only when the
+ * email reaches >= 2 clients).
+ */
+export const getClientLinkedCompanies = query(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+
+		const [client] = await db
+			.select({ id: table.client.id, email: table.client.email })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!client) return { email: null, companies: [] };
+		if (!client.email) return { email: null, companies: [] };
+
+		const normalizedEmail = client.email.toLowerCase();
+
+		const primaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name, cui: table.client.cui })
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					eq(sql`lower(${table.client.email})`, normalizedEmail)
+				)
+			);
+
+		const secondaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name, cui: table.client.cui })
+			.from(table.clientSecondaryEmail)
+			.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.tenantId, tenantId),
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
+				)
+			);
+
+		const seen = new Set<string>();
+		const companies: { id: string; name: string; cui: string | null }[] = [];
+		for (const m of [...primaryMatches, ...secondaryMatches]) {
+			if (seen.has(m.id)) continue;
+			seen.add(m.id);
+			companies.push(m);
+		}
+
+		return { email: normalizedEmail, companies };
+	}
+);
+
+/**
+ * Admin: generate a multi-company magic link URL for a client. Snapshots
+ * EVERY client whose primary or secondary email is the same as this
+ * client's primary email — at the next /verify step the user will see
+ * the company selector with all matched companies.
+ */
+export const generateClientMultiCompanyMagicLink = command(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+		const tenantSlug = event.locals.tenant.slug;
+
+		const [client] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!client) throw new Error('Client not found');
+		if (!client.email) throw new Error('Clientul nu are email configurat.');
+
+		const normalizedEmail = client.email.toLowerCase();
+
+		const primaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name })
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					eq(sql`lower(${table.client.email})`, normalizedEmail)
+				)
+			);
+
+		const secondaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name })
+			.from(table.clientSecondaryEmail)
+			.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.tenantId, tenantId),
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
+				)
+			);
+
+		const seen = new Set<string>();
+		const matched: { id: string; name: string }[] = [];
+		for (const m of [...primaryMatches, ...secondaryMatches]) {
+			if (seen.has(m.id)) continue;
+			seen.add(m.id);
+			matched.push(m);
+		}
+
+		if (matched.length < 2) {
+			throw new Error(
+				'Acest email aparține unei singure firme. Folosește butonul Magic Link standard.'
+			);
+		}
+
+		const plainToken = generateMagicLinkToken();
+		const hashedToken = hashToken(plainToken);
+		const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+		await db.insert(table.magicLinkToken).values({
+			id: tokenId,
+			token: hashedToken,
+			email: normalizedEmail,
+			clientId: matched[0].id,
+			matchedClientIds: JSON.stringify(matched.map((m) => m.id)),
+			tenantId,
+			expiresAt,
+			used: false
+		});
+
+		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
+		return { url, email: normalizedEmail, matchedCount: matched.length, matched, expiresAt };
+	}
+);
+
+/**
+ * Admin: generate + email a multi-company magic link to the client's email.
+ */
+export const sendClientMultiCompanyMagicLinkEmail = command(
+	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ clientId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const tenantId = event.locals.tenant.id;
+		const tenantSlug = event.locals.tenant.slug;
+
+		const [client] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!client) throw new Error('Client not found');
+		if (!client.email) throw new Error('Clientul nu are email configurat.');
+
+		const normalizedEmail = client.email.toLowerCase();
+
+		const primaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name })
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					eq(sql`lower(${table.client.email})`, normalizedEmail)
+				)
+			);
+
+		const secondaryMatches = await db
+			.select({ id: table.client.id, name: table.client.name })
+			.from(table.clientSecondaryEmail)
+			.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.tenantId, tenantId),
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
+				)
+			);
+
+		const seen = new Set<string>();
+		const matched: { id: string; name: string }[] = [];
+		for (const m of [...primaryMatches, ...secondaryMatches]) {
+			if (seen.has(m.id)) continue;
+			seen.add(m.id);
+			matched.push(m);
+		}
+
+		if (matched.length < 2) {
+			throw new Error(
+				'Acest email aparține unei singure firme. Folosește butonul Magic Link standard.'
+			);
+		}
+
+		const plainToken = generateMagicLinkToken();
+		const hashedToken = hashToken(plainToken);
+		const tokenId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+		await db.insert(table.magicLinkToken).values({
+			id: tokenId,
+			token: hashedToken,
+			email: normalizedEmail,
+			clientId: matched[0].id,
+			matchedClientIds: JSON.stringify(matched.map((m) => m.id)),
+			tenantId,
+			expiresAt,
+			used: false
+		});
+
+		// The email subject uses the first matched client's name as a label.
+		// The recipient lands on /select-company and picks any of the matched.
+		await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, matched[0].name);
+		logInfo('email', `Admin sent multi-company magic link to client`, {
+			tenantId,
+			metadata: {
+				clientId,
+				clientEmail: normalizedEmail,
+				matchedCount: matched.length,
+				adminUserId: event.locals.user.id
+			}
+		});
+		return { sent: true, email: normalizedEmail, matchedCount: matched.length };
 	}
 );
 
