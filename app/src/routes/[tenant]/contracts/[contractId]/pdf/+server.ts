@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
+import { classifyClientVat } from '$lib/server/vat/classify-client';
 import * as storage from '$lib/server/storage';
 
 export const GET: RequestHandler = async (event) => {
@@ -69,12 +70,17 @@ export const GET: RequestHandler = async (event) => {
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
 
+	const vatScenario = classifyClientVat({ country: client.country, cui: client.cui });
+	const settingsTaxRate = invoiceSettings?.defaultTaxRate ?? 19;
+	const effectiveTaxRate = vatScenario === 'ro_domestic' ? settingsTaxRate : 0;
+
 	const pdfBuffer = await generateContractPDF({
 		contract,
 		lineItems,
 		tenant: event.locals.tenant,
 		client,
-		taxRate: invoiceSettings?.defaultTaxRate ?? 19
+		taxRate: effectiveTaxRate,
+		vatScenario
 	});
 
 	const clientName = (client.businessName || client.name || 'Client').replace(/[^a-zA-Z0-9-_]/g, '_');

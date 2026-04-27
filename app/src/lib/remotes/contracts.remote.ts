@@ -11,6 +11,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
 import { env } from '$env/dynamic/private';
 import { recordContractActivity } from '$lib/server/contract-activity';
+import { shouldZeroVatForClient } from '$lib/server/vat/classify-client';
 
 const DEBUG_EXTRACTION = () => env.DEBUG_CONTRACT_EXTRACTION === 'true';
 
@@ -194,15 +195,31 @@ export const getContracts = query(
 				priceMap.set(t.contractId, Number(t.total) || 0);
 			}
 		}
+
+		// Batch-load client VAT-relevant fields for VAT scenario classification
+		const clientVatMap = new Map<string, { country: string | null; cui: string | null }>();
+		const clientIds = Array.from(new Set(contracts.map(c => c.clientId)));
+		if (clientIds.length > 0) {
+			const clientRows = await db
+				.select({ id: table.client.id, country: table.client.country, cui: table.client.cui })
+				.from(table.client)
+				.where(inArray(table.client.id, clientIds));
+			for (const row of clientRows) {
+				clientVatMap.set(row.id, { country: row.country ?? null, cui: row.cui ?? null });
+			}
+		}
+
 		const contractsWithPrice = contracts.map(c => {
 			const price = priceMap.get(c.id) || 0;
-			const tvaAmount = Math.round(price * taxRate / 100);
+			const clientVat = clientVatMap.get(c.clientId);
+			const effectiveTaxRate = clientVat && shouldZeroVatForClient(clientVat) ? 0 : taxRate;
+			const tvaAmount = Math.round(price * effectiveTaxRate / 100);
 			return {
 				...c,
 				totalPrice: price,
 				tvaAmount,
 				totalWithTVA: price + tvaAmount,
-				taxRate
+				taxRate: effectiveTaxRate
 			};
 		});
 

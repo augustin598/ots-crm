@@ -1,6 +1,10 @@
 import PDFDocument from 'pdfkit';
 import { resolve } from 'path';
 import { getDefaultContractClauses } from '$lib/contract-templates';
+import {
+	getZeroVatLegalNote,
+	type ClientVatScenario
+} from '$lib/server/vat/classify-client';
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -85,6 +89,7 @@ export interface ContractPDFInput {
 	tenant: ContractTenantData;
 	client: ContractClientData;
 	taxRate?: number; // VAT percentage, e.g. 19 or 21
+	vatScenario?: ClientVatScenario;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -148,7 +153,7 @@ function tenantAddr(t: ContractTenantData): string {
 export async function generateContractPDF(input: ContractPDFInput): Promise<Buffer> {
 	return new Promise<Buffer>((resolve, reject) => {
 		try {
-			const { contract, lineItems, tenant, client, taxRate } = input;
+			const { contract, lineItems, tenant, client, taxRate, vatScenario } = input;
 			const ACCENT = tenant.themeColor || DEFAULT_ACCENT;
 
 			const doc = new PDFDocument({
@@ -575,6 +580,19 @@ export async function generateContractPDF(input: ContractPDFInput): Promise<Buff
 						doc.text('Total cu TVA', ML + 6, y + 6, { width: colServiceW - 12, lineBreak: false });
 						doc.text(`${fNum(totalWithTVA)} ${contract.currency}`, ML + colServiceW + 6, y + 6, { width: colPriceW - 12, align: 'center', lineBreak: false });
 						y += totalRowH;
+					}
+
+					// Zero-VAT legal note (intracom / export) — only when no VAT was applied
+					if (effectiveTaxRate === 0 && vatScenario) {
+						const legalNote = getZeroVatLegalNote(vatScenario);
+						if (legalNote) {
+							y += 8;
+							doc.fontSize(7.5).font('DejaVu').fillColor(MUTED);
+							const noteHeight = doc.heightOfString(`Notă: ${legalNote}`, { width: CW });
+							y = ensureSpace(y, noteHeight + 4);
+							doc.text(`Notă: ${legalNote}`, ML, y, { width: CW });
+							y += noteHeight;
+						}
 					}
 
 					y += 16;
