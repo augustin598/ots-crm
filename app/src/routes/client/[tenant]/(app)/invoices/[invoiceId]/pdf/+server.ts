@@ -10,9 +10,6 @@ export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.isClientUser || !event.locals.client || !event.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	if (!event.locals.isClientUserPrimary) {
-		throw error(403, 'Access denied');
-	}
 
 	const invoiceId = event.params.invoiceId;
 	const tenantId = event.locals.tenant.id;
