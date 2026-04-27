@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { error, json } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import * as storage from '$lib/server/storage';
 import { recordContractActivity } from '$lib/server/contract-activity';
@@ -69,49 +69,92 @@ export const POST: RequestHandler = async (event) => {
 	const userId = event.locals.user.id;
 	const contractId = generateContractId();
 
-	// Use transaction for atomic contract number generation + insert
-	await db.transaction(async (tx) => {
-		let finalContractNumber = contractNumber;
-		if (!finalContractNumber) {
-			const prefix = event.locals.tenant?.contractPrefix || 'CTR';
-			const [maxResult] = await tx
-				.select({
-					maxNumber: sql<string>`max(${table.contract.contractNumber})`
-				})
-				.from(table.contract)
-				.where(eq(table.contract.tenantId, tenantId));
+	const manualNumber = contractNumber?.trim() || undefined;
+	const prefix = event.locals.tenant?.contractPrefix || 'CTR';
 
-			let nextNumber = 1;
-			if (maxResult?.maxNumber) {
-				const match = maxResult.maxNumber.match(/(\d+)$/);
-				if (match) {
-					nextNumber = parseInt(match[1], 10) + 1;
+	const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const numberRegex = new RegExp(`^${escapedPrefix}-(\\d+)$`);
+
+	const isUniqueConstraintError = (err: unknown): boolean => {
+		const e = err as { code?: string; message?: string } | null;
+		const msg = e?.message || String(err);
+		return (
+			e?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+			e?.code === 'SQLITE_CONSTRAINT' ||
+			msg.includes('UNIQUE constraint failed') ||
+			msg.includes('UNIQUE constraint')
+		);
+	};
+
+	const MAX_RETRIES = 5;
+	let lastErr: unknown = null;
+	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			await db.transaction(async (tx) => {
+				let finalContractNumber: string;
+				if (manualNumber) {
+					finalContractNumber = manualNumber;
+					const [dup] = await tx
+						.select({ id: table.contract.id })
+						.from(table.contract)
+						.where(
+							and(
+								eq(table.contract.tenantId, tenantId),
+								eq(table.contract.contractNumber, finalContractNumber)
+							)
+						)
+						.limit(1);
+					if (dup) {
+						throw new Error(`Numărul de contract "${finalContractNumber}" există deja pentru acest tenant`);
+					}
+				} else {
+					const rows = await tx
+						.select({ contractNumber: table.contract.contractNumber })
+						.from(table.contract)
+						.where(eq(table.contract.tenantId, tenantId));
+					let maxNum = 0;
+					for (const row of rows) {
+						const m = row.contractNumber.match(numberRegex);
+						if (m) {
+							const n = parseInt(m[1], 10);
+							if (n > maxNum) maxNum = n;
+						}
+					}
+					finalContractNumber = `${prefix}-${String(maxNum + 1).padStart(4, '0')}`;
 				}
-			}
-			finalContractNumber = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
-		}
 
-		await tx.insert(table.contract).values({
-			id: contractId,
-			tenantId,
-			clientId,
-			contractNumber: finalContractNumber,
-			contractDate: contractDate ? new Date(contractDate) : new Date(),
-			contractTitle: contractTitle || file.name.replace(/\.pdf$/i, ''),
-			status: 'draft',
-			currency: 'EUR',
-			paymentTermsDays: 5,
-			penaltyRate: 50,
-			billingFrequency: 'monthly',
-			contractDurationMonths: 6,
-			hourlyRate: 6000,
-			hourlyRateCurrency: 'EUR',
-			uploadedFilePath: uploadResult.path,
-			uploadedFileSize: uploadResult.size,
-			uploadedFileMimeType: uploadResult.mimeType,
-			createdByUserId: userId
-		});
-	});
+				await tx.insert(table.contract).values({
+					id: contractId,
+					tenantId,
+					clientId,
+					contractNumber: finalContractNumber,
+					contractDate: contractDate ? new Date(contractDate) : new Date(),
+					contractTitle: contractTitle || file.name.replace(/\.pdf$/i, ''),
+					status: 'draft',
+					currency: 'EUR',
+					paymentTermsDays: 5,
+					penaltyRate: 50,
+					billingFrequency: 'monthly',
+					contractDurationMonths: 6,
+					hourlyRate: 6000,
+					hourlyRateCurrency: 'EUR',
+					uploadedFilePath: uploadResult.path,
+					uploadedFileSize: uploadResult.size,
+					uploadedFileMimeType: uploadResult.mimeType,
+					createdByUserId: userId
+				});
+			});
+			lastErr = null;
+			break;
+		} catch (err) {
+			lastErr = err;
+			if (manualNumber) throw err;
+			if (!isUniqueConstraintError(err)) throw err;
+		}
+	}
+	if (lastErr) {
+		throw error(500, 'Nu s-a putut genera un număr unic de contract după mai multe încercări. Încercați din nou.');
+	}
 
 	// Audit trail
 	await recordContractActivity({

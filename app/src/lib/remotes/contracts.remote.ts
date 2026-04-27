@@ -40,22 +40,65 @@ function validateStatusTransition(currentStatus: string, newStatus: string): voi
 	}
 }
 
-async function generateContractNumber(txOrDb: { select: typeof db.select }, tenantId: string, prefix: string): Promise<string> {
-	const [maxResult] = await txOrDb
-		.select({
-			maxNumber: sql<string>`max(${table.contract.contractNumber})`
-		})
+// Scans all contract numbers matching the given prefix for the tenant and
+// returns the next sequential number padded to 4 digits. Numbers that don't
+// match the prefix pattern (manual ad-hoc strings) are ignored when computing
+// the max, so a stray "ABC-001" can't poison auto-generation.
+async function getNextContractNumber(
+	txOrDb: { select: typeof db.select },
+	tenantId: string,
+	prefix: string
+): Promise<string> {
+	const rows = await txOrDb
+		.select({ contractNumber: table.contract.contractNumber })
 		.from(table.contract)
 		.where(eq(table.contract.tenantId, tenantId));
 
-	let nextNumber = 1;
-	if (maxResult?.maxNumber) {
-		const match = maxResult.maxNumber.match(/(\d+)$/);
-		if (match) {
-			nextNumber = parseInt(match[1], 10) + 1;
+	const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const re = new RegExp(`^${escapedPrefix}-(\\d+)$`);
+	let maxNum = 0;
+	for (const row of rows) {
+		const m = row.contractNumber.match(re);
+		if (m) {
+			const n = parseInt(m[1], 10);
+			if (n > maxNum) maxNum = n;
 		}
 	}
-	return `${prefix}-${String(nextNumber).padStart(4, '0')}`;
+	return `${prefix}-${String(maxNum + 1).padStart(4, '0')}`;
+}
+
+async function assertContractNumberUnique(
+	txOrDb: { select: typeof db.select },
+	tenantId: string,
+	contractNumber: string,
+	excludeContractId?: string
+): Promise<void> {
+	const conds = [
+		eq(table.contract.tenantId, tenantId),
+		eq(table.contract.contractNumber, contractNumber)
+	];
+	if (excludeContractId) {
+		conds.push(sql`${table.contract.id} != ${excludeContractId}`);
+	}
+	const [existing] = await txOrDb
+		.select({ id: table.contract.id })
+		.from(table.contract)
+		.where(and(...conds))
+		.limit(1);
+	if (existing) {
+		throw new Error(`Numărul de contract "${contractNumber}" există deja pentru acest tenant`);
+	}
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+	const e = err as { code?: string; message?: string } | null;
+	const msg = e?.message || String(err);
+	return (
+		e?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+		e?.code === 'SQLITE_CONSTRAINT' ||
+		msg.includes('UNIQUE constraint failed') ||
+		msg.includes('UNIQUE constraint')
+	);
 }
 
 function generateContractId() {
@@ -346,52 +389,76 @@ export const createContract = command(
 			}
 		}
 
-		// Use transaction for atomic contract number generation + insert
-		await db.transaction(async (tx) => {
-			const contractNumber = data.contractNumber?.trim() || await generateContractNumber(tx, tenantId, prefix);
+		const manualNumber = data.contractNumber?.trim() || undefined;
 
-			await tx.insert(table.contract).values({
-				id: contractId,
-				tenantId,
-				clientId: data.clientId,
-				templateId: data.templateId || null,
-				contractNumber,
-				contractDate: data.contractDate ? new Date(data.contractDate) : new Date(),
-				contractTitle: data.contractTitle || 'PRESTARI SERVICII INFORMATICE',
-				status: data.status || 'draft',
-				serviceDescription: data.serviceDescription || null,
-				offerLink: data.offerLink || null,
-				currency: data.currency || 'EUR',
-				paymentTermsDays: data.paymentTermsDays ?? 5,
-				penaltyRate: data.penaltyRate ?? 50,
-				billingFrequency: data.billingFrequency || 'monthly',
-				contractDurationMonths: data.contractDurationMonths ?? 6,
-				discountPercent: data.discountPercent ?? null,
-				prestatorEmail: data.prestatorEmail || null,
-				beneficiarEmail: data.beneficiarEmail || null,
-				hourlyRate: data.hourlyRate ?? 6000,
-				hourlyRateCurrency: data.hourlyRateCurrency || 'EUR',
-				prestatorSignatureName: data.prestatorSignatureName || null,
-				beneficiarSignatureName: data.beneficiarSignatureName || null,
-				clausesJson,
-				notes: data.notes || null,
-				createdByUserId: userId
-			});
+		// Retry loop: when auto-generating, two concurrent creates can race on
+		// MAX(...) and produce the same number. Once the unique index ships,
+		// the conflicting INSERT will throw and we recompute. For manually
+		// entered numbers, we don't retry — surface the conflict to the user.
+		const MAX_RETRIES = 5;
+		let lastErr: unknown = null;
+		for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+			try {
+				await db.transaction(async (tx) => {
+					let contractNumber: string;
+					if (manualNumber) {
+						contractNumber = manualNumber;
+						await assertContractNumberUnique(tx, tenantId, contractNumber);
+					} else {
+						contractNumber = await getNextContractNumber(tx, tenantId, prefix);
+					}
 
-			// Insert line items if provided
-			if (data.lineItems && data.lineItems.length > 0) {
-				const lineItemsToInsert = data.lineItems.map((item, index) => ({
-					id: generateContractLineItemId(),
-					contractId,
-					description: item.description,
-					price: item.price,
-					unitOfMeasure: item.unitOfMeasure || 'Luna',
-					sortOrder: item.sortOrder ?? index
-				}));
+					await tx.insert(table.contract).values({
+						id: contractId,
+						tenantId,
+						clientId: data.clientId,
+						templateId: data.templateId || null,
+						contractNumber,
+						contractDate: data.contractDate ? new Date(data.contractDate) : new Date(),
+						contractTitle: data.contractTitle || 'PRESTARI SERVICII INFORMATICE',
+						status: data.status || 'draft',
+						serviceDescription: data.serviceDescription || null,
+						offerLink: data.offerLink || null,
+						currency: data.currency || 'EUR',
+						paymentTermsDays: data.paymentTermsDays ?? 5,
+						penaltyRate: data.penaltyRate ?? 50,
+						billingFrequency: data.billingFrequency || 'monthly',
+						contractDurationMonths: data.contractDurationMonths ?? 6,
+						discountPercent: data.discountPercent ?? null,
+						prestatorEmail: data.prestatorEmail || null,
+						beneficiarEmail: data.beneficiarEmail || null,
+						hourlyRate: data.hourlyRate ?? 6000,
+						hourlyRateCurrency: data.hourlyRateCurrency || 'EUR',
+						prestatorSignatureName: data.prestatorSignatureName || null,
+						beneficiarSignatureName: data.beneficiarSignatureName || null,
+						clausesJson,
+						notes: data.notes || null,
+						createdByUserId: userId
+					});
 
-				await tx.insert(table.contractLineItem).values(lineItemsToInsert);
+					if (data.lineItems && data.lineItems.length > 0) {
+						const lineItemsToInsert = data.lineItems.map((item, index) => ({
+							id: generateContractLineItemId(),
+							contractId,
+							description: item.description,
+							price: item.price,
+							unitOfMeasure: item.unitOfMeasure || 'Luna',
+							sortOrder: item.sortOrder ?? index
+						}));
+						await tx.insert(table.contractLineItem).values(lineItemsToInsert);
+					}
+				});
+				lastErr = null;
+				break;
+			} catch (err) {
+				lastErr = err;
+				if (manualNumber) throw err;
+				if (!isUniqueConstraintError(err)) throw err;
 			}
-		});
+		}
+		if (lastErr) {
+			throw new Error('Nu s-a putut genera un număr unic de contract după mai multe încercări. Încercați din nou.');
+		}
 
 		// Fetch the created contract with line items
 		const [createdContract] = await db
@@ -702,51 +769,63 @@ export const duplicateContract = command(
 		const prefix = event.locals.tenant.contractPrefix || 'CTR';
 		const newContractId = generateContractId();
 
-		// Use transaction for atomic contract number generation + insert
-		await db.transaction(async (tx) => {
-			const contractNumber = await generateContractNumber(tx, tenantId, prefix);
+		const MAX_RETRIES = 5;
+		let lastErr: unknown = null;
+		for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+			try {
+				await db.transaction(async (tx) => {
+					const contractNumber = await getNextContractNumber(tx, tenantId, prefix);
 
-			await tx.insert(table.contract).values({
-				id: newContractId,
-				tenantId,
-				clientId: existing.clientId,
-				templateId: existing.templateId,
-				contractNumber,
-				contractDate: new Date(),
-				contractTitle: existing.contractTitle,
-				status: 'draft',
-				serviceDescription: existing.serviceDescription,
-				offerLink: existing.offerLink,
-				currency: existing.currency,
-				paymentTermsDays: existing.paymentTermsDays,
-				penaltyRate: existing.penaltyRate,
-				billingFrequency: existing.billingFrequency,
-				contractDurationMonths: existing.contractDurationMonths,
-				discountPercent: existing.discountPercent,
-				prestatorEmail: existing.prestatorEmail,
-				beneficiarEmail: existing.beneficiarEmail,
-				hourlyRate: existing.hourlyRate,
-				hourlyRateCurrency: existing.hourlyRateCurrency,
-				prestatorSignatureName: existing.prestatorSignatureName,
-				beneficiarSignatureName: existing.beneficiarSignatureName,
-				clausesJson: existing.clausesJson,
-				notes: existing.notes,
-				createdByUserId: userId
-			});
+					await tx.insert(table.contract).values({
+						id: newContractId,
+						tenantId,
+						clientId: existing.clientId,
+						templateId: existing.templateId,
+						contractNumber,
+						contractDate: new Date(),
+						contractTitle: existing.contractTitle,
+						status: 'draft',
+						serviceDescription: existing.serviceDescription,
+						offerLink: existing.offerLink,
+						currency: existing.currency,
+						paymentTermsDays: existing.paymentTermsDays,
+						penaltyRate: existing.penaltyRate,
+						billingFrequency: existing.billingFrequency,
+						contractDurationMonths: existing.contractDurationMonths,
+						discountPercent: existing.discountPercent,
+						prestatorEmail: existing.prestatorEmail,
+						beneficiarEmail: existing.beneficiarEmail,
+						hourlyRate: existing.hourlyRate,
+						hourlyRateCurrency: existing.hourlyRateCurrency,
+						prestatorSignatureName: existing.prestatorSignatureName,
+						beneficiarSignatureName: existing.beneficiarSignatureName,
+						clausesJson: existing.clausesJson,
+						notes: existing.notes,
+						createdByUserId: userId
+					});
 
-			if (existingLineItems.length > 0) {
-				const lineItemsToInsert = existingLineItems.map((item) => ({
-					id: generateContractLineItemId(),
-					contractId: newContractId,
-					description: item.description,
-					price: item.price,
-					unitOfMeasure: item.unitOfMeasure,
-					sortOrder: item.sortOrder
-				}));
-
-				await tx.insert(table.contractLineItem).values(lineItemsToInsert);
+					if (existingLineItems.length > 0) {
+						const lineItemsToInsert = existingLineItems.map((item) => ({
+							id: generateContractLineItemId(),
+							contractId: newContractId,
+							description: item.description,
+							price: item.price,
+							unitOfMeasure: item.unitOfMeasure,
+							sortOrder: item.sortOrder
+						}));
+						await tx.insert(table.contractLineItem).values(lineItemsToInsert);
+					}
+				});
+				lastErr = null;
+				break;
+			} catch (err) {
+				lastErr = err;
+				if (!isUniqueConstraintError(err)) throw err;
 			}
-		});
+		}
+		if (lastErr) {
+			throw new Error('Nu s-a putut genera un număr unic de contract după mai multe încercări. Încercați din nou.');
+		}
 
 		// Fetch the duplicated contract with line items
 		const [duplicatedContract] = await db

@@ -1464,6 +1464,13 @@
       "when": 1777433003000,
       "tag": "0208_invoice_settings_whmcs_strict_bnr",
       "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "6",
+      "when": 1777940000000,
+      "tag": "0215_contract_unique_tenant_number",
+      "breakpoints": true
     }
   ]
 }

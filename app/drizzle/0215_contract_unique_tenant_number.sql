@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `contract_tenant_number_unique` ON `contract` (`tenant_id`,`contract_number`);

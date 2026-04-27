@@ -1237,7 +1237,9 @@ export const contract = sqliteTable('contract', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => ({
+	uniqueTenantNumber: uniqueIndex('contract_tenant_number_unique').on(t.tenantId, t.contractNumber)
+}));
 
 export const contractActivity = sqliteTable('contract_activity', {
 	id: text('id').primaryKey(),
