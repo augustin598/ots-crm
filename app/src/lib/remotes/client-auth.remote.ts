@@ -67,16 +67,12 @@ export const clientSignup = command(
 				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
-			// Verify email matches either primary or secondary
+			// Verify email matches either primary or secondary.
+			// Secondary emails work even when client.email is null (admin may register
+			// a contact via secondary first, before primary is set).
 			const emailLower = email.toLowerCase();
 			const isPrimaryMatch = client.email?.toLowerCase() === emailLower;
 			if (!isPrimaryMatch) {
-				// Client must have an email configured by admin
-				if (!client.email) {
-					// SECURITY: Don't allow arbitrary email to be set as primary via signup.
-					// Admin must configure client email first.
-					return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
-				}
 				const [secondary] = await db
 					.select()
 					.from(table.clientSecondaryEmail)
@@ -169,7 +165,8 @@ export const requestMagicLink = command(
 
 
 			if (!tenant) {
-				throw new Error('Tenant not found');
+				// SECURITY: generic response prevents tenant enumeration via this endpoint
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
 			// Find ALL clients matching this email in the tenant (primary OR secondary).
@@ -245,17 +242,30 @@ export const requestMagicLink = command(
 				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, matched[0].name);
 			} catch (emailError) {
 				console.error('Failed to send magic link email:', emailError);
-				throw new Error('Failed to send email. Please try again later.');
+				// SECURITY: still return generic success to avoid signaling that the email exists
+				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
 			return { success: true, message: 'Magic link sent to your email' };
 		} catch (error) {
 			console.error('Request magic link error:', error);
-			const message = error instanceof Error ? error.message : 'Request failed';
-			throw new Error(message);
+			// SECURITY: do not leak internal error messages to client
+			return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 		}
 	}
 );
+
+/**
+ * Authorization helper: only owner or admin tenant users may issue magic links
+ * on behalf of clients. A `member` role can read but not impersonate.
+ */
+function assertTenantAdmin(event: ReturnType<typeof getRequestEvent>): void {
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const tenantUser = event.locals.tenantUser;
+	if (!tenantUser || (tenantUser.role !== 'owner' && tenantUser.role !== 'admin')) {
+		throw new Error('Doar administratorii pot genera magic link-uri');
+	}
+}
 
 /**
  * Admin: Generate a magic link URL for a client (does not send email)
@@ -265,10 +275,10 @@ export const generateClientMagicLink = command(
 	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ clientId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		assertTenantAdmin(event);
 
-		const tenantId = event.locals.tenant.id;
-		const tenantSlug = event.locals.tenant.slug;
+		const tenantId = event!.locals.tenant!.id;
+		const tenantSlug = event!.locals.tenant!.slug;
 
 		const [client] = await db
 			.select()
@@ -297,6 +307,11 @@ export const generateClientMagicLink = command(
 			used: false
 		});
 
+		logInfo('email', 'Admin generated magic link for client (no email)', {
+			tenantId,
+			metadata: { clientId, clientEmail: client.email, adminUserId: event!.locals.user!.id, mode: 'single' }
+		});
+
 		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
 		return { url, email: client.email, expiresAt };
@@ -310,10 +325,10 @@ export const sendClientMagicLinkEmail = command(
 	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ clientId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		assertTenantAdmin(event);
 
-		const tenantId = event.locals.tenant.id;
-		const tenantSlug = event.locals.tenant.slug;
+		const tenantId = event!.locals.tenant!.id;
+		const tenantSlug = event!.locals.tenant!.slug;
 
 		const [client] = await db
 			.select()
@@ -342,7 +357,7 @@ export const sendClientMagicLinkEmail = command(
 		await sendMagicLinkEmail(client.email.toLowerCase(), plainToken, tenantSlug, client.name);
 		logInfo('email', `Admin sent magic link to client`, {
 			tenantId,
-			metadata: { clientId, clientEmail: client.email, adminUserId: event.locals.user.id }
+			metadata: { clientId, clientEmail: client.email, adminUserId: event!.locals.user!.id }
 		});
 		return { sent: true, email: client.email };
 	}
@@ -359,6 +374,8 @@ export const getClientLinkedCompanies = query(
 	async ({ clientId }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		// Read-only listing — any tenantUser may view, but reject cross-tenant probes.
+		if (!event.locals.tenantUser) throw new Error('Acces interzis pentru acest tenant');
 		const tenantId = event.locals.tenant.id;
 
 		const [client] = await db
@@ -414,9 +431,9 @@ export const generateClientMultiCompanyMagicLink = command(
 	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ clientId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-		const tenantId = event.locals.tenant.id;
-		const tenantSlug = event.locals.tenant.slug;
+		assertTenantAdmin(event);
+		const tenantId = event!.locals.tenant!.id;
+		const tenantSlug = event!.locals.tenant!.slug;
 
 		const [client] = await db
 			.select()
@@ -479,6 +496,17 @@ export const generateClientMultiCompanyMagicLink = command(
 			used: false
 		});
 
+		logInfo('email', 'Admin generated multi-company magic link for client (no email)', {
+			tenantId,
+			metadata: {
+				clientId,
+				clientEmail: normalizedEmail,
+				matchedCount: matched.length,
+				adminUserId: event!.locals.user!.id,
+				mode: 'multi'
+			}
+		});
+
 		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
 		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
 		return { url, email: normalizedEmail, matchedCount: matched.length, matched, expiresAt };
@@ -492,9 +520,9 @@ export const sendClientMultiCompanyMagicLinkEmail = command(
 	v.object({ clientId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ clientId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-		const tenantId = event.locals.tenant.id;
-		const tenantSlug = event.locals.tenant.slug;
+		assertTenantAdmin(event);
+		const tenantId = event!.locals.tenant!.id;
+		const tenantSlug = event!.locals.tenant!.slug;
 
 		const [client] = await db
 			.select()
@@ -566,7 +594,7 @@ export const sendClientMultiCompanyMagicLinkEmail = command(
 				clientId,
 				clientEmail: normalizedEmail,
 				matchedCount: matched.length,
-				adminUserId: event.locals.user.id
+				adminUserId: event!.locals.user!.id
 			}
 		});
 		return { sent: true, email: normalizedEmail, matchedCount: matched.length };
