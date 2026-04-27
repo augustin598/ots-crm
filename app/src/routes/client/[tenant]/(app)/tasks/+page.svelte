@@ -3,7 +3,6 @@
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getClientUserPreferences } from '$lib/remotes/client-user-preferences.remote';
 	import { page } from '$app/state';
-	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
@@ -69,6 +68,7 @@
 	let filterStatus = $state('');
 	let filterPriority = $state('');
 	let sortBy = $state('date');
+	let cardFilter = $state<'' | 'in-progress' | 'overdue' | 'completed' | 'recurring'>('');
 
 	const filteredTasks = $derived.by(() => {
 		let result = tasks;
@@ -85,6 +85,17 @@
 		}
 		if (filterPriority) {
 			result = result.filter((t: any) => t.priority === filterPriority);
+		}
+		if (cardFilter === 'in-progress') {
+			result = result.filter((t: any) => t.status === 'in-progress');
+		} else if (cardFilter === 'completed') {
+			result = result.filter((t: any) => t.status === 'done');
+		} else if (cardFilter === 'overdue') {
+			result = result.filter(
+				(t: any) => t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+			);
+		} else if (cardFilter === 'recurring') {
+			result = result.filter((t: any) => t.isRecurring || t.recurringParentId);
 		}
 		// Sort
 		const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
@@ -115,11 +126,26 @@
 		overdue: tasks.filter(
 			(t: any) => t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
 		).length,
-		completed: tasks.filter((t: any) => t.status === 'done').length
+		completed: tasks.filter((t: any) => t.status === 'done').length,
+		recurring: tasks.filter((t: any) => t.isRecurring || t.recurringParentId).length
 	});
 
+	function toggleCardFilter(value: typeof cardFilter) {
+		cardFilter = cardFilter === value ? '' : value;
+	}
+
+	function cardFilterLabel(value: typeof cardFilter): string {
+		switch (value) {
+			case 'in-progress': return 'In Progress';
+			case 'overdue': return 'Overdue';
+			case 'completed': return 'Completed';
+			case 'recurring': return 'Task recurent';
+			default: return '';
+		}
+	}
+
 	const totalActiveFilters = $derived(
-		[filterSearch.trim(), filterStatus, filterPriority].filter(Boolean).length
+		[filterSearch.trim(), filterStatus, filterPriority, cardFilter].filter(Boolean).length
 	);
 
 	// Sync preferences
@@ -140,7 +166,7 @@
 
 	// Reset page on filter/sort/pageSize change
 	$effect(() => {
-		filterSearch; filterStatus; filterPriority; sortBy; pageSize;
+		filterSearch; filterStatus; filterPriority; sortBy; pageSize; cardFilter;
 		currentPage = 1;
 	});
 
@@ -199,8 +225,13 @@
 
 	<!-- Stats cards -->
 	{#if !loading && tasks.length > 0}
-		<div class="grid gap-4 md:grid-cols-4">
-			<Card class="p-4">
+		<div class="grid gap-4 grid-cols-2 md:grid-cols-5">
+			<button
+				type="button"
+				onclick={() => (cardFilter = '')}
+				aria-pressed={cardFilter === ''}
+				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === '' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
+			>
 				<div class="flex items-center gap-3">
 					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
 						<ListTodoIcon class="h-5 w-5 text-blue-600" />
@@ -210,8 +241,13 @@
 						<p class="text-2xl font-bold">{stats.total}</p>
 					</div>
 				</div>
-			</Card>
-			<Card class="p-4">
+			</button>
+			<button
+				type="button"
+				onclick={() => toggleCardFilter('in-progress')}
+				aria-pressed={cardFilter === 'in-progress'}
+				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'in-progress' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
+			>
 				<div class="flex items-center gap-3">
 					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
 						<PlayIcon class="h-5 w-5 text-blue-600" />
@@ -221,8 +257,13 @@
 						<p class="text-2xl font-bold">{stats.inProgress}</p>
 					</div>
 				</div>
-			</Card>
-			<Card class="p-4">
+			</button>
+			<button
+				type="button"
+				onclick={() => toggleCardFilter('overdue')}
+				aria-pressed={cardFilter === 'overdue'}
+				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'overdue' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
+			>
 				<div class="flex items-center gap-3">
 					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10">
 						<AlertTriangleIcon class="h-5 w-5 text-red-600" />
@@ -232,8 +273,13 @@
 						<p class="text-2xl font-bold {stats.overdue > 0 ? 'text-red-600' : ''}">{stats.overdue}</p>
 					</div>
 				</div>
-			</Card>
-			<Card class="p-4">
+			</button>
+			<button
+				type="button"
+				onclick={() => toggleCardFilter('completed')}
+				aria-pressed={cardFilter === 'completed'}
+				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'completed' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
+			>
 				<div class="flex items-center gap-3">
 					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
 						<CheckCircle2Icon class="h-5 w-5 text-green-600" />
@@ -243,28 +289,45 @@
 						<p class="text-2xl font-bold">{stats.completed}</p>
 					</div>
 				</div>
-			</Card>
+			</button>
+			<button
+				type="button"
+				onclick={() => toggleCardFilter('recurring')}
+				aria-pressed={cardFilter === 'recurring'}
+				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'recurring' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
+			>
+				<div class="flex items-center gap-3">
+					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
+						<RepeatIcon class="h-5 w-5 text-blue-600" />
+					</div>
+					<div>
+						<p class="text-sm text-muted-foreground">Task recurent</p>
+						<p class="text-2xl font-bold">{stats.recurring}</p>
+					</div>
+				</div>
+			</button>
 		</div>
 	{/if}
 
 	<!-- Filter bar -->
 	<div class="rounded-xl border border-border/40 bg-card/50 shadow-sm overflow-hidden">
-		<div class="flex flex-wrap items-end gap-3 px-4 pt-4 pb-3">
+		<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-3 px-4 py-3">
 			<!-- Search -->
-			<div class="space-y-1.5 flex-1 min-w-[200px]">
-				<p class="text-xs font-medium text-muted-foreground">Search</p>
+			<div class="sm:col-span-2 md:col-span-4">
 				<div class="relative">
 					<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-					<Input bind:value={filterSearch} placeholder="Search tasks..." class="pl-8 h-9 text-sm" />
+					<Input bind:value={filterSearch} placeholder="Caută task-uri..." class="pl-8 h-9 text-sm" />
 				</div>
 			</div>
 
 			<!-- Status filter -->
-			<div class="space-y-1.5 min-w-[140px]">
-				<p class="text-xs font-medium text-muted-foreground">Status</p>
+			<div class="md:col-span-2">
 				<Select value={filterStatus || 'all'} type="single" onValueChange={(v) => { filterStatus = v === 'all' ? '' : v || ''; }}>
-					<SelectTrigger class="h-9">
-						{filterStatus ? formatStatus(filterStatus) : 'All'}
+					<SelectTrigger class="h-9 w-full">
+						<span class="flex items-center gap-1.5 truncate">
+							<span class="text-muted-foreground">Status:</span>
+							<span class="font-medium">{filterStatus ? formatStatus(filterStatus) : 'All'}</span>
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						<SelectItem value="all">All</SelectItem>
@@ -291,11 +354,13 @@
 			</div>
 
 			<!-- Priority filter -->
-			<div class="space-y-1.5 min-w-[140px]">
-				<p class="text-xs font-medium text-muted-foreground">Priority</p>
+			<div class="md:col-span-2">
 				<Select value={filterPriority || 'all'} type="single" onValueChange={(v) => { filterPriority = v === 'all' ? '' : v || ''; }}>
-					<SelectTrigger class="h-9">
-						{filterPriority ? formatPriority(filterPriority) : 'All'}
+					<SelectTrigger class="h-9 w-full">
+						<span class="flex items-center gap-1.5 truncate">
+							<span class="text-muted-foreground">Priority:</span>
+							<span class="font-medium">{filterPriority ? formatPriority(filterPriority) : 'All'}</span>
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						<SelectItem value="all">All</SelectItem>
@@ -316,11 +381,13 @@
 			</div>
 
 			<!-- Sort -->
-			<div class="space-y-1.5 min-w-[130px]">
-				<p class="text-xs font-medium text-muted-foreground">Sortare</p>
+			<div class="md:col-span-2">
 				<Select value={sortBy} type="single" onValueChange={(v) => { if (v) sortBy = v; }}>
-					<SelectTrigger class="h-9">
-						{sortBy === 'date' ? 'Dată' : sortBy === 'priority' ? 'Prioritate' : 'Status'}
+					<SelectTrigger class="h-9 w-full">
+						<span class="flex items-center gap-1.5 truncate">
+							<span class="text-muted-foreground">Sortare:</span>
+							<span class="font-medium">{sortBy === 'date' ? 'Dată' : sortBy === 'priority' ? 'Prioritate' : 'Status'}</span>
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						<SelectItem value="date">Dată</SelectItem>
@@ -331,11 +398,13 @@
 			</div>
 
 			<!-- Page size -->
-			<div class="space-y-1.5 min-w-[90px]">
-				<p class="text-xs font-medium text-muted-foreground">Pe pagină</p>
+			<div class="md:col-span-2">
 				<Select value={String(pageSize)} type="single" onValueChange={(v) => { if (v) pageSize = Number(v); }}>
-					<SelectTrigger class="h-9">
-						{pageSize}
+					<SelectTrigger class="h-9 w-full">
+						<span class="flex items-center gap-1.5 truncate">
+							<span class="text-muted-foreground">Pe pagină:</span>
+							<span class="font-medium">{pageSize}</span>
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						<SelectItem value="10">10</SelectItem>
@@ -367,6 +436,12 @@
 						class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
 						<span class="h-1.5 w-1.5 rounded-full {getPriorityDotColor(filterPriority)}"></span>
 						{formatPriority(filterPriority)} <XIcon class="h-3 w-3 opacity-60" />
+					</button>
+				{/if}
+				{#if cardFilter}
+					<button onclick={() => (cardFilter = '')}
+						class="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium hover:bg-muted transition-colors">
+						{cardFilterLabel(cardFilter)} <XIcon class="h-3 w-3 opacity-60" />
 					</button>
 				{/if}
 			</div>

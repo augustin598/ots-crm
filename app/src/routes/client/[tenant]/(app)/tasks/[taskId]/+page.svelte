@@ -49,6 +49,7 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import UserIcon from '@lucide/svelte/icons/user';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const taskId = $derived(page.params.taskId!);
@@ -115,6 +116,24 @@
 	const overdue = $derived(
 		task && task.status !== 'done' && task.status !== 'cancelled' && isTaskOverdue(task.dueDate)
 	);
+
+	function formatRecurrenceLabel(t: {
+		isRecurring?: boolean | null;
+		recurringType?: string | null;
+		recurringInterval?: number | null;
+	}): string {
+		if (!t.isRecurring || !t.recurringType) return 'Recurent';
+		const interval = t.recurringInterval || 1;
+		const typeLabels: Record<string, [string, string]> = {
+			daily: ['zi', 'zile'],
+			weekly: ['săptămână', 'săptămâni'],
+			monthly: ['lună', 'luni'],
+			yearly: ['an', 'ani']
+		};
+		const [singular, plural] = typeLabels[t.recurringType] || ['', ''];
+		if (interval === 1) return `Recurent · în fiecare ${singular}`;
+		return `Recurent · la ${interval} ${plural}`;
+	}
 
 	const isReadOnly = $derived(task?.status === 'done' || task?.status === 'cancelled');
 
@@ -332,6 +351,24 @@
 						<AlertTriangleIcon class="h-3 w-3 mr-1" />
 						Overdue
 					</Badge>
+				{/if}
+				{#if task.recurringParentId}
+					<a
+						href="/client/{tenantSlug}/tasks/{task.recurringParentId}"
+						class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] h-5 font-normal text-blue-800 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/70"
+						title="Acest task face parte dintr-o serie recurentă — apasă pentru rădăcină"
+					>
+						<RepeatIcon class="h-3 w-3" />
+						Din serie recurentă
+					</a>
+				{:else if task.isRecurring}
+					<span
+						class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] h-5 font-normal text-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+						title={formatRecurrenceLabel(task)}
+					>
+						<RepeatIcon class="h-3 w-3" />
+						{formatRecurrenceLabel(task)}
+					</span>
 				{/if}
 			</div>
 		</div>

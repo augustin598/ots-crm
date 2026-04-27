@@ -11,7 +11,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Label } from '$lib/components/ui/label';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
-	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply } from '@lucide/svelte';
+	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply, Repeat } from '@lucide/svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { formatStatus, getStatusBadgeVariant, getPriorityColor, getPriorityDotColor, formatPriority, formatDate, getActivityValueColor } from '$lib/components/task-kanban-utils';
 	import { toast } from 'svelte-sonner';
@@ -133,6 +133,24 @@
 			case 'assigned': return 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400';
 			default: return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
 		}
+	}
+
+	function formatRecurrenceLabel(t: {
+		isRecurring?: boolean | null;
+		recurringType?: string | null;
+		recurringInterval?: number | null;
+	}): string {
+		if (!t.isRecurring || !t.recurringType) return 'Recurent';
+		const interval = t.recurringInterval || 1;
+		const typeLabels: Record<string, [string, string]> = {
+			daily: ['zi', 'zile'],
+			weekly: ['săptămână', 'săptămâni'],
+			monthly: ['lună', 'luni'],
+			yearly: ['an', 'ani']
+		};
+		const [singular, plural] = typeLabels[t.recurringType] || ['', ''];
+		if (interval === 1) return `Recurent · în fiecare ${singular}`;
+		return `Recurent · la ${interval} ${plural}`;
 	}
 
 	function timeAgo(date: Date | string): string {
@@ -276,7 +294,27 @@
 		</div>
 	{:else if task}
 		<div class="flex items-center justify-between">
-			<h1 class="text-3xl font-bold">{task.title}</h1>
+			<div class="flex items-center gap-3 flex-wrap">
+				<h1 class="text-3xl font-bold">{task.title}</h1>
+				{#if task.recurringParentId}
+					<a
+						href="/{tenantSlug}/tasks/{task.recurringParentId}"
+						class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/70"
+						title="Acest task face parte dintr-o serie recurentă — apasă pentru rădăcină"
+					>
+						<Repeat class="h-3 w-3" />
+						Din serie recurentă
+					</a>
+				{:else if task.isRecurring}
+					<span
+						class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+						title={formatRecurrenceLabel(task)}
+					>
+						<Repeat class="h-3 w-3" />
+						{formatRecurrenceLabel(task)}
+					</span>
+				{/if}
+			</div>
 			<div class="flex items-center gap-2">
 				{#if task.status === 'pending-approval'}
 					<Button variant="default" onclick={handleApprove} disabled={approvalLoading}>
