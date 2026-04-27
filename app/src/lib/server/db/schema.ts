@@ -1291,6 +1291,7 @@ export const clientUser = sqliteTable('client_user', {
 		.notNull()
 		.references(() => tenant.id),
 	isPrimary: boolean('is_primary').notNull().default(true),
+	lastSelectedAt: timestamp('last_selected_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1359,7 +1360,8 @@ export const magicLinkToken = sqliteTable('magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
 	email: text('email').notNull(),
-	clientId: text('client_id').references(() => client.id), // Nullable for initial signup
+	clientId: text('client_id').references(() => client.id), // Legacy single-client; kept for backward compat
+	matchedClientIds: text('matched_client_ids'), // JSON array of client IDs snapshotted at request time (multi-company)
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),

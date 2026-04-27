@@ -32,6 +32,7 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import OnboardingTour from '$lib/components/onboarding/onboarding-tour.svelte';
+	import ClientSwitcher from '$lib/components/client/client-switcher.svelte';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
@@ -352,6 +353,15 @@
 		</SidebarFooter>
 	</Sidebar>
 	<SidebarInset>
+		{#if (data.userCompanies?.length ?? 0) > 1}
+			<header class="flex items-center justify-end gap-2 border-b px-6 py-3">
+				<ClientSwitcher
+					companies={data.userCompanies ?? []}
+					activeClientId={data.client?.id ?? null}
+					tenantSlug={tenantSlug ?? ''}
+				/>
+			</header>
+		{/if}
 		<main class="flex-1 p-6">
 			{#if data.accessRestriction?.isRestricted && isRestrictedRoute}
 				<div class="relative min-h-[60vh]">

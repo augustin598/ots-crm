@@ -3,7 +3,7 @@ import { command } from '$app/server';
 import { getRequestEvent } from '$app/server';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, or, inArray, sql } from 'drizzle-orm';
 import { encodeBase64url, encodeBase32LowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase } from '@oslojs/encoding';
@@ -119,6 +119,7 @@ export const clientSignup = command(
 				token: hashedToken,
 				email: normalizedEmail,
 				clientId: client.id,
+				matchedClientIds: JSON.stringify([client.id]),
 				tenantId: tenant.id,
 				expiresAt,
 				used: false
@@ -171,40 +172,45 @@ export const requestMagicLink = command(
 				throw new Error('Tenant not found');
 			}
 
-			// Find client by primary email in this tenant (case-insensitive)
-			let [client] = await db
-				.select()
+			// Find ALL clients matching this email in the tenant (primary OR secondary).
+			// Snapshot is stored in token to prevent auto-link to clients created after request.
+			const normalizedEmail = email.toLowerCase();
+			const primaryMatches = await db
+				.select({ id: table.client.id, name: table.client.name })
 				.from(table.client)
-				.where(and(eq(table.client.tenantId, tenant.id), eq(sql`lower(${table.client.email})`, email.toLowerCase())))
-				.limit(1);
-
-
-			// If not found by primary email, check secondary emails
-			if (!client) {
-				const [secondary] = await db
-					.select({ client: table.client })
-					.from(table.clientSecondaryEmail)
-					.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
-					.where(
-						and(
-							eq(table.clientSecondaryEmail.tenantId, tenant.id),
-							eq(sql`lower(${table.clientSecondaryEmail.email})`, email.toLowerCase())
-						)
+				.where(
+					and(
+						eq(table.client.tenantId, tenant.id),
+						eq(sql`lower(${table.client.email})`, normalizedEmail)
 					)
-					.limit(1);
-				if (secondary) {
-					client = secondary.client;
-				}
+				);
 
+			const secondaryMatches = await db
+				.select({ id: table.client.id, name: table.client.name })
+				.from(table.clientSecondaryEmail)
+				.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+				.where(
+					and(
+						eq(table.clientSecondaryEmail.tenantId, tenant.id),
+						eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
+					)
+				);
+
+			// Deduplicate by id (a client could match via both primary and secondary)
+			const idSet = new Set<string>();
+			const matched: { id: string; name: string }[] = [];
+			for (const m of [...primaryMatches, ...secondaryMatches]) {
+				if (!idSet.has(m.id)) {
+					idSet.add(m.id);
+					matched.push(m);
+				}
 			}
 
-			if (!client) {
-
+			if (matched.length === 0) {
 				return { success: true, message: 'If a client account exists, a magic link has been sent to your email' };
 			}
 
 			// Invalidate any existing unused tokens for this email+tenant
-			const normalizedEmail = email.toLowerCase();
 			await db
 				.update(table.magicLinkToken)
 				.set({ used: true, usedAt: new Date() })
@@ -227,15 +233,16 @@ export const requestMagicLink = command(
 				id: tokenId,
 				token: hashedToken,
 				email: normalizedEmail,
-				clientId: client.id,
+				clientId: matched[0].id, // backward compat: first matched client
+				matchedClientIds: JSON.stringify(matched.map((m) => m.id)),
 				tenantId: tenant.id,
 				expiresAt,
 				used: false
 			});
 
-			// Send magic link email
+			// Send magic link email — use first client's name as label (the email lists all on selection page)
 			try {
-				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, client.name);
+				await sendMagicLinkEmail(normalizedEmail, plainToken, tenantSlug, matched[0].name);
 			} catch (emailError) {
 				console.error('Failed to send magic link email:', emailError);
 				throw new Error('Failed to send email. Please try again later.');
@@ -284,6 +291,7 @@ export const generateClientMagicLink = command(
 			token: hashedToken,
 			email: client.email.toLowerCase(),
 			clientId: client.id,
+			matchedClientIds: JSON.stringify([client.id]),
 			tenantId,
 			expiresAt,
 			used: false
@@ -325,6 +333,7 @@ export const sendClientMagicLinkEmail = command(
 			token: hashedToken,
 			email: client.email.toLowerCase(),
 			clientId: client.id,
+			matchedClientIds: JSON.stringify([client.id]),
 			tenantId,
 			expiresAt,
 			used: false

@@ -35,7 +35,10 @@ export const GET: RequestHandler = async (event) => {
 		const result = await findOrCreateClientSession(tenantSlug, email, event);
 
 		if (result.success) {
-			throw redirect(302, `/client/${tenantSlug}/dashboard`);
+			const target = result.clientCount > 1
+				? `/client/${tenantSlug}/select-company`
+				: `/client/${tenantSlug}/dashboard`;
+			throw redirect(302, target);
 		}
 
 		if (result.reason === 'no-match') {

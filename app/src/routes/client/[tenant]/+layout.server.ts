@@ -2,7 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (
@@ -112,11 +112,36 @@ export const load: LayoutServerLoad = async (event) => {
 		}
 	}
 
+	// Multi-company: list every company this user has access to in this tenant.
+	// Drives the company switcher in the header (shown when length > 1) and
+	// the /select-company page after login.
+	let userCompanies: { id: string; name: string; cui: string | null; status: string | null; lastSelectedAt: Date | null }[] = [];
+	if (event.locals.user && event.locals.isClientUser) {
+		userCompanies = await db
+			.select({
+				id: table.client.id,
+				name: table.client.name,
+				cui: table.client.cui,
+				status: table.client.status,
+				lastSelectedAt: table.clientUser.lastSelectedAt
+			})
+			.from(table.clientUser)
+			.innerJoin(table.client, eq(table.clientUser.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientUser.userId, event.locals.user.id),
+					eq(table.clientUser.tenantId, tenant.id)
+				)
+			)
+			.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`, table.client.name);
+	}
+
 	return {
 		tenant,
 		client: event.locals.client,
 		clientUser: event.locals.clientUser,
 		isClientUserPrimary: event.locals.clientUser?.isPrimary ?? true,
+		userCompanies,
 		user: event.locals.user
 			? {
 					id: event.locals.user.id,

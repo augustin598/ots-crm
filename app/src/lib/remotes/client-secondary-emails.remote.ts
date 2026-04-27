@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, ne, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function generateId() {
@@ -52,37 +52,26 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 		.limit(1);
 	if (!client) throw new Error('Client not found');
 
-	// Cannot duplicate the primary email
+	// Cannot duplicate the primary email of THIS client.
 	if (client.email?.toLowerCase() === data.email.toLowerCase()) {
 		throw new Error('Această adresă este deja emailul principal al clientului.');
 	}
 
-	// Uniqueness within tenant
+	// Per-client uniqueness only — same email may legitimately appear on multiple
+	// clients (one user managing multiple companies). Cross-client checks lifted:
+	// uniqueness for a client = CUI, not email/phone.
 	const [existing] = await db
 		.select({ id: table.clientSecondaryEmail.id })
 		.from(table.clientSecondaryEmail)
 		.where(
 			and(
 				eq(table.clientSecondaryEmail.tenantId, tenantId),
+				eq(table.clientSecondaryEmail.clientId, data.clientId),
 				eq(sql`lower(${table.clientSecondaryEmail.email})`, data.email.toLowerCase())
 			)
 		)
 		.limit(1);
-	if (existing) throw new Error('Acest email este deja asociat unui client din acest tenant.');
-
-	// Check if email is already a primary email on another client
-	const [primaryTaken] = await db
-		.select({ id: table.client.id })
-		.from(table.client)
-		.where(
-			and(
-				eq(table.client.tenantId, tenantId),
-				eq(sql`lower(${table.client.email})`, data.email.toLowerCase()),
-				ne(table.client.id, data.clientId)
-			)
-		)
-		.limit(1);
-	if (primaryTaken) throw new Error('Acest email este deja emailul principal al altui client.');
+	if (existing) throw new Error('Acest email este deja secundar pentru acest client.');
 
 	const now = new Date();
 	const id = generateId();

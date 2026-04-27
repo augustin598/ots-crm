@@ -13,7 +13,7 @@ import { flushLogBuffer } from '$lib/server/logger';
 import { restoreAllSessions as restoreWhatsappSessions, shutdownAllSessions as shutdownWhatsappSessions } from '$lib/server/whatsapp/session-manager';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 // Initialize plugins once — flag stored on globalThis so HMR in dev mode
 // doesn't reset it (module reload wipes module-level `let`, but not globalThis).
@@ -98,7 +98,10 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 				.limit(1);
 
 			if (tenant) {
-				// Check if user has clientUser relationship for this tenant
+				// Pick the user's most recently selected client for this tenant.
+				// Multi-company users have multiple clientUser rows; the active one
+				// is whichever they switched to last (lastSelectedAt). Single-company
+				// users have exactly one row, ordering is irrelevant.
 				const [clientUserRecord] = await db
 					.select({
 						clientUser: table.clientUser,
@@ -112,6 +115,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 							eq(table.clientUser.tenantId, tenant.id)
 						)
 					)
+					.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`)
 					.limit(1);
 
 				if (clientUserRecord) {

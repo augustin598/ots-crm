@@ -1513,6 +1513,20 @@
       "when": 1777940000000,
       "tag": "0215_contract_unique_tenant_number",
       "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "6",
+      "when": 1777950000000,
+      "tag": "0216_client_user_last_selected_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "6",
+      "when": 1777950001000,
+      "tag": "0217_magic_link_matched_client_ids",
+      "breakpoints": true
     }
   ]
 }
