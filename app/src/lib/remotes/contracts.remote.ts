@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -472,9 +473,9 @@ export const updateContract = command(
 			throw new Error('Contract not found');
 		}
 
-		// Only allow editing draft or sent contracts
-		if (existing.status !== 'draft' && existing.status !== 'sent') {
-			throw new Error(`Nu se poate edita un contract cu statusul "${existing.status}". Doar contractele în starea "draft" sau "sent" pot fi editate.`);
+		// Editing blocked only for terminal statuses (expired/cancelled)
+		if (existing.status === 'expired' || existing.status === 'cancelled') {
+			throw new Error(`Nu se poate edita un contract cu statusul "${existing.status}". Contractele expirate sau anulate nu mai pot fi editate.`);
 		}
 
 		// Optimistic locking check
@@ -625,7 +626,7 @@ export const deleteContract = command(
 
 		// Prevent deletion of signed/active contracts
 		if (existing.status === 'signed' || existing.status === 'active') {
-			throw new Error(`Nu se poate șterge un contract cu statusul "${existing.status}". Doar contractele în starea "draft", "sent", "expired" sau "cancelled" pot fi șterse.`);
+			error(400, `Nu se poate șterge un contract cu statusul "${existing.status}". Doar contractele în starea "draft", "sent", "expired" sau "cancelled" pot fi șterse.`);
 		}
 
 		// Delete uploaded file from storage if exists

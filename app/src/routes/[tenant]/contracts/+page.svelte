@@ -116,8 +116,14 @@
 			showDeleteDialog = false;
 			deleteTargetId = '';
 		} catch (e) {
-			console.error('Delete contract error:', e);
-			clientLogger.apiError('contract_delete', e);
+			const status = (e as { status?: number })?.status;
+			const message = (e as { body?: { message?: string }; message?: string })?.body?.message
+				?? (e as Error)?.message;
+			if (status === 400 && message) {
+				toast.error(message);
+			} else {
+				clientLogger.apiError('contract_delete', e);
+			}
 		} finally {
 			deleting = false;
 		}

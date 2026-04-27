@@ -209,9 +209,15 @@
 			toast.success('Contract șters cu succes');
 			goto(`/${tenantSlug}/contracts`);
 		} catch (e) {
-			console.error('Delete contract error:', e);
-			clientLogger.apiError('contract_delete', e);
-			toast.error('Eroare la ștergerea contractului');
+			const status = (e as { status?: number })?.status;
+			const message = (e as { body?: { message?: string }; message?: string })?.body?.message
+				?? (e as Error)?.message;
+			if (status === 400 && message) {
+				toast.error(message);
+			} else {
+				clientLogger.apiError('contract_delete', e);
+				toast.error('Eroare la ștergerea contractului');
+			}
 		} finally {
 			deleting = false;
 		}
@@ -258,7 +264,7 @@
 						<Download class="mr-2 h-4 w-4" />
 						Download PDF
 					</Button>
-					{#if contract.status === 'draft' || contract.status === 'sent'}
+					{#if contract.status !== 'expired' && contract.status !== 'cancelled'}
 						<Button
 							variant="outline"
 							onclick={() => { sendEmail = contract.beneficiarEmail || ''; showSendModal = true; }}
@@ -276,7 +282,7 @@
 							Semneaza
 						</Button>
 					{/if}
-					{#if contract.status === 'draft' || contract.status === 'sent'}
+					{#if contract.status !== 'expired' && contract.status !== 'cancelled'}
 						<Button
 							variant="outline"
 							onclick={() => goto(`/${tenantSlug}/contracts/${contractId}/edit`)}
@@ -720,7 +726,7 @@
 							<Download class="mr-2 h-4 w-4" />
 							Download PDF
 						</Button>
-						{#if contract.status === 'draft' || contract.status === 'sent'}
+						{#if contract.status !== 'expired' && contract.status !== 'cancelled'}
 							<Button
 								variant="outline"
 								class="w-full bg-transparent"
