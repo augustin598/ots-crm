@@ -209,6 +209,17 @@ export async function handleMarketingUpload(event: RequestEvent): Promise<Respon
 		throw error(401, 'Unauthorized');
 	}
 
+	// Authorization: must be either a client user OR a tenantUser of this tenant.
+	// Without this gate, a logged-in user from another tenant could POST here
+	// (event.locals.tenant is set from URL param alone) and write to this tenant's storage.
+	if (!isClientUser && !event.locals.tenantUser) {
+		throw error(403, 'Acces interzis pentru acest tenant');
+	}
+	// Defensive: if isClientUser is true but client linkage is missing, deny.
+	if (isClientUser && !event.locals.client) {
+		throw error(403, 'Sesiune client invalidă');
+	}
+
 	const formData = await event.request.formData();
 	const file = formData.get('file') as File | null;
 	const clientId = formData.get('clientId') as string;
@@ -371,6 +382,17 @@ export async function handleArticleUpload(event: RequestEvent): Promise<Response
 
 	if (!userId || !tenantId) {
 		throw error(401, 'Unauthorized');
+	}
+
+	// Authorization: must be either a client user OR a tenantUser of this tenant.
+	// Without this gate, a logged-in user from another tenant could POST here
+	// (event.locals.tenant is set from URL param alone) and write to this tenant's storage.
+	if (!isClientUser && !event.locals.tenantUser) {
+		throw error(403, 'Acces interzis pentru acest tenant');
+	}
+	// Defensive: if isClientUser is true but client linkage is missing, deny.
+	if (isClientUser && !event.locals.client) {
+		throw error(403, 'Sesiune client invalidă');
 	}
 
 	const formData = await event.request.formData();
