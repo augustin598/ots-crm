@@ -26,6 +26,7 @@
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Dialog, DialogContent, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -71,7 +72,8 @@
 		FileText,
 		Type,
 		ExternalLink,
-		Reply
+		Reply,
+		Repeat
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
@@ -276,8 +278,30 @@
 		dueDate: 'termenul limită',
 		clientId: 'clientul',
 		projectId: 'proiectul',
-		milestoneId: 'milestone-ul'
+		milestoneId: 'milestone-ul',
+		isRecurring: 'recurența',
+		recurringType: 'frecvența',
+		recurringInterval: 'intervalul',
+		recurringEndDate: 'sfârșitul recurenței'
 	};
+
+	function formatRecurrenceLabel(t: {
+		isRecurring?: boolean | null;
+		recurringType?: string | null;
+		recurringInterval?: number | null;
+	}): string {
+		if (!t.isRecurring || !t.recurringType) return 'Recurent';
+		const interval = t.recurringInterval || 1;
+		const typeLabels: Record<string, [string, string]> = {
+			daily: ['zi', 'zile'],
+			weekly: ['săptămână', 'săptămâni'],
+			monthly: ['lună', 'luni'],
+			yearly: ['an', 'ani']
+		};
+		const [singular, plural] = typeLabels[t.recurringType] || ['', ''];
+		if (interval === 1) return `Recurent · în fiecare ${singular}`;
+		return `Recurent · la ${interval} ${plural}`;
+	}
 
 	function getActivityVerb(activity: { action: string; field?: string | null }): string {
 		switch (activity.action) {
@@ -662,6 +686,27 @@
 										{/each}
 									</Popover.Content>
 								</Popover.Root>
+
+								{#if currentTask.recurringParentId}
+									<a
+										href={page.url.pathname.startsWith('/client/')
+											? `/client/${page.params.tenant}/tasks/${currentTask.recurringParentId}`
+											: `/${page.params.tenant}/tasks/${currentTask.recurringParentId}`}
+										class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
+										title="Acest task face parte dintr-o serie recurentă — apasă pentru rădăcină"
+									>
+										<Repeat class="h-3 w-3" />
+										Din serie recurentă
+									</a>
+								{:else if currentTask.isRecurring}
+									<span
+										class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-800"
+										title={formatRecurrenceLabel(currentTask)}
+									>
+										<Repeat class="h-3 w-3" />
+										{formatRecurrenceLabel(currentTask)}
+									</span>
+								{/if}
 							</div>
 						{/if}
 					</div>

@@ -252,6 +252,12 @@ export const task = sqliteTable('task', {
 	assignedToUserId: text('assigned_to_user_id').references(() => user.id),
 	createdByUserId: text('created_by_user_id').references(() => user.id),
 	lastReminderSentAt: timestamp('last_reminder_sent_at', { withTimezone: true, mode: 'date' }),
+	isRecurring: boolean('is_recurring').notNull().default(false),
+	recurringType: text('recurring_type'), // 'daily' | 'weekly' | 'monthly' | 'yearly'
+	recurringInterval: integer('recurring_interval').default(1),
+	recurringEndDate: timestamp('recurring_end_date', { withTimezone: true, mode: 'date' }),
+	recurringParentId: text('recurring_parent_id'),
+	recurringSpawnedAt: timestamp('recurring_spawned_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

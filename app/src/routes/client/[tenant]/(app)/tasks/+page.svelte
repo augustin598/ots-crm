@@ -32,6 +32,7 @@
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import UserIcon from '@lucide/svelte/icons/user';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientName = $derived(
@@ -411,8 +412,11 @@
 					<div class="p-4">
 						<div class="flex items-start justify-between gap-3">
 							<div class="flex-1 min-w-0">
-								<h3 class="font-semibold text-[15px] leading-tight group-hover:text-primary transition-colors">
-									{task.title}
+								<h3 class="font-semibold text-[15px] leading-tight group-hover:text-primary transition-colors flex items-center gap-1.5">
+									{#if task.isRecurring || task.recurringParentId}
+										<RepeatIcon class="h-3.5 w-3.5 shrink-0 text-blue-600" aria-label="Task recurent" />
+									{/if}
+									<span>{task.title}</span>
 								</h3>
 								{#if task.description}
 									<p class="text-sm text-muted-foreground mt-1 line-clamp-2">{task.description}</p>

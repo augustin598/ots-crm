@@ -1,6 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import { env } from '$env/dynamic/private';
 import { processRecurringInvoices } from './tasks/recurring-invoices';
+import { processRecurringTasksSafety } from './tasks/recurring-tasks-safety';
 import { processTaskReminders } from './tasks/task-reminders';
 import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
@@ -105,6 +106,7 @@ type TaskHandler = (params: Record<string, any>) => Promise<any>;
  */
 const taskHandlers: Record<string, TaskHandler> = {
 	recurring_invoices: processRecurringInvoices,
+	recurring_tasks_safety: processRecurringTasksSafety,
 	task_reminders: processTaskReminders,
 	daily_work_reminders: processDailyWorkReminders,
 	spv_invoice_sync: processSpvInvoiceSync,
@@ -245,7 +247,7 @@ export const startScheduler = async () => {
 
 	// Clean up stale repeatable jobs from Redis (from old code deployments with different patterns)
 	const expectedJobIds = new Set([
-		'recurring-invoices', 'task-reminders', 'daily-work-reminders',
+		'recurring-invoices', 'recurring-tasks-safety', 'task-reminders', 'daily-work-reminders',
 		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
@@ -283,6 +285,22 @@ export const startScheduler = async () => {
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'recurring-invoices'
+		}
+	);
+
+	// Schedule recurring tasks safety-net to run daily at 8:00 AM (catches orphaned recurring tasks)
+	await schedulerQueue.add(
+		'recurring-tasks-safety',
+		{
+			type: 'recurring_tasks_safety',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 8 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'recurring-tasks-safety'
 		}
 	);
 

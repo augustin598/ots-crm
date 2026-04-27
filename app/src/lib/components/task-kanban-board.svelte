@@ -11,6 +11,7 @@
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import type { Task } from '$lib/server/db/schema';
 	import { updateTaskPosition, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { formatStatus, getPriorityColor, getPriorityDotColor, getPriorityCardClass, formatPriority, formatDate } from './task-kanban-utils';
@@ -557,6 +558,9 @@
 										<span class="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded {getPriorityColor(task.priority || 'medium')}">
 											{formatPriority(task.priority || 'medium')}
 										</span>
+										{#if task.isRecurring || task.recurringParentId}
+											<RepeatIcon class="h-3 w-3 text-blue-600" aria-label="Task recurent" />
+										{/if}
 									</div>
 									<h4 class="font-medium text-sm leading-snug line-clamp-2 {status === 'done' ? 'text-muted-foreground line-through decoration-muted-foreground/40' : ''}">{task.title}</h4>
 								</div>

@@ -16,6 +16,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import type { Task } from '$lib/server/db/schema';
 	import { formatStatus, getStatusColor } from './task-kanban-utils';
 	import { formatPriority, getPriorityColor } from '$lib/utils/task-filters';
@@ -153,7 +154,14 @@
 				{#each tasks as task}
 					{@const projectName = task.projectId ? projectMap.get(task.projectId) || 'No project' : 'No project'}
 					<TableRow class="cursor-pointer hover:bg-accent/50" onclick={() => onTaskClick(task)}>
-						<TableCell class="font-medium max-w-[300px] truncate">{task.title}</TableCell>
+						<TableCell class="font-medium max-w-[300px] truncate">
+							<span class="inline-flex items-center gap-1.5">
+								{#if task.isRecurring || task.recurringParentId}
+									<RepeatIcon class="h-3.5 w-3.5 shrink-0 text-blue-600" aria-label="Task recurent" />
+								{/if}
+								<span class="truncate">{task.title}</span>
+							</span>
+						</TableCell>
 						<TableCell>
 							<span class={`text-xs font-medium px-2 py-1 rounded capitalize ${getStatusColor(task.status || 'todo')}`}>
 								{formatStatus(task.status || 'todo')}

@@ -1466,6 +1466,48 @@
       "breakpoints": true
     },
     {
+      "idx": 209,
+      "version": "6",
+      "when": 1777520000000,
+      "tag": "0209_task_is_recurring",
+      "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "6",
+      "when": 1777520001000,
+      "tag": "0210_task_recurring_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 211,
+      "version": "6",
+      "when": 1777520002000,
+      "tag": "0211_task_recurring_interval",
+      "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "6",
+      "when": 1777520003000,
+      "tag": "0212_task_recurring_end_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "6",
+      "when": 1777520004000,
+      "tag": "0213_task_recurring_parent_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "6",
+      "when": 1777520005000,
+      "tag": "0214_task_recurring_spawned_at",
+      "breakpoints": true
+    },
+    {
       "idx": 215,
       "version": "6",
       "when": 1777940000000,

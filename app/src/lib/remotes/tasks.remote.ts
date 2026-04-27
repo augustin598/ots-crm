@@ -8,6 +8,7 @@ import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificatio
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
+import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -94,6 +95,7 @@ function generateTaskId() {
 
 const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
+const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 
 const taskSchema = v.object({
 	title: v.pipe(v.string(), v.minLength(1, 'Title is required')),
@@ -104,8 +106,39 @@ const taskSchema = v.object({
 	status: v.optional(v.picklist(VALID_STATUSES)),
 	priority: v.optional(v.picklist(VALID_PRIORITIES)),
 	dueDate: v.optional(v.string()),
-	assignedToUserId: v.optional(v.string())
+	assignedToUserId: v.optional(v.string()),
+	isRecurring: v.optional(v.boolean()),
+	recurringType: v.optional(v.picklist(VALID_RECURRING_TYPES)),
+	recurringInterval: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(365))),
+	recurringEndDate: v.optional(v.string())
 });
+
+function validateRecurringPayload(data: {
+	isRecurring?: boolean;
+	recurringType?: string;
+	dueDate?: string;
+	recurringEndDate?: string;
+}) {
+	if (!data.isRecurring) return;
+	if (!data.recurringType) {
+		throw new Error('Selectează frecvența pentru task-ul recurent.');
+	}
+	if (!data.dueDate) {
+		throw new Error('Selectează data limită pentru task-ul recurent.');
+	}
+	if (data.recurringEndDate && data.dueDate) {
+		const [dy, dm, dd] = data.dueDate.split('-').map(Number);
+		const [ey, em, ed] = data.recurringEndDate.split('-').map(Number);
+		if (dy && dm && dd && ey && em && ed) {
+			const due = new Date(dy, dm - 1, dd);
+			const end = new Date(ey, em - 1, ed);
+			if (end.getTime() < due.getTime()) {
+				throw new Error('Data de sfârșit a recurenței trebuie să fie după data limită.');
+			}
+		}
+	}
+}
+
 
 export const getTask = query(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
 	const event = getRequestEvent();
@@ -584,6 +617,8 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	}
 
+	validateRecurringPayload(data);
+
 	const taskId = generateTaskId();
 	// If client user, set status to pending-approval, otherwise use provided status or default to 'todo'
 	const status = event.locals.isClientUser ? 'pending-approval' : data.status || 'todo';
@@ -632,7 +667,13 @@ export const createTask = command(taskSchema, async (data) => {
 		position: nextPosition,
 		dueDate: data.dueDate ? new Date(data.dueDate) : null,
 		assignedToUserId: data.assignedToUserId || null,
-		createdByUserId: event.locals.user.id
+		createdByUserId: event.locals.user.id,
+		isRecurring: !!data.isRecurring,
+		recurringType: data.isRecurring ? data.recurringType ?? null : null,
+		recurringInterval: data.isRecurring ? data.recurringInterval ?? 1 : null,
+		recurringEndDate: data.isRecurring && data.recurringEndDate ? new Date(data.recurringEndDate) : null,
+		recurringParentId: null,
+		recurringSpawnedAt: null
 	});
 
 	// Auto-watch task for creator
@@ -766,7 +807,7 @@ export const updateTask = command(
 				throw new Error('Unauthorized - you can only update your own tasks');
 			}
 
-			// Client users can only update limited fields (title, description, dueDate)
+			// Client users can only update limited fields (title, description, dueDate, recurrence on tasks they created)
 			// Remove restricted fields
 			delete updateData.status;
 			delete updateData.priority;
@@ -774,16 +815,65 @@ export const updateTask = command(
 			delete updateData.projectId;
 			delete updateData.milestoneId;
 			delete updateData.clientId;
+
+			if (existing.createdByUserId !== event.locals.user.id) {
+				delete updateData.isRecurring;
+				delete updateData.recurringType;
+				delete updateData.recurringInterval;
+				delete updateData.recurringEndDate;
+			}
 		}
+
+		const willBeRecurring = updateData.isRecurring ?? existing.isRecurring;
+		validateRecurringPayload({
+			isRecurring: willBeRecurring,
+			recurringType: updateData.recurringType ?? existing.recurringType ?? undefined,
+			dueDate: updateData.dueDate ?? (existing.dueDate ? existing.dueDate.toISOString().split('T')[0] : undefined),
+			recurringEndDate: updateData.recurringEndDate ?? (existing.recurringEndDate ? existing.recurringEndDate.toISOString().split('T')[0] : undefined)
+		});
 
 		const oldAssigneeId = existing.assignedToUserId;
 		const newAssigneeId = updateData.assignedToUserId;
 		const assigneeChanged = newAssigneeId && oldAssigneeId !== newAssigneeId;
+		const oldStatus = existing.status;
+		const newStatus = updateData.status;
+		const transitionedToDone = newStatus === 'done' && oldStatus !== 'done';
+
+		const recurringPatch: {
+			isRecurring?: boolean;
+			recurringType?: 'daily' | 'weekly' | 'monthly' | 'yearly' | null;
+			recurringInterval?: number | null;
+			recurringEndDate?: Date | null;
+		} = {};
+		if (updateData.isRecurring !== undefined) {
+			recurringPatch.isRecurring = !!updateData.isRecurring;
+			if (!updateData.isRecurring) {
+				recurringPatch.recurringType = null;
+				recurringPatch.recurringInterval = null;
+				recurringPatch.recurringEndDate = null;
+			}
+		}
+		if (updateData.recurringType !== undefined) recurringPatch.recurringType = updateData.recurringType;
+		if (updateData.recurringInterval !== undefined) recurringPatch.recurringInterval = updateData.recurringInterval;
+		if (updateData.recurringEndDate !== undefined) {
+			recurringPatch.recurringEndDate = updateData.recurringEndDate ? new Date(updateData.recurringEndDate) : null;
+		}
+
+		// Strip raw recurring fields from updateData so the spread doesn't reintroduce
+		// the string-typed recurringEndDate (Drizzle expects Date).
+		const {
+			isRecurring: _ir,
+			recurringType: _rt,
+			recurringInterval: _ri,
+			recurringEndDate: _red,
+			...restUpdateData
+		} = updateData;
 
 		await db
 			.update(table.task)
 			.set({
-				...updateData,
+				...restUpdateData,
+				...recurringPatch,
 				dueDate: updateData.dueDate ? new Date(updateData.dueDate) : undefined,
 				milestoneId: updateData.milestoneId || undefined,
 				updatedAt: new Date()
@@ -791,10 +881,11 @@ export const updateTask = command(
 			.where(eq(table.task.id, taskId));
 
 		// Record activity for changed fields
-		const fieldsToTrack = ['title', 'description', 'status', 'priority', 'assignedToUserId', 'dueDate', 'clientId', 'projectId', 'milestoneId'] as const;
+		const fieldsToTrack = ['title', 'description', 'status', 'priority', 'assignedToUserId', 'dueDate', 'clientId', 'projectId', 'milestoneId', 'isRecurring', 'recurringType', 'recurringInterval', 'recurringEndDate'] as const;
 		const formatFieldValue = (val: unknown): string | null => {
 			if (val == null) return null;
 			if (val instanceof Date) return val.toISOString().split('T')[0];
+			if (typeof val === 'boolean') return val ? 'true' : 'false';
 			return String(val);
 		};
 		for (const field of fieldsToTrack) {
@@ -810,6 +901,15 @@ export const updateTask = command(
 					oldValue: formatFieldValue(oldVal),
 					newValue: formatFieldValue(newVal)
 				});
+			}
+		}
+
+		// If task transitioned to 'done' and is recurring, spawn the next occurrence
+		if (transitionedToDone && (existing.isRecurring || updateData.isRecurring)) {
+			try {
+				await spawnNextRecurringTask(taskId);
+			} catch (error) {
+				logError('server', `Failed to spawn next recurring task for ${taskId}: ${(error as Error).message}`, { tenantId: existing.tenantId });
 			}
 		}
 
