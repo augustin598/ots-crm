@@ -129,6 +129,46 @@ export type ApprovalRequestedEvent = {
 	tenantSlug: string;
 };
 
+// Campaign automation events — emitted by the external campaigns API
+// (workers create drafts, humans approve/pause via UI). See plan
+// `Phase 1.7` in /docs/superpowers/specs/.
+export type CampaignCreatedEvent = {
+	type: 'campaign.created';
+	tenantId: string;
+	campaignId: string;
+	platform: 'meta' | 'tiktok' | 'google';
+	clientId: string;
+	workerId: string | null;
+	budgetCents: number;
+	objective: string;
+};
+
+export type CampaignApprovedEvent = {
+	type: 'campaign.approved';
+	tenantId: string;
+	campaignId: string;
+	actorType: 'api_key' | 'user';
+	actorId: string;
+};
+
+export type CampaignPausedEvent = {
+	type: 'campaign.paused';
+	tenantId: string;
+	campaignId: string;
+	actorType: 'api_key' | 'user';
+	actorId: string;
+};
+
+export type CampaignBuildFailedEvent = {
+	type: 'campaign.build_failed';
+	tenantId: string;
+	campaignId: string;
+	platform: 'meta' | 'tiktok' | 'google';
+	clientId: string;
+	error: string;
+	rolledBack: boolean;
+};
+
 export type HookEvent =
 	| InvoiceCreatedEvent
 	| InvoiceUpdatedEvent
@@ -143,7 +183,11 @@ export type HookEvent =
 	| SyncErrorEvent
 	| LeadsImportedEvent
 	| ClientCreatedEvent
-	| ApprovalRequestedEvent;
+	| ApprovalRequestedEvent
+	| CampaignCreatedEvent
+	| CampaignApprovedEvent
+	| CampaignPausedEvent
+	| CampaignBuildFailedEvent;
 
 /**
  * Hook handler function type

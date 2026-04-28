@@ -4030,3 +4030,260 @@ export const whmcsTransactionSyncRelations = relations(whmcsTransactionSync, ({ 
 		references: [tenant.id]
 	})
 }));
+
+// =============================================================================
+// External API key auth — for autonomous workers (PersonalOPS) calling CRM
+// =============================================================================
+
+export const apiKey = sqliteTable(
+	'api_key',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		name: text('name').notNull(),
+		keyPrefix: text('key_prefix').notNull(), // first 12 chars of plaintext, display only
+		keyHash: text('key_hash').notNull(), // SHA-256 hex of full plaintext
+		scopes: text('scopes').notNull().default('[]'), // JSON array, e.g. ["campaigns:write","campaigns:read"]
+		createdByUserId: text('created_by_user_id')
+			.notNull()
+			.references(() => user.id),
+		lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
+		revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		hashIdx: uniqueIndex('api_key_hash_uidx').on(t.keyHash),
+		tenantIdx: index('api_key_tenant_idx').on(t.tenantId)
+	})
+);
+
+// =============================================================================
+// Campaigns — created by workers as drafts (PAUSED), approved by humans
+// =============================================================================
+
+// Resumable state machine for the 4-step Meta create flow
+//   none → campaign → adset → creative → ad → done
+// On any partial failure, the worker retries with the same Idempotency-Key,
+// and the CRM resumes from the last completed step. On permanent failure,
+// the CRM compensates by deleting any orphan Meta entities (in reverse order).
+export const campaign = sqliteTable(
+	'campaign',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull(), // 'meta' | 'tiktok' | 'google'
+		status: text('status').notNull().default('draft'),
+		// status: 'draft' | 'building' | 'pending_approval' | 'active' | 'paused' | 'archived' | 'failed'
+		buildStep: text('build_step').notNull().default('none'),
+		// buildStep: 'none' | 'campaign' | 'adset' | 'creative' | 'ad' | 'done'
+		buildAttempts: integer('build_attempts').notNull().default(0),
+		externalCampaignId: text('external_campaign_id'),
+		externalAdsetId: text('external_adset_id'),
+		externalCreativeId: text('external_creative_id'),
+		externalAdId: text('external_ad_id'),
+		externalAdAccountId: text('external_ad_account_id'),
+		name: text('name').notNull(),
+		objective: text('objective').notNull(),
+		budgetType: text('budget_type').notNull(), // 'daily' | 'lifetime'
+		budgetCents: integer('budget_cents').notNull(),
+		currencyCode: text('currency_code').notNull().default('RON'),
+		audienceJson: text('audience_json').notNull().default('{}'),
+		creativeJson: text('creative_json').notNull().default('{}'),
+		briefJson: text('brief_json').notNull().default('{}'), // PII-redacted
+		createdByWorkerId: text('created_by_worker_id'),
+		createdByApiKeyId: text('created_by_api_key_id').references(() => apiKey.id),
+		approvedByUserId: text('approved_by_user_id').references(() => user.id),
+		approvedAt: timestamp('approved_at', { withTimezone: true, mode: 'date' }),
+		pausedByUserId: text('paused_by_user_id').references(() => user.id),
+		pausedAt: timestamp('paused_at', { withTimezone: true, mode: 'date' }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantStatusIdx: index('campaign_tenant_status_idx').on(t.tenantId, t.status),
+		clientIdx: index('campaign_client_idx').on(t.clientId),
+		externalIdx: uniqueIndex('campaign_external_uidx').on(t.platform, t.externalCampaignId)
+	})
+);
+
+// Audit trail for state transitions only (not reads).
+// Actions: 'draft.created' | 'build.step' | 'build.failed' | 'build.rolled_back'
+//        | 'approved' | 'paused' | 'archived' | 'platform.error'
+export const campaignAudit = sqliteTable(
+	'campaign_audit',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		campaignId: text('campaign_id')
+			.notNull()
+			.references(() => campaign.id, { onDelete: 'cascade' }),
+		action: text('action').notNull(),
+		actorType: text('actor_type').notNull(), // 'api_key' | 'user' | 'system'
+		actorId: text('actor_id').notNull(),
+		payloadJson: text('payload_json').notNull().default('{}'),
+		errorMessage: text('error_message'),
+		at: timestamp('at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		campaignIdx: index('campaign_audit_campaign_idx').on(t.campaignId, t.at)
+	})
+);
+
+// Idempotency replay store — caches the response for an Idempotency-Key for 7 days.
+// responseStatus = 0 means "in-flight" — concurrent retries block on the lock.
+export const campaignIdempotency = sqliteTable(
+	'campaign_idempotency',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		idempotencyKey: text('idempotency_key').notNull(),
+		apiKeyId: text('api_key_id')
+			.notNull()
+			.references(() => apiKey.id),
+		responseStatus: integer('response_status').notNull().default(0),
+		responseJson: text('response_json').notNull().default('{}'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+	},
+	(t) => ({
+		tenantKeyIdx: uniqueIndex('campaign_idem_tenant_key_uidx').on(t.tenantId, t.idempotencyKey)
+	})
+);
+
+// Cached Meta targetingsearch results — anti-hallucination for workers.
+// Workers MUST pick interest/location/behavior IDs from this list, never invent them.
+export const metaTargetingCache = sqliteTable(
+	'meta_targeting_cache',
+	{
+		id: text('id').primaryKey(),
+		type: text('type').notNull(), // 'interests' | 'locations' | 'behaviors' | 'demographics'
+		query: text('query').notNull(),
+		payloadJson: text('payload_json').notNull(),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+	},
+	(t) => ({
+		typeQueryIdx: uniqueIndex('meta_targeting_cache_type_query_uidx').on(t.type, t.query)
+	})
+);
+
+// Relations
+export const apiKeyRelations = relations(apiKey, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [apiKey.tenantId],
+		references: [tenant.id]
+	}),
+	createdBy: one(user, {
+		fields: [apiKey.createdByUserId],
+		references: [user.id]
+	}),
+	campaigns: many(campaign),
+	idempotencyEntries: many(campaignIdempotency)
+}));
+
+export const campaignRelations = relations(campaign, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [campaign.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [campaign.clientId],
+		references: [client.id]
+	}),
+	createdByApiKey: one(apiKey, {
+		fields: [campaign.createdByApiKeyId],
+		references: [apiKey.id]
+	}),
+	approvedBy: one(user, {
+		fields: [campaign.approvedByUserId],
+		references: [user.id],
+		relationName: 'campaignApprovedBy'
+	}),
+	pausedBy: one(user, {
+		fields: [campaign.pausedByUserId],
+		references: [user.id],
+		relationName: 'campaignPausedBy'
+	}),
+	auditLog: many(campaignAudit)
+}));
+
+export const campaignAuditRelations = relations(campaignAudit, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [campaignAudit.tenantId],
+		references: [tenant.id]
+	}),
+	campaign: one(campaign, {
+		fields: [campaignAudit.campaignId],
+		references: [campaign.id]
+	})
+}));
+
+export const campaignIdempotencyRelations = relations(campaignIdempotency, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [campaignIdempotency.tenantId],
+		references: [tenant.id]
+	}),
+	apiKey: one(apiKey, {
+		fields: [campaignIdempotency.apiKeyId],
+		references: [apiKey.id]
+	})
+}));
+
+// Types
+export type ApiKey = typeof apiKey.$inferSelect;
+export type NewApiKey = typeof apiKey.$inferInsert;
+export type Campaign = typeof campaign.$inferSelect;
+export type NewCampaign = typeof campaign.$inferInsert;
+export type CampaignAudit = typeof campaignAudit.$inferSelect;
+export type NewCampaignAudit = typeof campaignAudit.$inferInsert;
+export type CampaignIdempotency = typeof campaignIdempotency.$inferSelect;
+export type NewCampaignIdempotency = typeof campaignIdempotency.$inferInsert;
+export type MetaTargetingCache = typeof metaTargetingCache.$inferSelect;
+export type NewMetaTargetingCache = typeof metaTargetingCache.$inferInsert;
+
+export const CAMPAIGN_STATUSES = [
+	'draft',
+	'building',
+	'pending_approval',
+	'active',
+	'paused',
+	'archived',
+	'failed'
+] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+
+export const CAMPAIGN_BUILD_STEPS = ['none', 'campaign', 'adset', 'creative', 'ad', 'done'] as const;
+export type CampaignBuildStep = (typeof CAMPAIGN_BUILD_STEPS)[number];
+
+export const API_KEY_SCOPES = [
+	'campaigns:read',
+	'campaigns:write',
+	'clients:read',
+	'integrations:read'
+] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
