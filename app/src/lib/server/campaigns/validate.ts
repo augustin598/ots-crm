@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { env } from '$env/dynamic/private';
 import type { MetaCampaignSpec } from '$lib/server/meta-ads/campaign-create';
@@ -177,6 +177,7 @@ export async function validateDraftBrief(
 			return { valid: false, errors };
 		}
 	} else {
+		// Priority: is_primary=true first, then oldest active account as fallback.
 		[adAccount] = await db
 			.select()
 			.from(table.metaAdsAccount)
@@ -187,7 +188,7 @@ export async function validateDraftBrief(
 					eq(table.metaAdsAccount.isActive, true)
 				)
 			)
-			.orderBy(table.metaAdsAccount.createdAt)
+			.orderBy(desc(table.metaAdsAccount.isPrimary), table.metaAdsAccount.createdAt)
 			.limit(1);
 		if (!adAccount) {
 			errors.push({
@@ -268,6 +269,27 @@ export async function validateDraftBrief(
 	const optimizationGoal =
 		input.brief.optimizationGoal ?? defaultOptimizationGoal(objective);
 
+	// Auto-resolve pageId from meta_ads_page when caller didn't provide one.
+	// This makes the worker brief lighter — page mapping lives in the CRM, not
+	// in every worker invocation. If multiple monitored pages exist for the
+	// client, prefer the most recently lead-synced one (most active).
+	let resolvedPageId = input.brief.creative?.pageId ?? '';
+	if (!resolvedPageId) {
+		const [page] = await db
+			.select({ metaPageId: table.metaAdsPage.metaPageId })
+			.from(table.metaAdsPage)
+			.where(
+				and(
+					eq(table.metaAdsPage.tenantId, tenantId),
+					eq(table.metaAdsPage.clientId, input.clientId),
+					eq(table.metaAdsPage.isMonitored, true)
+				)
+			)
+			.orderBy(desc(table.metaAdsPage.lastLeadSyncAt))
+			.limit(1);
+		if (page?.metaPageId) resolvedPageId = page.metaPageId;
+	}
+
 	const expandedSpec: MetaCampaignSpec = {
 		adAccountId: adAccount.metaAdAccountId,
 		name: input.brief.name?.trim() || `${objective} — ${new Date().toISOString().slice(0, 10)}`,
@@ -277,7 +299,7 @@ export async function validateDraftBrief(
 		billingEvent: input.brief.billingEvent ?? 'IMPRESSIONS',
 		audience: input.brief.audience ?? {},
 		creative: {
-			pageId: input.brief.creative?.pageId ?? '',
+			pageId: resolvedPageId,
 			title: input.brief.creative?.title,
 			body: input.brief.creative?.body,
 			linkUrl: input.brief.creative?.linkUrl,
@@ -293,8 +315,9 @@ export async function validateDraftBrief(
 	if (!expandedSpec.creative.pageId) {
 		errors.push({
 			field: 'brief.creative.pageId',
-			code: 'invalid_input',
-			message: 'creative.pageId required (Facebook page ID for the ad)'
+			code: 'page_id_unresolved',
+			message:
+				'No Facebook page mapped to this client (and no pageId in brief). Map a page in CRM > Meta Ads Pages or pass creative.pageId explicitly.'
 		});
 	}
 
