@@ -65,15 +65,21 @@ export const GET: RequestHandler = (event) =>
 			return { status: 500, body: { error: 'app_secret_missing' } };
 		}
 
+		const countryCode = (event.url.searchParams.get('country_code') ?? '').toUpperCase().trim();
+
 		try {
 			const options = await searchTargetingOptions({
 				type: typeParam as TargetingType,
 				query: search,
 				accessToken: tokenInfo.accessToken,
 				appSecret,
-				limit
+				limit,
+				countryCode: countryCode || undefined
 			});
-			return { status: 200, body: { type: typeParam, query: search, options } };
+			return {
+				status: 200,
+				body: { type: typeParam, query: search, countryCode: countryCode || 'RO (default)', options }
+			};
 		} catch (err) {
 			return {
 				status: 502,

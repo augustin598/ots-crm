@@ -53,6 +53,9 @@ function normalizeQuery(q: string): string {
  * Get targeting options from Meta, with 24h DB cache. Returns up to `limit`
  * results sorted by relevance (Meta's own ordering).
  *
+ * For type=locations, country_code is REQUIRED by Meta — defaults to 'RO'
+ * (Romanian agency context). Without it Meta silently returns [].
+ *
  * @throws on Meta API error or network failure (caller should fall back to
  *   empty list rather than crashing the campaign creation flow).
  */
@@ -62,19 +65,25 @@ export async function searchTargetingOptions(input: {
 	accessToken: string;
 	appSecret: string;
 	limit?: number;
+	/** ISO-2 country code; required for locations search. Default: 'RO'. */
+	countryCode?: string;
 }): Promise<TargetingOption[]> {
 	const normalized = normalizeQuery(input.query);
 	if (!normalized) return [];
+	const countryCode = (input.countryCode ?? 'RO').toUpperCase();
 
-	const cached = await loadCached(input.type, normalized);
+	// Cache key includes country_code so RO and US searches don't collide.
+	const cacheKey = input.type === 'locations' ? `${countryCode}:${normalized}` : normalized;
+
+	const cached = await loadCached(input.type, cacheKey);
 	if (cached) {
-		logInfo('meta-ads', `targeting cache HIT type=${input.type} q="${normalized}"`);
+		logInfo('meta-ads', `targeting cache HIT type=${input.type} q="${cacheKey}"`);
 		return cached.options.slice(0, input.limit ?? 25);
 	}
 
-	logInfo('meta-ads', `targeting cache MISS type=${input.type} q="${normalized}"`);
-	const fresh = await fetchFromMeta(input);
-	await storeCache(input.type, normalized, fresh);
+	logInfo('meta-ads', `targeting cache MISS type=${input.type} q="${cacheKey}"`);
+	const fresh = await fetchFromMeta({ ...input, countryCode });
+	await storeCache(input.type, cacheKey, fresh);
 	return fresh.slice(0, input.limit ?? 25);
 }
 
@@ -142,6 +151,7 @@ async function fetchFromMeta(input: {
 	query: string;
 	accessToken: string;
 	appSecret: string;
+	countryCode?: string;
 }): Promise<TargetingOption[]> {
 	const proof = generateAppSecretProof(input.accessToken, input.appSecret);
 
@@ -163,6 +173,9 @@ async function fetchFromMeta(input: {
 	} else if (input.type === 'locations') {
 		params.set('type', 'adgeolocation');
 		params.set('location_types', JSON.stringify(['city', 'region', 'country', 'subcity']));
+		// Meta requires country_code for locations search — without it, Meta silently
+		// returns [] even for major cities like "Bucharest". See Marketing API v25 docs.
+		if (input.countryCode) params.set('country_code', input.countryCode);
 		url = `${META_GRAPH_URL}/search?${params.toString()}`;
 	} else {
 		// demographics — handled via Meta's separate browse endpoints. Return [] for MVP.
