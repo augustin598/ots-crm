@@ -273,10 +273,17 @@ function buildCreativeSpec(
 	objective: string
 ): Record<string, unknown> {
 	const isLead = objective === 'OUTCOME_LEADS';
+	// Instant Form lead ads (OUTCOME_LEADS + leadFormId → ON_AD destination) must use a
+	// Facebook page URL as the link, not an external URL. An external URL implies WEBSITE
+	// destination which conflicts with ON_AD and causes Meta error 100/1892040 at ad creation.
+	const link =
+		isLead && creative.leadFormId
+			? `https://www.facebook.com/${creative.pageId}`
+			: creative.linkUrl ?? '';
 	const linkData: Record<string, unknown> = {
 		message: creative.body || '',
 		name: creative.title || '',
-		link: creative.linkUrl || creative.leadFormId ? creative.linkUrl ?? '' : creative.linkUrl ?? ''
+		link
 	};
 	if (creative.callToActionType) {
 		linkData.call_to_action = {
