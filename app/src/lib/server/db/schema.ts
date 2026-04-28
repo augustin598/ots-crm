@@ -1149,6 +1149,9 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 	notifyInvoices: boolean('notify_invoices').notNull().default(false),
 	notifyTasks: boolean('notify_tasks').notNull().default(false),
 	notifyContracts: boolean('notify_contracts').notNull().default(false),
+	// JSON-serialized AccessFlags. NULL = no portal access; falls back to notify*
+	// columns for backward compat until backfill runs. See lib/server/portal-access.ts.
+	accessFlags: text('access_flags'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

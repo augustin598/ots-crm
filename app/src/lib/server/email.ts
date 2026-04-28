@@ -249,23 +249,25 @@ export async function getNotificationRecipients(
 		recipients.push({ email: client.email, name: client.legalRepresentative || client.name || null });
 	}
 
-	const columnMap = {
-		invoices: table.clientSecondaryEmail.notifyInvoices,
-		tasks: table.clientSecondaryEmail.notifyTasks,
-		contracts: table.clientSecondaryEmail.notifyContracts
-	} as const;
-
+	// Read all secondary contacts and resolve their access flags. The category
+	// flag (invoices/tasks/contracts) gates whether they receive this notification.
+	// Falls back to legacy notify* columns when access_flags is NULL.
+	const { resolveAccessFlags } = await import('./portal-access');
 	const secondaryEmails = await db
-		.select({ email: table.clientSecondaryEmail.email, label: table.clientSecondaryEmail.label })
+		.select({
+			email: table.clientSecondaryEmail.email,
+			label: table.clientSecondaryEmail.label,
+			accessFlags: table.clientSecondaryEmail.accessFlags,
+			notifyInvoices: table.clientSecondaryEmail.notifyInvoices,
+			notifyTasks: table.clientSecondaryEmail.notifyTasks,
+			notifyContracts: table.clientSecondaryEmail.notifyContracts
+		})
 		.from(table.clientSecondaryEmail)
-		.where(
-			and(
-				eq(table.clientSecondaryEmail.clientId, clientId),
-				eq(columnMap[category], true)
-			)
-		);
+		.where(eq(table.clientSecondaryEmail.clientId, clientId));
 
 	for (const se of secondaryEmails) {
+		const flags = resolveAccessFlags({ isPrimary: false, secondaryEmail: se });
+		if (!flags[category]) continue;
 		if (se.email && !recipients.map((r) => r.email.toLowerCase()).includes(se.email.toLowerCase())) {
 			recipients.push({ email: se.email, name: se.label || null });
 		}

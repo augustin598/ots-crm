@@ -17,7 +17,7 @@
 		getClientSecondaryEmails,
 		createClientSecondaryEmail,
 		deleteClientSecondaryEmail,
-		updateClientSecondaryEmailNotifications
+		updateClientSecondaryEmailAccess
 	} from '$lib/remotes/client-secondary-emails.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
 	import { goto } from '$app/navigation';
@@ -120,22 +120,43 @@
 		}
 	}
 
-	async function handleToggleNotification(
+	type AccessCategory =
+		| 'invoices' | 'contracts' | 'tasks'
+		| 'marketing' | 'reports' | 'leads'
+		| 'accessData' | 'backlinks' | 'budgets';
+
+	const ACCESS_CHIPS: { key: AccessCategory; label: string }[] = [
+		{ key: 'invoices', label: 'Facturi' },
+		{ key: 'contracts', label: 'Contracte' },
+		{ key: 'tasks', label: 'Taskuri' },
+		{ key: 'marketing', label: 'Marketing' },
+		{ key: 'reports', label: 'Reports' },
+		{ key: 'leads', label: 'Leads' },
+		{ key: 'accessData', label: 'Date acces' },
+		{ key: 'backlinks', label: 'Backlinks' },
+		{ key: 'budgets', label: 'Bugete' }
+	];
+
+	async function handleToggleAccess(
 		secondaryEmailId: string,
-		field: 'notifyInvoices' | 'notifyTasks' | 'notifyContracts',
+		category: AccessCategory,
 		value: boolean
 	) {
 		const se = secondaryEmails.find((s: any) => s.id === secondaryEmailId);
 		if (!se) return;
+		const current = se.accessFlagsResolved ?? {
+			invoices: false, contracts: false, tasks: false,
+			marketing: false, reports: false, leads: false,
+			accessData: false, backlinks: false, budgets: false
+		};
+		const next = { ...current, [category]: value };
 		try {
-			await updateClientSecondaryEmailNotifications({
+			await updateClientSecondaryEmailAccess({
 				secondaryEmailId,
-				notifyInvoices: field === 'notifyInvoices' ? value : (se.notifyInvoices ?? false),
-				notifyTasks: field === 'notifyTasks' ? value : (se.notifyTasks ?? false),
-				notifyContracts: field === 'notifyContracts' ? value : (se.notifyContracts ?? false)
+				accessFlags: next
 			}).updates(secondaryEmailsQuery);
 		} catch (e) {
-			clientLogger.apiError('client_toggle_notification', e);
+			clientLogger.apiError('client_toggle_access', e);
 		}
 	}
 
@@ -435,32 +456,19 @@
 													<TrashIcon class="h-3.5 w-3.5" />
 												</Button>
 											</div>
-											<div class="flex items-center gap-1.5 mt-2">
-												<span class="text-[10px] text-muted-foreground mr-0.5">Notificări:</span>
-												<button
-													type="button"
-													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyInvoices ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
-													onclick={() => handleToggleNotification(se.id, 'notifyInvoices', !se.notifyInvoices)}
-												>
-													{#if se.notifyInvoices}<CheckIcon class="h-3 w-3" />{/if}
-													Facturi
-												</button>
-												<button
-													type="button"
-													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyTasks ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
-													onclick={() => handleToggleNotification(se.id, 'notifyTasks', !se.notifyTasks)}
-												>
-													{#if se.notifyTasks}<CheckIcon class="h-3 w-3" />{/if}
-													Taskuri
-												</button>
-												<button
-													type="button"
-													class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {se.notifyContracts ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
-													onclick={() => handleToggleNotification(se.id, 'notifyContracts', !se.notifyContracts)}
-												>
-													{#if se.notifyContracts}<CheckIcon class="h-3 w-3" />{/if}
-													Contracte
-												</button>
+											<div class="flex items-start gap-1.5 mt-2 flex-wrap">
+												<span class="text-[10px] text-muted-foreground mr-0.5 mt-0.5">Acces:</span>
+												{#each ACCESS_CHIPS as chip (chip.key)}
+													{@const active = se.accessFlagsResolved?.[chip.key] ?? false}
+													<button
+														type="button"
+														class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {active ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
+														onclick={() => handleToggleAccess(se.id, chip.key, !active)}
+													>
+														{#if active}<CheckIcon class="h-3 w-3" />{/if}
+														{chip.label}
+													</button>
+												{/each}
 											</div>
 										</div>
 									{/each}
@@ -507,7 +515,7 @@
 							{/if}
 
 							<p class="text-xs text-muted-foreground">
-								Emailul principal primește toate notificările. Bifați categoriile dorite pentru emailurile secundare.
+								Bifați paginile pe care fiecare contact secundar le poate vedea în portal. Notificările (Facturi, Taskuri, Contracte) se trimit doar dacă acea categorie e bifată. Contactul principal are acces complet automat.
 							</p>
 						</div>
 

@@ -1534,6 +1534,13 @@
       "when": 1777950002000,
       "tag": "0218_client_cui_per_tenant_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "6",
+      "when": 1777950003000,
+      "tag": "0219_client_secondary_email_access_flags",
+      "breakpoints": true
     }
   ]
 }
