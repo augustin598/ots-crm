@@ -7,6 +7,8 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { fly } from 'svelte/transition';
+	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 
 	let {
 		step,
@@ -27,10 +29,40 @@
 	const progress = $derived(((currentIndex + 1) / totalSteps) * 100);
 	const isFirst = $derived(currentIndex === 0);
 	const isLast = $derived(currentIndex === totalSteps - 1);
+
+	const CARD_HEIGHT_ESTIMATE = 280;
+	const VIEWPORT_PADDING = 16;
+
+	let anchorTop = $state<number | null>(null);
+
+	function computeAnchor() {
+		if (!browser) return;
+		const el = document.querySelector(`[data-sidebar-id="${step.sidebarKey}"]`);
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		const center = rect.top + rect.height / 2;
+		const minTop = VIEWPORT_PADDING + CARD_HEIGHT_ESTIMATE / 2;
+		const maxTop = window.innerHeight - VIEWPORT_PADDING - CARD_HEIGHT_ESTIMATE / 2;
+		anchorTop = Math.max(minTop, Math.min(maxTop, center));
+	}
+
+	$effect(() => {
+		// Recompute when the step changes
+		void step.sidebarKey;
+		computeAnchor();
+	});
+
+	onMount(() => {
+		computeAnchor();
+		const onResize = () => computeAnchor();
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
+	});
 </script>
 
 <div
-	class="fixed left-[var(--sidebar-width,16rem)] top-1/3 z-50 ml-6 w-80"
+	class="fixed left-[var(--sidebar-width,16rem)] z-50 ml-6 w-80 -translate-y-1/2"
+	style:top={anchorTop !== null ? `${anchorTop}px` : '33vh'}
 	transition:fly={{ x: -20, duration: 250 }}
 >
 	<Card class="shadow-xl border-primary/20">

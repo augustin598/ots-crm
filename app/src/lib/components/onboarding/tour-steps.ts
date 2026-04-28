@@ -16,6 +16,13 @@ const ALL_STEPS: TourStep[] = [
 		description: 'Aici ai o privire de ansamblu: task-uri active, facturi recente și contracte.'
 	},
 	{
+		id: 'services',
+		path: 'services',
+		sidebarKey: 'services',
+		title: 'Servicii & Oferte',
+		description: 'Răsfoiește serviciile și ofertele disponibile pentru contul tău.'
+	},
+	{
 		id: 'tasks',
 		path: 'tasks',
 		sidebarKey: 'tasks',
