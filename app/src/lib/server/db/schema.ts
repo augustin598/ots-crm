@@ -1627,6 +1627,8 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	lastAlertEmailAt: timestamp('last_alert_email_at', { withTimezone: true, mode: 'date' }), // throttle re-alerts to 24h
 	alertMutedAtStatus: text('alert_muted_at_status'), // admin-muted while current status == this; auto-unmutes on status change
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
+	// When a client has multiple accounts, this flags the default one for campaign creation.
+	isPrimary: boolean('is_primary').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

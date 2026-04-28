@@ -1555,6 +1555,13 @@
       "when": 1777950005000,
       "tag": "0221_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "6",
+      "when": 1777406733014,
+      "tag": "0222_meta_ads_account_is_primary",
+      "breakpoints": true
     }
   ]
 }
