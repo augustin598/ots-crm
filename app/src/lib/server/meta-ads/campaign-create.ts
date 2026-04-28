@@ -138,19 +138,72 @@ async function metaDelete(
 	accessToken: string,
 	appSecret: string,
 	timeoutMs = 30_000
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
 	const proof = generateAppSecretProof(accessToken, appSecret);
 	const params = new URLSearchParams({ access_token: accessToken, appsecret_proof: proof });
 	try {
-		await fetch(`${META_GRAPH_URL}/${entityId}?${params.toString()}`, {
+		const res = await fetch(`${META_GRAPH_URL}/${entityId}?${params.toString()}`, {
 			method: 'DELETE',
 			signal: AbortSignal.timeout(timeoutMs)
 		});
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok || data?.error) {
+			const message = data?.error?.message || `HTTP ${res.status}`;
+			logWarning('meta-ads', 'Rollback DELETE failed (continuing)', {
+				metadata: { entityId, error: message }
+			});
+			return { ok: false, error: message };
+		}
+		return { ok: true };
 	} catch (err) {
+		const error = err instanceof Error ? err.message : String(err);
 		logWarning('meta-ads', 'Rollback DELETE failed (continuing)', {
-			metadata: { entityId, error: err instanceof Error ? err.message : String(err) }
+			metadata: { entityId, error }
 		});
+		return { ok: false, error };
 	}
+}
+
+/**
+ * Delete the 4 Meta entities for a campaign in reverse order (ad → creative
+ * → adset → campaign). Best-effort — failures are logged but don't throw.
+ * Returns a summary so callers can audit which IDs were actually removed.
+ */
+export async function deleteMetaCampaignEntities(
+	externalIds: {
+		campaignId: string | null;
+		adsetId: string | null;
+		creativeId: string | null;
+		adId: string | null;
+	},
+	accessToken: string,
+	appSecret: string
+): Promise<{
+	deleted: string[];
+	failed: Array<{ id: string; kind: 'campaign' | 'adset' | 'creative' | 'ad'; error: string }>;
+}> {
+	const deleted: string[] = [];
+	const failed: Array<{
+		id: string;
+		kind: 'campaign' | 'adset' | 'creative' | 'ad';
+		error: string;
+	}> = [];
+
+	const order: Array<['ad' | 'creative' | 'adset' | 'campaign', string | null]> = [
+		['ad', externalIds.adId],
+		['creative', externalIds.creativeId],
+		['adset', externalIds.adsetId],
+		['campaign', externalIds.campaignId]
+	];
+
+	for (const [kind, id] of order) {
+		if (!id) continue;
+		const r = await metaDelete(id, accessToken, appSecret);
+		if (r.ok) deleted.push(id);
+		else failed.push({ id, kind, error: r.error ?? 'unknown' });
+	}
+
+	return { deleted, failed };
 }
 
 function classifyResponse(

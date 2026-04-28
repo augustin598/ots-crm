@@ -166,11 +166,34 @@
 										>Aprobă</button
 									>
 								</form>
+								<form
+									method="POST"
+									action="?/patch"
+									use:enhance
+									onsubmit={(e) => {
+										if (
+											!confirm(
+												'Respinge și șterge entitățile din Meta? (campaign + adset + creative + ad). Acțiunea nu poate fi anulată.'
+											)
+										)
+											e.preventDefault();
+									}}
+								>
+									<input type="hidden" name="id" value={c.id} />
+									<input type="hidden" name="action" value="archive" />
+									<input type="hidden" name="deleteFromPlatform" value="1" />
+									<button
+										class="bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1 rounded text-sm w-full"
+										title="Marchează archived în CRM ȘI șterge entitățile din Meta">Respinge + curăță Meta</button
+									>
+								</form>
 								<form method="POST" action="?/patch" use:enhance>
 									<input type="hidden" name="id" value={c.id} />
 									<input type="hidden" name="action" value="archive" />
-									<button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm w-full"
-										>Respinge</button
+									<button
+										class="bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded text-xs w-full text-gray-700"
+										title="Doar archived în CRM; entitățile rămân PAUSED în Meta"
+										>Respinge (păstrează în Meta)</button
 									>
 								</form>
 							{:else if c.status === 'active'}

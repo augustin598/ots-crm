@@ -85,6 +85,7 @@ export const actions: Actions = {
 		const formData = await event.request.formData();
 		const id = String(formData.get('id') ?? '');
 		const action = String(formData.get('action') ?? '') as CampaignAction;
+		const deleteFromPlatform = formData.get('deleteFromPlatform') === '1';
 
 		if (!id || !['approve', 'pause', 'archive'].includes(action)) {
 			return fail(400, { error: 'invalid_input' });
@@ -94,7 +95,8 @@ export const actions: Actions = {
 			campaignId: id,
 			tenantId,
 			action,
-			actor: { type: 'user', id: event.locals.user.id, userId: event.locals.user.id }
+			actor: { type: 'user', id: event.locals.user.id, userId: event.locals.user.id },
+			deleteFromPlatform: action === 'archive' ? deleteFromPlatform : false
 		});
 
 		if (result.status >= 400) {

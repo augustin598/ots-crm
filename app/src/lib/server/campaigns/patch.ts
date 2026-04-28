@@ -7,6 +7,7 @@ import { logError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { toggleCampaignStatus } from '$lib/server/meta-ads/client';
+import { deleteMetaCampaignEntities } from '$lib/server/meta-ads/campaign-create';
 
 // =============================================================================
 // Campaign mutations: approve | pause | archive
@@ -32,6 +33,11 @@ export interface PatchResult {
 		message?: string;
 		id?: string;
 		status?: table.CampaignStatus;
+		/** Populated when archive ran with deleteFromPlatform=true. */
+		platformCleanup?: {
+			deleted: string[];
+			failed: Array<{ id: string; kind: 'campaign' | 'adset' | 'creative' | 'ad'; error: string }>;
+		};
 	};
 }
 
@@ -44,6 +50,10 @@ export async function applyCampaignAction(input: {
 	tenantId: string;
 	action: CampaignAction;
 	actor: PatchActor;
+	/** Only honored when action='archive'. DELETEs the 4 Meta entities in
+	 *  reverse order (ad → creative → adset → campaign). Best-effort —
+	 *  per-entity failures are reported but don't fail the archive. */
+	deleteFromPlatform?: boolean;
 }): Promise<PatchResult> {
 	const [row] = await db
 		.select()
@@ -83,6 +93,48 @@ export async function applyCampaignAction(input: {
 
 	if (input.action === 'archive') {
 		const now = new Date();
+		let platformCleanup: PatchResult['body']['platformCleanup'];
+
+		if (input.deleteFromPlatform && row.externalCampaignId) {
+			const [adAccount] = await db
+				.select({ integrationId: table.metaAdsAccount.integrationId })
+				.from(table.metaAdsAccount)
+				.where(
+					and(
+						eq(table.metaAdsAccount.tenantId, input.tenantId),
+						eq(table.metaAdsAccount.metaAdAccountId, row.externalAdAccountId ?? '')
+					)
+				)
+				.limit(1);
+			const tokenInfo = adAccount ? await getAuthenticatedToken(adAccount.integrationId) : null;
+			const appSecret = env.META_APP_SECRET;
+			if (tokenInfo && appSecret) {
+				platformCleanup = await deleteMetaCampaignEntities(
+					{
+						campaignId: row.externalCampaignId,
+						adsetId: row.externalAdsetId,
+						creativeId: row.externalCreativeId,
+						adId: row.externalAdId
+					},
+					tokenInfo.accessToken,
+					appSecret
+				);
+			} else {
+				platformCleanup = {
+					deleted: [],
+					failed: [
+						{
+							id: row.externalCampaignId,
+							kind: 'campaign',
+							error: tokenInfo
+								? 'app_secret_missing'
+								: 'token_unavailable — campaign archived in CRM only'
+						}
+					]
+				};
+			}
+		}
+
 		await db
 			.update(table.campaign)
 			.set({ status: 'archived', updatedAt: now })
@@ -92,9 +144,16 @@ export async function applyCampaignAction(input: {
 			tenantId: input.tenantId,
 			action: 'archived',
 			actor: input.actor,
-			payload: { from: currentStatus }
+			payload: {
+				from: currentStatus,
+				deleteFromPlatform: Boolean(input.deleteFromPlatform),
+				platformCleanup: platformCleanup ?? null
+			}
 		});
-		return { status: 200, body: { id: input.campaignId, status: 'archived' } };
+		return {
+			status: 200,
+			body: { id: input.campaignId, status: 'archived', platformCleanup }
+		};
 	}
 
 	// approve / pause both call Meta toggleCampaignStatus

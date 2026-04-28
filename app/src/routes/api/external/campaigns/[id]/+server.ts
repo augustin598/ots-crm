@@ -66,6 +66,7 @@ export const PATCH: RequestHandler = (event) =>
 		const body = (await event.request.json().catch(() => null)) as {
 			action?: CampaignAction;
 			userId?: string;
+			deleteFromPlatform?: boolean;
 		} | null;
 		if (!body || !body.action || !['approve', 'pause', 'archive'].includes(body.action)) {
 			return {
@@ -78,7 +79,8 @@ export const PATCH: RequestHandler = (event) =>
 			campaignId: id,
 			tenantId: ctx.tenantId,
 			action: body.action,
-			actor: { type: 'api_key', id: ctx.apiKeyId, apiKeyId: ctx.apiKeyId, userId: body.userId }
+			actor: { type: 'api_key', id: ctx.apiKeyId, apiKeyId: ctx.apiKeyId, userId: body.userId },
+			deleteFromPlatform: body.deleteFromPlatform === true
 		});
 
 		return { status: result.status, body: result.body };
