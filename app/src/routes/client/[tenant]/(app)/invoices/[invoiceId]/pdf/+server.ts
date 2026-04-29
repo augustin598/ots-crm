@@ -5,18 +5,26 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.isClientUser || !event.locals.client || !event.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	if (!event.locals.isClientUserPrimary) {
-		throw error(403, 'Access denied');
-	}
 
 	const invoiceId = event.params.invoiceId;
 	const tenantId = event.locals.tenant.id;
 	const clientId = event.locals.client.id;
+
+	// Per-user access gate. (app)/+layout.server.ts gates page routes;
+	// +server.ts endpoints must enforce explicitly (layouts don't run for them).
+	const flags = await getRequestAccessFlags({
+		tenantId,
+		clientId,
+		userEmail: event.locals.user.email,
+		isPrimary: event.locals.clientUser?.isPrimary ?? false
+	});
+	if (!flags.invoices) throw error(403, 'Nu ai acces la facturi.');
 
 	// Scope to both tenant and client so clients can only access their own invoices
 	const [invoice] = await db

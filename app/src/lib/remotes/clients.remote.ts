@@ -293,22 +293,25 @@ export const createClient = command(clientSchema, async (data) => {
 	const clientId = generateClientId();
 	const tenantId = event.locals.tenant.id;
 
-	// Validate email uniqueness within tenant
-	if (data.email) {
-		const emailLower = data.email.toLowerCase().trim();
-		const [emailTaken] = await db
-			.select({ id: table.client.id })
-			.from(table.client)
-			.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, emailLower)))
-			.limit(1);
-		if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
-
-		const [secondaryTaken] = await db
-			.select({ id: table.clientSecondaryEmail.id })
-			.from(table.clientSecondaryEmail)
-			.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, emailLower)))
-			.limit(1);
-		if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+	// Email/phone may be shared across clients (same person manages multiple
+	// companies). Uniqueness is enforced on CUI alone.
+	if (data.cui) {
+		const cuiNormalized = data.cui.trim().toLowerCase().replace(/^ro/, '');
+		if (cuiNormalized.length > 0) {
+			const [cuiTaken] = await db
+				.select({ id: table.client.id, name: table.client.name })
+				.from(table.client)
+				.where(
+					and(
+						eq(table.client.tenantId, tenantId),
+						eq(sql`lower(replace(${table.client.cui}, 'RO', ''))`, cuiNormalized)
+					)
+				)
+				.limit(1);
+			if (cuiTaken) {
+				throw new Error(`CUI deja folosit pe clientul "${cuiTaken.name}".`);
+			}
+		}
 	}
 
 	await db.insert(table.client).values({
@@ -381,21 +384,27 @@ export const updateClient = command(
 		const newEmail = (rest.email || '').toLowerCase().trim();
 		const emailChanged = oldEmail !== newEmail && oldEmail !== '';
 
-		// Validate email uniqueness within tenant
-		if (newEmail && newEmail !== oldEmail) {
-			const [emailTaken] = await db
-				.select({ id: table.client.id })
-				.from(table.client)
-				.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, newEmail), ne(table.client.id, clientId)))
-				.limit(1);
-			if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
-
-			const [secondaryTaken] = await db
-				.select({ id: table.clientSecondaryEmail.id })
-				.from(table.clientSecondaryEmail)
-				.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, newEmail)))
-				.limit(1);
-			if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+		// Email/phone may be shared across clients (same person manages multiple
+		// companies). Uniqueness is enforced on CUI alone.
+		const newCui = (rest.cui || '').toString();
+		if (newCui) {
+			const cuiNormalized = newCui.trim().toLowerCase().replace(/^ro/, '');
+			if (cuiNormalized.length > 0) {
+				const [cuiTaken] = await db
+					.select({ id: table.client.id, name: table.client.name })
+					.from(table.client)
+					.where(
+						and(
+							eq(table.client.tenantId, tenantId),
+							eq(sql`lower(replace(${table.client.cui}, 'RO', ''))`, cuiNormalized),
+							ne(table.client.id, clientId)
+						)
+					)
+					.limit(1);
+				if (cuiTaken) {
+					throw new Error(`CUI deja folosit pe clientul "${cuiTaken.name}".`);
+				}
+			}
 		}
 
 		await db.transaction(async (tx) => {
@@ -696,30 +705,25 @@ export const updateClientCompanyData = command(clientCompanyUpdateSchema, async 
 	if (!clientId) throw new Error('Unauthorized');
 	const tenantId = event.locals.tenant.id;
 
-	// Email uniqueness check
-	const newEmail = (data.email || '').toLowerCase().trim();
-	if (newEmail) {
-		const [existing] = await db
-			.select({ id: table.client.id, email: table.client.email })
-			.from(table.client)
-			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
-			.limit(1);
-
-		const oldEmail = (existing?.email || '').toLowerCase().trim();
-		if (newEmail !== oldEmail) {
-			const [emailTaken] = await db
-				.select({ id: table.client.id })
+	// Email/phone may be shared across clients. Uniqueness is enforced on CUI alone.
+	const newCui = (data.cui || '').toString();
+	if (newCui) {
+		const cuiNormalized = newCui.trim().toLowerCase().replace(/^ro/, '');
+		if (cuiNormalized.length > 0) {
+			const [cuiTaken] = await db
+				.select({ id: table.client.id, name: table.client.name })
 				.from(table.client)
-				.where(and(eq(table.client.tenantId, tenantId), eq(sql`lower(${table.client.email})`, newEmail), ne(table.client.id, clientId)))
+				.where(
+					and(
+						eq(table.client.tenantId, tenantId),
+						eq(sql`lower(replace(${table.client.cui}, 'RO', ''))`, cuiNormalized),
+						ne(table.client.id, clientId)
+					)
+				)
 				.limit(1);
-			if (emailTaken) throw new Error('Acest email este deja asociat altui client.');
-
-			const [secondaryTaken] = await db
-				.select({ id: table.clientSecondaryEmail.id })
-				.from(table.clientSecondaryEmail)
-				.where(and(eq(table.clientSecondaryEmail.tenantId, tenantId), eq(sql`lower(${table.clientSecondaryEmail.email})`, newEmail)))
-				.limit(1);
-			if (secondaryTaken) throw new Error('Acest email este deja folosit ca email secundar.');
+			if (cuiTaken) {
+				throw new Error(`CUI deja folosit pe clientul "${cuiTaken.name}".`);
+			}
 		}
 	}
 

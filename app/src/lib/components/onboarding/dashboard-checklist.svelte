@@ -78,7 +78,7 @@
 				>
 					{#if done}
 						<CheckCircle2Icon class="size-4 shrink-0 text-emerald-500" />
-						<span class="flex-1 truncate text-sm text-zinc-400 line-through">{item.label}</span>
+						<span class="flex-1 truncate text-sm text-zinc-500">{item.label}</span>
 					{:else}
 						<CircleIcon class="size-4 shrink-0 text-zinc-300" />
 						<span class="flex-1 truncate text-sm font-medium text-zinc-900">{item.label}</span>

@@ -4,7 +4,7 @@
 	import RangeCalendarCell from "./range-calendar-cell.svelte";
 	import RangeCalendarDay from "./range-calendar-day.svelte";
 	import { cn, type WithoutChildrenOrChild } from "$lib/utils.js";
-	import type { ButtonVariant } from "$lib/components/ui/button/button.svelte";
+	import type { ButtonVariant } from "$lib/components/ui/button/button-variants";
 	import { isEqualMonth, type DateValue } from "@internationalized/date";
 
 	let {

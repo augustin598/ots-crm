@@ -4,7 +4,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { eq } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 
-type EmailType =
+export type EmailType =
 	| 'invitation'
 	| 'invoice'
 	| 'magic-link'
@@ -18,7 +18,11 @@ type EmailType =
 	| 'contract-signing'
 	| 'invoice-paid'
 	| 'invoice-overdue-reminder'
-	| 'notification_alert';
+	| 'notification_alert'
+	| 'report'
+	| 'ad_payment_alert'
+	| 'ad_payment_digest'
+	| 'package-request';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

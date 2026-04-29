@@ -1149,6 +1149,9 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 	notifyInvoices: boolean('notify_invoices').notNull().default(false),
 	notifyTasks: boolean('notify_tasks').notNull().default(false),
 	notifyContracts: boolean('notify_contracts').notNull().default(false),
+	// JSON-serialized AccessFlags. NULL = no portal access; falls back to notify*
+	// columns for backward compat until backfill runs. See lib/server/portal-access.ts.
+	accessFlags: text('access_flags'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1291,6 +1294,7 @@ export const clientUser = sqliteTable('client_user', {
 		.notNull()
 		.references(() => tenant.id),
 	isPrimary: boolean('is_primary').notNull().default(true),
+	lastSelectedAt: timestamp('last_selected_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -1359,7 +1363,8 @@ export const magicLinkToken = sqliteTable('magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
 	email: text('email').notNull(),
-	clientId: text('client_id').references(() => client.id), // Nullable for initial signup
+	clientId: text('client_id').references(() => client.id), // Legacy single-client; kept for backward compat
+	matchedClientIds: text('matched_client_ids'), // JSON array of client IDs snapshotted at request time (multi-company)
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
@@ -1622,6 +1627,8 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	lastAlertEmailAt: timestamp('last_alert_email_at', { withTimezone: true, mode: 'date' }), // throttle re-alerts to 24h
 	alertMutedAtStatus: text('alert_muted_at_status'), // admin-muted while current status == this; auto-unmutes on status change
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
+	// When a client has multiple accounts, this flags the default one for campaign creation.
+	isPrimary: boolean('is_primary').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -4025,3 +4032,411 @@ export const whmcsTransactionSyncRelations = relations(whmcsTransactionSync, ({ 
 		references: [tenant.id]
 	})
 }));
+
+// =============================================================================
+// External API key auth — for autonomous workers (PersonalOPS) calling CRM
+// =============================================================================
+
+export const apiKey = sqliteTable(
+	'api_key',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		name: text('name').notNull(),
+		keyPrefix: text('key_prefix').notNull(), // first 12 chars of plaintext, display only
+		keyHash: text('key_hash').notNull(), // SHA-256 hex of full plaintext
+		scopes: text('scopes').notNull().default('[]'), // JSON array, e.g. ["campaigns:write","campaigns:read"]
+		createdByUserId: text('created_by_user_id')
+			.notNull()
+			.references(() => user.id),
+		lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
+		revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		hashIdx: uniqueIndex('api_key_hash_uidx').on(t.keyHash),
+		tenantIdx: index('api_key_tenant_idx').on(t.tenantId)
+	})
+);
+
+// =============================================================================
+// Campaigns — created by workers as drafts (PAUSED), approved by humans
+// =============================================================================
+
+// Resumable state machine for the 4-step Meta create flow
+//   none → campaign → adset → creative → ad → done
+// On any partial failure, the worker retries with the same Idempotency-Key,
+// and the CRM resumes from the last completed step. On permanent failure,
+// the CRM compensates by deleting any orphan Meta entities (in reverse order).
+export const campaign = sqliteTable(
+	'campaign',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull(), // 'meta' | 'tiktok' | 'google'
+		status: text('status').notNull().default('draft'),
+		// status: 'draft' | 'building' | 'pending_approval' | 'active' | 'paused' | 'archived' | 'failed'
+		buildStep: text('build_step').notNull().default('none'),
+		// buildStep: 'none' | 'campaign' | 'adset' | 'creative' | 'ad' | 'done'
+		buildAttempts: integer('build_attempts').notNull().default(0),
+		externalCampaignId: text('external_campaign_id'),
+		externalAdsetId: text('external_adset_id'),
+		externalCreativeId: text('external_creative_id'),
+		externalAdId: text('external_ad_id'),
+		externalAdAccountId: text('external_ad_account_id'),
+		name: text('name').notNull(),
+		objective: text('objective').notNull(),
+		budgetType: text('budget_type').notNull(), // 'daily' | 'lifetime'
+		budgetCents: integer('budget_cents').notNull(),
+		currencyCode: text('currency_code').notNull().default('RON'),
+		audienceJson: text('audience_json').notNull().default('{}'),
+		creativeJson: text('creative_json').notNull().default('{}'),
+		briefJson: text('brief_json').notNull().default('{}'), // PII-redacted
+		createdByWorkerId: text('created_by_worker_id'),
+		createdByApiKeyId: text('created_by_api_key_id').references(() => apiKey.id),
+		approvedByUserId: text('approved_by_user_id').references(() => user.id),
+		approvedAt: timestamp('approved_at', { withTimezone: true, mode: 'date' }),
+		pausedByUserId: text('paused_by_user_id').references(() => user.id),
+		pausedAt: timestamp('paused_at', { withTimezone: true, mode: 'date' }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantStatusIdx: index('campaign_tenant_status_idx').on(t.tenantId, t.status),
+		clientIdx: index('campaign_client_idx').on(t.clientId),
+		externalIdx: uniqueIndex('campaign_external_uidx').on(t.platform, t.externalCampaignId)
+	})
+);
+
+// Audit trail for state transitions only (not reads).
+// Actions: 'draft.created' | 'build.step' | 'build.failed' | 'build.rolled_back'
+//        | 'approved' | 'paused' | 'archived' | 'platform.error'
+export const campaignAudit = sqliteTable(
+	'campaign_audit',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		campaignId: text('campaign_id')
+			.notNull()
+			.references(() => campaign.id, { onDelete: 'cascade' }),
+		action: text('action').notNull(),
+		actorType: text('actor_type').notNull(), // 'api_key' | 'user' | 'system'
+		actorId: text('actor_id').notNull(),
+		payloadJson: text('payload_json').notNull().default('{}'),
+		errorMessage: text('error_message'),
+		at: timestamp('at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		campaignIdx: index('campaign_audit_campaign_idx').on(t.campaignId, t.at)
+	})
+);
+
+// Idempotency replay store — caches the response for an Idempotency-Key for 7 days.
+// responseStatus = 0 means "in-flight" — concurrent retries block on the lock.
+export const campaignIdempotency = sqliteTable(
+	'campaign_idempotency',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		idempotencyKey: text('idempotency_key').notNull(),
+		apiKeyId: text('api_key_id')
+			.notNull()
+			.references(() => apiKey.id),
+		responseStatus: integer('response_status').notNull().default(0),
+		responseJson: text('response_json').notNull().default('{}'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+	},
+	(t) => ({
+		tenantKeyIdx: uniqueIndex('campaign_idem_tenant_key_uidx').on(t.tenantId, t.idempotencyKey)
+	})
+);
+
+// Cached Meta targetingsearch results — anti-hallucination for workers.
+// Workers MUST pick interest/location/behavior IDs from this list, never invent them.
+export const metaTargetingCache = sqliteTable(
+	'meta_targeting_cache',
+	{
+		id: text('id').primaryKey(),
+		type: text('type').notNull(), // 'interests' | 'locations' | 'behaviors' | 'demographics'
+		query: text('query').notNull(),
+		payloadJson: text('payload_json').notNull(),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
+	},
+	(t) => ({
+		typeQueryIdx: uniqueIndex('meta_targeting_cache_type_query_uidx').on(t.type, t.query)
+	})
+);
+
+// Relations
+export const apiKeyRelations = relations(apiKey, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [apiKey.tenantId],
+		references: [tenant.id]
+	}),
+	createdBy: one(user, {
+		fields: [apiKey.createdByUserId],
+		references: [user.id]
+	}),
+	campaigns: many(campaign),
+	idempotencyEntries: many(campaignIdempotency)
+}));
+
+export const campaignRelations = relations(campaign, ({ one, many }) => ({
+	tenant: one(tenant, {
+		fields: [campaign.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [campaign.clientId],
+		references: [client.id]
+	}),
+	createdByApiKey: one(apiKey, {
+		fields: [campaign.createdByApiKeyId],
+		references: [apiKey.id]
+	}),
+	approvedBy: one(user, {
+		fields: [campaign.approvedByUserId],
+		references: [user.id],
+		relationName: 'campaignApprovedBy'
+	}),
+	pausedBy: one(user, {
+		fields: [campaign.pausedByUserId],
+		references: [user.id],
+		relationName: 'campaignPausedBy'
+	}),
+	auditLog: many(campaignAudit)
+}));
+
+export const campaignAuditRelations = relations(campaignAudit, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [campaignAudit.tenantId],
+		references: [tenant.id]
+	}),
+	campaign: one(campaign, {
+		fields: [campaignAudit.campaignId],
+		references: [campaign.id]
+	})
+}));
+
+export const campaignIdempotencyRelations = relations(campaignIdempotency, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [campaignIdempotency.tenantId],
+		references: [tenant.id]
+	}),
+	apiKey: one(apiKey, {
+		fields: [campaignIdempotency.apiKeyId],
+		references: [apiKey.id]
+	})
+}));
+
+// Types
+export type ApiKey = typeof apiKey.$inferSelect;
+export type NewApiKey = typeof apiKey.$inferInsert;
+export type Campaign = typeof campaign.$inferSelect;
+export type NewCampaign = typeof campaign.$inferInsert;
+export type CampaignAudit = typeof campaignAudit.$inferSelect;
+export type NewCampaignAudit = typeof campaignAudit.$inferInsert;
+export type CampaignIdempotency = typeof campaignIdempotency.$inferSelect;
+export type NewCampaignIdempotency = typeof campaignIdempotency.$inferInsert;
+export type MetaTargetingCache = typeof metaTargetingCache.$inferSelect;
+export type NewMetaTargetingCache = typeof metaTargetingCache.$inferInsert;
+
+export const CAMPAIGN_STATUSES = [
+	'draft',
+	'building',
+	'pending_approval',
+	'active',
+	'paused',
+	'archived',
+	'failed'
+] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+
+export const CAMPAIGN_BUILD_STEPS = ['none', 'campaign', 'adset', 'creative', 'ad', 'done'] as const;
+export type CampaignBuildStep = (typeof CAMPAIGN_BUILD_STEPS)[number];
+
+export const API_KEY_SCOPES = [
+	'campaigns:read',
+	'campaigns:write',
+	'clients:read',
+	'integrations:read'
+] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ads Monitoring (MVP — Meta only) — Performance target tracking + alerting
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Per-campaign performance targets (CPL/CPA/ROAS/CTR + daily budget)
+export const adMonitorTarget = sqliteTable(
+	'ad_monitor_target',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull().default('meta'), // 'meta' | 'google' | 'tiktok'
+		externalCampaignId: text('external_campaign_id').notNull(),
+		externalAdsetId: text('external_adset_id'), // nullable — campaign-level by default
+		objective: text('objective').notNull(), // OUTCOME_LEADS | OUTCOME_SALES | ...
+		// Targets (any may be null — alert only on populated metrics)
+		targetCplCents: integer('target_cpl_cents'),
+		targetCpaCents: integer('target_cpa_cents'),
+		targetRoas: real('target_roas'),
+		targetCtr: real('target_ctr'),
+		targetDailyBudgetCents: integer('target_daily_budget_cents'),
+		deviationThresholdPct: integer('deviation_threshold_pct').notNull().default(20),
+		isActive: boolean('is_active').notNull().default(true),
+		isMuted: boolean('is_muted').notNull().default(false),
+		mutedUntil: timestamp('muted_until', { withTimezone: true, mode: 'date' }),
+		notifyTelegram: boolean('notify_telegram').notNull().default(true),
+		notifyEmail: boolean('notify_email').notNull().default(true),
+		notifyInApp: boolean('notify_in_app').notNull().default(true),
+		createdByUserId: text('created_by_user_id').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantActiveIdx: index('ad_monitor_target_tenant_active_idx').on(t.tenantId, t.isActive),
+		clientIdx: index('ad_monitor_target_client_idx').on(t.clientId),
+		uniqCampaignAdset: uniqueIndex('ad_monitor_target_uniq').on(
+			t.tenantId,
+			t.externalCampaignId,
+			t.externalAdsetId
+		)
+	})
+);
+
+// Daily metric snapshots per campaign/adset (90-day retention)
+export const adMetricSnapshot = sqliteTable(
+	'ad_metric_snapshot',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull().default('meta'),
+		externalCampaignId: text('external_campaign_id').notNull(),
+		externalAdsetId: text('external_adset_id'),
+		date: text('date').notNull(), // 'YYYY-MM-DD' Europe/Bucharest
+		spendCents: integer('spend_cents').notNull().default(0),
+		impressions: integer('impressions').notNull().default(0),
+		clicks: integer('clicks').notNull().default(0),
+		conversions: integer('conversions').notNull().default(0),
+		cpcCents: integer('cpc_cents'),
+		cpmCents: integer('cpm_cents'),
+		cpaCents: integer('cpa_cents'),
+		cplCents: integer('cpl_cents'),
+		ctr: real('ctr'),
+		roas: real('roas'),
+		frequency: real('frequency'),
+		// 'learning' (<7d running) | 'sparse' (<50 conv last 7d) | 'mature'
+		maturity: text('maturity').notNull().default('mature'),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniqSnapshot: uniqueIndex('ad_metric_snapshot_uniq').on(
+			t.tenantId,
+			t.externalCampaignId,
+			t.externalAdsetId,
+			t.date
+		),
+		tenantDateIdx: index('ad_metric_snapshot_tenant_date_idx').on(t.tenantId, t.date),
+		retentionIdx: index('ad_metric_snapshot_date_idx').on(t.date)
+	})
+);
+
+// Telegram chat linking — global bot, per-user pairing via /start <code>
+export const userTelegramLink = sqliteTable(
+	'user_telegram_link',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id),
+		telegramChatId: text('telegram_chat_id'), // populated after webhook /start callback
+		telegramUsername: text('telegram_username'),
+		linkCode: text('link_code').notNull(), // unique pairing code embedded in deep-link
+		linkedAt: timestamp('linked_at', { withTimezone: true, mode: 'date' }),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniqLinkCode: uniqueIndex('user_telegram_link_code_uidx').on(t.linkCode),
+		uniqUser: uniqueIndex('user_telegram_link_user_uidx').on(t.tenantId, t.userId),
+		chatIdx: index('user_telegram_link_chat_idx').on(t.telegramChatId)
+	})
+);
+
+export const adMonitorTargetRelations = relations(adMonitorTarget, ({ one }) => ({
+	tenant: one(tenant, { fields: [adMonitorTarget.tenantId], references: [tenant.id] }),
+	client: one(client, { fields: [adMonitorTarget.clientId], references: [client.id] }),
+	createdBy: one(user, {
+		fields: [adMonitorTarget.createdByUserId],
+		references: [user.id]
+	})
+}));
+
+export const adMetricSnapshotRelations = relations(adMetricSnapshot, ({ one }) => ({
+	tenant: one(tenant, { fields: [adMetricSnapshot.tenantId], references: [tenant.id] }),
+	client: one(client, { fields: [adMetricSnapshot.clientId], references: [client.id] })
+}));
+
+export const userTelegramLinkRelations = relations(userTelegramLink, ({ one }) => ({
+	tenant: one(tenant, { fields: [userTelegramLink.tenantId], references: [tenant.id] }),
+	user: one(user, { fields: [userTelegramLink.userId], references: [user.id] })
+}));
+
+export type AdMonitorTarget = typeof adMonitorTarget.$inferSelect;
+export type NewAdMonitorTarget = typeof adMonitorTarget.$inferInsert;
+export type AdMetricSnapshot = typeof adMetricSnapshot.$inferSelect;
+export type NewAdMetricSnapshot = typeof adMetricSnapshot.$inferInsert;
+export type UserTelegramLink = typeof userTelegramLink.$inferSelect;
+export type NewUserTelegramLink = typeof userTelegramLink.$inferInsert;
+
+export const AD_METRIC_MATURITY = ['learning', 'sparse', 'mature'] as const;
+export type AdMetricMaturity = (typeof AD_METRIC_MATURITY)[number];

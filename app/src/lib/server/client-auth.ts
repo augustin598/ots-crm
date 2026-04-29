@@ -2,7 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { db } from './db';
 import * as table from './db/schema';
 import * as auth from './auth';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeHexLowerCase, encodeBase32LowerCase } from '@oslojs/encoding';
 import { hash } from '@node-rs/argon2';
@@ -55,7 +55,7 @@ export async function verifyMagicLinkToken(
 	tenantSlug: string,
 	token: string,
 	event?: RequestEvent
-) {
+): Promise<{ success: true; userId: string; clientCount: number; activeClientId: string }> {
 	// Find tenant by slug
 	const [tenant] = await db
 		.select()
@@ -113,65 +113,105 @@ export async function verifyMagicLinkToken(
 		throw new Error('Invalid or expired token. Please request a new magic link.');
 	}
 
-	// Get client
-	if (!tokenRecord.clientId) {
-		throw new Error('Invalid token - no client associated');
+	// Resolve the list of client IDs the token authorizes, in priority order:
+	// 1. matchedClientIds (snapshot at request time — multi-company)
+	// 2. clientId (legacy single-client tokens)
+	let candidateIds: string[] = [];
+	if (tokenRecord.matchedClientIds) {
+		try {
+			const parsed = JSON.parse(tokenRecord.matchedClientIds);
+			if (Array.isArray(parsed)) {
+				candidateIds = parsed.filter((x): x is string => typeof x === 'string' && x.length > 0);
+			}
+		} catch {
+			// Malformed JSON — fall through to legacy clientId
+		}
+	}
+	if (candidateIds.length === 0 && tokenRecord.clientId) {
+		candidateIds = [tokenRecord.clientId];
+	}
+	if (candidateIds.length === 0) {
+		throw new Error('Invalid token - no clients associated');
 	}
 
-	const [client] = await db
+	// Re-validate against current DB state: filter to clients that still exist
+	// in this tenant and are not soft-deleted/inactive. Skips any that were
+	// removed between request and verify.
+	const validClients = await db
 		.select()
 		.from(table.client)
-		.where(eq(table.client.id, tokenRecord.clientId))
-		.limit(1);
+		.where(
+			and(
+				inArray(table.client.id, candidateIds),
+				eq(table.client.tenantId, tenant.id)
+			)
+		);
 
-	if (!client) {
-		throw new Error('Client not found');
+	if (validClients.length === 0) {
+		throw new Error('No active clients matched for this token. Please request a new magic link.');
 	}
 
-	// Determine if the login email is the primary email
-	const isPrimary = tokenRecord.email.toLowerCase() === client.email?.toLowerCase();
+	// For each client, recompute whether the login email is primary or secondary.
+	// Skip clients where the email is no longer authorized (admin removed it).
+	const normalizedEmail = tokenRecord.email.toLowerCase();
+	const authorized: { client: typeof validClients[number]; isPrimary: boolean }[] = [];
 
-	// If not primary, verify it exists as a secondary email for this client
-	if (!isPrimary) {
+	for (const cli of validClients) {
+		const isPrimary = cli.email?.toLowerCase() === normalizedEmail;
+		if (isPrimary) {
+			authorized.push({ client: cli, isPrimary: true });
+			continue;
+		}
 		const [secondary] = await db
-			.select()
+			.select({ id: table.clientSecondaryEmail.id })
 			.from(table.clientSecondaryEmail)
 			.where(
 				and(
-					eq(table.clientSecondaryEmail.clientId, client.id),
+					eq(table.clientSecondaryEmail.clientId, cli.id),
 					eq(table.clientSecondaryEmail.tenantId, tenant.id),
-					eq(sql`lower(${table.clientSecondaryEmail.email})`, tokenRecord.email.toLowerCase())
+					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
 				)
 			)
 			.limit(1);
-		if (!secondary) {
-			throw new Error('Email address no longer authorized for this client.');
+		if (secondary) {
+			authorized.push({ client: cli, isPrimary: false });
 		}
 	}
 
-	// Delegate to shared logic
+	if (authorized.length === 0) {
+		throw new Error('Email address no longer authorized for any matched client.');
+	}
+
+	// Delegate to shared logic — creates user + N clientUser rows + session
 	const result = await findOrCreateClientUserSession(
 		tenant,
-		client,
+		authorized,
 		tokenRecord.email,
-		isPrimary,
 		event
 	);
 
-	return { success: true, userId: result.userId };
+	return {
+		success: true,
+		userId: result.userId,
+		clientCount: result.clientCount,
+		activeClientId: result.activeClientId
+	};
 }
 
 /**
  * Match an email against a tenant's clients (primary + secondary),
  * then find/create user + clientUser and optionally create a session.
  * Used by both magic link verification and Google OAuth login.
+ *
+ * Returns clientCount so callers can decide whether to redirect to the
+ * /select-company page (when N>1) vs the dashboard (when N=1).
  */
 export async function findOrCreateClientSession(
 	tenantSlug: string,
 	email: string,
 	event?: RequestEvent
 ): Promise<
-	| { success: true; userId: string; clientId: string; isPrimary: boolean }
+	| { success: true; userId: string; clientCount: number; activeClientId: string }
 	| { success: false; reason: 'no-match' | 'tenant-not-found' }
 > {
 	// Find tenant by slug
@@ -187,8 +227,8 @@ export async function findOrCreateClientSession(
 
 	const normalizedEmail = email.toLowerCase();
 
-	// Try to match primary email
-	let [client] = await db
+	// Find ALL clients matching this email (primary + secondary)
+	const primaryMatches = await db
 		.select()
 		.from(table.client)
 		.where(
@@ -196,53 +236,75 @@ export async function findOrCreateClientSession(
 				eq(table.client.tenantId, tenant.id),
 				eq(sql`lower(${table.client.email})`, normalizedEmail)
 			)
-		)
-		.limit(1);
+		);
 
-	let isPrimary = !!client;
-
-	// Try secondary email if no primary match
-	if (!client) {
-		const [secondaryMatch] = await db
-			.select({ client: table.client })
-			.from(table.clientSecondaryEmail)
-			.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
-			.where(
-				and(
-					eq(table.clientSecondaryEmail.tenantId, tenant.id),
-					eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
-				)
+	const secondaryMatches = await db
+		.select({ client: table.client })
+		.from(table.clientSecondaryEmail)
+		.innerJoin(table.client, eq(table.clientSecondaryEmail.clientId, table.client.id))
+		.where(
+			and(
+				eq(table.clientSecondaryEmail.tenantId, tenant.id),
+				eq(sql`lower(${table.clientSecondaryEmail.email})`, normalizedEmail)
 			)
-			.limit(1);
+		);
 
-		if (secondaryMatch) {
-			client = secondaryMatch.client;
-			isPrimary = false;
-		}
+	const seen = new Set<string>();
+	const authorized: { client: typeof primaryMatches[number]; isPrimary: boolean }[] = [];
+	for (const cli of primaryMatches) {
+		if (seen.has(cli.id)) continue;
+		seen.add(cli.id);
+		authorized.push({ client: cli, isPrimary: true });
+	}
+	for (const sm of secondaryMatches) {
+		if (seen.has(sm.client.id)) continue;
+		seen.add(sm.client.id);
+		authorized.push({ client: sm.client, isPrimary: false });
 	}
 
-	if (!client) {
+	if (authorized.length === 0) {
 		return { success: false, reason: 'no-match' };
 	}
 
-	const result = await findOrCreateClientUserSession(tenant, client, email, isPrimary, event);
-	return { success: true, userId: result.userId, clientId: client.id, isPrimary };
+	const result = await findOrCreateClientUserSession(tenant, authorized, email, event);
+	return {
+		success: true,
+		userId: result.userId,
+		clientCount: result.clientCount,
+		activeClientId: result.activeClientId
+	};
 }
 
 /**
- * Internal: find/create user + clientUser rows and optionally create session
+ * Internal: find/create user + N clientUser rows (one per authorized client)
+ * and optionally create a session.
+ *
+ * `authorized` lists each client the email is authorized for, with whether
+ * the email is the primary one for that specific client. Each client gets
+ * its own clientUser row (idempotent — uses unique index on user/client/tenant).
+ *
+ * Returns the count of clients linked + which one is "active" right after
+ * login. Active selection rule: prefer the most recently selected
+ * (lastSelectedAt), falling back to the first authorized client. Caller
+ * decides whether to redirect to /select-company (when count > 1) or
+ * straight to /dashboard.
  */
 async function findOrCreateClientUserSession(
 	tenant: { id: string },
-	client: { id: string; name: string },
+	authorized: { client: { id: string; name: string; email: string | null }; isPrimary: boolean }[],
 	email: string,
-	isPrimary: boolean,
 	event?: RequestEvent
-): Promise<{ userId: string }> {
-	// Normalize email to lowercase to prevent duplicate user records
-	const normalizedEmail = email.toLowerCase();
+): Promise<{ userId: string; clientCount: number; activeClientId: string }> {
+	if (authorized.length === 0) {
+		throw new Error('No authorized clients provided to session helper');
+	}
 
-	// Find or create user (race-safe: INSERT...ON CONFLICT handles concurrent magic link clicks)
+	const normalizedEmail = email.toLowerCase();
+	const firstClient = authorized[0].client;
+	const firstIsPrimary = authorized[0].isPrimary;
+
+	// Find or create user (race-safe: INSERT...ON CONFLICT handles concurrent magic link clicks).
+	// User's display name is resolved from the FIRST authorized client's contact info.
 	let user = await db
 		.select()
 		.from(table.user)
@@ -253,7 +315,7 @@ async function findOrCreateClientUserSession(
 	if (!user) {
 		const emailParts = normalizedEmail.split('@');
 
-		const contactName = await resolveContactName(client.id, normalizedEmail, isPrimary);
+		const contactName = await resolveContactName(firstClient.id, normalizedEmail, firstIsPrimary);
 		const nameParts = contactName ? contactName.split(' ') : [];
 		const firstName = nameParts[0] || emailParts[0];
 		const lastName = nameParts.slice(1).join(' ') || '';
@@ -268,7 +330,6 @@ async function findOrCreateClientUserSession(
 			parallelism: 1
 		});
 
-		// Use ON CONFLICT to handle concurrent requests (e.g., multi-device magic link clicks)
 		await db.insert(table.user).values({
 			id: userId,
 			email: normalizedEmail,
@@ -277,7 +338,6 @@ async function findOrCreateClientUserSession(
 			passwordHash
 		}).onConflictDoNothing({ target: table.user.email });
 
-		// Always re-fetch by email (our insert may have been a no-op due to conflict)
 		user = await db
 			.select()
 			.from(table.user)
@@ -290,20 +350,18 @@ async function findOrCreateClientUserSession(
 		}
 	}
 
-	// Sync user name from contact label if user still has the company name
-	if (user) {
-		const contactName = await resolveContactName(client.id, normalizedEmail, isPrimary);
-
+	// Sync user display name from contact label (only if not manually edited)
+	{
+		const contactName = await resolveContactName(firstClient.id, normalizedEmail, firstIsPrimary);
 		if (contactName) {
 			const nameParts = contactName.split(' ');
 			const newFirst = nameParts[0] || '';
 			const newLast = nameParts.slice(1).join(' ') || '';
 			const currentName = `${user.firstName} ${user.lastName}`.trim();
 			const newContactName = `${newFirst} ${newLast}`.trim();
-			// Only update if name is empty, matches company name, or already matches a previous contact label
-			// This prevents overwriting names that were manually edited by admin
 			const emailPrefix = normalizedEmail.split('@')[0];
-			const isDefaultOrCompanyName = !user.firstName || currentName === client.name || currentName === emailPrefix;
+			const isDefaultOrCompanyName =
+				!user.firstName || currentName === firstClient.name || currentName === emailPrefix;
 			const isAlreadyCorrect = currentName === newContactName;
 			if (isDefaultOrCompanyName && !isAlreadyCorrect) {
 				await db
@@ -314,36 +372,74 @@ async function findOrCreateClientUserSession(
 		}
 	}
 
-	// Check if clientUser relationship already exists
-	const [existingClientUser] = await db
-		.select()
+	// Upsert one clientUser per authorized client (idempotent: unique index
+	// on user_id + client_id + tenant_id). This is what enables multi-company
+	// access for a single email.
+	for (const { client: cli, isPrimary } of authorized) {
+		const [existing] = await db
+			.select()
+			.from(table.clientUser)
+			.where(
+				and(
+					eq(table.clientUser.userId, user.id),
+					eq(table.clientUser.clientId, cli.id),
+					eq(table.clientUser.tenantId, tenant.id)
+				)
+			)
+			.limit(1);
+
+		if (existing) {
+			if (existing.isPrimary !== isPrimary) {
+				await db
+					.update(table.clientUser)
+					.set({ isPrimary, updatedAt: new Date() })
+					.where(eq(table.clientUser.id, existing.id));
+			}
+		} else {
+			const clientUserId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.clientUser).values({
+				id: clientUserId,
+				userId: user.id,
+				clientId: cli.id,
+				tenantId: tenant.id,
+				isPrimary
+			});
+		}
+	}
+
+	// Determine which client is "active" right after login. Prefer the most
+	// recently selected one (lastSelectedAt) so returning users land on the
+	// company they were last using; otherwise fall back to the first authorized.
+	const [mostRecent] = await db
+		.select({ clientId: table.clientUser.clientId })
 		.from(table.clientUser)
 		.where(
 			and(
 				eq(table.clientUser.userId, user.id),
-				eq(table.clientUser.clientId, client.id),
-				eq(table.clientUser.tenantId, tenant.id)
+				eq(table.clientUser.tenantId, tenant.id),
+				inArray(
+					table.clientUser.clientId,
+					authorized.map((a) => a.client.id)
+				)
 			)
 		)
+		.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`)
 		.limit(1);
 
-	if (existingClientUser) {
-		if (existingClientUser.isPrimary !== isPrimary) {
-			await db
-				.update(table.clientUser)
-				.set({ isPrimary, updatedAt: new Date() })
-				.where(eq(table.clientUser.id, existingClientUser.id));
-		}
-	} else {
-		const clientUserId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-		await db.insert(table.clientUser).values({
-			id: clientUserId,
-			userId: user.id,
-			clientId: client.id,
-			tenantId: tenant.id,
-			isPrimary
-		});
-	}
+	const activeClientId = mostRecent?.clientId ?? firstClient.id;
+
+	// Total clientUser count for this user/tenant determines if /select-company
+	// page should be shown. We re-query rather than use authorized.length so
+	// existing links (from previous logins on different emails) are counted too.
+	const [{ count }] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(table.clientUser)
+		.where(
+			and(
+				eq(table.clientUser.userId, user.id),
+				eq(table.clientUser.tenantId, tenant.id)
+			)
+		);
 
 	// Create session if event is provided
 	if (event) {
@@ -354,5 +450,5 @@ async function findOrCreateClientUserSession(
 		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
 	}
 
-	return { userId: user.id };
+	return { userId: user.id, clientCount: Number(count), activeClientId };
 }

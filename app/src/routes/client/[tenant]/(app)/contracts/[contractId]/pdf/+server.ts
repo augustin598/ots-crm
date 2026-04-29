@@ -5,18 +5,24 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
 import * as storage from '$lib/server/storage';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.isClientUser || !event.locals.client || !event.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	if (!event.locals.isClientUserPrimary) {
-		throw error(403, 'Access denied');
-	}
 
 	const contractId = event.params.contractId;
 	const tenantId = event.locals.tenant.id;
 	const clientId = event.locals.client.id;
+
+	const flags = await getRequestAccessFlags({
+		tenantId,
+		clientId,
+		userEmail: event.locals.user.email,
+		isPrimary: event.locals.clientUser?.isPrimary ?? false
+	});
+	if (!flags.contracts) throw error(403, 'Nu ai acces la contracte.');
 
 	// Scope to both tenant and client so clients can only access their own contracts
 	const [contract] = await db

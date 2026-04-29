@@ -32,6 +32,7 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import OnboardingTour from '$lib/components/onboarding/onboarding-tour.svelte';
+	import ClientSwitcher from '$lib/components/client/client-switcher.svelte';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
@@ -52,6 +53,9 @@
 
 	const currentPath = $derived(page.url.pathname);
 	const tenantSlug = $derived(page.params.tenant);
+	const access = $derived(data.accessFlags);
+	// The "Acces Restricționat" overlay only fires for overdue/admin_forced restrictions.
+	// Lack of per-user access is enforced server-side (403) before render — see hooks.server.ts.
 	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads'];
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
@@ -111,6 +115,7 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{#if access.tasks}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="tasks" isActive={currentPath.startsWith(`/client/${tenantSlug}/tasks`)}>
 						{#snippet child({ props })}
@@ -121,7 +126,8 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
-				{#if data.isClientUserPrimary}
+				{/if}
+				{#if access.contracts}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="contracts" isActive={currentPath.startsWith(`/client/${tenantSlug}/contracts`)}>
 						{#snippet child({ props })}
@@ -132,6 +138,8 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{/if}
+				{#if access.invoices}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="invoices" isActive={currentPath.startsWith(`/client/${tenantSlug}/invoices`)}>
 						{#snippet child({ props })}
@@ -186,7 +194,7 @@
 					{/if}
 				</SidebarMenuItem>
 				{/if}
-				{#if data.isClientUserPrimary}
+				{#if access.budgets}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="budgets" isActive={currentPath.startsWith(`/client/${tenantSlug}/budgets`)}>
 						{#snippet child({ props })}
@@ -198,6 +206,7 @@
 					</SidebarMenuButton>
 				</SidebarMenuItem>
 				{/if}
+				{#if access.marketing}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="marketing" isActive={currentPath.startsWith(`/client/${tenantSlug}/marketing`)}>
 						{#snippet child({ props })}
@@ -208,6 +217,8 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{/if}
+				{#if access.reports}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="reports" isActive={currentPath.startsWith(`/client/${tenantSlug}/reports`)}>
 						{#snippet child({ props })}
@@ -252,6 +263,8 @@
 						</SidebarMenuSub>
 					{/if}
 				</SidebarMenuItem>
+				{/if}
+				{#if access.leads}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="leads" isActive={currentPath.startsWith(`/client/${tenantSlug}/leads`)}>
 						{#snippet child({ props })}
@@ -296,6 +309,8 @@
 						</SidebarMenuSub>
 					{/if}
 				</SidebarMenuItem>
+				{/if}
+				{#if access.accessData}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="access-data" isActive={currentPath.startsWith(`/client/${tenantSlug}/access-data`)}>
 						{#snippet child({ props })}
@@ -306,6 +321,8 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{/if}
+				{#if access.backlinks}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="backlinks" isActive={currentPath.startsWith(`/client/${tenantSlug}/backlinks`)}>
 						{#snippet child({ props })}
@@ -316,6 +333,7 @@
 						{/snippet}
 					</SidebarMenuButton>
 				</SidebarMenuItem>
+				{/if}
 				<SidebarMenuItem>
 					<SidebarMenuButton data-sidebar-id="settings" isActive={currentPath.startsWith(`/client/${tenantSlug}/settings`)}>
 						{#snippet child({ props })}
@@ -352,6 +370,15 @@
 		</SidebarFooter>
 	</Sidebar>
 	<SidebarInset>
+		{#if (data.userCompanies?.length ?? 0) > 1}
+			<header class="flex items-center justify-end gap-2 border-b px-6 py-3">
+				<ClientSwitcher
+					companies={data.userCompanies ?? []}
+					activeClientId={data.client?.id ?? null}
+					tenantSlug={tenantSlug ?? ''}
+				/>
+			</header>
+		{/if}
 		<main class="flex-1 p-6">
 			{#if data.accessRestriction?.isRestricted && isRestrictedRoute}
 				<div class="relative min-h-[60vh]">

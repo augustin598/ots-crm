@@ -10,6 +10,10 @@ export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	// Authorization: must be either a client user OR a tenantUser of this tenant
+	if (!event.locals.isClientUser && !event.locals.tenantUser) {
+		throw error(403, 'Acces interzis pentru acest tenant');
+	}
 
 	const invoiceId = event.params.invoiceId;
 	const tenantId = event.locals.tenant.id;

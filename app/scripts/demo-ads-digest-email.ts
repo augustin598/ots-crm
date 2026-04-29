@@ -95,7 +95,7 @@ function renderCard(it: AdDigestItem): string {
 
 	const detailsBlock = it.details
 		? `
-			<div style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
+			<div class="ots-details" style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
 				<div style="font-size: 14px; font-weight: 700; color: ${accentDark}; letter-spacing: -0.01em;">${escapeHtml(it.details.headline)}</div>
 				<div style="font-size: 13px; color: ${accentDarker}; line-height: 1.6; margin-top: 6px;">${escapeHtml(it.details.body)}</div>
 				${deadlineLine}
@@ -119,8 +119,8 @@ function renderCard(it: AdDigestItem): string {
 	return `
 		<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; margin: 0 0 14px 0; overflow: hidden;">
 			<tr>
-				<td style="padding: 18px 20px;">
-					<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+				<td class="ots-card-inner" style="padding: 18px 20px;">
+					<table role="presentation" cellpadding="0" cellspacing="0" width="100%" class="ots-stack">
 						<tr>
 							<td style="vertical-align: top; padding-right: 12px;">
 								<div style="font-weight: 700; color: #111827; font-size: 15px; line-height: 1.3;">${escapeHtml(it.accountName)}</div>
@@ -131,7 +131,7 @@ function renderCard(it: AdDigestItem): string {
 								</div>
 								${clientLine}
 							</td>
-							<td style="vertical-align: top; text-align: right; white-space: nowrap;">
+							<td class="ots-stack-right" style="vertical-align: top; text-align: right; white-space: nowrap;">
 								<span style="display: inline-block; padding: 5px 12px; border-radius: 999px; background: ${accentBg}; color: ${accentPill}; font-size: 12px; font-weight: 600; border: 1px solid ${accentBorder};">${escapeHtml(it.statusLabelRo)}</span>
 							</td>
 						</tr>
@@ -255,42 +255,136 @@ const demoItems: AdDigestItem[] = [
 
 const cardsHtml = demoItems.map(renderCard).join('');
 
+// Single-account variant (the broken-on-mobile case from the screenshot:
+// "Sold restant 1.121,59 RON" — beonemedical.ro · Meta · Perioadă de grație).
+const singleItem = buildItem({
+	accountName: 'beonemedical.ro',
+	externalAccountId: 'act_818842774503712',
+	provider: 'meta',
+	paymentStatus: 'grace_period',
+	statusLabelRo: 'Perioadă de grație',
+	rawStatusCode: '9',
+	balanceFormatted: '1.121,59 RON',
+});
+const singleCardHtml = renderCard(singleItem);
+const singleGreeting = 'Salut George,';
+const singleIntro = `Contul tău de <strong>Meta (Facebook)</strong> <strong>beonemedical.ro</strong> este în perioadă de grație cu o factură neachitată. Sold restant: <strong>1.121,59 RON</strong>. Te rugăm să achiți cât mai repede pentru a preveni oprirea automată a reclamelor.`;
+const singleTitle = `Sold restant 1.121,59 RON`;
+const singleSubtitle = `beonemedical.ro · Meta (Facebook) · Perioadă de grație`;
+
 const greeting = 'Salut Demo,';
 const intro = `Am detectat probleme pe <strong>${demoItems.length}</strong> conturi de publicitate ale tale. Te rugăm să verifici și să rezolvi situația cât mai repede posibil.`;
 
-const bodyHtml = `
-	<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">${greeting}</p>
-	<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 24px 0;">${intro}</p>
-	${cardsHtml}
-	<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 12px 0 0 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
-`;
+// Reproduces the production renderBrandedEmail structure (mobile media query
+// + ots-* classes) so we can preview the actual responsive behaviour locally.
+function renderEmail({
+	title,
+	subtitle,
+	cardsHtml: inner,
+	greeting: g,
+	intro: i,
+}: {
+	title: string;
+	subtitle: string;
+	cardsHtml: string;
+	greeting: string;
+	intro: string;
+}): string {
+	const themeColor = '#0ea5e9';
+	const bodyHtml = `
+		<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">${g}</p>
+		<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 24px 0;">${i}</p>
+		${inner}
+		<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 12px 0 0 0;">Statusurile se vor actualiza automat în următoarele 1–2 ore după ce plata/problema este rezolvată.</p>
+	`;
+	return `<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>${title}</title>
+	<style>
+		@media only screen and (max-width: 480px) {
+			.ots-outer { padding: 16px 8px !important; }
+			.ots-card { padding: 20px 18px !important; border-radius: 8px !important; }
+			.ots-title { font-size: 18px !important; line-height: 1.25 !important; word-break: break-word; }
+			.ots-subtitle { font-size: 12px !important; line-height: 1.5 !important; }
+			.ots-stack td { display: block !important; width: 100% !important; padding: 0 !important; }
+			.ots-stack-right { text-align: left !important; padding-top: 10px !important; white-space: normal !important; }
+			.ots-card-inner { padding: 16px 16px !important; }
+			.ots-details { padding: 12px 14px !important; }
+		}
+	</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
+	<div class="ots-outer" style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+		<div class="ots-card" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
+			<h1 class="ots-title" style="color: ${themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${title}</h1>
+			<p class="ots-subtitle" style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>
+			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
+			${bodyHtml}
+		</div>
+	</div>
+</body>
+</html>`;
+}
+
+const singleEmailHtml = renderEmail({
+	title: singleTitle,
+	subtitle: singleSubtitle,
+	cardsHtml: singleCardHtml,
+	greeting: singleGreeting,
+	intro: singleIntro,
+});
+const digestEmailHtml = renderEmail({
+	title: `${demoItems.length} conturi de publicitate cu probleme`,
+	subtitle: 'Conturile tale de publicitate',
+	cardsHtml,
+	greeting,
+	intro,
+});
+
+const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
 const html = `<!doctype html>
 <html>
 <head>
 	<meta charset="utf-8">
-	<title>OTS CRM — demo digest email</title>
+	<title>OTS CRM — demo digest email (desktop + mobile)</title>
 	<style>
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 24px; }
-		.wrap { max-width: 640px; margin: 0 auto; }
-		.email-frame { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 28px 28px 32px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-		.email-header { margin-bottom: 24px; padding-bottom: 18px; border-bottom: 1px solid #e5e7eb; }
-		.email-title { font-size: 22px; font-weight: 700; color: #111827; letter-spacing: -0.01em; }
-		.email-subtitle { font-size: 14px; color: #6b7280; margin-top: 4px; }
-		.demo-note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px; color: #1e40af; font-size: 13px; }
+		h2 { font-size: 14px; color: #6b7280; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.05em; }
+		.row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 32px; }
+		.col-desktop { flex: 1 1 600px; min-width: 0; }
+		.col-mobile { flex: 0 0 375px; }
+		iframe { border: 1px solid #d1d5db; border-radius: 12px; background: #f4f5f7; box-shadow: 0 1px 3px rgba(0,0,0,0.04); display: block; }
+		.iframe-desktop { width: 100%; height: 900px; }
+		.iframe-mobile { width: 375px; height: 900px; }
+		.label { font-size: 13px; color: #374151; font-weight: 600; margin-bottom: 6px; }
 	</style>
 </head>
 <body>
-	<div class="wrap">
-		<div class="demo-note">
-			<strong>Preview demo</strong> — așa vor arăta emailurile digest de la OTS CRM cu noile statusuri TikTok și copy RO actionable.
+	<h2>Single account — grace period (the broken-on-mobile case from the screenshot)</h2>
+	<div class="row">
+		<div class="col-desktop">
+			<div class="label">Desktop (full width)</div>
+			<iframe class="iframe-desktop" srcdoc="${escapeAttr(singleEmailHtml)}"></iframe>
 		</div>
-		<div class="email-frame">
-			<div class="email-header">
-				<div class="email-title">${demoItems.length} conturi de publicitate cu probleme</div>
-				<div class="email-subtitle">Conturile tale de publicitate</div>
-			</div>
-			${bodyHtml}
+		<div class="col-mobile">
+			<div class="label">Mobile (375px)</div>
+			<iframe class="iframe-mobile" srcdoc="${escapeAttr(singleEmailHtml)}"></iframe>
+		</div>
+	</div>
+
+	<h2>Multi-account digest</h2>
+	<div class="row">
+		<div class="col-desktop">
+			<div class="label">Desktop (full width)</div>
+			<iframe class="iframe-desktop" srcdoc="${escapeAttr(digestEmailHtml)}"></iframe>
+		</div>
+		<div class="col-mobile">
+			<div class="label">Mobile (375px)</div>
+			<iframe class="iframe-mobile" srcdoc="${escapeAttr(digestEmailHtml)}"></iframe>
 		</div>
 	</div>
 </body>
