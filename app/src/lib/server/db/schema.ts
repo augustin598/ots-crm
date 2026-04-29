@@ -4324,6 +4324,17 @@ export const adMonitorTarget = sqliteTable(
 		notifyTelegram: boolean('notify_telegram').notNull().default(true),
 		notifyEmail: boolean('notify_email').notNull().default(true),
 		notifyInApp: boolean('notify_in_app').notNull().default(true),
+		// User-facing free-form notes (max 500 char enforced server-side)
+		notes: text('notes'),
+		// Worker overrides — null = use default
+		externalAdAccountId: text('external_ad_account_id'),
+		customCooldownHours: integer('custom_cooldown_hours'),
+		// JSON array of AdRecommendationAction strings; queried via json_each()
+		suppressedActions: text('suppressed_actions').notNull().default('[]'),
+		severityOverride: text('severity_override'),
+		minConversionsThreshold: integer('min_conversions_threshold'),
+		// Optimistic-locking guard
+		version: integer('version').notNull().default(1),
 		createdByUserId: text('created_by_user_id').references(() => user.id),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
