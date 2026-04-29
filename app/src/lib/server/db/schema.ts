@@ -4434,6 +4434,57 @@ export const adMonitorTargetRelations = relations(adMonitorTarget, ({ one }) => 
 	})
 }));
 
+// Immutable audit trail for adMonitorTarget changes — written on POST/PATCH/DELETE/mute/unmute
+export const adMonitorTargetAudit = sqliteTable(
+	'ad_monitor_target_audit',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		targetId: text('target_id')
+			.notNull()
+			.references(() => adMonitorTarget.id, { onDelete: 'cascade' }),
+		actorType: text('actor_type').notNull(), // 'user' | 'worker' | 'system'
+		actorId: text('actor_id').notNull(), // user.id | worker_id | 'system'
+		action: text('action').notNull(), // 'created'|'updated'|'muted'|'unmuted'|'deactivated'|'reactivated'
+		changesJson: text('changes_json').notNull().default('{}'), // {field: {from, to}}
+		note: text('note'), // free-form, max 200 char enforced server-side
+		metadataJson: text('metadata_json').notNull().default('{}'), // ex: {expiresAt: ISO} for auto-suppress
+		at: timestamp('at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		targetAtIdx: index('ad_monitor_target_audit_target_at_idx').on(t.targetId, t.at),
+		tenantAtIdx: index('ad_monitor_target_audit_tenant_at_idx').on(t.tenantId, t.at)
+	})
+);
+
+export const adMonitorTargetAuditRelations = relations(adMonitorTargetAudit, ({ one }) => ({
+	tenant: one(tenant, { fields: [adMonitorTargetAudit.tenantId], references: [tenant.id] }),
+	target: one(adMonitorTarget, {
+		fields: [adMonitorTargetAudit.targetId],
+		references: [adMonitorTarget.id]
+	})
+}));
+
+export type AdMonitorTargetAudit = typeof adMonitorTargetAudit.$inferSelect;
+export type NewAdMonitorTargetAudit = typeof adMonitorTargetAudit.$inferInsert;
+
+export const AD_AUDIT_ACTOR_TYPES = ['user', 'worker', 'system'] as const;
+export type AdAuditActorType = (typeof AD_AUDIT_ACTOR_TYPES)[number];
+
+export const AD_AUDIT_ACTIONS = [
+	'created',
+	'updated',
+	'muted',
+	'unmuted',
+	'deactivated',
+	'reactivated'
+] as const;
+export type AdAuditAction = (typeof AD_AUDIT_ACTIONS)[number];
+
 export const adMetricSnapshotRelations = relations(adMetricSnapshot, ({ one }) => ({
 	tenant: one(tenant, { fields: [adMetricSnapshot.tenantId], references: [tenant.id] }),
 	client: one(client, { fields: [adMetricSnapshot.clientId], references: [client.id] })
