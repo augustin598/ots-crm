@@ -45,9 +45,37 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		.where(eq(table.client.tenantId, locals.tenant.id))
 		.orderBy(table.client.name);
 
+	const recommendations = await db
+		.select({
+			id: table.adOptimizationRecommendation.id,
+			clientId: table.adOptimizationRecommendation.clientId,
+			clientName: table.client.name,
+			externalCampaignId: table.adOptimizationRecommendation.externalCampaignId,
+			action: table.adOptimizationRecommendation.action,
+			reason: table.adOptimizationRecommendation.reason,
+			metricSnapshotJson: table.adOptimizationRecommendation.metricSnapshotJson,
+			suggestedPayloadJson: table.adOptimizationRecommendation.suggestedPayloadJson,
+			status: table.adOptimizationRecommendation.status,
+			source: table.adOptimizationRecommendation.source,
+			sourceWorkerId: table.adOptimizationRecommendation.sourceWorkerId,
+			createdAt: table.adOptimizationRecommendation.createdAt,
+			decidedAt: table.adOptimizationRecommendation.decidedAt,
+			appliedAt: table.adOptimizationRecommendation.appliedAt,
+			applyError: table.adOptimizationRecommendation.applyError
+		})
+		.from(table.adOptimizationRecommendation)
+		.innerJoin(
+			table.client,
+			eq(table.client.id, table.adOptimizationRecommendation.clientId)
+		)
+		.where(eq(table.adOptimizationRecommendation.tenantId, locals.tenant.id))
+		.orderBy(desc(table.adOptimizationRecommendation.createdAt))
+		.limit(50);
+
 	return {
 		targets,
 		clients,
+		recommendations,
 		tenantSlug: params.tenant
 	};
 };

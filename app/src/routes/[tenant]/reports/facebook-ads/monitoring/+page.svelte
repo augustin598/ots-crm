@@ -9,12 +9,84 @@
 	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
 	import Volume2Icon from '@lucide/svelte/icons/volume-2';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import XIcon from '@lucide/svelte/icons/x';
+	import LightbulbIcon from '@lucide/svelte/icons/lightbulb';
 	import { toast } from 'svelte-sonner';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 	let targets = $state([...data.targets]);
+	let recommendations = $state([...data.recommendations]);
 	let runningRebuild = $state(false);
+	let approvingId = $state<string | null>(null);
+	let rejectingId = $state<string | null>(null);
+
+	const pendingRecs = $derived(recommendations.filter((r) => r.status === 'draft'));
+	const decidedRecs = $derived(recommendations.filter((r) => r.status !== 'draft'));
+
+	const ACTION_LABELS: Record<string, string> = {
+		pause_ad: '⏸ Pauză campanie',
+		resume_ad: '▶️ Reia campanie',
+		increase_budget: '📈 Mărește buget',
+		decrease_budget: '📉 Scade buget',
+		refresh_creative: '🎨 Refresh creative',
+		change_audience: '🎯 Schimbă audiență'
+	};
+
+	const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+		draft: { label: 'În așteptare', variant: 'default' },
+		approved: { label: 'Aprobat', variant: 'secondary' },
+		rejected: { label: 'Respins', variant: 'outline' },
+		applied: { label: 'Aplicat ✅', variant: 'secondary' },
+		failed: { label: 'Eșuat ❌', variant: 'outline' }
+	};
+
+	function safeJsonParse(s: string): Record<string, unknown> {
+		try {
+			return JSON.parse(s) as Record<string, unknown>;
+		} catch {
+			return {};
+		}
+	}
+
+	async function approveRecommendation(id: string) {
+		if (!confirm('Aprobi această recomandare? Acțiunea va fi aplicată imediat pe Meta.')) return;
+		approvingId = id;
+		try {
+			const res = await fetch(`/${data.tenantSlug}/api/ads-monitor/recommendations/${id}/approve`, {
+				method: 'POST'
+			});
+			const body = (await res.json()) as { ok: boolean; applied?: boolean; error?: string };
+			if (!body.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+			toast.success('Aprobată și aplicată pe Meta.');
+			recommendations = recommendations.map((r) =>
+				r.id === id ? { ...r, status: 'applied', appliedAt: new Date(), decidedAt: new Date() } : r
+			);
+		} catch (e) {
+			toast.error(`Eroare: ${(e as Error).message}`);
+		} finally {
+			approvingId = null;
+		}
+	}
+
+	async function rejectRecommendation(id: string) {
+		rejectingId = id;
+		try {
+			const res = await fetch(`/${data.tenantSlug}/api/ads-monitor/recommendations/${id}/reject`, {
+				method: 'POST'
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			toast.success('Recomandare respinsă.');
+			recommendations = recommendations.map((r) =>
+				r.id === id ? { ...r, status: 'rejected', decidedAt: new Date() } : r
+			);
+		} catch (e) {
+			toast.error(`Eroare: ${(e as Error).message}`);
+		} finally {
+			rejectingId = null;
+		}
+	}
 
 	// Add-target form state
 	let showAddForm = $state(false);
@@ -324,6 +396,92 @@
 		</Card>
 	{/if}
 
+	{#if pendingRecs.length > 0}
+		<Card class="p-6 border-amber-500/40 bg-amber-500/5">
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="text-xl font-semibold flex items-center gap-2">
+					<LightbulbIcon class="h-5 w-5 text-amber-500" />
+					Recomandări în așteptare ({pendingRecs.length})
+				</h2>
+				<p class="text-xs text-muted-foreground">
+					Generate de worker-ele PersonalOPS — necesită aprobarea ta înainte să atingă Meta.
+				</p>
+			</div>
+			<div class="space-y-3">
+				{#each pendingRecs as rec (rec.id)}
+					{@const metric = safeJsonParse(rec.metricSnapshotJson)}
+					{@const payload = safeJsonParse(rec.suggestedPayloadJson)}
+					<div class="rounded-md border bg-background p-4">
+						<div class="flex items-start justify-between gap-4">
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-2 mb-1 flex-wrap">
+									<Badge>{ACTION_LABELS[rec.action] ?? rec.action}</Badge>
+									<span class="text-sm text-muted-foreground">{rec.clientName}</span>
+									<span class="text-xs font-mono text-muted-foreground">
+										{rec.externalCampaignId}
+									</span>
+									{#if rec.sourceWorkerId}
+										<Badge variant="outline" class="text-xs">
+											worker: {rec.sourceWorkerId}
+										</Badge>
+									{/if}
+								</div>
+								<p class="text-sm">{rec.reason}</p>
+								{#if Object.keys(payload).length > 0}
+									<details class="mt-2">
+										<summary class="text-xs text-muted-foreground cursor-pointer">
+											Payload propus
+										</summary>
+										<pre class="text-xs bg-muted/50 rounded p-2 mt-1 overflow-x-auto">{JSON.stringify(
+												payload,
+												null,
+												2
+											)}</pre>
+									</details>
+								{/if}
+								{#if Object.keys(metric).length > 0}
+									<details class="mt-2">
+										<summary class="text-xs text-muted-foreground cursor-pointer">
+											Metric snapshot la momentul recomandării
+										</summary>
+										<pre class="text-xs bg-muted/50 rounded p-2 mt-1 overflow-x-auto">{JSON.stringify(
+												metric,
+												null,
+												2
+											)}</pre>
+									</details>
+								{/if}
+							</div>
+							<div class="flex flex-col gap-2 min-w-[120px]">
+								<Button
+									size="sm"
+									variant="default"
+									onclick={() => approveRecommendation(rec.id)}
+									disabled={approvingId === rec.id || rejectingId === rec.id}
+								>
+									<CheckIcon class="h-4 w-4 mr-1" />
+									{approvingId === rec.id ? 'Aplic…' : 'Aprobă & Aplică'}
+								</Button>
+								<Button
+									size="sm"
+									variant="outline"
+									onclick={() => rejectRecommendation(rec.id)}
+									disabled={approvingId === rec.id || rejectingId === rec.id}
+								>
+									<XIcon class="h-4 w-4 mr-1" />
+									Respinge
+								</Button>
+							</div>
+						</div>
+						<p class="text-xs text-muted-foreground mt-2">
+							Trimisă la {new Date(rec.createdAt).toLocaleString('ro-RO')}
+						</p>
+					</div>
+				{/each}
+			</div>
+		</Card>
+	{/if}
+
 	<!-- Targets table -->
 	<Card class="p-6">
 		<div class="flex items-center justify-between mb-4">
@@ -413,4 +571,50 @@
 			</div>
 		{/if}
 	</Card>
+
+	{#if decidedRecs.length > 0}
+		<Card class="p-6">
+			<h2 class="text-xl font-semibold mb-4">Istoric recomandări</h2>
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm">
+					<thead class="border-b bg-muted/40">
+						<tr class="text-left">
+							<th class="px-3 py-2">Data</th>
+							<th class="px-3 py-2">Client</th>
+							<th class="px-3 py-2">Campanie</th>
+							<th class="px-3 py-2">Acțiune</th>
+							<th class="px-3 py-2">Stare</th>
+							<th class="px-3 py-2">Sursă</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each decidedRecs as rec (rec.id)}
+							{@const badge = STATUS_BADGES[rec.status] ?? STATUS_BADGES.draft}
+							<tr class="border-b hover:bg-muted/20">
+								<td class="px-3 py-2 text-xs text-muted-foreground">
+									{new Date(rec.createdAt).toLocaleDateString('ro-RO')}
+								</td>
+								<td class="px-3 py-2">{rec.clientName}</td>
+								<td class="px-3 py-2 font-mono text-xs">{rec.externalCampaignId}</td>
+								<td class="px-3 py-2">{ACTION_LABELS[rec.action] ?? rec.action}</td>
+								<td class="px-3 py-2">
+									<Badge variant={badge.variant} class="text-xs">{badge.label}</Badge>
+									{#if rec.applyError}
+										<p class="text-xs text-red-600 mt-1" title={rec.applyError}>
+											{rec.applyError.length > 60
+												? rec.applyError.slice(0, 60) + '…'
+												: rec.applyError}
+										</p>
+									{/if}
+								</td>
+								<td class="px-3 py-2 text-xs">
+									{rec.source}{#if rec.sourceWorkerId} ({rec.sourceWorkerId}){/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</Card>
+	{/if}
 </div>
