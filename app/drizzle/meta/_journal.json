@@ -1583,6 +1583,13 @@
       "when": 1777950102000,
       "tag": "0225_user_telegram_link",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "6",
+      "when": 1777950103000,
+      "tag": "0226_ad_optimization_recommendation",
+      "breakpoints": true
     }
   ]
 }

@@ -4286,7 +4286,9 @@ export const API_KEY_SCOPES = [
 	'campaigns:read',
 	'campaigns:write',
 	'clients:read',
-	'integrations:read'
+	'integrations:read',
+	'ads_monitor:read',
+	'ads_monitor:write'
 ] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
@@ -4430,6 +4432,100 @@ export const userTelegramLinkRelations = relations(userTelegramLink, ({ one }) =
 	tenant: one(tenant, { fields: [userTelegramLink.tenantId], references: [tenant.id] }),
 	user: one(user, { fields: [userTelegramLink.userId], references: [user.id] })
 }));
+
+// Optimization recommendations — DRAFT actions proposed by PersonalOPS workers
+// or generated automatically. Approved recommendations are applied via Meta API.
+export const adOptimizationRecommendation = sqliteTable(
+	'ad_optimization_recommendation',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		targetId: text('target_id').references(() => adMonitorTarget.id, { onDelete: 'set null' }),
+		platform: text('platform').notNull().default('meta'),
+		externalCampaignId: text('external_campaign_id').notNull(),
+		externalAdsetId: text('external_adset_id'),
+		externalAdId: text('external_ad_id'),
+		// pause_ad | resume_ad | increase_budget | decrease_budget | refresh_creative | change_audience
+		action: text('action').notNull(),
+		reason: text('reason').notNull(),
+		// JSON blob of metric snapshot at recommendation time
+		metricSnapshotJson: text('metric_snapshot_json').notNull().default('{}'),
+		// JSON blob of args needed to apply (e.g. { newDailyBudgetCents: 5000 })
+		suggestedPayloadJson: text('suggested_payload_json').notNull().default('{}'),
+		// draft | approved | rejected | applied | failed
+		status: text('status').notNull().default('draft'),
+		// worker | manual | engine
+		source: text('source').notNull().default('worker'),
+		sourceWorkerId: text('source_worker_id'),
+		sourceApiKeyId: text('source_api_key_id').references(() => apiKey.id),
+		decidedByUserId: text('decided_by_user_id').references(() => user.id),
+		decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'date' }),
+		appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'date' }),
+		applyError: text('apply_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantStatusIdx: index('ad_optimization_recommendation_tenant_status_idx').on(
+			t.tenantId,
+			t.status
+		),
+		campaignIdx: index('ad_optimization_recommendation_campaign_idx').on(t.externalCampaignId)
+	})
+);
+
+export const adOptimizationRecommendationRelations = relations(
+	adOptimizationRecommendation,
+	({ one }) => ({
+		tenant: one(tenant, {
+			fields: [adOptimizationRecommendation.tenantId],
+			references: [tenant.id]
+		}),
+		client: one(client, {
+			fields: [adOptimizationRecommendation.clientId],
+			references: [client.id]
+		}),
+		target: one(adMonitorTarget, {
+			fields: [adOptimizationRecommendation.targetId],
+			references: [adMonitorTarget.id]
+		}),
+		decidedBy: one(user, {
+			fields: [adOptimizationRecommendation.decidedByUserId],
+			references: [user.id]
+		})
+	})
+);
+
+export type AdOptimizationRecommendation = typeof adOptimizationRecommendation.$inferSelect;
+export type NewAdOptimizationRecommendation = typeof adOptimizationRecommendation.$inferInsert;
+
+export const AD_RECOMMENDATION_ACTIONS = [
+	'pause_ad',
+	'resume_ad',
+	'increase_budget',
+	'decrease_budget',
+	'refresh_creative',
+	'change_audience'
+] as const;
+export type AdRecommendationAction = (typeof AD_RECOMMENDATION_ACTIONS)[number];
+
+export const AD_RECOMMENDATION_STATUSES = [
+	'draft',
+	'approved',
+	'rejected',
+	'applied',
+	'failed'
+] as const;
+export type AdRecommendationStatus = (typeof AD_RECOMMENDATION_STATUSES)[number];
 
 export type AdMonitorTarget = typeof adMonitorTarget.$inferSelect;
 export type NewAdMonitorTarget = typeof adMonitorTarget.$inferInsert;
