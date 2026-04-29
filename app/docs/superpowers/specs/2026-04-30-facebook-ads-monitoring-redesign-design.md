@@ -60,12 +60,15 @@ The "training" loop is **deterministic**, not ML:
 externalAdAccountId: text('external_ad_account_id'),         // 'act_XXX' denormalized at create-time
 notes: text('notes'),                                         // user-facing free notes (max 500 char)
 customCooldownHours: integer('custom_cooldown_hours'),        // null = use default 72
-suppressedActions: text('suppressed_actions'),                // CSV of AdRecommendationAction values, ordered alphabetically
+suppressedActions: text('suppressed_actions').default('[]'),  // JSON array of AdRecommendationAction strings; validated server-side; queried via json_each()
 severityOverride: text('severity_override'),                  // 'urgent'|'high'|'warning'|'opportunity' or null
 minConversionsThreshold: integer('min_conversions_threshold'), // null = use default 5
+version: integer('version').notNull().default(1),             // optimistic-locking guard; bumped on every UPDATE
 ```
 
-All nullable → backwards compatible. Existing rows get all NULLs and continue to behave with default rules.
+All override columns nullable → backwards compatible. Existing rows get all NULLs and `version=1`. JSON for `suppressedActions` (not CSV) so we can query with `json_each()` and analyze suppression patterns later.
+
+**Optimistic locking:** PATCH must include `expectedVersion` matching the current row. Mismatch → 409 Conflict with `currentVersion` in body so the UI can refetch + re-prompt. Server bumps `version = version + 1` on every successful UPDATE in a single SQL statement (atomic). Worker auto-suppress writes also obey this guard — on conflict, the worker retries once after refetching.
 
 ### 4.2 New table `adMonitorTargetAudit`
 
@@ -179,6 +182,8 @@ src/routes/[tenant]/reports/facebook-ads/monitoring/
 **Overrides** — form for the 4 override fields. "Suprimă acțiuni" is a 6-checkbox group (one per `AdRecommendationAction`). If all 6 are checked, show inline warning + confirm modal on save.
 
 **Istoric** — paginated audit list (20 per page). Each row: timestamp (ro-RO format), actor name, action badge, structured diff rendered field-by-field, optional note. Filter dropdown for action type. Optional CSV export (nice-to-have).
+
+**Pogo-sticking mitigation:** Every drawer tab has a persistent footer line showing "Ultima modificare: {actor} · {relative_time} · {action}" so the user keeps awareness of the most recent change without flipping to History tab.
 
 ### 5.4 KPI strip data source
 
@@ -294,14 +299,26 @@ Use `cooldownMs` instead of constant `COOLDOWN_MS`. Use `minConv` instead of con
 
 ### 7.3 Worker auto-suppress audit
 
-When the handler observes `rejectionRate > 0.5` AND the action isn't already in `suppressedActions`, write an audit row via the external CRM API:
+Auto-suppress is **conservative on purpose** to avoid statistical noise at small N:
+
+**Trigger conditions (all must hold):**
+- `rejectedCount` ≥ 3 in last 30 days for `(action, clientId)`
+- `rejectedCount / totalProposals` > 0.5
+- Action not already in `suppressedActions`
+
+**TTL:** Auto-suppressed actions get a 30-day expiry. The `adMonitorTargetAudit` row written at suppression carries `metadata.expiresAt`. A nightly cleanup job (or lazy check at decision time) re-evaluates: if 30 days have passed AND the most recent rejection is older than the TTL, the action is automatically removed from `suppressedActions` with a fresh audit row `actorType='system'`, `note='Auto-unsuppress: TTL expired'`.
+
+This ensures suppression is never permanent and gives the worker a chance to re-propose after seasonality (Black Friday, holiday windows) passes.
+
+**Endpoint:**
 
 ```
 POST /api/external/ads-monitor/targets/[id]/auto-suppress
-{ action: 'increase_budget', reason: 'rejection_rate_0.6_in_5_recs' }
+{ action: 'increase_budget', expectedVersion: 7,
+  reason: 'rejection_rate_0.6_in_5_recs_30d' }
 ```
 
-Server-side: append action to `suppressedActions` CSV + insert audit row with `actorType='worker'`, `actorId='ads_optimizer'`, `action='updated'`, `note='Auto-suppress: rata respingere 60% pe ultimele 5 propuneri'`.
+Server-side: append action to `suppressedActions` JSON array (idempotent if already present) + bump `version` + insert audit row with `actorType='worker'`, `actorId='ads_optimizer'`, `action='updated'`, `note='Auto-suppress: rata respingere 60% (3/5 ultimele 30 zile) — expiră în 30 zile'`, `metadata.expiresAt=now+30d`. On version conflict (409), worker refetches and retries once.
 
 ### 7.4 Failure modes
 
@@ -321,10 +338,11 @@ If `getTargetWithOverrides` fails (network/404/500), the worker falls back to de
 | `customCooldownHours` | int, 1..720 |
 | `minConversionsThreshold` | int, 0..100 |
 | `severityOverride` | one of `urgent`/`high`/`warning`/`opportunity` or null |
-| `suppressedActions` | array of strings, each in `AD_RECOMMENDATION_ACTIONS`; serialized as CSV ordered alphabetically (idempotent diff) |
+| `suppressedActions` | JSON array of strings, each in `AD_RECOMMENDATION_ACTIONS`; deduplicated and sorted alphabetically server-side (idempotent diff) |
 | `notes` | string ≤ 500 char (server trim) |
 | `auditNote` | string ≤ 200 char |
 | `rejectionReason` | one of `AD_REJECTION_REASONS` |
+| `expectedVersion` | int matching current `adMonitorTarget.version`; required on PATCH and auto-suppress; mismatch → 409 |
 
 400 on any violation with field-specific message.
 
@@ -336,7 +354,7 @@ If `getTargetWithOverrides` fails (network/404/500), the worker falls back to de
 | Target has no snapshots yet | Performance tab shows empty state copy with hint to run snapshots-fetcher |
 | Target `isActive=false` | Row dimmed (30% opacity) + `Inactiv` badge; drawer offers reactivate toggle |
 | Audit empty (just created) | History tab shows only the `created` row |
-| Concurrent worker + user update | Last-write-wins; both audit rows persist |
+| Concurrent worker + user update | Optimistic locking via `version`: 409 on mismatch; client refetches and retries. UI shows toast „Targetul a fost modificat între timp — am reîncărcat datele". |
 | All 6 actions suppressed | Inline warning + confirm modal on save |
 | Pending rec exists when editing target | Toast warning "Există N recomandări pending — verifică-le înainte" |
 | `getTargetWithOverrides` 404 (deploy lag) | Worker falls back to default rules + warns |
@@ -359,10 +377,12 @@ Plus pure-function tests for the diff builder used in PATCH.
 ### 11.2 Integration (DB)
 
 - POST target → audit row `created` inserted with `changesJson` containing initial values
-- PATCH CPL 30→25 → audit row `updated` with `changesJson.targetCplCents = {from: 3000, to: 2500}`
+- PATCH CPL 30→25 → audit row `updated` with `changesJson.targetCplCents = {from: 3000, to: 2500}`, `version` bumped from N to N+1
+- PATCH with stale `expectedVersion` → 409 Conflict, no audit row, no version bump
 - Reject rec with `reason='false_positive'` → feedback row inserted
 - Tenant A user cannot read/edit tenant B target (404)
-- No-op PATCH (same values) → no audit row
+- No-op PATCH (same values) → no audit row, no version bump
+- **Full feedback loop test:** seed 5 recs for `(action='increase_budget', clientId=X)`; reject 3 with `reason='wrong_action'` → next worker run for that target observes `recentRejectionRates['increase_budget']=0.6` → calls auto-suppress endpoint → audit row written with `metadata.expiresAt=now+30d` → re-running decision engine returns `skip: action_suppressed_by_user`. Then advance clock 31 days, run cleanup → action removed, audit row `Auto-unsuppress: TTL expired` written.
 
 ### 11.3 Smoke (manual)
 
@@ -391,11 +411,33 @@ Browser test on `/ots/reports/facebook-ads/monitoring` against a tenant with see
 
 ## 13. Rollout plan
 
-1. Land migrations (schema + 2 new tables) behind no flag — additive only.
-2. Land server endpoints + extended PATCH — kept backwards compatible.
-3. Land Svelte UI in same PR (or sibling PR if too large).
-4. Deploy worker changes (PersonalOPS) **after** CRM is live, since worker reads new endpoints.
-5. No data backfill required.
+Split into **3 PRs** to keep blast radius small and reviewable:
+
+**PR 1 — Data layer**
+- Drizzle schema changes: new columns on `adMonitorTarget`, two new tables, type exports
+- Three migration files
+- Type-only exports for `AdAuditAction`, `AdRejectionReason`, etc.
+- Pure unit tests for diff-builder helper
+
+**PR 2 — API + worker**
+- New/modified internal endpoints (`/api/ads-monitor/...`)
+- Extended external endpoints (`/api/external/ads-monitor/...`) with `withOverrides=true` and auto-suppress
+- PATCH with optimistic locking + audit-row writes in transaction
+- Worker (PersonalOPS) changes: `decideAction` reads overrides, handler computes rejection rate, auto-suppress call
+- TTL cleanup job (cron or lazy) for expired auto-suppressions
+- Integration tests for endpoints + full feedback loop
+- Backwards-compatible: old endpoints continue to work without `expectedVersion` for one release cycle, with deprecation warning logged.
+
+**PR 3 — UI**
+- Svelte component refactor: 9 new components
+- Drawer with 4 tabs
+- KpiStrip + filters + sparkline
+- AddTargetForm campaign-picker
+- Smoke tests + accessibility checks
+
+**Deployment order:** PR 1 → PR 2 → PR 3. Worker (PersonalOPS) deploys **after** CRM has PR 2 live. No data backfill required.
+
+**Rollback:** Each PR is independently revertible. Migrations are additive (no DROP), so reverting only the code is safe.
 
 ## 14. Open questions
 
@@ -403,3 +445,11 @@ None at brainstorming close. To revisit during writing-plans:
 - Exact UI library for Sheet/drawer (already used elsewhere — confirm import path).
 - CSV export for history: include in v1 or defer? Default: defer, mark as optional in plan.
 - Whether to also expose feedback aggregate stats in UI (e.g., "this rule has 60% rejection rate") — defer to v2.
+
+## 15. Explicitly deferred to v2
+
+Discussed during Gemini second-opinion review and intentionally **not** included in this scope:
+
+- **Per-target ACL on external API.** Today, an API key with `ads_monitor:write` can mutate any target in its tenant. Narrowing this to per-target keys is a significant scope expansion (key issuance, rotation, UI). Same threat model as today's campaign-creation API; defer until per-key resource scoping is needed elsewhere.
+- **JSON policy object** (vs. discrete columns) for overrides. With only 4 overrides today, discrete typed columns are easier to validate, migrate, and type-check. Reconsider only if the override surface grows to 10+ fields.
+- **Wilson Score / Bayesian smoothing** for rejection rate. The current safeguard (N≥3 + ratio>0.5 + 30-day TTL) is good enough for human-in-the-loop volumes. Reassess if false-positive auto-suppressions are observed in practice.
