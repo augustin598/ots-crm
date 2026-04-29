@@ -64,11 +64,13 @@ export const getPackageRequests = query(async () => {
 		// Expose the underlying SQL error so we can see "no such table / no such column"
 		// in the server log instead of just Drizzle's generic "Failed query".
 		logError('packages', 'getPackageRequests SQL failed', {
-			message: raw.message,
-			cause: (raw as Error & { cause?: unknown }).cause
-				? String((raw as Error & { cause?: unknown }).cause)
-				: undefined,
-			stack: raw.stack
+			stackTrace: raw.stack,
+			metadata: {
+				message: raw.message,
+				cause: (raw as Error & { cause?: unknown }).cause
+					? String((raw as Error & { cause?: unknown }).cause)
+					: undefined
+			}
 		});
 		console.error('[packages.getPackageRequests] SQL error →', raw.message, raw);
 		throw raw;
@@ -105,13 +107,15 @@ export const createPackageRequest = command(createRequestSchema, async (data) =>
 	} catch (err) {
 		const raw = err instanceof Error ? err : new Error(String(err));
 		logError('packages', 'createPackageRequest INSERT failed', {
-			message: raw.message,
-			cause: (raw as Error & { cause?: unknown }).cause
-				? String((raw as Error & { cause?: unknown }).cause)
-				: undefined,
-			categorySlug: data.categorySlug,
-			tier: data.tier,
-			stack: raw.stack
+			stackTrace: raw.stack,
+			metadata: {
+				message: raw.message,
+				cause: (raw as Error & { cause?: unknown }).cause
+					? String((raw as Error & { cause?: unknown }).cause)
+					: undefined,
+				categorySlug: data.categorySlug,
+				tier: data.tier
+			}
 		});
 		console.error('[packages.createPackageRequest] SQL error →', raw.message, raw);
 		throw raw;
@@ -142,28 +146,36 @@ export const createPackageRequest = command(createRequestSchema, async (data) =>
 					await sendPackageRequestEmail(requestId, admin.email, name || undefined);
 				} catch (err) {
 					logError('packages', 'sendPackageRequestEmail failed', {
-						requestId,
-						adminEmail: admin.email,
-						error: err instanceof Error ? err.message : String(err)
+						metadata: {
+							requestId,
+							adminEmail: admin.email,
+							error: err instanceof Error ? err.message : String(err)
+						}
 					});
 				}
 			}
 			logInfo('packages', 'package request admins notified', {
-				requestId,
-				adminCount: admins.length
+				metadata: {
+					requestId,
+					adminCount: admins.length
+				}
 			});
 		} catch (err) {
 			logError('packages', 'failed to enumerate admins for package request', {
-				requestId,
-				error: err instanceof Error ? err.message : String(err)
+				metadata: {
+					requestId,
+					error: err instanceof Error ? err.message : String(err)
+				}
 			});
 		}
 	})().catch((err) => {
 		// Extra safety net: ensures the fire-and-forget promise never triggers
 		// an unhandled rejection that could abort the SvelteKit response.
 		logError('packages', 'package request notification IIFE crashed', {
-			requestId,
-			error: err instanceof Error ? err.message : String(err)
+			metadata: {
+				requestId,
+				error: err instanceof Error ? err.message : String(err)
+			}
 		});
 	});
 

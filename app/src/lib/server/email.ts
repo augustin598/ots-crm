@@ -11,7 +11,8 @@ import {
 	logEmailProcessing,
 	logEmailSuccess,
 	logEmailFailure,
-	logEmailRetry
+	logEmailRetry,
+	type EmailType
 } from './email-logger';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { createNotification } from '$lib/server/notifications';
@@ -124,7 +125,7 @@ function renderBrandedEmail(opts: BrandedEmailOptions): string {
 		opts.footerHtml ??
 		'Pentru întrebări sau clarificări, nu ezitați să ne contactați.';
 	const subtitleBlock = subtitle
-		? `<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>`
+		? `<p class="ots-subtitle" style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>`
 		: '';
 	return `<!DOCTYPE html>
 <html>
@@ -132,12 +133,24 @@ function renderBrandedEmail(opts: BrandedEmailOptions): string {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>${opts.previewTitle ?? opts.title}</title>
+	<style>
+		@media only screen and (max-width: 480px) {
+			.ots-outer { padding: 16px 8px !important; }
+			.ots-card { padding: 20px 18px !important; border-radius: 8px !important; }
+			.ots-title { font-size: 18px !important; line-height: 1.25 !important; word-break: break-word; }
+			.ots-subtitle { font-size: 12px !important; line-height: 1.5 !important; }
+			.ots-stack td { display: block !important; width: 100% !important; padding: 0 !important; }
+			.ots-stack-right { text-align: left !important; padding-top: 10px !important; white-space: normal !important; }
+			.ots-card-inner { padding: 16px 16px !important; }
+			.ots-details { padding: 12px 14px !important; }
+		}
+	</style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
-	<div style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
-		<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
+	<div class="ots-outer" style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+		<div class="ots-card" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
 			${opts.headerLogoHtml}
-			<h1 style="color: ${opts.themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${opts.title}</h1>
+			<h1 class="ots-title" style="color: ${opts.themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${opts.title}</h1>
 			${subtitleBlock}
 			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
 			${opts.bodyHtml}
@@ -724,25 +737,6 @@ function isHardBounce(error: Error): { code: string; message: string } | null {
 // ---------------------------------------------------------------------------
 // Persistent send helper — DB-backed outbox pattern
 // ---------------------------------------------------------------------------
-
-type EmailType =
-	| 'invitation'
-	| 'invoice'
-	| 'magic-link'
-	| 'admin-magic-link'
-	| 'password-reset'
-	| 'task-assignment'
-	| 'task-update'
-	| 'task-reminder'
-	| 'task-client-notification'
-	| 'daily-reminder'
-	| 'contract-signing'
-	| 'invoice-paid'
-	| 'invoice-overdue-reminder'
-	| 'notification_alert'
-	| 'report'
-	| 'ad_payment_alert'
-	| 'ad_payment_digest';
 
 export type EmailSendContext = {
 	tenantId: string | null;
@@ -2829,7 +2823,7 @@ export async function sendAdPaymentAlertEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${audienceIntro}</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fef2f2; border: 1px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #fef2f2; border: 1px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
 							<div><span style="color: #6b7280;">Platformă</span> &nbsp;·&nbsp; <strong>${safeProvider}</strong></div>
@@ -3039,7 +3033,7 @@ export async function sendAdPaymentDigestEmail(
 
 					const detailsBlock = it.details
 						? `
-							<div style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
+							<div class="ots-details" style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
 								<div style="font-size: 14px; font-weight: 700; color: ${accentDark}; letter-spacing: -0.01em;">${escapeHtml(it.details.headline)}</div>
 								<div style="font-size: 13px; color: ${accentDarker}; line-height: 1.6; margin-top: 6px;">${escapeHtml(it.details.body)}</div>
 								${deadlineLine}
@@ -3063,8 +3057,8 @@ export async function sendAdPaymentDigestEmail(
 					return `
 						<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; margin: 0 0 14px 0; overflow: hidden;">
 							<tr>
-								<td style="padding: 18px 20px;">
-									<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+								<td class="ots-card-inner" style="padding: 18px 20px;">
+									<table role="presentation" cellpadding="0" cellspacing="0" width="100%" class="ots-stack">
 										<tr>
 											<td style="vertical-align: top; padding-right: 12px;">
 												<div style="font-weight: 700; color: #111827; font-size: 15px; line-height: 1.3;">${escapeHtml(it.accountName)}</div>
@@ -3075,7 +3069,7 @@ export async function sendAdPaymentDigestEmail(
 												</div>
 												${clientLine}
 											</td>
-											<td style="vertical-align: top; text-align: right; white-space: nowrap;">
+											<td class="ots-stack-right" style="vertical-align: top; text-align: right; white-space: nowrap;">
 												<span style="display: inline-block; padding: 5px 12px; border-radius: 999px; background: ${accentBg}; color: ${accentPill}; font-size: 12px; font-weight: 600; border: 1px solid ${accentBorder};">${escapeHtml(it.statusLabelRo)}</span>
 											</td>
 										</tr>

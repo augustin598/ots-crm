@@ -40,7 +40,8 @@ export type LogSource =
 	| 'tiktok-auto-assign'
 	| 'whatsapp'
 	| 'wordpress'
-	| 'whmcs';
+	| 'whmcs'
+	| 'packages';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
