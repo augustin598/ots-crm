@@ -121,13 +121,39 @@ export const POST: RequestHandler = (event) =>
 			return { status: 404, body: { error: 'client_not_found' } };
 		}
 
+		// Verify targetId (if provided) exists in this tenant. Without this check
+		// a worker could orphan a recommendation against a deleted target, or worse,
+		// reference a target from another tenant.
+		const targetIdRaw = typeof body.targetId === 'string' ? body.targetId : null;
+		if (targetIdRaw) {
+			const [targetRow] = await db
+				.select({ id: table.adMonitorTarget.id })
+				.from(table.adMonitorTarget)
+				.where(
+					and(
+						eq(table.adMonitorTarget.id, targetIdRaw),
+						eq(table.adMonitorTarget.tenantId, ctx.tenantId)
+					)
+				)
+				.limit(1);
+			if (!targetRow) {
+				return {
+					status: 400,
+					body: {
+						error: 'target_not_found',
+						message: `targetId ${targetIdRaw} does not belong to this tenant`
+					}
+				};
+			}
+		}
+
 		const id = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
 		await db.insert(table.adOptimizationRecommendation).values({
 			id,
 			tenantId: ctx.tenantId,
 			clientId,
-			targetId: typeof body.targetId === 'string' ? body.targetId : null,
+			targetId: targetIdRaw,
 			platform: 'meta',
 			externalCampaignId,
 			externalAdsetId: typeof body.externalAdsetId === 'string' ? body.externalAdsetId : null,

@@ -32,7 +32,15 @@ export const GET: RequestHandler = (event) =>
 			}
 		}
 
-		const severity = url.searchParams.get('severity');
+		// severity may be a single value (e.g. "warning") or comma-separated list
+		// (e.g. "warning,high,urgent"). Empty/whitespace entries are ignored.
+		const severityRaw = url.searchParams.get('severity');
+		const severityFilter = severityRaw
+			? severityRaw
+					.split(',')
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0)
+			: null;
 		const campaignId = url.searchParams.get('campaignId');
 
 		const limitRaw = parseInt(url.searchParams.get('limit') ?? '100', 10);
@@ -107,7 +115,7 @@ export const GET: RequestHandler = (event) =>
 					? severities.reduce((a, b) => (order[b] > (order[a] ?? 0) ? b : a))
 					: null;
 
-			if (severity && maxSev !== severity) continue;
+			if (severityFilter && (!maxSev || !severityFilter.includes(maxSev))) continue;
 
 			items.push({
 				notificationId: r.id,
@@ -148,7 +156,7 @@ export const GET: RequestHandler = (event) =>
 			body: {
 				items,
 				summary,
-				query: { since: since.toISOString(), severity, campaignId, limit }
+				query: { since: since.toISOString(), severity: severityFilter, campaignId, limit }
 			}
 		};
 	});
