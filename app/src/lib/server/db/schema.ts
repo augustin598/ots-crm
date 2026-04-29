@@ -4570,6 +4570,58 @@ export const adOptimizationRecommendationRelations = relations(
 export type AdOptimizationRecommendation = typeof adOptimizationRecommendation.$inferSelect;
 export type NewAdOptimizationRecommendation = typeof adOptimizationRecommendation.$inferInsert;
 
+// Structured feedback signal on rejected recommendations — used by worker auto-suppress logic
+export const adRecommendationFeedback = sqliteTable(
+	'ad_recommendation_feedback',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		recommendationId: text('recommendation_id')
+			.notNull()
+			.references(() => adOptimizationRecommendation.id, { onDelete: 'cascade' }),
+		userId: text('user_id').references(() => user.id),
+		// 'false_positive' | 'wrong_action' | 'bad_timing' | 'manually_handled' | 'other'
+		rejectionReason: text('rejection_reason').notNull(),
+		note: text('note'),
+		at: timestamp('at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		recIdx: index('ad_recommendation_feedback_rec_idx').on(t.recommendationId),
+		tenantAtIdx: index('ad_recommendation_feedback_tenant_at_idx').on(t.tenantId, t.at)
+	})
+);
+
+export const adRecommendationFeedbackRelations = relations(adRecommendationFeedback, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [adRecommendationFeedback.tenantId],
+		references: [tenant.id]
+	}),
+	recommendation: one(adOptimizationRecommendation, {
+		fields: [adRecommendationFeedback.recommendationId],
+		references: [adOptimizationRecommendation.id]
+	}),
+	user: one(user, {
+		fields: [adRecommendationFeedback.userId],
+		references: [user.id]
+	})
+}));
+
+export type AdRecommendationFeedback = typeof adRecommendationFeedback.$inferSelect;
+export type NewAdRecommendationFeedback = typeof adRecommendationFeedback.$inferInsert;
+
+export const AD_REJECTION_REASONS = [
+	'false_positive',
+	'wrong_action',
+	'bad_timing',
+	'manually_handled',
+	'other'
+] as const;
+export type AdRejectionReason = (typeof AD_REJECTION_REASONS)[number];
+
 export const AD_RECOMMENDATION_ACTIONS = [
 	'pause_ad',
 	'resume_ad',
