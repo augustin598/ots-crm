@@ -1118,7 +1118,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 			// IBAN payment details
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				? `<div class="ots-details" style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
 				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
 				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
 				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
@@ -1145,7 +1145,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${clientDisplayName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem factura de la <strong>${tenantName}</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -1491,7 +1491,7 @@ export async function sendTaskAssignmentEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Ți-a fost atribuit un task nou:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1623,7 +1623,7 @@ export async function sendTaskUpdateEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeWatcher ? ` ${safeWatcher}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un task pe care îl urmăriți a fost actualizat — <em>${changeDescription}</em>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1807,7 +1807,7 @@ export async function sendTaskClientNotificationEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ${greeting},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${changeDescription}</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1928,7 +1928,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Am primit plata pentru următoarea factură:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -2081,7 +2081,7 @@ export async function sendOverdueReminderEmail(
 			const overdueHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				? `<div class="ots-details" style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
 				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
 				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
 				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
@@ -2102,7 +2102,7 @@ export async function sendOverdueReminderEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă reamintim că factura de mai jos este restantă de <strong>${daysOverdue} zile</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fffbeb; border-left: 3px solid #d97706; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #fffbeb; border-left: 3px solid #d97706; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -2220,7 +2220,7 @@ export async function sendTaskReminderEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
 				${isOverdue ? `<p style="color: ${accent}; font-weight: 600; font-size: 15px; margin: 0 0 16px 0;">Acest task este restant!</p>` : `<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">Acest task are termen ${daysUntilDue === 0 ? 'astăzi' : `în ${daysUntilDue} ${daysUntilDue === 1 ? 'zi' : 'zile'}`}.</p>`}
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-left: 3px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-left: 3px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -2337,7 +2337,7 @@ export async function sendDailyWorkReminderEmail(
 					const safeTitle = escapeHtml(task.title);
 					const safeDesc = task.description ? escapeHtml(task.description) : '';
 					return `
-				<div style="background-color: #f9fafb; padding: 14px 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${priorityColor};">
+				<div class="ots-details" style="background-color: #f9fafb; padding: 14px 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${priorityColor};">
 					<div style="margin: 0 0 6px 0;"><a href="${taskUrl}" style="color: ${themeColor}; text-decoration: none; font-weight: 600; font-size: 15px;">${safeTitle}</a></div>
 					${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin: 0 0 8px 0;">${safeDesc}</div>` : ''}
 					<div style="color: #374151; font-size: 13px; line-height: 1.6;">
@@ -2548,7 +2548,7 @@ export async function sendReportEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong></div>
@@ -2707,7 +2707,7 @@ export async function sendPackageRequestEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeRecipientName ? ` ${safeRecipientName}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat ${isBundle ? 'un bundle de servicii' : 'un serviciu'} din CRM:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
 							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
