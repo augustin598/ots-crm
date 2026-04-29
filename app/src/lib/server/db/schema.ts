@@ -4289,3 +4289,154 @@ export const API_KEY_SCOPES = [
 	'integrations:read'
 ] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ads Monitoring (MVP — Meta only) — Performance target tracking + alerting
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Per-campaign performance targets (CPL/CPA/ROAS/CTR + daily budget)
+export const adMonitorTarget = sqliteTable(
+	'ad_monitor_target',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull().default('meta'), // 'meta' | 'google' | 'tiktok'
+		externalCampaignId: text('external_campaign_id').notNull(),
+		externalAdsetId: text('external_adset_id'), // nullable — campaign-level by default
+		objective: text('objective').notNull(), // OUTCOME_LEADS | OUTCOME_SALES | ...
+		// Targets (any may be null — alert only on populated metrics)
+		targetCplCents: integer('target_cpl_cents'),
+		targetCpaCents: integer('target_cpa_cents'),
+		targetRoas: real('target_roas'),
+		targetCtr: real('target_ctr'),
+		targetDailyBudgetCents: integer('target_daily_budget_cents'),
+		deviationThresholdPct: integer('deviation_threshold_pct').notNull().default(20),
+		isActive: boolean('is_active').notNull().default(true),
+		isMuted: boolean('is_muted').notNull().default(false),
+		mutedUntil: timestamp('muted_until', { withTimezone: true, mode: 'date' }),
+		notifyTelegram: boolean('notify_telegram').notNull().default(true),
+		notifyEmail: boolean('notify_email').notNull().default(true),
+		notifyInApp: boolean('notify_in_app').notNull().default(true),
+		createdByUserId: text('created_by_user_id').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantActiveIdx: index('ad_monitor_target_tenant_active_idx').on(t.tenantId, t.isActive),
+		clientIdx: index('ad_monitor_target_client_idx').on(t.clientId),
+		uniqCampaignAdset: uniqueIndex('ad_monitor_target_uniq').on(
+			t.tenantId,
+			t.externalCampaignId,
+			t.externalAdsetId
+		)
+	})
+);
+
+// Daily metric snapshots per campaign/adset (90-day retention)
+export const adMetricSnapshot = sqliteTable(
+	'ad_metric_snapshot',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		platform: text('platform').notNull().default('meta'),
+		externalCampaignId: text('external_campaign_id').notNull(),
+		externalAdsetId: text('external_adset_id'),
+		date: text('date').notNull(), // 'YYYY-MM-DD' Europe/Bucharest
+		spendCents: integer('spend_cents').notNull().default(0),
+		impressions: integer('impressions').notNull().default(0),
+		clicks: integer('clicks').notNull().default(0),
+		conversions: integer('conversions').notNull().default(0),
+		cpcCents: integer('cpc_cents'),
+		cpmCents: integer('cpm_cents'),
+		cpaCents: integer('cpa_cents'),
+		cplCents: integer('cpl_cents'),
+		ctr: real('ctr'),
+		roas: real('roas'),
+		frequency: real('frequency'),
+		// 'learning' (<7d running) | 'sparse' (<50 conv last 7d) | 'mature'
+		maturity: text('maturity').notNull().default('mature'),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniqSnapshot: uniqueIndex('ad_metric_snapshot_uniq').on(
+			t.tenantId,
+			t.externalCampaignId,
+			t.externalAdsetId,
+			t.date
+		),
+		tenantDateIdx: index('ad_metric_snapshot_tenant_date_idx').on(t.tenantId, t.date),
+		retentionIdx: index('ad_metric_snapshot_date_idx').on(t.date)
+	})
+);
+
+// Telegram chat linking — global bot, per-user pairing via /start <code>
+export const userTelegramLink = sqliteTable(
+	'user_telegram_link',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id),
+		telegramChatId: text('telegram_chat_id'), // populated after webhook /start callback
+		telegramUsername: text('telegram_username'),
+		linkCode: text('link_code').notNull(), // unique pairing code embedded in deep-link
+		linkedAt: timestamp('linked_at', { withTimezone: true, mode: 'date' }),
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniqLinkCode: uniqueIndex('user_telegram_link_code_uidx').on(t.linkCode),
+		uniqUser: uniqueIndex('user_telegram_link_user_uidx').on(t.tenantId, t.userId),
+		chatIdx: index('user_telegram_link_chat_idx').on(t.telegramChatId)
+	})
+);
+
+export const adMonitorTargetRelations = relations(adMonitorTarget, ({ one }) => ({
+	tenant: one(tenant, { fields: [adMonitorTarget.tenantId], references: [tenant.id] }),
+	client: one(client, { fields: [adMonitorTarget.clientId], references: [client.id] }),
+	createdBy: one(user, {
+		fields: [adMonitorTarget.createdByUserId],
+		references: [user.id]
+	})
+}));
+
+export const adMetricSnapshotRelations = relations(adMetricSnapshot, ({ one }) => ({
+	tenant: one(tenant, { fields: [adMetricSnapshot.tenantId], references: [tenant.id] }),
+	client: one(client, { fields: [adMetricSnapshot.clientId], references: [client.id] })
+}));
+
+export const userTelegramLinkRelations = relations(userTelegramLink, ({ one }) => ({
+	tenant: one(tenant, { fields: [userTelegramLink.tenantId], references: [tenant.id] }),
+	user: one(user, { fields: [userTelegramLink.userId], references: [user.id] })
+}));
+
+export type AdMonitorTarget = typeof adMonitorTarget.$inferSelect;
+export type NewAdMonitorTarget = typeof adMonitorTarget.$inferInsert;
+export type AdMetricSnapshot = typeof adMetricSnapshot.$inferSelect;
+export type NewAdMetricSnapshot = typeof adMetricSnapshot.$inferInsert;
+export type UserTelegramLink = typeof userTelegramLink.$inferSelect;
+export type NewUserTelegramLink = typeof userTelegramLink.$inferInsert;
+
+export const AD_METRIC_MATURITY = ['learning', 'sparse', 'mature'] as const;
+export type AdMetricMaturity = (typeof AD_METRIC_MATURITY)[number];

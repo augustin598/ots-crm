@@ -1040,6 +1040,12 @@
 			<Button variant="outline" size="sm" onclick={exportCSV} title="Export CSV cu coloanele vizibile">
 				<DownloadIcon class="h-4 w-4" />
 			</Button>
+			<a href="/{tenantSlug}/reports/facebook-ads/monitoring" title="Monitoring target-uri">
+				<Button variant="outline" size="sm">
+					<TargetIcon class="h-4 w-4 mr-1" />
+					Monitoring
+				</Button>
+			</a>
 			<Button variant="outline" size="sm" onclick={handleRefresh}>
 				<RefreshCwIcon class="h-4 w-4" />
 			</Button>

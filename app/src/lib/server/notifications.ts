@@ -31,6 +31,9 @@ export type NotificationType =
 	| 'ad.grace_period'
 	| 'ad.risk_review'
 	| 'ad.account_restored'
+	// Ads performance monitoring
+	| 'ad.target_deviation'
+	| 'ad.target_deviation_resolved'
 	// Budget
 	| 'budget.exceeded'
 	| 'budget.warning'
@@ -70,6 +73,7 @@ export interface CreateNotificationParams {
 const GROUPABLE_TYPES: Set<NotificationType> = new Set([
 	'lead.imported',
 	'ad.spending_synced',
+	'ad.target_deviation',
 	'email.delivery_failed',
 	'invoice.reminder',
 	'contract.expiring',
@@ -83,6 +87,7 @@ const GROUP_TITLES: Partial<Record<NotificationType, (count: number) => string>>
 	'invoice.reminder': (n) => `${n} facturi restante`,
 	'contract.expiring': (n) => `${n} contracte expira curand`,
 	'task.overdue': (n) => `${n} taskuri intarziate`,
+	'ad.target_deviation': (n) => `${n} deviații Meta Ads detectate`,
 };
 
 function generateFingerprint(tenantId: string, userId: string, type: string, clientId: string | null): string {
@@ -108,8 +113,12 @@ const EMAIL_TYPES: Set<NotificationType> = new Set([
 	'contract.expiring',
 	'comment.mention',
 	'approval.requested',
-	// NOTE: ad.* types are emailed separately (branded template) by
-	// src/lib/server/ads/payment-alerts.ts — excluded here to avoid double send.
+	// Ads performance — re-uses generic notification email template.
+	// Dedup-by-fingerprint already collapses same metric/campaign/day, lastEmailAt
+	// caps at 1 per 24h. Branded digest can replace this in phase 2.
+	'ad.target_deviation',
+	// NOTE: ad.account_suspended/payment_failed/etc are emailed separately (branded)
+	// by src/lib/server/ads/payment-alerts.ts — excluded here to avoid double send.
 ]);
 
 /**

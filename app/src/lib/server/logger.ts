@@ -41,7 +41,9 @@ export type LogSource =
 	| 'whatsapp'
 	| 'wordpress'
 	| 'whmcs'
-	| 'packages';
+	| 'packages'
+	| 'telegram'
+	| 'ads-monitor';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

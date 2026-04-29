@@ -1562,6 +1562,27 @@
       "when": 1777406733014,
       "tag": "0222_meta_ads_account_is_primary",
       "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "6",
+      "when": 1777950100000,
+      "tag": "0223_ad_monitor_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "6",
+      "when": 1777950101000,
+      "tag": "0224_ad_metric_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "6",
+      "when": 1777950102000,
+      "tag": "0225_user_telegram_link",
+      "breakpoints": true
     }
   ]
 }
