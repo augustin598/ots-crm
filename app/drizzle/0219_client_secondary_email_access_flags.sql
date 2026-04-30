@@ -1,0 +1,1 @@
+ALTER TABLE `client_secondary_email` ADD COLUMN `access_flags` text;

@@ -18,6 +18,8 @@ import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processAdsStatusMonitor } from './tasks/ads-status-monitor';
+import { processAdsPerformanceMonitor } from './tasks/ads-performance-monitor';
+import { processAdsSnapshotRetention } from './tasks/ads-snapshot-retention';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
@@ -123,6 +125,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
 	ads_status_monitor: processAdsStatusMonitor,
+	ads_performance_monitor: processAdsPerformanceMonitor,
+	ads_snapshot_retention: processAdsSnapshotRetention,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
@@ -251,7 +255,8 @@ export const startScheduler = async () => {
 		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
-		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'ads-status-monitor', 'meta-ads-leads-sync',
+		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'ads-status-monitor',
+		'ads-performance-monitor', 'ads-snapshot-retention', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
@@ -545,6 +550,39 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Schedule daily Meta ads performance monitor — pulls insights, runs deviation engine.
+	// 07:00 Europe/Bucharest. Per-tenant stagger handled inside the task to spread load.
+	await schedulerQueue.add(
+		'ads-performance-monitor',
+		{
+			type: 'ads_performance_monitor',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 7 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-performance-monitor'
+		}
+	);
+
+	// Schedule daily snapshot retention — keeps ad_metric_snapshot capped at 90 days.
+	await schedulerQueue.add(
+		'ads-snapshot-retention',
+		{
+			type: 'ads_snapshot_retention',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 3 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-snapshot-retention'
+		}
+	);
+
 	// Schedule Meta Ads lead sync every 4 hours
 	await schedulerQueue.add(
 		'meta-ads-leads-sync',
@@ -807,6 +845,8 @@ export const JOB_LABELS: Record<string, string> = {
 	meta_ads_invoice_sync: 'Sync Facturi Meta Ads',
 	tiktok_ads_spending_sync: 'Sync Cheltuieli TikTok Ads',
 	ads_status_monitor: 'Monitor Status Plată Ads (Meta/Google/TikTok)',
+	ads_performance_monitor: 'Monitor Performanță Ads (Meta) — alerte deviații',
+	ads_snapshot_retention: 'Retenție 90z — snapshots metrici Ads',
 	meta_ads_leads_sync: 'Sync Leaduri Meta Ads',
 	token_refresh: 'Refresh Token-uri Integrări',
 	token_refresh_frequent: 'Refresh Token-uri (Gmail/Google Ads)',

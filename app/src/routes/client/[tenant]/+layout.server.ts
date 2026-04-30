@@ -2,7 +2,8 @@ import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
+import { getRequestAccessFlags, ALL_ACCESS_TRUE, NO_ACCESS, type AccessFlags } from '$lib/server/portal-access';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (
@@ -112,11 +113,51 @@ export const load: LayoutServerLoad = async (event) => {
 		}
 	}
 
+	// Resolve per-user access flags. Primary contacts always get full access;
+	// secondary contacts (matched by user.email) read flags from clientSecondaryEmail.
+	let accessFlags: AccessFlags = { ...NO_ACCESS };
+	if (event.locals.client && event.locals.user) {
+		accessFlags = await getRequestAccessFlags({
+			tenantId: tenant.id,
+			clientId: event.locals.client.id,
+			userEmail: event.locals.user.email,
+			isPrimary: event.locals.clientUser?.isPrimary ?? false
+		});
+	} else if (!event.locals.isClientUser) {
+		// Admin viewing client portal (rare) — give full access.
+		accessFlags = { ...ALL_ACCESS_TRUE };
+	}
+
+	// Multi-company: list every company this user has access to in this tenant.
+	// Drives the company switcher in the header (shown when length > 1) and
+	// the /select-company page after login.
+	let userCompanies: { id: string; name: string; cui: string | null; status: string | null; lastSelectedAt: Date | null }[] = [];
+	if (event.locals.user && event.locals.isClientUser) {
+		userCompanies = await db
+			.select({
+				id: table.client.id,
+				name: table.client.name,
+				cui: table.client.cui,
+				status: table.client.status,
+				lastSelectedAt: table.clientUser.lastSelectedAt
+			})
+			.from(table.clientUser)
+			.innerJoin(table.client, eq(table.clientUser.clientId, table.client.id))
+			.where(
+				and(
+					eq(table.clientUser.userId, event.locals.user.id),
+					eq(table.clientUser.tenantId, tenant.id)
+				)
+			)
+			.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`, table.client.name);
+	}
+
 	return {
 		tenant,
 		client: event.locals.client,
 		clientUser: event.locals.clientUser,
 		isClientUserPrimary: event.locals.clientUser?.isPrimary ?? true,
+		userCompanies,
 		user: event.locals.user
 			? {
 					id: event.locals.user.id,
@@ -127,6 +168,7 @@ export const load: LayoutServerLoad = async (event) => {
 			: null,
 		defaultWebsiteUrl,
 		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null,
-		accessRestriction
+		accessRestriction,
+		accessFlags
 	};
 };

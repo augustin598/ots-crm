@@ -2,8 +2,13 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, ne, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import {
+	ACCESS_CATEGORIES,
+	parseAccessFlags,
+	type AccessFlags
+} from '$lib/server/portal-access';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -18,7 +23,7 @@ export const getClientSecondaryEmails = query(
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
-		return db
+		const rows = await db
 			.select()
 			.from(table.clientSecondaryEmail)
 			.where(
@@ -27,6 +32,24 @@ export const getClientSecondaryEmails = query(
 					eq(table.clientSecondaryEmail.tenantId, event.locals.tenant.id)
 				)
 			);
+
+		// Resolve accessFlags so the UI gets a guaranteed-shape object per row.
+		// Fallback to legacy notify* columns when access_flags is NULL (pre-backfill rows).
+		return rows.map((r) => {
+			const parsed = parseAccessFlags(r.accessFlags);
+			const flags: AccessFlags = parsed ?? {
+				invoices: !!r.notifyInvoices,
+				contracts: !!r.notifyContracts,
+				tasks: !!r.notifyTasks,
+				marketing: false,
+				reports: false,
+				leads: false,
+				accessData: false,
+				backlinks: false,
+				budgets: false
+			};
+			return { ...r, accessFlagsResolved: flags };
+		});
 	}
 );
 
@@ -52,37 +75,26 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 		.limit(1);
 	if (!client) throw new Error('Client not found');
 
-	// Cannot duplicate the primary email
+	// Cannot duplicate the primary email of THIS client.
 	if (client.email?.toLowerCase() === data.email.toLowerCase()) {
 		throw new Error('Această adresă este deja emailul principal al clientului.');
 	}
 
-	// Uniqueness within tenant
+	// Per-client uniqueness only — same email may legitimately appear on multiple
+	// clients (one user managing multiple companies). Cross-client checks lifted:
+	// uniqueness for a client = CUI, not email/phone.
 	const [existing] = await db
 		.select({ id: table.clientSecondaryEmail.id })
 		.from(table.clientSecondaryEmail)
 		.where(
 			and(
 				eq(table.clientSecondaryEmail.tenantId, tenantId),
+				eq(table.clientSecondaryEmail.clientId, data.clientId),
 				eq(sql`lower(${table.clientSecondaryEmail.email})`, data.email.toLowerCase())
 			)
 		)
 		.limit(1);
-	if (existing) throw new Error('Acest email este deja asociat unui client din acest tenant.');
-
-	// Check if email is already a primary email on another client
-	const [primaryTaken] = await db
-		.select({ id: table.client.id })
-		.from(table.client)
-		.where(
-			and(
-				eq(table.client.tenantId, tenantId),
-				eq(sql`lower(${table.client.email})`, data.email.toLowerCase()),
-				ne(table.client.id, data.clientId)
-			)
-		)
-		.limit(1);
-	if (primaryTaken) throw new Error('Acest email este deja emailul principal al altui client.');
+	if (existing) throw new Error('Acest email este deja secundar pentru acest client.');
 
 	const now = new Date();
 	const id = generateId();
@@ -99,13 +111,27 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 	return { success: true, id };
 });
 
-/** Update notification preferences for a secondary email (admin only) */
-export const updateClientSecondaryEmailNotifications = command(
+const accessFlagsSchema = v.object({
+	invoices: v.boolean(),
+	contracts: v.boolean(),
+	tasks: v.boolean(),
+	marketing: v.boolean(),
+	reports: v.boolean(),
+	leads: v.boolean(),
+	accessData: v.boolean(),
+	backlinks: v.boolean(),
+	budgets: v.boolean()
+});
+
+/**
+ * Update per-user portal access flags for a secondary contact (admin only).
+ * Persists JSON in `access_flags` and dual-writes the 3 legacy notify* columns
+ * so existing email-sending logic keeps working until callers migrate.
+ */
+export const updateClientSecondaryEmailAccess = command(
 	v.object({
 		secondaryEmailId: v.pipe(v.string(), v.minLength(1)),
-		notifyInvoices: v.boolean(),
-		notifyTasks: v.boolean(),
-		notifyContracts: v.boolean()
+		accessFlags: accessFlagsSchema
 	}),
 	async (data) => {
 		const event = getRequestEvent();
@@ -124,12 +150,19 @@ export const updateClientSecondaryEmailNotifications = command(
 			.limit(1);
 		if (!record) throw new Error('Email secundar negăsit');
 
+		const flags: AccessFlags = data.accessFlags;
+		// Sanity: only persist known categories.
+		const sanitized = Object.fromEntries(
+			ACCESS_CATEGORIES.map((c) => [c, !!flags[c]])
+		) as AccessFlags;
+
 		await db
 			.update(table.clientSecondaryEmail)
 			.set({
-				notifyInvoices: data.notifyInvoices,
-				notifyTasks: data.notifyTasks,
-				notifyContracts: data.notifyContracts,
+				accessFlags: JSON.stringify(sanitized),
+				notifyInvoices: sanitized.invoices,
+				notifyTasks: sanitized.tasks,
+				notifyContracts: sanitized.contracts,
 				updatedAt: new Date()
 			})
 			.where(eq(table.clientSecondaryEmail.id, data.secondaryEmailId));

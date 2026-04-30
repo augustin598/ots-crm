@@ -11,7 +11,8 @@ import {
 	logEmailProcessing,
 	logEmailSuccess,
 	logEmailFailure,
-	logEmailRetry
+	logEmailRetry,
+	type EmailType
 } from './email-logger';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { createNotification } from '$lib/server/notifications';
@@ -124,7 +125,7 @@ function renderBrandedEmail(opts: BrandedEmailOptions): string {
 		opts.footerHtml ??
 		'Pentru întrebări sau clarificări, nu ezitați să ne contactați.';
 	const subtitleBlock = subtitle
-		? `<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>`
+		? `<p class="ots-subtitle" style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">${subtitle}</p>`
 		: '';
 	return `<!DOCTYPE html>
 <html>
@@ -132,12 +133,24 @@ function renderBrandedEmail(opts: BrandedEmailOptions): string {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>${opts.previewTitle ?? opts.title}</title>
+	<style>
+		@media only screen and (max-width: 480px) {
+			.ots-outer { padding: 16px 8px !important; }
+			.ots-card { padding: 20px 18px !important; border-radius: 8px !important; }
+			.ots-title { font-size: 18px !important; line-height: 1.25 !important; word-break: break-word; }
+			.ots-subtitle { font-size: 12px !important; line-height: 1.5 !important; }
+			.ots-stack td { display: block !important; width: 100% !important; padding: 0 !important; }
+			.ots-stack-right { text-align: left !important; padding-top: 10px !important; white-space: normal !important; }
+			.ots-card-inner { padding: 16px 16px !important; }
+			.ots-details { padding: 12px 14px !important; }
+		}
+	</style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
-	<div style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
-		<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
+	<div class="ots-outer" style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+		<div class="ots-card" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
 			${opts.headerLogoHtml}
-			<h1 style="color: ${opts.themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${opts.title}</h1>
+			<h1 class="ots-title" style="color: ${opts.themeColor}; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">${opts.title}</h1>
 			${subtitleBlock}
 			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
 			${opts.bodyHtml}
@@ -249,23 +262,25 @@ export async function getNotificationRecipients(
 		recipients.push({ email: client.email, name: client.legalRepresentative || client.name || null });
 	}
 
-	const columnMap = {
-		invoices: table.clientSecondaryEmail.notifyInvoices,
-		tasks: table.clientSecondaryEmail.notifyTasks,
-		contracts: table.clientSecondaryEmail.notifyContracts
-	} as const;
-
+	// Read all secondary contacts and resolve their access flags. The category
+	// flag (invoices/tasks/contracts) gates whether they receive this notification.
+	// Falls back to legacy notify* columns when access_flags is NULL.
+	const { resolveAccessFlags } = await import('./portal-access');
 	const secondaryEmails = await db
-		.select({ email: table.clientSecondaryEmail.email, label: table.clientSecondaryEmail.label })
+		.select({
+			email: table.clientSecondaryEmail.email,
+			label: table.clientSecondaryEmail.label,
+			accessFlags: table.clientSecondaryEmail.accessFlags,
+			notifyInvoices: table.clientSecondaryEmail.notifyInvoices,
+			notifyTasks: table.clientSecondaryEmail.notifyTasks,
+			notifyContracts: table.clientSecondaryEmail.notifyContracts
+		})
 		.from(table.clientSecondaryEmail)
-		.where(
-			and(
-				eq(table.clientSecondaryEmail.clientId, clientId),
-				eq(columnMap[category], true)
-			)
-		);
+		.where(eq(table.clientSecondaryEmail.clientId, clientId));
 
 	for (const se of secondaryEmails) {
+		const flags = resolveAccessFlags({ isPrimary: false, secondaryEmail: se });
+		if (!flags[category]) continue;
 		if (se.email && !recipients.map((r) => r.email.toLowerCase()).includes(se.email.toLowerCase())) {
 			recipients.push({ email: se.email, name: se.label || null });
 		}
@@ -723,25 +738,6 @@ function isHardBounce(error: Error): { code: string; message: string } | null {
 // Persistent send helper — DB-backed outbox pattern
 // ---------------------------------------------------------------------------
 
-type EmailType =
-	| 'invitation'
-	| 'invoice'
-	| 'magic-link'
-	| 'admin-magic-link'
-	| 'password-reset'
-	| 'task-assignment'
-	| 'task-update'
-	| 'task-reminder'
-	| 'task-client-notification'
-	| 'daily-reminder'
-	| 'contract-signing'
-	| 'invoice-paid'
-	| 'invoice-overdue-reminder'
-	| 'notification_alert'
-	| 'report'
-	| 'ad_payment_alert'
-	| 'ad_payment_digest';
-
 export type EmailSendContext = {
 	tenantId: string | null;
 	toEmail: string;
@@ -1122,7 +1118,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 
 			// IBAN payment details
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				? `<div class="ots-details" style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
 				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
 				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
 				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
@@ -1149,7 +1145,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${clientDisplayName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem factura de la <strong>${tenantName}</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -1495,7 +1491,7 @@ export async function sendTaskAssignmentEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Ți-a fost atribuit un task nou:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1627,7 +1623,7 @@ export async function sendTaskUpdateEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeWatcher ? ` ${safeWatcher}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un task pe care îl urmăriți a fost actualizat — <em>${changeDescription}</em>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1811,7 +1807,7 @@ export async function sendTaskClientNotificationEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ${greeting},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${changeDescription}</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -1932,7 +1928,7 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Am primit plata pentru următoarea factură:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -2085,7 +2081,7 @@ export async function sendOverdueReminderEmail(
 			const overdueHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
 			const ibanHtml = tenant?.iban
-				? `<div style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
+				? `<div class="ots-details" style="background-color: #f9fafb; border-left: 3px solid ${themeColor}; padding: 14px 16px; border-radius: 6px; margin: 0 0 20px 0;">
 				<p style="color: #111827; font-weight: 600; font-size: 14px; margin: 0 0 6px 0;">Date pentru plată</p>
 				${tenant.bankName ? `<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">Banca</span> &nbsp;·&nbsp; ${escapeHtml(tenant.bankName)}</p>` : ''}
 				<p style="color: #374151; font-size: 13px; margin: 2px 0;"><span style="color: #6b7280;">IBAN (LEI)</span> &nbsp;·&nbsp; ${escapeHtml(tenant.iban)}</p>
@@ -2106,7 +2102,7 @@ export async function sendOverdueReminderEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă reamintim că factura de mai jos este restantă de <strong>${daysOverdue} zile</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fffbeb; border-left: 3px solid #d97706; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #fffbeb; border-left: 3px solid #d97706; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
@@ -2224,7 +2220,7 @@ export async function sendTaskReminderEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeAssignee ? ` ${safeAssignee}` : ''},</p>
 				${isOverdue ? `<p style="color: ${accent}; font-weight: 600; font-size: 15px; margin: 0 0 16px 0;">Acest task este restant!</p>` : `<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">Acest task are termen ${daysUntilDue === 0 ? 'astăzi' : `în ${daysUntilDue} ${daysUntilDue === 1 ? 'zi' : 'zile'}`}.</p>`}
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-left: 3px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-left: 3px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${safeTitle}</div>
@@ -2341,7 +2337,7 @@ export async function sendDailyWorkReminderEmail(
 					const safeTitle = escapeHtml(task.title);
 					const safeDesc = task.description ? escapeHtml(task.description) : '';
 					return `
-				<div style="background-color: #f9fafb; padding: 14px 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${priorityColor};">
+				<div class="ots-details" style="background-color: #f9fafb; padding: 14px 16px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid ${priorityColor};">
 					<div style="margin: 0 0 6px 0;"><a href="${taskUrl}" style="color: ${themeColor}; text-decoration: none; font-weight: 600; font-size: 15px;">${safeTitle}</a></div>
 					${safeDesc ? `<div style="color: #6b7280; font-size: 13px; margin: 0 0 8px 0;">${safeDesc}</div>` : ''}
 					<div style="color: #374151; font-size: 13px; line-height: 1.6;">
@@ -2552,7 +2548,7 @@ export async function sendReportEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Vă transmitem raportul de marketing pentru <strong>${safeClientName}</strong>.</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 							<div><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong></div>
@@ -2711,7 +2707,7 @@ export async function sendPackageRequestEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeRecipientName ? ` ${safeRecipientName}` : ''},</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat ${isBundle ? 'un bundle de servicii' : 'un serviciu'} din CRM:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
 							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
@@ -2827,7 +2823,7 @@ export async function sendAdPaymentAlertEmail(
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${audienceIntro}</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fef2f2; border: 1px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #fef2f2; border: 1px solid ${accent}; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
 							<div><span style="color: #6b7280;">Platformă</span> &nbsp;·&nbsp; <strong>${safeProvider}</strong></div>
@@ -3037,7 +3033,7 @@ export async function sendAdPaymentDigestEmail(
 
 					const detailsBlock = it.details
 						? `
-							<div style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
+							<div class="ots-details" style="margin-top: 14px; padding: 14px 16px; background: ${accentBg}; border: 1px solid ${accentBorder}; border-left: 4px solid ${accent}; border-radius: 8px;">
 								<div style="font-size: 14px; font-weight: 700; color: ${accentDark}; letter-spacing: -0.01em;">${escapeHtml(it.details.headline)}</div>
 								<div style="font-size: 13px; color: ${accentDarker}; line-height: 1.6; margin-top: 6px;">${escapeHtml(it.details.body)}</div>
 								${deadlineLine}
@@ -3061,8 +3057,8 @@ export async function sendAdPaymentDigestEmail(
 					return `
 						<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: separate; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; margin: 0 0 14px 0; overflow: hidden;">
 							<tr>
-								<td style="padding: 18px 20px;">
-									<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+								<td class="ots-card-inner" style="padding: 18px 20px;">
+									<table role="presentation" cellpadding="0" cellspacing="0" width="100%" class="ots-stack">
 										<tr>
 											<td style="vertical-align: top; padding-right: 12px;">
 												<div style="font-weight: 700; color: #111827; font-size: 15px; line-height: 1.3;">${escapeHtml(it.accountName)}</div>
@@ -3073,7 +3069,7 @@ export async function sendAdPaymentDigestEmail(
 												</div>
 												${clientLine}
 											</td>
-											<td style="vertical-align: top; text-align: right; white-space: nowrap;">
+											<td class="ots-stack-right" style="vertical-align: top; text-align: right; white-space: nowrap;">
 												<span style="display: inline-block; padding: 5px 12px; border-radius: 999px; background: ${accentBg}; color: ${accentPill}; font-size: 12px; font-weight: 600; border: 1px solid ${accentBorder};">${escapeHtml(it.statusLabelRo)}</span>
 											</td>
 										</tr>

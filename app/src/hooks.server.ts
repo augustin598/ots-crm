@@ -13,7 +13,7 @@ import { flushLogBuffer } from '$lib/server/logger';
 import { restoreAllSessions as restoreWhatsappSessions, shutdownAllSessions as shutdownWhatsappSessions } from '$lib/server/whatsapp/session-manager';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 // Initialize plugins once — flag stored on globalThis so HMR in dev mode
 // doesn't reset it (module reload wipes module-level `let`, but not globalThis).
@@ -98,7 +98,10 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 				.limit(1);
 
 			if (tenant) {
-				// Check if user has clientUser relationship for this tenant
+				// Pick the user's most recently selected client for this tenant.
+				// Multi-company users have multiple clientUser rows; the active one
+				// is whichever they switched to last (lastSelectedAt). Single-company
+				// users have exactly one row, ordering is irrelevant.
 				const [clientUserRecord] = await db
 					.select({
 						clientUser: table.clientUser,
@@ -112,6 +115,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 							eq(table.clientUser.tenantId, tenant.id)
 						)
 					)
+					.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`)
 					.limit(1);
 
 				if (clientUserRecord) {
@@ -191,23 +195,6 @@ export const handleError: import('@sveltejs/kit').HandleServerError = async ({ e
 	const { logError, serializeError } = await import('$lib/server/logger');
 	const serialized = serializeError(error);
 	const requestId = crypto.randomUUID();
-
-	// Debug: log full error details for client auth routes
-	if (event.url.pathname.includes('client') || event.request.method === 'POST') {
-		console.error('[HANDLE_ERROR_DEBUG]', {
-			requestId,
-			url: event.url.pathname,
-			method: event.request.method,
-			status,
-			errorType: typeof error,
-			errorName: error instanceof Error ? error.name : 'unknown',
-			errorMessage: error instanceof Error ? error.message : String(error),
-			errorStack: error instanceof Error ? error.stack : undefined,
-			rawError: JSON.stringify(error, Object.getOwnPropertyNames(error || {})),
-			serializedMessage: serialized.message,
-			serializedStack: serialized.stack
-		});
-	}
 
 	await logError('server', serialized.message, {
 		tenantId: event.locals.tenant?.id,

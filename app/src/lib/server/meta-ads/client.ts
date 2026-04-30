@@ -1,5 +1,6 @@
 import { logInfo, logError } from '$lib/server/logger';
 import { createHmac } from 'crypto';
+import { META_ACTIVE_AD_ACCOUNT_STATUSES } from './constants';
 
 export const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
 
@@ -120,7 +121,7 @@ export async function listBusinessAdAccounts(
 					adAccountId: acc.id || '',
 					accountName: acc.name || '',
 					accountStatus: acc.account_status || 0,
-					isActive: acc.account_status === 1,
+					isActive: META_ACTIVE_AD_ACCOUNT_STATUSES.has(acc.account_status),
 					disableReason: acc.disable_reason ?? 0,
 					balanceCents,
 					currencyCode: acc.currency ?? null,
