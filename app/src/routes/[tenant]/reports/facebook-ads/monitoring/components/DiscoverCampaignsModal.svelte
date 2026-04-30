@@ -8,9 +8,7 @@
 	interface Client {
 		id: string;
 		name: string;
-		adAccountId: string;
-		integrationId: string;
-		accountName: string;
+		accounts: Array<{ adAccountId: string; integrationId: string; accountName: string; isPrimary: boolean }>;
 	}
 	interface DisplayCampaign {
 		campaignId: string;
@@ -31,6 +29,7 @@
 	let { open = $bindable(), clients, tenantSlug, onClose, onImported }: Props = $props();
 
 	let clientId = $state('');
+	let accountId = $state('');
 	let selected = $state<Set<string>>(new Set());
 	let importing = $state(false);
 
@@ -42,12 +41,23 @@
 	let campaignsQuery = $state<ReturnType<typeof getMetaActiveCampaigns> | null>(null);
 
 	const selectedClient = $derived(clients.find((c) => c.id === clientId) ?? null);
+	const availableAccounts = $derived(selectedClient?.accounts ?? []);
 
 	$effect(() => {
-		if (selectedClient && open) {
+		if (availableAccounts.length > 0 && !availableAccounts.find((a) => a.adAccountId === accountId)) {
+			accountId = availableAccounts[0].adAccountId;
+		} else if (availableAccounts.length === 0) {
+			accountId = '';
+		}
+	});
+
+	const selectedAccount = $derived(availableAccounts.find((a) => a.adAccountId === accountId) ?? null);
+
+	$effect(() => {
+		if (selectedAccount && open) {
 			campaignsQuery = getMetaActiveCampaigns({
-				adAccountId: selectedClient.adAccountId,
-				integrationId: selectedClient.integrationId
+				adAccountId: selectedAccount.adAccountId,
+				integrationId: selectedAccount.integrationId
 			});
 		} else {
 			campaignsQuery = null;
@@ -158,9 +168,31 @@
 				Client
 				<select bind:value={clientId} class="h-9 rounded-md border px-3 bg-background">
 					<option value="">Alege client…</option>
-					{#each clients as c}<option value={c.id}>{c.name}</option>{/each}
+					{#each clients as c}
+						<option value={c.id}>
+							{c.name} ({c.accounts.length} {c.accounts.length === 1 ? 'cont' : 'conturi'})
+						</option>
+					{/each}
 				</select>
 			</label>
+
+			{#if selectedClient && availableAccounts.length > 1}
+				<label class="flex flex-col gap-1 text-sm">
+					Ad Account
+					<select bind:value={accountId} class="h-9 rounded-md border px-3 bg-background">
+						{#each availableAccounts as a}
+							<option value={a.adAccountId}>
+								{a.accountName} ({a.adAccountId}){a.isPrimary ? ' · primary' : ''}
+							</option>
+						{/each}
+					</select>
+				</label>
+			{:else if selectedClient && availableAccounts.length === 1}
+				<div class="text-xs text-muted-foreground">
+					Ad Account: <span class="font-mono">{availableAccounts[0].accountName}</span>
+					(<span class="font-mono">{availableAccounts[0].adAccountId}</span>)
+				</div>
+			{/if}
 
 			{#if loading}
 				<div class="text-sm text-muted-foreground py-4">Se încarcă campaniile Meta…</div>

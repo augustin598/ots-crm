@@ -88,13 +88,26 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 		accountId: t.externalAdAccountId ?? t.accountId ?? null
 	}));
 
-	const clientRows = await db
+	type ClientAccount = {
+		adAccountId: string;
+		integrationId: string;
+		accountName: string;
+		isPrimary: boolean;
+	};
+	type ClientWithAccounts = {
+		id: string;
+		name: string;
+		accounts: ClientAccount[];
+	};
+
+	const rows = await db
 		.select({
 			id: table.client.id,
 			name: table.client.name,
 			adAccountId: table.metaAdsAccount.metaAdAccountId,
 			integrationId: table.metaAdsAccount.integrationId,
-			accountName: table.metaAdsAccount.accountName
+			accountName: table.metaAdsAccount.accountName,
+			isPrimary: table.metaAdsAccount.isPrimary
 		})
 		.from(table.client)
 		.innerJoin(
@@ -102,19 +115,31 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 			and(
 				eq(table.metaAdsAccount.clientId, table.client.id),
 				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
-				eq(table.metaAdsAccount.isActive, true),
-				eq(table.metaAdsAccount.isPrimary, true)
+				eq(table.metaAdsAccount.isActive, true)
 			)
 		)
 		.where(eq(table.client.tenantId, locals.tenant.id))
 		.orderBy(table.client.name);
 
-	const seen = new Set<string>();
-	const clients = clientRows.filter((c) => {
-		if (seen.has(c.id)) return false;
-		seen.add(c.id);
-		return true;
-	});
+	const grouped = new Map<string, ClientWithAccounts>();
+	for (const r of rows) {
+		const c = grouped.get(r.id) ?? { id: r.id, name: r.name, accounts: [] };
+		c.accounts.push({
+			adAccountId: r.adAccountId,
+			integrationId: r.integrationId,
+			accountName: r.accountName ?? r.adAccountId,
+			isPrimary: r.isPrimary
+		});
+		grouped.set(r.id, c);
+	}
+	for (const c of grouped.values()) {
+		c.accounts.sort((a, b) =>
+			a.isPrimary === b.isPrimary
+				? a.accountName.localeCompare(b.accountName)
+				: a.isPrimary ? -1 : 1
+		);
+	}
+	const clients = Array.from(grouped.values());
 
 	const recommendations = await db
 		.select({
