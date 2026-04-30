@@ -89,14 +89,21 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 	}));
 
 	const clientRows = await db
-		.select({ id: table.client.id, name: table.client.name })
+		.select({
+			id: table.client.id,
+			name: table.client.name,
+			adAccountId: table.metaAdsAccount.metaAdAccountId,
+			integrationId: table.metaAdsAccount.integrationId,
+			accountName: table.metaAdsAccount.accountName
+		})
 		.from(table.client)
 		.innerJoin(
 			table.metaAdsAccount,
 			and(
 				eq(table.metaAdsAccount.clientId, table.client.id),
 				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
-				eq(table.metaAdsAccount.isActive, true)
+				eq(table.metaAdsAccount.isActive, true),
+				eq(table.metaAdsAccount.isPrimary, true)
 			)
 		)
 		.where(eq(table.client.tenantId, locals.tenant.id))

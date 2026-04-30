@@ -3,17 +3,22 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
+	import { getMetaActiveCampaigns } from '$lib/remotes/reports.remote';
 
-	interface Client { id: string; name: string }
-	interface Campaign {
+	interface Client {
+		id: string;
+		name: string;
+		adAccountId: string;
+		integrationId: string;
+		accountName: string;
+	}
+	interface DisplayCampaign {
 		campaignId: string;
 		campaignName: string;
 		status: string;
 		objective: string;
 		optimizationGoal: string;
 		dailyBudget: string | null;
-		lifetimeBudget: string | null;
-		startTime: string | null;
 		alreadyMonitored: boolean;
 	}
 	interface Props {
@@ -26,9 +31,6 @@
 	let { open = $bindable(), clients, tenantSlug, onClose, onImported }: Props = $props();
 
 	let clientId = $state('');
-	let loading = $state(false);
-	let loadError = $state<string | null>(null);
-	let campaigns = $state<Campaign[]>([]);
 	let selected = $state<Set<string>>(new Set());
 	let importing = $state(false);
 
@@ -36,25 +38,59 @@
 	let defaultCpl = $state('');
 	let defaultThreshold = $state('20');
 
+	// Live query driven by selected client
+	let campaignsQuery = $state<ReturnType<typeof getMetaActiveCampaigns> | null>(null);
+
+	const selectedClient = $derived(clients.find((c) => c.id === clientId) ?? null);
+
 	$effect(() => {
-		if (!clientId) { campaigns = []; selected = new Set(); return; }
-		loadCampaigns();
+		if (selectedClient && open) {
+			campaignsQuery = getMetaActiveCampaigns({
+				adAccountId: selectedClient.adAccountId,
+				integrationId: selectedClient.integrationId
+			});
+		} else {
+			campaignsQuery = null;
+		}
 	});
 
-	async function loadCampaigns() {
-		loading = true;
-		loadError = null;
-		campaigns = [];
+	const rawCampaigns = $derived(campaignsQuery?.current ?? []);
+	const loading = $derived(campaignsQuery?.loading ?? false);
+	const loadError = $derived(campaignsQuery?.error?.message ?? null);
+
+	// Track already-monitored campaign IDs for this client
+	let monitoredIds = $state<Set<string>>(new Set());
+
+	$effect(() => {
+		if (clientId) {
+			fetch(`/${tenantSlug}/api/ads-monitor/targets?clientId=${clientId}`)
+				.then((r) => r.json())
+				.then((d) => {
+					monitoredIds = new Set((d.targets ?? []).map((t: any) => t.externalCampaignId));
+				})
+				.catch(() => { monitoredIds = new Set(); });
+		} else {
+			monitoredIds = new Set();
+		}
+	});
+
+	// Reset selection when client changes
+	$effect(() => {
+		clientId; // track
 		selected = new Set();
-		try {
-			const res = await fetch(`/${tenantSlug}/api/ads-monitor/discover-campaigns?clientId=${clientId}`);
-			const body = await res.json();
-			if (body.error) loadError = body.error;
-			campaigns = body.campaigns ?? [];
-		} catch (e) {
-			loadError = (e as Error).message;
-		} finally { loading = false; }
-	}
+	});
+
+	const campaigns = $derived<DisplayCampaign[]>(
+		rawCampaigns.map((c: any) => ({
+			campaignId: c.campaignId,
+			campaignName: c.campaignName,
+			status: c.status,
+			objective: c.objective,
+			optimizationGoal: c.optimizationGoal,
+			dailyBudget: c.dailyBudget,
+			alreadyMonitored: monitoredIds.has(c.campaignId)
+		}))
+	);
 
 	function toggle(id: string) {
 		if (selected.has(id)) selected.delete(id);
