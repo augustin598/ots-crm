@@ -157,13 +157,13 @@
 </script>
 
 <Sheet.Root bind:open onOpenChange={(o) => { if (!o) onClose(); }}>
-	<Sheet.Content side="right" class="w-[900px] sm:max-w-[900px] max-w-full">
-		<Sheet.Header>
+	<Sheet.Content side="right" class="w-[900px] sm:max-w-[900px] max-w-full p-0 flex flex-col gap-0">
+		<Sheet.Header class="px-6 pt-6 pb-4 border-b">
 			<Sheet.Title>Importă campanii Meta</Sheet.Title>
 			<Sheet.Description>Selectează clientul, alege campaniile active și aplică target-uri implicite.</Sheet.Description>
 		</Sheet.Header>
 
-		<div class="space-y-4 py-4">
+		<div class="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4 min-h-0">
 			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 				<label class="flex flex-col gap-1 text-sm">
 					Client
@@ -191,20 +191,20 @@
 				{:else if selectedClient && availableAccounts.length === 1}
 					<div class="flex flex-col gap-1 text-sm">
 						<span class="text-muted-foreground">Ad Account</span>
-						<div class="h-9 rounded-md border px-3 bg-muted/30 flex items-center gap-2 text-xs">
-							<span>{availableAccounts[0].accountName}</span>
-							<span class="font-mono text-muted-foreground">({availableAccounts[0].adAccountId})</span>
+						<div class="h-9 rounded-md border px-3 bg-muted/30 flex items-center gap-2 text-xs overflow-hidden">
+							<span class="truncate">{availableAccounts[0].accountName}</span>
+							<span class="font-mono text-muted-foreground shrink-0">({availableAccounts[0].adAccountId})</span>
 						</div>
 					</div>
 				{/if}
 			</div>
 
 			{#if loading}
-				<div class="text-sm text-muted-foreground py-4">Se încarcă campaniile Meta…</div>
+				<div class="text-sm text-muted-foreground py-8 text-center">Se încarcă campaniile Meta…</div>
 			{:else if loadError}
-				<div class="text-sm text-red-600 border border-red-200 rounded p-3 bg-red-50">⚠ {loadError}</div>
+				<div class="text-sm text-red-600 border border-red-200 rounded-md p-3 bg-red-50">⚠ {loadError}</div>
 			{:else if campaigns.length === 0 && clientId}
-				<div class="text-sm text-muted-foreground py-4">Nicio campanie activă găsită.</div>
+				<div class="text-sm text-muted-foreground py-8 text-center">Nicio campanie activă găsită.</div>
 			{:else if campaigns.length > 0}
 				<div class="grid grid-cols-2 gap-3">
 					<label class="flex flex-col gap-1 text-sm">
@@ -217,28 +217,28 @@
 					</label>
 				</div>
 
-				<div class="flex items-center justify-between">
+				<div class="flex items-center justify-between border-t pt-3">
 					<div class="text-sm">
-						{selected.size} selectate · {campaigns.filter((c) => !c.alreadyMonitored).length} disponibile
+						<span class="font-semibold">{selected.size}</span> selectate · {campaigns.filter((c) => !c.alreadyMonitored).length} disponibile
 					</div>
 					<button type="button" onclick={selectAllUnmonitored} class="text-xs text-primary hover:underline">
 						Selectează toate disponibilele
 					</button>
 				</div>
 
-				<div class="space-y-1 max-h-[500px] overflow-y-auto border rounded">
+				<div class="flex-1 min-h-0 overflow-y-auto border rounded-md divide-y bg-background">
 					{#each campaigns as c (c.campaignId)}
-						<label class="flex items-start gap-2 p-2 hover:bg-muted/30 border-b last:border-0 {c.alreadyMonitored ? 'opacity-50' : ''}">
+						<label class="flex items-start gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors {c.alreadyMonitored ? 'opacity-50 cursor-not-allowed' : ''}">
 							<input
 								type="checkbox"
 								checked={selected.has(c.campaignId)}
 								disabled={c.alreadyMonitored}
 								onchange={() => toggle(c.campaignId)}
-								class="mt-1"
+								class="mt-0.5 shrink-0"
 							/>
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium truncate">{c.campaignName}</div>
-								<div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+								<div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap mt-1">
 									<span class="font-mono">{c.campaignId}</span>
 									<Badge variant="outline" class="text-xs">{c.objective}</Badge>
 									{#if c.optimizationGoal}<Badge variant="outline" class="text-xs">{c.optimizationGoal}</Badge>{/if}
@@ -251,7 +251,7 @@
 			{/if}
 		</div>
 
-		<Sheet.Footer>
+		<Sheet.Footer class="px-6 py-4 border-t bg-muted/20 flex flex-row gap-2 justify-end">
 			<Button variant="outline" onclick={onClose}>Anulează</Button>
 			<Button onclick={importSelected} disabled={importing || selected.size === 0}>
 				{importing ? `Importez…` : `Importă ${selected.size} target-uri`}
