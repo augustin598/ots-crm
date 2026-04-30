@@ -157,42 +157,47 @@
 </script>
 
 <Sheet.Root bind:open onOpenChange={(o) => { if (!o) onClose(); }}>
-	<Sheet.Content side="right" class="w-[600px] max-w-full">
+	<Sheet.Content side="right" class="w-[900px] sm:max-w-[900px] max-w-full">
 		<Sheet.Header>
 			<Sheet.Title>Importă campanii Meta</Sheet.Title>
 			<Sheet.Description>Selectează clientul, alege campaniile active și aplică target-uri implicite.</Sheet.Description>
 		</Sheet.Header>
 
 		<div class="space-y-4 py-4">
-			<label class="flex flex-col gap-1 text-sm">
-				Client
-				<select bind:value={clientId} class="h-9 rounded-md border px-3 bg-background">
-					<option value="">Alege client…</option>
-					{#each clients as c}
-						<option value={c.id}>
-							{c.name} ({c.accounts.length} {c.accounts.length === 1 ? 'cont' : 'conturi'})
-						</option>
-					{/each}
-				</select>
-			</label>
-
-			{#if selectedClient && availableAccounts.length > 1}
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 				<label class="flex flex-col gap-1 text-sm">
-					Ad Account
-					<select bind:value={accountId} class="h-9 rounded-md border px-3 bg-background">
-						{#each availableAccounts as a}
-							<option value={a.adAccountId}>
-								{a.accountName} ({a.adAccountId}){a.isPrimary ? ' · primary' : ''}
+					Client
+					<select bind:value={clientId} class="h-9 rounded-md border px-3 bg-background">
+						<option value="">Alege client…</option>
+						{#each clients as c}
+							<option value={c.id}>
+								{c.name} ({c.accounts.length} {c.accounts.length === 1 ? 'cont' : 'conturi'})
 							</option>
 						{/each}
 					</select>
 				</label>
-			{:else if selectedClient && availableAccounts.length === 1}
-				<div class="text-xs text-muted-foreground">
-					Ad Account: <span class="font-mono">{availableAccounts[0].accountName}</span>
-					(<span class="font-mono">{availableAccounts[0].adAccountId}</span>)
-				</div>
-			{/if}
+
+				{#if selectedClient && availableAccounts.length > 1}
+					<label class="flex flex-col gap-1 text-sm">
+						Ad Account
+						<select bind:value={accountId} class="h-9 rounded-md border px-3 bg-background">
+							{#each availableAccounts as a}
+								<option value={a.adAccountId}>
+									{a.accountName} ({a.adAccountId}){a.isPrimary ? ' · primary' : ''}
+								</option>
+							{/each}
+						</select>
+					</label>
+				{:else if selectedClient && availableAccounts.length === 1}
+					<div class="flex flex-col gap-1 text-sm">
+						<span class="text-muted-foreground">Ad Account</span>
+						<div class="h-9 rounded-md border px-3 bg-muted/30 flex items-center gap-2 text-xs">
+							<span>{availableAccounts[0].accountName}</span>
+							<span class="font-mono text-muted-foreground">({availableAccounts[0].adAccountId})</span>
+						</div>
+					</div>
+				{/if}
+			</div>
 
 			{#if loading}
 				<div class="text-sm text-muted-foreground py-4">Se încarcă campaniile Meta…</div>
@@ -221,7 +226,7 @@
 					</button>
 				</div>
 
-				<div class="space-y-1 max-h-[400px] overflow-y-auto border rounded">
+				<div class="space-y-1 max-h-[500px] overflow-y-auto border rounded">
 					{#each campaigns as c (c.campaignId)}
 						<label class="flex items-start gap-2 p-2 hover:bg-muted/30 border-b last:border-0 {c.alreadyMonitored ? 'opacity-50' : ''}">
 							<input
