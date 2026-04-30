@@ -88,11 +88,26 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 		accountId: t.externalAdAccountId ?? t.accountId ?? null
 	}));
 
-	const clients = await db
+	const clientRows = await db
 		.select({ id: table.client.id, name: table.client.name })
 		.from(table.client)
+		.innerJoin(
+			table.metaAdsAccount,
+			and(
+				eq(table.metaAdsAccount.clientId, table.client.id),
+				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
+				eq(table.metaAdsAccount.isActive, true)
+			)
+		)
 		.where(eq(table.client.tenantId, locals.tenant.id))
 		.orderBy(table.client.name);
+
+	const seen = new Set<string>();
+	const clients = clientRows.filter((c) => {
+		if (seen.has(c.id)) return false;
+		seen.add(c.id);
+		return true;
+	});
 
 	const recommendations = await db
 		.select({
