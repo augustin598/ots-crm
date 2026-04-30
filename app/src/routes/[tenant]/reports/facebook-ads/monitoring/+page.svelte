@@ -19,6 +19,8 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import RejectRecModal from './components/RejectRecModal.svelte';
 	import AddTargetForm from './components/AddTargetForm.svelte';
+	import DiscoverCampaignsModal from './components/DiscoverCampaignsModal.svelte';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -36,6 +38,7 @@
 	let rejectRecId = $state<string | null>(null);
 	let rejectModalOpen = $state(false);
 	let showAddForm = $state(false);
+	let discoverOpen = $state(false);
 
 	let filterClientId = $state('');
 	let filterStatus = $state<'all' | 'active' | 'muted' | 'inactive'>('all');
@@ -169,6 +172,10 @@
 			</h1>
 		</div>
 		<div class="flex items-center gap-2">
+			<Button onclick={() => (discoverOpen = true)} variant="outline" size="sm">
+				<DownloadIcon class="h-4 w-4 mr-2" />
+				Importă campanii
+			</Button>
 			<Button onclick={() => (showAddForm = !showAddForm)} variant="default" size="sm">
 				<TargetIcon class="h-4 w-4 mr-2" />
 				{showAddForm ? 'Închide' : 'Adaugă target'}
@@ -328,4 +335,12 @@
 	tenantSlug={data.tenantSlug}
 	onClose={() => (rejectModalOpen = false)}
 	onRejected={onRecRejected}
+/>
+
+<DiscoverCampaignsModal
+	bind:open={discoverOpen}
+	clients={data.clients}
+	tenantSlug={data.tenantSlug}
+	onClose={() => (discoverOpen = false)}
+	onImported={refreshAll}
 />
