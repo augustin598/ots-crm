@@ -22,6 +22,21 @@ import {
 	type DeviationResult
 } from '$lib/server/ads/deviation-engine';
 
+const GOAL_TO_ACTION: Record<string, string> = {
+	'CALL': 'click_to_call_native_call_placed',
+	'QUALITY_CALL': 'click_to_call_native_call_placed',
+	'OFFSITE_CONVERSIONS': 'offsite_conversion.fb_pixel_purchase',
+	'LINK_CLICKS': 'link_click',
+	'LANDING_PAGE_VIEWS': 'landing_page_view',
+	'POST_ENGAGEMENT': 'post_engagement',
+	'THRUPLAY': 'video_view',
+	'VIDEO_VIEWS': 'video_view',
+	'LEAD_GENERATION': 'lead',
+	'CONVERSATIONS': 'onsite_conversion.messaging_conversation_started_7d',
+	'APP_INSTALLS': 'app_install',
+	'VALUE': 'offsite_conversion.fb_pixel_purchase'
+};
+
 const PROCESS_TIMEOUT_MS = 90_000;
 const MAX_TENANT_STAGGER_MS = 60 * 60 * 1000; // 0–60 min spread
 
@@ -174,9 +189,13 @@ async function fetchAccountInsights(
 		listActiveCampaigns(adAccountId, auth.accessToken, appSecret)
 	]);
 
-	const objectiveByCampaign = new Map<string, { objective: string; startTime: string | null }>();
+	const objectiveByCampaign = new Map<string, { objective: string; startTime: string | null; optimizationGoal: string }>();
 	for (const c of campaigns) {
-		objectiveByCampaign.set(c.campaignId, { objective: c.objective, startTime: c.startTime });
+		objectiveByCampaign.set(c.campaignId, {
+			objective: c.objective,
+			startTime: c.startTime,
+			optimizationGoal: c.optimizationGoal
+		});
 	}
 
 	const grouped = new Map<string, InsightRow>();
@@ -198,7 +217,15 @@ async function fetchAccountInsights(
 		const spendCents = toCents(row.spend);
 		const impressions = parseInt(row.impressions || '0', 10) || 0;
 		const clicks = parseInt(row.clicks || '0', 10) || 0;
-		const conversions = row.conversions ?? 0;
+		// Use optimizationGoal-specific action type to match Meta Ads Manager's reported result.
+		// Falls back to row.conversions only when goal isn't in our map (already objective-mapped server-side).
+		const optGoal = entry.objective ? objectiveByCampaign.get(row.campaignId)?.optimizationGoal ?? '' : '';
+		const actionTypeForGoal = optGoal && GOAL_TO_ACTION[optGoal] ? GOAL_TO_ACTION[optGoal] : null;
+		let conversions = row.conversions ?? 0;
+		if (actionTypeForGoal && row.rawActions && row.rawActions.length > 0) {
+			const match = row.rawActions.find((a) => a.action_type === actionTypeForGoal);
+			conversions = match ? parseFloat(match.value || '0') : 0;
+		}
 		const conversionValue = row.conversionValue ?? 0;
 
 		const day: DailyMetrics = {
@@ -216,6 +243,20 @@ async function fetchAccountInsights(
 			frequency: parseFloat(row.frequency || '0') || null
 		};
 		entry.dailyByDate.set(dateKey, day);
+	}
+
+	// Campaigns with 0 spend in the window won't appear in insights but may still
+	// be active and monitored. Add empty entries so targets for these campaigns
+	// are still processed (zero-metric snapshots get persisted, no false alerts fired).
+	for (const [campaignId, meta] of objectiveByCampaign) {
+		if (!grouped.has(campaignId)) {
+			grouped.set(campaignId, {
+				campaignId,
+				objective: meta.objective,
+				startTime: meta.startTime,
+				dailyByDate: new Map()
+			});
+		}
 	}
 
 	return Array.from(grouped.values());
@@ -567,4 +608,115 @@ export async function processAdsPerformanceMonitor(
 	});
 
 	return { tenantsProcessed: tenantIds.length, alerted: totalAlerted, processed: totalProcessed };
+}
+
+/**
+ * Backfill ad_metric_snapshot rows for a tenant over the last N days.
+ * Re-fetches Meta insights and overwrites snapshots (upsert by date).
+ * Does NOT run deviation detection or generate recommendations.
+ *
+ * Used for: manual UI-triggered backfill after fixing conversion mapping bugs.
+ */
+export async function backfillTenantSnapshots(
+	tenantId: string,
+	daysBack: number = 30,
+	includeToday: boolean = false,
+	clientId: string | null = null
+): Promise<{ campaignsProcessed: number; daysCovered: number; errors: string[] }> {
+	const errors: string[] = [];
+	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}, includeToday=${includeToday}, clientId=${clientId ?? 'all'}`);
+
+	const whereConds = [
+		eq(table.adMonitorTarget.tenantId, tenantId),
+		eq(table.adMonitorTarget.isActive, true),
+		eq(table.adMonitorTarget.platform, 'meta')
+	];
+	if (clientId) whereConds.push(eq(table.adMonitorTarget.clientId, clientId));
+
+	const targets = await db
+		.select()
+		.from(table.adMonitorTarget)
+		.where(and(...whereConds));
+	if (targets.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
+
+	const accountsConds = [
+		eq(table.metaAdsAccount.tenantId, tenantId),
+		eq(table.metaAdsAccount.isActive, true)
+	];
+	if (clientId) accountsConds.push(eq(table.metaAdsAccount.clientId, clientId));
+
+	const accountsRows = await db
+		.select({
+			id: table.metaAdsAccount.id,
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			integrationId: table.metaAdsAccount.integrationId,
+			clientId: table.metaAdsAccount.clientId
+		})
+		.from(table.metaAdsAccount)
+		.where(and(...accountsConds));
+	if (accountsRows.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
+
+	const now = new Date();
+	const sinceDays = includeToday ? daysBack - 1 : daysBack;
+	const since = ymd(shiftDays(now, -sinceDays));
+	const until = includeToday ? ymd(now) : ymd(shiftDays(now, -1));
+
+	let campaignsProcessed = 0;
+
+	for (const account of accountsRows) {
+		try {
+			const insights = await withTimeout(
+				fetchAccountInsights(account.metaAdAccountId, account.integrationId, since, until),
+				PROCESS_TIMEOUT_MS,
+				`fetchAccountInsights ${account.metaAdAccountId}`
+			);
+			if (!insights) continue;
+
+			const insightsByCampaign = new Map(insights.map((i) => [i.campaignId, i]));
+
+			for (const target of targets) {
+				const insight = insightsByCampaign.get(target.externalCampaignId);
+				if (!insight) continue;
+				campaignsProcessed++;
+
+				// Build full date series for window (ascending)
+				const dates: string[] = [];
+				const startOffset = includeToday ? daysBack - 1 : daysBack;
+				const endOffset = includeToday ? 0 : 1;
+				for (let i = startOffset; i >= endOffset; i--) dates.push(ymd(shiftDays(now, -i)));
+				const dailyHistory: DailyMetrics[] = dates.map(
+					(d) => insight.dailyByDate.get(d) ?? emptyDay(d)
+				);
+
+				const last7d = dailyHistory.slice(-7);
+				const maturity = assessMaturity(last7d, {
+					campaignStartDate: insight.startTime ? insight.startTime.slice(0, 10) : null,
+					isMuted: target.isMuted,
+					mutedUntil: target.mutedUntil ?? null,
+					now
+				});
+
+				try {
+					await persistSnapshots(
+						tenantId,
+						target.clientId,
+						target.externalCampaignId,
+						maturity.maturity,
+						dailyHistory
+					);
+				} catch (e) {
+					const msg = serializeError(e).message;
+					errors.push(`${target.externalCampaignId}: ${msg}`);
+					logError('scheduler', `Backfill failed for ${target.externalCampaignId}: ${msg}`);
+				}
+			}
+		} catch (e) {
+			const msg = serializeError(e).message;
+			errors.push(`account ${account.metaAdAccountId}: ${msg}`);
+			logError('scheduler', `Backfill account ${account.metaAdAccountId} failed: ${msg}`);
+		}
+	}
+
+	logInfo('scheduler', `ads-performance-monitor: backfill done for ${tenantId}: ${campaignsProcessed} campaigns over ${daysBack} days, ${errors.length} errors`);
+	return { campaignsProcessed, daysCovered: daysBack, errors };
 }

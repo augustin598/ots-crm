@@ -7,6 +7,7 @@
 		removeMetaAdsConnection,
 		fetchMetaAdsAccounts,
 		assignMetaAdsAccountToClient,
+		setMetaAdsAccountAsPrimary,
 		triggerMetaAdsSync,
 		setMetaAdsCookies,
 		clearMetaAdsCookies
@@ -20,7 +21,7 @@
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { Badge } from '$lib/components/ui/badge';
-	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2, BarChart3 } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, Link as LinkIcon, Unlink, Plus, RefreshCw, Download, ChevronDown, ChevronUp, AlertTriangle, Trash2, BarChart3, Star } from '@lucide/svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -207,6 +208,26 @@
 			clientLogger.apiError('meta_ads_fetch_accounts', e);
 		} finally {
 			fetchingAccountsFor = null;
+		}
+	}
+
+	async function handleSetPrimary(accountId: string, integrationId: string) {
+		try {
+			await setMetaAdsAccountAsPrimary(accountId);
+			const account = (accountsCache[integrationId] || []).find((a: any) => a.id === accountId);
+			const targetClientId = account?.clientId;
+			if (targetClientId) {
+				accountsCache = {
+					...accountsCache,
+					[integrationId]: (accountsCache[integrationId] || []).map((a: any) =>
+						a.clientId === targetClientId ? { ...a, isPrimary: a.id === accountId } : a
+					)
+				};
+			}
+			toast.success('Cont marcat ca primar');
+		} catch (e) {
+			clientLogger.apiError('meta_ads_set_primary', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la marcarea contului ca primar');
 		}
 	}
 
@@ -568,6 +589,7 @@
 																<TableHead>Cont Meta Ads</TableHead>
 																<TableHead>Ad Account ID</TableHead>
 																<TableHead>Client CRM</TableHead>
+																<TableHead class="w-[80px] text-center">Primar</TableHead>
 																<TableHead class="w-[100px]">Raport</TableHead>
 															</TableRow>
 														</TableHeader>
@@ -589,6 +611,26 @@
 																			class="max-w-[250px]"
 																			onValueChange={(val) => handleAssignClient(account.id, String(val ?? ''), conn.id)}
 																		/>
+																	</TableCell>
+																	<TableCell class="text-center">
+																		{#if account.clientId}
+																			<button
+																				type="button"
+																				onclick={() => handleSetPrimary(account.id, conn.id)}
+																				disabled={account.isPrimary}
+																				title={account.isPrimary ? 'Cont primar pentru acest client' : 'Marchează ca primar pentru acest client'}
+																				class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+																				aria-label={account.isPrimary ? 'Cont primar' : 'Marchează ca primar'}
+																			>
+																				<Star
+																					class="h-4 w-4 {account.isPrimary
+																						? 'fill-yellow-400 text-yellow-500'
+																						: 'text-muted-foreground'}"
+																				/>
+																			</button>
+																		{:else}
+																			<span class="text-xs text-muted-foreground">—</span>
+																		{/if}
 																	</TableCell>
 																	<TableCell>
 																		<a

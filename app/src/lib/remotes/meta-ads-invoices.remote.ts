@@ -137,6 +137,7 @@ export const getMetaAdsAccounts = query(
 				clientId: table.metaAdsAccount.clientId,
 				clientName: table.client.name,
 				isActive: table.metaAdsAccount.isActive,
+				isPrimary: table.metaAdsAccount.isPrimary,
 				lastFetchedAt: table.metaAdsAccount.lastFetchedAt
 			})
 			.from(table.metaAdsAccount)
@@ -457,13 +458,95 @@ export const assignMetaAdsAccountToClient = command(
 			}
 		}
 
-		await db
-			.update(table.metaAdsAccount)
-			.set({
-				clientId: data.clientId || null,
-				updatedAt: new Date()
-			})
-			.where(eq(table.metaAdsAccount.id, data.accountId));
+		const now = new Date();
+		const newClientId = data.clientId || null;
+
+		await db.transaction(async (tx) => {
+			await tx
+				.update(table.metaAdsAccount)
+				.set({
+					clientId: newClientId,
+					// When unassigning, the primary flag becomes meaningless — clear it.
+					...(newClientId === null ? { isPrimary: false } : {}),
+					updatedAt: now
+				})
+				.where(eq(table.metaAdsAccount.id, data.accountId));
+
+			// If newly assigned to a client that has no primary yet, promote this one automatically.
+			if (newClientId) {
+				const [existingPrimary] = await tx
+					.select({ id: table.metaAdsAccount.id })
+					.from(table.metaAdsAccount)
+					.where(
+						and(
+							eq(table.metaAdsAccount.tenantId, tenantId),
+							eq(table.metaAdsAccount.clientId, newClientId),
+							eq(table.metaAdsAccount.isPrimary, true)
+						)
+					)
+					.limit(1);
+
+				if (!existingPrimary) {
+					await tx
+						.update(table.metaAdsAccount)
+						.set({ isPrimary: true, updatedAt: now })
+						.where(eq(table.metaAdsAccount.id, data.accountId));
+				}
+			}
+		});
+
+		return { success: true };
+	}
+);
+
+/** Mark a Meta Ads account as the primary one for its assigned client (demotes all others for that client) */
+export const setMetaAdsAccountAsPrimary = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (accountId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		const [account] = await db
+			.select({ id: table.metaAdsAccount.id, clientId: table.metaAdsAccount.clientId })
+			.from(table.metaAdsAccount)
+			.where(
+				and(
+					eq(table.metaAdsAccount.id, accountId),
+					eq(table.metaAdsAccount.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!account) {
+			throw error(404, 'Cont Meta Ads negăsit');
+		}
+		if (!account.clientId) {
+			throw error(400, 'Atribuie întâi un client acestui cont, apoi marchează-l ca primar');
+		}
+
+		const now = new Date();
+		await db.transaction(async (tx) => {
+			await tx
+				.update(table.metaAdsAccount)
+				.set({ isPrimary: false, updatedAt: now })
+				.where(
+					and(
+						eq(table.metaAdsAccount.tenantId, tenantId),
+						eq(table.metaAdsAccount.clientId, account.clientId!)
+					)
+				);
+			await tx
+				.update(table.metaAdsAccount)
+				.set({ isPrimary: true, updatedAt: now })
+				.where(eq(table.metaAdsAccount.id, accountId));
+		});
 
 		return { success: true };
 	}

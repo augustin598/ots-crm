@@ -1,19 +1,22 @@
 import { error, redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, gte, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 	if (!locals.user || !locals.tenant) throw redirect(302, '/login');
 
-	const targets = await db
+	const since7 = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+
+	const targetRows = await db
 		.select({
 			id: table.adMonitorTarget.id,
 			clientId: table.adMonitorTarget.clientId,
 			clientName: table.client.name,
 			externalCampaignId: table.adMonitorTarget.externalCampaignId,
 			externalAdsetId: table.adMonitorTarget.externalAdsetId,
+			externalAdAccountId: table.adMonitorTarget.externalAdAccountId,
 			objective: table.adMonitorTarget.objective,
 			targetCplCents: table.adMonitorTarget.targetCplCents,
 			targetCpaCents: table.adMonitorTarget.targetCpaCents,
@@ -27,10 +30,21 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			notifyTelegram: table.adMonitorTarget.notifyTelegram,
 			notifyEmail: table.adMonitorTarget.notifyEmail,
 			notifyInApp: table.adMonitorTarget.notifyInApp,
-			updatedAt: table.adMonitorTarget.updatedAt
+			version: table.adMonitorTarget.version,
+			updatedAt: table.adMonitorTarget.updatedAt,
+			accountName: table.metaAdsAccount.accountName,
+			accountId: table.metaAdsAccount.metaAdAccountId
 		})
 		.from(table.adMonitorTarget)
 		.innerJoin(table.client, eq(table.client.id, table.adMonitorTarget.clientId))
+		.leftJoin(
+			table.metaAdsAccount,
+			and(
+				eq(table.metaAdsAccount.clientId, table.adMonitorTarget.clientId),
+				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
+				eq(table.metaAdsAccount.isPrimary, true)
+			)
+		)
 		.where(
 			and(
 				eq(table.adMonitorTarget.tenantId, locals.tenant.id),
@@ -39,11 +53,93 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		)
 		.orderBy(desc(table.adMonitorTarget.updatedAt));
 
-	const clients = await db
-		.select({ id: table.client.id, name: table.client.name })
+	const campaignIds = targetRows.map((t) => t.externalCampaignId);
+	const snapshots =
+		campaignIds.length > 0
+			? await db
+					.select({
+						externalCampaignId: table.adMetricSnapshot.externalCampaignId,
+						date: table.adMetricSnapshot.date,
+						cplCents: table.adMetricSnapshot.cplCents,
+						spendCents: table.adMetricSnapshot.spendCents
+					})
+					.from(table.adMetricSnapshot)
+					.where(
+						and(
+							eq(table.adMetricSnapshot.tenantId, locals.tenant.id),
+							gte(table.adMetricSnapshot.date, since7)
+						)
+					)
+			: [];
+
+	const sparkByCampaign = new Map<string, Array<number | null>>();
+	const latestByCampaign = new Map<string, number | null>();
+	for (const s of snapshots) {
+		const arr = sparkByCampaign.get(s.externalCampaignId) ?? [];
+		arr.push(s.cplCents);
+		sparkByCampaign.set(s.externalCampaignId, arr);
+		latestByCampaign.set(s.externalCampaignId, s.cplCents);
+	}
+
+	const targets = targetRows.map((t) => ({
+		...t,
+		spark7d: sparkByCampaign.get(t.externalCampaignId) ?? [],
+		latestCplCents: latestByCampaign.get(t.externalCampaignId) ?? null,
+		accountId: t.externalAdAccountId ?? t.accountId ?? null
+	}));
+
+	type ClientAccount = {
+		adAccountId: string;
+		integrationId: string;
+		accountName: string;
+		isPrimary: boolean;
+	};
+	type ClientWithAccounts = {
+		id: string;
+		name: string;
+		accounts: ClientAccount[];
+	};
+
+	const rows = await db
+		.select({
+			id: table.client.id,
+			name: table.client.name,
+			adAccountId: table.metaAdsAccount.metaAdAccountId,
+			integrationId: table.metaAdsAccount.integrationId,
+			accountName: table.metaAdsAccount.accountName,
+			isPrimary: table.metaAdsAccount.isPrimary
+		})
 		.from(table.client)
+		.innerJoin(
+			table.metaAdsAccount,
+			and(
+				eq(table.metaAdsAccount.clientId, table.client.id),
+				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
+				eq(table.metaAdsAccount.isActive, true)
+			)
+		)
 		.where(eq(table.client.tenantId, locals.tenant.id))
 		.orderBy(table.client.name);
+
+	const grouped = new Map<string, ClientWithAccounts>();
+	for (const r of rows) {
+		const c = grouped.get(r.id) ?? { id: r.id, name: r.name, accounts: [] };
+		c.accounts.push({
+			adAccountId: r.adAccountId,
+			integrationId: r.integrationId,
+			accountName: r.accountName ?? r.adAccountId,
+			isPrimary: r.isPrimary
+		});
+		grouped.set(r.id, c);
+	}
+	for (const c of grouped.values()) {
+		c.accounts.sort((a, b) =>
+			a.isPrimary === b.isPrimary
+				? a.accountName.localeCompare(b.accountName)
+				: a.isPrimary ? -1 : 1
+		);
+	}
+	const clients = Array.from(grouped.values());
 
 	const recommendations = await db
 		.select({
@@ -64,18 +160,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			applyError: table.adOptimizationRecommendation.applyError
 		})
 		.from(table.adOptimizationRecommendation)
-		.innerJoin(
-			table.client,
-			eq(table.client.id, table.adOptimizationRecommendation.clientId)
-		)
+		.innerJoin(table.client, eq(table.client.id, table.adOptimizationRecommendation.clientId))
 		.where(eq(table.adOptimizationRecommendation.tenantId, locals.tenant.id))
 		.orderBy(desc(table.adOptimizationRecommendation.createdAt))
 		.limit(50);
 
-	return {
-		targets,
-		clients,
-		recommendations,
-		tenantSlug: params.tenant
-	};
+	const summaryRes = await fetch(`/${params.tenant}/api/ads-monitor/summary`);
+	const summary = summaryRes.ok
+		? await summaryRes.json()
+		: { activeTargets: 0, pendingRecs: 0, spend7dCents: 0, avgCpl30dCents: null, avgTargetCplCents: null };
+
+	return { targets, clients, recommendations, summary, tenantSlug: params.tenant };
 };
