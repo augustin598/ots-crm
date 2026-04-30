@@ -22,6 +22,21 @@ import {
 	type DeviationResult
 } from '$lib/server/ads/deviation-engine';
 
+const GOAL_TO_ACTION: Record<string, string> = {
+	'CALL': 'click_to_call_native_call_placed',
+	'QUALITY_CALL': 'click_to_call_native_call_placed',
+	'OFFSITE_CONVERSIONS': 'offsite_conversion.fb_pixel_purchase',
+	'LINK_CLICKS': 'link_click',
+	'LANDING_PAGE_VIEWS': 'landing_page_view',
+	'POST_ENGAGEMENT': 'post_engagement',
+	'THRUPLAY': 'video_view',
+	'VIDEO_VIEWS': 'video_view',
+	'LEAD_GENERATION': 'lead',
+	'CONVERSATIONS': 'onsite_conversion.messaging_conversation_started_7d',
+	'APP_INSTALLS': 'app_install',
+	'VALUE': 'offsite_conversion.fb_pixel_purchase'
+};
+
 const PROCESS_TIMEOUT_MS = 90_000;
 const MAX_TENANT_STAGGER_MS = 60 * 60 * 1000; // 0–60 min spread
 
@@ -174,9 +189,13 @@ async function fetchAccountInsights(
 		listActiveCampaigns(adAccountId, auth.accessToken, appSecret)
 	]);
 
-	const objectiveByCampaign = new Map<string, { objective: string; startTime: string | null }>();
+	const objectiveByCampaign = new Map<string, { objective: string; startTime: string | null; optimizationGoal: string }>();
 	for (const c of campaigns) {
-		objectiveByCampaign.set(c.campaignId, { objective: c.objective, startTime: c.startTime });
+		objectiveByCampaign.set(c.campaignId, {
+			objective: c.objective,
+			startTime: c.startTime,
+			optimizationGoal: c.optimizationGoal
+		});
 	}
 
 	const grouped = new Map<string, InsightRow>();
@@ -198,7 +217,15 @@ async function fetchAccountInsights(
 		const spendCents = toCents(row.spend);
 		const impressions = parseInt(row.impressions || '0', 10) || 0;
 		const clicks = parseInt(row.clicks || '0', 10) || 0;
-		const conversions = row.conversions ?? 0;
+		// Use optimizationGoal-specific action type to match Meta Ads Manager's reported result.
+		// Falls back to row.conversions only when goal isn't in our map (already objective-mapped server-side).
+		const optGoal = entry.objective ? objectiveByCampaign.get(row.campaignId)?.optimizationGoal ?? '' : '';
+		const actionTypeForGoal = optGoal && GOAL_TO_ACTION[optGoal] ? GOAL_TO_ACTION[optGoal] : null;
+		let conversions = row.conversions ?? 0;
+		if (actionTypeForGoal && row.rawActions && row.rawActions.length > 0) {
+			const match = row.rawActions.find((a) => a.action_type === actionTypeForGoal);
+			conversions = match ? parseFloat(match.value || '0') : 0;
+		}
 		const conversionValue = row.conversionValue ?? 0;
 
 		const day: DailyMetrics = {
