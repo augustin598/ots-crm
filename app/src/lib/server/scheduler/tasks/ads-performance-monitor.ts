@@ -605,10 +605,11 @@ export async function processAdsPerformanceMonitor(
  */
 export async function backfillTenantSnapshots(
 	tenantId: string,
-	daysBack: number = 30
+	daysBack: number = 30,
+	includeToday: boolean = false
 ): Promise<{ campaignsProcessed: number; daysCovered: number; errors: string[] }> {
 	const errors: string[] = [];
-	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}`);
+	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}, includeToday=${includeToday}`);
 
 	const targets = await db
 		.select()
@@ -639,8 +640,9 @@ export async function backfillTenantSnapshots(
 	if (accountsRows.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
 
 	const now = new Date();
-	const since = ymd(shiftDays(now, -daysBack));
-	const until = ymd(shiftDays(now, -1));
+	const sinceDays = includeToday ? daysBack - 1 : daysBack;
+	const since = ymd(shiftDays(now, -sinceDays));
+	const until = includeToday ? ymd(now) : ymd(shiftDays(now, -1));
 
 	let campaignsProcessed = 0;
 
@@ -662,7 +664,9 @@ export async function backfillTenantSnapshots(
 
 				// Build full date series for window (ascending)
 				const dates: string[] = [];
-				for (let i = daysBack; i >= 1; i--) dates.push(ymd(shiftDays(now, -i)));
+				const startOffset = includeToday ? daysBack - 1 : daysBack;
+				const endOffset = includeToday ? 0 : 1;
+				for (let i = startOffset; i >= endOffset; i--) dates.push(ymd(shiftDays(now, -i)));
 				const dailyHistory: DailyMetrics[] = dates.map(
 					(d) => insight.dailyByDate.get(d) ?? emptyDay(d)
 				);

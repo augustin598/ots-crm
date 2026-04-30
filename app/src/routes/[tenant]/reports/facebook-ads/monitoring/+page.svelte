@@ -2,6 +2,8 @@
 	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import TargetIcon from '@lucide/svelte/icons/target';
@@ -131,23 +133,22 @@
 		} finally { runningRebuild = false; }
 	}
 
-	async function runBackfill() {
+	async function runBackfill(daysBack: number, includeToday: boolean, label: string) {
 		if (runningBackfill) return;
-		if (!confirm('Backfill rulează din nou ultimii 30 zile de snapshot-uri Meta. Util după ce s-au schimbat regulile de mapare conversion. Continui?')) return;
+		if (!confirm(`Backfill «${label}» rulează din nou snapshot-urile Meta. Continui?`)) return;
 		runningBackfill = true;
 		try {
 			const res = await fetch(`/${data.tenantSlug}/api/ads-monitor/backfill`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ daysBack: 30 })
+				body: JSON.stringify({ daysBack, includeToday })
 			});
 			const body = (await res.json().catch(() => null)) as
 				| { ok: boolean; result?: { campaignsProcessed: number; daysCovered: number; errors: string[] }; error?: string }
 				| null;
 			if (!res.ok || !body?.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-			const result = body.result ?? { campaignsProcessed: 0, daysCovered: 30, errors: [] };
-			toast.success(`Backfill: ${result.campaignsProcessed} campanii × ${result.daysCovered} zile${result.errors.length > 0 ? ' (' + result.errors.length + ' erori)' : ''}`);
-			// Reload to see fresh data
+			const result = body.result ?? { campaignsProcessed: 0, daysCovered: daysBack, errors: [] };
+			toast.success(`Backfill «${label}»: ${result.campaignsProcessed} campanii${result.errors.length > 0 ? ' (' + result.errors.length + ' erori)' : ''}`);
 			setTimeout(() => window.location.reload(), 1500);
 		} catch (e) {
 			toast.error(`Eroare backfill: ${(e as Error).message}`);
@@ -175,10 +176,21 @@
 			<Button onclick={runMonitorNow} disabled={runningRebuild} variant="outline" size="sm">
 				<RefreshCwIcon class="h-4 w-4 mr-2 {runningRebuild ? 'animate-spin' : ''}" /> Rulează acum
 			</Button>
-			<Button onclick={runBackfill} disabled={runningBackfill} variant="outline" size="sm">
-				<HistoryIcon class="h-4 w-4 mr-2 {runningBackfill ? 'animate-spin' : ''}" />
-				Backfill 30 zile
-			</Button>
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger>
+					<Button variant="outline" size="sm" disabled={runningBackfill}>
+						<HistoryIcon class="h-4 w-4 mr-2 {runningBackfill ? 'animate-spin' : ''}" />
+						Backfill
+						<ChevronDownIcon class="h-3 w-3 ml-1" />
+					</Button>
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="end">
+					<DropdownMenu.Item onclick={() => runBackfill(30, false, '30 zile')}>30 zile</DropdownMenu.Item>
+					<DropdownMenu.Item onclick={() => runBackfill(7, false, '7 zile')}>7 zile</DropdownMenu.Item>
+					<DropdownMenu.Item onclick={() => runBackfill(1, false, 'Ieri')}>Ieri (1 zi)</DropdownMenu.Item>
+					<DropdownMenu.Item onclick={() => runBackfill(1, true, 'Azi')}>Azi</DropdownMenu.Item>
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
 		</div>
 	</div>
 

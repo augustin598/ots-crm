@@ -18,15 +18,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	const daysBack = typeof body.daysBack === 'number' && body.daysBack > 0 && body.daysBack <= 90
 		? Math.floor(body.daysBack)
 		: 30;
+	const includeToday = body.includeToday === true;
 
-	logInfo('ads-monitor', `Manual backfill triggered by user ${locals.user.id} (${daysBack} days)`, {
+	logInfo('ads-monitor', `Manual backfill triggered by user ${locals.user.id} (${daysBack} days, includeToday=${includeToday})`, {
 		tenantId: locals.tenant.id,
 		userId: locals.user.id,
-		metadata: { daysBack }
+		metadata: { daysBack, includeToday }
 	});
 
 	try {
-		const result = await backfillTenantSnapshots(locals.tenant.id, daysBack);
+		const result = await backfillTenantSnapshots(locals.tenant.id, daysBack, includeToday);
 		return json({ ok: true, result });
 	} catch (e) {
 		const { message, stack } = serializeError(e);
