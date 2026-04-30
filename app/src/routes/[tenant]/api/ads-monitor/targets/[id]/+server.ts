@@ -27,6 +27,56 @@ function normalizeSuppressedActions(input: unknown): string[] | undefined {
 	return out;
 }
 
+export const GET: RequestHandler = async ({ params, locals }) => {
+	if (!locals.user || !locals.tenant) throw error(401, 'Unauthorized');
+	if (!params.id) throw error(400, 'Missing id');
+
+	const [row] = await db
+		.select({
+			target: table.adMonitorTarget,
+			clientName: table.client.name,
+			accountName: table.metaAdsAccount.accountName,
+			accountId: table.metaAdsAccount.metaAdAccountId
+		})
+		.from(table.adMonitorTarget)
+		.innerJoin(table.client, eq(table.client.id, table.adMonitorTarget.clientId))
+		.leftJoin(
+			table.metaAdsAccount,
+			and(
+				eq(table.metaAdsAccount.clientId, table.adMonitorTarget.clientId),
+				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
+				eq(table.metaAdsAccount.isPrimary, true)
+			)
+		)
+		.where(
+			and(
+				eq(table.adMonitorTarget.id, params.id),
+				eq(table.adMonitorTarget.tenantId, locals.tenant.id)
+			)
+		)
+		.limit(1);
+
+	if (!row) throw error(404, 'Target inexistent');
+
+	let suppressed: string[] = [];
+	try {
+		const parsed = JSON.parse(row.target.suppressedActions ?? '[]');
+		if (Array.isArray(parsed)) suppressed = parsed.filter((x): x is string => typeof x === 'string');
+	} catch {
+		suppressed = [];
+	}
+
+	return json({
+		target: {
+			...row.target,
+			suppressedActions: suppressed
+		},
+		clientName: row.clientName,
+		accountName: row.accountName,
+		accountId: row.target.externalAdAccountId ?? row.accountId ?? null
+	});
+};
+
 export const PATCH: RequestHandler = async ({ params, locals, request }) => {
 	if (!locals.user || !locals.tenant) throw error(401, 'Unauthorized');
 	if (!params.id) throw error(400, 'Missing id');
