@@ -245,6 +245,20 @@ async function fetchAccountInsights(
 		entry.dailyByDate.set(dateKey, day);
 	}
 
+	// Campaigns with 0 spend in the window won't appear in insights but may still
+	// be active and monitored. Add empty entries so targets for these campaigns
+	// are still processed (zero-metric snapshots get persisted, no false alerts fired).
+	for (const [campaignId, meta] of objectiveByCampaign) {
+		if (!grouped.has(campaignId)) {
+			grouped.set(campaignId, {
+				campaignId,
+				objective: meta.objective,
+				startTime: meta.startTime,
+				dailyByDate: new Map()
+			});
+		}
+	}
+
 	return Array.from(grouped.values());
 }
 
