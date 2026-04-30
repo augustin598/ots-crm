@@ -12,8 +12,8 @@
 	import { toast } from 'svelte-sonner';
 	import KpiStrip from './components/KpiStrip.svelte';
 	import TargetFilters from './components/TargetFilters.svelte';
-	import TargetRow from './components/TargetRow.svelte';
-	import TargetDrawer from './components/TargetDrawer.svelte';
+	import TargetCard from './components/TargetCard.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import RejectRecModal from './components/RejectRecModal.svelte';
 	import AddTargetForm from './components/AddTargetForm.svelte';
 	import type { PageData } from './$types';
@@ -24,8 +24,11 @@
 	let recommendations = $state([...data.recommendations]);
 	let runningRebuild = $state(false);
 	let approvingId = $state<string | null>(null);
-	let drawerTargetId = $state<string | null>(null);
-	let drawerOpen = $state(false);
+	let expandedIds = new SvelteSet<string>();
+	function toggleExpand(id: string) {
+		if (expandedIds.has(id)) expandedIds.delete(id);
+		else expandedIds.add(id);
+	}
 	let rejectRecId = $state<string | null>(null);
 	let rejectModalOpen = $state(false);
 	let showAddForm = $state(false);
@@ -105,9 +108,6 @@
 		}
 		rejectRecId = null;
 	}
-
-	function openDrawer(id: string) { drawerTargetId = id; drawerOpen = true; }
-	function closeDrawer() { drawerOpen = false; drawerTargetId = null; }
 
 	function refreshAll() {
 		window.location.reload();
@@ -227,24 +227,26 @@
 				<p>Niciun target nu se potrivește filtrelor.</p>
 			</div>
 		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead class="border-b bg-muted/40">
-						<tr class="text-left">
-							<th class="px-3 py-2">Client</th>
-							<th class="px-3 py-2">Ad Account</th>
-							<th class="px-3 py-2">Campanie</th>
-							<th class="px-3 py-2 text-right">CPL / Target</th>
-							<th class="px-3 py-2">7d</th>
-							<th class="px-3 py-2">Stare</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each filteredTargets as target (target.id)}
-							<TargetRow {target} onSelect={openDrawer} />
-						{/each}
-					</tbody>
-				</table>
+			<!-- Column headers -->
+			<div class="grid grid-cols-[2fr_2fr_1.5fr_1fr_80px_100px_24px] gap-4 px-6 py-2 border-b bg-muted/30 text-xs font-medium text-muted-foreground">
+				<span>Client</span>
+				<span>Ad Account</span>
+				<span>Campanie</span>
+				<span class="text-right">CPL / Target</span>
+				<span>7d</span>
+				<span>Stare</span>
+				<span></span>
+			</div>
+			<div class="space-y-2 mt-3">
+				{#each filteredTargets as target (target.id)}
+					<TargetCard
+						summary={target}
+						tenantSlug={data.tenantSlug}
+						expanded={expandedIds.has(target.id)}
+						onToggle={toggleExpand}
+						onUpdated={refreshAll}
+					/>
+				{/each}
 			</div>
 		{/if}
 	</Card>
@@ -278,14 +280,6 @@
 		</Card>
 	{/if}
 </div>
-
-<TargetDrawer
-	bind:open={drawerOpen}
-	targetId={drawerTargetId}
-	tenantSlug={data.tenantSlug}
-	onClose={closeDrawer}
-	onUpdated={refreshAll}
-/>
 
 <RejectRecModal
 	bind:open={rejectModalOpen}
