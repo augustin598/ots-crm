@@ -8,6 +8,7 @@ import {
 	fetchRecsForFeedback,
 	computeRejectionRates
 } from '$lib/server/ads-monitor/feedback-aggregate';
+import { evaluateAutoUnsuppress } from '$lib/server/ads-monitor/audit-writer';
 
 const ALLOWED_UPDATE_FIELDS = new Set([
 	'targetCplCents',
@@ -61,6 +62,14 @@ export const GET: RequestHandler = (event) =>
 			suppressed = [];
 		}
 
+		const cleaned = await evaluateAutoUnsuppress(
+			ctx.tenantId,
+			row.id,
+			suppressed,
+			row.version
+		);
+		suppressed = cleaned.suppressedActions;
+
 		const recs = await fetchRecsForFeedback(ctx.tenantId, row.clientId);
 		const rates = computeRejectionRates(recs);
 
@@ -73,7 +82,7 @@ export const GET: RequestHandler = (event) =>
 					suppressedActions: suppressed,
 					severityOverride: row.severityOverride ?? null,
 					minConversionsThreshold: row.minConversionsThreshold ?? null,
-					version: row.version
+					version: cleaned.version
 				},
 				feedback: { rejectionRateLast30d: rates }
 			}

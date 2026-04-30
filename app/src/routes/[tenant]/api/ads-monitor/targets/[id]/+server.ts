@@ -5,7 +5,7 @@ import { AD_RECOMMENDATION_ACTIONS } from '$lib/server/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { buildDiff } from '$lib/server/ads-monitor/diff-builder';
-import { writeTargetAudit } from '$lib/server/ads-monitor/audit-writer';
+import { writeTargetAudit, evaluateAutoUnsuppress } from '$lib/server/ads-monitor/audit-writer';
 import type { RequestHandler } from './$types';
 
 const SEVERITY_VALUES = new Set(['urgent', 'high', 'warning', 'opportunity']);
@@ -66,10 +66,19 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 		suppressed = [];
 	}
 
+	const cleaned = await evaluateAutoUnsuppress(
+		locals.tenant.id,
+		row.target.id,
+		suppressed,
+		row.target.version
+	);
+	suppressed = cleaned.suppressedActions;
+
 	return json({
 		target: {
 			...row.target,
-			suppressedActions: suppressed
+			suppressedActions: suppressed,
+			version: cleaned.version
 		},
 		clientName: row.clientName,
 		accountName: row.accountName,
