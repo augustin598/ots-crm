@@ -606,22 +606,30 @@ export async function processAdsPerformanceMonitor(
 export async function backfillTenantSnapshots(
 	tenantId: string,
 	daysBack: number = 30,
-	includeToday: boolean = false
+	includeToday: boolean = false,
+	clientId: string | null = null
 ): Promise<{ campaignsProcessed: number; daysCovered: number; errors: string[] }> {
 	const errors: string[] = [];
-	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}, includeToday=${includeToday}`);
+	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}, includeToday=${includeToday}, clientId=${clientId ?? 'all'}`);
+
+	const whereConds = [
+		eq(table.adMonitorTarget.tenantId, tenantId),
+		eq(table.adMonitorTarget.isActive, true),
+		eq(table.adMonitorTarget.platform, 'meta')
+	];
+	if (clientId) whereConds.push(eq(table.adMonitorTarget.clientId, clientId));
 
 	const targets = await db
 		.select()
 		.from(table.adMonitorTarget)
-		.where(
-			and(
-				eq(table.adMonitorTarget.tenantId, tenantId),
-				eq(table.adMonitorTarget.isActive, true),
-				eq(table.adMonitorTarget.platform, 'meta')
-			)
-		);
+		.where(and(...whereConds));
 	if (targets.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
+
+	const accountsConds = [
+		eq(table.metaAdsAccount.tenantId, tenantId),
+		eq(table.metaAdsAccount.isActive, true)
+	];
+	if (clientId) accountsConds.push(eq(table.metaAdsAccount.clientId, clientId));
 
 	const accountsRows = await db
 		.select({
@@ -631,12 +639,7 @@ export async function backfillTenantSnapshots(
 			clientId: table.metaAdsAccount.clientId
 		})
 		.from(table.metaAdsAccount)
-		.where(
-			and(
-				eq(table.metaAdsAccount.tenantId, tenantId),
-				eq(table.metaAdsAccount.isActive, true)
-			)
-		);
+		.where(and(...accountsConds));
 	if (accountsRows.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
 
 	const now = new Date();

@@ -138,20 +138,24 @@
 
 	async function runBackfill(daysBack: number, includeToday: boolean, label: string) {
 		if (runningBackfill) return;
-		if (!confirm(`Backfill «${label}» rulează din nou snapshot-urile Meta. Continui?`)) return;
+		const targetClientId = filterClientId || null;
+		const clientLabel = targetClientId
+			? data.clients.find((c) => c.id === targetClientId)?.name ?? 'client selectat'
+			: 'toți clienții';
+		if (!confirm(`Backfill «${label}» pentru ${clientLabel} rulează din nou snapshot-urile Meta. Continui?`)) return;
 		runningBackfill = true;
 		try {
 			const res = await fetch(`/${data.tenantSlug}/api/ads-monitor/backfill`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ daysBack, includeToday })
+				body: JSON.stringify({ daysBack, includeToday, clientId: targetClientId })
 			});
 			const body = (await res.json().catch(() => null)) as
 				| { ok: boolean; result?: { campaignsProcessed: number; daysCovered: number; errors: string[] }; error?: string }
 				| null;
 			if (!res.ok || !body?.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
 			const result = body.result ?? { campaignsProcessed: 0, daysCovered: daysBack, errors: [] };
-			toast.success(`Backfill «${label}»: ${result.campaignsProcessed} campanii${result.errors.length > 0 ? ' (' + result.errors.length + ' erori)' : ''}`);
+			toast.success(`Backfill «${label}» (${clientLabel}): ${result.campaignsProcessed} campanii${result.errors.length > 0 ? ' (' + result.errors.length + ' erori)' : ''}`);
 			setTimeout(() => window.location.reload(), 1500);
 		} catch (e) {
 			toast.error(`Eroare backfill: ${(e as Error).message}`);
@@ -187,7 +191,7 @@
 				<DropdownMenu.Trigger>
 					<Button variant="outline" size="sm" disabled={runningBackfill}>
 						<HistoryIcon class="h-4 w-4 mr-2 {runningBackfill ? 'animate-spin' : ''}" />
-						Backfill
+						Backfill{filterClientId ? ' client' : ''}
 						<ChevronDownIcon class="h-3 w-3 ml-1" />
 					</Button>
 				</DropdownMenu.Trigger>
