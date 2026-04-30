@@ -4,6 +4,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { writeTargetAudit } from '$lib/server/ads-monitor/audit-writer';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
@@ -68,6 +69,27 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		.limit(1);
 	if (existing) throw error(409, 'Există deja un target pentru această campanie/adset');
 
+	// Lookup primary ad account for client (best-effort — null if none)
+	const [primaryAccount] = await db
+		.select({
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			accountName: table.metaAdsAccount.accountName
+		})
+		.from(table.metaAdsAccount)
+		.where(
+			and(
+				eq(table.metaAdsAccount.clientId, clientId),
+				eq(table.metaAdsAccount.tenantId, locals.tenant.id),
+				eq(table.metaAdsAccount.isPrimary, true)
+			)
+		)
+		.limit(1);
+
+	const externalAdAccountId =
+		(typeof body.externalAdAccountId === 'string' ? body.externalAdAccountId : null) ??
+		primaryAccount?.metaAdAccountId ??
+		null;
+
 	const id = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 	const platform = typeof body.platform === 'string' ? body.platform : 'meta';
 	const deviationThresholdPct =
@@ -93,6 +115,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 					? body.targetDailyBudgetCents
 					: null,
 			deviationThresholdPct,
+			externalAdAccountId,
+			notes: typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) : null,
 			isActive: true,
 			isMuted: false,
 			notifyTelegram: body.notifyTelegram !== false,
@@ -100,6 +124,28 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			notifyInApp: body.notifyInApp !== false,
 			createdByUserId: locals.user.id
 		});
+
+		// Audit: 'created' row capturing initial values
+		await writeTargetAudit({
+			tenantId: locals.tenant.id,
+			targetId: id,
+			actorType: 'user',
+			actorId: locals.user.id,
+			action: 'created',
+			changes: {
+				clientId: { from: null, to: clientId },
+				externalCampaignId: { from: null, to: externalCampaignId },
+				externalAdsetId: { from: null, to: externalAdsetId },
+				objective: { from: null, to: objective },
+				targetCplCents: { from: null, to: typeof body.targetCplCents === 'number' ? body.targetCplCents : null },
+				targetCpaCents: { from: null, to: typeof body.targetCpaCents === 'number' ? body.targetCpaCents : null },
+				targetRoas: { from: null, to: typeof body.targetRoas === 'number' ? body.targetRoas : null },
+				targetCtr: { from: null, to: typeof body.targetCtr === 'number' ? body.targetCtr : null },
+				targetDailyBudgetCents: { from: null, to: typeof body.targetDailyBudgetCents === 'number' ? body.targetDailyBudgetCents : null },
+				deviationThresholdPct: { from: null, to: deviationThresholdPct }
+			}
+		});
+
 		logInfo('ads-monitor', `Target created: ${id} for campaign ${externalCampaignId}`, {
 			tenantId: locals.tenant.id,
 			userId: locals.user.id,
