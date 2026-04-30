@@ -6,6 +6,7 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import TargetIcon from '@lucide/svelte/icons/target';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import HistoryIcon from '@lucide/svelte/icons/history';
 	import LightbulbIcon from '@lucide/svelte/icons/lightbulb';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -23,6 +24,7 @@
 	let targets = $state([...data.targets]);
 	let recommendations = $state([...data.recommendations]);
 	let runningRebuild = $state(false);
+	let runningBackfill = $state(false);
 	let approvingId = $state<string | null>(null);
 	let expandedIds = new SvelteSet<string>();
 	function toggleExpand(id: string) {
@@ -128,6 +130,29 @@
 			toast.error(`Eroare: ${(e as Error).message}`);
 		} finally { runningRebuild = false; }
 	}
+
+	async function runBackfill() {
+		if (runningBackfill) return;
+		if (!confirm('Backfill rulează din nou ultimii 30 zile de snapshot-uri Meta. Util după ce s-au schimbat regulile de mapare conversion. Continui?')) return;
+		runningBackfill = true;
+		try {
+			const res = await fetch(`/${data.tenantSlug}/api/ads-monitor/backfill`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ daysBack: 30 })
+			});
+			const body = (await res.json().catch(() => null)) as
+				| { ok: boolean; result?: { campaignsProcessed: number; daysCovered: number; errors: string[] }; error?: string }
+				| null;
+			if (!res.ok || !body?.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+			const result = body.result ?? { campaignsProcessed: 0, daysCovered: 30, errors: [] };
+			toast.success(`Backfill: ${result.campaignsProcessed} campanii × ${result.daysCovered} zile${result.errors.length > 0 ? ' (' + result.errors.length + ' erori)' : ''}`);
+			// Reload to see fresh data
+			setTimeout(() => window.location.reload(), 1500);
+		} catch (e) {
+			toast.error(`Eroare backfill: ${(e as Error).message}`);
+		} finally { runningBackfill = false; }
+	}
 </script>
 
 <svelte:head><title>Monitoring Meta Ads</title></svelte:head>
@@ -149,6 +174,10 @@
 			</Button>
 			<Button onclick={runMonitorNow} disabled={runningRebuild} variant="outline" size="sm">
 				<RefreshCwIcon class="h-4 w-4 mr-2 {runningRebuild ? 'animate-spin' : ''}" /> Rulează acum
+			</Button>
+			<Button onclick={runBackfill} disabled={runningBackfill} variant="outline" size="sm">
+				<HistoryIcon class="h-4 w-4 mr-2 {runningBackfill ? 'animate-spin' : ''}" />
+				Backfill 30 zile
 			</Button>
 		</div>
 	</div>

@@ -595,3 +595,107 @@ export async function processAdsPerformanceMonitor(
 
 	return { tenantsProcessed: tenantIds.length, alerted: totalAlerted, processed: totalProcessed };
 }
+
+/**
+ * Backfill ad_metric_snapshot rows for a tenant over the last N days.
+ * Re-fetches Meta insights and overwrites snapshots (upsert by date).
+ * Does NOT run deviation detection or generate recommendations.
+ *
+ * Used for: manual UI-triggered backfill after fixing conversion mapping bugs.
+ */
+export async function backfillTenantSnapshots(
+	tenantId: string,
+	daysBack: number = 30
+): Promise<{ campaignsProcessed: number; daysCovered: number; errors: string[] }> {
+	const errors: string[] = [];
+	logInfo('scheduler', `ads-performance-monitor: backfill started for tenant ${tenantId}, daysBack=${daysBack}`);
+
+	const targets = await db
+		.select()
+		.from(table.adMonitorTarget)
+		.where(
+			and(
+				eq(table.adMonitorTarget.tenantId, tenantId),
+				eq(table.adMonitorTarget.isActive, true),
+				eq(table.adMonitorTarget.platform, 'meta')
+			)
+		);
+	if (targets.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
+
+	const accountsRows = await db
+		.select({
+			id: table.metaAdsAccount.id,
+			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
+			integrationId: table.metaAdsAccount.integrationId,
+			clientId: table.metaAdsAccount.clientId
+		})
+		.from(table.metaAdsAccount)
+		.where(
+			and(
+				eq(table.metaAdsAccount.tenantId, tenantId),
+				eq(table.metaAdsAccount.isActive, true)
+			)
+		);
+	if (accountsRows.length === 0) return { campaignsProcessed: 0, daysCovered: daysBack, errors };
+
+	const now = new Date();
+	const since = ymd(shiftDays(now, -daysBack));
+	const until = ymd(shiftDays(now, -1));
+
+	let campaignsProcessed = 0;
+
+	for (const account of accountsRows) {
+		try {
+			const insights = await withTimeout(
+				fetchAccountInsights(account.metaAdAccountId, account.integrationId, since, until),
+				PROCESS_TIMEOUT_MS,
+				`fetchAccountInsights ${account.metaAdAccountId}`
+			);
+			if (!insights) continue;
+
+			const insightsByCampaign = new Map(insights.map((i) => [i.campaignId, i]));
+
+			for (const target of targets) {
+				const insight = insightsByCampaign.get(target.externalCampaignId);
+				if (!insight) continue;
+				campaignsProcessed++;
+
+				// Build full date series for window (ascending)
+				const dates: string[] = [];
+				for (let i = daysBack; i >= 1; i--) dates.push(ymd(shiftDays(now, -i)));
+				const dailyHistory: DailyMetrics[] = dates.map(
+					(d) => insight.dailyByDate.get(d) ?? emptyDay(d)
+				);
+
+				const last7d = dailyHistory.slice(-7);
+				const maturity = assessMaturity(last7d, {
+					campaignStartDate: insight.startTime ? insight.startTime.slice(0, 10) : null,
+					isMuted: target.isMuted,
+					mutedUntil: target.mutedUntil ?? null,
+					now
+				});
+
+				try {
+					await persistSnapshots(
+						tenantId,
+						target.clientId,
+						target.externalCampaignId,
+						maturity.maturity,
+						dailyHistory
+					);
+				} catch (e) {
+					const msg = serializeError(e).message;
+					errors.push(`${target.externalCampaignId}: ${msg}`);
+					logError('scheduler', `Backfill failed for ${target.externalCampaignId}: ${msg}`);
+				}
+			}
+		} catch (e) {
+			const msg = serializeError(e).message;
+			errors.push(`account ${account.metaAdAccountId}: ${msg}`);
+			logError('scheduler', `Backfill account ${account.metaAdAccountId} failed: ${msg}`);
+		}
+	}
+
+	logInfo('scheduler', `ads-performance-monitor: backfill done for ${tenantId}: ${campaignsProcessed} campaigns over ${daysBack} days, ${errors.length} errors`);
+	return { campaignsProcessed, daysCovered: daysBack, errors };
+}
