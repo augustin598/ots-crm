@@ -80,6 +80,10 @@ export const POST: RequestHandler = (event) =>
 
 		const externalAdsetId =
 			typeof body.externalAdsetId === 'string' ? body.externalAdsetId : null;
+		const externalCampaignName =
+			typeof body.externalCampaignName === 'string' && body.externalCampaignName.trim().length > 0
+				? body.externalCampaignName.trim().slice(0, 255)
+				: null;
 
 		// Upsert: if a target already exists for (tenant, campaign, adset), update it.
 		const [existing] = await db
@@ -100,6 +104,7 @@ export const POST: RequestHandler = (event) =>
 			clientId,
 			platform: typeof body.platform === 'string' ? body.platform : 'meta',
 			externalCampaignId,
+			externalCampaignName,
 			externalAdsetId,
 			objective,
 			targetCplCents: typeof body.targetCplCents === 'number' ? body.targetCplCents : null,
@@ -117,9 +122,14 @@ export const POST: RequestHandler = (event) =>
 		};
 
 		if (existing) {
+			// On update, only overwrite externalCampaignName if caller sent one — preserves
+			// previously cached names when external clients omit the field.
+			const updatePayload = externalCampaignName === null
+				? (() => { const { externalCampaignName: _omit, ...rest } = payload; return rest; })()
+				: payload;
 			await db
 				.update(table.adMonitorTarget)
-				.set(payload)
+				.set(updatePayload)
 				.where(eq(table.adMonitorTarget.id, existing.id));
 			return { status: 200, body: { id: existing.id, updated: true } };
 		}

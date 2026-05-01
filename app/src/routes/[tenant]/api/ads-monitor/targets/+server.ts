@@ -52,6 +52,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const externalAdsetId =
 		typeof body.externalAdsetId === 'string' ? body.externalAdsetId : null;
+	const externalCampaignName =
+		typeof body.externalCampaignName === 'string' && body.externalCampaignName.trim().length > 0
+			? body.externalCampaignName.trim().slice(0, 255)
+			: null;
 
 	// Reject duplicate target for same campaign+adset
 	const [existing] = await db
@@ -102,6 +106,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			clientId,
 			platform,
 			externalCampaignId,
+			externalCampaignName,
 			externalAdsetId,
 			objective,
 			targetCplCents:

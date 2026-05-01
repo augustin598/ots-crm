@@ -33,6 +33,8 @@ import { processTaskOverdueNotifications } from './tasks/task-overdue-notificati
 import { processWordpressUptimePing } from './tasks/wordpress-uptime-ping';
 import { processWordpressUpdatesCheck } from './tasks/wordpress-updates-check';
 import { processWordpressConnectorAutoUpdate } from './tasks/wordpress-connector-auto-update';
+import { processAdsOptimizationTaskCreator } from './tasks/ads-optimization-task-creator';
+import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-reaper';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -127,6 +129,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	ads_status_monitor: processAdsStatusMonitor,
 	ads_performance_monitor: processAdsPerformanceMonitor,
 	ads_snapshot_retention: processAdsSnapshotRetention,
+	ads_optimization_task_creator: processAdsOptimizationTaskCreator,
+	ads_optimization_task_reaper: processAdsOptimizationTaskReaper,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
@@ -261,7 +265,8 @@ export const startScheduler = async () => {
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
-		'whmcs-invoice-reconcile'
+		'whmcs-invoice-reconcile',
+		'ads-optimization-task-creator', 'ads-optimization-task-reaper'
 	]);
 
 	try {
@@ -817,6 +822,40 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Ads optimization task creator — daily at 00:15 RO, creates one task per active target.
+	await schedulerQueue.add(
+		'ads-optimization-task-creator',
+		{
+			type: 'ads_optimization_task_creator',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '15 0 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-optimization-task-creator'
+		}
+	);
+	logInfo('scheduler', '[scheduler] ads-optimization-task-creator registered (15 0 * * * Europe/Bucharest)');
+
+	// Ads optimization task reaper — daily at 02:00 RO, reverts stale claimed tasks + expires old ones.
+	await schedulerQueue.add(
+		'ads-optimization-task-reaper',
+		{
+			type: 'ads_optimization_task_reaper',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 2 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-optimization-task-reaper'
+		}
+	);
+	logInfo('scheduler', '[scheduler] ads-optimization-task-reaper registered (0 2 * * * Europe/Bucharest)');
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -860,7 +899,9 @@ export const JOB_LABELS: Record<string, string> = {
 	invoice_reminder_notifications: 'Notificari Facturi Restante',
 	task_overdue_notifications: 'Notificari Taskuri Intarziate',
 	wordpress_uptime_ping: 'Ping Uptime WordPress',
-	wordpress_updates_check: 'Verificare Update-uri WordPress'
+	wordpress_updates_check: 'Verificare Update-uri WordPress',
+	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
+	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)'
 };
 
 /** Default params for jobs that need specific parameters */

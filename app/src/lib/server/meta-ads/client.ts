@@ -395,6 +395,7 @@ export async function listCampaignInsights(
 		level: 'campaign',
 		time_range: timeRange,
 		time_increment: timeIncrement === 'daily' ? '1' : 'monthly',
+		action_attribution_windows: JSON.stringify(['1d_click', '1d_view']),
 		access_token: accessToken,
 		appsecret_proof: proof,
 		limit: '500'

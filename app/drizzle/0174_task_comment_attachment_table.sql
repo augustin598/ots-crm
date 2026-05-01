@@ -1,4 +1,4 @@
-CREATE TABLE `task_comment_attachment` (
+CREATE TABLE IF NOT EXISTS `task_comment_attachment` (
 	`id` text PRIMARY KEY NOT NULL,
 	`comment_id` text NOT NULL,
 	`path` text NOT NULL,

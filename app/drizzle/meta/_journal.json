@@ -1604,6 +1604,41 @@
       "when": 1777939200000,
       "tag": "0228_meta_ads_backfill_primary",
       "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "6",
+      "when": 1777538940306,
+      "tag": "0229_tough_salo",
+      "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "6",
+      "when": 1777950200000,
+      "tag": "0230_ads_optimization_task",
+      "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "6",
+      "when": 1777950201000,
+      "tag": "0231_ads_optimization_task_day_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "6",
+      "when": 1777950202000,
+      "tag": "0232_ads_optimization_task_status_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "6",
+      "when": 1777950203000,
+      "tag": "0233_ads_optimization_task_tenant_status_idx",
+      "breakpoints": true
     }
   ]
 }

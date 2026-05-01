@@ -22,15 +22,6 @@ const AD_ACCOUNT_ID = 'act_818842774503712';
 const CLIENT_ID = 'g4gjn3qe6o734r64xiystdst';
 const META_GRAPH_URL = 'https://graph.facebook.com/v25.0';
 
-// OUTCOME_LEADS action types în ordinea priorității
-const LEAD_ACTION_TYPES = [
-	'lead',
-	'offsite_conversion.fb_pixel_lead',
-	'complete_registration',
-	'offsite_conversion.fb_pixel_complete_registration',
-	'contact_total',
-	'submit_application_total'
-];
 
 const LEARNING_DAYS_MIN = 7;
 const SPARSE_CONVERSIONS_MIN = 50;
@@ -84,13 +75,13 @@ function generateId(): string {
 
 function getLeads(actions: any[] | undefined): number {
 	if (!actions) return 0;
-	for (const type of LEAD_ACTION_TYPES) {
-		const a = actions.find((x: any) => x.action_type === type);
-		if (a) {
-			const v = parseFloat(a.value || '0');
-			if (v > 0) return Math.round(v);
-		}
-	}
+	// Match cron behavior: GOAL_TO_ACTION['LEAD_GENERATION'] = 'lead' only.
+	// Do NOT fall back to contact_total / submit_application_total — they inflate counts
+	// (generic pixel events, not real leads).
+	const lead = actions.find((x: any) => x.action_type === 'lead');
+	if (lead) return Math.round(parseFloat(lead.value || '0'));
+	const pixelLead = actions.find((x: any) => x.action_type === 'offsite_conversion.fb_pixel_lead');
+	if (pixelLead) return Math.round(parseFloat(pixelLead.value || '0'));
 	return 0;
 }
 
@@ -104,6 +95,7 @@ async function fetchWindow(token: string, since: string, until: string): Promise
 		level: 'campaign',
 		time_range: JSON.stringify({ since, until }),
 		time_increment: '1',
+		action_attribution_windows: JSON.stringify(['1d_click', '1d_view']),
 		filtering,
 		access_token: token,
 		appsecret_proof: proof,

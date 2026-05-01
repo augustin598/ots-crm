@@ -1,4 +1,4 @@
-CREATE TABLE `whatsapp_contact` (
+CREATE TABLE IF NOT EXISTS `whatsapp_contact` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
 	`phone_e164` text NOT NULL,

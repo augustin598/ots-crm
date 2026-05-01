@@ -1,4 +1,4 @@
-CREATE TABLE `sitemap_cache` (
+CREATE TABLE IF NOT EXISTS `sitemap_cache` (
 	`url` text PRIMARY KEY NOT NULL,
 	`content` text NOT NULL,
 	`content_lastmod` text,

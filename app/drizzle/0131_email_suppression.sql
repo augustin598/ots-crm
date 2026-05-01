@@ -1,4 +1,4 @@
-CREATE TABLE `email_suppression` (
+CREATE TABLE IF NOT EXISTS `email_suppression` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text REFERENCES `tenant`(`id`),
 	`email` text NOT NULL,

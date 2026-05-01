@@ -4288,7 +4288,8 @@ export const API_KEY_SCOPES = [
 	'clients:read',
 	'integrations:read',
 	'ads_monitor:read',
-	'ads_monitor:write'
+	'ads_monitor:write',
+	'telegram:link'
 ] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
@@ -4309,6 +4310,7 @@ export const adMonitorTarget = sqliteTable(
 			.references(() => client.id),
 		platform: text('platform').notNull().default('meta'), // 'meta' | 'google' | 'tiktok'
 		externalCampaignId: text('external_campaign_id').notNull(),
+		externalCampaignName: text('external_campaign_name'),
 		externalAdsetId: text('external_adset_id'), // nullable — campaign-level by default
 		objective: text('objective').notNull(), // OUTCOME_LEADS | OUTCOME_SALES | ...
 		// Targets (any may be null — alert only on populated metrics)
@@ -4650,3 +4652,53 @@ export type NewUserTelegramLink = typeof userTelegramLink.$inferInsert;
 
 export const AD_METRIC_MATURITY = ['learning', 'sparse', 'mature'] as const;
 export type AdMetricMaturity = (typeof AD_METRIC_MATURITY)[number];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ads Optimization Task Queue — daily tasks created per active target,
+// polled and processed by PersonalOPS worker.
+// scheduledFor is ALWAYS normalised to start-of-day UTC (Date.UTC(y,m,d,0,0,0,0))
+// before INSERT — this guarantees the UNIQUE(tenantId,targetId,scheduledFor) covers
+// exactly one task per campaign per calendar day.
+// ─────────────────────────────────────────────────────────────────────────────
+export const adsOptimizationTask = sqliteTable(
+	'ads_optimization_task',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		targetId: text('target_id')
+			.notNull()
+			.references(() => adMonitorTarget.id, { onDelete: 'cascade' }),
+		externalCampaignId: text('external_campaign_id').notNull(),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		type: text('type').notNull().default('analyze_for_suggestions'),
+		status: text('status', { enum: ['pending', 'claimed', 'done', 'failed', 'expired'] })
+			.notNull()
+			.default('pending'),
+		// normalised to 00:00:00 UTC (start of day) — see comment above
+		scheduledFor: integer('scheduled_for', { mode: 'timestamp_ms' }).notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.notNull()
+			.$defaultFn(() => new Date()),
+		claimedAt: integer('claimed_at', { mode: 'timestamp_ms' }),
+		claimedBy: text('claimed_by'),
+		completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+		resultJson: text('result_json'),
+		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull()
+	},
+	(t) => ({
+		uniqueDayTask: uniqueIndex('ads_optimization_task_day_unique').on(
+			t.tenantId,
+			t.targetId,
+			t.scheduledFor
+		),
+		statusIdx: index('ads_optimization_task_status_idx').on(t.status),
+		tenantStatusIdx: index('ads_optimization_task_tenant_status_idx').on(t.tenantId, t.status)
+	})
+);
+
+export type AdsOptimizationTask = typeof adsOptimizationTask.$inferSelect;
+export type NewAdsOptimizationTask = typeof adsOptimizationTask.$inferInsert;

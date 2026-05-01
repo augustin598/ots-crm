@@ -1,4 +1,4 @@
-CREATE TABLE `seo_link_discovery_job` (
+CREATE TABLE IF NOT EXISTS `seo_link_discovery_job` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`user_id` text NOT NULL,

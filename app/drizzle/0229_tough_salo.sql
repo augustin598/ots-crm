@@ -1,0 +1,1 @@
+ALTER TABLE `ad_monitor_target` ADD `external_campaign_name` text;
