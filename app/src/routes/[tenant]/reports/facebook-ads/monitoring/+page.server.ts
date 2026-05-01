@@ -1,10 +1,10 @@
 import { error, redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, desc, gte, sql } from 'drizzle-orm';
+import { and, eq, desc, gte, isNull, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, params, fetch }) => {
+export const load: PageServerLoad = async ({ locals, params, fetch, url }) => {
 	if (!locals.user || !locals.tenant) throw redirect(302, '/login');
 
 	const since7 = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
@@ -142,6 +142,17 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 	}
 	const clients = Array.from(grouped.values());
 
+	const outcomeParam = url.searchParams.get('outcome') ?? 'all';
+	const recConditions: ReturnType<typeof eq>[] = [
+		eq(table.adOptimizationRecommendation.tenantId, locals.tenant.id)
+	];
+	if (outcomeParam === 'pending') {
+		recConditions.push(eq(table.adOptimizationRecommendation.status, 'applied'));
+		recConditions.push(isNull(table.adOptimizationRecommendation.outcomeVerdict));
+	} else if (['improved', 'worsened', 'neutral', 'insufficient_data', 'no_baseline'].includes(outcomeParam)) {
+		recConditions.push(eq(table.adOptimizationRecommendation.outcomeVerdict, outcomeParam));
+	}
+
 	const recommendations = await db
 		.select({
 			id: table.adOptimizationRecommendation.id,
@@ -158,11 +169,14 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 			createdAt: table.adOptimizationRecommendation.createdAt,
 			decidedAt: table.adOptimizationRecommendation.decidedAt,
 			appliedAt: table.adOptimizationRecommendation.appliedAt,
-			applyError: table.adOptimizationRecommendation.applyError
+			applyError: table.adOptimizationRecommendation.applyError,
+			outcomeVerdict: table.adOptimizationRecommendation.outcomeVerdict,
+			outcomeCplCents7d: table.adOptimizationRecommendation.outcomeCplCents7d,
+			baselineCplCents: table.adOptimizationRecommendation.baselineCplCents
 		})
 		.from(table.adOptimizationRecommendation)
 		.innerJoin(table.client, eq(table.client.id, table.adOptimizationRecommendation.clientId))
-		.where(eq(table.adOptimizationRecommendation.tenantId, locals.tenant.id))
+		.where(and(...recConditions))
 		.orderBy(desc(table.adOptimizationRecommendation.createdAt))
 		.limit(50);
 
@@ -171,5 +185,5 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 		? await summaryRes.json()
 		: { activeTargets: 0, pendingRecs: 0, spend7dCents: 0, avgCpl30dCents: null, avgTargetCplCents: null };
 
-	return { targets, clients, recommendations, summary, tenantSlug: params.tenant };
+	return { targets, clients, recommendations, summary, tenantSlug: params.tenant, outcomeFilter: outcomeParam };
 };

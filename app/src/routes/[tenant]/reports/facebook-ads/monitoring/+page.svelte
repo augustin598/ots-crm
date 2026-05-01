@@ -21,6 +21,7 @@
 	import AddTargetForm from './components/AddTargetForm.svelte';
 	import DiscoverCampaignsModal from './components/DiscoverCampaignsModal.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -44,9 +45,63 @@
 	let filterStatus = $state<'all' | 'active' | 'muted' | 'inactive'>('all');
 	let filterDeviation = $state<'all' | 'over' | 'under' | 'ok'>('all');
 	let filterSearch = $state('');
+	let filterOutcome = $state(data.outcomeFilter ?? 'all');
+
+	const OUTCOME_VERDICTS = ['improved', 'worsened', 'neutral', 'insufficient_data', 'no_baseline'] as const;
+
+	function getVerdictBadge(rec: {
+		outcomeVerdict: string | null;
+		status: string;
+		appliedAt: Date | null;
+		baselineCplCents: number | null;
+		outcomeCplCents7d: number | null;
+	}): { label: string; cls: string } | null {
+		if (rec.outcomeVerdict === null) {
+			if (rec.status !== 'applied') return null;
+			const daysSince = rec.appliedAt
+				? (Date.now() - new Date(rec.appliedAt).getTime()) / 86400_000
+				: 0;
+			const daysLeft = Math.max(0, 7 - Math.floor(daysSince));
+			return { label: `⏱ Pending (${daysLeft}d rămase)`, cls: 'bg-gray-100 text-gray-600' };
+		}
+		const delta =
+			rec.baselineCplCents && rec.outcomeCplCents7d && rec.baselineCplCents > 0
+				? (((rec.outcomeCplCents7d - rec.baselineCplCents) / rec.baselineCplCents) * 100).toFixed(1)
+				: null;
+		switch (rec.outcomeVerdict) {
+			case 'improved':
+				return { label: `✅ CPL îmbunătățit cu ${delta ? Math.abs(Number(delta)) : '?'}%`, cls: 'bg-green-100 text-green-700' };
+			case 'worsened':
+				return { label: `⚠️ CPL înrăutățit cu ${delta ? Math.abs(Number(delta)) : '?'}%`, cls: 'bg-red-100 text-red-700' };
+			case 'neutral':
+				return { label: '➖ CPL similar', cls: 'bg-gray-100 text-gray-600' };
+			case 'insufficient_data':
+				return { label: '⏳ Sub 5 conv post-apply', cls: 'bg-yellow-100 text-yellow-700' };
+			case 'no_baseline':
+				return { label: 'ℹ️ Fără baseline', cls: 'bg-blue-100 text-blue-700' };
+			default:
+				return null;
+		}
+	}
+
+	function setOutcomeFilter(v: string) {
+		filterOutcome = v;
+		const params = new URLSearchParams(window.location.search);
+		if (v === 'all') params.delete('outcome');
+		else params.set('outcome', v);
+		goto(`?${params.toString()}`, { keepFocus: true, replaceState: true });
+	}
 
 	const pendingRecs = $derived(recommendations.filter((r) => r.status === 'draft'));
-	const decidedRecs = $derived(recommendations.filter((r) => r.status !== 'draft'));
+	const decidedRecs = $derived(
+		recommendations
+			.filter((r) => r.status !== 'draft')
+			.filter((r) => {
+				if (filterOutcome === 'all') return true;
+				if (filterOutcome === 'pending') return r.status === 'applied' && r.outcomeVerdict === null;
+				return r.outcomeVerdict === filterOutcome;
+			})
+	);
 
 	const filteredTargets = $derived(
 		targets.filter((t) => {
@@ -303,9 +358,30 @@
 		{/if}
 	</Card>
 
-	{#if decidedRecs.length > 0}
+	{#if decidedRecs.length > 0 || filterOutcome !== 'all'}
 		<Card class="p-6">
-			<h2 class="text-xl font-semibold mb-4">Istoric recomandări</h2>
+			<div class="flex items-center justify-between mb-4 gap-4 flex-wrap">
+				<h2 class="text-xl font-semibold">Istoric recomandări ({decidedRecs.length})</h2>
+				<div class="flex items-center gap-2">
+					<span class="text-sm text-muted-foreground">Outcome:</span>
+					<select
+						class="text-sm border rounded px-2 py-1 bg-background"
+						value={filterOutcome}
+						onchange={(e) => setOutcomeFilter((e.target as HTMLSelectElement).value)}
+					>
+						<option value="all">Toate</option>
+						<option value="improved">Îmbunătățit</option>
+						<option value="worsened">Înrăutățit</option>
+						<option value="neutral">Neutru</option>
+						<option value="insufficient_data">Date insuficiente</option>
+						<option value="no_baseline">Fără baseline</option>
+						<option value="pending">Pending</option>
+					</select>
+				</div>
+			</div>
+			{#if decidedRecs.length === 0}
+				<p class="text-sm text-muted-foreground py-4">Nicio recomandare pentru filtrul selectat.</p>
+			{:else}
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
 					<thead class="border-b bg-muted/40">
@@ -314,21 +390,33 @@
 							<th class="px-3 py-2">Client</th>
 							<th class="px-3 py-2">Acțiune</th>
 							<th class="px-3 py-2">Stare</th>
+							<th class="px-3 py-2">Outcome</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each decidedRecs as rec (rec.id)}
 							{@const badge = STATUS_BADGES[rec.status] ?? STATUS_BADGES.draft}
+							{@const verdictBadge = getVerdictBadge(rec)}
 							<tr class="border-b">
 								<td class="px-3 py-2 text-xs text-muted-foreground">{new Date(rec.createdAt).toLocaleDateString('ro-RO')}</td>
 								<td class="px-3 py-2">{rec.clientName}</td>
 								<td class="px-3 py-2">{ACTION_LABELS[rec.action] ?? rec.action}</td>
 								<td class="px-3 py-2"><Badge variant={badge.variant} class="text-xs">{badge.label}</Badge></td>
+								<td class="px-3 py-2">
+									{#if verdictBadge}
+										<span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium {verdictBadge.cls}">
+											{verdictBadge.label}
+										</span>
+									{:else}
+										<span class="text-xs text-muted-foreground">—</span>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			</div>
+			{/if}
 		</Card>
 	{/if}
 </div>

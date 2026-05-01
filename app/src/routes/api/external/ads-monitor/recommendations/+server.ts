@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { withApiKey } from '$lib/server/api-keys/middleware';
 import {
@@ -28,8 +28,11 @@ export const GET: RequestHandler = (event) =>
 		const clientId = url.searchParams.get('clientId');
 		const campaignId = url.searchParams.get('campaignId');
 		const sinceRaw = url.searchParams.get('since');
+		const outcomeParam = url.searchParams.get('outcome');
 		const limitRaw = parseInt(url.searchParams.get('limit') ?? '50', 10);
 		const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+
+		const VALID_OUTCOMES = ['improved', 'worsened', 'neutral', 'insufficient_data', 'no_baseline', 'pending'];
 
 		const conditions = [eq(table.adOptimizationRecommendation.tenantId, ctx.tenantId)];
 		if (status) {
@@ -43,6 +46,23 @@ export const GET: RequestHandler = (event) =>
 				};
 			}
 			conditions.push(eq(table.adOptimizationRecommendation.status, status));
+		}
+		if (outcomeParam) {
+			if (!VALID_OUTCOMES.includes(outcomeParam)) {
+				return {
+					status: 400,
+					body: {
+						error: 'invalid_outcome',
+						message: `outcome must be one of ${VALID_OUTCOMES.join(', ')}`
+					}
+				};
+			}
+			if (outcomeParam === 'pending') {
+				conditions.push(eq(table.adOptimizationRecommendation.status, 'applied'));
+				conditions.push(isNull(table.adOptimizationRecommendation.outcomeVerdict));
+			} else {
+				conditions.push(eq(table.adOptimizationRecommendation.outcomeVerdict, outcomeParam));
+			}
 		}
 		if (clientId) conditions.push(eq(table.adOptimizationRecommendation.clientId, clientId));
 		if (campaignId)

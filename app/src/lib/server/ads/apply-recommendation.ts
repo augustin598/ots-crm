@@ -27,8 +27,17 @@ interface BudgetPayload {
 
 export type RecommendationPayload = PausePayload | ResumePayload | BudgetPayload | Record<string, unknown>;
 
-const MIN_DAILY_BUDGET_CENTS = 500; // 5 RON — absolute floor
-const ADSET_BUDGET_FLOOR_CENTS = MIN_DAILY_BUDGET_CENTS;
+const MIN_FLOOR_BY_CURRENCY: Record<string, number> = {
+	RON: 500, // 5 RON
+	EUR: 100, // 1 EUR
+	USD: 100, // 1 USD
+	GBP: 100, // 1 GBP
+};
+const DEFAULT_FLOOR = 100;
+
+function getMinFloor(currency: string): number {
+	return MIN_FLOOR_BY_CURRENCY[currency.toUpperCase()] ?? DEFAULT_FLOOR;
+}
 
 interface BudgetChangeResult {
 	strategy: string;
@@ -60,13 +69,15 @@ async function applyBudgetChange(
 ): Promise<BudgetChangeResult> {
 	const campaignInfo = await getCampaignWithAdsets(campaignId, accessToken, appSecret);
 	const isCBO = campaignInfo.daily_budget != null;
+	const currency = campaignInfo.accountCurrency ?? 'RON';
+	const floorCents = getMinFloor(currency);
 
 	if (isCBO) {
 		const warnings: string[] = [];
-		const safeBudget = Math.max(newDailyBudgetCents, MIN_DAILY_BUDGET_CENTS);
+		const safeBudget = Math.max(newDailyBudgetCents, floorCents);
 		if (safeBudget !== newDailyBudgetCents) {
 			warnings.push(
-				`Budget floor: clamped from ${newDailyBudgetCents} to ${safeBudget}`
+				`Budget floor (${currency}): clamped from ${newDailyBudgetCents} to ${safeBudget}`
 			);
 		}
 		await updateCampaignBudget(campaignId, accessToken, appSecret, 'daily', safeBudget);
@@ -90,7 +101,7 @@ async function applyBudgetChange(
 
 	if (activeAdsets.length === 1) {
 		const adset = activeAdsets[0];
-		const safeBudget = Math.max(newDailyBudgetCents, ADSET_BUDGET_FLOOR_CENTS);
+		const safeBudget = Math.max(newDailyBudgetCents, floorCents);
 		await updateAdsetBudget(adset.id, safeBudget, accessToken, appSecret);
 		return {
 			strategy: 'single_adset',
@@ -121,7 +132,7 @@ async function applyBudgetChange(
 
 	// Hybrid Option C: cut worst if it's >1.5× avg CPL AND has >20% spend share
 	if ((worst.cpl ?? 0) >= 1.5 * avgCpl && worstSpendShare >= 0.2) {
-		const adsetNewBudget = Math.max(Math.floor((worst.daily_budget ?? newDailyBudgetCents) * 0.7), ADSET_BUDGET_FLOOR_CENTS);
+		const adsetNewBudget = Math.max(Math.floor((worst.daily_budget ?? newDailyBudgetCents) * 0.7), floorCents);
 		try {
 			await updateAdsetBudget(worst.id, adsetNewBudget, accessToken, appSecret);
 			return {
@@ -171,7 +182,7 @@ async function applyBudgetChange(
 		const changes: BudgetChangeResult['changes'] = [];
 		for (const adset of activeAdsets) {
 			if (adset.daily_budget == null) continue;
-			const newAdsetBudget = Math.max(Math.floor(adset.daily_budget * 0.7), ADSET_BUDGET_FLOOR_CENTS);
+			const newAdsetBudget = Math.max(Math.floor(adset.daily_budget * 0.7), floorCents);
 			try {
 				await updateAdsetBudget(adset.id, newAdsetBudget, accessToken, appSecret);
 				changes.push({ adsetId: adset.id, name: adset.name, oldBudget: adset.daily_budget, newBudget: newAdsetBudget, status: 'success' });
@@ -306,6 +317,7 @@ export async function applyRecommendation(
 		return { ok: false, error: 'no_app_secret' };
 	}
 
+	// --- Meta API call (outside transaction — no DB lock during network call) ---
 	let decisionRationale: Record<string, unknown> | null = null;
 
 	try {
@@ -342,33 +354,64 @@ export async function applyRecommendation(
 			await markFailure(recommendationId, `Unknown action: ${action}`);
 			return { ok: false, error: 'unknown_action' };
 		}
-
-		const now = new Date();
-		await db
-			.update(table.adOptimizationRecommendation)
-			.set({
-				status: 'applied',
-				appliedAt: now,
-				updatedAt: now,
-				applyError: null,
-				decisionRationaleJson: decisionRationale ? JSON.stringify(decisionRationale) : null
-			})
-			.where(eq(table.adOptimizationRecommendation.id, recommendationId));
-
-		logInfo('ads-monitor', `Applied recommendation ${recommendationId} action=${action}`, {
-			tenantId,
-			metadata: { recommendationId, action, externalCampaignId: rec.externalCampaignId }
-		});
-		return { ok: true, appliedAt: now };
 	} catch (e) {
 		const { message } = serializeError(e);
 		await markFailure(recommendationId, message);
-		logError('ads-monitor', `Apply failed for ${recommendationId}: ${message}`, {
+		logError('ads-monitor', `Meta apply failed for ${recommendationId}: ${message}`, {
 			tenantId,
 			metadata: { recommendationId, action, externalCampaignId: rec.externalCampaignId }
 		});
 		return { ok: false, error: message };
 	}
+
+	// --- Atomic DB write — transaction guards against concurrent double-apply ---
+	// If this write fails, status stays 'approved' (transaction rollback) and user can retry.
+	const now = new Date();
+	try {
+		await db.transaction(async (tx) => {
+			const [fresh] = await tx
+				.select({ id: table.adOptimizationRecommendation.id, status: table.adOptimizationRecommendation.status })
+				.from(table.adOptimizationRecommendation)
+				.where(
+					and(
+						eq(table.adOptimizationRecommendation.id, recommendationId),
+						eq(table.adOptimizationRecommendation.tenantId, tenantId)
+					)
+				)
+				.limit(1);
+			if (!fresh || fresh.status !== 'approved') {
+				throw new Error(`Status changed to ${fresh?.status ?? 'not_found'} during apply`);
+			}
+			await tx
+				.update(table.adOptimizationRecommendation)
+				.set({
+					status: 'applied',
+					appliedAt: now,
+					updatedAt: now,
+					applyError: null,
+					decisionRationaleJson: decisionRationale ? JSON.stringify(decisionRationale) : null
+				})
+				.where(eq(table.adOptimizationRecommendation.id, recommendationId));
+		});
+	} catch (e) {
+		const { message } = serializeError(e);
+		// Meta change was applied but DB write failed — status stays 'approved' for retry.
+		await db
+			.update(table.adOptimizationRecommendation)
+			.set({ applyError: `DB write failed (Meta applied): ${message}`, updatedAt: new Date() })
+			.where(eq(table.adOptimizationRecommendation.id, recommendationId));
+		logError('ads-monitor', `DB write failed after Meta apply for ${recommendationId}: ${message}`, {
+			tenantId,
+			metadata: { recommendationId, action, externalCampaignId: rec.externalCampaignId }
+		});
+		return { ok: false, error: message };
+	}
+
+	logInfo('ads-monitor', `Applied recommendation ${recommendationId} action=${action}`, {
+		tenantId,
+		metadata: { recommendationId, action, externalCampaignId: rec.externalCampaignId }
+	});
+	return { ok: true, appliedAt: now };
 }
 
 async function markFailure(recommendationId: string, error: string): Promise<void> {
