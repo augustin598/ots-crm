@@ -156,6 +156,11 @@ export const POST: RequestHandler = (event) =>
 
 		const id = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 
+		const baselineCplCents =
+			typeof body.baselineCplCents === 'number' && body.baselineCplCents > 0
+				? body.baselineCplCents
+				: null;
+
 		await db.insert(table.adOptimizationRecommendation).values({
 			id,
 			tenantId: ctx.tenantId,
@@ -179,7 +184,8 @@ export const POST: RequestHandler = (event) =>
 			source: 'worker',
 			sourceWorkerId:
 				typeof body.sourceWorkerId === 'string' ? body.sourceWorkerId : null,
-			sourceApiKeyId: ctx.apiKeyId
+			sourceApiKeyId: ctx.apiKeyId,
+			baselineCplCents
 		});
 
 		// Notify all tenant admins so they see the pending recommendation.

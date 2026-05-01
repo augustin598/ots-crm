@@ -35,6 +35,7 @@ import { processWordpressUpdatesCheck } from './tasks/wordpress-updates-check';
 import { processWordpressConnectorAutoUpdate } from './tasks/wordpress-connector-auto-update';
 import { processAdsOptimizationTaskCreator } from './tasks/ads-optimization-task-creator';
 import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-reaper';
+import { processAdsOptimizerOutcomeEvaluator } from './tasks/ads-optimizer-outcome-evaluator';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -131,6 +132,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	ads_snapshot_retention: processAdsSnapshotRetention,
 	ads_optimization_task_creator: processAdsOptimizationTaskCreator,
 	ads_optimization_task_reaper: processAdsOptimizationTaskReaper,
+	ads_optimizer_outcome_evaluator: processAdsOptimizerOutcomeEvaluator,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
@@ -266,7 +268,8 @@ export const startScheduler = async () => {
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
 		'whmcs-invoice-reconcile',
-		'ads-optimization-task-creator', 'ads-optimization-task-reaper'
+		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
+		'ads-optimizer-outcome-evaluator'
 	]);
 
 	try {
@@ -856,6 +859,23 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] ads-optimization-task-reaper registered (0 2 * * * Europe/Bucharest)');
 
+	// Outcome evaluator — daily at 03:00 RO, evaluates CPL outcome 7d post-apply.
+	await schedulerQueue.add(
+		'ads-optimizer-outcome-evaluator',
+		{
+			type: 'ads_optimizer_outcome_evaluator',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '0 3 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'ads-optimizer-outcome-evaluator'
+		}
+	);
+	logInfo('scheduler', '[scheduler] ads-optimizer-outcome-evaluator registered (0 3 * * * Europe/Bucharest)');
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -900,6 +920,7 @@ export const JOB_LABELS: Record<string, string> = {
 	task_overdue_notifications: 'Notificari Taskuri Intarziate',
 	wordpress_uptime_ping: 'Ping Uptime WordPress',
 	wordpress_updates_check: 'Verificare Update-uri WordPress',
+	ads_optimizer_outcome_evaluator: 'Evaluator Outcome CPL 7z — Optimizare Ads',
 	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
 	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)'
 };

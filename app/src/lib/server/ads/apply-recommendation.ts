@@ -27,7 +27,8 @@ interface BudgetPayload {
 
 export type RecommendationPayload = PausePayload | ResumePayload | BudgetPayload | Record<string, unknown>;
 
-const ADSET_BUDGET_FLOOR_CENTS = 500; // 5 RON minimum
+const MIN_DAILY_BUDGET_CENTS = 500; // 5 RON — absolute floor
+const ADSET_BUDGET_FLOOR_CENTS = MIN_DAILY_BUDGET_CENTS;
 
 interface BudgetChangeResult {
 	strategy: string;
@@ -44,6 +45,7 @@ interface BudgetChangeResult {
 		error?: string;
 	}>;
 	partial?: boolean;
+	warnings?: string[];
 }
 
 async function applyBudgetChange(
@@ -56,12 +58,20 @@ async function applyBudgetChange(
 	const isCBO = campaignInfo.daily_budget != null;
 
 	if (isCBO) {
-		await updateCampaignBudget(campaignId, accessToken, appSecret, 'daily', newDailyBudgetCents);
+		const warnings: string[] = [];
+		const safeBudget = Math.max(newDailyBudgetCents, MIN_DAILY_BUDGET_CENTS);
+		if (safeBudget !== newDailyBudgetCents) {
+			warnings.push(
+				`Budget floor: clamped from ${newDailyBudgetCents} to ${safeBudget}`
+			);
+		}
+		await updateCampaignBudget(campaignId, accessToken, appSecret, 'daily', safeBudget);
 		return {
 			strategy: 'cbo_campaign',
 			isCBO: true,
 			adsetCount: campaignInfo.adsets.length,
-			changes: [{ newBudget: newDailyBudgetCents }]
+			changes: [{ newBudget: safeBudget }],
+			warnings: warnings.length > 0 ? warnings : undefined
 		};
 	}
 
@@ -272,7 +282,10 @@ export async function applyRecommendation(
 				isCBO: budgetResult.isCBO,
 				adset_count: budgetResult.adsetCount,
 				changes: budgetResult.changes,
-				partial: budgetResult.partial ?? false
+				partial: budgetResult.partial ?? false,
+				...(budgetResult.warnings && budgetResult.warnings.length > 0
+					? { warnings: budgetResult.warnings }
+					: {})
 			};
 		} else {
 			await markFailure(recommendationId, `Unknown action: ${action}`);

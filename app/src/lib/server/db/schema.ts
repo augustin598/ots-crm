@@ -4532,6 +4532,12 @@ export const adOptimizationRecommendation = sqliteTable(
 		appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'date' }),
 		applyError: text('apply_error'),
 		decisionRationaleJson: text('decision_rationale_json'),
+		// Outcome measurement (B5) — populated at create time and evaluated 7d post-apply
+		baselineCplCents: integer('baseline_cpl_cents'),
+		outcomeCplCents7d: integer('outcome_cpl_cents_7d'),
+		// 'improved' | 'worsened' | 'neutral' | 'pending' | 'insufficient_data'
+		outcomeVerdict: text('outcome_verdict'),
+		outcomeEvaluatedAt: integer('outcome_evaluated_at'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),

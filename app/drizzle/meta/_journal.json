@@ -1646,6 +1646,34 @@
       "when": 1746115200000,
       "tag": "0234_ad_recommendation_decision_rationale",
       "breakpoints": true
+    },
+    {
+      "idx": 235,
+      "version": "6",
+      "when": 1746201600000,
+      "tag": "0235_ad_rec_baseline_cpl",
+      "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "6",
+      "when": 1746201601000,
+      "tag": "0236_ad_rec_outcome_cpl_7d",
+      "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "6",
+      "when": 1746201602000,
+      "tag": "0237_ad_rec_outcome_verdict",
+      "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "6",
+      "when": 1746201603000,
+      "tag": "0238_ad_rec_outcome_evaluated_at",
+      "breakpoints": true
     }
   ]
 }
