@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { withApiKey } from '$lib/server/api-keys/middleware';
 import {
@@ -27,6 +27,7 @@ export const GET: RequestHandler = (event) =>
 		const status = url.searchParams.get('status');
 		const clientId = url.searchParams.get('clientId');
 		const campaignId = url.searchParams.get('campaignId');
+		const sinceRaw = url.searchParams.get('since');
 		const limitRaw = parseInt(url.searchParams.get('limit') ?? '50', 10);
 		const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
 
@@ -46,6 +47,12 @@ export const GET: RequestHandler = (event) =>
 		if (clientId) conditions.push(eq(table.adOptimizationRecommendation.clientId, clientId));
 		if (campaignId)
 			conditions.push(eq(table.adOptimizationRecommendation.externalCampaignId, campaignId));
+		if (sinceRaw) {
+			const sinceDate = new Date(sinceRaw);
+			if (!Number.isNaN(sinceDate.getTime())) {
+				conditions.push(gte(table.adOptimizationRecommendation.createdAt, sinceDate));
+			}
+		}
 
 		const rows = await db
 			.select()

@@ -6,7 +6,12 @@ import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
-import { toggleCampaignStatus, updateCampaignBudget } from '$lib/server/meta-ads/client';
+import {
+	toggleCampaignStatus,
+	updateCampaignBudget,
+	getCampaignWithAdsets,
+	updateAdsetBudget
+} from '$lib/server/meta-ads/client';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import type { AdRecommendationAction } from '$lib/server/db/schema';
 
@@ -21,6 +26,139 @@ interface BudgetPayload {
 }
 
 export type RecommendationPayload = PausePayload | ResumePayload | BudgetPayload | Record<string, unknown>;
+
+const ADSET_BUDGET_FLOOR_CENTS = 500; // 5 RON minimum
+
+interface BudgetChangeResult {
+	strategy: string;
+	isCBO: boolean;
+	adsetCount: number;
+	changes: Array<{
+		adsetId?: string;
+		name?: string;
+		oldBudget?: number;
+		newBudget?: number;
+		cpl?: number | null;
+		spendShare?: number;
+		status?: string;
+		error?: string;
+	}>;
+	partial?: boolean;
+}
+
+async function applyBudgetChange(
+	campaignId: string,
+	newDailyBudgetCents: number,
+	accessToken: string,
+	appSecret: string
+): Promise<BudgetChangeResult> {
+	const campaignInfo = await getCampaignWithAdsets(campaignId, accessToken, appSecret);
+	const isCBO = campaignInfo.daily_budget != null;
+
+	if (isCBO) {
+		await updateCampaignBudget(campaignId, accessToken, appSecret, 'daily', newDailyBudgetCents);
+		return {
+			strategy: 'cbo_campaign',
+			isCBO: true,
+			adsetCount: campaignInfo.adsets.length,
+			changes: [{ newBudget: newDailyBudgetCents }]
+		};
+	}
+
+	// ABO — budget is on adsets
+	const activeAdsets = campaignInfo.adsets.filter((a) => a.status === 'ACTIVE');
+
+	if (activeAdsets.length === 0) {
+		throw new Error(
+			JSON.stringify({ error: 'no_active_adsets', message: 'Campaign has no active adsets to update' })
+		);
+	}
+
+	if (activeAdsets.length === 1) {
+		const adset = activeAdsets[0];
+		const safeBudget = Math.max(newDailyBudgetCents, ADSET_BUDGET_FLOOR_CENTS);
+		await updateAdsetBudget(adset.id, safeBudget, accessToken, appSecret);
+		return {
+			strategy: 'single_adset',
+			isCBO: false,
+			adsetCount: 1,
+			changes: [{ adsetId: adset.id, name: adset.name, oldBudget: adset.daily_budget ?? undefined, newBudget: safeBudget }]
+		};
+	}
+
+	// Multi-adset: rank by CPL (worst first)
+	const ranked = activeAdsets
+		.filter((a) => a.daily_budget != null && a.cpl != null)
+		.sort((a, b) => (b.cpl ?? 0) - (a.cpl ?? 0));
+
+	if (ranked.length === 0) {
+		throw new Error(
+			JSON.stringify({
+				error: 'no_ranked_adsets',
+				message: 'No adsets have both daily_budget and cpl data'
+			})
+		);
+	}
+
+	const avgCpl = ranked.reduce((s, a) => s + (a.cpl ?? 0), 0) / ranked.length;
+	const totalSpend = ranked.reduce((s, a) => s + (a.spend ?? 0), 0);
+	const worst = ranked[0];
+	const worstSpendShare = totalSpend > 0 ? (worst.spend ?? 0) / totalSpend : 0;
+
+	// Hybrid Option C: cut worst if it's >1.5× avg CPL AND has >20% spend share
+	if ((worst.cpl ?? 0) >= 1.5 * avgCpl && worstSpendShare >= 0.2) {
+		const adsetNewBudget = Math.max(Math.floor((worst.daily_budget ?? newDailyBudgetCents) * 0.7), ADSET_BUDGET_FLOOR_CENTS);
+		await updateAdsetBudget(worst.id, adsetNewBudget, accessToken, appSecret);
+		return {
+			strategy: 'cut_worst_adset',
+			isCBO: false,
+			adsetCount: activeAdsets.length,
+			changes: [{
+				adsetId: worst.id,
+				name: worst.name,
+				oldBudget: worst.daily_budget ?? undefined,
+				newBudget: adsetNewBudget,
+				cpl: worst.cpl,
+				spendShare: worstSpendShare
+			}]
+		};
+	}
+
+	// All adsets statistically tied — proportional cut
+	const allTied = ranked.every(
+		(a) => Math.abs((a.cpl ?? 0) - avgCpl) / avgCpl < 0.2
+	);
+
+	if (allTied) {
+		const changes: BudgetChangeResult['changes'] = [];
+		for (const adset of activeAdsets) {
+			if (adset.daily_budget == null) continue;
+			const newAdsetBudget = Math.max(Math.floor(adset.daily_budget * 0.7), ADSET_BUDGET_FLOOR_CENTS);
+			try {
+				await updateAdsetBudget(adset.id, newAdsetBudget, accessToken, appSecret);
+				changes.push({ adsetId: adset.id, name: adset.name, oldBudget: adset.daily_budget, newBudget: newAdsetBudget, status: 'success' });
+			} catch (err) {
+				changes.push({ adsetId: adset.id, name: adset.name, status: 'failed', error: String(err) });
+			}
+		}
+		return {
+			strategy: 'proportional_cut_all_adsets',
+			isCBO: false,
+			adsetCount: activeAdsets.length,
+			changes,
+			partial: changes.some((c) => c.status === 'failed')
+		};
+	}
+
+	// Ambiguous — manual review needed
+	throw new Error(
+		JSON.stringify({
+			error: 'multi_adset_ambiguous',
+			message: 'Multi-adset campaign needs manual review',
+			adsets: ranked.map((a) => ({ id: a.id, cpl: a.cpl, spend: a.spend, budget: a.daily_budget }))
+		})
+	);
+}
 
 async function resolveMetaIntegration(
 	tenantId: string,
@@ -110,6 +248,8 @@ export async function applyRecommendation(
 		return { ok: false, error: 'no_app_secret' };
 	}
 
+	let decisionRationale: Record<string, unknown> | null = null;
+
 	try {
 		if (action === 'pause_ad') {
 			await toggleCampaignStatus(rec.externalCampaignId, auth.accessToken, appSecret, 'PAUSED');
@@ -121,13 +261,19 @@ export async function applyRecommendation(
 				await markFailure(recommendationId, 'Invalid newDailyBudgetCents in suggested payload');
 				return { ok: false, error: 'invalid_budget_payload' };
 			}
-			await updateCampaignBudget(
+			const budgetResult = await applyBudgetChange(
 				rec.externalCampaignId,
+				budget.newDailyBudgetCents,
 				auth.accessToken,
-				appSecret,
-				'daily',
-				budget.newDailyBudgetCents
+				appSecret
 			);
+			decisionRationale = {
+				strategy: budgetResult.strategy,
+				isCBO: budgetResult.isCBO,
+				adset_count: budgetResult.adsetCount,
+				changes: budgetResult.changes,
+				partial: budgetResult.partial ?? false
+			};
 		} else {
 			await markFailure(recommendationId, `Unknown action: ${action}`);
 			return { ok: false, error: 'unknown_action' };
@@ -136,7 +282,13 @@ export async function applyRecommendation(
 		const now = new Date();
 		await db
 			.update(table.adOptimizationRecommendation)
-			.set({ status: 'applied', appliedAt: now, updatedAt: now, applyError: null })
+			.set({
+				status: 'applied',
+				appliedAt: now,
+				updatedAt: now,
+				applyError: null,
+				decisionRationaleJson: decisionRationale ? JSON.stringify(decisionRationale) : null
+			})
 			.where(eq(table.adOptimizationRecommendation.id, recommendationId));
 
 		logInfo('ads-monitor', `Applied recommendation ${recommendationId} action=${action}`, {

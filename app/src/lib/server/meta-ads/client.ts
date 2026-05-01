@@ -538,11 +538,17 @@ export async function toggleCampaignStatus(
 	try {
 		const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}`, { method: 'POST', body: params });
 		const data: any = await res.json();
-		if (data.error) {
-			logError('meta-ads', `Failed to toggle campaign ${campaignId}`, {
-				metadata: { errorMessage: data.error.message, errorCode: data.error.code }
-			});
-			throw new Error(data.error.message);
+		if (!res.ok || data.error) {
+			const errorBody = data.error ?? {};
+			throw new Error(JSON.stringify({
+				code: errorBody.code,
+				subcode: errorBody.error_subcode,
+				message: errorBody.message,
+				fbtrace_id: errorBody.fbtrace_id,
+				error_user_title: errorBody.error_user_title,
+				error_user_msg: errorBody.error_user_msg,
+				full: errorBody
+			}));
 		}
 		logInfo('meta-ads', `Campaign ${campaignId} set to ${newStatus}`);
 		return { success: true };
@@ -582,11 +588,17 @@ export async function updateCampaignBudget(
 		});
 		const data: any = await res.json();
 
-		if (data.error) {
-			logError('meta-ads', `Failed to update budget for ${campaignId}`, {
-				metadata: { errorMessage: data.error.message, errorCode: data.error.code }
-			});
-			throw new Error(data.error.message);
+		if (!res.ok || data.error) {
+			const errorBody = data.error ?? {};
+			throw new Error(JSON.stringify({
+				code: errorBody.code,
+				subcode: errorBody.error_subcode,
+				message: errorBody.message,
+				fbtrace_id: errorBody.fbtrace_id,
+				error_user_title: errorBody.error_user_title,
+				error_user_msg: errorBody.error_user_msg,
+				full: errorBody
+			}));
 		}
 
 		logInfo('meta-ads', `Budget updated for ${campaignId}`, { metadata: { budgetType, budgetCents } });
@@ -1027,6 +1039,182 @@ export async function listActiveCampaigns(
 		});
 		throw err;
 	}
+}
+
+// ---- Budget mutation helpers ----
+
+export interface AdsetInfo {
+	id: string;
+	name: string;
+	daily_budget: number | null;
+	lifetime_budget: number | null;
+	status: string;
+	/** Cost per lead in cents (null if no insight data). */
+	cpl: number | null;
+	/** Spend in RON (float). */
+	spend: number | null;
+}
+
+export interface CampaignWithAdsets {
+	id: string;
+	name: string;
+	/** Campaign-level daily budget in cents, or null if ABO (budget is on adsets). */
+	daily_budget: number | null;
+	lifetime_budget: number | null;
+	adsets: AdsetInfo[];
+}
+
+/**
+ * Fetch campaign with its adsets + last-7d CPL/spend per adset.
+ * Used by apply-recommendation to detect CBO vs ABO and rank adsets.
+ */
+export async function getCampaignWithAdsets(
+	campaignId: string,
+	accessToken: string,
+	appSecret: string
+): Promise<CampaignWithAdsets> {
+	logInfo('meta-ads', `Fetching campaign+adsets for ${campaignId}`);
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const fields = 'id,name,daily_budget,lifetime_budget,adsets{id,name,daily_budget,lifetime_budget,status}';
+	const params = new URLSearchParams({ fields, access_token: accessToken, appsecret_proof: proof });
+
+	const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}?${params}`, {
+		signal: AbortSignal.timeout(30_000)
+	});
+	const data: any = await res.json();
+
+	if (!res.ok || data.error) {
+		const errorBody = data.error ?? {};
+		throw new Error(JSON.stringify({
+			code: errorBody.code,
+			subcode: errorBody.error_subcode,
+			message: errorBody.message,
+			fbtrace_id: errorBody.fbtrace_id,
+			error_user_title: errorBody.error_user_title,
+			error_user_msg: errorBody.error_user_msg,
+			full: errorBody
+		}));
+	}
+
+	const rawAdsets: any[] = data.adsets?.data ?? [];
+	const adsets: AdsetInfo[] = rawAdsets.map((a: any) => ({
+		id: a.id,
+		name: a.name ?? '',
+		daily_budget: a.daily_budget ? Number(a.daily_budget) : null,
+		lifetime_budget: a.lifetime_budget ? Number(a.lifetime_budget) : null,
+		status: a.status ?? 'UNKNOWN',
+		cpl: null,
+		spend: null
+	}));
+
+	// Fetch last-7d adset insights from the campaign (level=adset)
+	if (adsets.length > 0) {
+		try {
+			const today = new Date();
+			const since7 = new Date(today.getTime() - 7 * 24 * 3600 * 1000);
+			const pad = (n: number) => String(n).padStart(2, '0');
+			const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+			const insightParams = new URLSearchParams({
+				fields: 'adset_id,spend,cost_per_action_type',
+				level: 'adset',
+				time_range: JSON.stringify({ since: fmt(since7), until: fmt(today) }),
+				access_token: accessToken,
+				appsecret_proof: proof,
+				limit: '200'
+			});
+			const insightRes: Response = await fetch(
+				`${META_GRAPH_URL}/${campaignId}/insights?${insightParams}`,
+				{ signal: AbortSignal.timeout(30_000) }
+			);
+			const insightData: any = await insightRes.json();
+
+			if (!insightData.error) {
+				const insightMap = new Map<string, { spend: number; cpl: number | null }>();
+				for (const row of insightData.data ?? []) {
+					const spend = parseFloat(row.spend ?? '0');
+					let cpl: number | null = null;
+					for (const cpa of row.cost_per_action_type ?? []) {
+						if (
+							cpa.action_type === 'lead' ||
+							cpa.action_type === 'offsite_conversion.fb_pixel_lead'
+						) {
+							const val = parseFloat(cpa.value ?? '0');
+							if (val > 0) {
+								cpl = Math.round(val * 100);
+								break;
+							}
+						}
+					}
+					const existing = insightMap.get(row.adset_id);
+					insightMap.set(row.adset_id, {
+						spend: (existing?.spend ?? 0) + spend,
+						cpl: existing?.cpl ?? cpl
+					});
+				}
+				for (const adset of adsets) {
+					const info = insightMap.get(adset.id);
+					if (info) {
+						adset.spend = info.spend;
+						adset.cpl = info.cpl;
+					}
+				}
+			}
+		} catch {
+			// Non-critical — CPL will be null; multi-adset falls back to ambiguous path
+		}
+	}
+
+	return {
+		id: data.id,
+		name: data.name ?? '',
+		daily_budget: data.daily_budget ? Number(data.daily_budget) : null,
+		lifetime_budget: data.lifetime_budget ? Number(data.lifetime_budget) : null,
+		adsets
+	};
+}
+
+/**
+ * Update ad set budget via Meta API.
+ * Budget value is in cents (e.g., 5000 = 50.00 RON).
+ */
+export async function updateAdsetBudget(
+	adsetId: string,
+	dailyBudgetCents: number,
+	accessToken: string,
+	appSecret: string
+): Promise<{ success: boolean }> {
+	logInfo('meta-ads', `Updating adset budget ${adsetId}`, { metadata: { dailyBudgetCents } });
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const params = new URLSearchParams({
+		access_token: accessToken,
+		appsecret_proof: proof,
+		daily_budget: String(dailyBudgetCents)
+	});
+
+	const res: Response = await fetch(`${META_GRAPH_URL}/${adsetId}`, {
+		method: 'POST',
+		body: params,
+		signal: AbortSignal.timeout(30_000)
+	});
+	const data: any = await res.json();
+
+	if (!res.ok || data.error) {
+		const errorBody = data.error ?? {};
+		throw new Error(JSON.stringify({
+			code: errorBody.code,
+			subcode: errorBody.error_subcode,
+			message: errorBody.message,
+			fbtrace_id: errorBody.fbtrace_id,
+			error_user_title: errorBody.error_user_title,
+			error_user_msg: errorBody.error_user_msg,
+			full: errorBody
+		}));
+	}
+
+	logInfo('meta-ads', `Adset budget updated ${adsetId}`, { metadata: { dailyBudgetCents } });
+	return { success: true };
 }
 
 // ---- Demographics ----

@@ -4531,6 +4531,7 @@ export const adOptimizationRecommendation = sqliteTable(
 		decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'date' }),
 		appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'date' }),
 		applyError: text('apply_error'),
+		decisionRationaleJson: text('decision_rationale_json'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),
