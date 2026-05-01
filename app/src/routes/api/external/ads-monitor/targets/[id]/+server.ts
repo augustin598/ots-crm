@@ -6,6 +6,7 @@ import { withApiKey } from '$lib/server/api-keys/middleware';
 import { logInfo } from '$lib/server/logger';
 import {
 	fetchRecsForFeedback,
+	fetchRecsForFeedbackByTarget,
 	computeRejectionRates
 } from '$lib/server/ads-monitor/feedback-aggregate';
 import { evaluateAutoUnsuppress } from '$lib/server/ads-monitor/audit-writer';
@@ -22,7 +23,8 @@ const ALLOWED_UPDATE_FIELDS = new Set([
 	'mutedUntil',
 	'notifyTelegram',
 	'notifyEmail',
-	'notifyInApp'
+	'notifyInApp',
+	'snoozeUntil'
 ]);
 
 async function fetchTarget(id: string | undefined, tenantId: string) {
@@ -70,8 +72,13 @@ export const GET: RequestHandler = (event) =>
 		);
 		suppressed = cleaned.suppressedActions;
 
-		const recs = await fetchRecsForFeedback(ctx.tenantId, row.clientId);
-		const rates = computeRejectionRates(recs);
+		// B10: per-target rejection rates (more precise than per-client)
+		const [targetRecs, clientRecs] = await Promise.all([
+			fetchRecsForFeedbackByTarget(ctx.tenantId, row.id),
+			fetchRecsForFeedback(ctx.tenantId, row.clientId)
+		]);
+		const targetRates = computeRejectionRates(targetRecs);
+		const clientRates = computeRejectionRates(clientRecs);
 
 		return {
 			status: 200,
@@ -84,7 +91,13 @@ export const GET: RequestHandler = (event) =>
 					minConversionsThreshold: row.minConversionsThreshold ?? null,
 					version: cleaned.version
 				},
-				feedback: { rejectionRateLast30d: rates }
+				feedback: {
+					// Per-target rates — used for gate decisions (B10)
+					rejectionRateLast30d: Object.keys(targetRates).length > 0 ? targetRates : clientRates,
+					// Per-client fallback always available
+					clientRejectionRateLast30d: clientRates
+				},
+				snoozeUntil: row.snoozeUntil ?? null
 			}
 		};
 	});

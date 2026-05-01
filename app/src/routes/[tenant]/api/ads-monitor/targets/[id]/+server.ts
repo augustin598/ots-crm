@@ -78,7 +78,8 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 		target: {
 			...row.target,
 			suppressedActions: suppressed,
-			version: cleaned.version
+			version: cleaned.version,
+			snoozeUntil: row.target.snoozeUntil ?? null
 		},
 		clientName: row.clientName,
 		accountName: row.accountName,
@@ -104,6 +105,28 @@ export const PATCH: RequestHandler = async ({ params, locals, request }) => {
 		body = (await request.json()) as Record<string, unknown>;
 	} catch {
 		throw error(400, 'JSON invalid');
+	}
+
+	// B14: snooze/unsnooze — special action (no version check needed)
+	if (body.action === 'snooze' || body.action === 'unsnooze') {
+		const isSnooze = body.action === 'snooze';
+		const days = typeof body.days === 'number' ? body.days : 1;
+		const snoozeUntil = isSnooze ? Date.now() + days * 86400_000 : null;
+		await db
+			.update(table.adMonitorTarget)
+			.set({ snoozeUntil, updatedAt: new Date() })
+			.where(
+				and(eq(table.adMonitorTarget.id, params.id!), eq(table.adMonitorTarget.tenantId, locals.tenant.id))
+			);
+		await writeTargetAudit({
+			tenantId: locals.tenant.id,
+			targetId: params.id!,
+			actorType: 'user',
+			actorId: locals.user.id,
+			action: isSnooze ? 'updated' : 'updated',
+			changes: { snoozeUntil: { from: target.snoozeUntil ?? null, to: snoozeUntil } }
+		});
+		return json({ ok: true, snoozeUntil });
 	}
 
 	// Mute/unmute remains a special action (no version check needed — informational)

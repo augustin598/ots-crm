@@ -63,3 +63,32 @@ export async function fetchRecsForFeedback(
 		);
 	return rows;
 }
+
+/**
+ * B10: Fetch decided recs scoped to a specific target over last 30 days.
+ * Used for per-target rejection rate tracking.
+ */
+export async function fetchRecsForFeedbackByTarget(
+	tenantId: string,
+	targetId: string
+): Promise<RecRecord[]> {
+	const { db } = await import('$lib/server/db');
+	const { and, eq, gte } = await import('drizzle-orm');
+	const table = await import('$lib/server/db/schema');
+	const cutoff = new Date(Date.now() - WINDOW_DAYS * MS_PER_DAY);
+	const rows = await db
+		.select({
+			action: table.adOptimizationRecommendation.action,
+			status: table.adOptimizationRecommendation.status,
+			decidedAt: table.adOptimizationRecommendation.decidedAt
+		})
+		.from(table.adOptimizationRecommendation)
+		.where(
+			and(
+				eq(table.adOptimizationRecommendation.tenantId, tenantId),
+				eq(table.adOptimizationRecommendation.targetId, targetId),
+				gte(table.adOptimizationRecommendation.createdAt, cutoff)
+			)
+		);
+	return rows;
+}

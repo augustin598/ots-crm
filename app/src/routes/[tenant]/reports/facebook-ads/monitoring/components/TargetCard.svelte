@@ -24,6 +24,7 @@
 		isActive: boolean;
 		isMuted: boolean;
 		mutedUntil: Date | null;
+		snoozeUntil: number | null;
 	}
 	interface Props {
 		summary: TargetSummary;
@@ -40,6 +41,26 @@
 	let loading = $state(false);
 
 	const fmt = (c: number | null) => (c === null ? '—' : `${(c / 100).toFixed(0)} RON`);
+	const isSnoozed = $derived(summary.snoozeUntil !== null && summary.snoozeUntil > Date.now());
+
+	async function snooze(days: number) {
+		await fetch(`/${tenantSlug}/api/ads-monitor/targets/${summary.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'snooze', days })
+		});
+		onUpdated();
+	}
+
+	async function unsnooze() {
+		await fetch(`/${tenantSlug}/api/ads-monitor/targets/${summary.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'unsnooze' })
+		});
+		onUpdated();
+	}
+
 	const deltaPct = $derived(
 		summary.targetCplCents && summary.latestCplCents
 			? Math.round((summary.latestCplCents / summary.targetCplCents - 1) * 100)
@@ -107,8 +128,10 @@
 						{/if}
 					</div>
 					<div><Sparkline values={summary.spark7d} ariaLabel="CPL ultimele 7 zile" /></div>
-					<div>
-						{#if summary.isMuted}
+					<div class="flex flex-col gap-1 items-start">
+						{#if isSnoozed}
+							<Badge variant="secondary" class="text-xs">⏸ Snoozed</Badge>
+						{:else if summary.isMuted}
 							<Badge variant="secondary" class="text-xs">🔇 Mute</Badge>
 						{:else if summary.isActive}
 							<Badge variant="default" class="text-xs">Activ</Badge>
@@ -147,6 +170,25 @@
 								<OverridesTab {tenantSlug} target={target.target} onSaved={onSavedReload} />
 							{:else if activeTab === 'history'}
 								<HistoryTab {tenantSlug} targetId={target.target.id} />
+							{/if}
+						</div>
+
+						<div class="flex gap-2 items-center border-t pt-3 pb-2">
+							<span class="text-xs text-muted-foreground">Snooze:</span>
+							{#if isSnoozed}
+								<button
+									class="text-xs px-2 py-1 rounded border border-input bg-background hover:bg-muted"
+									onclick={unsnooze}
+								>Anulează snooze</button>
+							{:else}
+								<button
+									class="text-xs px-2 py-1 rounded border border-input bg-background hover:bg-muted"
+									onclick={() => snooze(1)}
+								>24h</button>
+								<button
+									class="text-xs px-2 py-1 rounded border border-input bg-background hover:bg-muted"
+									onclick={() => snooze(7)}
+								>7 zile</button>
 							{/if}
 						</div>
 

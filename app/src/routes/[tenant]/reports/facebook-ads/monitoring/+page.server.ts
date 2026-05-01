@@ -27,6 +27,7 @@ export const load: PageServerLoad = async ({ locals, params, fetch }) => {
 			isActive: table.adMonitorTarget.isActive,
 			isMuted: table.adMonitorTarget.isMuted,
 			mutedUntil: table.adMonitorTarget.mutedUntil,
+			snoozeUntil: table.adMonitorTarget.snoozeUntil,
 			notifyTelegram: table.adMonitorTarget.notifyTelegram,
 			notifyEmail: table.adMonitorTarget.notifyEmail,
 			notifyInApp: table.adMonitorTarget.notifyInApp,

@@ -4335,6 +4335,8 @@ export const adMonitorTarget = sqliteTable(
 		suppressedActions: text('suppressed_actions').notNull().default('[]'),
 		severityOverride: text('severity_override'),
 		minConversionsThreshold: integer('min_conversions_threshold'),
+		// B14: snooze until epoch ms — worker skips target while snoozeUntil > now
+		snoozeUntil: integer('snooze_until'),
 		// Optimistic-locking guard
 		version: integer('version').notNull().default(1),
 		createdByUserId: text('created_by_user_id').references(() => user.id),
@@ -4637,7 +4639,8 @@ export const AD_RECOMMENDATION_ACTIONS = [
 	'increase_budget',
 	'decrease_budget',
 	'refresh_creative',
-	'change_audience'
+	'change_audience',
+	'investigate'
 ] as const;
 export type AdRecommendationAction = (typeof AD_RECOMMENDATION_ACTIONS)[number];
 

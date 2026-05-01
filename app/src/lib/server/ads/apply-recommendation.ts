@@ -45,6 +45,10 @@ interface BudgetChangeResult {
 		error?: string;
 	}>;
 	partial?: boolean;
+	partial_apply_state?: {
+		successful: string[];
+		failed: Array<{ adsetId: string | undefined; error: string }>;
+	};
 	warnings?: string[];
 }
 
@@ -118,20 +122,44 @@ async function applyBudgetChange(
 	// Hybrid Option C: cut worst if it's >1.5× avg CPL AND has >20% spend share
 	if ((worst.cpl ?? 0) >= 1.5 * avgCpl && worstSpendShare >= 0.2) {
 		const adsetNewBudget = Math.max(Math.floor((worst.daily_budget ?? newDailyBudgetCents) * 0.7), ADSET_BUDGET_FLOOR_CENTS);
-		await updateAdsetBudget(worst.id, adsetNewBudget, accessToken, appSecret);
-		return {
-			strategy: 'cut_worst_adset',
-			isCBO: false,
-			adsetCount: activeAdsets.length,
-			changes: [{
-				adsetId: worst.id,
-				name: worst.name,
-				oldBudget: worst.daily_budget ?? undefined,
-				newBudget: adsetNewBudget,
-				cpl: worst.cpl,
-				spendShare: worstSpendShare
-			}]
-		};
+		try {
+			await updateAdsetBudget(worst.id, adsetNewBudget, accessToken, appSecret);
+			return {
+				strategy: 'cut_worst_adset',
+				isCBO: false,
+				adsetCount: activeAdsets.length,
+				changes: [{
+					adsetId: worst.id,
+					name: worst.name,
+					oldBudget: worst.daily_budget ?? undefined,
+					newBudget: adsetNewBudget,
+					cpl: worst.cpl,
+					spendShare: worstSpendShare,
+					status: 'success'
+				}]
+			};
+		} catch (err) {
+			const errMsg = String(err);
+			return {
+				strategy: 'cut_worst_adset',
+				isCBO: false,
+				adsetCount: activeAdsets.length,
+				changes: [{
+					adsetId: worst.id,
+					name: worst.name,
+					oldBudget: worst.daily_budget ?? undefined,
+					cpl: worst.cpl,
+					spendShare: worstSpendShare,
+					status: 'failed',
+					error: errMsg
+				}],
+				partial: true,
+				partial_apply_state: {
+					successful: [],
+					failed: [{ adsetId: worst.id, error: errMsg }]
+				}
+			};
+		}
 	}
 
 	// All adsets statistically tied — proportional cut
@@ -151,12 +179,17 @@ async function applyBudgetChange(
 				changes.push({ adsetId: adset.id, name: adset.name, status: 'failed', error: String(err) });
 			}
 		}
+		const isPartial = changes.some((c) => c.status === 'failed');
 		return {
 			strategy: 'proportional_cut_all_adsets',
 			isCBO: false,
 			adsetCount: activeAdsets.length,
 			changes,
-			partial: changes.some((c) => c.status === 'failed')
+			partial: isPartial,
+			partial_apply_state: isPartial ? {
+				successful: changes.filter((c) => c.status === 'success').map((c) => c.adsetId).filter((id): id is string => Boolean(id)),
+				failed: changes.filter((c) => c.status === 'failed').map((c) => ({ adsetId: c.adsetId, error: c.error ?? 'unknown' }))
+			} : undefined
 		};
 	}
 
@@ -240,6 +273,21 @@ export async function applyRecommendation(
 		return { ok: true, appliedAt: now };
 	}
 
+	// B9: investigate is a manual-review advisory — close with rationale, no platform call
+	if (action === 'investigate') {
+		const now = new Date();
+		await db
+			.update(table.adOptimizationRecommendation)
+			.set({
+				status: 'applied',
+				appliedAt: now,
+				updatedAt: now,
+				decisionRationaleJson: JSON.stringify({ strategy: 'manual_review', changes: [] })
+			})
+			.where(eq(table.adOptimizationRecommendation.id, recommendationId));
+		return { ok: true, appliedAt: now };
+	}
+
 	const integrationId = await resolveMetaIntegration(tenantId, rec.externalCampaignId);
 	if (!integrationId) {
 		await markFailure(recommendationId, 'No active Meta integration for tenant');
@@ -283,6 +331,9 @@ export async function applyRecommendation(
 				adset_count: budgetResult.adsetCount,
 				changes: budgetResult.changes,
 				partial: budgetResult.partial ?? false,
+				...(budgetResult.partial_apply_state
+					? { partial_apply_state: budgetResult.partial_apply_state }
+					: {}),
 				...(budgetResult.warnings && budgetResult.warnings.length > 0
 					? { warnings: budgetResult.warnings }
 					: {})
