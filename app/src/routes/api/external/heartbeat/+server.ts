@@ -31,6 +31,18 @@ export const POST: RequestHandler = (event) =>
 			return { status: 400, body: { error: 'missing_instance_id' } };
 		}
 
+		const UUID_REGEX =
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		if (!UUID_REGEX.test(instanceId)) {
+			return {
+				status: 400,
+				body: {
+					error: 'invalid_instance_id',
+					message: 'instanceId must be a valid UUID v4'
+				}
+			};
+		}
+
 		const version = typeof body.version === 'string' ? body.version : null;
 		const metadata =
 			body.metadata && typeof body.metadata === 'object'

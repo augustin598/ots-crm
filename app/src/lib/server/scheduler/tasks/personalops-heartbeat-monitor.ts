@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, lt, ne } from 'drizzle-orm';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { sendTelegramMessage } from '$lib/server/telegram/sender';
 
@@ -31,12 +31,21 @@ export async function processPersonalopsHeartbeatMonitor(): Promise<{
 }> {
 	logInfo('scheduler', 'personalops-heartbeat-monitor: starting');
 
+	const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 	const threshold = new Date(Date.now() - SILENT_THRESHOLD_MS);
 
-	const silentInstances = await db
+	const candidates = await db
 		.select()
 		.from(table.personalopsInstance)
-		.where(lt(table.personalopsInstance.lastHeartbeatAt, threshold));
+		.where(
+			and(
+				lt(table.personalopsInstance.lastHeartbeatAt, threshold),
+				ne(table.personalopsInstance.version, 'test')
+			)
+		);
+
+	// Also filter out instances whose instanceId is not a valid UUID (test/legacy rows)
+	const silentInstances = candidates.filter((r) => UUID_REGEX.test(r.instanceId));
 
 	let silentFound = 0;
 
