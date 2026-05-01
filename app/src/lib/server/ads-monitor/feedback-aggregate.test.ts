@@ -59,3 +59,26 @@ describe('computeRejectionRates', () => {
 		expect(rates.increase_budget).toBe(1);
 	});
 });
+
+// B10 — per-target rejection rate tracking
+describe('computeRejectionRates — B10 per-target scope', () => {
+	test('B10-1: per-target recs produce correct rates (same computation, target-scoped data)', () => {
+		// Simulates fetchRecsForFeedbackByTarget output: only recs for one specific target
+		const targetRecs = [
+			rec('decrease_budget', 'rejected', 3),
+			rec('decrease_budget', 'rejected', 8),
+			rec('decrease_budget', 'applied', 12),
+		];
+		const rates = computeRejectionRates(targetRecs, NOW);
+		expect(rates.decrease_budget).toBeCloseTo(0.667, 2);
+	});
+
+	test('B10-2: empty per-target recs → falls back gracefully to empty rates', () => {
+		// When no recs exist for a target, computeRejectionRates returns {}
+		// CRM endpoint falls back to clientRejectionRateLast30d in this case
+		const rates = computeRejectionRates([], NOW);
+		expect(rates).toEqual({});
+		// Endpoint logic: use clientRates when Object.keys(targetRates).length === 0
+		expect(Object.keys(rates).length).toBe(0);
+	});
+});

@@ -18,7 +18,7 @@ User flow: cron CRM creează tasks → PersonalOPS poller procesează → drafts
 │  │     ├── ads-performance-monitor (07:00 RO daily)               │
 │  │     ├── ads-status-monitor (hourly)                            │
 │  │     ├── ads-snapshot-retention (daily)                         │
-│  │     ├── ads-optimization-task-creator (00:15 RO daily)         │
+│  │     ├── ads-optimization-task-creator (07:30 RO daily)         │
 │  │     └── ads-optimization-task-reaper (02:00 RO daily)          │
 │  ├── External API endpoints (X-API-Key auth)                      │
 │  │     ├── /api/external/ads-monitor/{targets,deviations,...}     │
@@ -57,7 +57,7 @@ User flow: cron CRM creează tasks → PersonalOPS poller procesează → drafts
 ```
 
 ### 2.2 Flow zilnic (production)
-1. **00:15 RO** CRM cron creează task per target activ (UNIQUE constraint per zi → idempotent)
+1. **07:30 RO** CRM cron creează task per target activ (UNIQUE constraint per zi → idempotent)
 2. **02:00 RO** CRM cron revertează tasks `claimed > 1h` → pending (reaper)
 3. **00:05 / 12:05 RO + startup catch-up** PersonalOPS poller polls pending tasks
 4. **Per task** PersonalOPS:
@@ -254,6 +254,18 @@ Fix aplicat în `client.ts`. Cron tomorrow rulează cu fix.
 ### 11.2 Migration 0234 must be applied locally (Sprint 1)
 Local CRM dev nu rulează auto migrations. După `git pull` sau modificări schema, rulează `bun run db:migrate`.
 
+### 11.4 Sprint 1 attribution-window cron-rerun (rezolvat post-deploy 1 mai 2026)
+Cron `ads-performance-monitor` rulase la 07:00 RO ÎNAINTE de deploy-ul Sprint 1 (~12:32 RO) → snapshot-uri Apr 29 + Apr 30 inserate cu cumulative attribution → fals positive (109+ conversii zilnic).
+Fix manual: backfill rerun pe DOUBLO GOLD overwrite snapshot-uri corupte. Cron de a doua zi (07:00) folosește deja codul corect.
+Lesson learned: după deploy schimbări la cron, verifică prima rulare următoare a cron-ului afectat + corectează manual day(s) afectate.
+
+### 11.5 Migration 0234+ trebuie aplicate local cu db:migrate
+Local CRM dev nu rulează auto migrations la pornire. După git pull cu modificări schema, rulează:
+```
+cd /Users/augustin598/Projects/CRM/app && bun run db:migrate
+```
+Production (hosted) aplică automat migrations la deploy.
+
 ### 11.3 Local dev server vs prod URL
 Dacă PersonalOPS pointează la `http://localhost:5173`, drafts se postează pe Turso DB shared cu prod. Nu confunda — prod-uri și local-uri văd aceeași bază.
 
@@ -261,7 +273,7 @@ Dacă PersonalOPS pointează la `http://localhost:5173`, drafts se postează pe 
 
 ### Sprint 0 — Task Queue (anterior)
 - Schema ads_optimization_task + 3 endpoints externe
-- Cron creator daily 00:15 RO + reaper 02:00 RO
+- Cron creator daily 07:30 RO + reaper 02:00 RO
 - PersonalOPS poller every 12h + catch-up on startup
 
 ### Sprint 1 — BLOCKERS (1 mai 2026, commit cc75094)
@@ -272,19 +284,27 @@ Dacă PersonalOPS pointează la `http://localhost:5173`, drafts se postează pe 
 - Migration 0234: decision_rationale_json column
 - Validated end-to-end: DOUBLO GOLD adset budget 35→25 RON applied real pe Meta
 
-### Sprint 2 — UX + Outcomes (urmează)
-- B5: Outcome measurement post-apply CPL @ 7d
-- B7: Pause weekend false positive guard
-- B11: Min budget floor enforcement (5 RON)
-- (Optional) B3: Recommendation card UI cu adset preview
+### Sprint 2 — Outcomes + UX (1 mai 2026, commit ba8f8bd, deploy 8ba9ca49)
+- B5: Outcome measurement — 4 cols noi (baseline_cpl_cents, outcome_cpl_cents_7d, outcome_verdict, outcome_evaluated_at)
+- B5: Cron `ads-optimizer-outcome-evaluator` daily 03:00 RO compare baseline vs current 7d post-apply (improved/worsened/neutral/insufficient_data/no_baseline)
+- B5: PersonalOPS handler trimite baseline_cpl_cents la create time
+- B7: Pause emergency skip weekend (Sat/Sun) + 2 zile consecutive minimum în loc de 1
+- B11: Min budget floor 500 cents (5 RON) — clamp în CRM apply layer + fail-fast în decision engine
+- 51/51 tests pass în decision-engine
+- Migrations 0235-0238 (1 statement per file per skill)
 
-### Sprint 3+ — Polish (later)
-- B8: Increase budget gradual decay
-- B9: Delivery_issue rule
-- B10: Per-target rejection tracking
-- B12: Partial failure handling pe multi-adset apply
-- B13: Apply timing (defer until low-spend window)
-- B14: Snooze button "all good today"
+### Sprint 3 — Polish (planificat, urmează)
+**Scope:**
+- B8: Increase budget gradual decay — limit max +50%/14d window + decay multiplier dacă consecutive_increases_7d > 1 → 1.1× în loc de 1.2×
+- B9: Delivery issue detection — rule nouă (spend>0 + impressions=0 timp de 2 zile) → action='investigate' (manual review only)
+- B10: Per-target rejection rate tracking — schema `recentRejectionRates: Record<targetId, Record<action, rate>>` în loc de global
+- B12: Partial failure handling pe multi-adset apply — per-adset try/catch, persist `partial_apply_state` cu listă succes/fail, retry button în UI
+- B13: Apply timing — defer budget changes until window 02:00-06:00 cont local (low-spend window) sau flag `defer_until_next_window`
+- B14: Snooze button — `target.snooze_until` în DB, gate suplimentar în decision engine
+
+**Estimare:** ~6-8h muncă peste sprint 1+2.
+
+**Validare strategy:** după Sprint 3, propus shadow run 14 zile (optimizer logs decisions but NU postează în CRM). Skip dacă tu te simți confortabil să verifici manual deciziile pentru 1-2 săptămâni live.
 
 ## 13. Limitări actuale
 
@@ -305,5 +325,52 @@ Mac nu e mereu online. Tasks acumulează în queue și sunt procesate la pornire
 - Local dev CRM: http://localhost:5173 (varies)
 - Local dev PersonalOPS: http://localhost:3737
 
+## 15. Migration Verification (post-deploy)
+
+Per `database-migrations` skill rule 19, după FIECARE deploy CRM cu migrations noi:
+
+```bash
+cd /Users/augustin598/Projects/CRM/app
+bun run scripts/verify-recent-migrations.ts
+```
+
+Output:
+- Listă tabele/coloane verificate (0220–0242+)
+- Status ✅ ok / ❌ MISSING per migration
+- Exit 0 dacă toate OK, 1 dacă lipsesc
+
+### Pattern de remediere pentru MISSING_COLUMN
+
+```ts
+// Aplică idempotent cu catch pe "already exists":
+try {
+  await client.execute('ALTER TABLE `t` ADD `col` text');
+} catch(e: any) {
+  if (!e.message?.includes('already exists')) throw e;
+}
+```
+
+### Diagnostic queries
+
+```sql
+-- Verifică coloane tabelă:
+PRAGMA table_info(ads_optimization_task);
+PRAGMA table_info(personalops_instance);
+PRAGMA table_info(meta_ads_integration);
+PRAGMA table_info(ad_monitor_target);
+PRAGMA table_info(ad_optimization_recommendation);
+
+-- Verifică că migration e înregistrată:
+SELECT * FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 10;
+```
+
+### KNOWN PATTERN: Silent migration drift
+
+Migrations înregistrate în `__drizzle_migrations` dar SQL nu execută silent (cauză: Turso write lock în momentul migrării). Fix: rulează scriptul de verify + pentru orice missing, aplică SQL-ul direct cu try/catch pe "already exists".
+
+**Occurrences istorice:**
+- 0093 (apr 2026) — gmail/google_ads/meta_ads_integration refresh tracking columns
+- 0229/0235-0239 (mai 2026) — Sprint 3/3.5 drift: `external_campaign_name`, outcome metrics, `snooze_until` (resolved 2026-05-01)
+
 ---
-**Last updated:** 2026-05-01 după Sprint 1 commit cc75094 + deploy 82d165c2.
+**Last updated:** 2026-05-01 după Sprint 3.5 commit 1abdebf + migration audit (verify script creat, 6 coloane aplicate pe Turso).
