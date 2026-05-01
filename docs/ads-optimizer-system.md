@@ -266,6 +266,12 @@ cd /Users/augustin598/Projects/CRM/app && bun run db:migrate
 ```
 Production (hosted) aplică automat migrations la deploy.
 
+### 11.6 Sprint 4 incidents (rezolvate)
+
+**Heartbeat false-positive `test-12345`**: instanceId folosit la testarea manuală cu curl s-a persistat în `personalops_instance` table. Cron monitor a alertat după 30min silence. Fix: șters manual + adaugat UUID validation pe POST /heartbeat (Sprint 4b).
+
+**Migration 0229 + 0235-0239 silent fail**: descoperit la audit Sprint 3.5. 6 coloane lipseau live pe Turso pentru Sprint 2+3 features (outcome measurement, baseline, snooze). Aplicate idempotent. Pattern documentat în 11.4.
+
 ### 11.3 Local dev server vs prod URL
 Dacă PersonalOPS pointează la `http://localhost:5173`, drafts se postează pe Turso DB shared cu prod. Nu confunda — prod-uri și local-uri văd aceeași bază.
 
@@ -305,6 +311,53 @@ Dacă PersonalOPS pointează la `http://localhost:5173`, drafts se postează pe 
 **Estimare:** ~6-8h muncă peste sprint 1+2.
 
 **Validare strategy:** după Sprint 3, propus shadow run 14 zile (optimizer logs decisions but NU postează în CRM). Skip dacă tu te simți confortabil să verifici manual deciziile pentru 1-2 săptămâni live.
+
+### Sprint 4a — Foundation: trust + safety + scale (1 mai 2026, commit b7f33a7, deploy a51b87fd)
+- **Outcome verdict UI**: badge colorat (improved/worsened/neutral/insufficient_data/no_baseline/pending) cu delta_pct calculat din baseline_cpl_cents vs outcome_cpl_cents_7d
+- **Filter dropdown "Outcome"**: 5 opțiuni (All / Improved / Worsened / Neutral / Pending) cu URL param sync
+- **Atomic transactions pe apply**: Meta API call OUTSIDE tx + DB write INSIDE `db.transaction()` → dacă DB write fail, rec stays 'approved' pentru retry, applyError populated (rezolvă Sprint 1 incident migration 0234)
+- **Multi-currency min budget floor**: RON 500, EUR/USD/GBP 100 (default fallback 100)
+- 34/34 tests pass (16 outcome filter + 3 atomic + 10 multicurrency + 5 concurrent setup)
+- Per audit PPC Strategist + Gemini cross-validation: foundation = trust loop + data integrity + scale prep
+
+### Sprint 4b — Data integrity: live Meta source-of-truth (1 mai 2026, commits 63e70d9 + 12e1ddf, deploy 93a121b3)
+- **Endpoint nou** `GET /api/external/ads-monitor/budget-snapshot?campaignId=X`: live Meta budget (CBO returnează campaign daily_budget; ABO sums adsets daily_budget); cache in-memory 60s per (tenantId, campaignId)
+- **PersonalOPS budget-drift.ts** (new): `computeCumulativeDrift` folosește live Meta budget vs baseline (din previous_budget al primei applied rec). REPLACES suma delta-uri DB-stored. Reflectă imediat manual reverts în Meta UI.
+- **Concurrent claim stress test**: 5 tests în CRM — atomic claim guarantee, already-claimed/done rejections, race condition validation
+- **Heartbeat UUID hardening**: endpoint reject non-UUID instanceId (400 invalid_instance_id); cron `personalops-heartbeat-monitor` filter version='test' + non-UUID din silent alerts
+- 12 tests added (5 concurrent + 4 heartbeat + 3 drift)
+
+**Production-readiness final score: 9/10** (de la 4/10 inițial → 8/10 post 3.5 → 9/10 post 4)
+
+### CUT din Sprint 4 (per audit, NU vom face)
+- ❌ **Worsened streak auto-pause**: redundant cu suppressed_actions după 1 reject + zero auto-apply path. Defer Sprint 5+ doar când avem 100+ recs reali pentru calibrare.
+- ⏳ **B13 apply timing window 02-06 RO**: premature optimization la 8 targets. Threshold mandatory: 25+ targets.
+- ⏳ **DLQ Meta rate limit + exponential backoff**: nu e problemă la 8 targets / 1 client. Sprint 5+.
+- ⏳ **Metrics dashboard agregat**: verdict-pe-card sufficient la <20 targets. Threshold: 20+ targets.
+- ⏳ **E2E nock mock tests**: unit + manual smoke sufficient. Sprint 5+ când arhitectura se stabilizează.
+
+### Sprint 5 — Backlog (când scalezi la 20-25+ targets)
+
+**Robustness:**
+- B13: Apply timing defer 02-06 RO low-spend window
+- DLQ pentru Meta rate limit cu exponential backoff per-target
+- Worsened streak auto-pause (cu calibrare reală pe 100+ recs)
+
+**Observability:**
+- Metrics dashboard: recs/day, approval rate, apply success, verdict distribution per client/tenant
+- Audit trail history view per target
+
+**Quality:**
+- E2E nock layer pentru graph.facebook.com (5 scenarii: success, rate_limit, token_expired, partial_fail, code=100)
+- Coverage% reporting (target ≥85% pe decision-engine.ts)
+
+**Multi-platform extension:**
+- Engine support pentru Google Ads + TikTok Ads (schema deja gata)
+- Rule sets per-platform (CTR/CPC/CPM thresholds diferite)
+
+**Multi-tenant scale:**
+- Worker concurrency per-tenant configurable
+- Rate limiting fine-grained pe tenant
 
 ## 13. Limitări actuale
 
@@ -373,4 +426,4 @@ Migrations înregistrate în `__drizzle_migrations` dar SQL nu execută silent (
 - 0229/0235-0239 (mai 2026) — Sprint 3/3.5 drift: `external_campaign_name`, outcome metrics, `snooze_until` (resolved 2026-05-01)
 
 ---
-**Last updated:** 2026-05-01 după Sprint 3.5 commit 1abdebf + migration audit (verify script creat, 6 coloane aplicate pe Turso).
+**Last updated:** 2026-05-01 după Sprint 4 (4a commit b7f33a7 deploy a51b87fd, 4b commit 63e70d9 deploy 93a121b3, PersonalOPS commit 12e1ddf).
