@@ -20,6 +20,7 @@ export const POST: RequestHandler = (event) =>
 			// body is optional
 		}
 		const workerId = typeof body.workerId === 'string' ? body.workerId : 'unknown';
+		const instanceId = typeof body.instanceId === 'string' ? body.instanceId : null;
 
 		// Verify the task belongs to this tenant first
 		const [existing] = await db
@@ -40,7 +41,7 @@ export const POST: RequestHandler = (event) =>
 		// Atomic claim: only succeeds if status is still 'pending'
 		const updated = await db
 			.update(table.adsOptimizationTask)
-			.set({ status: 'claimed', claimedAt: new Date(), claimedBy: workerId })
+			.set({ status: 'claimed', claimedAt: new Date(), claimedBy: workerId, claimedByInstanceId: instanceId })
 			.where(
 				and(
 					eq(table.adsOptimizationTask.id, id),

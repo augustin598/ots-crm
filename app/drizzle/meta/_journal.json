@@ -1681,6 +1681,27 @@
       "when": 1746288000000,
       "tag": "0239_ad_monitor_target_snooze_until",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "6",
+      "when": 1777644562990,
+      "tag": "0240_ads_task_claimed_by_instance_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "6",
+      "when": 1777644562991,
+      "tag": "0241_personalops_instance",
+      "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "6",
+      "when": 1777644562992,
+      "tag": "0242_meta_ads_integration_last_token_check_at",
+      "breakpoints": true
     }
   ]
 }

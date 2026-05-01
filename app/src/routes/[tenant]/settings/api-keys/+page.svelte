@@ -6,6 +6,7 @@
 
 	let showCreate = $state(false);
 	let copiedJustNow = $state(false);
+	let confirmRevokeId = $state<string | null>(null);
 
 	function copy(text: string) {
 		navigator.clipboard.writeText(text).then(() => {
@@ -130,10 +131,18 @@
 						</td>
 						<td class="px-3 py-2">
 							{#if !k.revokedAt}
-								<form method="POST" action="?/revoke" use:enhance>
-									<input type="hidden" name="id" value={k.id} />
-									<button class="text-red-600 hover:text-red-800 text-xs">Revocă</button>
-								</form>
+								{#if confirmRevokeId === k.id}
+									<div class="flex items-center gap-1">
+										<span class="text-xs text-red-700 font-medium">Sigur?</span>
+										<form method="POST" action="?/revoke" use:enhance onsubmit={() => (confirmRevokeId = null)}>
+											<input type="hidden" name="id" value={k.id} />
+											<button class="text-red-600 hover:text-red-800 text-xs font-semibold">Da</button>
+										</form>
+										<button class="text-gray-500 hover:text-gray-700 text-xs" onclick={() => (confirmRevokeId = null)}>Nu</button>
+									</div>
+								{:else}
+									<button class="text-red-600 hover:text-red-800 text-xs" onclick={() => (confirmRevokeId = k.id)}>Revocă</button>
+								{/if}
 							{/if}
 						</td>
 					</tr>

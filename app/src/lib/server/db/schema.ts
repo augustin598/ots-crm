@@ -1598,6 +1598,7 @@ export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
 	lastRefreshError: text('last_refresh_error'),
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
+	lastTokenCheckAt: timestamp('last_token_check_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -4695,6 +4696,7 @@ export const adsOptimizationTask = sqliteTable(
 			.$defaultFn(() => new Date()),
 		claimedAt: integer('claimed_at', { mode: 'timestamp_ms' }),
 		claimedBy: text('claimed_by'),
+		claimedByInstanceId: text('claimed_by_instance_id'),
 		completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
 		resultJson: text('result_json'),
 		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull()
@@ -4712,3 +4714,40 @@ export const adsOptimizationTask = sqliteTable(
 
 export type AdsOptimizationTask = typeof adsOptimizationTask.$inferSelect;
 export type NewAdsOptimizationTask = typeof adsOptimizationTask.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PersonalOPS Instance Registry — heartbeat tracking for worker processes
+// ─────────────────────────────────────────────────────────────────────────────
+export const personalopsInstance = sqliteTable(
+	'personalops_instance',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		instanceId: text('instance_id').notNull().unique(),
+		lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true, mode: 'date' }).notNull(),
+		version: text('version'),
+		metadata: text('metadata'), // JSON: host info, OS, etc.
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		instanceIdIdx: uniqueIndex('personalops_instance_instance_id_uidx').on(t.instanceId),
+		tenantIdx: index('personalops_instance_tenant_idx').on(t.tenantId)
+	})
+);
+
+export const personalopsInstanceRelations = relations(personalopsInstance, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [personalopsInstance.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export type PersonalopsInstance = typeof personalopsInstance.$inferSelect;
+export type NewPersonalopsInstance = typeof personalopsInstance.$inferInsert;

@@ -36,6 +36,8 @@ import { processWordpressConnectorAutoUpdate } from './tasks/wordpress-connector
 import { processAdsOptimizationTaskCreator } from './tasks/ads-optimization-task-creator';
 import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-reaper';
 import { processAdsOptimizerOutcomeEvaluator } from './tasks/ads-optimizer-outcome-evaluator';
+import { processPersonalopsHeartbeatMonitor } from './tasks/personalops-heartbeat-monitor';
+import { processMetaTokenExpirationMonitor } from './tasks/meta-token-expiration-monitor';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -133,6 +135,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	ads_optimization_task_creator: processAdsOptimizationTaskCreator,
 	ads_optimization_task_reaper: processAdsOptimizationTaskReaper,
 	ads_optimizer_outcome_evaluator: processAdsOptimizerOutcomeEvaluator,
+	personalops_heartbeat_monitor: processPersonalopsHeartbeatMonitor,
+	meta_token_expiration_monitor: processMetaTokenExpirationMonitor,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
@@ -269,7 +273,8 @@ export const startScheduler = async () => {
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
 		'whmcs-invoice-reconcile',
 		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
-		'ads-optimizer-outcome-evaluator'
+		'ads-optimizer-outcome-evaluator',
+		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor'
 	]);
 
 	try {
@@ -825,7 +830,8 @@ export const startScheduler = async () => {
 		}
 	);
 
-	// Ads optimization task creator — daily at 00:15 RO, creates one task per active target.
+	// Ads optimization task creator — daily at 07:30 RO, 30min after performance monitor (07:00).
+	// Ensures snapshots are written before tasks are created, avoiding race conditions.
 	await schedulerQueue.add(
 		'ads-optimization-task-creator',
 		{
@@ -834,13 +840,13 @@ export const startScheduler = async () => {
 		},
 		{
 			repeat: {
-				pattern: '15 0 * * *',
+				pattern: '30 7 * * *',
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'ads-optimization-task-creator'
 		}
 	);
-	logInfo('scheduler', '[scheduler] ads-optimization-task-creator registered (15 0 * * * Europe/Bucharest)');
+	logInfo('scheduler', '[scheduler] ads-optimization-task-creator registered (30 7 * * * Europe/Bucharest)');
 
 	// Ads optimization task reaper — daily at 02:00 RO, reverts stale claimed tasks + expires old ones.
 	await schedulerQueue.add(
@@ -875,6 +881,28 @@ export const startScheduler = async () => {
 		}
 	);
 	logInfo('scheduler', '[scheduler] ads-optimizer-outcome-evaluator registered (0 3 * * * Europe/Bucharest)');
+
+	// PersonalOPS heartbeat monitor — every 15 min, alerts if instance silent >30min.
+	await schedulerQueue.add(
+		'personalops-heartbeat-monitor',
+		{ type: 'personalops_heartbeat_monitor', params: {} },
+		{
+			repeat: { pattern: '*/15 * * * *', tz: 'Europe/Bucharest' },
+			jobId: 'personalops-heartbeat-monitor'
+		}
+	);
+	logInfo('scheduler', '[scheduler] personalops-heartbeat-monitor registered (*/15 * * * * Europe/Bucharest)');
+
+	// Meta token expiration monitor — daily at 09:00 RO. Alerts <14d, <7d, <1d.
+	await schedulerQueue.add(
+		'meta-token-expiration-monitor',
+		{ type: 'meta_token_expiration_monitor', params: {} },
+		{
+			repeat: { pattern: '0 9 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'meta-token-expiration-monitor'
+		}
+	);
+	logInfo('scheduler', '[scheduler] meta-token-expiration-monitor registered (0 9 * * * Europe/Bucharest)');
 
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
@@ -922,7 +950,9 @@ export const JOB_LABELS: Record<string, string> = {
 	wordpress_updates_check: 'Verificare Update-uri WordPress',
 	ads_optimizer_outcome_evaluator: 'Evaluator Outcome CPL 7z — Optimizare Ads',
 	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
-	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)'
+	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)',
+	personalops_heartbeat_monitor: 'Monitor Heartbeat PersonalOPS (alertă instanțe tăcute)',
+	meta_token_expiration_monitor: 'Monitor Expirare Token Meta Ads (alertă <14z)'
 };
 
 /** Default params for jobs that need specific parameters */
