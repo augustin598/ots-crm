@@ -146,6 +146,8 @@ export async function handleCallback(
 			accessToken,
 			tokenExpiresAt,
 			isActive: true,
+			consecutiveRefreshFailures: 0,
+			lastRefreshError: null,
 			updatedAt: new Date()
 		})
 		.where(eq(table.metaAdsIntegration.id, integrationId));

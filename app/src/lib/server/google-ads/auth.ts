@@ -94,6 +94,8 @@ export async function handleCallback(
 				mccAccountId,
 				developerToken,
 				isActive: true,
+				consecutiveRefreshFailures: 0,
+				lastRefreshError: null,
 				updatedAt: new Date()
 			})
 			.where(eq(table.googleAdsIntegration.id, existing.id));

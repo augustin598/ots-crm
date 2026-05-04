@@ -170,6 +170,8 @@ export async function handleCallback(code: string, tenantId: string): Promise<{ 
 				grantedScopes,
 				tokenExpiresAt,
 				isActive: true,
+				consecutiveRefreshFailures: 0,
+				lastRefreshError: null,
 				updatedAt: new Date()
 			})
 			.where(eq(table.gmailIntegration.id, existing.id));

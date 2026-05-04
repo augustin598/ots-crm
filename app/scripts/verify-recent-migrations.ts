@@ -44,6 +44,8 @@ const RECENT_MIGRATIONS: MigrationCheck[] = [
   { id: '0240', table: 'ads_optimization_task', column: 'claimed_by_instance_id' },
   { id: '0241', table: 'personalops_instance', isNewTable: true, columns: ['id', 'tenant_id', 'instance_id', 'last_heartbeat_at'] },
   { id: '0242', table: 'meta_ads_integration', column: 'last_token_check_at' },
+  { id: '0243', table: 'ad_monitor_target', column: 'optimizer_paused_until' },
+  { id: '0244', table: 'ad_monitor_target', column: 'optimizer_paused_reason' },
 ];
 
 async function main() {

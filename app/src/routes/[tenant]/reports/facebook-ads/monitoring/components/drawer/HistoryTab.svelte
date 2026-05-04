@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 
 	interface Entry {
@@ -13,7 +14,7 @@
 	let hasMore = $state(true);
 	let loading = $state(false);
 
-	$effect(() => { entries = []; offset = 0; hasMore = true; load(); });
+	onMount(() => { load(); });
 
 	async function load() {
 		if (loading || !hasMore) return;

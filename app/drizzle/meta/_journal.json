@@ -1702,6 +1702,20 @@
       "when": 1777644562992,
       "tag": "0242_meta_ads_integration_last_token_check_at",
       "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "6",
+      "when": 1746374400000,
+      "tag": "0243_ad_monitor_target_optimizer_paused_until",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "6",
+      "when": 1746374400001,
+      "tag": "0244_ad_monitor_target_optimizer_paused_reason",
+      "breakpoints": true
     }
   ]
 }
