@@ -1062,6 +1062,8 @@ export interface CampaignWithAdsets {
 	daily_budget: number | null;
 	lifetime_budget: number | null;
 	adsets: AdsetInfo[];
+	/** ISO currency code of the ad account (e.g. RON, EUR, USD). */
+	accountCurrency: string | null;
 }
 
 /**
@@ -1076,7 +1078,7 @@ export async function getCampaignWithAdsets(
 	logInfo('meta-ads', `Fetching campaign+adsets for ${campaignId}`);
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
-	const fields = 'id,name,daily_budget,lifetime_budget,adsets{id,name,daily_budget,lifetime_budget,status}';
+	const fields = 'id,name,daily_budget,lifetime_budget,account_currency,adsets{id,name,daily_budget,lifetime_budget,status}';
 	const params = new URLSearchParams({ fields, access_token: accessToken, appsecret_proof: proof });
 
 	const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}?${params}`, {
@@ -1170,6 +1172,7 @@ export async function getCampaignWithAdsets(
 		name: data.name ?? '',
 		daily_budget: data.daily_budget ? Number(data.daily_budget) : null,
 		lifetime_budget: data.lifetime_budget ? Number(data.lifetime_budget) : null,
+		accountCurrency: typeof data.account_currency === 'string' ? data.account_currency : null,
 		adsets
 	};
 }

@@ -4338,6 +4338,9 @@ export const adMonitorTarget = sqliteTable(
 		minConversionsThreshold: integer('min_conversions_threshold'),
 		// B14: snooze until epoch ms — worker skips target while snoozeUntil > now
 		snoozeUntil: integer('snooze_until'),
+		// Sprint 4a: auto-pause optimizer after 5 consecutive worsened recs
+		optimizerPausedUntil: integer('optimizer_paused_until'),
+		optimizerPausedReason: text('optimizer_paused_reason'),
 		// Optimistic-locking guard
 		version: integer('version').notNull().default(1),
 		createdByUserId: text('created_by_user_id').references(() => user.id),

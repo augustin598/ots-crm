@@ -79,11 +79,14 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 			...row.target,
 			suppressedActions: suppressed,
 			version: cleaned.version,
-			snoozeUntil: row.target.snoozeUntil ?? null
+			snoozeUntil: row.target.snoozeUntil ?? null,
+			optimizerPausedUntil: row.target.optimizerPausedUntil ?? null,
+			optimizerPausedReason: row.target.optimizerPausedReason ?? null
 		},
 		clientName: row.clientName,
 		accountName: row.accountName,
-		accountId: row.target.externalAdAccountId ?? row.accountId ?? null
+		accountId: row.target.externalAdAccountId ?? row.accountId ?? null,
+		currency: null // populated via Meta API account_currency in apply path; no DB column yet
 	});
 };
 
