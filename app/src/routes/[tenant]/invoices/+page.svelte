@@ -855,7 +855,7 @@ import { goto } from '$app/navigation';
 													{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
 												</h3>
 											</div>
-											{#if invoice.isCreditNote}
+											{#if invoice.isCreditNote || ((invoice.totalAmount ?? 0) < 0)}
 												<Badge
 													variant="outline"
 													class="text-xs font-semibold px-2 py-0.5 shadow-sm border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300"

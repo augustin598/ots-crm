@@ -1,16 +1,20 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, or, isNull } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 
 /**
- * Reset credit notes (storno) that were wrongly marked as 'overdue' by the
- * old overdue cron back to 'sent'. The cron now skips credit notes; this
- * endpoint cleans up the historical drift for the current tenant.
+ * Reset storno invoices wrongly marked 'overdue' back to 'sent'. Storno
+ * detection covers both cases:
+ *   - isCreditNote = true (set by manual creation)
+ *   - totalAmount  < 0    (synced from Keez; sync doesn't set isCreditNote)
+ *
+ * Also backfills isCreditNote = true on any negative-amount invoice so
+ * future code paths can rely on the flag alone.
  *
  * GET  → list affected invoices (no changes)
- * POST → flip status from 'overdue' to 'sent' for credit notes in this tenant
+ * POST → reset status + backfill isCreditNote
  *
  * Admin-only.
  */
@@ -22,6 +26,8 @@ function assertAdmin(event: Parameters<RequestHandler>[0]) {
 	}
 }
 
+const stornoCondition = or(eq(table.invoice.isCreditNote, true), lt(table.invoice.totalAmount, 0));
+
 export const GET: RequestHandler = async (event) => {
 	assertAdmin(event);
 	const tenantId = event.locals.tenant!.id;
@@ -31,36 +37,52 @@ export const GET: RequestHandler = async (event) => {
 			id: table.invoice.id,
 			invoiceNumber: table.invoice.invoiceNumber,
 			status: table.invoice.status,
+			isCreditNote: table.invoice.isCreditNote,
 			totalAmount: table.invoice.totalAmount,
 			dueDate: table.invoice.dueDate
 		})
 		.from(table.invoice)
-		.where(
-			and(
-				eq(table.invoice.tenantId, tenantId),
-				eq(table.invoice.isCreditNote, true),
-				eq(table.invoice.status, 'overdue')
-			)
-		);
+		.where(and(eq(table.invoice.tenantId, tenantId), stornoCondition));
 
-	return json({ count: affected.length, invoices: affected });
+	const wronglyOverdue = affected.filter((i) => i.status === 'overdue');
+	const missingFlag = affected.filter((i) => !i.isCreditNote);
+
+	return json({
+		totalStorno: affected.length,
+		wronglyOverdueCount: wronglyOverdue.length,
+		wronglyOverdue,
+		missingIsCreditNoteFlagCount: missingFlag.length,
+		missingFlag
+	});
 };
 
 export const POST: RequestHandler = async (event) => {
 	assertAdmin(event);
 	const tenantId = event.locals.tenant!.id;
+	const now = new Date();
 
-	const updated = await db
+	const statusReset = await db
 		.update(table.invoice)
-		.set({ status: 'sent', updatedAt: new Date() })
+		.set({ status: 'sent', updatedAt: now })
+		.where(and(eq(table.invoice.tenantId, tenantId), eq(table.invoice.status, 'overdue'), stornoCondition))
+		.returning({ id: table.invoice.id, invoiceNumber: table.invoice.invoiceNumber });
+
+	const flagBackfill = await db
+		.update(table.invoice)
+		.set({ isCreditNote: true, updatedAt: now })
 		.where(
 			and(
 				eq(table.invoice.tenantId, tenantId),
-				eq(table.invoice.isCreditNote, true),
-				eq(table.invoice.status, 'overdue')
+				lt(table.invoice.totalAmount, 0),
+				or(eq(table.invoice.isCreditNote, false), isNull(table.invoice.isCreditNote))
 			)
 		)
 		.returning({ id: table.invoice.id, invoiceNumber: table.invoice.invoiceNumber });
 
-	return json({ updatedCount: updated.length, invoices: updated });
+	return json({
+		statusResetCount: statusReset.length,
+		statusReset,
+		flagBackfillCount: flagBackfill.length,
+		flagBackfill
+	});
 };

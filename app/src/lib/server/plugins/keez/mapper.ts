@@ -976,6 +976,7 @@ export function mapKeezInvoiceToCRM(
 		keezStatus: keezStatus || null,
 		keezInvoiceId: keezHeader.externalId || null,
 		keezExternalId: keezHeader.externalId || null,
+		isCreditNote: totalAmount < 0,
 		createdByUserId: userId
 	};
 }

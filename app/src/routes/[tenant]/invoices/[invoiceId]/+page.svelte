@@ -410,7 +410,7 @@
 				<div>
 					<div class="flex items-center gap-3 mb-2">
 						<h1 class="text-3xl font-bold tracking-tight">{displayInvoiceNumber}</h1>
-						{#if invoice.isCreditNote}
+						{#if invoice.isCreditNote || ((invoice.totalAmount ?? 0) < 0)}
 							<Badge variant="outline" class="border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300">↩ Storno</Badge>
 						{:else}
 							<Badge variant={getStatusVariant(invoice.status)}>{getStatusText(invoice.status)}</Badge>
@@ -724,7 +724,7 @@
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Status</p>
 							<div class="flex items-center gap-2 flex-wrap">
-								{#if invoice.isCreditNote}
+								{#if invoice.isCreditNote || ((invoice.totalAmount ?? 0) < 0)}
 									<Badge variant="outline" class="border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300">↩ Storno</Badge>
 								{:else}
 									<Badge variant={getStatusVariant(invoice.status)}>
@@ -734,7 +734,7 @@
 										{getStatusText(invoice.status)}
 									</Badge>
 								{/if}
-								{#if invoice.status === 'partially_paid' && invoice.remainingAmount && !invoice.isCreditNote}
+								{#if invoice.status === 'partially_paid' && invoice.remainingAmount && !invoice.isCreditNote && (invoice.totalAmount ?? 0) >= 0}
 									<span class="text-sm font-medium text-orange-600 dark:text-orange-400">
 										Sold restant: {(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}
 									</span>
