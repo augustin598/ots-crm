@@ -4754,3 +4754,31 @@ export const personalopsInstanceRelations = relations(personalopsInstance, ({ on
 
 export type PersonalopsInstance = typeof personalopsInstance.$inferSelect;
 export type NewPersonalopsInstance = typeof personalopsInstance.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Telegram message send log — observability for all sendTelegramMessage calls
+// ─────────────────────────────────────────────────────────────────────────────
+export const telegramMessage = sqliteTable(
+	'telegram_messages',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id'),
+		userId: text('user_id'),
+		chatId: text('chat_id').notNull(),
+		textSnippet: text('text_snippet').notNull(),
+		ok: integer('ok').notNull().default(0),
+		errorReason: text('error_reason'),
+		botMessageId: integer('bot_message_id'),
+		parseMode: text('parse_mode'),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.notNull()
+			.default(sql`(cast(strftime('%s', 'now') AS integer) * 1000)`)
+	},
+	(t) => ({
+		chatIdIdx: index('telegram_messages_chat_id_idx').on(t.chatId),
+		createdAtIdx: index('telegram_messages_created_at_idx').on(t.createdAt)
+	})
+);
+
+export type TelegramMessage = typeof telegramMessage.$inferSelect;
+export type NewTelegramMessage = typeof telegramMessage.$inferInsert;

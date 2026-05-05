@@ -1716,6 +1716,27 @@
       "when": 1746374400001,
       "tag": "0244_ad_monitor_target_optimizer_paused_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "6",
+      "when": 1746460800000,
+      "tag": "0245_telegram_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "6",
+      "when": 1746460800001,
+      "tag": "0246_telegram_messages_chat_id_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "6",
+      "when": 1746460800002,
+      "tag": "0247_telegram_messages_created_at_idx",
+      "breakpoints": true
     }
   ]
 }

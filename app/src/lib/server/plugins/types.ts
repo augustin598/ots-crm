@@ -47,6 +47,19 @@ export type InvoicePaidEvent = {
 	userId: string;
 };
 
+export type TaskCreatedEvent = {
+	type: 'task.created';
+	taskId: string;
+	taskTitle: string;
+	createdByUserId: string;
+	assignedToUserId: string | null;
+	priority: string | null;
+	dueDate: Date | null;
+	clientId: string | null;
+	tenantId: string;
+	tenantSlug: string;
+};
+
 export type TaskAssignedEvent = {
 	type: 'task.assigned';
 	taskId: string;
@@ -175,6 +188,7 @@ export type HookEvent =
 	| InvoiceDeletedEvent
 	| InvoiceStatusChangedEvent
 	| InvoicePaidEvent
+	| TaskCreatedEvent
 	| TaskAssignedEvent
 	| TaskCompletedEvent
 	| ContractSignedEvent

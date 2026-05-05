@@ -43,9 +43,11 @@ mock.module('$lib/server/db', () => ({ db: fakeDb }));
 mock.module('$lib/server/db/schema', () => ({
 	task: { id: 'id', priority: 'priority', dueDate: 'dueDate' },
 	taskWatcher: { taskId: 'task_id', tenantId: 'tenant_id', userId: 'user_id' },
+	tenantUser: { tenantId: 'tenant_id', userId: 'user_id', role: 'role' },
 }));
 
 const {
+	notifyTaskCreated,
 	notifyTaskAssigned,
 	notifyTaskCompleted,
 	notifyTaskDueSoon,
@@ -60,6 +62,46 @@ async function flush() {
 beforeEach(() => {
 	sendCalls.length = 0;
 	dbNextResult = [];
+});
+
+describe('notifyTaskCreated', () => {
+	const base = {
+		type: 'task.created' as const,
+		taskId: 'task1',
+		taskTitle: 'New task',
+		createdByUserId: 'client-user1',
+		assignedToUserId: null,
+		priority: 'medium',
+		dueDate: null,
+		clientId: 'client1',
+		tenantId: 'tenant1',
+		tenantSlug: 'ots',
+	};
+
+	test('notifies all admins when no assignee', async () => {
+		dbNextResult = [{ userId: 'admin1' }, { userId: 'admin2' }];
+		await notifyTaskCreated(base);
+		await flush();
+		expect(sendCalls).toHaveLength(2);
+		const userIds = sendCalls.map((c) => c.userId);
+		expect(userIds).toContain('admin1');
+		expect(userIds).toContain('admin2');
+		expect(sendCalls[0]!.text).toContain('New task');
+	});
+
+	test('skips notification when task is assigned', async () => {
+		dbNextResult = [{ userId: 'admin1' }];
+		await notifyTaskCreated({ ...base, assignedToUserId: 'user2' });
+		await flush();
+		expect(sendCalls).toHaveLength(0);
+	});
+
+	test('skips when no admins found', async () => {
+		dbNextResult = [];
+		await notifyTaskCreated(base);
+		await flush();
+		expect(sendCalls).toHaveLength(0);
+	});
 });
 
 describe('notifyTaskAssigned', () => {
@@ -84,10 +126,11 @@ describe('notifyTaskAssigned', () => {
 		expect(sendCalls[0]!.parseMode).toBe('Markdown');
 	});
 
-	test('skips self-assignment (assignedTo === assignedBy)', async () => {
+	test('sends notification on self-assignment (guard removed)', async () => {
 		await notifyTaskAssigned({ ...base, assignedToUserId: 'user1', assignedByUserId: 'user1' });
 		await flush();
-		expect(sendCalls).toHaveLength(0);
+		expect(sendCalls).toHaveLength(1);
+		expect(sendCalls[0]!.userId).toBe('user1');
 	});
 
 	test('skips when assignedToUserId is empty', async () => {

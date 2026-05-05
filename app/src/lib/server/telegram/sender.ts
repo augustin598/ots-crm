@@ -6,6 +6,38 @@ import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
 import { logError, logWarning, logInfo, serializeError } from '$lib/server/logger';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
+
+function generateId() {
+	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
+
+async function logTelegramMessage(params: {
+	tenantId: string;
+	userId: string;
+	chatId: string;
+	text: string;
+	parseMode: string | undefined;
+	ok: boolean;
+	errorReason?: string;
+	botMessageId?: number;
+}): Promise<void> {
+	try {
+		await db.insert(table.telegramMessage).values({
+			id: generateId(),
+			tenantId: params.tenantId,
+			userId: params.userId,
+			chatId: params.chatId,
+			textSnippet: params.text.substring(0, 200),
+			ok: params.ok ? 1 : 0,
+			errorReason: params.errorReason ?? null,
+			botMessageId: params.botMessageId ?? null,
+			parseMode: params.parseMode ?? null
+		});
+	} catch {
+		// Silent — logging must never break the send flow
+	}
+}
 
 const TELEGRAM_API = 'https://api.telegram.org';
 const FETCH_TIMEOUT_MS = 10_000;
@@ -31,6 +63,7 @@ export async function sendTelegramMessage(args: SendArgs): Promise<SendResult> {
 	const token = getBotToken();
 	if (!token) {
 		logWarning('telegram', 'TELEGRAM_BOT_TOKEN not configured — skipping send');
+		void logTelegramMessage({ tenantId: args.tenantId, userId: args.userId, chatId: 'unknown', text: args.text, parseMode: args.parseMode, ok: false, errorReason: 'no_token' });
 		return { ok: false, reason: 'no_token' };
 	}
 
@@ -46,6 +79,7 @@ export async function sendTelegramMessage(args: SendArgs): Promise<SendResult> {
 		.limit(1);
 
 	if (!link?.telegramChatId) {
+		void logTelegramMessage({ tenantId: args.tenantId, userId: args.userId, chatId: 'unknown', text: args.text, parseMode: args.parseMode, ok: false, errorReason: 'not_linked' });
 		return { ok: false, reason: 'not_linked' };
 	}
 
@@ -62,14 +96,17 @@ export async function sendTelegramMessage(args: SendArgs): Promise<SendResult> {
 			}),
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 		});
-		const json = (await res.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+		const json = (await res.json().catch(() => null)) as { ok?: boolean; description?: string; result?: { message_id?: number } } | null;
 		if (!res.ok || !json?.ok) {
 			logError('telegram', `sendMessage failed: ${json?.description ?? res.status}`);
+			void logTelegramMessage({ tenantId: args.tenantId, userId: args.userId, chatId: link.telegramChatId, text: args.text, parseMode: args.parseMode, ok: false, errorReason: `api_error: ${json?.description ?? `HTTP ${res.status}`}` });
 			return { ok: false, reason: 'api_error', detail: json?.description ?? `HTTP ${res.status}` };
 		}
+		void logTelegramMessage({ tenantId: args.tenantId, userId: args.userId, chatId: link.telegramChatId, text: args.text, parseMode: args.parseMode, ok: true, botMessageId: json?.result?.message_id });
 		return { ok: true };
 	} catch (e) {
 		logError('telegram', `sendMessage fetch failed: ${serializeError(e).message}`);
+		void logTelegramMessage({ tenantId: args.tenantId, userId: args.userId, chatId: link.telegramChatId, text: args.text, parseMode: args.parseMode, ok: false, errorReason: `fetch_failed: ${serializeError(e).message}` });
 		return { ok: false, reason: 'fetch_failed', detail: serializeError(e).message };
 	}
 }

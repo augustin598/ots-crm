@@ -644,6 +644,35 @@ export const createTask = command(taskSchema, async (data) => {
 			? event.locals.client.id
 			: data.clientId || null;
 
+	// Client portal task with no assignee → default to tenant owner/admin
+	if (event.locals.isClientUser && !data.assignedToUserId) {
+		const [owner] = await db
+			.select({ userId: table.tenantUser.userId })
+			.from(table.tenantUser)
+			.where(
+				and(
+					eq(table.tenantUser.tenantId, targetTenantId),
+					eq(table.tenantUser.role, 'owner')
+				)
+			)
+			.limit(1);
+		if (owner) {
+			data.assignedToUserId = owner.userId;
+		} else {
+			const [admin] = await db
+				.select({ userId: table.tenantUser.userId })
+				.from(table.tenantUser)
+				.where(
+					and(
+						eq(table.tenantUser.tenantId, targetTenantId),
+						eq(table.tenantUser.role, 'admin')
+					)
+				)
+				.limit(1);
+			if (admin) data.assignedToUserId = admin.userId;
+		}
+	}
+
 	// Get the highest position for this status to assign next position
 	const [maxPositionResult] = await db
 		.select({
@@ -684,6 +713,25 @@ export const createTask = command(taskSchema, async (data) => {
 		userId: event.locals.user.id,
 		tenantId: targetTenantId
 	});
+
+	// Emit task.created hook (always, regardless of assignee)
+	try {
+		const hooks = getHooksManager();
+		await hooks.emit({
+			type: 'task.created',
+			taskId,
+			taskTitle: data.title,
+			createdByUserId: event.locals.user.id,
+			assignedToUserId: data.assignedToUserId || null,
+			priority: data.priority || 'medium',
+			dueDate: data.dueDate ? new Date(data.dueDate) : null,
+			clientId,
+			tenantId: targetTenantId,
+			tenantSlug: event.locals.tenant.slug
+		});
+	} catch {
+		// Don't throw - task creation should succeed even if notification fails
+	}
 
 	// If task is assigned, auto-watch for assignee and send assignment email
 	if (data.assignedToUserId) {

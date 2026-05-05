@@ -1,8 +1,8 @@
 import { sendTelegramMessage } from './sender';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, ne } from 'drizzle-orm';
-import type { TaskAssignedEvent, TaskCompletedEvent } from '$lib/server/plugins/types';
+import { and, eq, inArray, ne } from 'drizzle-orm';
+import type { TaskAssignedEvent, TaskCompletedEvent, TaskCreatedEvent } from '$lib/server/plugins/types';
 
 const BASE_URL = 'https://clients.onetopsolution.ro';
 
@@ -30,8 +30,41 @@ function stripHtml(html: string): string {
 	return html.replace(/<[^>]*>/g, '').trim();
 }
 
+export async function notifyTaskCreated(event: TaskCreatedEvent): Promise<void> {
+	// Skip when assigned — task.assigned covers that notification
+	if (event.assignedToUserId) return;
+
+	const admins = await db
+		.select({ userId: table.tenantUser.userId })
+		.from(table.tenantUser)
+		.where(
+			and(
+				eq(table.tenantUser.tenantId, event.tenantId),
+				inArray(table.tenantUser.role, ['owner', 'admin'])
+			)
+		);
+
+	if (admins.length === 0) return;
+
+	const text =
+		`📝 *Task nou nelegat*\n` +
+		`"${event.taskTitle}"\n` +
+		(event.priority ? `Prioritate: ${PRIORITY_EMOJI[event.priority] ?? ''} ${event.priority}\n` : '') +
+		(event.dueDate ? `Due: ${formatDate(event.dueDate)}\n` : '') +
+		`\n→ ${buildTaskUrl(event.tenantSlug, event.taskId)}`;
+
+	for (const admin of admins) {
+		void sendTelegramMessage({
+			tenantId: event.tenantId,
+			userId: admin.userId,
+			text,
+			parseMode: 'Markdown',
+		}).catch((err) => console.error('[telegram-task] task.created send failed', err));
+	}
+}
+
 export async function notifyTaskAssigned(event: TaskAssignedEvent): Promise<void> {
-	if (!event.assignedToUserId || event.assignedToUserId === event.assignedByUserId) return;
+	if (!event.assignedToUserId) return;
 
 	const [taskRow] = await db
 		.select({ priority: table.task.priority, dueDate: table.task.dueDate })

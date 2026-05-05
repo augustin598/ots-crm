@@ -46,6 +46,9 @@ const RECENT_MIGRATIONS: MigrationCheck[] = [
   { id: '0242', table: 'meta_ads_integration', column: 'last_token_check_at' },
   { id: '0243', table: 'ad_monitor_target', column: 'optimizer_paused_until' },
   { id: '0244', table: 'ad_monitor_target', column: 'optimizer_paused_reason' },
+  { id: '0245', table: 'telegram_messages', isNewTable: true, columns: ['id', 'chat_id', 'text_snippet', 'ok', 'created_at'] },
+  { id: '0246', table: 'telegram_messages', column: 'chat_id' },
+  { id: '0247', table: 'telegram_messages', column: 'created_at' },
 ];
 
 async function main() {
