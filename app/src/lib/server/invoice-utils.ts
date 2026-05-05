@@ -10,6 +10,18 @@ import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './pl
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
 import { logInfo, logWarning } from '$lib/server/logger';
 
+/** Returns the rate to use (in cents), applying drift guard if Keez price differs >20% from template. */
+export function applyKeezDriftGuard(liveRateCents: number, templateRateCents: number): { rate: number; driftDetected: boolean } {
+	if (templateRateCents <= 0) {
+		return { rate: liveRateCents, driftDetected: false };
+	}
+	const driftPct = Math.abs(liveRateCents - templateRateCents) / templateRateCents;
+	if (driftPct > 0.20) {
+		return { rate: templateRateCents, driftDetected: true };
+	}
+	return { rate: liveRateCents, driftDetected: false };
+}
+
 function generateInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
@@ -427,7 +439,18 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 
 							const keezItem = await keezClient.getItem(item.keezItemExternalId);
 							if (keezItem && keezItem.lastPrice !== undefined) {
-								latestRate = Math.round(keezItem.lastPrice * 100); // Convert to cents
+								const liveRate = Math.round(keezItem.lastPrice * 100);
+								const templateRate = Math.round(item.rate * 100);
+								const { rate, driftDetected } = applyKeezDriftGuard(liveRate, templateRate);
+								if (driftDetected) {
+									logWarning('server',
+										`[recurring-invoice] Keez price drift detected for item ${item.description}: ` +
+										`template=${templateRate / 100}, keez=${liveRate / 100}. ` +
+										`Using TEMPLATE rate to prevent runaway. Update template explicitly if change intended.`,
+										{ tenantId: recurringInvoice.tenantId }
+									);
+								}
+								latestRate = rate;
 							}
 						} catch (error) {
 							logWarning('server', `Failed to fetch Keez item ${item.keezItemExternalId}`, { tenantId: recurringInvoice.tenantId, stackTrace: error instanceof Error ? error.stack : undefined });

@@ -12,6 +12,23 @@ function generateRecurringInvoiceId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+export function validateLineItems(lineItems: Array<{ description: string; quantity: number; rate: number }>, isCreditNote: boolean) {
+	for (const [idx, item] of lineItems.entries()) {
+		if (item.quantity == null || isNaN(item.quantity)) {
+			throw new Error(`Line item ${idx + 1} (${item.description}): quantity invalid`);
+		}
+		if (!isCreditNote && item.quantity <= 0) {
+			throw new Error(
+				`Line item ${idx + 1} (${item.description}): quantity must be positive (${item.quantity}). ` +
+				`For credit notes, set isCreditNote=true on the invoice/template.`
+			);
+		}
+		if (item.rate == null || isNaN(item.rate) || item.rate < 0) {
+			throw new Error(`Line item ${idx + 1} (${item.description}): rate invalid`);
+		}
+	}
+}
+
 // Line item schema (same as in invoices.remote.ts)
 const lineItemSchema = v.object({
 	description: v.pipe(v.string(), v.minLength(1)),
@@ -129,6 +146,11 @@ export const createRecurringInvoice = command(recurringInvoiceSchema, async (dat
 	let taxRate = defaultTaxRateCents;
 	let taxAmount = 0;
 	let totalAmount = 0;
+
+	// Validate line items before processing
+	if (data.lineItems && data.lineItems.length > 0) {
+		validateLineItems(data.lineItems, data.isCreditNote ?? false);
+	}
 
 	// Calculate from line items if provided, otherwise use legacy amount
 	if (data.lineItems && data.lineItems.length > 0) {
@@ -332,6 +354,11 @@ export const updateRecurringInvoice = command(
 
 		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
 		const defaultTaxRateCents = defaultTaxRatePercent * 100;
+
+		// Validate line items before processing
+		if (updateData.lineItems && updateData.lineItems.length > 0) {
+			validateLineItems(updateData.lineItems, updateData.isCreditNote ?? false);
+		}
 
 		// Calculate amount from line items if provided
 		let amount = existing.amount;
