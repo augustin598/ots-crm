@@ -855,12 +855,21 @@ import { goto } from '$app/navigation';
 													{formatInvoiceNumberDisplay(invoice, invoiceSettings)}
 												</h3>
 											</div>
-											<Badge
-												variant={getStatusColor(invoice.status)}
-												class="text-xs font-semibold px-2 py-0.5 shadow-sm {invoice.status === 'partially_paid' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-700' : ''}"
-											>
-												{getStatusIcon(invoice.status)} {getStatusText(invoice.status)}
-											</Badge>
+											{#if invoice.isCreditNote}
+												<Badge
+													variant="outline"
+													class="text-xs font-semibold px-2 py-0.5 shadow-sm border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+												>
+													↩ Storno
+												</Badge>
+											{:else}
+												<Badge
+													variant={getStatusColor(invoice.status)}
+													class="text-xs font-semibold px-2 py-0.5 shadow-sm {invoice.status === 'partially_paid' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-700' : ''}"
+												>
+													{getStatusIcon(invoice.status)} {getStatusText(invoice.status)}
+												</Badge>
+											{/if}
 											{#if invoice.status === 'partially_paid' && invoice.remainingAmount}
 												<span class="text-xs font-medium text-orange-600 dark:text-orange-400">
 													Sold restant: {(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}

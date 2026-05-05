@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lt, lte, notInArray, inArray } from 'drizzle-orm';
+import { eq, and, lt, lte, notInArray, inArray, or, isNull } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 
@@ -50,8 +50,21 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 				const repeatDays = settings.overdueReminderRepeatDays ?? 7;
 				const maxCount = settings.overdueReminderMaxCount ?? 3;
 
+				// Self-heal credit notes wrongly marked overdue by previous cron runs
+				await db
+					.update(table.invoice)
+					.set({ status: 'sent', updatedAt: now })
+					.where(
+						and(
+							eq(table.invoice.tenantId, settings.tenantId),
+							eq(table.invoice.isCreditNote, true),
+							eq(table.invoice.status, 'overdue')
+						)
+					);
+
 				// Auto-transition keezStatus='Valid' invoices past due date to 'overdue'
 				// Only for invoices not already overdue/paid/cancelled
+				// Credit notes (storno) are excluded — they represent money owed back to the client, not due from them
 				await db
 					.update(table.invoice)
 					.set({ status: 'overdue', updatedAt: now })
@@ -60,11 +73,12 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							eq(table.invoice.tenantId, settings.tenantId),
 							eq(table.invoice.keezStatus, 'Valid'),
 							notInArray(table.invoice.status, ['overdue', 'paid', 'partially_paid', 'cancelled']),
-							lt(table.invoice.dueDate, now)
+							lt(table.invoice.dueDate, now),
+							or(eq(table.invoice.isCreditNote, false), isNull(table.invoice.isCreditNote))
 						)
 					);
 
-				// Find overdue invoices: strictly keezStatus='Valid', dueDate past, not paid/cancelled
+				// Find overdue invoices: strictly keezStatus='Valid', dueDate past, not paid/cancelled, not credit notes
 				const overdueInvoices = await db
 					.select()
 					.from(table.invoice)
@@ -74,7 +88,8 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							eq(table.invoice.keezStatus, 'Valid'),
 							notInArray(table.invoice.status, ['paid', 'partially_paid', 'cancelled']),
 							lt(table.invoice.dueDate, now),
-							lte(table.invoice.overdueReminderCount, maxCount - 1)
+							lte(table.invoice.overdueReminderCount, maxCount - 1),
+							or(eq(table.invoice.isCreditNote, false), isNull(table.invoice.isCreditNote))
 						)
 					);
 
