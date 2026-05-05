@@ -8,6 +8,7 @@ import type {
 	InvoicePaidEvent,
 	InvoiceStatusChangedEvent,
 	TaskAssignedEvent,
+	TaskCompletedEvent,
 	ContractSignedEvent,
 	ContractActivatedEvent,
 	ContractExpiredEvent,
@@ -17,6 +18,7 @@ import type {
 	ApprovalRequestedEvent
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
+import { notifyTaskAssigned, notifyTaskCompleted } from '../telegram/task-notifications';
 
 /**
  * Get all owner/admin user IDs for a tenant (used to broadcast notifications).
@@ -110,6 +112,12 @@ export function registerNotificationHooks(): void {
 				tenantId: event.tenantId
 			});
 		}
+		void notifyTaskAssigned(event).catch(() => {});
+	});
+
+	// ---- Task Completed ----
+	hooks.on('task.completed', async (event: TaskCompletedEvent) => {
+		void notifyTaskCompleted(event).catch(() => {});
 	});
 
 	// ---- Contract Signed ----

@@ -3,6 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, lt, ne, isNotNull, or } from 'drizzle-orm';
 import { createNotification } from '$lib/server/notifications';
 import { logInfo, logError } from '$lib/server/logger';
+import { notifyTaskOverdue } from '$lib/server/telegram/task-notifications';
 
 async function getTenantAdminUserIds(tenantId: string): Promise<string[]> {
 	const tenantUsers = await db
@@ -73,6 +74,15 @@ export async function processTaskOverdueNotifications(): Promise<void> {
 					link: tenant ? `/${tenant.slug}/tasks` : undefined,
 					priority: 'medium',
 				});
+				if (tenant?.slug) {
+					void notifyTaskOverdue({
+						tenantId,
+						tenantSlug: tenant.slug,
+						adminUserId: userId,
+						count: tasks.length,
+						sampleTitles: tasks.slice(0, 3).map((t) => t.title),
+					}).catch(() => {});
+				}
 				totalNotified++;
 			}
 		}

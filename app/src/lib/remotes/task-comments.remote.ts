@@ -9,6 +9,7 @@ import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import * as storage from '$lib/server/storage';
 import { createNotification } from '$lib/server/notifications';
+import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
 function sanitizeCommentHtml(html: string): string {
@@ -325,6 +326,18 @@ export const createTaskComment = command(
 					link: `/${tenantSlug}/tasks/${data.taskId}`,
 					priority: 'high',
 					metadata: { taskId: data.taskId, commentId },
+				}).catch(() => {});
+
+				// Telegram mention notification
+				void notifyTaskMention({
+					tenantId: event.locals.tenant.id,
+					tenantSlug,
+					taskId: data.taskId,
+					taskTitle: task.title,
+					mentionedUserId: mentionedId,
+					authorUserId: event.locals.user.id,
+					authorName,
+					commentSnippet: data.content,
 				}).catch(() => {});
 			}
 		}

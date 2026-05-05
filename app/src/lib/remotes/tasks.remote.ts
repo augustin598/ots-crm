@@ -1089,6 +1089,24 @@ export const updateTask = command(
 			}
 		}
 
+		// Emit task.completed hook when status transitions to 'done'
+		if (transitionedToDone) {
+			try {
+				const hooks = getHooksManager();
+				await hooks.emit({
+					type: 'task.completed',
+					taskId,
+					taskTitle: existing.title,
+					completedByUserId: event.locals.user.id,
+					clientId: existing.clientId ?? undefined,
+					tenantId: existing.tenantId,
+					tenantSlug: event.locals.tenant.slug
+				});
+			} catch {
+				// Don't throw - task update should succeed even if notification fails
+			}
+		}
+
 		return { success: true };
 	}
 );

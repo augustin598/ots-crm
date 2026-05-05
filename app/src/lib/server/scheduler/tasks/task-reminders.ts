@@ -3,6 +3,7 @@ import * as table from '../../db/schema';
 import { eq, and, lte, gte, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { sendTaskReminderEmail } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { notifyTaskDueSoon } from '$lib/server/telegram/task-notifications';
 
 /**
  * Process task reminders - finds tasks with due dates in the next 24 hours
@@ -66,6 +67,13 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 			: [];
 		const userMap = new Map(users.map((u) => [u.id, u]));
 
+		// Batch-fetch tenant slugs for Telegram URLs
+		const uniqueTenantIds = [...new Set(tasks.map((t) => t.tenantId))];
+		const tenants = uniqueTenantIds.length > 0
+			? await db.select({ id: table.tenant.id, slug: table.tenant.slug }).from(table.tenant).where(inArray(table.tenant.id, uniqueTenantIds))
+			: [];
+		const tenantSlugMap = new Map(tenants.map((t) => [t.id, t.slug]));
+
 		// Send reminder emails for each task
 		for (const task of tasks) {
 			if (!task.assignedToUserId || !task.dueDate) {
@@ -83,6 +91,20 @@ export async function processTaskReminders(params: Record<string, any> = {}) {
 				// Send reminder email
 				const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
 				await sendTaskReminderEmail(task.id, assignee.email, assigneeName);
+
+				// Send Telegram reminder (fire-and-forget; piggybacks on same dedup via lastReminderSentAt)
+				const tenantSlug = tenantSlugMap.get(task.tenantId);
+				if (tenantSlug) {
+					void notifyTaskDueSoon({
+						tenantId: task.tenantId,
+						tenantSlug,
+						taskId: task.id,
+						taskTitle: task.title,
+						assignedToUserId: task.assignedToUserId,
+						dueDate: task.dueDate,
+						priority: task.priority,
+					}).catch(() => {});
+				}
 
 				// Update lastReminderSentAt
 				await db
