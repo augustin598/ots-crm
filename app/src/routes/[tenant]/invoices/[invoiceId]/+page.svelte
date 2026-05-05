@@ -410,7 +410,11 @@
 				<div>
 					<div class="flex items-center gap-3 mb-2">
 						<h1 class="text-3xl font-bold tracking-tight">{displayInvoiceNumber}</h1>
-						<Badge variant={getStatusVariant(invoice.status)}>{getStatusText(invoice.status)}</Badge>
+						{#if invoice.isCreditNote}
+							<Badge variant="outline" class="border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300">↩ Storno</Badge>
+						{:else}
+							<Badge variant={getStatusVariant(invoice.status)}>{getStatusText(invoice.status)}</Badge>
+						{/if}
 						{#if invoice.keezExternalId}
 							{#if invoice.keezStatus === 'Valid'}
 								<Badge variant="outline" class="border-green-500 text-green-600 dark:text-green-400">Keez ✓</Badge>
@@ -419,9 +423,6 @@
 							{:else}
 								<Badge variant="outline" class="border-yellow-500 text-yellow-600 dark:text-yellow-400">Keez Proformă</Badge>
 							{/if}
-						{/if}
-						{#if invoice.isCreditNote}
-							<Badge variant="outline">Credit Note</Badge>
 						{/if}
 					</div>
 					<p class="text-lg text-muted-foreground">{client?.name || 'Unknown Client'}</p>
@@ -723,13 +724,17 @@
 						<div>
 							<p class="text-sm text-muted-foreground mb-1">Status</p>
 							<div class="flex items-center gap-2 flex-wrap">
-								<Badge variant={getStatusVariant(invoice.status)}>
-									{#if invoice.status === 'sent' && invoice.lastEmailStatus === 'sent'}
-										<Mail class="mr-1 h-3 w-3" />
-									{/if}
-									{getStatusText(invoice.status)}
-								</Badge>
-								{#if invoice.status === 'partially_paid' && invoice.remainingAmount}
+								{#if invoice.isCreditNote}
+									<Badge variant="outline" class="border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300">↩ Storno</Badge>
+								{:else}
+									<Badge variant={getStatusVariant(invoice.status)}>
+										{#if invoice.status === 'sent' && invoice.lastEmailStatus === 'sent'}
+											<Mail class="mr-1 h-3 w-3" />
+										{/if}
+										{getStatusText(invoice.status)}
+									</Badge>
+								{/if}
+								{#if invoice.status === 'partially_paid' && invoice.remainingAmount && !invoice.isCreditNote}
 									<span class="text-sm font-medium text-orange-600 dark:text-orange-400">
 										Sold restant: {(invoice.remainingAmount / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 })} {invoice.currency}
 									</span>
