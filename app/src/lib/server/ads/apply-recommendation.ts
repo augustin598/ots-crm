@@ -321,6 +321,9 @@ export async function applyRecommendation(
 	let decisionRationale: Record<string, unknown> | null = null;
 
 	try {
+		// Option B convention: toggle campaign only — children inherit pause/active from campaign
+		// (Meta hierarchy: paused campaign = no delivery regardless of adset/ad own status).
+		// Adsets + ads are created ACTIVE, so a single campaign flip at approve/pause is sufficient.
 		if (action === 'pause_ad') {
 			await toggleCampaignStatus(rec.externalCampaignId, auth.accessToken, appSecret, 'PAUSED');
 		} else if (action === 'resume_ad') {

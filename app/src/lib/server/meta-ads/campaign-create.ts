@@ -389,12 +389,14 @@ async function createAdsetStep(
 	const destinationType =
 		spec.objective === 'OUTCOME_LEADS' && spec.creative.leadFormId ? 'ON_AD' : null;
 
+	// Convention (Option B): adset is created ACTIVE — campaign is PAUSED, so children cannot
+	// deliver regardless of own status. At approve, a single campaign flip cascades to all children.
 	const params = new URLSearchParams({
 		access_token: accessToken,
 		appsecret_proof: proof,
 		name: `${spec.name} — adset`,
 		campaign_id: campaignExternalId,
-		status: 'PAUSED',
+		status: 'ACTIVE',
 		[spec.budget.type === 'daily' ? 'daily_budget' : 'lifetime_budget']: String(spec.budget.cents),
 		optimization_goal: optimizationGoal,
 		billing_event: spec.billingEvent ?? 'IMPRESSIONS',
@@ -456,13 +458,15 @@ async function createAdStep(
 	appSecret: string
 ): Promise<string> {
 	const proof = generateAppSecretProof(accessToken, appSecret);
+	// Convention (Option B): ad is created ACTIVE — campaign is PAUSED, so children cannot
+	// deliver regardless of own status. At approve, a single campaign flip cascades to all children.
 	const params = new URLSearchParams({
 		access_token: accessToken,
 		appsecret_proof: proof,
 		name: `${spec.name} — ad`,
 		adset_id: adsetExternalId,
 		creative: JSON.stringify({ creative_id: creativeExternalId }),
-		status: 'PAUSED'
+		status: 'ACTIVE'
 	});
 	const { data, status } = await metaPost(`${META_GRAPH_URL}/${spec.adAccountId}/ads`, params);
 	const cls = classifyResponse(status, data, 'create ad');
