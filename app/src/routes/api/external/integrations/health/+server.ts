@@ -3,20 +3,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { withApiKey } from '$lib/server/api-keys/middleware';
-
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
-type HealthStatus = 'healthy' | 'expiring_soon' | 'expired' | 'broken' | 'inactive';
-
-interface IntegrationHealth {
-	platform: 'meta' | 'tiktok' | 'google';
-	integrationId: string;
-	tokenExpiresAt: Date | null;
-	daysUntilExpiry: number | null;
-	status: HealthStatus;
-	lastSyncAt: Date | null;
-	lastError: string | null;
-}
+import { buildHealth } from './health.utils';
 
 /**
  * Health snapshot for all advertising integrations on this tenant.
@@ -41,11 +28,11 @@ export const GET: RequestHandler = (event) =>
 			.from(table.googleAdsIntegration)
 			.where(eq(table.googleAdsIntegration.tenantId, ctx.tenantId));
 
-		const items: IntegrationHealth[] = [];
+		const items = [];
 
 		for (const r of metaRows) {
 			items.push(
-				buildHealth('meta', r.id, r.tokenExpiresAt, r.lastSyncAt, r.lastRefreshError, r.isActive, now)
+				buildHealth('meta', r.id, r.tokenExpiresAt, r.lastSyncAt, r.lastRefreshError, r.isActive, now, r.consecutiveRefreshFailures ?? 0)
 			);
 		}
 		for (const r of tiktokRows) {
@@ -57,7 +44,8 @@ export const GET: RequestHandler = (event) =>
 					r.lastSyncAt,
 					r.lastRefreshError,
 					r.isActive,
-					now
+					now,
+					r.consecutiveRefreshFailures ?? 0
 				)
 			);
 		}
@@ -70,44 +58,11 @@ export const GET: RequestHandler = (event) =>
 					r.lastSyncAt,
 					r.lastRefreshError,
 					r.isActive,
-					now
+					now,
+					r.consecutiveRefreshFailures ?? 0
 				)
 			);
 		}
 
 		return { status: 200, body: { items, total: items.length } };
 	});
-
-function buildHealth(
-	platform: 'meta' | 'tiktok' | 'google',
-	integrationId: string,
-	tokenExpiresAt: Date | null,
-	lastSyncAt: Date | null,
-	lastError: string | null,
-	isActive: boolean,
-	now: number
-): IntegrationHealth {
-	let status: HealthStatus = 'healthy';
-	let daysUntilExpiry: number | null = null;
-
-	if (!isActive) {
-		status = 'inactive';
-	} else if (tokenExpiresAt) {
-		const ms = tokenExpiresAt.getTime() - now;
-		daysUntilExpiry = Math.floor(ms / (24 * 60 * 60 * 1000));
-		if (ms < 0) status = 'expired';
-		else if (ms < SEVEN_DAYS_MS) status = 'expiring_soon';
-	} else if (lastError) {
-		status = 'broken';
-	}
-
-	return {
-		platform,
-		integrationId,
-		tokenExpiresAt,
-		daysUntilExpiry,
-		status,
-		lastSyncAt,
-		lastError
-	};
-}
