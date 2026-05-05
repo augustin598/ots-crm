@@ -18,7 +18,7 @@ mock.module('$lib/server/logger', () => ({
 	serializeError: (e: unknown) => ({ message: String(e), stack: '' }),
 }));
 
-const { validateLineItems } = await import('../../remotes/recurring-invoices.remote');
+const { validateLineItems } = await import('../recurring-invoice-validation');
 const { applyKeezDriftGuard } = await import('../invoice-utils');
 
 describe('validateLineItems', () => {

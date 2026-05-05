@@ -6,27 +6,11 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { generateInvoiceFromRecurringTemplate, calculateNextRunDate } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
+import { validateLineItems } from '$lib/server/recurring-invoice-validation';
 
 function generateRecurringInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
-}
-
-export function validateLineItems(lineItems: Array<{ description: string; quantity: number; rate: number }>, isCreditNote: boolean) {
-	for (const [idx, item] of lineItems.entries()) {
-		if (item.quantity == null || isNaN(item.quantity)) {
-			throw new Error(`Line item ${idx + 1} (${item.description}): quantity invalid`);
-		}
-		if (!isCreditNote && item.quantity <= 0) {
-			throw new Error(
-				`Line item ${idx + 1} (${item.description}): quantity must be positive (${item.quantity}). ` +
-				`For credit notes, set isCreditNote=true on the invoice/template.`
-			);
-		}
-		if (item.rate == null || isNaN(item.rate) || item.rate < 0) {
-			throw new Error(`Line item ${idx + 1} (${item.description}): rate invalid`);
-		}
-	}
 }
 
 // Line item schema (same as in invoices.remote.ts)
