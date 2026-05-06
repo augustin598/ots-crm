@@ -2,17 +2,26 @@
 	import { page } from '$app/state';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import HomeIcon from '@lucide/svelte/icons/home';
-	import { SIDEBAR_NAV, buildBreadcrumbs } from '$lib/config/sidebar-nav';
+	import { SIDEBAR_NAV, buildBreadcrumbs, type NavGroup } from '$lib/config/sidebar-nav';
 
-	let { actions }: { actions?: import('svelte').Snippet } = $props();
+	let {
+		actions,
+		groups = SIDEBAR_NAV,
+		pathPrefix: explicitPathPrefix
+	}: {
+		actions?: import('svelte').Snippet;
+		groups?: NavGroup[];
+		pathPrefix?: string;
+	} = $props();
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
-	const crumbs = $derived(buildBreadcrumbs(page.url.pathname, tenantSlug, SIDEBAR_NAV));
+	const pathPrefix = $derived(explicitPathPrefix ?? `/${tenantSlug}`);
+	const crumbs = $derived(buildBreadcrumbs(page.url.pathname, pathPrefix, groups));
 </script>
 
 <header class="ots-topbar">
 	<nav class="ots-crumbs" aria-label="Breadcrumbs">
-		<a href="/{tenantSlug}" class="ots-crumb-home" aria-label="Dashboard">
+		<a href={pathPrefix} class="ots-crumb-home" aria-label="Dashboard">
 			<HomeIcon class="size-3.5" />
 		</a>
 		{#each crumbs as crumb, i (i)}

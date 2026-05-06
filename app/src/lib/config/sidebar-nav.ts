@@ -245,17 +245,18 @@ export function filterByRole(groups: NavGroup[], role: string | undefined): NavG
 		.filter((g) => g.items.length > 0);
 }
 
-export function buildHref(tenantSlug: string, href?: string): string | undefined {
+// pathPrefix examples: "/ots" (admin) or "/client/ots" (client portal).
+export function buildHref(pathPrefix: string, href?: string): string | undefined {
 	if (!href) return undefined;
-	if (href === '/') return `/${tenantSlug}`;
-	return `/${tenantSlug}${href}`;
+	if (href === '/') return pathPrefix;
+	return `${pathPrefix}${href}`;
 }
 
-// True if `pathname` is on (or under) `targetHref` for the given tenant.
-function pathMatches(pathname: string, tenantSlug: string, targetHref: string): boolean {
-	const full = buildHref(tenantSlug, targetHref);
+// True if `pathname` is on (or under) `targetHref` for the given prefix.
+function pathMatches(pathname: string, pathPrefix: string, targetHref: string): boolean {
+	const full = buildHref(pathPrefix, targetHref);
 	if (!full) return false;
-	if (full === `/${tenantSlug}`) {
+	if (full === pathPrefix) {
 		return pathname === full || pathname === `${full}/`;
 	}
 	return pathname === full || pathname.startsWith(`${full}/`);
@@ -266,22 +267,22 @@ function pathMatches(pathname: string, tenantSlug: string, targetHref: string): 
 export function isItemActive(
 	item: NavItem,
 	pathname: string,
-	tenantSlug: string,
+	pathPrefix: string,
 	siblingHrefs: string[] = []
 ): boolean {
 	const candidates = item.matchPaths ?? (item.href ? [item.href] : []);
-	const matchesSelf = candidates.some((p) => pathMatches(pathname, tenantSlug, p));
+	const matchesSelf = candidates.some((p) => pathMatches(pathname, pathPrefix, p));
 	if (!matchesSelf) {
 		// Active if any child matches.
 		return (item.children ?? []).some((c) =>
-			c.href ? pathMatches(pathname, tenantSlug, c.href) : false
+			c.href ? pathMatches(pathname, pathPrefix, c.href) : false
 		);
 	}
 	// Exclude when a more-specific sibling claims the same prefix.
 	const targetHref = item.href ?? candidates[0];
 	if (!targetHref) return matchesSelf;
 	const moreSpecificSibling = siblingHrefs.find(
-		(s) => s !== targetHref && s.startsWith(`${targetHref}/`) && pathMatches(pathname, tenantSlug, s)
+		(s) => s !== targetHref && s.startsWith(`${targetHref}/`) && pathMatches(pathname, pathPrefix, s)
 	);
 	return !moreSpecificSibling;
 }
@@ -295,18 +296,17 @@ export interface Breadcrumb {
 // Falls back to a humanised path segment if no nav entry matches.
 export function buildBreadcrumbs(
 	pathname: string,
-	tenantSlug: string,
+	pathPrefix: string,
 	groups: NavGroup[]
 ): Breadcrumb[] {
-	if (!tenantSlug) return [];
-	const tenantPrefix = `/${tenantSlug}`;
-	if (!pathname.startsWith(tenantPrefix)) return [];
+	if (!pathPrefix) return [];
+	if (!pathname.startsWith(pathPrefix)) return [];
 
 	// Strip query/hash if any
 	const cleanPath = pathname.split('?')[0].split('#')[0];
-	const after = cleanPath.slice(tenantPrefix.length);
+	const after = cleanPath.slice(pathPrefix.length);
 	if (after === '' || after === '/') {
-		return [{ label: 'Dashboard', href: `/${tenantSlug}` }];
+		return [{ label: 'Dashboard', href: pathPrefix }];
 	}
 	const segments = after.replace(/^\//, '').split('/').filter(Boolean);
 
@@ -320,7 +320,7 @@ export function buildBreadcrumbs(
 		if (matched) {
 			out.push({
 				label: matched.parentLabel ? `${matched.label}` : matched.label,
-				href: `${tenantPrefix}${acc}`
+				href: `${pathPrefix}${acc}`
 			});
 			// If this is a child item, prepend the parent group/item context.
 			if (matched.parentLabel && out.length === 1) {
@@ -328,7 +328,7 @@ export function buildBreadcrumbs(
 					(p) => p.id === matched.parentId && p.parentLabel === undefined
 				);
 				if (parent && parent.href) {
-					out.unshift({ label: parent.label, href: `${tenantPrefix}${parent.href}` });
+					out.unshift({ label: parent.label, href: `${pathPrefix}${parent.href}` });
 				}
 			}
 		} else if (looksLikeId(seg)) {
@@ -358,10 +358,10 @@ function humaniseSegment(seg: string): string {
 }
 
 // Used by groups to know if any item should keep them visually expanded.
-export function isGroupActive(group: NavGroup, pathname: string, tenantSlug: string): boolean {
+export function isGroupActive(group: NavGroup, pathname: string, pathPrefix: string): boolean {
 	const allHrefs = group.items.flatMap((it) => [
 		...(it.href ? [it.href] : []),
 		...(it.children ?? []).map((c) => c.href).filter((h): h is string => Boolean(h))
 	]);
-	return group.items.some((it) => isItemActive(it, pathname, tenantSlug, allHrefs));
+	return group.items.some((it) => isItemActive(it, pathname, pathPrefix, allHrefs));
 }
