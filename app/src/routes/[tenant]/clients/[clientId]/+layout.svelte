@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
-	import { Breadcrumb } from '$lib/components/app/breadcrumb';
 	import { Button } from '$lib/components/ui/button';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
@@ -44,12 +43,6 @@
 	const invoices = $derived(invoicesQuery.current || []);
 	const contractsQuery = $derived(getContracts({ clientId }));
 	const contracts = $derived(contractsQuery.current?.contracts || []);
-
-	const breadcrumbItems = $derived([
-		{ label: data.tenant?.name || 'Organization', href: `/${tenantSlug}` },
-		{ label: 'Clients', href: `/${tenantSlug}/clients` },
-		{ label: client?.name || 'Client', href: `/${tenantSlug}/clients/${clientId}` }
-	]);
 
 	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/clients/${clientId}` },
@@ -148,8 +141,6 @@
 </script>
 
 <div class="space-y-6">
-	<Breadcrumb items={breadcrumbItems} />
-
 	<!-- Consistent header across all tabs -->
 	<div class="mb-2">
 		<Button variant="ghost" size="sm" class="mb-4" onclick={() => goto(`/${tenantSlug}/clients`)}>
