@@ -736,7 +736,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		padding: 7px 8px;
+		padding: 7px 32px 7px 8px;
 		border-radius: var(--ots-sb-radius);
 		color: var(--ots-sb-text);
 		text-decoration: none;
