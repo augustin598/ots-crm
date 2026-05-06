@@ -1,4 +1,4 @@
-CREATE TABLE `telegram_messages` (
+CREATE TABLE IF NOT EXISTS `telegram_messages` (
   `id` text PRIMARY KEY NOT NULL,
   `tenant_id` text,
   `user_id` text,

@@ -1,4 +1,4 @@
-CREATE TABLE `ads_optimization_task` (
+CREATE TABLE IF NOT EXISTS `ads_optimization_task` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`target_id` text NOT NULL,

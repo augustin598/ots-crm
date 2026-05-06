@@ -4782,3 +4782,29 @@ export const telegramMessage = sqliteTable(
 
 export type TelegramMessage = typeof telegramMessage.$inferSelect;
 export type NewTelegramMessage = typeof telegramMessage.$inferInsert;
+
+// Sidebar pinned/favorite menu items per user per tenant
+export const userSidebarPin = sqliteTable(
+	'user_sidebar_pin',
+	{
+		id: text('id').primaryKey(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		itemId: text('item_id').notNull(),
+		position: integer('position').notNull().default(0),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		userTenantIdx: index('user_sidebar_pin_user_tenant_idx').on(t.userId, t.tenantId),
+		uniqUserTenantItem: uniqueIndex('user_sidebar_pin_uniq').on(t.userId, t.tenantId, t.itemId)
+	})
+);
+
+export type UserSidebarPin = typeof userSidebarPin.$inferSelect;
+export type NewUserSidebarPin = typeof userSidebarPin.$inferInsert;

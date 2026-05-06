@@ -3,7 +3,7 @@ import type { LayoutServerLoad } from './$types';
 import * as tenantUtils from '$lib/server/tenant';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (!event.locals.user) {
@@ -36,9 +36,35 @@ export const load: LayoutServerLoad = async (event) => {
 	// Get all tenants for the user (for switcher)
 	const allTenants = await tenantUtils.getUserTenants(event.locals.user.id);
 
+	// Load sidebar pins (best-effort — empty list if anything fails)
+	let sidebarPins: string[] = [];
+	try {
+		const rows = await db
+			.select({ itemId: table.userSidebarPin.itemId })
+			.from(table.userSidebarPin)
+			.where(
+				and(
+					eq(table.userSidebarPin.userId, event.locals.user.id),
+					eq(table.userSidebarPin.tenantId, access.tenant.id)
+				)
+			)
+			.orderBy(asc(table.userSidebarPin.position), asc(table.userSidebarPin.createdAt));
+		sidebarPins = rows.map((r) => r.itemId);
+	} catch {
+		// Migration may not have run yet — graceful degradation.
+		sidebarPins = [];
+	}
+
 	return {
 		tenant: access.tenant,
 		tenantUser: access.tenantUser,
-		allTenants
+		allTenants,
+		sidebarPins,
+		user: {
+			id: event.locals.user.id,
+			email: event.locals.user.email,
+			firstName: event.locals.user.firstName,
+			lastName: event.locals.user.lastName
+		}
 	};
 };
