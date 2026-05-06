@@ -331,11 +331,23 @@ export function buildBreadcrumbs(
 					out.unshift({ label: parent.label, href: `${tenantPrefix}${parent.href}` });
 				}
 			}
+		} else if (looksLikeId(seg)) {
+			// Skip IDs in breadcrumbs (UUID, CUID, hex/numeric tokens).
+			continue;
 		} else {
 			out.push({ label: humaniseSegment(seg) });
 		}
 	}
 	return out;
+}
+
+function looksLikeId(seg: string): boolean {
+	// UUID v4: 8-4-4-4-12 = 36 chars; CUID typically 24-25 chars; numeric IDs >= 8 chars.
+	// Heuristic: contains a digit AND length >= 16, OR pure hex/numeric of length >= 8.
+	if (/^\d+$/.test(seg) && seg.length >= 6) return true;
+	if (seg.length >= 16 && /\d/.test(seg)) return true;
+	if (/^[0-9a-f]{8,}$/i.test(seg) && seg.length >= 16) return true;
+	return false;
 }
 
 function humaniseSegment(seg: string): string {
