@@ -35,14 +35,17 @@
 	import TeamKpiStrip from '$lib/components/team/TeamKpiStrip.svelte';
 	import TeamMemberCard from '$lib/components/team/TeamMemberCard.svelte';
 	import TeamMemberTable from '$lib/components/team/TeamMemberTable.svelte';
+	import TeamDeptLanes from '$lib/components/team/TeamDeptLanes.svelte';
 	import TeamInviteModal from '$lib/components/team/TeamInviteModal.svelte';
 	import TeamPendingInviteCard from '$lib/components/team/TeamPendingInviteCard.svelte';
 	import TeamPermissionsMatrix from '$lib/components/team/TeamPermissionsMatrix.svelte';
 	import TeamRoleGrid from '$lib/components/team/TeamRoleGrid.svelte';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import UsersIcon from '@lucide/svelte/icons/users';
 
 	let { data }: { data: PageData } = $props();
 
-	let view = $state<'grid' | 'table'>('grid');
+	let view = $state<'grid' | 'table' | 'lanes'>('grid');
 	let search = $state('');
 	let roleFilter = $state<'all' | AdminRoleId>('all');
 	let inviteOpen = $state(false);
@@ -186,6 +189,46 @@
 	function isExpired(d: Date | string): boolean {
 		return new Date(d).getTime() < Date.now();
 	}
+
+	function exportCsv() {
+		const rows = [
+			['Email', 'Nume', 'Rol', 'Departament', 'Titlu', 'Tasks active', 'Tasks done', 'Adăugat']
+		];
+		for (const m of data.members) {
+			const s = data.stats[m.userId];
+			const dept = getDepartment(m.department);
+			rows.push([
+				m.email,
+				`${m.firstName ?? ''} ${m.lastName ?? ''}`.trim(),
+				getAdminRole(m.role)?.label ?? m.role,
+				dept?.label ?? '',
+				m.title ?? '',
+				String(s?.active ?? 0),
+				String(s?.done ?? 0),
+				m.joinedAt ? dateFmt.format(new Date(m.joinedAt)) : ''
+			]);
+		}
+		const csv = rows
+			.map((r) =>
+				r
+					.map((cell) => {
+						const c = String(cell);
+						return /[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c;
+					})
+					.join(',')
+			)
+			.join('\n');
+		const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `team-${new Date().toISOString().slice(0, 10)}.csv`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+		toast.success(`Export CSV cu ${data.members.length} membri.`);
+	}
 </script>
 
 <div class="space-y-5">
@@ -205,6 +248,10 @@
 			<Button variant="outline" onclick={() => (permsOpen = true)}>
 				<LayersIcon class="mr-2 size-4" />
 				Permisiuni
+			</Button>
+			<Button variant="outline" onclick={exportCsv}>
+				<DownloadIcon class="mr-2 size-4" />
+				Export
 			</Button>
 			<Button onclick={() => (inviteOpen = true)}>
 				<PlusIcon class="mr-2 size-4" />
@@ -290,6 +337,14 @@
 			>
 				<ListIcon class="size-3" /> Tabel
 			</button>
+			<button
+				type="button"
+				class="view-btn"
+				class:active={view === 'lanes'}
+				onclick={() => (view = 'lanes')}
+			>
+				<UsersIcon class="size-3" /> Departamente
+			</button>
 		</div>
 	</div>
 
@@ -325,8 +380,13 @@
 				<TeamMemberCard member={toCardData(m)} onclick={() => openProfile(m)} />
 			{/each}
 		</div>
-	{:else}
+	{:else if view === 'table'}
 		<TeamMemberTable members={filteredMembers.map(toCardData)} onpick={(c) => {
+			const m = filteredMembers.find(x => x.tenantUserId === c.id);
+			if (m) openProfile(m);
+		}} />
+	{:else}
+		<TeamDeptLanes members={filteredMembers.map(toCardData)} onpick={(c) => {
 			const m = filteredMembers.find(x => x.tenantUserId === c.id);
 			if (m) openProfile(m);
 		}} />
