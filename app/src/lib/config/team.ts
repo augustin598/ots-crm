@@ -124,6 +124,26 @@ export function getDepartment(id: string | null | undefined): DepartmentDef | un
 }
 
 // =============================================================================
+// Skills catalog — for autocomplete in member profile editor
+// =============================================================================
+
+export const TEAM_SKILLS: ReadonlyArray<string> = [
+	'Meta Ads',
+	'TikTok Ads',
+	'Google Ads',
+	'SEO',
+	'Copywriting',
+	'Video Editing',
+	'React',
+	'Svelte',
+	'Node',
+	'Figma',
+	'Sales',
+	'Account Mgmt',
+	'Project Mgmt'
+];
+
+// =============================================================================
 // Client portal role presets — combinații predefinite de access flags
 // =============================================================================
 

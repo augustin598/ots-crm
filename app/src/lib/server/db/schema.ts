@@ -82,6 +82,9 @@ export const tenantUser = sqliteTable(
 		department: text('department'), // 'ads' | 'sales' | 'dev' | 'finance' | 'support' | 'ops' | null
 		title: text('title'), // free-form job title
 		phone: text('phone'),
+		skills: text('skills').default('[]'), // JSON array of skill labels
+		hourlyRate: text('hourly_rate'), // free-form display string e.g. "€55/h"
+		status: text('status').notNull().default('active'), // 'active' | 'suspended'
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_date`)
