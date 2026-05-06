@@ -46,7 +46,8 @@
 		pinsApiPath: explicitPinsApiPath,
 		subtitle,
 		logoutPath = '/login',
-		switchTenantUrlBuilder
+		switchTenantUrlBuilder,
+		badges = {}
 	}: {
 		tenant: { slug: string; name: string | null; website?: string | null } | null;
 		tenantUser: { role: string } | null;
@@ -59,7 +60,14 @@
 		subtitle?: string;
 		logoutPath?: string;
 		switchTenantUrlBuilder?: (slug: string) => string;
+		badges?: Record<string, number>;
 	} = $props();
+
+	function badgeFor(item: NavItem): number | undefined {
+		const fromProp = badges[item.id];
+		if (typeof fromProp === 'number' && fromProp > 0) return fromProp;
+		return item.badge;
+	}
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 	const pathPrefix = $derived(explicitPathPrefix ?? `/${tenantSlug}`);
@@ -322,6 +330,7 @@
 						{@const open = isItemOpen(item)}
 						{@const itemHref = buildHref(pathPrefix, item.href)}
 						{@const isPinned = pins.includes(item.id)}
+						{@const itemBadge = badgeFor(item)}
 						<div class="ots-sb-item-row">
 							{#if item.children && item.children.length > 0}
 								<button
@@ -334,8 +343,8 @@
 								>
 									<NavIcon icon={item.icon} class="ots-sb-icon" />
 									<span class="ots-sb-label">{item.label}</span>
-									{#if item.badge}
-										<span class="ots-sb-badge">{item.badge}</span>
+									{#if itemBadge}
+										<span class="ots-sb-badge">{itemBadge}</span>
 									{/if}
 									<ChevronRightIcon
 										class={cn(
@@ -392,8 +401,8 @@
 								>
 									<NavIcon icon={item.icon} class="ots-sb-icon" />
 									<span class="ots-sb-label">{item.label}</span>
-									{#if item.badge}
-										<span class="ots-sb-badge">{item.badge}</span>
+									{#if itemBadge}
+										<span class="ots-sb-badge">{itemBadge}</span>
 									{/if}
 								</a>
 								{#if pinsApiPath}

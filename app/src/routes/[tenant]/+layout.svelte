@@ -39,6 +39,7 @@
 			allTenants={data.allTenants ?? []}
 			user={data.user ?? null}
 			initialPins={data.sidebarPins ?? []}
+			badges={data.sidebarCounts ?? {}}
 		/>
 	</Sidebar>
 	<SidebarInset>

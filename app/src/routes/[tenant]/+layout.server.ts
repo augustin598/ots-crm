@@ -3,7 +3,7 @@ import type { LayoutServerLoad } from './$types';
 import * as tenantUtils from '$lib/server/tenant';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, not, sql } from 'drizzle-orm';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (!event.locals.user) {
@@ -36,6 +36,42 @@ export const load: LayoutServerLoad = async (event) => {
 	// Get all tenants for the user (for switcher)
 	const allTenants = await tenantUtils.getUserTenants(event.locals.user.id);
 
+	// Load lightweight aggregate counts for sidebar badges (best-effort).
+	// Each is a single COUNT(*) — fast with existing tenantId indexes.
+	const sidebarCounts: Record<string, number> = {};
+	try {
+		const [activeClients] = await db
+			.select({ c: sql<number>`count(*)` })
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, access.tenant.id), eq(table.client.status, 'active')));
+		sidebarCounts.clients = Number(activeClients?.c ?? 0);
+	} catch {
+		/* empty */
+	}
+	try {
+		const [openTasks] = await db
+			.select({ c: sql<number>`count(*)` })
+			.from(table.task)
+			.where(
+				and(
+					eq(table.task.tenantId, access.tenant.id),
+					not(inArray(table.task.status, ['done', 'cancelled']))
+				)
+			);
+		sidebarCounts.tasks = Number(openTasks?.c ?? 0);
+	} catch {
+		/* empty */
+	}
+	try {
+		const [newLeads] = await db
+			.select({ c: sql<number>`count(*)` })
+			.from(table.lead)
+			.where(and(eq(table.lead.tenantId, access.tenant.id), eq(table.lead.status, 'new')));
+		sidebarCounts.leads = Number(newLeads?.c ?? 0);
+	} catch {
+		/* empty */
+	}
+
 	// Load sidebar pins (best-effort — empty list if anything fails)
 	let sidebarPins: string[] = [];
 	try {
@@ -60,6 +96,7 @@ export const load: LayoutServerLoad = async (event) => {
 		tenantUser: access.tenantUser,
 		allTenants,
 		sidebarPins,
+		sidebarCounts,
 		user: {
 			id: event.locals.user.id,
 			email: event.locals.user.email,
