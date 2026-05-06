@@ -38,10 +38,16 @@ export const load: LayoutServerLoad = async (event) => {
 
 	// Load lightweight aggregate counts for sidebar badges (best-effort).
 	// Each is a single COUNT(*) — fast with existing tenantId indexes.
-	// We only show badges that map to actionable work, not totals — totals confuse users
-	// because the matching page often filters further (e.g. clients page uses a saved
-	// selection from localStorage).
 	const sidebarCounts: Record<string, number> = {};
+	try {
+		const [activeClients] = await db
+			.select({ c: sql<number>`count(*)` })
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, access.tenant.id), eq(table.client.status, 'active')));
+		sidebarCounts.clients = Number(activeClients?.c ?? 0);
+	} catch {
+		/* empty */
+	}
 	try {
 		const [openTasks] = await db
 			.select({ c: sql<number>`count(*)` })
