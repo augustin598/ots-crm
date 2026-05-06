@@ -13,13 +13,8 @@
 		deleteClientWebsite,
 		setDefaultClientWebsite
 	} from '$lib/remotes/client-websites.remote';
-	import {
-		getClientSecondaryEmails,
-		createClientSecondaryEmail,
-		deleteClientSecondaryEmail,
-		updateClientSecondaryEmailAccess
-	} from '$lib/remotes/client-secondary-emails.remote';
 	import { getCompanyData } from '$lib/remotes/anaf.remote';
+	import ClientTeamEditor from '$lib/components/team/ClientTeamEditor.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -75,89 +70,6 @@
 
 	function handleRefreshLogo(websiteId: string) {
 		faviconKeys = { ...faviconKeys, [websiteId]: (faviconKeys[websiteId] ?? 0) + 1 };
-	}
-
-	// Secondary emails
-	const secondaryEmailsQuery = $derived(getClientSecondaryEmails(clientId as string));
-	const secondaryEmails = $derived(secondaryEmailsQuery?.current || []);
-	let newSecondaryEmail = $state('');
-	let newSecondaryLabel = $state('');
-	let showAddSecondaryEmail = $state(false);
-	let addingSecondaryEmail = $state(false);
-	let addSecondaryEmailError = $state<string | null>(null);
-
-	async function handleAddSecondaryEmail() {
-		if (!newSecondaryEmail.trim()) {
-			addSecondaryEmailError = 'Emailul este obligatoriu';
-			return;
-		}
-		addingSecondaryEmail = true;
-		addSecondaryEmailError = null;
-		try {
-			await createClientSecondaryEmail({
-				clientId: clientId as string,
-				email: newSecondaryEmail.trim(),
-				label: newSecondaryLabel.trim() || undefined
-			}).updates(secondaryEmailsQuery);
-			newSecondaryEmail = '';
-			newSecondaryLabel = '';
-			showAddSecondaryEmail = false;
-			toast.success('Email secundar adăugat');
-		} catch (e) {
-			addSecondaryEmailError = e instanceof Error ? e.message : 'Eroare la adăugare';
-		} finally {
-			addingSecondaryEmail = false;
-		}
-	}
-
-	async function handleDeleteSecondaryEmail(id: string) {
-		if (!confirm('Sigur vrei să ștergi acest email secundar?')) return;
-		try {
-			await deleteClientSecondaryEmail({ secondaryEmailId: id }).updates(secondaryEmailsQuery);
-			toast.success('Email secundar șters');
-		} catch (e) {
-			clientLogger.apiError('client_delete_secondary_email', e);
-		}
-	}
-
-	type AccessCategory =
-		| 'invoices' | 'contracts' | 'tasks'
-		| 'marketing' | 'reports' | 'leads'
-		| 'accessData' | 'backlinks' | 'budgets';
-
-	const ACCESS_CHIPS: { key: AccessCategory; label: string }[] = [
-		{ key: 'invoices', label: 'Facturi' },
-		{ key: 'contracts', label: 'Contracte' },
-		{ key: 'tasks', label: 'Taskuri' },
-		{ key: 'marketing', label: 'Marketing' },
-		{ key: 'reports', label: 'Reports' },
-		{ key: 'leads', label: 'Leads' },
-		{ key: 'accessData', label: 'Date acces' },
-		{ key: 'backlinks', label: 'Backlinks' },
-		{ key: 'budgets', label: 'Bugete' }
-	];
-
-	async function handleToggleAccess(
-		secondaryEmailId: string,
-		category: AccessCategory,
-		value: boolean
-	) {
-		const se = secondaryEmails.find((s: any) => s.id === secondaryEmailId);
-		if (!se) return;
-		const current = se.accessFlagsResolved ?? {
-			invoices: false, contracts: false, tasks: false,
-			marketing: false, reports: false, leads: false,
-			accessData: false, backlinks: false, budgets: false
-		};
-		const next = { ...current, [category]: value };
-		try {
-			await updateClientSecondaryEmailAccess({
-				secondaryEmailId,
-				accessFlags: next
-			}).updates(secondaryEmailsQuery);
-		} catch (e) {
-			clientLogger.apiError('client_toggle_access', e);
-		}
 	}
 
 	let name = $state('');
@@ -423,101 +335,8 @@
 							</div>
 						</div>
 
-						<!-- Emailuri Secundare -->
-						<div class="space-y-2">
-							<div class="flex items-center justify-between">
-								<Label>Emailuri Secundare (acces portal)</Label>
-								{#if !showAddSecondaryEmail}
-									<Button type="button" variant="outline" size="sm" onclick={() => { showAddSecondaryEmail = true; }}>
-										<PlusIcon class="h-3.5 w-3.5 mr-1" />
-										Adaugă
-									</Button>
-								{/if}
-							</div>
-
-							{#if secondaryEmails.length > 0}
-								<div class="space-y-2">
-									{#each secondaryEmails as se (se.id)}
-										<div class="rounded-lg border bg-card px-3 py-2.5 group hover:bg-muted/30 transition-colors">
-											<div class="flex items-center gap-2">
-												<div class="flex-1 min-w-0">
-													<p class="text-sm font-medium">{se.email}</p>
-													{#if se.label}
-														<p class="text-xs text-muted-foreground">{se.label}</p>
-													{/if}
-												</div>
-												<Button
-													type="button"
-													variant="ghost"
-													size="sm"
-													class="h-7 w-7 p-0 text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-													onclick={() => handleDeleteSecondaryEmail(se.id)}
-												>
-													<TrashIcon class="h-3.5 w-3.5" />
-												</Button>
-											</div>
-											<div class="flex items-start gap-1.5 mt-2 flex-wrap">
-												<span class="text-[10px] text-muted-foreground mr-0.5 mt-0.5">Acces:</span>
-												{#each ACCESS_CHIPS as chip (chip.key)}
-													{@const active = se.accessFlagsResolved?.[chip.key] ?? false}
-													<button
-														type="button"
-														class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border transition-all cursor-pointer {active ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-muted-foreground/50'}"
-														onclick={() => handleToggleAccess(se.id, chip.key, !active)}
-													>
-														{#if active}<CheckIcon class="h-3 w-3" />{/if}
-														{chip.label}
-													</button>
-												{/each}
-											</div>
-										</div>
-									{/each}
-								</div>
-							{/if}
-
-							{#if showAddSecondaryEmail}
-								<div class="rounded-lg border border-dashed border-primary/40 bg-muted/20 p-3 space-y-2">
-									<p class="text-xs font-medium text-muted-foreground">Email secundar nou</p>
-									<div class="grid grid-cols-2 gap-2">
-										<div class="space-y-1">
-											<p class="text-xs text-muted-foreground">Email *</p>
-											<Input
-												bind:value={newSecondaryEmail}
-												type="email"
-												placeholder="contact@firma.ro"
-												class="h-8 text-sm"
-												onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSecondaryEmail(); } }}
-											/>
-										</div>
-										<div class="space-y-1">
-											<p class="text-xs text-muted-foreground">Etichetă (opțional)</p>
-											<Input
-												bind:value={newSecondaryLabel}
-												placeholder="ex: Contabilitate"
-												class="h-8 text-sm"
-											/>
-										</div>
-									</div>
-									{#if addSecondaryEmailError}
-										<p class="text-xs text-destructive">{addSecondaryEmailError}</p>
-									{/if}
-									<div class="flex justify-end gap-2">
-										<Button type="button" variant="ghost" size="sm" onclick={() => { showAddSecondaryEmail = false; addSecondaryEmailError = null; newSecondaryEmail = ''; newSecondaryLabel = ''; }} disabled={addingSecondaryEmail}>
-											<XIcon class="h-3.5 w-3.5 mr-1" />
-											Anulare
-										</Button>
-										<Button type="button" size="sm" onclick={handleAddSecondaryEmail} disabled={addingSecondaryEmail || !newSecondaryEmail.trim()}>
-											<PlusIcon class="h-3.5 w-3.5 mr-1" />
-											{addingSecondaryEmail ? 'Se adaugă...' : 'Adaugă'}
-										</Button>
-									</div>
-								</div>
-							{/if}
-
-							<p class="text-xs text-muted-foreground">
-								Bifați paginile pe care fiecare contact secundar le poate vedea în portal. Notificările (Facturi, Taskuri, Contracte) se trimit doar dacă acea categorie e bifată. Contactul principal are acces complet automat.
-							</p>
-						</div>
+						<!-- Emailuri Secundare (extras în component reutilizabil) -->
+						<ClientTeamEditor clientId={clientId as string} mode="admin" />
 
 						<!-- Website-uri -->
 						<div class="space-y-2">
