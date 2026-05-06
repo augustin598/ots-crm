@@ -22,9 +22,15 @@
 		getClientRolePreset,
 		avatarColor,
 		avatarInitials,
-		type ClientRolePresetId
+		ACCESS_CATEGORIES,
+		type ClientRolePresetId,
+		type AccessFlags
 	} from '$lib/config/team';
-	import { ACCESS_CATEGORIES, NO_ACCESS, type AccessFlags } from '$lib/server/portal-access';
+
+	const NO_ACCESS_LOCAL: AccessFlags = {
+		invoices: false, contracts: false, tasks: false, marketing: false,
+		reports: false, leads: false, accessData: false, backlinks: false, budgets: false
+	};
 	import TeamMemberCard from './TeamMemberCard.svelte';
 	import TeamInviteModal from './TeamInviteModal.svelte';
 
@@ -59,7 +65,7 @@
 	];
 
 	function resolvedFlags(se: { accessFlagsResolved?: Partial<AccessFlags> | null }): AccessFlags {
-		const base: AccessFlags = { ...NO_ACCESS };
+		const base: AccessFlags = { ...NO_ACCESS_LOCAL };
 		if (se.accessFlagsResolved) {
 			for (const k of ACCESS_CATEGORIES) {
 				const v = se.accessFlagsResolved[k];
