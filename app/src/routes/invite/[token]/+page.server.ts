@@ -1,29 +1,126 @@
 import type { PageServerLoad } from './$types';
-import { getInvitationByToken } from '$lib/remotes/invitations.remote';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq } from 'drizzle-orm';
+
+type LoadedInvitation = {
+	id: string;
+	email: string;
+	role: string;
+	department: string | null;
+	title: string | null;
+	expiresAt: Date;
+	tenant: { id: string; name: string; slug: string };
+	invitedBy: {
+		id: string;
+		email: string;
+		firstName: string | null;
+		lastName: string | null;
+	};
+};
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	const token = params.token;
+	const isLoggedIn = !!locals.user;
 
 	if (!token) {
 		return {
-			invitation: null,
-			error: 'Invalid invitation link',
-			isLoggedIn: !!locals.user
+			invitation: null as LoadedInvitation | null,
+			error: 'Link de invitație invalid.',
+			isLoggedIn
 		};
 	}
 
-	try {
-		const invitation = await getInvitationByToken(token);
+	const [row] = await db
+		.select({
+			invitation: table.invitation,
+			tenant: {
+				id: table.tenant.id,
+				name: table.tenant.name,
+				slug: table.tenant.slug
+			},
+			invitedBy: {
+				id: table.user.id,
+				email: table.user.email,
+				firstName: table.user.firstName,
+				lastName: table.user.lastName
+			}
+		})
+		.from(table.invitation)
+		.innerJoin(table.tenant, eq(table.invitation.tenantId, table.tenant.id))
+		.innerJoin(table.user, eq(table.invitation.invitedByUserId, table.user.id))
+		.where(eq(table.invitation.token, token))
+		.limit(1);
+
+	if (!row) {
 		return {
-			invitation,
-			error: null,
-			isLoggedIn: !!locals.user
-		};
-	} catch (error) {
-		return {
-			invitation: null,
-			error: error instanceof Error ? error.message : 'Invalid or expired invitation',
-			isLoggedIn: !!locals.user
+			invitation: null as LoadedInvitation | null,
+			error: 'Token de invitație invalid.',
+			isLoggedIn
 		};
 	}
+
+	if (row.invitation.expiresAt < new Date()) {
+		// Best-effort: mark as expired (don't fail page load if write fails)
+		try {
+			await db
+				.update(table.invitation)
+				.set({ status: 'expired' })
+				.where(eq(table.invitation.id, row.invitation.id));
+		} catch {
+			// ignore
+		}
+		return {
+			invitation: null as LoadedInvitation | null,
+			error: 'Invitația a expirat.',
+			isLoggedIn
+		};
+	}
+
+	if (row.invitation.status === 'cancelled') {
+		return {
+			invitation: null as LoadedInvitation | null,
+			error: 'Această invitație a fost anulată.',
+			isLoggedIn
+		};
+	}
+
+	if (row.invitation.status === 'accepted') {
+		return {
+			invitation: null as LoadedInvitation | null,
+			error: 'Invitația a fost deja acceptată.',
+			isLoggedIn
+		};
+	}
+
+	if (row.invitation.status === 'expired') {
+		return {
+			invitation: null as LoadedInvitation | null,
+			error: 'Invitația a expirat.',
+			isLoggedIn
+		};
+	}
+
+	if (row.invitation.status !== 'pending') {
+		return {
+			invitation: null as LoadedInvitation | null,
+			error: `Invitație inactivă (${row.invitation.status}).`,
+			isLoggedIn
+		};
+	}
+
+	return {
+		invitation: {
+			id: row.invitation.id,
+			email: row.invitation.email,
+			role: row.invitation.role,
+			department: row.invitation.department,
+			title: row.invitation.title,
+			expiresAt: row.invitation.expiresAt,
+			tenant: row.tenant,
+			invitedBy: row.invitedBy
+		} satisfies LoadedInvitation,
+		error: null,
+		isLoggedIn
+	};
 };
