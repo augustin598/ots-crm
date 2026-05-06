@@ -2,8 +2,9 @@ import * as v from 'valibot';
 import { command, query } from '$app/server';
 import { lucia } from '../server/lucia';
 import { db } from '../server/db';
-import { user, adminMagicLinkToken, passwordResetToken, tenantUser } from '../server/db/schema';
+import { user, adminMagicLinkToken, passwordResetToken, tenantUser, invitation } from '../server/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
+import { logError } from '../server/logger';
 import { hash, verify } from '@node-rs/argon2';
 import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
@@ -362,13 +363,62 @@ export const requestPasswordReset = command(
 				};
 			}
 
-			const [userRecord] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+			const normalizedEmail = email.trim().toLowerCase();
+			const [userRecord] = await db
+				.select()
+				.from(user)
+				.where(eq(user.email, normalizedEmail))
+				.limit(1);
+
+			// Generic response — never reveal whether email exists (security)
+			const GENERIC_OK = {
+				success: true,
+				message: 'Dacă există un cont pentru acest email, a fost trimis un link de resetare.'
+			};
 
 			if (!userRecord) {
-				return {
-					success: true,
-					message: 'If an account exists with this email, a password reset link has been sent.'
-				};
+				return GENERIC_OK;
+			}
+
+			// Find user's tenant. Try active membership first, then fall back to a
+			// tenant from a pending invitation (so orphan users invited to a tenant
+			// can still get email via that tenant's Gmail/SMTP).
+			const [activeTenant] = await db
+				.select({ tenantId: tenantUser.tenantId })
+				.from(tenantUser)
+				.where(
+					and(
+						eq(tenantUser.userId, userRecord.id),
+						eq(tenantUser.status, 'active')
+					)
+				)
+				.limit(1);
+
+			let resolvedTenantId: string | null = activeTenant?.tenantId ?? null;
+
+			if (!resolvedTenantId) {
+				// Orphan user — try to use a pending invitation's tenant
+				const [pendingInv] = await db
+					.select({ tenantId: invitation.tenantId })
+					.from(invitation)
+					.where(
+						and(
+							eq(invitation.email, normalizedEmail),
+							eq(invitation.status, 'pending')
+						)
+					)
+					.limit(1);
+				resolvedTenantId = pendingInv?.tenantId ?? null;
+			}
+
+			if (!resolvedTenantId) {
+				// Orphan account with no tenant context AND no pending invitations.
+				// Don't send email — there's no useful workspace to log into anyway.
+				// Return generic message (don't leak the orphan state).
+				logError('auth', 'Password reset blocked for orphan account', {
+					metadata: { email: normalizedEmail, userId: userRecord.id }
+				});
+				return GENERIC_OK;
 			}
 
 			const plainToken = generateMagicLinkToken();
@@ -394,25 +444,21 @@ export const requestPasswordReset = command(
 				expiresAt
 			});
 
-			// Find user's primary tenant for email transporter
-			const [resetUserTenant] = await db
-				.select({ tenantId: tenantUser.tenantId })
-				.from(tenantUser)
-				.where(eq(tenantUser.userId, userRecord.id))
-				.limit(1);
-
 			try {
 				await sendPasswordResetEmail(
 					email,
 					plainToken,
-					userRecord.firstName + ' ' + userRecord.lastName,
-					resetUserTenant?.tenantId
+					`${userRecord.firstName ?? ''} ${userRecord.lastName ?? ''}`.trim() || email,
+					resolvedTenantId
 				);
 			} catch (emailError) {
-				console.error('Failed to send password reset email:', emailError);
+				logError('auth', 'Failed to send password reset email', {
+					metadata: { email: normalizedEmail, tenantId: resolvedTenantId },
+					stackTrace: emailError instanceof Error ? emailError.stack : undefined
+				});
 				return {
 					success: false,
-					message: 'Failed to send email. Please try again later.',
+					message: 'Trimiterea emailului a eșuat. Reîncearcă în câteva minute.',
 					error: 'Email send failed'
 				};
 			}
