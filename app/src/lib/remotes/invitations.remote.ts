@@ -19,7 +19,11 @@ function generateInvitationToken() {
 
 const sendInvitationSchema = v.object({
 	email: v.pipe(v.string(), v.email('Invalid email address')),
-	role: v.optional(v.picklist(['owner', 'admin', 'member'], 'Invalid role'))
+	role: v.optional(v.picklist(['admin', 'manager', 'member', 'viewer'], 'Invalid role')),
+	department: v.optional(
+		v.union([v.picklist(['ads', 'sales', 'dev', 'finance', 'support', 'ops']), v.null()])
+	),
+	title: v.optional(v.union([v.pipe(v.string(), v.maxLength(120)), v.null()]))
 });
 
 /**
@@ -36,7 +40,7 @@ export const sendInvitation = command(sendInvitationSchema, async (data) => {
 		throw new Error('Insufficient permissions');
 	}
 
-	const { email, role = 'member' } = data;
+	const { email, role = 'member', department = null, title = null } = data;
 
 	// Check if user already exists and is in tenant
 	const [existingUser] = await db
@@ -89,7 +93,9 @@ export const sendInvitation = command(sendInvitationSchema, async (data) => {
 		token,
 		invitedByUserId: event.locals.user.id,
 		status: 'pending',
-		expiresAt
+		expiresAt,
+		department,
+		title
 	});
 
 	// Send email
@@ -292,13 +298,15 @@ export const acceptInvitation = command(
 			throw new Error('You are already a member of this organization');
 		}
 
-		// Create tenantUser relationship
+		// Create tenantUser relationship — carry-over department/title from invitation
 		const tenantUserId = generateInvitationId();
 		await db.insert(table.tenantUser).values({
 			id: tenantUserId,
 			tenantId: invitation.tenantId,
 			userId: event.locals.user.id,
-			role: invitation.role
+			role: invitation.role,
+			department: invitation.department ?? null,
+			title: invitation.title ?? null
 		});
 
 		// Mark invitation as accepted

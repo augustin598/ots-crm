@@ -1765,6 +1765,41 @@
       "when": 1746633600000,
       "tag": "0251_tenant_user_uniq",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "6",
+      "when": 1746633600001,
+      "tag": "0252_tenant_user_department",
+      "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "6",
+      "when": 1746633600002,
+      "tag": "0253_tenant_user_title",
+      "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "6",
+      "when": 1746633600003,
+      "tag": "0254_tenant_user_phone",
+      "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "6",
+      "when": 1746633600004,
+      "tag": "0255_invitation_department",
+      "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "6",
+      "when": 1746633600005,
+      "tag": "0256_invitation_title",
+      "breakpoints": true
     }
   ]
 }

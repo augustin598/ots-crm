@@ -78,7 +78,10 @@ export const tenantUser = sqliteTable(
 		userId: text('user_id')
 			.notNull()
 			.references(() => user.id),
-		role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
+		role: text('role').notNull().default('member'), // 'owner', 'admin', 'manager', 'member', 'viewer'
+		department: text('department'), // 'ads' | 'sales' | 'dev' | 'finance' | 'support' | 'ops' | null
+		title: text('title'), // free-form job title
+		phone: text('phone'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_date`)
@@ -94,7 +97,7 @@ export const invitation = sqliteTable('invitation', {
 		.notNull()
 		.references(() => tenant.id),
 	email: text('email').notNull(),
-	role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
+	role: text('role').notNull().default('member'), // 'owner', 'admin', 'manager', 'member', 'viewer'
 	token: text('token').notNull().unique(),
 	invitedByUserId: text('invited_by_user_id')
 		.notNull()
@@ -102,6 +105,8 @@ export const invitation = sqliteTable('invitation', {
 	status: text('status').notNull().default('pending'), // 'pending', 'accepted', 'expired', 'cancelled'
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
 	acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'date' }),
+	department: text('department'), // carry-over to tenantUser at accept
+	title: text('title'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)

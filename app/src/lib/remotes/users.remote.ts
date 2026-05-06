@@ -10,7 +10,7 @@ export const getTenantUsers = query(async () => {
 		throw new Error('Unauthorized');
 	}
 
-	// Returns one row per tenantUser with the joined user info + role + joinedAt.
+	// Returns one row per tenantUser with the joined user info + role + meta.
 	const tenantUsers = await db
 		.select({
 			tenantUserId: table.tenantUser.id,
@@ -19,6 +19,9 @@ export const getTenantUsers = query(async () => {
 			firstName: table.user.firstName,
 			lastName: table.user.lastName,
 			role: table.tenantUser.role,
+			department: table.tenantUser.department,
+			title: table.tenantUser.title,
+			phone: table.tenantUser.phone,
 			joinedAt: table.tenantUser.createdAt
 		})
 		.from(table.tenantUser)
@@ -30,7 +33,7 @@ export const getTenantUsers = query(async () => {
 
 const updateRoleSchema = v.object({
 	tenantUserId: v.pipe(v.string(), v.minLength(1)),
-	role: v.picklist(['admin', 'member'])
+	role: v.picklist(['admin', 'manager', 'member', 'viewer'])
 });
 
 /**
@@ -66,6 +69,50 @@ export const updateTenantUserRole = command(updateRoleSchema, async ({ tenantUse
 		.update(table.tenantUser)
 		.set({ role })
 		.where(eq(table.tenantUser.id, tenantUserId));
+	return { ok: true };
+});
+
+const updateMetaSchema = v.object({
+	tenantUserId: v.pipe(v.string(), v.minLength(1)),
+	department: v.optional(v.union([v.picklist(['ads', 'sales', 'dev', 'finance', 'support', 'ops']), v.null()])),
+	title: v.optional(v.union([v.pipe(v.string(), v.maxLength(120)), v.null()])),
+	phone: v.optional(v.union([v.pipe(v.string(), v.maxLength(40)), v.null()]))
+});
+
+/**
+ * Owner / admin can update meta fields (department, title, phone) for any
+ * member. The actor cannot change another owner's meta unless they're the
+ * owner themselves.
+ */
+export const updateTenantUserMeta = command(updateMetaSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
+		throw new Error('Unauthorized');
+	}
+	const actorRole = event.locals.tenantUser.role;
+	if (actorRole !== 'owner' && actorRole !== 'admin') {
+		throw new Error('Doar owner / admin pot edita profilul.');
+	}
+	const [target] = await db
+		.select()
+		.from(table.tenantUser)
+		.where(
+			and(
+				eq(table.tenantUser.id, data.tenantUserId),
+				eq(table.tenantUser.tenantId, event.locals.tenant.id)
+			)
+		)
+		.limit(1);
+	if (!target) throw new Error('Membrul nu există.');
+	if (target.role === 'owner' && actorRole !== 'owner') {
+		throw new Error('Doar owner-ul își poate edita propriul profil.');
+	}
+	const patch: Record<string, string | null> = {};
+	if ('department' in data) patch.department = data.department ?? null;
+	if ('title' in data) patch.title = data.title ?? null;
+	if ('phone' in data) patch.phone = data.phone ?? null;
+	if (Object.keys(patch).length === 0) return { ok: true };
+	await db.update(table.tenantUser).set(patch).where(eq(table.tenantUser.id, data.tenantUserId));
 	return { ok: true };
 });
 
