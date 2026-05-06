@@ -286,6 +286,65 @@ export function isItemActive(
 	return !moreSpecificSibling;
 }
 
+export interface Breadcrumb {
+	label: string;
+	href?: string;
+}
+
+// Build breadcrumbs from the current pathname using SIDEBAR_NAV as label source.
+// Falls back to a humanised path segment if no nav entry matches.
+export function buildBreadcrumbs(
+	pathname: string,
+	tenantSlug: string,
+	groups: NavGroup[]
+): Breadcrumb[] {
+	if (!tenantSlug) return [];
+	const tenantPrefix = `/${tenantSlug}`;
+	if (!pathname.startsWith(tenantPrefix)) return [];
+
+	// Strip query/hash if any
+	const cleanPath = pathname.split('?')[0].split('#')[0];
+	const after = cleanPath.slice(tenantPrefix.length);
+	if (after === '' || after === '/') {
+		return [{ label: 'Dashboard', href: `/${tenantSlug}` }];
+	}
+	const segments = after.replace(/^\//, '').split('/').filter(Boolean);
+
+	// Walk the segments, accumulating href and matching against nav items.
+	const flat = flattenNav(groups);
+	const out: Breadcrumb[] = [];
+	let acc = '';
+	for (const seg of segments) {
+		acc += `/${seg}`;
+		const matched = flat.find((it) => it.href === acc);
+		if (matched) {
+			out.push({
+				label: matched.parentLabel ? `${matched.label}` : matched.label,
+				href: `${tenantPrefix}${acc}`
+			});
+			// If this is a child item, prepend the parent group/item context.
+			if (matched.parentLabel && out.length === 1) {
+				const parent = flat.find(
+					(p) => p.id === matched.parentId && p.parentLabel === undefined
+				);
+				if (parent && parent.href) {
+					out.unshift({ label: parent.label, href: `${tenantPrefix}${parent.href}` });
+				}
+			}
+		} else {
+			out.push({ label: humaniseSegment(seg) });
+		}
+	}
+	return out;
+}
+
+function humaniseSegment(seg: string): string {
+	return decodeURIComponent(seg)
+		.replace(/-/g, ' ')
+		.replace(/_/g, ' ')
+		.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // Used by groups to know if any item should keep them visually expanded.
 export function isGroupActive(group: NavGroup, pathname: string, tenantSlug: string): boolean {
 	const allHrefs = group.items.flatMap((it) => [
