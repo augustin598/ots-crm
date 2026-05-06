@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 type LoadedInvitation = {
 	id: string;
@@ -19,16 +19,32 @@ type LoadedInvitation = {
 	};
 };
 
-export const load: PageServerLoad = async ({ params, locals }) => {
+type LoadResult = {
+	invitation: LoadedInvitation | null;
+	error: string | null;
+	isLoggedIn: boolean;
+	loggedInEmail: string | null;
+	emailMismatch: boolean;
+	alreadyMember: boolean;
+	memberTenantSlug: string | null;
+};
+
+export const load: PageServerLoad = async ({ params, locals }): Promise<LoadResult> => {
 	const token = params.token;
 	const isLoggedIn = !!locals.user;
+	const loggedInEmail = locals.user?.email ?? null;
+
+	const baseEmpty = {
+		invitation: null,
+		isLoggedIn,
+		loggedInEmail,
+		emailMismatch: false,
+		alreadyMember: false,
+		memberTenantSlug: null
+	} as const;
 
 	if (!token) {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Link de invitație invalid.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Link de invitație invalid.' };
 	}
 
 	const [row] = await db
@@ -53,15 +69,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		.limit(1);
 
 	if (!row) {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Token de invitație invalid.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Token de invitație invalid.' };
 	}
 
 	if (row.invitation.expiresAt < new Date()) {
-		// Best-effort: mark as expired (don't fail page load if write fails)
 		try {
 			await db
 				.update(table.invitation)
@@ -70,43 +81,46 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		} catch {
 			// ignore
 		}
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Invitația a expirat.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Invitația a expirat.' };
 	}
 
 	if (row.invitation.status === 'cancelled') {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Această invitație a fost anulată.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Această invitație a fost anulată.' };
 	}
-
 	if (row.invitation.status === 'accepted') {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Invitația a fost deja acceptată.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Invitația a fost deja acceptată.' };
 	}
-
 	if (row.invitation.status === 'expired') {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Invitația a expirat.',
-			isLoggedIn
-		};
+		return { ...baseEmpty, error: 'Invitația a expirat.' };
+	}
+	if (row.invitation.status !== 'pending') {
+		return { ...baseEmpty, error: `Invitație inactivă (${row.invitation.status}).` };
 	}
 
-	if (row.invitation.status !== 'pending') {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: `Invitație inactivă (${row.invitation.status}).`,
-			isLoggedIn
-		};
+	const invEmail = row.invitation.email.trim().toLowerCase();
+	const userEmail = (loggedInEmail ?? '').trim().toLowerCase();
+	const emailMismatch = isLoggedIn && userEmail !== invEmail;
+
+	// If logged-in user is already a member of this tenant — show "already member"
+	let alreadyMember = false;
+	let memberTenantSlug: string | null = null;
+	if (isLoggedIn && locals.user) {
+		const [existing] = await db
+			.select({ slug: table.tenant.slug })
+			.from(table.tenantUser)
+			.innerJoin(table.tenant, eq(table.tenant.id, table.tenantUser.tenantId))
+			.where(
+				and(
+					eq(table.tenantUser.tenantId, row.tenant.id),
+					eq(table.tenantUser.userId, locals.user.id),
+					eq(table.tenantUser.status, 'active')
+				)
+			)
+			.limit(1);
+		if (existing) {
+			alreadyMember = true;
+			memberTenantSlug = existing.slug;
+		}
 	}
 
 	return {
@@ -119,8 +133,12 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 			expiresAt: row.invitation.expiresAt,
 			tenant: row.tenant,
 			invitedBy: row.invitedBy
-		} satisfies LoadedInvitation,
+		},
 		error: null,
-		isLoggedIn
+		isLoggedIn,
+		loggedInEmail,
+		emailMismatch,
+		alreadyMember,
+		memberTenantSlug
 	};
 };

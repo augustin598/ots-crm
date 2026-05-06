@@ -105,6 +105,51 @@
 					</div>
 					<Button onclick={() => goto('/')} class="w-full">Înapoi la pagina principală</Button>
 				</div>
+			{:else if inv && data.alreadyMember}
+				<div class="space-y-4">
+					<div class="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-5 dark:border-blue-800 dark:bg-blue-950">
+						<CheckIcon class="mt-0.5 size-5 shrink-0 text-blue-600 dark:text-blue-400" />
+						<div>
+							<p class="font-medium text-blue-900 dark:text-blue-100">Ești deja membru</p>
+							<p class="mt-1 text-sm text-blue-800 dark:text-blue-200">
+								Faci deja parte din <strong>{tenant?.name}</strong>. Nu este nevoie să accepți din nou.
+							</p>
+						</div>
+					</div>
+					<Button
+						onclick={() => goto(`/${data.memberTenantSlug ?? tenant?.slug ?? ''}`)}
+						class="w-full"
+						size="lg"
+					>
+						Mergi la workspace
+					</Button>
+				</div>
+			{:else if inv && data.emailMismatch}
+				<div class="space-y-4">
+					<div class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950">
+						<AlertTriangleIcon class="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+						<div class="space-y-2">
+							<p class="font-medium text-amber-900 dark:text-amber-100">Cont greșit</p>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								Această invitație a fost trimisă către <strong>{inv.email}</strong>, dar
+								ești logat ca <strong>{data.loggedInEmail}</strong>.
+							</p>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								Deconectează-te și loghează-te cu contul corect pentru a accepta.
+							</p>
+						</div>
+					</div>
+					<Button
+						onclick={() =>
+							goto('/login?redirect=' + encodeURIComponent('/invite/' + token))}
+						class="w-full"
+						size="lg"
+						variant="outline"
+					>
+						<LogInIcon class="mr-2 size-4" />
+						Deconectează-te și loghează cu altul cont
+					</Button>
+				</div>
 			{:else if inv}
 				<div class="space-y-2 mb-8">
 					<h1 class="text-2xl font-bold tracking-tight">Bun venit în echipă!</h1>
