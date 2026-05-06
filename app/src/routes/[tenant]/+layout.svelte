@@ -5,6 +5,7 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import OtsSidebar from '$lib/components/ots-sidebar/OtsSidebar.svelte';
+	import OtsTopbar from '$lib/components/ots-sidebar/OtsTopbar.svelte';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -41,6 +42,7 @@
 		/>
 	</Sidebar>
 	<SidebarInset>
+		<OtsTopbar />
 		<main class="min-w-0 flex-1 overflow-x-hidden p-6">
 			{@render children()}
 		</main>
