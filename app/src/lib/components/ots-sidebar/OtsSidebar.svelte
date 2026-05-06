@@ -436,12 +436,12 @@
 		/* Forțăm paleta DARK în interiorul sidebar-ului indiferent de tema globală.
 		   Popover-urile (tenant switcher, user menu) și command palette
 		   sunt în portal — moștenesc tema globală a aplicației. */
-		--ots-sb-bg: oklch(0.16 0.02 252);
-		--ots-sb-surface: oklch(0.22 0.025 252);
-		--ots-sb-surface-hover: oklch(0.27 0.03 252);
-		--ots-sb-text: oklch(0.82 0.02 252);
-		--ots-sb-text-strong: oklch(0.97 0.02 252);
-		--ots-sb-muted: oklch(0.6 0.02 258);
+		--ots-sb-bg: #0e172a;
+		--ots-sb-surface: #1e293b;
+		--ots-sb-surface-hover: #2a3a52;
+		--ots-sb-text: #cbd5e1;
+		--ots-sb-text-strong: #f8fafc;
+		--ots-sb-muted: #64748b;
 		--ots-sb-accent: oklch(0.7 0.24 var(--theme-hue, 245));
 		--ots-sb-accent-soft: color-mix(in oklch, var(--ots-sb-accent) 22%, transparent);
 		--ots-sb-accent-on: oklch(0.15 0.02 260);
