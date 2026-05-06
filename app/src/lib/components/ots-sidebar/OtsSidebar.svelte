@@ -786,13 +786,13 @@
 		place-items: center;
 		color: var(--ots-sb-muted);
 		cursor: pointer;
-		opacity: 0;
-		transition: opacity 0.12s, color 0.12s;
+		opacity: 0.35;
+		transition: opacity 0.12s, color 0.12s, background 0.12s;
 		flex-shrink: 0;
 		z-index: 1;
 	}
 	.ots-sb-item-row:hover .ots-sb-pin-btn {
-		opacity: 0.6;
+		opacity: 0.85;
 	}
 	.ots-sb-pin-btn:hover {
 		opacity: 1 !important;
