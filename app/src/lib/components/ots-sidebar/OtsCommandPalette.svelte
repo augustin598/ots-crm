@@ -8,8 +8,8 @@
 	let {
 		open = $bindable(false),
 		items,
-		tenantSlug
-	}: { open: boolean; items: FlatNavItem[]; tenantSlug: string } = $props();
+		pathPrefix
+	}: { open: boolean; items: FlatNavItem[]; pathPrefix: string } = $props();
 
 	let query = $state('');
 	let selected = $state(0);
@@ -43,7 +43,7 @@
 	});
 
 	function navigate(item: FlatNavItem) {
-		const href = buildHref(tenantSlug, item.href);
+		const href = buildHref(pathPrefix, item.href);
 		open = false;
 		if (href) goto(href);
 	}

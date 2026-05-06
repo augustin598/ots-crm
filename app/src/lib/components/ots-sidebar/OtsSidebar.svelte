@@ -40,20 +40,38 @@
 		tenantUser,
 		allTenants,
 		user,
-		initialPins
+		initialPins,
+		groups: navGroups = SIDEBAR_NAV,
+		pathPrefix: explicitPathPrefix,
+		pinsApiPath: explicitPinsApiPath,
+		subtitle,
+		logoutPath = '/login',
+		switchTenantUrlBuilder
 	}: {
 		tenant: { slug: string; name: string | null; website?: string | null } | null;
 		tenantUser: { role: string } | null;
 		allTenants: TenantInfo[];
 		user: { firstName?: string | null; lastName?: string | null; email: string } | null;
 		initialPins: string[];
+		groups?: NavGroup[];
+		pathPrefix?: string;
+		pinsApiPath?: string | null;
+		subtitle?: string;
+		logoutPath?: string;
+		switchTenantUrlBuilder?: (slug: string) => string;
 	} = $props();
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
+	const pathPrefix = $derived(explicitPathPrefix ?? `/${tenantSlug}`);
+	const pinsApiPath = $derived(
+		explicitPinsApiPath === null
+			? null
+			: (explicitPinsApiPath ?? `/${tenantSlug}/api/sidebar/pins`)
+	);
 	const currentPath = $derived(page.url.pathname);
 	const role = $derived(tenantUser?.role ?? 'member');
 
-	const visibleGroups = $derived(filterByRole(SIDEBAR_NAV, role));
+	const visibleGroups = $derived(filterByRole(navGroups, role));
 	const flatVisible = $derived(flattenNav(visibleGroups));
 
 	// pins (mirror of server state, optimistic on toggle)
@@ -69,7 +87,7 @@
 		if (item.id in openItems) return openItems[item.id];
 		// Default: open if current route is on a child
 		return (item.children ?? []).some(
-			(c) => c.href && (currentPath === buildHref(tenantSlug, c.href) || currentPath.startsWith(`${buildHref(tenantSlug, c.href)}/`))
+			(c) => c.href && (currentPath === buildHref(pathPrefix, c.href) || currentPath.startsWith(`${buildHref(pathPrefix, c.href)}/`))
 		);
 	}
 
@@ -91,12 +109,13 @@
 
 	// Pin/unpin: optimistic + server sync
 	async function togglePin(itemId: string) {
+		if (!pinsApiPath) return;
 		const prev = pins;
 		const isPinned = pins.includes(itemId);
 		const next = isPinned ? pins.filter((p) => p !== itemId) : [...pins, itemId];
 		pins = next;
 		try {
-			const res = await fetch(`/${tenantSlug}/api/sidebar/pins`, {
+			const res = await fetch(pinsApiPath, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ itemId })
@@ -135,7 +154,7 @@
 	async function handleLogout() {
 		try {
 			await logout();
-			goto('/login');
+			goto(logoutPath);
 		} catch (err) {
 			console.error('Logout failed:', err);
 		}
@@ -184,7 +203,7 @@
 				<div class="ots-sb-tenant-text">
 					<div class="ots-sb-tenant-name">{tenant?.name ?? 'Organization'}</div>
 					<div class="ots-sb-tenant-role">
-						<span class="capitalize">{tenantUser?.role ?? 'member'}</span>
+						<span class="capitalize">{subtitle ?? tenantUser?.role ?? 'member'}</span>
 						<ChevronDownIcon class="size-3" />
 					</div>
 				</div>
@@ -197,7 +216,7 @@
 							type="button"
 							class={cn('ots-sb-tenant-option', t.slug === tenantSlug && 'active')}
 							onclick={() => {
-								goto(`/${t.slug}`);
+								goto(switchTenantUrlBuilder ? switchTenantUrlBuilder(t.slug) : `/${t.slug}`);
 								switcherOpen = false;
 							}}
 						>
@@ -245,7 +264,7 @@
 			</div>
 			<div class="ots-sb-tenant-text">
 				<div class="ots-sb-tenant-name">{tenant?.name ?? 'Organization'}</div>
-				<div class="ots-sb-tenant-role capitalize">{tenantUser?.role ?? 'member'}</div>
+				<div class="ots-sb-tenant-role capitalize">{subtitle ?? tenantUser?.role ?? 'member'}</div>
 			</div>
 		</div>
 	{/if}
@@ -266,7 +285,7 @@
 			</div>
 			<div class="ots-sb-pinned-items">
 				{#each pinnedItems as it (it.id)}
-					{@const itHref = buildHref(tenantSlug, it.href)}
+					{@const itHref = buildHref(pathPrefix, it.href)}
 					<a
 						href={itHref}
 						class={cn(
@@ -299,9 +318,9 @@
 				</button>
 				{#if !collapsedGroups[group.id]}
 					{#each group.items as item (item.id)}
-						{@const active = isItemActive(item, currentPath, tenantSlug, sibHrefs)}
+						{@const active = isItemActive(item, currentPath, pathPrefix, sibHrefs)}
 						{@const open = isItemOpen(item)}
-						{@const itemHref = buildHref(tenantSlug, item.href)}
+						{@const itemHref = buildHref(pathPrefix, item.href)}
 						{@const isPinned = pins.includes(item.id)}
 						<div class="ots-sb-item-row">
 							{#if item.children && item.children.length > 0}
@@ -325,21 +344,23 @@
 										)}
 									/>
 								</button>
-								<button
-									type="button"
-									class={cn('ots-sb-pin-btn', isPinned && 'on')}
-									aria-label={isPinned ? 'Scoate din favorite' : 'Adaugă la favorite'}
-									onclick={(e) => {
-										e.stopPropagation();
-										togglePin(item.id);
-									}}
-								>
-									<HeartIcon class="size-3" />
-								</button>
+								{#if pinsApiPath}
+									<button
+										type="button"
+										class={cn('ots-sb-pin-btn', isPinned && 'on')}
+										aria-label={isPinned ? 'Scoate din favorite' : 'Adaugă la favorite'}
+										onclick={(e) => {
+											e.stopPropagation();
+											togglePin(item.id);
+										}}
+									>
+										<HeartIcon class="size-3" />
+									</button>
+								{/if}
 								{#if open}
 									<div class="ots-sb-sub">
 										{#each item.children as child (child.id)}
-											{@const chHref = buildHref(tenantSlug, child.href)}
+											{@const chHref = buildHref(pathPrefix, child.href)}
 											{@const chActive =
 												chHref && (currentPath === chHref || currentPath.startsWith(`${chHref}/`))
 													? !sibHrefs.find(
@@ -347,8 +368,8 @@
 																s !== child.href &&
 																child.href &&
 																s.startsWith(`${child.href}/`) &&
-																(currentPath === buildHref(tenantSlug, s) ||
-																	currentPath.startsWith(`${buildHref(tenantSlug, s)}/`))
+																(currentPath === buildHref(pathPrefix, s) ||
+																	currentPath.startsWith(`${buildHref(pathPrefix, s)}/`))
 														)
 													: false}
 											<a
@@ -375,14 +396,16 @@
 										<span class="ots-sb-badge">{item.badge}</span>
 									{/if}
 								</a>
-								<button
-									type="button"
-									class={cn('ots-sb-pin-btn', isPinned && 'on')}
-									aria-label={isPinned ? 'Scoate din favorite' : 'Adaugă la favorite'}
-									onclick={() => togglePin(item.id)}
-								>
-									<HeartIcon class="size-3" />
-								</button>
+								{#if pinsApiPath}
+									<button
+										type="button"
+										class={cn('ots-sb-pin-btn', isPinned && 'on')}
+										aria-label={isPinned ? 'Scoate din favorite' : 'Adaugă la favorite'}
+										onclick={() => togglePin(item.id)}
+									>
+										<HeartIcon class="size-3" />
+									</button>
+								{/if}
 							{/if}
 						</div>
 					{/each}
@@ -429,7 +452,7 @@
 	</div>
 </aside>
 
-<OtsCommandPalette bind:open={cmdOpen} items={flatVisible} {tenantSlug} />
+<OtsCommandPalette bind:open={cmdOpen} items={flatVisible} {pathPrefix} />
 
 <style>
 	.ots-sb {
