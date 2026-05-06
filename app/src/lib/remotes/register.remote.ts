@@ -70,17 +70,24 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 
 	// Validate password match
 	if (password !== passwordConfirm) {
-		throw new Error('Passwords do not match');
+		throw new Error('Parolele nu coincid.');
 	}
+
+	if (password.length < 8) {
+		throw new Error('Parola trebuie să aibă cel puțin 8 caractere.');
+	}
+
+	// Normalize email
+	const normalizedEmail = email.trim().toLowerCase();
 
 	// Check email uniqueness
 	const [existingUser] = await db
-		.select()
+		.select({ id: table.user.id })
 		.from(table.user)
-		.where(eq(table.user.email, email))
+		.where(eq(table.user.email, normalizedEmail))
 		.limit(1);
 	if (existingUser) {
-		throw new Error('Email already registered');
+		throw new Error('Acest email are deja un cont. Loghează-te în loc să creezi unul nou.');
 	}
 
 	// If invitation token provided, validate it and get invitation details
@@ -97,11 +104,20 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 			.limit(1);
 
 		if (!invitationRecord) {
-			throw new Error('Invalid invitation token');
+			throw new Error('Token de invitație invalid.');
 		}
 
+		if (invitationRecord.status === 'cancelled') {
+			throw new Error('Această invitație a fost anulată.');
+		}
+		if (invitationRecord.status === 'accepted') {
+			throw new Error('Invitația a fost deja acceptată.');
+		}
+		if (invitationRecord.status === 'expired') {
+			throw new Error('Invitația a expirat.');
+		}
 		if (invitationRecord.status !== 'pending') {
-			throw new Error(`Invitation has been ${invitationRecord.status}`);
+			throw new Error(`Invitație inactivă (${invitationRecord.status}).`);
 		}
 
 		if (invitationRecord.expiresAt < new Date()) {
@@ -109,12 +125,12 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 				.update(table.invitation)
 				.set({ status: 'expired' })
 				.where(eq(table.invitation.id, invitationRecord.id));
-			throw new Error('Invitation has expired');
+			throw new Error('Invitația a expirat.');
 		}
 
-		// Validate email matches invitation
-		if (email !== invitationRecord.email) {
-			throw new Error('Email does not match the invitation');
+		// Validate email matches invitation (case-insensitive)
+		if (normalizedEmail !== invitationRecord.email.trim().toLowerCase()) {
+			throw new Error('Email-ul nu corespunde invitației.');
 		}
 
 		invitation = invitationRecord;
@@ -129,7 +145,7 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 			.limit(1);
 
 		if (!tenant) {
-			throw new Error('Tenant not found');
+			throw new Error('Organizația nu mai există.');
 		}
 
 		tenantSlugToUse = tenant.slug;

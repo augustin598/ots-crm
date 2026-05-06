@@ -10,6 +10,7 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
 	import LockIcon from '@lucide/svelte/icons/lock';
+	import LogInIcon from '@lucide/svelte/icons/log-in';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 
@@ -40,12 +41,20 @@
 			return;
 		}
 		if (!inv) return;
-		if (password !== passwordConfirm) {
-			error = 'Parolele nu coincid.';
+		if (!firstName.trim()) {
+			error = 'Prenumele este obligatoriu.';
+			return;
+		}
+		if (!lastName.trim()) {
+			error = 'Numele este obligatoriu.';
 			return;
 		}
 		if (password.length < 8) {
 			error = 'Parola trebuie să aibă cel puțin 8 caractere.';
+			return;
+		}
+		if (password !== passwordConfirm) {
+			error = 'Parolele nu coincid.';
 			return;
 		}
 
@@ -143,7 +152,7 @@
 						class="w-full"
 						size="lg"
 					>
-						<UserPlusIcon class="mr-2 size-4" />
+						<LogInIcon class="mr-2 size-4" />
 						Login pentru a accepta
 					</Button>
 				</div>
