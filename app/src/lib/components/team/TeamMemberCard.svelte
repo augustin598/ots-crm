@@ -10,8 +10,16 @@
 		lastName?: string | null;
 		title?: string | null;
 		role: { label: string; color: string; bg: string };
+		department?: { label: string; color: string } | null;
+		stats?: { active: number; done: number; onTime?: number | null } | null;
 		joinedAtLabel?: string | null;
 		isYou?: boolean;
+	}
+
+	function workloadLevel(active: number): { cls: 'low' | 'med' | 'high'; pct: number; lbl: string } {
+		if (active <= 8) return { cls: 'low', pct: Math.max(15, active * 6), lbl: 'Light' };
+		if (active <= 16) return { cls: 'med', pct: Math.min(85, 50 + active * 2), lbl: 'Normal' };
+		return { cls: 'high', pct: Math.min(98, 70 + (active - 16) * 4), lbl: 'Heavy' };
 	}
 
 	let {
@@ -62,11 +70,47 @@
 			<span class="dot" style="background:{member.role.color}"></span>
 			{member.role.label}
 		</span>
+		{#if member.department}
+			<span
+				class="team-pill"
+				style="background:color-mix(in srgb, {member.department.color} 12%, transparent); color:{member.department.color}"
+			>
+				<span class="dot" style="background:{member.department.color}"></span>
+				{member.department.label}
+			</span>
+		{/if}
 	</div>
+	{#if member.stats}
+		{@const wl = workloadLevel(member.stats.active)}
+		<div class="team-load">
+			<div class="team-load-bar">
+				<div class="team-load-fill {wl.cls}" style="width:{wl.pct}%"></div>
+			</div>
+			<span class="team-load-pct">{member.stats.active}t</span>
+		</div>
+		<div class="team-card-stats">
+			<div>
+				<div class="team-stat-lbl">Active</div>
+				<div class="team-stat-val">{member.stats.active}</div>
+			</div>
+			<div>
+				<div class="team-stat-lbl">Done</div>
+				<div class="team-stat-val">{member.stats.done}</div>
+			</div>
+			{#if typeof member.stats.onTime === 'number'}
+				<div>
+					<div class="team-stat-lbl">On-time</div>
+					<div class="team-stat-val" class:green={member.stats.onTime >= 90} class:warn={member.stats.onTime < 90}>
+						{member.stats.onTime}%
+					</div>
+				</div>
+			{/if}
+		</div>
+	{/if}
 	<div class="team-card-meta">
 		<div class="row"><MailIcon class="size-3.5" /> <span>{member.email}</span></div>
 		{#if member.joinedAtLabel}
-			<div class="row muted">Membru din {member.joinedAtLabel}</div>
+			<div class="row muted">Adăugat {member.joinedAtLabel}</div>
 		{/if}
 	</div>
 </button>
@@ -198,5 +242,59 @@
 	}
 	.team-card-meta .muted {
 		color: var(--muted-foreground);
+	}
+	.team-load {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.team-load-bar {
+		flex: 1;
+		height: 6px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		overflow: hidden;
+	}
+	.team-load-fill {
+		height: 100%;
+		border-radius: 999px;
+		transition: width 0.2s;
+	}
+	.team-load-fill.low {
+		background: #10b981;
+	}
+	.team-load-fill.med {
+		background: #1877f2;
+	}
+	.team-load-fill.high {
+		background: #f59e0b;
+	}
+	.team-load-pct {
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--muted-foreground);
+	}
+	.team-card-stats {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 8px;
+	}
+	.team-stat-lbl {
+		font-size: 9px;
+		font-weight: 700;
+		color: var(--muted-foreground);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.team-stat-val {
+		font-size: 16px;
+		font-weight: 800;
+		color: var(--foreground);
+	}
+	.team-stat-val.green {
+		color: #10b981;
+	}
+	.team-stat-val.warn {
+		color: #f59e0b;
 	}
 </style>

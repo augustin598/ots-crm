@@ -7,6 +7,7 @@
 	} from '$lib/remotes/invitations.remote';
 	import {
 		updateTenantUserRole,
+		updateTenantUserMeta,
 		removeTenantUser,
 		getTenantUsers
 	} from '$lib/remotes/users.remote';
@@ -24,9 +25,13 @@
 	import {
 		ADMIN_ROLES,
 		ADMIN_PERMISSION_MATRIX,
+		DEPARTMENTS,
 		getAdminRole,
-		type AdminRoleId
+		getDepartment,
+		type AdminRoleId,
+		type DepartmentId
 	} from '$lib/config/team';
+	import { Label } from '$lib/components/ui/label';
 	import TeamKpiStrip from '$lib/components/team/TeamKpiStrip.svelte';
 	import TeamMemberCard from '$lib/components/team/TeamMemberCard.svelte';
 	import TeamMemberTable from '$lib/components/team/TeamMemberTable.svelte';
@@ -64,6 +69,12 @@
 		const now = Date.now();
 		return data.invitations.filter((i) => new Date(i.expiresAt).getTime() < now).length;
 	});
+	const totalActive = $derived(
+		data.members.reduce((acc, m) => acc + (data.stats[m.userId]?.active ?? 0), 0)
+	);
+	const heavyWorkload = $derived(
+		data.members.filter((m) => (data.stats[m.userId]?.active ?? 0) > 16).length
+	);
 
 	const dateFmt = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -72,13 +83,22 @@
 		return { label: r.label, color: r.color, bg: r.bg };
 	}
 
+	function memberDeptMeta(department: string | null | undefined) {
+		const d = getDepartment(department);
+		return d ? { label: d.label, color: d.color } : null;
+	}
+
 	function toCardData(m: (typeof data.members)[number]) {
+		const s = data.stats[m.userId];
 		return {
 			id: m.tenantUserId,
 			email: m.email,
 			firstName: m.firstName,
 			lastName: m.lastName,
+			title: m.title ?? null,
 			role: memberRoleMeta(m.role),
+			department: memberDeptMeta(m.department),
+			stats: s ? { active: s.active, done: s.done, onTime: null } : null,
 			joinedAtLabel: m.joinedAt ? dateFmt.format(new Date(m.joinedAt)) : null,
 			isYou: m.userId === data.currentUserId
 		};
@@ -88,8 +108,24 @@
 		editing = m;
 	}
 
-	async function submitInvite({ email, role }: { email: string; role: AdminRoleId }) {
-		await sendInvitation({ email, role: role === 'owner' ? 'admin' : role });
+	async function submitInvite({
+		email,
+		role,
+		department,
+		jobTitle
+	}: {
+		email: string;
+		role: AdminRoleId;
+		department?: DepartmentId | null;
+		jobTitle?: string;
+	}) {
+		const safeRole = role === 'owner' ? 'admin' : role;
+		await sendInvitation({
+			email,
+			role: safeRole,
+			department: department ?? null,
+			title: jobTitle ?? null
+		});
 		await invalidateAll();
 		await getInvitations().refresh?.();
 		toast.success(`Invitație trimisă către ${email}.`);
@@ -116,6 +152,19 @@
 			await invalidateAll();
 			toast.success('Rol actualizat.');
 			editing = null;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare.');
+		}
+	}
+
+	async function handleSaveMeta(
+		member: NonNullable<typeof editing>,
+		patch: { department?: DepartmentId | null; title?: string | null; phone?: string | null }
+	) {
+		try {
+			await updateTenantUserMeta({ tenantUserId: member.tenantUserId, ...patch });
+			await invalidateAll();
+			toast.success('Profil actualizat.');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare.');
 		}
@@ -170,21 +219,32 @@
 			{
 				label: 'Total membri',
 				value: totalMembers,
-				foot: `${recentlyAdded} adăugați ultimele 30 zile`
+				foot:
+					recentlyAdded > 0
+						? `${recentlyAdded} ${recentlyAdded === 1 ? 'nou' : 'noi'} ultimele 30 zile`
+						: 'fără adăugări recente',
+				delta: recentlyAdded > 0 ? { text: `+${recentlyAdded}` } : null
 			},
 			{
 				label: 'Invitații pending',
 				value: pendingInvites,
 				foot:
-					expiredInvites > 0
-						? `${expiredInvites} expirate`
-						: 'Niciuna expirată',
+					expiredInvites > 0 ? `${expiredInvites} expirate` : 'Niciuna expirată',
 				tone: expiredInvites > 0 ? 'warning' : 'default'
 			},
 			{
-				label: 'Adăugați recent',
-				value: recentlyAdded,
-				foot: 'în ultimele 30 zile'
+				label: 'Tasks active',
+				value: totalActive,
+				foot:
+					totalMembers > 0
+						? `≈ ${Math.round(totalActive / totalMembers)} per persoană`
+						: '—'
+			},
+			{
+				label: 'Workload heavy',
+				value: heavyWorkload,
+				foot: heavyWorkload > 0 ? 'Necesită balansare' : 'Echipă în echilibru',
+				tone: heavyWorkload > 0 ? 'warning' : 'success'
 			}
 		]}
 	/>
@@ -276,10 +336,14 @@
 <!-- Invite modal -->
 <TeamInviteModal
 	bind:open={inviteOpen}
-	title="Invită membru"
+	title="Invită membru nou"
 	description="Persoana va primi un email cu link de activare. Link-ul expiră în 7 zile."
 	roles={ADMIN_ROLES.filter((r) => r.id !== 'owner')}
 	defaultRole={'member' as AdminRoleId}
+	departments={DEPARTMENTS}
+	defaultDepartment={'ads' as DepartmentId}
+	showTitle
+	showWelcomeMessage
 	submit={submitInvite}
 />
 
@@ -313,6 +377,41 @@
 			</Dialog.Header>
 			<div class="space-y-4">
 				<TeamMemberCard member={toCardData(member)} />
+
+				{#if !isSelf && !isOwner}
+					<div class="grid gap-3" style="grid-template-columns:1fr 1fr">
+						<div class="space-y-1.5">
+							<Label class="text-xs font-bold uppercase tracking-wide text-muted-foreground">Departament</Label>
+							<select
+								class="meta-select"
+								value={member.department ?? ''}
+								onchange={(e) => {
+									const v = (e.currentTarget as HTMLSelectElement).value;
+									handleSaveMeta(member, { department: (v === '' ? null : v) as DepartmentId | null });
+								}}
+							>
+								<option value="">— Fără —</option>
+								{#each DEPARTMENTS as d (d.id)}
+									<option value={d.id}>{d.label}</option>
+								{/each}
+							</select>
+						</div>
+						<div class="space-y-1.5">
+							<Label class="text-xs font-bold uppercase tracking-wide text-muted-foreground">Titlu</Label>
+							<Input
+								value={member.title ?? ''}
+								placeholder="ex: Marketing Specialist"
+								onblur={(e) => {
+									const v = (e.currentTarget as HTMLInputElement).value.trim();
+									if (v !== (member.title ?? '')) {
+										handleSaveMeta(member, { title: v || null });
+									}
+								}}
+							/>
+						</div>
+					</div>
+				{/if}
+
 				<div class="space-y-2">
 					<div class="text-sm font-semibold">Rol</div>
 					{#if canActorChangeRole}
@@ -422,5 +521,26 @@
 		background: var(--card);
 		color: var(--foreground);
 		box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
+	}
+	.meta-select {
+		width: 100%;
+		padding: 8px 12px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--card);
+		color: var(--foreground);
+		font-size: 14px;
+		font-family: inherit;
+		appearance: none;
+		background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'><path d='m6 9 6 6 6-6'/></svg>");
+		background-repeat: no-repeat;
+		background-position: right 10px center;
+		background-size: 14px 14px;
+		padding-right: 32px;
+	}
+	.meta-select:focus {
+		outline: none;
+		border-color: #1877f2;
+		box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.12);
 	}
 </style>

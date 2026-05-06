@@ -43,7 +43,7 @@ const NO_ACCESS: AccessFlags = {
 // Admin (tenant) roles
 // =============================================================================
 
-export type AdminRoleId = 'owner' | 'admin' | 'member';
+export type AdminRoleId = 'owner' | 'admin' | 'manager' | 'member' | 'viewer';
 
 export interface RoleDef<Id extends string = string> {
 	id: Id;
@@ -53,32 +53,74 @@ export interface RoleDef<Id extends string = string> {
 	desc: string;
 }
 
+// Hardcoded hex colors per the new design (team-data.jsx). NOT theme-driven —
+// roluri folosesc semantica vizuală standard pe toată platforma.
 export const ADMIN_ROLES: ReadonlyArray<RoleDef<AdminRoleId>> = [
 	{
 		id: 'owner',
 		label: 'Owner',
 		color: '#dc2626',
 		bg: '#fee2e2',
-		desc: 'Control complet · billing · transfer'
+		desc: 'Full control · billing · org settings'
 	},
 	{
 		id: 'admin',
 		label: 'Admin',
 		color: '#7c3aed',
 		bg: '#ede9fe',
-		desc: 'Manage users, integrations, ads'
+		desc: 'Manage users, roles, integrations'
+	},
+	{
+		id: 'manager',
+		label: 'Manager',
+		color: '#1877F2',
+		bg: '#dbeafe',
+		desc: 'Manage team, projects, campaigns'
 	},
 	{
 		id: 'member',
 		label: 'Member',
 		color: '#0d9488',
 		bg: '#ccfbf1',
-		desc: 'Acces standard la munca asignată'
+		desc: 'Standard access to assigned work'
+	},
+	{
+		id: 'viewer',
+		label: 'Viewer',
+		color: '#64748b',
+		bg: '#f1f5f9',
+		desc: 'Read-only across the workspace'
 	}
 ];
 
 export function getAdminRole(id: string): RoleDef<AdminRoleId> | undefined {
 	return ADMIN_ROLES.find((r) => r.id === id);
+}
+
+// =============================================================================
+// Departments (admin) — hex colors 1:1 cu team-data.jsx
+// =============================================================================
+
+export type DepartmentId = 'ads' | 'sales' | 'dev' | 'finance' | 'support' | 'ops';
+
+export interface DepartmentDef {
+	id: DepartmentId;
+	label: string;
+	color: string;
+}
+
+export const DEPARTMENTS: ReadonlyArray<DepartmentDef> = [
+	{ id: 'ads', label: 'Marketing & Ads', color: '#8b5cf6' },
+	{ id: 'sales', label: 'Sales', color: '#10b981' },
+	{ id: 'dev', label: 'Development', color: '#1877F2' },
+	{ id: 'finance', label: 'Finance', color: '#f59e0b' },
+	{ id: 'support', label: 'Support', color: '#ec4899' },
+	{ id: 'ops', label: 'Operations', color: '#64748b' }
+];
+
+export function getDepartment(id: string | null | undefined): DepartmentDef | undefined {
+	if (!id) return undefined;
+	return DEPARTMENTS.find((d) => d.id === id);
 }
 
 // =============================================================================
@@ -190,32 +232,36 @@ export const ADMIN_PERMISSION_MATRIX: ReadonlyArray<PermissionGroup> = [
 	{
 		group: 'Workspace',
 		items: [
-			{ id: 'ws.settings', label: 'Modifică setări workspace', roles: ['owner', 'admin'] },
-			{ id: 'ws.billing', label: 'Acces facturare', roles: ['owner'] },
-			{ id: 'ws.export', label: 'Export date', roles: ['owner', 'admin'] }
+			{ id: 'ws.settings', label: 'Modificare setări workspace', roles: ['owner', 'admin'] },
+			{ id: 'ws.billing', label: 'Acces facturare & plan', roles: ['owner'] },
+			{ id: 'ws.export', label: 'Export date workspace', roles: ['owner', 'admin'] }
 		]
 	},
 	{
 		group: 'Team',
 		items: [
-			{ id: 'team.invite', label: 'Invită utilizatori', roles: ['owner', 'admin'] },
-			{ id: 'team.roles', label: 'Schimbă rol', roles: ['owner'] },
-			{ id: 'team.remove', label: 'Șterge utilizator', roles: ['owner', 'admin'] }
+			{ id: 'team.invite', label: 'Invită utilizatori', roles: ['owner', 'admin', 'manager'] },
+			{ id: 'team.roles', label: 'Schimbă rol utilizator', roles: ['owner', 'admin'] },
+			{ id: 'team.suspend', label: 'Suspendă/Dezactivează cont', roles: ['owner', 'admin'] }
 		]
 	},
 	{
-		group: 'Campaigns & Marketing',
+		group: 'Campaigns',
 		items: [
-			{ id: 'camp.view', label: 'Vezi campanii', roles: ['owner', 'admin', 'member'] },
-			{ id: 'camp.edit', label: 'Editează campanii', roles: ['owner', 'admin'] },
-			{ id: 'camp.budget', label: 'Modifică buget', roles: ['owner', 'admin'] }
+			{
+				id: 'camp.create',
+				label: 'Creare campanii ads',
+				roles: ['owner', 'admin', 'manager', 'member']
+			},
+			{ id: 'camp.budget', label: 'Modificare buget', roles: ['owner', 'admin', 'manager'] },
+			{ id: 'camp.launch', label: 'Lansare campanii live', roles: ['owner', 'admin', 'manager'] }
 		]
 	},
 	{
 		group: 'Finance',
 		items: [
-			{ id: 'fin.view', label: 'Vezi facturi', roles: ['owner', 'admin', 'member'] },
-			{ id: 'fin.edit', label: 'Emite facturi', roles: ['owner', 'admin'] }
+			{ id: 'fin.invoice', label: 'Emitere facturi', roles: ['owner', 'admin', 'manager'] },
+			{ id: 'fin.view', label: 'Vizualizare P&L', roles: ['owner', 'admin'] }
 		]
 	}
 ];
