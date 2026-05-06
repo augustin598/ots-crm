@@ -15,13 +15,35 @@ function generateId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+/**
+ * Authorize secondary-email management for a given clientId.
+ * Allowed actors:
+ *  - tenant users (admin staff, any role)
+ *  - primary client users — only for THEIR own client
+ * Returns the tenantId so callers can scope their writes.
+ */
+function authorizeSecondaryEmailAccess(
+	event: ReturnType<typeof getRequestEvent>,
+	clientId: string
+): string {
+	if (!event?.locals.user) throw new Error('Unauthorized');
+	if (event.locals.isClientUser) {
+		if (!event.locals.clientUser?.isPrimary) throw new Error('Unauthorized');
+		if (!event.locals.client || event.locals.client.id !== clientId) {
+			throw new Error('Unauthorized');
+		}
+		return event.locals.client.tenantId;
+	}
+	if (!event.locals.tenant) throw new Error('Unauthorized');
+	return event.locals.tenant.id;
+}
+
 /** Get all secondary emails for a client (admin only) */
 export const getClientSecondaryEmails = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (clientId) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-		if (event.locals.isClientUser) throw new Error('Unauthorized');
+		const tenantId = authorizeSecondaryEmailAccess(event, clientId);
 
 		const rows = await db
 			.select()
@@ -29,7 +51,7 @@ export const getClientSecondaryEmails = query(
 			.where(
 				and(
 					eq(table.clientSecondaryEmail.clientId, clientId),
-					eq(table.clientSecondaryEmail.tenantId, event.locals.tenant.id)
+					eq(table.clientSecondaryEmail.tenantId, tenantId)
 				)
 			);
 
@@ -62,10 +84,7 @@ const createSchema = v.object({
 /** Add a secondary email to a client */
 export const createClientSecondaryEmail = command(createSchema, async (data) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-	if (event.locals.isClientUser) throw new Error('Unauthorized');
-
-	const tenantId = event.locals.tenant.id;
+	const tenantId = authorizeSecondaryEmailAccess(event, data.clientId);
 
 	// Validate clientId belongs to tenant
 	const [client] = await db
@@ -135,20 +154,21 @@ export const updateClientSecondaryEmailAccess = command(
 	}),
 	async (data) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-		if (event.locals.isClientUser) throw new Error('Unauthorized');
-
+		// Look up the row first so we can derive the clientId for authorization.
+		const tenantHint = event?.locals.tenant?.id ?? event?.locals.client?.tenantId;
+		if (!tenantHint) throw new Error('Unauthorized');
 		const [record] = await db
-			.select({ id: table.clientSecondaryEmail.id })
+			.select({ id: table.clientSecondaryEmail.id, clientId: table.clientSecondaryEmail.clientId })
 			.from(table.clientSecondaryEmail)
 			.where(
 				and(
 					eq(table.clientSecondaryEmail.id, data.secondaryEmailId),
-					eq(table.clientSecondaryEmail.tenantId, event.locals.tenant.id)
+					eq(table.clientSecondaryEmail.tenantId, tenantHint)
 				)
 			)
 			.limit(1);
 		if (!record) throw new Error('Email secundar negăsit');
+		authorizeSecondaryEmailAccess(event, record.clientId);
 
 		const flags: AccessFlags = data.accessFlags;
 		// Sanity: only persist known categories.
@@ -176,20 +196,20 @@ export const deleteClientSecondaryEmail = command(
 	v.object({ secondaryEmailId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ secondaryEmailId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-		if (event.locals.isClientUser) throw new Error('Unauthorized');
-
+		const tenantHint = event?.locals.tenant?.id ?? event?.locals.client?.tenantId;
+		if (!tenantHint) throw new Error('Unauthorized');
 		const [record] = await db
 			.select()
 			.from(table.clientSecondaryEmail)
 			.where(
 				and(
 					eq(table.clientSecondaryEmail.id, secondaryEmailId),
-					eq(table.clientSecondaryEmail.tenantId, event.locals.tenant.id)
+					eq(table.clientSecondaryEmail.tenantId, tenantHint)
 				)
 			)
 			.limit(1);
 		if (!record) throw new Error('Email secundar negăsit');
+		authorizeSecondaryEmailAccess(event, record.clientId);
 
 		await db
 			.delete(table.clientSecondaryEmail)

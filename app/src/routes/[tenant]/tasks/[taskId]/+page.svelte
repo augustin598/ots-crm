@@ -48,9 +48,10 @@
 
 	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
 	// Merge tenant users + client users for mentions (deduplicated by id)
+	type MentionUser = { id: string; email: string; firstName: string; lastName: string };
 	const mentionUsers = $derived.by(() => {
-		const merged = new Map<string, typeof users[number]>();
-		for (const u of users) merged.set(u.id, u);
+		const merged = new Map<string, MentionUser>();
+		for (const u of users) merged.set(u.id, { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName });
 		for (const u of (clientUsersQuery?.current || [])) merged.set(u.id, u);
 		return [...merged.values()];
 	});

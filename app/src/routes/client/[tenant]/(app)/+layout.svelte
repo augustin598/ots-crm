@@ -199,6 +199,16 @@
 				id: 'account',
 				label: 'Cont',
 				items: [
+					...(data.isClientUserPrimary
+						? [
+								{
+									id: 'team',
+									label: 'Echipa mea',
+									icon: 'clients' as const,
+									href: '/team'
+								}
+							]
+						: []),
 					...(access.accessData
 						? [
 								{

@@ -59,7 +59,8 @@ export const SIDEBAR_NAV: NavGroup[] = [
 		items: [
 			{ id: 'dashboard', label: 'Dashboard', icon: 'dashboard', href: '/' },
 			{ id: 'tasks', label: 'Tasks', icon: 'tasks', href: '/tasks' },
-			{ id: 'my-plans', label: 'My Plans', icon: 'my-plans', href: '/my-plans' }
+			{ id: 'my-plans', label: 'My Plans', icon: 'my-plans', href: '/my-plans' },
+			{ id: 'team', label: 'Team', icon: 'clients', href: '/team', requiredRole: 'admin' }
 		]
 	},
 	{

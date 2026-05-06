@@ -68,19 +68,25 @@ export const tenant = sqliteTable('tenant', {
 		.default(sql`current_date`)
 });
 
-export const tenantUser = sqliteTable('tenant_user', {
-	id: text('id').primaryKey(),
-	tenantId: text('tenant_id')
-		.notNull()
-		.references(() => tenant.id),
-	userId: text('user_id')
-		.notNull()
-		.references(() => user.id),
-	role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
-	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
-		.notNull()
-		.default(sql`current_date`)
-});
+export const tenantUser = sqliteTable(
+	'tenant_user',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id),
+		role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => ({
+		uniqUserTenant: uniqueIndex('tenant_user_uniq').on(t.userId, t.tenantId)
+	})
+);
 
 export const invitation = sqliteTable('invitation', {
 	id: text('id').primaryKey(),
