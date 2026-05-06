@@ -1737,6 +1737,27 @@
       "when": 1746460800002,
       "tag": "0247_telegram_messages_created_at_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "6",
+      "when": 1746547200000,
+      "tag": "0248_user_sidebar_pin",
+      "breakpoints": true
+    },
+    {
+      "idx": 249,
+      "version": "6",
+      "when": 1746547200001,
+      "tag": "0249_user_sidebar_pin_user_tenant_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 250,
+      "version": "6",
+      "when": 1746547200002,
+      "tag": "0250_user_sidebar_pin_uniq",
+      "breakpoints": true
     }
   ]
 }

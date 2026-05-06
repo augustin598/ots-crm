@@ -1,4 +1,4 @@
-CREATE TABLE `personalops_instance` (
+CREATE TABLE IF NOT EXISTS `personalops_instance` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`instance_id` text NOT NULL,
