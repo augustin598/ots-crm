@@ -126,6 +126,27 @@
 					</div>
 					<Button onclick={() => goto('/')} class="w-full">Înapoi la pagina principală</Button>
 				</div>
+			{:else if inv && data.emailExists}
+				<div class="space-y-4">
+					<div class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950">
+						<AlertTriangleIcon class="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+						<div>
+							<p class="font-medium text-amber-900 dark:text-amber-100">Cont existent</p>
+							<p class="mt-1 text-sm text-amber-800 dark:text-amber-200">
+								Adresa <strong>{inv.email}</strong> are deja un cont. Conectează-te pentru a accepta invitația — nu este nevoie să creezi unul nou.
+							</p>
+						</div>
+					</div>
+					<Button
+						onclick={() =>
+							goto('/login?redirect=' + encodeURIComponent('/invite/' + token))}
+						class="w-full"
+						size="lg"
+					>
+						<UserPlusIcon class="mr-2 size-4" />
+						Login pentru a accepta
+					</Button>
+				</div>
 			{:else if inv}
 				<div class="space-y-2 mb-6">
 					<h1 class="text-2xl font-bold tracking-tight">Creează cont</h1>

@@ -1,4 +1,5 @@
 import type { PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -19,14 +20,17 @@ type LoadedInvitation = {
 	};
 };
 
-export const load: PageServerLoad = async ({ params }) => {
+type LoadResult = {
+	invitation: LoadedInvitation | null;
+	error: string | null;
+	emailExists: boolean;
+};
+
+export const load: PageServerLoad = async ({ params, locals }): Promise<LoadResult> => {
 	const token = params.token;
 
 	if (!token) {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Link de invitație invalid.'
-		};
+		return { invitation: null, error: 'Link de invitație invalid.', emailExists: false };
 	}
 
 	const [row] = await db
@@ -51,10 +55,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		.limit(1);
 
 	if (!row) {
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Token de invitație invalid.'
-		};
+		return { invitation: null, error: 'Token de invitație invalid.', emailExists: false };
 	}
 
 	if (row.invitation.expiresAt < new Date()) {
@@ -66,31 +67,46 @@ export const load: PageServerLoad = async ({ params }) => {
 		} catch {
 			// ignore
 		}
-		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Invitația a expirat.'
-		};
+		return { invitation: null, error: 'Invitația a expirat.', emailExists: false };
 	}
 
 	if (row.invitation.status === 'cancelled') {
 		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Această invitație a fost anulată.'
+			invitation: null,
+			error: 'Această invitație a fost anulată.',
+			emailExists: false
 		};
 	}
 
 	if (row.invitation.status === 'accepted') {
 		return {
-			invitation: null as LoadedInvitation | null,
-			error: 'Invitația a fost deja acceptată.'
+			invitation: null,
+			error: 'Invitația a fost deja acceptată.',
+			emailExists: false
 		};
 	}
 
 	if (row.invitation.status !== 'pending') {
 		return {
-			invitation: null as LoadedInvitation | null,
-			error: `Invitație inactivă (${row.invitation.status}).`
+			invitation: null,
+			error: `Invitație inactivă (${row.invitation.status}).`,
+			emailExists: false
 		};
+	}
+
+	// Check if a user with this email already exists. If yes, signup will fail —
+	// redirect them back to /invite/<token> with a hint to use Login.
+	const [existing] = await db
+		.select({ id: table.user.id })
+		.from(table.user)
+		.where(eq(table.user.email, row.invitation.email))
+		.limit(1);
+
+	const emailExists = !!existing;
+
+	// If user is already logged in, redirect to the accept page
+	if (locals.user) {
+		throw redirect(302, `/invite/${token}`);
 	}
 
 	return {
@@ -104,6 +120,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			tenant: row.tenant,
 			invitedBy: row.invitedBy
 		} satisfies LoadedInvitation,
-		error: null
+		error: null,
+		emailExists
 	};
 };
