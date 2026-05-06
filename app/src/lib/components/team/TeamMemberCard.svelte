@@ -1,6 +1,8 @@
 <script lang="ts">
 	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
 	import MailIcon from '@lucide/svelte/icons/mail';
+	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
+	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import { avatarColor, avatarInitials } from '$lib/config/team';
 
 	export interface MemberCardData {
@@ -9,11 +11,14 @@
 		firstName?: string | null;
 		lastName?: string | null;
 		title?: string | null;
+		phone?: string | null;
 		role: { label: string; color: string; bg: string };
 		department?: { label: string; color: string } | null;
 		stats?: { active: number; done: number; onTime?: number | null } | null;
 		joinedAtLabel?: string | null;
 		isYou?: boolean;
+		online?: boolean;
+		skills?: string[];
 	}
 
 	function workloadLevel(active: number): { cls: 'low' | 'med' | 'high'; pct: number; lbl: string } {
@@ -37,9 +42,23 @@
 	const displayName = $derived(
 		[member.firstName, member.lastName].filter(Boolean).join(' ').trim() || member.email
 	);
+	const skillsList = $derived(member.skills ?? []);
+	const visibleSkills = $derived(skillsList.slice(0, 2));
+	const moreSkills = $derived(Math.max(0, skillsList.length - 2));
 </script>
 
-<button type="button" class="team-card" {onclick}>
+<div
+	class="team-card"
+	role="button"
+	tabindex="0"
+	onclick={onclick}
+	onkeydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			onclick?.();
+		}
+	}}
+>
 	{#if onmenuclick}
 		<button
 			type="button"
@@ -54,7 +73,10 @@
 		</button>
 	{/if}
 	<div class="team-card-head">
-		<div class="team-av" style="background:{color}">{initials}</div>
+		<div class="team-av-wrap">
+			<div class="team-av" style="background:{color}">{initials}</div>
+			<span class="team-presence" class:online={member.online} class:offline={!member.online}></span>
+		</div>
 		<div class="team-card-info">
 			<div class="team-card-name">
 				{displayName}
@@ -97,23 +119,76 @@
 				<div class="team-stat-lbl">Done</div>
 				<div class="team-stat-val">{member.stats.done}</div>
 			</div>
-			{#if typeof member.stats.onTime === 'number'}
-				<div>
-					<div class="team-stat-lbl">On-time</div>
-					<div class="team-stat-val" class:green={member.stats.onTime >= 90} class:warn={member.stats.onTime < 90}>
+			<div>
+				<div class="team-stat-lbl">On-time</div>
+				{#if typeof member.stats.onTime === 'number'}
+					<div
+						class="team-stat-val"
+						class:green={member.stats.onTime >= 90}
+						class:warn={member.stats.onTime < 90}
+					>
 						{member.stats.onTime}%
 					</div>
-				</div>
-			{/if}
+				{:else}
+					<div class="team-stat-val muted">—</div>
+				{/if}
+			</div>
 		</div>
 	{/if}
-	<div class="team-card-meta">
-		<div class="row"><MailIcon class="size-3.5" /> <span>{member.email}</span></div>
-		{#if member.joinedAtLabel}
-			<div class="row muted">Adăugat {member.joinedAtLabel}</div>
-		{/if}
+	<div class="team-card-foot">
+		<div class="team-card-skills">
+			{#each visibleSkills as s (s)}
+				<span class="team-skill">{s}</span>
+			{/each}
+			{#if moreSkills > 0}
+				<span class="team-skill more">+{moreSkills}</span>
+			{/if}
+		</div>
+		<div class="team-card-quick">
+			<a
+				class="team-q-btn"
+				href={`mailto:${member.email}`}
+				aria-label="Email"
+				title="Email"
+				onclick={(e) => e.stopPropagation()}
+			>
+				<MailIcon class="size-3" />
+			</a>
+			<button
+				type="button"
+				class="team-q-btn"
+				aria-label="Slack (în curând)"
+				title="Slack (în curând)"
+				disabled
+				onclick={(e) => e.stopPropagation()}
+			>
+				<MessageCircleIcon class="size-3" />
+			</button>
+			{#if member.phone}
+				<a
+					class="team-q-btn"
+					href={`tel:${member.phone}`}
+					aria-label="Sună"
+					title={member.phone}
+					onclick={(e) => e.stopPropagation()}
+				>
+					<PhoneIcon class="size-3" />
+				</a>
+			{:else}
+				<button
+					type="button"
+					class="team-q-btn"
+					aria-label="Telefon indisponibil"
+					title="Fără telefon"
+					disabled
+					onclick={(e) => e.stopPropagation()}
+				>
+					<PhoneIcon class="size-3" />
+				</button>
+			{/if}
+		</div>
 	</div>
-</button>
+</div>
 
 <style>
 	.team-card {
@@ -129,7 +204,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
-		transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+		transition:
+			border-color 0.15s,
+			box-shadow 0.15s,
+			transform 0.15s;
 		width: 100%;
 	}
 	.team-card:hover {
@@ -150,6 +228,11 @@
 		border: 1px solid transparent;
 		color: var(--muted-foreground);
 		cursor: pointer;
+		opacity: 0;
+		transition: opacity 0.12s;
+	}
+	.team-card:hover .team-card-menu {
+		opacity: 1;
 	}
 	.team-card-menu:hover {
 		background: var(--accent);
@@ -160,28 +243,49 @@
 		gap: 12px;
 		align-items: flex-start;
 	}
+	.team-av-wrap {
+		position: relative;
+		flex-shrink: 0;
+	}
 	.team-av {
-		width: 44px;
-		height: 44px;
+		width: 48px;
+		height: 48px;
 		border-radius: 50%;
 		display: grid;
 		place-items: center;
 		color: white;
 		font-weight: 800;
-		font-size: 14px;
-		flex-shrink: 0;
+		font-size: 15px;
+	}
+	.team-presence {
+		position: absolute;
+		bottom: -1px;
+		right: -1px;
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		border: 2px solid var(--card);
+	}
+	.team-presence.online {
+		background: #10b981;
+	}
+	.team-presence.offline {
+		background: #cbd5e1;
 	}
 	.team-card-info {
 		min-width: 0;
 		flex: 1;
 	}
 	.team-card-name {
-		font-size: 14px;
+		font-size: 14.5px;
 		font-weight: 700;
 		color: var(--foreground);
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.team-you {
 		background: var(--accent);
@@ -196,7 +300,10 @@
 	.team-card-title {
 		font-size: 12px;
 		color: var(--muted-foreground);
-		margin-top: 2px;
+		margin-top: 1px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.team-card-pills {
 		display: flex;
@@ -217,32 +324,6 @@
 		height: 6px;
 		border-radius: 50%;
 	}
-	.team-card-meta {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		font-size: 12px;
-		color: var(--foreground);
-	}
-	.team-card-meta .row {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		min-width: 0;
-	}
-	.team-card-meta .row :global(svg) {
-		color: var(--muted-foreground);
-		flex-shrink: 0;
-	}
-	.team-card-meta .row span {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.team-card-meta .muted {
-		color: var(--muted-foreground);
-	}
 	.team-load {
 		display: flex;
 		align-items: center;
@@ -252,7 +333,7 @@
 		flex: 1;
 		height: 6px;
 		border-radius: 999px;
-		background: #f1f5f9;
+		background: color-mix(in oklch, var(--foreground) 6%, transparent);
 		overflow: hidden;
 	}
 	.team-load-fill {
@@ -278,6 +359,8 @@
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 8px;
+		padding-top: 12px;
+		border-top: 1px solid color-mix(in oklch, var(--foreground) 5%, transparent);
 	}
 	.team-stat-lbl {
 		font-size: 9px;
@@ -287,8 +370,8 @@
 		letter-spacing: 0.05em;
 	}
 	.team-stat-val {
-		font-size: 16px;
-		font-weight: 800;
+		font-size: 14px;
+		font-weight: 700;
 		color: var(--foreground);
 	}
 	.team-stat-val.green {
@@ -296,5 +379,63 @@
 	}
 	.team-stat-val.warn {
 		color: #f59e0b;
+	}
+	.team-stat-val.muted {
+		color: var(--muted-foreground);
+	}
+	.team-card-foot {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		padding-top: 12px;
+		border-top: 1px solid color-mix(in oklch, var(--foreground) 5%, transparent);
+		min-height: 30px;
+	}
+	.team-card-skills {
+		display: flex;
+		gap: 4px;
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+	.team-skill {
+		font-size: 10px;
+		font-weight: 600;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: color-mix(in oklch, var(--foreground) 4%, transparent);
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+	.team-skill.more {
+		background: color-mix(in oklch, var(--primary) 14%, transparent);
+		color: var(--primary);
+	}
+	.team-card-quick {
+		display: flex;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+	.team-q-btn {
+		width: 26px;
+		height: 26px;
+		border-radius: 6px;
+		border: 1px solid var(--border);
+		background: var(--card);
+		color: var(--muted-foreground);
+		cursor: pointer;
+		display: grid;
+		place-items: center;
+		text-decoration: none;
+		transition: all 0.12s;
+	}
+	.team-q-btn:hover:not(:disabled) {
+		border-color: var(--primary);
+		color: var(--primary);
+		background: color-mix(in oklch, var(--primary) 6%, transparent);
+	}
+	.team-q-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
 	}
 </style>

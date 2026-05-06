@@ -48,8 +48,11 @@
 			<div class="lane-body">
 				{#each lane.items as m (m.id)}
 					<button type="button" class="lane-card" onclick={() => onpick?.(m)}>
-						<div class="av" style="background:{avatarColor(m.email)}">
-							{avatarInitials(m.firstName, m.lastName, m.email)}
+						<div class="av-wrap">
+							<div class="av" style="background:{avatarColor(m.email)}">
+								{avatarInitials(m.firstName, m.lastName, m.email)}
+							</div>
+							<span class="presence" class:online={m.online} class:offline={!m.online}></span>
 						</div>
 						<div class="info">
 							<div class="name">{displayName(m)}</div>
@@ -72,7 +75,7 @@
 <style>
 	.lanes {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 		gap: 14px;
 	}
 	.lane {
@@ -132,6 +135,10 @@
 		background: var(--accent);
 		border-color: var(--border);
 	}
+	.av-wrap {
+		position: relative;
+		flex-shrink: 0;
+	}
 	.av {
 		width: 32px;
 		height: 32px;
@@ -141,7 +148,21 @@
 		color: white;
 		font-weight: 800;
 		font-size: 11px;
-		flex-shrink: 0;
+	}
+	.presence {
+		position: absolute;
+		bottom: -1px;
+		right: -1px;
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		border: 2px solid var(--card);
+	}
+	.presence.online {
+		background: #10b981;
+	}
+	.presence.offline {
+		background: #cbd5e1;
 	}
 	.info {
 		flex: 1;

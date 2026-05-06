@@ -1800,6 +1800,27 @@
       "when": 1746633600005,
       "tag": "0256_invitation_title",
       "breakpoints": true
+    },
+    {
+      "idx": 257,
+      "version": "6",
+      "when": 1746633600006,
+      "tag": "0257_tenant_user_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "6",
+      "when": 1746633600007,
+      "tag": "0258_tenant_user_hourly_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "6",
+      "when": 1746633600008,
+      "tag": "0259_tenant_user_status",
+      "breakpoints": true
     }
   ]
 }

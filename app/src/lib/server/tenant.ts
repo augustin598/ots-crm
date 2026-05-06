@@ -4,7 +4,8 @@ import { eq, and, or } from 'drizzle-orm';
 import { generateSlug } from './utils/slug';
 
 /**
- * Get tenant by ID and validate user has access
+ * Get tenant by ID and validate user has access.
+ * Suspended tenant_users are denied access (status !== 'active').
  */
 export async function getTenantById(tenantId: string, userId: string) {
 	const [result] = await db
@@ -15,9 +16,12 @@ export async function getTenantById(tenantId: string, userId: string) {
 		.from(table.tenant)
 		.innerJoin(table.tenantUser, eq(table.tenant.id, table.tenantUser.tenantId))
 		.where(
-			or(
-				and(eq(table.tenant.slug, tenantId), eq(table.tenantUser.userId, userId)),
-				and(eq(table.tenant.id, tenantId), eq(table.tenantUser.userId, userId))
+			and(
+				eq(table.tenantUser.status, 'active'),
+				or(
+					and(eq(table.tenant.slug, tenantId), eq(table.tenantUser.userId, userId)),
+					and(eq(table.tenant.id, tenantId), eq(table.tenantUser.userId, userId))
+				)
 			)
 		)
 		.limit(1);
