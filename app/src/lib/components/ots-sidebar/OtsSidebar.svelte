@@ -63,7 +63,44 @@
 		badges?: Record<string, number>;
 	} = $props();
 
+	// Client-side override: sync clients badge with the localStorage filter set
+	// by /[tenant]/clients/+page.svelte. If the user has saved a selection, the
+	// badge reflects the filtered count instead of the DB total.
+	let clientsLocalCount = $state<number | null>(null);
+
+	function readClientsFilterFromStorage(slug: string): number | null {
+		if (typeof window === 'undefined' || !slug) return null;
+		try {
+			const raw = window.localStorage.getItem(`crm-clients-filter-${slug}`);
+			if (!raw) return null;
+			const parsed = JSON.parse(raw);
+			if (Array.isArray(parsed) && parsed.length > 0) return parsed.length;
+		} catch {
+			/* ignore */
+		}
+		return null;
+	}
+
+	$effect(() => {
+		clientsLocalCount = readClientsFilterFromStorage(tenantSlug);
+		// Re-read on cross-tab updates and on focus (covers same-tab changes).
+		const onStorage = (e: StorageEvent) => {
+			if (e.key && !e.key.startsWith('crm-clients-filter-')) return;
+			clientsLocalCount = readClientsFilterFromStorage(tenantSlug);
+		};
+		const onFocus = () => {
+			clientsLocalCount = readClientsFilterFromStorage(tenantSlug);
+		};
+		window.addEventListener('storage', onStorage);
+		window.addEventListener('focus', onFocus);
+		return () => {
+			window.removeEventListener('storage', onStorage);
+			window.removeEventListener('focus', onFocus);
+		};
+	});
+
 	function badgeFor(item: NavItem): number | undefined {
+		if (item.id === 'clients' && clientsLocalCount !== null) return clientsLocalCount;
 		const fromProp = badges[item.id];
 		if (typeof fromProp === 'number' && fromProp > 0) return fromProp;
 		return item.badge;
