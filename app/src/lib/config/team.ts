@@ -1,9 +1,43 @@
-import {
-	ACCESS_CATEGORIES,
-	ALL_ACCESS_TRUE,
-	NO_ACCESS,
-	type AccessFlags
-} from '$lib/server/portal-access';
+// Mirror of $lib/server/portal-access — duplicated here so client-side modules
+// (Svelte components, browser bundles) don't pull the server module.
+export const ACCESS_CATEGORIES = [
+	'invoices',
+	'contracts',
+	'tasks',
+	'marketing',
+	'reports',
+	'leads',
+	'accessData',
+	'backlinks',
+	'budgets'
+] as const;
+
+export type AccessCategory = (typeof ACCESS_CATEGORIES)[number];
+export type AccessFlags = Record<AccessCategory, boolean>;
+
+const ALL_ACCESS_TRUE: AccessFlags = {
+	invoices: true,
+	contracts: true,
+	tasks: true,
+	marketing: true,
+	reports: true,
+	leads: true,
+	accessData: true,
+	backlinks: true,
+	budgets: true
+};
+
+const NO_ACCESS: AccessFlags = {
+	invoices: false,
+	contracts: false,
+	tasks: false,
+	marketing: false,
+	reports: false,
+	leads: false,
+	accessData: false,
+	backlinks: false,
+	budgets: false
+};
 
 // =============================================================================
 // Admin (tenant) roles
