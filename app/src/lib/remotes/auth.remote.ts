@@ -359,7 +359,7 @@ export const requestPasswordReset = command(
 			if (rateLimitError) {
 				return {
 					success: true,
-					message: 'If an account exists with this email, a password reset link has been sent.'
+					message: 'Dacă există un cont pentru acest email, a fost trimis un link de resetare.'
 				};
 			}
 
@@ -414,7 +414,6 @@ export const requestPasswordReset = command(
 			if (!resolvedTenantId) {
 				// Orphan account with no tenant context AND no pending invitations.
 				// Don't send email — there's no useful workspace to log into anyway.
-				// Return generic message (don't leak the orphan state).
 				logError('auth', 'Password reset blocked for orphan account', {
 					metadata: { email: normalizedEmail, userId: userRecord.id }
 				});
@@ -463,10 +462,7 @@ export const requestPasswordReset = command(
 				};
 			}
 
-			return {
-				success: true,
-				message: 'If an account exists with this email, a password reset link has been sent.'
-			};
+			return GENERIC_OK;
 		} catch (error) {
 			console.error('Request password reset error:', error);
 			return {
