@@ -12,7 +12,7 @@ import { randomBytes } from 'crypto';
 import { env } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import type { User } from '../server/db/schema';
-import { sendAdminMagicLinkEmail, sendPasswordResetEmail } from '../server/email';
+import { sendAdminMagicLinkEmail, sendPasswordResetEmail, safeGreetingName } from '../server/email';
 import { checkAuthRateLimit } from '../server/rate-limiter';
 import { verifyAdminMagicLinkToken } from '../server/auth';
 import { generateSessionToken, createSession, setSessionTokenCookie, invalidateSession, deleteSessionTokenCookie } from '../server/auth';
@@ -296,7 +296,7 @@ export const requestMagicLink = command(
 				await sendAdminMagicLinkEmail(
 					email,
 					plainToken,
-					userRecord.firstName + ' ' + userRecord.lastName,
+					safeGreetingName(userRecord.firstName, userRecord.lastName, email),
 					userTenant?.tenantId
 				);
 			} catch (emailError) {
@@ -414,7 +414,7 @@ export const requestPasswordReset = command(
 			if (!resolvedTenantId) {
 				// Orphan account with no tenant context AND no pending invitations.
 				// Don't send email — there's no useful workspace to log into anyway.
-				logError('auth', 'Password reset blocked for orphan account', {
+				logError('server', 'Password reset blocked for orphan account', {
 					metadata: { email: normalizedEmail, userId: userRecord.id }
 				});
 				return GENERIC_OK;
@@ -447,11 +447,11 @@ export const requestPasswordReset = command(
 				await sendPasswordResetEmail(
 					email,
 					plainToken,
-					`${userRecord.firstName ?? ''} ${userRecord.lastName ?? ''}`.trim() || email,
+					safeGreetingName(userRecord.firstName, userRecord.lastName, email),
 					resolvedTenantId
 				);
 			} catch (emailError) {
-				logError('auth', 'Failed to send password reset email', {
+				logError('server', 'Failed to send password reset email', {
 					metadata: { email: normalizedEmail, tenantId: resolvedTenantId },
 					stackTrace: emailError instanceof Error ? emailError.stack : undefined
 				});

@@ -77,6 +77,22 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 		throw new Error('Parola trebuie să aibă cel puțin 8 caractere.');
 	}
 
+	// Validate first/last name look like person names, not company strings
+	const COMPANY_SUFFIXES_RE = /\b(S\.R\.L\.?|SRL|S\.A\.?|PFA|I\.I\.?|I\.F\.?|LLC|LTD|INC|GMBH|B\.V\.?|N\.V\.?|AG)\b/i;
+	const fnTrim = firstName.trim();
+	const lnTrim = lastName.trim();
+	if (!fnTrim || !lnTrim) {
+		throw new Error('Prenumele și numele sunt obligatorii.');
+	}
+	if (COMPANY_SUFFIXES_RE.test(fnTrim) || COMPANY_SUFFIXES_RE.test(lnTrim)) {
+		throw new Error(
+			'Folosește prenumele și numele tău, nu numele companiei (ex: nu "GLOBAL SOCIAL PLATFORMS S.R.L.").'
+		);
+	}
+	if (fnTrim.length > 60 || lnTrim.length > 80) {
+		throw new Error('Prenumele și numele sunt prea lungi (max 60 / 80 caractere).');
+	}
+
 	// Normalize email
 	const normalizedEmail = email.trim().toLowerCase();
 
