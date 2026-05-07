@@ -46,6 +46,46 @@ function trimPlainText(text: string): string {
 }
 
 /**
+ * Detect if a "name" looks like a company entity rather than a person name.
+ * Used to avoid greeting emails with "Hello GLOBAL SOCIAL PLATFORMS S.R.L." when
+ * the user's first/last name fields were filled with company data.
+ */
+const COMPANY_SUFFIXES = [
+	'S.R.L.', 'SRL', 'S.A.', 'SA', 'PFA', 'I.I.', 'II', 'I.F.', 'IF',
+	'LLC', 'LTD', 'INC', 'GMBH', 'B.V.', 'BV', 'N.V.', 'NV', 'AG'
+];
+function looksLikeCompanyName(text: string): boolean {
+	const t = text.trim();
+	if (!t) return false;
+	const upper = t.toUpperCase();
+	for (const suffix of COMPANY_SUFFIXES) {
+		if (upper.includes(suffix)) return true;
+	}
+	return false;
+}
+
+/**
+ * Pick a safe greeting from a user's data — uses the name if it looks like a
+ * person, otherwise falls back to the email's local-part (capitalized).
+ */
+export function safeGreetingName(
+	firstName: string | null | undefined,
+	lastName: string | null | undefined,
+	emailFallback: string
+): string {
+	const fn = (firstName ?? '').trim();
+	const ln = (lastName ?? '').trim();
+	const full = `${fn} ${ln}`.trim();
+
+	if (full && !looksLikeCompanyName(full)) {
+		return full;
+	}
+
+	const local = emailFallback.split('@')[0] ?? emailFallback;
+	return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+/**
  * Resolve the "from" email for a tenant or the global default.
  * Logs a warning if falling back to noreply@example.com (emails will be rejected).
  */

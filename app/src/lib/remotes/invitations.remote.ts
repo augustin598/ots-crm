@@ -7,6 +7,8 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { randomBytes } from 'crypto';
 import { sendInvitationEmail } from '$lib/server/email';
 import { redirect } from '@sveltejs/kit';
+import { getActor } from '$lib/server/get-actor';
+import { assertCan } from '$lib/server/access';
 
 function generateInvitationId() {
 	const bytes = randomBytes(15);
@@ -35,13 +37,18 @@ export const sendInvitation = command(sendInvitationSchema, async (data) => {
 		throw new Error('Unauthorized');
 	}
 
-	// Only owners and admins can invite
-	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
-		throw new Error('Insufficient permissions');
-	}
+	// Anyone with admin.team.invite can invite (Owner, Admin, Manager).
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.team.invite');
 
 	const { email: rawEmail, role = 'member', department = null, title = null } = data;
 	const email = rawEmail.trim().toLowerCase();
+
+	// Manager can only invite Member/Viewer (not Admin/Owner). Enforced via
+	// admin.team.changeRole gate when target role is admin/owner.
+	if (role === 'admin') {
+		assertCan(actor, 'admin.team.changeRole');
+	}
 
 	// Prevent self-invitation — actor's own email cannot be invited
 	if (event.locals.user.email && event.locals.user.email.toLowerCase() === email) {
@@ -126,10 +133,8 @@ export const getInvitations = query(async () => {
 		throw new Error('Unauthorized');
 	}
 
-	// Only owners and admins can view invitations
-	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
-		throw new Error('Insufficient permissions');
-	}
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.team.invite');
 
 	const invitations = await db
 		.select({
@@ -163,10 +168,8 @@ export const cancelInvitation = command(
 			throw new Error('Unauthorized');
 		}
 
-		// Only owners and admins can cancel invitations
-		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
-			throw new Error('Insufficient permissions');
-		}
+		const actor = await getActor(event);
+		assertCan(actor, 'admin.team.invite');
 
 		// Verify invitation belongs to tenant and is pending
 		const [invitation] = await db

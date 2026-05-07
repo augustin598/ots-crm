@@ -85,6 +85,7 @@ export const tenantUser = sqliteTable(
 		skills: text('skills').default('[]'), // JSON array of skill labels
 		hourlyRate: text('hourly_rate'), // free-form display string e.g. "€55/h"
 		status: text('status').notNull().default('active'), // 'active' | 'suspended'
+		capabilities: text('capabilities'), // JSON array of capability IDs (override). NULL = use role defaults from access/catalog.ts
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_date`)
@@ -93,6 +94,23 @@ export const tenantUser = sqliteTable(
 		uniqUserTenant: uniqueIndex('tenant_user_uniq').on(t.userId, t.tenantId)
 	})
 );
+
+/**
+ * Catalog of all known capabilities. Populated from CAPABILITY_CATALOG in
+ * `$lib/access/catalog` at boot via seed. Used for audit/debug/admin UIs;
+ * NOT consulted at runtime for authorization (engine reads catalog directly).
+ */
+export const accessCapability = sqliteTable('access_capability', {
+	id: text('id').primaryKey(),
+	domain: text('domain').notNull(), // 'admin' | 'portal' | 'shared'
+	groupLabel: text('group_label').notNull(),
+	label: text('label').notNull(),
+	description: text('description'),
+	unsafeUnlessRole: text('unsafe_unless_role'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_date`)
+});
 
 export const invitation = sqliteTable('invitation', {
 	id: text('id').primaryKey(),

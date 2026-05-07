@@ -8,6 +8,7 @@ import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
 import { registerNotificationHooks } from '$lib/server/hooks/notification-hooks';
 import { runMigrations } from '$lib/server/db/migrate';
+import { seedAccessCatalog } from '$lib/server/access-seed';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
 import { flushLogBuffer } from '$lib/server/logger';
 import { restoreAllSessions as restoreWhatsappSessions, shutdownAllSessions as shutdownWhatsappSessions } from '$lib/server/whatsapp/session-manager';
@@ -161,6 +162,12 @@ export const init = async () => {
 		await runMigrations();
 	} catch (e) {
 		console.error('[INIT] Migrations failed, continuing startup:', e instanceof Error ? e.message : e);
+	}
+	// Mirror capability catalog into DB (idempotent, non-fatal on failure)
+	try {
+		await seedAccessCatalog();
+	} catch (e) {
+		console.error('[INIT] Access catalog seed failed:', e instanceof Error ? e.message : e);
 	}
 	await ensurePluginsInitialized();
 	ensureAppHooksRegistered();

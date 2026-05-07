@@ -11,6 +11,11 @@ declare global {
 			client?: import('$lib/server/db/schema').Client | null;
 			isClientUser?: boolean;
 			isClientUserPrimary?: boolean;
+			/**
+			 * Authorization actor — populated lazily by `getActor()` from
+			 * `$lib/server/access`. Use assertCan/can helpers, not direct access.
+			 */
+			actor?: import('$lib/server/access').Actor;
 		}
 		interface PageData {
 			translations?: Record<import('$lib/i18n/index.svelte').Language, Record<string, any>>;
