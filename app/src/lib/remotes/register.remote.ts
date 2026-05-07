@@ -214,13 +214,17 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 			});
 
 			if (invitation) {
-				// User is joining existing tenant via invitation
+				// User is joining existing tenant via invitation.
+				// Carry over department + title from the invitation record (set by
+				// the inviter in /team Invite Modal).
 				const tenantUserId = generateTenantUserId();
 				await tx.insert(table.tenantUser).values({
 					id: tenantUserId,
 					tenantId: invitation.tenantId,
 					userId,
-					role
+					role,
+					department: invitation.department ?? null,
+					title: invitation.title ?? null
 				});
 
 				// Mark invitation as accepted
