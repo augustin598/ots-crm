@@ -1,6 +1,11 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+// Re-export for legacy callers; new code should use the catalog directly.
+export {
+	routeRequiresCapability,
+	type Capability
+} from '$lib/access/catalog';
 
 /**
  * Portal access flags — granular per-page visibility for client portal users.

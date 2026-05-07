@@ -9,6 +9,7 @@
 		updateTenantUserRole,
 		updateTenantUserMeta,
 		updateTenantUserSkills,
+		updateTenantUserCapabilities,
 		removeTenantUser,
 		suspendTenantUser,
 		reactivateTenantUser,
@@ -26,13 +27,17 @@
 	import ListIcon from '@lucide/svelte/icons/list';
 	import {
 		ADMIN_ROLES,
-		ADMIN_PERMISSION_MATRIX,
 		DEPARTMENTS,
 		getAdminRole,
 		getDepartment,
 		type AdminRoleId,
 		type DepartmentId
 	} from '$lib/config/team';
+	import {
+		capabilitiesByGroup,
+		rolesForCapability,
+		type Capability
+	} from '$lib/access/catalog';
 	import TeamKpiStrip from '$lib/components/team/TeamKpiStrip.svelte';
 	import TeamMemberCard from '$lib/components/team/TeamMemberCard.svelte';
 	import TeamMemberTable from '$lib/components/team/TeamMemberTable.svelte';
@@ -197,7 +202,8 @@
 			isYou: m.userId === data.currentUserId,
 			isOwner: m.role === 'owner',
 			online: isMemberOnline(m.userId),
-			stats: s ? { active: s.active, done: s.done, onTime: s.onTimePct } : null
+			stats: s ? { active: s.active, done: s.done, onTime: s.onTimePct } : null,
+			capabilities: (m as { capabilities?: string | null }).capabilities ?? null
 		};
 	});
 
@@ -285,6 +291,25 @@
 			toast.success('Skills actualizate.');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare.');
+		}
+	}
+
+	async function handleSaveCapabilities(capabilities: string[] | null) {
+		const m = editingMember;
+		if (!m) return;
+		try {
+			await updateTenantUserCapabilities({
+				tenantUserId: m.tenantUserId,
+				capabilities
+			});
+			await invalidateAll();
+			toast.success(
+				capabilities === null
+					? 'Permisiuni resetate la preset-ul rolului.'
+					: 'Permisiuni custom salvate.'
+			);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la actualizare permisiuni.');
 		}
 	}
 
@@ -625,7 +650,16 @@
 				Permisiunile se acumulează — Owner are tot, Member doar acces standard.
 			</Dialog.Description>
 		</Dialog.Header>
-		<TeamPermissionsMatrix roles={ADMIN_ROLES} permissions={ADMIN_PERMISSION_MATRIX} />
+		{@const adminGroups = capabilitiesByGroup('admin')}
+		{@const matrixData = Array.from(adminGroups.entries()).map(([group, items]) => ({
+			group,
+			items: items.map((c) => ({
+				id: c.id as string,
+				label: c.label,
+				roles: rolesForCapability(c.id as Capability) as string[]
+			}))
+		}))}
+		<TeamPermissionsMatrix roles={ADMIN_ROLES} permissions={matrixData} />
 		<Dialog.Footer>
 			<Button onclick={() => (permsOpen = false)}>Închide</Button>
 		</Dialog.Footer>
@@ -669,6 +703,7 @@
 	onChangeRole={handleChangeRole}
 	onSaveMeta={handleSaveMeta}
 	onSaveSkills={handleSaveSkills}
+	onSaveCapabilities={handleSaveCapabilities}
 	onRemove={handleRemove}
 	onSuspend={handleSuspend}
 	onReactivate={handleReactivate}

@@ -18,6 +18,14 @@
 		type AdminRoleId,
 		type DepartmentId
 	} from '$lib/config/team';
+	import {
+		capabilitiesByGroup,
+		getCapabilitiesForRole,
+		type Capability
+	} from '$lib/access/catalog';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ShieldIcon from '@lucide/svelte/icons/shield';
 
 	export interface ProfileMember {
 		tenantUserId: string;
@@ -37,6 +45,8 @@
 		isOwner: boolean;
 		online: boolean;
 		stats: { active: number; done: number; onTime: number | null } | null;
+		/** JSON array of capability IDs (override) or null = use role defaults. */
+		capabilities: string | null;
 	}
 
 	let {
@@ -46,6 +56,7 @@
 		onChangeRole,
 		onSaveMeta,
 		onSaveSkills,
+		onSaveCapabilities,
 		onRemove,
 		onSuspend,
 		onReactivate
@@ -60,6 +71,7 @@
 			hourlyRate?: string | null;
 		}) => Promise<void> | void;
 		onSaveSkills: (skills: string[]) => Promise<void> | void;
+		onSaveCapabilities?: (capabilities: string[] | null) => Promise<void> | void;
 		onRemove: () => Promise<void> | void;
 		onSuspend: () => Promise<void> | void;
 		onReactivate: () => Promise<void> | void;
@@ -71,13 +83,54 @@
 	let newSkill = $state('');
 	let busy = $state(false);
 
+	// Capability override state
+	let capsExpanded = $state(false);
+	let capsDraft = $state<Set<string>>(new Set());
+	let capsHasOverride = $state(false);
+
 	$effect(() => {
 		if (member) {
 			titleDraft = member.title ?? '';
 			rateDraft = member.hourlyRate ?? '';
 			skillsDraft = [...member.skills];
+
+			// Initialize capabilities draft from member's override or role defaults
+			if (member.capabilities) {
+				try {
+					const parsed = JSON.parse(member.capabilities);
+					if (Array.isArray(parsed)) {
+						capsDraft = new Set(parsed.filter((s) => typeof s === 'string'));
+						capsHasOverride = true;
+					} else {
+						capsDraft = new Set(getCapabilitiesForRole(member.role as AdminRoleId));
+						capsHasOverride = false;
+					}
+				} catch {
+					capsDraft = new Set(getCapabilitiesForRole(member.role as AdminRoleId));
+					capsHasOverride = false;
+				}
+			} else {
+				capsDraft = new Set(getCapabilitiesForRole(member.role as AdminRoleId));
+				capsHasOverride = false;
+			}
 		}
 	});
+
+	const adminCapGroups = $derived(capabilitiesByGroup('admin'));
+
+	function toggleCap(id: string) {
+		const next = new Set(capsDraft);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		capsDraft = next;
+		capsHasOverride = true;
+	}
+
+	function resetCapsToRoleDefault() {
+		if (!member) return;
+		capsDraft = new Set(getCapabilitiesForRole(member.role as AdminRoleId));
+		capsHasOverride = false;
+	}
 
 	const canActorChangeRole = $derived.by(() => {
 		if (!member) return false;
@@ -139,6 +192,24 @@
 			const before = JSON.stringify([...member.skills].sort());
 			const after = JSON.stringify([...skillsDraft].sort());
 			if (before !== after) await onSaveSkills(skillsDraft);
+
+			// Capabilities override save
+			if (onSaveCapabilities) {
+				const roleDefaults = new Set(getCapabilitiesForRole(member.role as AdminRoleId));
+				const draftStr = JSON.stringify([...capsDraft].sort());
+				const defaultStr = JSON.stringify([...roleDefaults].sort());
+				const memberCurrentStr = member.capabilities;
+
+				if (capsHasOverride && draftStr !== defaultStr) {
+					// Save override (only if different from current persisted)
+					if (memberCurrentStr !== draftStr) {
+						await onSaveCapabilities([...capsDraft]);
+					}
+				} else if (!capsHasOverride && memberCurrentStr !== null) {
+					// Clear override
+					await onSaveCapabilities(null);
+				}
+			}
 		} finally {
 			busy = false;
 		}
@@ -328,6 +399,63 @@
 						</div>
 					{/if}
 				</div>
+
+				<!-- Permisiuni avansate (per-user override) -->
+				{#if onSaveCapabilities && actorRole === 'owner' && !member.isOwner}
+					<div class="fld">
+						<button type="button" class="caps-toggle" onclick={() => (capsExpanded = !capsExpanded)}>
+							{#if capsExpanded}<ChevronDownIcon class="size-3.5" />{:else}<ChevronRightIcon class="size-3.5" />{/if}
+							<ShieldIcon class="size-3.5" />
+							<span>Permisiuni avansate</span>
+							{#if capsHasOverride}
+								<span class="caps-custom-badge">Custom</span>
+							{:else}
+								<span class="caps-default-hint">— folosește preset rol —</span>
+							{/if}
+						</button>
+						{#if capsExpanded}
+							<div class="caps-body">
+								<div class="caps-row-actions">
+									<button
+										type="button"
+										class="caps-reset-btn"
+										onclick={resetCapsToRoleDefault}
+										disabled={!capsHasOverride}
+									>
+										Resetează la preset rol
+									</button>
+									<span class="caps-hint">
+										Bifează individual pentru a permite acest membru capacități în plus față de rol.
+									</span>
+								</div>
+								{#each Array.from(adminCapGroups.entries()) as [groupName, items] (groupName)}
+									<div class="caps-group">
+										<div class="caps-group-label">{groupName}</div>
+										{#each items as cap (cap.id)}
+											<label class="caps-row">
+												<input
+													type="checkbox"
+													checked={capsDraft.has(cap.id)}
+													onchange={() => toggleCap(cap.id)}
+													disabled={cap.unsafeUnlessRole !== undefined && cap.unsafeUnlessRole !== member.role}
+												/>
+												<span class="caps-row-label">
+													{cap.label}
+													{#if cap.unsafeUnlessRole}
+														<span class="caps-warn">doar {cap.unsafeUnlessRole}</span>
+													{/if}
+												</span>
+												{#if cap.description}
+													<span class="caps-desc">{cap.description}</span>
+												{/if}
+											</label>
+										{/each}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 
 			<Dialog.Footer>
@@ -642,5 +770,133 @@
 		display: flex;
 		gap: 8px;
 		flex-wrap: wrap;
+	}
+
+	/* Capabilities advanced section */
+	.caps-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		background: none;
+		border: 1px dashed var(--border);
+		border-radius: 8px;
+		padding: 8px 12px;
+		font-family: inherit;
+		font-size: 12.5px;
+		font-weight: 600;
+		color: var(--foreground);
+		cursor: pointer;
+		width: 100%;
+		justify-content: flex-start;
+	}
+	.caps-toggle:hover {
+		border-color: var(--primary);
+	}
+	.caps-custom-badge {
+		font-size: 10px;
+		font-weight: 700;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--primary) 16%, transparent);
+		color: var(--primary);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		margin-left: auto;
+	}
+	.caps-default-hint {
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--muted-foreground);
+		margin-left: auto;
+		font-style: italic;
+	}
+	.caps-body {
+		margin-top: 8px;
+		padding: 12px;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		background: color-mix(in oklch, var(--foreground) 2%, transparent);
+		max-height: 320px;
+		overflow-y: auto;
+	}
+	.caps-row-actions {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 10px;
+		padding-bottom: 10px;
+		border-bottom: 1px solid var(--border);
+	}
+	.caps-reset-btn {
+		font-size: 11px;
+		font-weight: 600;
+		padding: 4px 10px;
+		border-radius: 6px;
+		border: 1px solid var(--border);
+		background: var(--card);
+		color: var(--muted-foreground);
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.caps-reset-btn:hover:not(:disabled) {
+		border-color: var(--primary);
+		color: var(--primary);
+	}
+	.caps-reset-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.caps-hint {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		flex: 1;
+	}
+	.caps-group {
+		margin-bottom: 12px;
+	}
+	.caps-group:last-child {
+		margin-bottom: 0;
+	}
+	.caps-group-label {
+		font-size: 10px;
+		font-weight: 700;
+		color: var(--primary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 6px;
+	}
+	.caps-row {
+		display: grid;
+		grid-template-columns: auto 1fr auto;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 0;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.caps-row input[type='checkbox']:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.caps-row-label {
+		font-weight: 600;
+		color: var(--foreground);
+	}
+	.caps-warn {
+		font-size: 9px;
+		font-weight: 700;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: #fef3c7;
+		color: #92400e;
+		margin-left: 4px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.caps-desc {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		grid-column: 2 / -1;
+		font-weight: normal;
 	}
 </style>

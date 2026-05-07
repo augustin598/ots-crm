@@ -81,7 +81,6 @@ export function safeGreetingName(
 		return full;
 	}
 
-	// Fallback: capitalize email local-part
 	const local = emailFallback.split('@')[0] ?? emailFallback;
 	return local.charAt(0).toUpperCase() + local.slice(1);
 }

@@ -5,7 +5,7 @@ import type { PageServerLoad } from './$types';
 import { ensureAdminTeamAccess } from '$lib/server/team-access';
 
 export const load: PageServerLoad = async (event) => {
-	ensureAdminTeamAccess(event);
+	await ensureAdminTeamAccess(event);
 	const tenantId = event.locals.tenant!.id;
 
 	const [members, invitations, taskCounts, sessionRows] = await Promise.all([
@@ -23,6 +23,7 @@ export const load: PageServerLoad = async (event) => {
 				skills: table.tenantUser.skills,
 				hourlyRate: table.tenantUser.hourlyRate,
 				status: table.tenantUser.status,
+				capabilities: table.tenantUser.capabilities,
 				joinedAt: table.tenantUser.createdAt
 			})
 			.from(table.tenantUser)
