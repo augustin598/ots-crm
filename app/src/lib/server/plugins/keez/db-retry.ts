@@ -10,16 +10,20 @@ const BUSY_PATTERNS = [
 	'STREAM_EXPIRED',
 	'HRANA_WEBSOCKET_ERROR',
 	'write timeout',
-	'WRITE_TIMEOUT'
+	'WRITE_TIMEOUT',
+	'invalid baton' // Turso HTTP protocol: baton (session handle) expired mid-batch
 ];
 
 function isTursoBusyError(err: unknown): boolean {
 	let current: unknown = err;
 	for (let depth = 0; current && depth < 4; depth++) {
 		if (current instanceof Error) {
-			const msg = current.message || '';
-			const code = (current as { code?: string }).code || '';
-			if (BUSY_PATTERNS.some((p) => msg.includes(p) || code.includes(p))) return true;
+			const msg = (current.message || '').toLowerCase();
+			const code = ((current as { code?: string }).code || '').toLowerCase();
+			if (BUSY_PATTERNS.some((p) => {
+				const lower = p.toLowerCase();
+				return msg.includes(lower) || code.includes(lower);
+			})) return true;
 			current = (current as { cause?: unknown }).cause;
 		} else {
 			break;

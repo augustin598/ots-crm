@@ -448,34 +448,29 @@ async function _syncKeezInvoicesForTenantInner(
 					}
 				}
 
-				await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, existing.id));
+				// Atomic: header UPDATE + line items DELETE/INSERT in one transaction so
+				// a mid-write Turso failure can't leave the invoice partially updated.
+				const lineItemsData =
+					Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0
+						? mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, existing.id)
+						: null;
 
-				// Update line items atomically: delete + insert in a single transaction
-				// so a mid-write failure can't leave the invoice with zero line items.
-				if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
-					try {
-						const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, existing.id);
-						await withTursoBusyRetry(
-							() => db.transaction(async (tx) => {
-								await tx
-									.delete(table.invoiceLineItem)
-									.where(eq(table.invoiceLineItem.invoiceId, existing.id));
-								if (lineItemsData.length > 0) {
-									await tx.insert(table.invoiceLineItem).values(
-										lineItemsData.map((item) => ({
-											...item,
-											id: generateId()
-										}))
-									);
-								}
-							}),
-							{ tenantId, label: `update line items for invoice ${existing.id}` }
-						);
-					} catch (lineItemError) {
-						const lineErr = serializeError(lineItemError);
-						logError('keez', `Sync failed to update line items for invoice ${existing.id}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
-					}
-				}
+				await withTursoBusyRetry(
+					() => db.transaction(async (tx) => {
+						await tx.update(table.invoice).set(updateData).where(eq(table.invoice.id, existing.id));
+						if (lineItemsData) {
+							await tx
+								.delete(table.invoiceLineItem)
+								.where(eq(table.invoiceLineItem.invoiceId, existing.id));
+							if (lineItemsData.length > 0) {
+								await tx.insert(table.invoiceLineItem).values(
+									lineItemsData.map((item) => ({ ...item, id: generateId() }))
+								);
+							}
+						}
+					}),
+					{ tenantId, label: `update invoice ${existing.id} + line items` }
+				);
 
 				// Update or create sync record
 				const [existingSync] = await db

@@ -68,6 +68,67 @@ describe('withTursoBusyRetry', () => {
 		expect(calls).toBe(1);
 	});
 
+	test('retries on "invalid baton" (Turso HTTP session expired mid-batch)', async () => {
+		let calls = 0;
+		const result = await withTursoBusyRetry(
+			async () => {
+				calls++;
+				if (calls === 1) throw new Error('Received an invalid baton');
+				return 'ok';
+			},
+			{ label: 'invalid-baton', tenantId: 't1' }
+		);
+		expect(result).toBe('ok');
+		expect(calls).toBe(2);
+	});
+
+	test('retries on "invalid baton" nested in .cause (Drizzle batch wrapper)', async () => {
+		let calls = 0;
+		const result = await withTursoBusyRetry(
+			async () => {
+				calls++;
+				if (calls === 1) {
+					const inner = new Error('Received an invalid baton');
+					const wrapper = new Error('Failed query: insert into "invoice_line_item"…');
+					(wrapper as Error & { cause?: unknown }).cause = inner;
+					throw wrapper;
+				}
+				return 'ok';
+			},
+			{ label: 'invalid-baton-wrapped', tenantId: 't1' }
+		);
+		expect(result).toBe('ok');
+		expect(calls).toBe(2);
+	});
+
+	test('retries on uppercase "INVALID BATON" (case-insensitive match)', async () => {
+		let calls = 0;
+		const result = await withTursoBusyRetry(
+			async () => {
+				calls++;
+				if (calls === 1) throw new Error('INVALID BATON');
+				return 'ok';
+			},
+			{ label: 'invalid-baton-upper', tenantId: 't1' }
+		);
+		expect(result).toBe('ok');
+		expect(calls).toBe(2);
+	});
+
+	test('retries on mixed-case "Invalid Baton" (case-insensitive match)', async () => {
+		let calls = 0;
+		const result = await withTursoBusyRetry(
+			async () => {
+				calls++;
+				if (calls === 1) throw new Error('Invalid Baton received from server');
+				return 'ok';
+			},
+			{ label: 'invalid-baton-mixed', tenantId: 't1' }
+		);
+		expect(result).toBe('ok');
+		expect(calls).toBe(2);
+	});
+
 	test('gives up after max retries on persistent busy', async () => {
 		let calls = 0;
 		await expect(
