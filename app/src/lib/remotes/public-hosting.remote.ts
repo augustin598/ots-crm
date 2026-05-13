@@ -7,10 +7,11 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { env } from '$env/dynamic/private';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { normalizeCui, validateCuiOrReason } from '$lib/server/cui-validator';
-import { getStripe, isStripeConfigured } from '$lib/server/stripe/client';
+import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
 import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
 import { getOrCreateStripePrice } from '$lib/server/stripe/price';
 import { createHostingCheckoutSession } from '$lib/server/stripe/checkout';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 
 /**
  * Public hosting pages — accessible without authentication.
@@ -345,7 +346,8 @@ const OrderSchema = v.object({
  * magic link email + admin notification.
  */
 export const submitHostingOrder = command(OrderSchema, async (data) => {
-	if (!isStripeConfigured()) {
+	const tenantId = await resolvePublicTenantId();
+	if (!(await isStripeConfiguredForTenant(tenantId))) {
 		throw new Error(
 			'Plățile online nu sunt configurate. Contactează administratorul (Stripe lipsește).'
 		);
@@ -357,7 +359,17 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 		event?.request?.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
 		'unknown';
 	const userAgent = event?.request?.headers.get('user-agent') ?? null;
-	const origin = event?.url.origin ?? env.PUBLIC_APP_URL ?? 'http://localhost:5173';
+
+	// Origin whitelist — Stripe redirect target trebuie să vină dintr-o listă fixă
+	// ca să prevenim open redirect via Host/X-Forwarded-Host forjat la proxy.
+	const ALLOWED_ORIGINS = [env.PUBLIC_APP_URL, 'http://localhost:5173'].filter(
+		(o): o is string => Boolean(o)
+	);
+	const candidateOrigin = event?.url.origin;
+	const origin =
+		candidateOrigin && ALLOWED_ORIGINS.includes(candidateOrigin)
+			? candidateOrigin
+			: env.PUBLIC_APP_URL ?? 'http://localhost:5173';
 
 	if (!checkRateLimit(ip)) {
 		throw new Error('Prea multe cereri din această locație. Reîncearcă peste o oră.');
@@ -367,7 +379,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 	if (reason) throw new Error(reason);
 	const cleanCui = normalizeCui(data.cui);
 
-	const tenantId = await resolvePublicTenantId();
+	// tenantId rezolvat sus, la verificarea isStripeConfiguredForTenant
 	const normalizedEmail = data.email.trim().toLowerCase();
 
 	// Validate product belongs to tenant + is public
@@ -438,52 +450,79 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 	const inquiryId = generateId();
 	const now = new Date();
 
-	await db.insert(table.client).values({
-		id: clientId,
-		tenantId,
-		name: data.companyName,
-		businessName: data.companyName,
-		email: normalizedEmail,
-		phone: data.phone || null,
-		status: 'prospect',
-		cui: cleanCui,
-		vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
-		registrationNumber: data.registrationNumber || null,
-		address: data.address || null,
-		city: data.city || null,
-		county: data.county || null,
-		postalCode: data.postalCode || null,
-		country: 'RO',
-		legalType: 'srl', // MVP: JP only; ulterior detect din nrRegCom (J vs F vs A)
-		signupSource: 'public-form',
-		onboardingStatus: 'pending_email'
-	});
+	// INSERT cu retry pe Turso busy + .returning() ca să evităm SELECT separat.
+	// Capturăm violations pe UNIQUE (tenant_id, cui) ca să tratăm race-uri
+	// concurente (două submituri paralele cu același CUI înainte ca check-ul
+	// SELECT de mai sus să le vadă).
+	let clientRow: typeof table.client.$inferSelect;
+	try {
+		const inserted = await withTursoBusyRetry(
+			() =>
+				db
+					.insert(table.client)
+					.values({
+						id: clientId,
+						tenantId,
+						name: data.companyName,
+						businessName: data.companyName,
+						email: normalizedEmail,
+						phone: data.phone || null,
+						status: 'prospect',
+						cui: cleanCui,
+						vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
+						registrationNumber: data.registrationNumber || null,
+						address: data.address || null,
+						city: data.city || null,
+						county: data.county || null,
+						postalCode: data.postalCode || null,
+						country: 'RO',
+						legalType: 'srl',
+						signupSource: 'public-form',
+						onboardingStatus: 'pending_email'
+					})
+					.returning(),
+			{ tenantId, label: 'public-hosting/insertClient' }
+		);
+		clientRow = inserted[0];
+	} catch (err) {
+		const { message } = serializeError(err);
+		if (message.toLowerCase().includes('unique')) {
+			// Race condition cu un alt submit pentru același CUI → tratăm ca duplicate
+			// (același mesaj transparent ca în check-ul SELECT de mai sus).
+			logInfo('directadmin', 'CUI duplicat detected via UNIQUE constraint race', {
+				tenantId,
+				metadata: { cui: cleanCui }
+			});
+			return {
+				duplicateCui: true as const,
+				message:
+					'Acest CUI există deja în sistemul nostru. Ți-am trimis pe emailul asociat un link de acces.'
+			};
+		}
+		throw err;
+	}
 
-	await db.insert(table.hostingInquiry).values({
-		id: inquiryId,
-		tenantId,
-		hostingProductId: product.id,
-		contactName: data.companyName,
-		contactEmail: normalizedEmail,
-		contactPhone: data.phone || null,
-		companyName: data.companyName,
-		vatNumber: cleanCui,
-		status: 'new',
-		source: 'pachete-hosting-checkout',
-		ipAddress: ip,
-		userAgent,
-		clientId,
-		clientCreated: true,
-		clientCreatedAt: now
-	});
-
-	// === Stripe: customer + price + checkout session ===
-	const [clientRow] = await db
-		.select()
-		.from(table.client)
-		.where(eq(table.client.id, clientId))
-		.limit(1);
-	if (!clientRow) throw new Error('Client creat dar nu poate fi citit (race condition).');
+	await withTursoBusyRetry(
+		() =>
+			db.insert(table.hostingInquiry).values({
+				id: inquiryId,
+				tenantId,
+				hostingProductId: product.id,
+				contactName: data.companyName,
+				contactEmail: normalizedEmail,
+				contactPhone: data.phone || null,
+				companyName: data.companyName,
+				vatNumber: cleanCui,
+				status: 'new',
+				source: 'pachete-hosting-checkout',
+				ipAddress: ip,
+				userAgent,
+				clientId,
+				clientCreated: true,
+				clientCreatedAt: now
+			}),
+		{ tenantId, label: 'public-hosting/insertInquiry' }
+	);
 
 	let checkoutUrl: string;
 	try {
@@ -502,7 +541,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			country: clientRow.country,
 			stripeCustomerId: clientRow.stripeCustomerId
 		});
-		const stripePriceId = await getOrCreateStripePrice({
+		const stripePriceId = await getOrCreateStripePrice(tenantId, {
 			id: product.id,
 			name: product.name,
 			description: product.description,
@@ -515,6 +554,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 
 		const mode = product.billingCycle === 'one_time' ? 'payment' : 'subscription';
 		const session = await createHostingCheckoutSession({
+			tenantId,
 			stripeCustomerId,
 			stripePriceId,
 			mode,
@@ -528,10 +568,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			}
 		});
 
-		await db
-			.update(table.hostingInquiry)
-			.set({ stripeCheckoutSessionId: session.id, updatedAt: new Date() })
-			.where(eq(table.hostingInquiry.id, inquiryId));
+		await withTursoBusyRetry(
+			() =>
+				db
+					.update(table.hostingInquiry)
+					.set({ stripeCheckoutSessionId: session.id, updatedAt: new Date() })
+					.where(eq(table.hostingInquiry.id, inquiryId)),
+			{ tenantId, label: 'public-hosting/updateInquirySession' }
+		);
 
 		checkoutUrl = session.url ?? '';
 		if (!checkoutUrl) throw new Error('Stripe nu a returnat URL de checkout.');
@@ -541,11 +585,15 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			tenantId,
 			metadata: { clientId, inquiryId, product: product.name }
 		});
-		// Mark inquiry as failed for staff visibility
-		await db
-			.update(table.hostingInquiry)
-			.set({ status: 'new', message: `Eroare Stripe: ${message}`, updatedAt: new Date() })
-			.where(eq(table.hostingInquiry.id, inquiryId));
+		// Mark inquiry as failed for staff visibility (best-effort, nu blocăm pe DB busy).
+		await withTursoBusyRetry(
+			() =>
+				db
+					.update(table.hostingInquiry)
+					.set({ status: 'new', message: `Eroare Stripe: ${message}`, updatedAt: new Date() })
+					.where(eq(table.hostingInquiry.id, inquiryId)),
+			{ tenantId, label: 'public-hosting/markInquiryFailed' }
+		).catch(() => {});
 		throw new Error(`Nu am putut crea sesiunea de plată: ${message}`);
 	}
 

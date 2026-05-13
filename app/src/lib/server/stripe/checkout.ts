@@ -1,4 +1,4 @@
-import { getStripe } from './client';
+import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 
 /**
  * Create a Stripe Checkout Session for a hosting order.
@@ -10,6 +10,7 @@ import { getStripe } from './client';
  * tenant) ca să le pot rezolva în webhook fără re-query.
  */
 export async function createHostingCheckoutSession(opts: {
+	tenantId: string;
 	stripeCustomerId: string;
 	stripePriceId: string;
 	mode: 'subscription' | 'payment';
@@ -24,7 +25,7 @@ export async function createHostingCheckoutSession(opts: {
 	// Locale RO + Europa
 	locale?: 'ro' | 'en';
 }) {
-	const stripe = getStripe();
+	const stripe = await getStripeForTenant(opts.tenantId);
 	const session = await stripe.checkout.sessions.create({
 		customer: opts.stripeCustomerId,
 		mode: opts.mode,
@@ -34,13 +35,18 @@ export async function createHostingCheckoutSession(opts: {
 				quantity: 1
 			}
 		],
-		// Auto-collect TVA prin Stripe Tax. Dacă nu e activat Stripe Tax pe cont,
-		// `tax_behavior` de pe Price face Stripe să afișeze "Tax exclusive" și
-		// CRM-ul calculează TVA pe factura Keez la final.
-		automatic_tax: { enabled: true },
-		// Trimite factura proforma Stripe la email (separat de factura Keez RO)
+		// VAT decision: Keez emite factura fiscală RO autoritate. Stripe colectează
+		// doar plata (RON), nu calculează tax. Așa evităm divergențe între tax rate
+		// Stripe Dashboard și `defaultTaxRate` din CRM. `automatic_tax: false` =
+		// Stripe nu adaugă TVA peste prețul Price (vezi `tax_behavior` pe Price).
+		// Dacă pe viitor activăm Stripe Tax, trebuie sincronizat cu Keez ca să nu
+		// dublăm TVA pe factură.
+		automatic_tax: { enabled: false },
+		// Pentru mode='payment', Stripe creează propria factură (PDF + Hosted Invoice
+		// Page) — utilă pentru clientul care vrea dovada plății imediat, separat de
+		// factura fiscală RO emisă ulterior de Keez. Pentru subscription, Stripe
+		// creează automat o factură per ciclu (controlăm doar emiterea Keez).
 		invoice_creation: opts.mode === 'payment' ? { enabled: true } : undefined,
-		// Pentru subscription, Stripe creează automat invoice la fiecare ciclu
 		success_url: opts.successUrl + '?session_id={CHECKOUT_SESSION_ID}',
 		cancel_url: opts.cancelUrl,
 		locale: opts.locale ?? 'ro',

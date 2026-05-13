@@ -2,7 +2,8 @@ import type Stripe from 'stripe';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { getStripe } from './client';
+import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
+import { logWarning, serializeError } from '$lib/server/logger';
 
 /**
  * Get or lazily create a Stripe Customer for a CRM client.
@@ -35,7 +36,7 @@ export async function getOrCreateStripeCustomer(clientRow: {
 		throw new Error('Clientul nu are email — nu putem crea Stripe Customer.');
 	}
 
-	const stripe = getStripe();
+	const stripe = await getStripeForTenant(clientRow.tenantId);
 	const displayName = clientRow.businessName || clientRow.name;
 
 	// Idempotency search — dacă există deja un customer cu email-ul ăsta în Stripe
@@ -87,6 +88,10 @@ export async function getOrCreateStripeCustomer(clientRow: {
 /**
  * Ensure the Stripe Customer has the Romanian VAT ID (eu_vat type).
  * Idempotent — skips if already attached.
+ *
+ * Non-blocking: VAT ID-uri sunt opționale (Stripe afișează warning în Dashboard
+ * dacă e invalid, dar checkout-ul tot merge). Log warning explicit ca staff să
+ * vadă în logs dacă apar pattern-uri (ex: cui invalid din ANAF).
  */
 async function ensureRomanianVatId(stripe: Stripe, customerId: string, cui: string) {
 	const cleaned = cui.toUpperCase().replace(/^RO/, '');
@@ -101,8 +106,10 @@ async function ensureRomanianVatId(stripe: Stripe, customerId: string, cui: stri
 			type: 'eu_vat',
 			value: taxIdValue
 		});
-	} catch {
-		// Tax IDs sunt opționale — un fail aici nu blochează plata.
-		// Stripe va warning în Dashboard că tax ID e invalid dar checkout-ul merge.
+	} catch (err) {
+		const { message } = serializeError(err);
+		logWarning('directadmin', `Stripe VAT ID attach failed (non-blocking): ${message}`, {
+			metadata: { stripeCustomerId: customerId, cuiPresent: cleaned.length > 0 }
+		});
 	}
 }

@@ -1,7 +1,8 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
-import { getStripe } from './client';
+import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
+import { logWarning, serializeError } from '$lib/server/logger';
 
 /**
  * Lazy-create Stripe Product + Price for a CRM hostingProduct.
@@ -18,17 +19,20 @@ import { getStripe } from './client';
  *
  * Returns the Stripe Price ID (price_...).
  */
-export async function getOrCreateStripePrice(productRow: {
-	id: string;
-	name: string;
-	description: string | null;
-	price: number; // cents
-	currency: string;
-	billingCycle: string; // monthly | quarterly | annually | etc.
-	stripePriceId: string | null;
-	stripeProductId: string | null;
-}): Promise<string> {
-	const stripe = getStripe();
+export async function getOrCreateStripePrice(
+	tenantId: string,
+	productRow: {
+		id: string;
+		name: string;
+		description: string | null;
+		price: number; // cents
+		currency: string;
+		billingCycle: string; // monthly | quarterly | annually | etc.
+		stripePriceId: string | null;
+		stripeProductId: string | null;
+	}
+): Promise<string> {
+	const stripe = await getStripeForTenant(tenantId);
 
 	// 1. Determine Stripe Product ID (lazy create)
 	let productId = productRow.stripeProductId;
@@ -57,9 +61,29 @@ export async function getOrCreateStripePrice(productRow: {
 				return productRow.stripePriceId;
 			}
 			// Mismatch → archive old Price, create new one below
+			logWarning(
+				'directadmin',
+				`Stripe Price mismatch detected (currency=${currencyMatch} amount=${amountMatch} interval=${intervalMatch} active=${existing.active}) — archiving old, creating new`,
+				{
+					metadata: {
+						crmHostingProductId: productRow.id,
+						oldStripePriceId: productRow.stripePriceId
+					}
+				}
+			);
 			await stripe.prices.update(productRow.stripePriceId, { active: false });
-		} catch {
-			// Price doesn't exist (deleted manually in Stripe?) — fall through to create new
+		} catch (err) {
+			const { message } = serializeError(err);
+			logWarning(
+				'directadmin',
+				`Stripe Price retrieve failed (likely deleted in Dashboard), creating new: ${message}`,
+				{
+					metadata: {
+						crmHostingProductId: productRow.id,
+						oldStripePriceId: productRow.stripePriceId
+					}
+				}
+			);
 		}
 	}
 

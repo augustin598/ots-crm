@@ -182,7 +182,11 @@ export const client = sqliteTable('client', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	// Anti-duplicat la signup public (CUI = identitate fiscală unică per tenant).
+	// Partial index pe `cui IS NOT NULL` ca să permitem clienți fără CUI (PFA/PF).
+	uniqueIndex('client_tenant_cui_uniq').on(t.tenantId, t.cui).where(sql`${t.cui} IS NOT NULL`)
+]);
 
 export const partner = sqliteTable('partner', {
 	id: text('id').primaryKey(),
@@ -875,6 +879,12 @@ export const hostingAccount = sqliteTable(
 		additionalDomains: jsonb('additional_domains').$type<string[]>(),
 		notes: text('notes'),
 		whmcsServiceId: integer('whmcs_service_id'),
+		/**
+		 * Stripe Subscription id (sub_...) când contul DA e creat pe baza unei
+		 * subscription recurrent. Folosit la `customer.subscription.deleted` pentru
+		 * a suspenda contul corect. NULL pentru conturile manuale sau one-time.
+		 */
+		stripeSubscriptionId: text('stripe_subscription_id'),
 		lastSyncedAt: text('last_synced_at'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
@@ -887,7 +897,8 @@ export const hostingAccount = sqliteTable(
 		index('hosting_account_tenant_idx').on(t.tenantId),
 		index('hosting_account_client_idx').on(t.clientId),
 		index('hosting_account_server_idx').on(t.daServerId),
-		index('hosting_account_status_idx').on(t.status)
+		index('hosting_account_status_idx').on(t.status),
+		index('hosting_account_stripe_sub_idx').on(t.stripeSubscriptionId)
 	]
 );
 
@@ -952,14 +963,110 @@ export const processedStripeEvent = sqliteTable(
 		id: text('id').primaryKey(), // stripe event.id (evt_...)
 		eventType: text('event_type').notNull(),
 		tenantId: text('tenant_id').references(() => tenant.id),
+		/**
+		 * Status lifecycle: 'processing' → 'completed' | 'failed'.
+		 * Folosit ca să evităm DELETE-on-fail (race condition între retry-uri Stripe).
+		 */
+		status: text('status').notNull().default('completed'),
+		startedAt: text('started_at'),
+		completedAt: text('completed_at'),
+		errorMessage: text('error_message'),
+		retryCount: integer('retry_count').notNull().default(0),
 		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_date`)
 	},
 	(t) => [
 		index('processed_stripe_event_processed_at_idx').on(t.processedAt),
-		index('processed_stripe_event_type_idx').on(t.eventType)
+		index('processed_stripe_event_type_idx').on(t.eventType),
+		index('processed_stripe_event_status_idx').on(t.status)
 	]
+);
+
+/**
+ * Post-payment pipeline state (per Stripe checkout session).
+ *
+ * Webhook `checkout.session.completed` declanșează 3 pași independenți: trimitere
+ * magic-link, emitere factură Keez, provisioning DirectAdmin. Eșuarea unuia nu
+ * blochează ceilalți. Staff face replay manual via debug endpoint.
+ *
+ * UNIQUE (stripe_session_id, step) face procesarea idempotent: pe retry Stripe
+ * sărim pașii deja completați.
+ */
+export const postPaymentStep = sqliteTable(
+	'post_payment_step',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		inquiryId: text('inquiry_id')
+			.notNull()
+			.references(() => hostingInquiry.id),
+		stripeSessionId: text('stripe_session_id').notNull(),
+		/** 'magic_link' | 'keez_invoice' | 'da_provision' */
+		step: text('step').notNull(),
+		/** 'pending' | 'success' | 'failed' | 'skipped' */
+		status: text('status').notNull().default('pending'),
+		error: text('error'),
+		attempts: integer('attempts').notNull().default(0),
+		completedAt: text('completed_at'),
+		/** JSON payload cu rezultatul pasului (ex: daUsername creat, magicLinkTokenId). */
+		payload: text('payload'),
+		createdAt: text('created_at').notNull().default(sql`current_timestamp`),
+		updatedAt: text('updated_at').notNull().default(sql`current_timestamp`)
+	},
+	(t) => [
+		index('post_payment_step_session_idx').on(t.stripeSessionId),
+		index('post_payment_step_status_idx').on(t.status),
+		uniqueIndex('post_payment_step_uniq').on(t.stripeSessionId, t.step)
+	]
+);
+
+/**
+ * Per-tenant Stripe integration credentials (Sprint 9 — Stripe as plugin).
+ *
+ * Pattern aliniat cu `keezIntegration` / `smartbillIntegration`:
+ *  - Credențialele sensibile sunt criptate cu AES-256-GCM per-tenant
+ *    (`smartbill/crypto.ts` — key derived from tenantId + ENCRYPTION_SECRET).
+ *  - Publishable key e public, stocat plain.
+ *  - Webhook secret e nullable until tenant configures the endpoint in
+ *    Stripe Dashboard.
+ *
+ * One row per tenant (unique constraint pe tenantId).
+ */
+export const stripeIntegration = sqliteTable(
+	'stripe_integration',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id)
+			.unique(),
+		// Stripe account info (fetched at "Test connection" time via stripe.accounts.retrieve)
+		accountId: text('account_id'), // acct_... — pentru afișare info cont
+		accountName: text('account_name'),
+		accountEmail: text('account_email'),
+		// Credentials (encrypted)
+		secretKeyEncrypted: text('secret_key_encrypted').notNull(),
+		publishableKey: text('publishable_key').notNull(), // public — stocat plain
+		webhookSecretEncrypted: text('webhook_secret_encrypted'), // nullable
+		// Mode + status
+		isTestMode: boolean('is_test_mode').notNull().default(true),
+		isActive: boolean('is_active').notNull().default(true),
+		lastTestedAt: timestamp('last_tested_at', { withTimezone: true, mode: 'date' }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [index('stripe_integration_tenant_idx').on(t.tenantId)]
 );
 
 export const daAuditLog = sqliteTable(

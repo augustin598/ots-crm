@@ -2087,6 +2087,34 @@
 			"when": 1778593921452800,
 			"tag": "0297_stripe_onboarding",
 			"breakpoints": true
+		},
+		{
+			"idx": 298,
+			"version": "6",
+			"when": 1778593921452900,
+			"tag": "0298_stripe_integration",
+			"breakpoints": true
+		},
+		{
+			"idx": 299,
+			"version": "6",
+			"when": 1778593921453000,
+			"tag": "0299_stripe_event_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 300,
+			"version": "6",
+			"when": 1778593921453100,
+			"tag": "0300_client_unique_cui",
+			"breakpoints": true
+		},
+		{
+			"idx": 301,
+			"version": "6",
+			"when": 1778593921453200,
+			"tag": "0301_post_payment_steps",
+			"breakpoints": true
 		}
 	]
 }

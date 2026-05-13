@@ -23,6 +23,7 @@ import { processAdsSnapshotRetention } from './tasks/ads-snapshot-retention';
 import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
+import { processStripeEventCleanup } from './tasks/stripe-event-cleanup';
 import { processTokenCleanup } from './tasks/token-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
@@ -140,6 +141,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
+	stripe_event_cleanup: processStripeEventCleanup,
 	token_cleanup: processTokenCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
 	pdf_report_send: processPdfReportSend,

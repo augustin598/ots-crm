@@ -1,0 +1,11 @@
+-- Anti-duplicate: enforce UNIQUE pe (tenant_id, cui) ca să prevenim race-uri
+-- în flow-ul public /pachete-hosting (două submituri paralele cu același CUI).
+-- Check-ul SELECT existing din public-hosting.remote.ts e non-atomic; UNIQUE
+-- index e singura garanție corectă.
+--
+-- ATENȚIE: dacă există deja duplicate în prod, migrarea va EȘUA. Înainte de
+-- aplicare, rulează:
+--   SELECT tenant_id, cui, COUNT(*) FROM client
+--   WHERE cui IS NOT NULL GROUP BY 1,2 HAVING COUNT(*) > 1;
+-- și curăță manual prin endpoint admin sau staff dashboard.
+CREATE UNIQUE INDEX `client_tenant_cui_uniq` ON `client` (`tenant_id`, `cui`) WHERE `cui` IS NOT NULL;
