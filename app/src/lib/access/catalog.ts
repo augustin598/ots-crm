@@ -199,6 +199,24 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		unsafeUnlessRole: 'admin'
 	},
 
+	// Stripe (plugin)
+	{
+		id: 'admin.stripe.view',
+		domain: 'admin',
+		groupLabel: 'Stripe',
+		label: 'Vezi configurare Stripe',
+		description: 'Acces la /settings/stripe (status integrare, account info).'
+	},
+	{
+		id: 'admin.stripe.manage',
+		domain: 'admin',
+		groupLabel: 'Stripe',
+		label: 'Gestionare credentials Stripe',
+		description:
+			'Adăugare/actualizare/ștergere chei API Stripe + webhook secret. Acțiune sensibilă financiar.',
+		unsafeUnlessRole: 'admin'
+	},
+
 	// Scheduler / Operations
 	{
 		id: 'admin.scheduler.view',
@@ -379,6 +397,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		'admin.hosting.manage',
 		'admin.hosting.servers.manage',
 		'admin.hosting.import',
+		// Stripe
+		'admin.stripe.view',
+		'admin.stripe.manage',
 		// Operations
 		'admin.scheduler.view',
 		'admin.scheduler.trigger',
@@ -412,6 +433,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		'admin.hosting.manage',
 		'admin.hosting.servers.manage',
 		'admin.hosting.import',
+		// Stripe
+		'admin.stripe.view',
+		'admin.stripe.manage',
 		// Operations (no scheduler.trigger)
 		'admin.scheduler.view',
 		'admin.logs.view',

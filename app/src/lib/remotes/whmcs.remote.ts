@@ -339,47 +339,9 @@ export const setEnableKeezPush = command(
  * Save hosting-series config on invoice_settings. Creates the row if the
  * tenant has never configured invoice settings before.
  */
-export const saveWhmcsHostingSeries = command(
-	v.object({
-		keezSeriesHosting: v.nullable(v.string()),
-		keezStartNumberHosting: v.nullable(v.string()),
-		whmcsAutoPushToKeez: v.boolean()
-	}),
-	async (data) => {
-		const { tenantId } = requireTenantAdmin();
-
-		const existing = await db
-			.select({ id: table.invoiceSettings.id })
-			.from(table.invoiceSettings)
-			.where(eq(table.invoiceSettings.tenantId, tenantId))
-			.get();
-
-		const normalizedSeries = data.keezSeriesHosting?.trim() || null;
-		const normalizedStart = data.keezStartNumberHosting?.trim() || null;
-
-		if (existing) {
-			await db
-				.update(table.invoiceSettings)
-				.set({
-					keezSeriesHosting: normalizedSeries,
-					keezStartNumberHosting: normalizedStart,
-					whmcsAutoPushToKeez: data.whmcsAutoPushToKeez,
-					updatedAt: new Date()
-				})
-				.where(eq(table.invoiceSettings.id, existing.id));
-		} else {
-			await db.insert(table.invoiceSettings).values({
-				id: generateId(),
-				tenantId,
-				keezSeriesHosting: normalizedSeries,
-				keezStartNumberHosting: normalizedStart,
-				whmcsAutoPushToKeez: data.whmcsAutoPushToKeez
-			});
-		}
-
-		return { saved: true };
-	}
-);
+// saveWhmcsHostingSeries — REMOVED. Hosting series, zero-VAT, strict BNR settings
+// migrated to /[tenant]/settings/keez. Use `updateInvoiceSettings` from
+// $lib/remotes/invoice-settings.remote with the relevant fields.
 
 /**
  * End-to-end self-test for the admin UI "Testează conexiunea" button.
@@ -711,47 +673,5 @@ export const replayAllFailedWhmcsPushes = command(
  * All four fields are nullable on the DB side so the UI can clear them
  * (auto-detect with code defaults) or set custom per-tenant text.
  */
-export const saveWhmcsZeroVatSettings = command(
-	v.object({
-		whmcsZeroVatAutoDetect: v.boolean(),
-		whmcsZeroVatNoteIntracom: v.nullable(v.string()),
-		whmcsZeroVatNoteExport: v.nullable(v.string()),
-		whmcsStrictBnrConversion: v.boolean()
-	}),
-	async (data) => {
-		const { tenantId } = requireTenantAdmin();
-
-		const existing = await db
-			.select({ id: table.invoiceSettings.id })
-			.from(table.invoiceSettings)
-			.where(eq(table.invoiceSettings.tenantId, tenantId))
-			.get();
-
-		const intracom = data.whmcsZeroVatNoteIntracom?.trim() || null;
-		const exportNote = data.whmcsZeroVatNoteExport?.trim() || null;
-
-		if (existing) {
-			await db
-				.update(table.invoiceSettings)
-				.set({
-					whmcsZeroVatAutoDetect: data.whmcsZeroVatAutoDetect,
-					whmcsZeroVatNoteIntracom: intracom,
-					whmcsZeroVatNoteExport: exportNote,
-					whmcsStrictBnrConversion: data.whmcsStrictBnrConversion,
-					updatedAt: new Date()
-				})
-				.where(eq(table.invoiceSettings.id, existing.id));
-		} else {
-			await db.insert(table.invoiceSettings).values({
-				id: generateId(),
-				tenantId,
-				whmcsZeroVatAutoDetect: data.whmcsZeroVatAutoDetect,
-				whmcsZeroVatNoteIntracom: intracom,
-				whmcsZeroVatNoteExport: exportNote,
-				whmcsStrictBnrConversion: data.whmcsStrictBnrConversion
-			});
-		}
-
-		return { saved: true };
-	}
-);
+// saveWhmcsZeroVatSettings — REMOVED. See note on saveWhmcsHostingSeries above; the
+// fields are now managed via `updateInvoiceSettings` exposed by the Keez settings page.

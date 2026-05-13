@@ -218,7 +218,23 @@
 							</div>
 						</CardContent>
 					{/if}
-					
+					{#if plugin.name === 'stripe'}
+						<CardContent>
+							<Separator class="mb-4" />
+							<div class="space-y-2">
+								<p class="text-sm font-medium">Stripe Payments</p>
+								<p class="text-sm text-muted-foreground">
+									Conectează contul Stripe pentru a primi plăți online (carduri, SCA, subscriptions). Configurare per-tenant.
+								</p>
+								{#if isEnabled}
+									<Button variant="outline" size="sm" href="/{tenantSlug}/settings/stripe">
+										Configurează Stripe
+									</Button>
+								{/if}
+							</div>
+						</CardContent>
+					{/if}
+
 				</Card>
 			{/each}
 		</div>

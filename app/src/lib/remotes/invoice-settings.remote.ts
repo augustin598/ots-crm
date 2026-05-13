@@ -37,6 +37,20 @@ export const getInvoiceSettings = query(async () => {
 			keezLastSyncedNumber: null,
 			keezAutoSync: false,
 			keezDefaultPaymentTypeId: 3,
+			// Hosting-specific Keez series. Read by getNextInvoiceNumberFromPlugin when the
+			// recurring template is linked to a hosting account (DA flow). Configured in
+			// /[tenant]/settings/keez.
+			keezSeriesHosting: null,
+			keezStartNumberHosting: null,
+			keezLastSyncedNumberHosting: null,
+			// Zero-VAT compliance (intracom / export). Applies to ALL Keez-routed invoices when
+			// auto-detect is on, including DA hosting recurring invoices. Configured in
+			// /[tenant]/settings/keez. Column names retain whmcs_* prefix from the era when
+			// only the WHMCS handler used them (rename → follow-up).
+			whmcsZeroVatAutoDetect: true,
+			whmcsZeroVatNoteIntracom: null,
+			whmcsZeroVatNoteExport: null,
+			whmcsStrictBnrConversion: true,
 			defaultCurrency: 'RON',
 			defaultTaxRate: 19,
 			invoiceEmailsEnabled: true,
@@ -64,6 +78,13 @@ export const getInvoiceSettings = query(async () => {
 		keezLastSyncedNumber: settings.keezLastSyncedNumber,
 		keezAutoSync: settings.keezAutoSync,
 		keezDefaultPaymentTypeId: settings.keezDefaultPaymentTypeId ?? 3,
+		keezSeriesHosting: settings.keezSeriesHosting,
+		keezStartNumberHosting: settings.keezStartNumberHosting,
+		keezLastSyncedNumberHosting: settings.keezLastSyncedNumberHosting,
+		whmcsZeroVatAutoDetect: settings.whmcsZeroVatAutoDetect ?? true,
+		whmcsZeroVatNoteIntracom: settings.whmcsZeroVatNoteIntracom,
+		whmcsZeroVatNoteExport: settings.whmcsZeroVatNoteExport,
+		whmcsStrictBnrConversion: settings.whmcsStrictBnrConversion ?? true,
 		defaultCurrency: settings.defaultCurrency || 'RON',
 		defaultTaxRate: settings.defaultTaxRate ?? 19,
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true,
@@ -90,6 +111,16 @@ export const updateInvoiceSettings = command(
 		keezStartNumber: v.optional(v.string()),
 		keezAutoSync: v.optional(v.boolean()),
 		keezDefaultPaymentTypeId: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(9))),
+		// Hosting-specific Keez series (DA hosting renewals). Editable from /[tenant]/settings/keez.
+		// `keezLastSyncedNumberHosting` is not exposed here — it's set by the Keez sync job.
+		keezSeriesHosting: v.optional(v.nullable(v.string())),
+		keezStartNumberHosting: v.optional(v.nullable(v.string())),
+		// Zero-VAT auto-detection + legal note text. Editable from /[tenant]/settings/keez.
+		whmcsZeroVatAutoDetect: v.optional(v.boolean()),
+		whmcsZeroVatNoteIntracom: v.optional(v.nullable(v.string())),
+		whmcsZeroVatNoteExport: v.optional(v.nullable(v.string())),
+		// Strict BNR rate freshness check for non-RON invoices. Editable from /[tenant]/settings/keez.
+		whmcsStrictBnrConversion: v.optional(v.boolean()),
 		defaultCurrency: v.optional(v.string()), // 'RON', 'EUR', 'USD', etc.
 		defaultTaxRate: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))), // VAT percentage (0-100)
 		invoiceEmailsEnabled: v.optional(v.boolean()),
@@ -141,6 +172,18 @@ export const updateInvoiceSettings = command(
 					keezAutoSync: data.keezAutoSync !== undefined ? data.keezAutoSync : undefined,
 					keezDefaultPaymentTypeId:
 						data.keezDefaultPaymentTypeId !== undefined ? data.keezDefaultPaymentTypeId : undefined,
+					keezSeriesHosting:
+						data.keezSeriesHosting !== undefined ? data.keezSeriesHosting : undefined,
+					keezStartNumberHosting:
+						data.keezStartNumberHosting !== undefined ? data.keezStartNumberHosting : undefined,
+					whmcsZeroVatAutoDetect:
+						data.whmcsZeroVatAutoDetect !== undefined ? data.whmcsZeroVatAutoDetect : undefined,
+					whmcsZeroVatNoteIntracom:
+						data.whmcsZeroVatNoteIntracom !== undefined ? data.whmcsZeroVatNoteIntracom : undefined,
+					whmcsZeroVatNoteExport:
+						data.whmcsZeroVatNoteExport !== undefined ? data.whmcsZeroVatNoteExport : undefined,
+					whmcsStrictBnrConversion:
+						data.whmcsStrictBnrConversion !== undefined ? data.whmcsStrictBnrConversion : undefined,
 					defaultCurrency: data.defaultCurrency !== undefined ? data.defaultCurrency : undefined,
 					defaultTaxRate: data.defaultTaxRate !== undefined ? data.defaultTaxRate : undefined,
 					invoiceEmailsEnabled:
@@ -181,6 +224,13 @@ export const updateInvoiceSettings = command(
 				keezLastSyncedNumber: null,
 				keezAutoSync: data.keezAutoSync ?? false,
 				keezDefaultPaymentTypeId: data.keezDefaultPaymentTypeId ?? 3,
+				keezSeriesHosting: data.keezSeriesHosting ?? null,
+				keezStartNumberHosting: data.keezStartNumberHosting ?? null,
+				keezLastSyncedNumberHosting: null,
+				whmcsZeroVatAutoDetect: data.whmcsZeroVatAutoDetect ?? true,
+				whmcsZeroVatNoteIntracom: data.whmcsZeroVatNoteIntracom ?? null,
+				whmcsZeroVatNoteExport: data.whmcsZeroVatNoteExport ?? null,
+				whmcsStrictBnrConversion: data.whmcsStrictBnrConversion ?? true,
 				defaultCurrency: data.defaultCurrency || 'RON',
 				defaultTaxRate: data.defaultTaxRate ?? 19,
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true,

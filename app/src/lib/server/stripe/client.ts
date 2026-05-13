@@ -1,44 +1,27 @@
-import Stripe from 'stripe';
-import { env } from '$env/dynamic/private';
-
 /**
- * Stripe client setup — single instance, configured from env.
+ * Thin compatibility layer — Sprint 9 a mutat client-ul real la
+ * `plugins/stripe/factory.ts` ca să suporte per-tenant credentials.
  *
- * MVP scope: One Top Solution e single-tenant pe Stripe (un cont Stripe, toate
- * comenzile merg acolo). Dacă viitor adăugăm multi-tenant Stripe, refactor la
- * factory per-tenant cu credențiale encrypted (pattern: smartbill/crypto).
+ * Acest fișier rămâne pentru a păstra compatibilitatea cu importurile existente
+ * (`getStripe` și `isStripeConfigured`). Va fi eliminat după ce toate apelurile
+ * sunt migrate la `getStripeForTenant(tenantId)`.
  *
- * Notă: NU stocăm secret key în CRM DB. Singura sursă = `STRIPE_SECRET_KEY` ENV.
+ * @deprecated Folosește `getStripeForTenant(tenantId)` din
+ *  `$lib/server/plugins/stripe/factory` în loc.
  */
-
-let cachedStripe: Stripe | null = null;
-
-export function getStripe(): Stripe {
-	if (cachedStripe) return cachedStripe;
-	const secret = env.STRIPE_SECRET_KEY;
-	if (!secret || secret.includes('REPLACE_ME')) {
-		throw new Error(
-			'STRIPE_SECRET_KEY nu e configurat în .env (sau e placeholder). Pune cheia test/live din Stripe Dashboard.'
-		);
-	}
-	if (!secret.startsWith('sk_test_') && !secret.startsWith('sk_live_')) {
-		throw new Error('STRIPE_SECRET_KEY format invalid (trebuie sk_test_ sau sk_live_).');
-	}
-	cachedStripe = new Stripe(secret, {
-		// Default la API version baked în SDK-ul instalat. Update conștient când
-		// vrei features noi (https://stripe.com/docs/upgrades).
-		typescript: true,
-		appInfo: {
-			name: 'OTS CRM',
-			version: '1.0.0'
-		}
-	});
-	return cachedStripe;
-}
+import { env } from '$env/dynamic/private';
+export {
+	getStripeForTenant,
+	isStripeConfiguredForTenant,
+	StripeNotConfiguredError,
+	clearStripeCache,
+	getWebhookSecretForTenant,
+	getPublishableKeyForTenant
+} from '$lib/server/plugins/stripe/factory';
 
 /**
- * Check if Stripe is configured (without throwing). Use to gate features
- * gracefully when keys aren't set up yet (e.g., hide "Plătește online" buton).
+ * @deprecated Folosit doar de check-uri legacy. Pentru flow nou, folosește
+ * `isStripeConfiguredForTenant(tenantId)`.
  */
 export function isStripeConfigured(): boolean {
 	const secret = env.STRIPE_SECRET_KEY;

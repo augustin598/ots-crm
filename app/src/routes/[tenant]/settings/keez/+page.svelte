@@ -7,6 +7,7 @@
 		importClientsFromKeez,
 		getKeezSyncHistory
 	} from '$lib/remotes/keez.remote';
+	import { getInvoiceSettings, updateInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -15,9 +16,11 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Switch } from '$lib/components/ui/switch';
 	import { CheckCircle2, XCircle, Link as LinkIcon, Download, AlertTriangle } from '@lucide/svelte';
 	import { extractErrorMessage } from '$lib/utils';
 	import { page } from '$app/state';
+	import { toast } from 'svelte-sonner';
 
 	const tenantSlug = $derived(page.params.tenant);
 
@@ -28,6 +31,10 @@
 	const syncHistoryQuery = getKeezSyncHistory();
 	const syncHistory = $derived(syncHistoryQuery.current ?? []);
 
+	// Invoice settings: hosting series, zero-VAT, strict BNR. Migrated from /settings/whmcs.
+	const invoiceSettingsQuery = getInvoiceSettings();
+	const invoiceSettings = $derived(invoiceSettingsQuery.current);
+
 	let clientEid = $state('');
 	let applicationId = $state('');
 	let secret = $state('');
@@ -36,6 +43,30 @@
 	let error = $state<string | null>(null);
 	let success = $state(false);
 	let successTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Hosting series state (DA recurring renewals use this when configured).
+	let keezSeriesHosting = $state('');
+	let keezStartNumberHosting = $state('');
+	let savingHostingSeries = $state(false);
+
+	// Zero-VAT compliance state (applies to all Keez-routed invoices when auto-detect is on).
+	let zeroVatAutoDetect = $state(true);
+	let zeroVatNoteIntracom = $state('');
+	let zeroVatNoteExport = $state('');
+	let strictBnrConversion = $state(true);
+	let savingZeroVatSettings = $state(false);
+
+	// Populate form state once settings load. Re-runs if settings refresh (e.g., after save).
+	$effect(() => {
+		if (invoiceSettings) {
+			keezSeriesHosting = invoiceSettings.keezSeriesHosting ?? '';
+			keezStartNumberHosting = invoiceSettings.keezStartNumberHosting ?? '';
+			zeroVatAutoDetect = invoiceSettings.whmcsZeroVatAutoDetect ?? true;
+			zeroVatNoteIntracom = invoiceSettings.whmcsZeroVatNoteIntracom ?? '';
+			zeroVatNoteExport = invoiceSettings.whmcsZeroVatNoteExport ?? '';
+			strictBnrConversion = invoiceSettings.whmcsStrictBnrConversion ?? true;
+		}
+	});
 
 	function showSuccess(durationMs = 3000) {
 		success = true;
@@ -123,6 +154,47 @@
 			importError = extractErrorMessage(e, 'Failed to import clients from Keez');
 		} finally {
 			importingClients = false;
+		}
+	}
+
+	async function handleSaveHostingSeries() {
+		savingHostingSeries = true;
+		try {
+			await updateInvoiceSettings({
+				keezSeriesHosting: keezSeriesHosting.trim() ? keezSeriesHosting.trim() : null,
+				keezStartNumberHosting: keezStartNumberHosting.trim()
+					? keezStartNumberHosting.trim()
+					: null
+			}).updates(invoiceSettingsQuery);
+			toast.success('Setări serie hosting salvate.');
+		} catch (e) {
+			toast.error(
+				'A apărut o eroare: ' + extractErrorMessage(e, 'Nu s-au putut salva setările')
+			);
+		} finally {
+			savingHostingSeries = false;
+		}
+	}
+
+	async function handleSaveZeroVatSettings() {
+		savingZeroVatSettings = true;
+		try {
+			await updateInvoiceSettings({
+				whmcsZeroVatAutoDetect: zeroVatAutoDetect,
+				whmcsZeroVatNoteIntracom: zeroVatNoteIntracom.trim()
+					? zeroVatNoteIntracom.trim()
+					: null,
+				whmcsZeroVatNoteExport: zeroVatNoteExport.trim() ? zeroVatNoteExport.trim() : null,
+				whmcsStrictBnrConversion: strictBnrConversion
+			}).updates(invoiceSettingsQuery);
+			toast.success('Setări TVA 0% / BNR salvate.');
+		} catch (e) {
+			toast.error(
+				'A apărut o eroare: ' +
+					extractErrorMessage(e, 'Nu s-au putut salva setările TVA 0%')
+			);
+		} finally {
+			savingZeroVatSettings = false;
 		}
 	}
 
@@ -310,6 +382,147 @@
 					disabled
 					class="bg-muted"
 				/>
+			</div>
+
+			<Separator />
+
+			<!-- Hosting series -->
+			<div class="space-y-4">
+				<div>
+					<h3 class="text-lg font-semibold">Serie hosting Keez</h3>
+					<p class="text-sm text-muted-foreground">
+						Configurează o serie Keez dedicată pentru facturile recurente de hosting (cont
+						DirectAdmin). Dacă lipsește, se folosește seria Keez default: <span class="font-mono font-medium">{invoiceSettings?.keezSeries ?? '(neconfigurată)'}</span>.
+					</p>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="keez-series-hosting">Serie Keez pentru hosting (opțional)</Label>
+					<Input
+						id="keez-series-hosting"
+						type="text"
+						bind:value={keezSeriesHosting}
+						placeholder="HOST"
+					/>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="keez-start-number-hosting">Număr de start (opțional)</Label>
+					<Input
+						id="keez-start-number-hosting"
+						type="text"
+						bind:value={keezStartNumberHosting}
+						placeholder="1"
+					/>
+					<p class="text-xs text-muted-foreground">
+						Opțional — Keez gestionează numerotarea automat pentru serii noi. Folosit doar ca
+						fallback când API-ul Keez nu răspunde.
+					</p>
+				</div>
+
+				{#if invoiceSettings?.keezLastSyncedNumberHosting}
+					<div class="space-y-2">
+						<Label>Ultimul număr sincronizat (read-only)</Label>
+						<Input
+							type="text"
+							value={invoiceSettings.keezLastSyncedNumberHosting}
+							disabled
+							class="bg-muted font-mono"
+						/>
+					</div>
+				{/if}
+
+				<div>
+					<Button
+						type="button"
+						onclick={handleSaveHostingSeries}
+						disabled={savingHostingSeries}
+					>
+						{savingHostingSeries ? 'Se salvează...' : 'Salvează serie hosting'}
+					</Button>
+				</div>
+			</div>
+
+			<Separator />
+
+			<!-- Zero-VAT compliance + Strict BNR -->
+			<div class="space-y-4">
+				<div>
+					<h3 class="text-lg font-semibold">Conformitate TVA 0% (intracomunitar &amp; export)</h3>
+					<p class="text-sm text-muted-foreground">
+						Pentru clienții din UE cu CUI valid (taxare inversă) sau din afara UE (export),
+						sistemul detectează automat și forțează 0% TVA pe factură, adăugând textul legal
+						cerut de ANAF. Se aplică la toate facturile generate pe pluginul Keez, inclusiv
+						facturile recurente de hosting.
+					</p>
+				</div>
+
+				<div class="flex items-center justify-between gap-4">
+					<div class="space-y-0.5">
+						<Label for="zero-vat-auto-detect">Detectare automată TVA 0%</Label>
+						<p class="text-xs text-muted-foreground">
+							Activ: detectează intracom (UE non-RO) vs export (non-UE) după
+							<code>country</code> / <code>CUI</code> al clientului și adaugă textul corespunzător
+							plus forțează 0% TVA. Inactiv: nu se atinge nota facturii.
+						</p>
+					</div>
+					<Switch id="zero-vat-auto-detect" bind:checked={zeroVatAutoDetect} />
+				</div>
+
+				<div class="space-y-1.5">
+					<Label for="zero-vat-intracom">Notă intracomunitar (UE B2B cu CUI valid)</Label>
+					<textarea
+						id="zero-vat-intracom"
+						bind:value={zeroVatNoteIntracom}
+						placeholder="Ex.: Taxare inversă conform art. 278 alin. (2) Cod Fiscal — operațiune intracomunitară."
+						rows={2}
+						class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[60px] w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+						disabled={!zeroVatAutoDetect}
+					></textarea>
+					<p class="text-xs text-muted-foreground">
+						Lăsat gol → folosește textul implicit cerut de ANAF.
+					</p>
+				</div>
+
+				<div class="space-y-1.5">
+					<Label for="zero-vat-export">Notă export (clienți non-UE)</Label>
+					<textarea
+						id="zero-vat-export"
+						bind:value={zeroVatNoteExport}
+						placeholder="Ex.: Operațiune neimpozabilă în România conform art. 278 alin. (1) Cod Fiscal — export."
+						rows={2}
+						class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[60px] w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+						disabled={!zeroVatAutoDetect}
+					></textarea>
+					<p class="text-xs text-muted-foreground">
+						Lăsat gol → folosește textul implicit.
+					</p>
+				</div>
+
+				<Separator />
+
+				<div class="flex items-center justify-between gap-4">
+					<div class="space-y-0.5">
+						<Label for="strict-bnr">Strict BNR rate pentru facturi în valută</Label>
+						<p class="text-xs text-muted-foreground">
+							Activ: dacă cursul BNR pentru moneda facturii (EUR / USD / etc.) lipsește
+							sau e mai vechi de 26h, generarea facturii recurente eșuează tranzient și
+							se reîncearcă după următoarea sincronizare BNR (zilnic 10:00). Previne
+							facturile cu sume × 5 când cursul lipsește. <strong>Recomandat ON.</strong>
+						</p>
+					</div>
+					<Switch id="strict-bnr" bind:checked={strictBnrConversion} />
+				</div>
+
+				<div>
+					<Button
+						type="button"
+						onclick={handleSaveZeroVatSettings}
+						disabled={savingZeroVatSettings}
+					>
+						{savingZeroVatSettings ? 'Se salvează...' : 'Salvează setări TVA 0% / BNR'}
+					</Button>
+				</div>
 			</div>
 
 			<Separator />

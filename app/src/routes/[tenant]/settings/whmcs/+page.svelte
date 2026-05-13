@@ -8,8 +8,6 @@
 		regenerateWhmcsSecret,
 		setWhmcsActive,
 		setEnableKeezPush,
-		saveWhmcsHostingSeries,
-		saveWhmcsZeroVatSettings,
 		replayWhmcsSync,
 		replayAllFailedWhmcsPushes,
 		testWhmcsConnection,
@@ -56,6 +54,9 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import { toast } from 'svelte-sonner';
 	import { extractErrorMessage } from '$lib/utils';
+	import { page } from '$app/state';
+
+	const tenantSlug = $derived(page.params.tenant);
 
 	// ─────────────────────────────────────────────
 	// Queries
@@ -92,47 +93,12 @@
 	let togglingActive = $state(false);
 	let togglingKeezPush = $state(false);
 
-	// Hosting series form state.
-	// NOTE: form fields must be $state (not $derived) because the user must be
-	// able to edit them. We initialize once from server settings via an $effect
-	// guarded by formInitialized so a status refresh mid-edit does not clobber
-	// the user's in-progress input. Same pattern as the Keez settings page.
-	let keezSeriesHosting = $state('');
-	let keezStartNumberHosting = $state('');
-	let whmcsAutoPushToKeez = $state(false);
-	let formInitialized = $state(false);
-	let savingHostingSeries = $state(false);
-
-	// Zero-VAT compliance form state — separate $state so the form can be edited
-	// without colliding with the hosting-series form's lifecycle.
-	let zeroVatAutoDetect = $state(true);
-	let zeroVatNoteIntracom = $state('');
-	let zeroVatNoteExport = $state('');
-	let strictBnrConversion = $state(true);
-	let zeroVatFormInitialized = $state(false);
-	let savingZeroVatSettings = $state(false);
+	// Hosting series + Zero-VAT + Strict BNR settings moved to /settings/keez —
+	// they apply to all Keez-routed invoices (incl. DA hosting recurring), so they
+	// live on the Keez settings page now. The banner card below points operators there.
 
 	let replayingId = $state<string | null>(null);
 	let replayingAll = $state(false);
-
-	$effect(() => {
-		if (!formInitialized && status?.settings) {
-			keezSeriesHosting = status.settings.keezSeriesHosting ?? '';
-			keezStartNumberHosting = status.settings.keezStartNumberHosting ?? '';
-			whmcsAutoPushToKeez = status.settings.whmcsAutoPushToKeez ?? false;
-			formInitialized = true;
-		}
-	});
-
-	$effect(() => {
-		if (!zeroVatFormInitialized && status?.settings) {
-			zeroVatAutoDetect = status.settings.whmcsZeroVatAutoDetect ?? true;
-			zeroVatNoteIntracom = status.settings.whmcsZeroVatNoteIntracom ?? '';
-			zeroVatNoteExport = status.settings.whmcsZeroVatNoteExport ?? '';
-			strictBnrConversion = status.settings.whmcsStrictBnrConversion ?? true;
-			zeroVatFormInitialized = true;
-		}
-	});
 
 	// ─────────────────────────────────────────────
 	// Derived presentation
@@ -279,44 +245,6 @@
 			toast.error('A apărut o eroare: ' + extractErrorMessage(e, 'Nu s-a putut modifica setarea'));
 		} finally {
 			togglingKeezPush = false;
-		}
-	}
-
-	async function handleSaveHostingSeries() {
-		savingHostingSeries = true;
-		try {
-			await saveWhmcsHostingSeries({
-				keezSeriesHosting: keezSeriesHosting.trim() ? keezSeriesHosting.trim() : null,
-				keezStartNumberHosting: keezStartNumberHosting.trim() ? keezStartNumberHosting.trim() : null,
-				whmcsAutoPushToKeez
-			}).updates(statusQuery);
-			toast.success('Setări salvate.');
-		} catch (e) {
-			toast.error('A apărut o eroare: ' + extractErrorMessage(e, 'Nu s-au putut salva setările'));
-		} finally {
-			savingHostingSeries = false;
-		}
-	}
-
-	async function handleSaveZeroVatSettings() {
-		savingZeroVatSettings = true;
-		try {
-			await saveWhmcsZeroVatSettings({
-				whmcsZeroVatAutoDetect: zeroVatAutoDetect,
-				whmcsZeroVatNoteIntracom: zeroVatNoteIntracom.trim()
-					? zeroVatNoteIntracom.trim()
-					: null,
-				whmcsZeroVatNoteExport: zeroVatNoteExport.trim() ? zeroVatNoteExport.trim() : null,
-				whmcsStrictBnrConversion: strictBnrConversion
-			}).updates(statusQuery);
-			toast.success('Setări TVA 0% salvate.');
-		} catch (e) {
-			toast.error(
-				'A apărut o eroare: ' +
-					extractErrorMessage(e, 'Nu s-au putut salva setările TVA 0%')
-			);
-		} finally {
-			savingZeroVatSettings = false;
 		}
 	}
 
@@ -633,133 +561,28 @@
 		</Card>
 
 		{#if status?.connected}
-			<!-- Section 2: Hosting series -->
-			<Card>
+			<!-- Hosting series, TVA 0% (intracom/export), Strict BNR migrate la /settings/keez.
+			     Setările trăiesc pe coloanele invoiceSettings (keezSeriesHosting,
+			     whmcsZeroVat*, whmcsStrictBnrConversion) și sunt acum administrate central
+			     din pagina Keez, întrucât se aplică tuturor facturilor generate via Keez
+			     (inclusiv hosting recurent DirectAdmin), nu doar fluxului WHMCS legacy. -->
+			<Card class="border-amber-200 bg-amber-50/30 dark:border-amber-900/40 dark:bg-amber-950/20">
 				<CardHeader>
-					<CardTitle>Serie hosting Keez</CardTitle>
+					<div class="flex items-center gap-2">
+						<AlertTriangle class="h-4 w-4 text-amber-600 dark:text-amber-400" />
+						<CardTitle>Setări mutate la Keez</CardTitle>
+					</div>
 					<CardDescription>
-						Configurează o serie Keez dedicată pentru facturile venite din WHMCS. Dacă lipsește, se folosește seria Keez default: <span class="font-mono font-medium">{status.settings?.keezSeries ?? '(neconfigurată)'}</span>.
+						<strong>Serie hosting Keez</strong>, <strong>Conformitate TVA 0%
+						(intracomunitar &amp; export)</strong> și <strong>Strict BNR</strong> au fost
+						mutate la pagina de setări Keez, unde se aplică tuturor facturilor — inclusiv
+						celor recurente generate pentru conturile de hosting DirectAdmin.
 					</CardDescription>
 				</CardHeader>
-				<CardContent class="space-y-4">
-					<div class="space-y-2">
-						<Label for="keez-series-hosting">Serie Keez pentru hosting (opțional)</Label>
-						<Input
-							id="keez-series-hosting"
-							type="text"
-							bind:value={keezSeriesHosting}
-							placeholder="HOST"
-						/>
-					</div>
-
-					<div class="space-y-2">
-						<Label for="keez-start-number-hosting">Număr de start (opțional)</Label>
-						<Input
-							id="keez-start-number-hosting"
-							type="text"
-							bind:value={keezStartNumberHosting}
-							placeholder="1"
-						/>
-						<p class="text-xs text-muted-foreground">
-							Opțional — Keez gestionează numerotarea automat pentru serii noi.
-						</p>
-					</div>
-
-					<div class="flex items-center justify-between gap-4">
-						<div class="space-y-0.5">
-							<Label for="whmcs-auto-push-keez">Push automat la Keez după recepția facturii</Label>
-							<p class="text-xs text-muted-foreground">
-								Necesită și switch-ul "Push automat la Keez" activ pe integrare.
-							</p>
-						</div>
-						<Switch id="whmcs-auto-push-keez" bind:checked={whmcsAutoPushToKeez} />
-					</div>
-
-					<div>
-						<Button type="button" onclick={handleSaveHostingSeries} disabled={savingHostingSeries}>
-							{savingHostingSeries ? 'Se salvează...' : 'Salvează'}
-						</Button>
-					</div>
-				</CardContent>
-			</Card>
-
-			<!-- Section 2b: Conformitate TVA 0% (intracomunitar / export) + BNR strict -->
-			<Card>
-				<CardHeader>
-					<CardTitle>Conformitate TVA 0% (intracomunitar &amp; export)</CardTitle>
-					<CardDescription>
-						Pentru clienții din UE cu CUI valid (taxare inversă) sau din afara UE (export),
-						adăugăm automat textul legal cerut de ANAF în nota facturii când WHMCS trimite
-						<code>tax = 0</code>. Plus protecție BNR — refuză push-ul EUR dacă cursul e vechi.
-					</CardDescription>
-				</CardHeader>
-				<CardContent class="space-y-4">
-					<div class="flex items-center justify-between gap-4">
-						<div class="space-y-0.5">
-							<Label for="zero-vat-auto-detect">Detectare automată TVA 0%</Label>
-							<p class="text-xs text-muted-foreground">
-								Activ: detectează intracom (UE non-RO) vs export (non-UE) după
-								<code>countryCode</code> al clientului și adaugă textul corespunzător.
-								Inactiv: nu se atinge nota facturii.
-							</p>
-						</div>
-						<Switch id="zero-vat-auto-detect" bind:checked={zeroVatAutoDetect} />
-					</div>
-
-					<div class="space-y-1.5">
-						<Label for="zero-vat-intracom">Notă intracomunitar (UE B2B cu CUI valid)</Label>
-						<textarea
-							id="zero-vat-intracom"
-							bind:value={zeroVatNoteIntracom}
-							placeholder="Ex.: Taxare inversă conform art. 278 alin. (2) Cod Fiscal — operațiune intracomunitară."
-							rows={2}
-							class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[60px] w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-							disabled={!zeroVatAutoDetect}
-						></textarea>
-						<p class="text-xs text-muted-foreground">
-							Lăsat gol → folosește textul implicit de mai sus.
-						</p>
-					</div>
-
-					<div class="space-y-1.5">
-						<Label for="zero-vat-export">Notă export (clienți non-UE)</Label>
-						<textarea
-							id="zero-vat-export"
-							bind:value={zeroVatNoteExport}
-							placeholder="Ex.: Operațiune neimpozabilă în România conform art. 278 alin. (1) Cod Fiscal — export."
-							rows={2}
-							class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[60px] w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-							disabled={!zeroVatAutoDetect}
-						></textarea>
-						<p class="text-xs text-muted-foreground">
-							Lăsat gol → folosește textul implicit. Folosit și pentru cazul
-							"unknown" (când clientul nu are countryCode setat).
-						</p>
-					</div>
-
-					<Separator />
-
-					<div class="flex items-center justify-between gap-4">
-						<div class="space-y-0.5">
-							<Label for="strict-bnr">Strict BNR rate pentru EUR</Label>
-							<p class="text-xs text-muted-foreground">
-								Activ: dacă cursul BNR pentru EUR e vechi &gt;26h, push-ul Keez eșuează
-								tranzient și se reîncearcă după următoarea sincronizare BNR (zilnic 10:00).
-								Previne facturile cu sume × 5 când cursul lipsește. Recomandat ON.
-							</p>
-						</div>
-						<Switch id="strict-bnr" bind:checked={strictBnrConversion} />
-					</div>
-
-					<div>
-						<Button
-							type="button"
-							onclick={handleSaveZeroVatSettings}
-							disabled={savingZeroVatSettings}
-						>
-							{savingZeroVatSettings ? 'Se salvează...' : 'Salvează setări TVA 0%'}
-						</Button>
-					</div>
+				<CardContent>
+					<Button variant="outline" href="/{tenantSlug}/settings/keez">
+						Deschide setări Keez
+					</Button>
 				</CardContent>
 			</Card>
 

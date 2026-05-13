@@ -9,6 +9,14 @@ import { decrypt } from './plugins/keez/crypto';
 import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './plugins/keez/mapper';
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
 import { logInfo, logWarning } from '$lib/server/logger';
+import { classifyClientVat } from '$lib/server/vat/classify-client';
+import {
+	DEFAULT_INTRACOM_NOTE,
+	DEFAULT_EXPORT_NOTE,
+	ZERO_VAT_NOTE_PREFIX,
+	appendZeroVatNote
+} from '$lib/server/whmcs/zero-vat-detection';
+import { getLatestBnrRateWithDate } from '$lib/server/bnr/client';
 
 /** Returns the rate to use (in cents), applying drift guard if Keez price differs >20% from template. */
 export function applyKeezDriftGuard(liveRateCents: number, templateRateCents: number): { rate: number; driftDetected: boolean } {
@@ -104,15 +112,24 @@ export async function generateInvoiceNumber(tenantId: string): Promise<string> {
 }
 
 /**
- * Get the next invoice number from plugin settings based on the provided series
- * Checks both Keez and SmartBill integrations
+ * Get the next invoice number from plugin settings based on the provided series.
+ * Checks both Keez and SmartBill integrations.
+ *
  * @param tenantId - Tenant ID
- * @param series - Invoice series (optional, if provided will match against plugin series)
+ * @param series - Optional. When provided, only the plugin whose configured series matches
+ *                will be consulted. For Keez tenants this is matched against both the default
+ *                series (`keezSeries`) and the hosting series (`keezSeriesHosting`).
+ * @param options.isHosting - When true, the helper prefers `keezSeriesHosting` (with fallback
+ *                            to `keezSeries`) and uses the hosting-specific fallback columns
+ *                            (`keezLastSyncedNumberHosting` → `keezStartNumberHosting`) before
+ *                            cross-falling back to the default columns. SmartBill has no
+ *                            hosting analog and is skipped when `isHosting` is set.
  * @returns Next invoice number with series, or null if no matching plugin found
  */
 export async function getNextInvoiceNumberFromPlugin(
 	tenantId: string,
-	series?: string
+	series?: string,
+	options?: { isHosting?: boolean }
 ): Promise<string | null> {
 	// Get invoice settings
 	const [settings] = await db
@@ -125,60 +142,86 @@ export async function getNextInvoiceNumberFromPlugin(
 		return null;
 	}
 
+	const isHosting = options?.isHosting === true;
+
 	// Check Keez integration first
-	if (settings.keezSeries) {
-		const keezSeries = settings.keezSeries.trim();
-		// If series is provided, only use Keez if it matches
-		if (!series || keezSeries === series) {
-			// Check if Keez integration is active
-			const [keezIntegration] = await db
-				.select()
-				.from(table.keezIntegration)
-				.where(
-					and(
-						eq(table.keezIntegration.tenantId, tenantId),
-						eq(table.keezIntegration.isActive, true)
-					)
+	const keezDefaultSeries = settings.keezSeries?.trim() || null;
+	const keezHostingSeries = settings.keezSeriesHosting?.trim() || null;
+
+	// Resolve which series to actually use for the Keez call.
+	// - If caller passed an explicit `series`, honor it only when it matches one of the
+	//   tenant's configured Keez series (default or hosting). Otherwise the call belongs to
+	//   another provider (or to nobody) — let the SmartBill branch / null fall-through handle it.
+	// - If caller didn't pass a series, pick hosting when hosting flag is set; otherwise default.
+	let resolvedKeezSeries: string | null = null;
+	if (series) {
+		if (series === keezDefaultSeries || series === keezHostingSeries) {
+			resolvedKeezSeries = series;
+		}
+	} else if (isHosting) {
+		resolvedKeezSeries = keezHostingSeries || keezDefaultSeries;
+	} else {
+		resolvedKeezSeries = keezDefaultSeries;
+	}
+
+	if (resolvedKeezSeries) {
+		// Check if Keez integration is active
+		const [keezIntegration] = await db
+			.select()
+			.from(table.keezIntegration)
+			.where(
+				and(
+					eq(table.keezIntegration.tenantId, tenantId),
+					eq(table.keezIntegration.isActive, true)
 				)
-				.limit(1);
+			)
+			.limit(1);
 
-			if (keezIntegration) {
-				// Try to get next number from Keez API
-				try {
-					const secret = decrypt(tenantId, keezIntegration.secret);
-					const keezClient = new KeezClient({
-						clientEid: keezIntegration.clientEid,
-						applicationId: keezIntegration.applicationId,
-						secret
-					});
+		if (keezIntegration) {
+			// Try to get next number from Keez API
+			try {
+				const secret = decrypt(tenantId, keezIntegration.secret);
+				const keezClient = new KeezClient({
+					clientEid: keezIntegration.clientEid,
+					applicationId: keezIntegration.applicationId,
+					secret
+				});
 
-					const nextNumber = await keezClient.getNextInvoiceNumber(keezSeries);
-					if (nextNumber !== null) {
-						logInfo('keez', `Keez plugin next number: serie=${keezSeries}, număr=${nextNumber}`, { tenantId, action: 'keez_plugin_next_number' });
-						return generateKeezInvoiceNumber(keezSeries, nextNumber);
-					}
-				} catch (error) {
-					logWarning('server', `Failed to get next number from Keez, using fallback`, { tenantId, stackTrace: error instanceof Error ? error.stack : undefined });
+				const nextNumber = await keezClient.getNextInvoiceNumber(resolvedKeezSeries);
+				if (nextNumber !== null) {
+					logInfo('keez', `Keez plugin next number: serie=${resolvedKeezSeries}, număr=${nextNumber}`, { tenantId, action: 'keez_plugin_next_number' });
+					return generateKeezInvoiceNumber(resolvedKeezSeries, nextNumber);
 				}
-
-				// Fallback: use last synced number or start number
-				let nextNum: string;
-				if (settings.keezLastSyncedNumber) {
-					const numericPart = extractInvoiceNumber(settings.keezLastSyncedNumber);
-					nextNum = generateNextKeezInvoiceNumber(numericPart);
-				} else if (settings.keezStartNumber) {
-					nextNum = extractInvoiceNumber(settings.keezStartNumber);
-				} else {
-					nextNum = '1';
-				}
-
-				return generateKeezInvoiceNumber(keezSeries, nextNum);
+			} catch (error) {
+				logWarning('server', `Failed to get next number from Keez, using fallback`, { tenantId, stackTrace: error instanceof Error ? error.stack : undefined });
 			}
+
+			// Fallback chain. When the resolved series IS the hosting series, prefer
+			// hosting-specific stored numbers first, then cross-fall back to the default columns
+			// (safety net for tenants that set keezSeriesHosting but forgot to set the hosting
+			// last-synced / start-number). When non-hosting, original behavior preserved.
+			const useHostingFallback = resolvedKeezSeries === keezHostingSeries;
+			let nextNum: string;
+			if (useHostingFallback && settings.keezLastSyncedNumberHosting) {
+				nextNum = generateNextKeezInvoiceNumber(extractInvoiceNumber(settings.keezLastSyncedNumberHosting));
+			} else if (useHostingFallback && settings.keezStartNumberHosting) {
+				nextNum = extractInvoiceNumber(settings.keezStartNumberHosting);
+			} else if (settings.keezLastSyncedNumber) {
+				nextNum = generateNextKeezInvoiceNumber(extractInvoiceNumber(settings.keezLastSyncedNumber));
+			} else if (settings.keezStartNumber) {
+				nextNum = extractInvoiceNumber(settings.keezStartNumber);
+			} else {
+				nextNum = '1';
+			}
+
+			return generateKeezInvoiceNumber(resolvedKeezSeries, nextNum);
 		}
 	}
 
-	// Check SmartBill integration
-	if (settings.smartbillSeries) {
+	// Check SmartBill integration. Skipped for hosting flow — SmartBill has no hosting analog
+	// and the OTS tenant runs hosting on Keez. Without this guard a hosting invoice could be
+	// mis-routed to SmartBill if both plugins were ever configured on the same tenant.
+	if (!isHosting && settings.smartbillSeries) {
 		const smartbillSeries = settings.smartbillSeries.trim();
 		// If series is provided, only use SmartBill if it matches
 		if (!series || smartbillSeries === series) {
@@ -426,15 +469,77 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 	const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
 	const defaultTaxRateCents = defaultTaxRatePercent * 100;
 
+	// Zero-VAT classification by client residency. Romanian fiscal law requires 0% VAT for
+	// EU-intracom (reverse charge under art. 278(2)) and for export to non-EU customers
+	// (art. 278(1)). When auto-detect is enabled (default), the recurring generator
+	// overrides taxApplicationType → 'none' and taxRate → 0 for these clients, and appends
+	// the configured legal note. Operator can disable detection per-tenant via
+	// `whmcsZeroVatAutoDetect` (settings UI lives in /[tenant]/settings/keez).
+	const [client] = await db
+		.select({ country: table.client.country, cui: table.client.cui })
+		.from(table.client)
+		.where(
+			and(
+				eq(table.client.id, recurringInvoice.clientId),
+				eq(table.client.tenantId, recurringInvoice.tenantId)
+			)
+		)
+		.limit(1);
+	const zeroVatAutoDetect = invoiceSettings?.whmcsZeroVatAutoDetect ?? true;
+	const vatScenario =
+		client && zeroVatAutoDetect
+			? classifyClientVat({ country: client.country, cui: client.cui })
+			: null;
+	const forceZeroVat = vatScenario === 'intracom' || vatScenario === 'export';
+
+	// BNR rate lock. For non-RON invoices we look up the latest BNR rate once at generation
+	// time so the PDF/UI display and the Keez push agree on the exchange rate. Strict mode
+	// (`whmcsStrictBnrConversion`) raises a retryable error on missing/stale rate so the
+	// scheduler defers; non-strict mode falls back to 1.0 with a warn (matches existing
+	// mapper behavior, keeps backward compat for tenants that haven't enabled strict).
+	const invoiceCurrencyRaw = recurringInvoice.currency || invoiceSettings?.defaultCurrency || 'RON';
+	const invoiceCurrencyUpper = invoiceCurrencyRaw.toUpperCase();
+	let lockedExchangeRate: string | null = null;
+	if (invoiceCurrencyUpper !== 'RON') {
+		const fresh = await getLatestBnrRateWithDate(invoiceCurrencyUpper);
+		const strict = invoiceSettings?.whmcsStrictBnrConversion ?? false;
+		if (!fresh) {
+			if (strict) {
+				throw new Error(
+					`BNR rate missing for ${invoiceCurrencyUpper} — cannot create recurring invoice ${recurringInvoiceId}`
+				);
+			}
+			logWarning(
+				'server',
+				`BNR rate missing for ${invoiceCurrencyUpper}; recurring invoice ${recurringInvoiceId} falling back to exchangeRate=1`,
+				{ tenantId: recurringInvoice.tenantId }
+			);
+			lockedExchangeRate = '1';
+		} else {
+			const rateDate = new Date(`${fresh.rateDate}T00:00:00.000Z`);
+			const ageHours = (now.getTime() - rateDate.getTime()) / 36e5;
+			if (ageHours > 26 && strict) {
+				throw new Error(
+					`BNR rate stale for ${invoiceCurrencyUpper} (${ageHours.toFixed(1)}h) — cannot create recurring invoice ${recurringInvoiceId}`
+				);
+			}
+			lockedExchangeRate = fresh.rate.toFixed(4);
+		}
+	}
+
 	// Calculate amounts (use stored amount, but we'll recalculate from line items if available)
 	let amount = recurringInvoice.amount;
-	let taxRate = recurringInvoice.taxRate;
+	let taxRate = forceZeroVat ? 0 : recurringInvoice.taxRate;
 	let taxAmount = Math.round((amount * taxRate) / 10000);
 	let totalAmount = amount + taxAmount;
 
 	// If we have line items, fetch latest prices and recalculate amounts
 	if (lineItems && lineItems.length > 0) {
-		const taxApplicationType = invoiceFields.taxApplicationType || 'apply';
+		// Zero-VAT detection wins over template metadata: an EU-intracom or export client
+		// always gets 0% VAT regardless of what the template says.
+		const taxApplicationType: 'apply' | 'none' | 'reverse' = forceZeroVat
+			? 'none'
+			: ((invoiceFields.taxApplicationType as 'apply' | 'none' | 'reverse' | undefined) || 'apply');
 
 		// Fetch latest prices from services or Keez
 		// Note: Rates from lineItemsJson are in currency units, need to convert to cents
@@ -573,13 +678,22 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 	// Get invoice series from invoice fields (needed for invoice number generation)
 	const invoiceSeriesFromMetadata = invoiceFields.invoiceSeries;
 
+	// When the template is linked to a hosting account (DA flow), route the number lookup
+	// through the hosting branch of getNextInvoiceNumberFromPlugin so Keez is queried on
+	// `keezSeriesHosting` (e.g., "OTSH") instead of the default `keezSeries` ("OTS"). Without
+	// this, hosting renewals draw numbers from the regular OTS pool and collide with the
+	// fiscal sequence Keez maintains for the hosting series.
+	const isHosting = hostingAccountId !== null;
+
 	// Generate invoice number using plugin settings (SmartBill/Keez)
 	let invoiceNumber: string;
 	if (invoiceSeriesFromMetadata) {
-		// Use series from metadata to get next number from matching plugin
+		// Use series from metadata to get next number from matching plugin. The helper will
+		// match the explicit series against either the default or hosting Keez series.
 		const nextNumber = await getNextInvoiceNumberFromPlugin(
 			recurringInvoice.tenantId,
-			invoiceSeriesFromMetadata
+			invoiceSeriesFromMetadata,
+			{ isHosting }
 		);
 		if (nextNumber) {
 			invoiceNumber = nextNumber;
@@ -588,8 +702,13 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 			invoiceNumber = await generateInvoiceNumber(recurringInvoice.tenantId);
 		}
 	} else {
-		// No series specified, use plugin-based generation (checks both SmartBill and Keez)
-		const nextNumber = await getNextInvoiceNumberFromPlugin(recurringInvoice.tenantId);
+		// No series specified, use plugin-based generation. For hosting templates the helper
+		// resolves to keezSeriesHosting; for non-hosting it resolves to keezSeries.
+		const nextNumber = await getNextInvoiceNumberFromPlugin(
+			recurringInvoice.tenantId,
+			undefined,
+			{ isHosting }
+		);
 		if (nextNumber) {
 			invoiceNumber = nextNumber;
 		} else {
@@ -598,6 +717,24 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		}
 	}
 	const invoiceId = generateInvoiceId();
+
+	// Append zero-VAT legal note for intracom/export clients. Wording comes from invoice
+	// settings (configured under /[tenant]/settings/keez), with fallback to defaults from
+	// the zero-vat-detection module. The append helper prefixes "[Scutire TVA] " and joins
+	// onto existing user notes without losing them.
+	let finalNotes: string | null = userNotes || null;
+	if (forceZeroVat) {
+		const noteBody =
+			vatScenario === 'intracom'
+				? invoiceSettings?.whmcsZeroVatNoteIntracom?.trim() || DEFAULT_INTRACOM_NOTE
+				: invoiceSettings?.whmcsZeroVatNoteExport?.trim() || DEFAULT_EXPORT_NOTE;
+		finalNotes = appendZeroVatNote(finalNotes, ZERO_VAT_NOTE_PREFIX + noteBody);
+	}
+
+	// Effective tax application type: classification wins over template metadata.
+	const effectiveTaxApplicationType: 'apply' | 'none' | 'reverse' = forceZeroVat
+		? 'none'
+		: ((invoiceFields.taxApplicationType as 'apply' | 'none' | 'reverse' | undefined) || 'apply');
 
 	// Create invoice
 	const newInvoice = {
@@ -616,15 +753,17 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		currency: recurringInvoice.currency,
 		issueDate,
 		dueDate,
-		notes: userNotes || null,
+		notes: finalNotes,
 		invoiceSeries: invoiceFields.invoiceSeries || null,
-		invoiceCurrency: invoiceFields.invoiceCurrency || null,
+		invoiceCurrency: invoiceFields.invoiceCurrency || (invoiceCurrencyUpper !== 'RON' ? invoiceCurrencyRaw : null),
 		paymentTerms: invoiceFields.paymentTerms || null,
 		paymentMethod: invoiceFields.paymentMethod || null,
-		exchangeRate: invoiceFields.exchangeRate || null,
+		// Prefer the BNR rate locked above; fall back to whatever the template metadata stored
+		// (kept for backward compat with templates that carried an explicit rate).
+		exchangeRate: lockedExchangeRate ?? invoiceFields.exchangeRate ?? null,
 		vatOnCollection: invoiceFields.vatOnCollection || false,
 		isCreditNote: invoiceFields.isCreditNote || false,
-		taxApplicationType: invoiceFields.taxApplicationType || 'apply',
+		taxApplicationType: effectiveTaxApplicationType,
 		discountType: invoiceFields.discountType || null,
 		discountValue: invoiceFields.discountValue
 			? invoiceFields.discountType === 'percent'

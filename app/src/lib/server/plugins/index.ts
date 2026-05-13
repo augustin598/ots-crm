@@ -7,6 +7,8 @@ import { bankingRevolutPlugin } from './banking/revolut/plugin';
 import { bankingTransilvaniaPlugin } from './banking/transilvania/plugin';
 import { bankingBCRPlugin } from './banking/bcr/plugin';
 import { directAdminPlugin } from './directadmin/plugin';
+import { stripePlugin } from './stripe/plugin';
+import { migrateStripeFromEnv } from './stripe/env-migration';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -37,15 +39,23 @@ export async function initializePlugins(): Promise<void> {
 	// Register DirectAdmin plugin
 	registry.register(directAdminPlugin);
 
+	// Register Stripe plugin
+	registry.register(stripePlugin);
+
 	// Load plugin from database and ensure plugins are registered
 	await ensureSmartBillPluginInDatabase();
 	await ensureKeezPluginInDatabase();
 	await ensureAnafSpvPluginInDatabase();
 	await ensureBankingPluginsInDatabase();
 	await ensureDirectAdminPluginInDatabase();
+	await ensureStripePluginInDatabase();
 
 	// Initialize all registered plugins
 	await manager.loadPlugins();
+
+	// One-shot: migrate Stripe env vars to DB for the default public-hosting tenant
+	// (Sprint 8 setup → Sprint 9 per-tenant). Idempotent.
+	await migrateStripeFromEnv();
 }
 
 /**
@@ -224,5 +234,36 @@ async function ensureDirectAdminPluginInDatabase(): Promise<void> {
 		const { message, stack } = serializeError(error);
 		logError('plugin', `Failed to ensure DirectAdmin plugin: ${message}`, { stackTrace: stack });
 		// Don't throw - allow app to continue
+	}
+}
+
+/**
+ * Ensure Stripe plugin exists in database (Sprint 9 — per-tenant payments)
+ */
+async function ensureStripePluginInDatabase(): Promise<void> {
+	try {
+		const [existing] = await db
+			.select()
+			.from(table.plugin)
+			.where(eq(table.plugin.name, 'stripe'))
+			.limit(1);
+
+		if (!existing) {
+			const pluginId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.plugin).values({
+				id: pluginId,
+				name: 'stripe',
+				displayName: 'Stripe Payments',
+				description:
+					'Plăți online prin Stripe (carduri Visa/Mastercard, SCA, subscriptions). Configurare per-tenant.',
+				version: '1.0.0',
+				isActive: true,
+				config: {}
+			});
+			logInfo('plugin', 'Created Stripe plugin in database');
+		}
+	} catch (error) {
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure Stripe plugin: ${message}`, { stackTrace: stack });
 	}
 }
