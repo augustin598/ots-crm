@@ -39,6 +39,8 @@ import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-
 import { processAdsOptimizerOutcomeEvaluator } from './tasks/ads-optimizer-outcome-evaluator';
 import { processPersonalopsHeartbeatMonitor } from './tasks/personalops-heartbeat-monitor';
 import { processMetaTokenExpirationMonitor } from './tasks/meta-token-expiration-monitor';
+import { processDirectAdminSyncAccounts } from './tasks/directadmin-sync-accounts';
+import { processDirectAdminSyncPackages } from './tasks/directadmin-sync-packages';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -151,7 +153,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	task_overdue_notifications: processTaskOverdueNotifications,
 	wordpress_uptime_ping: processWordpressUptimePing,
 	wordpress_updates_check: processWordpressUpdatesCheck,
-	wordpress_connector_auto_update: processWordpressConnectorAutoUpdate
+	wordpress_connector_auto_update: processWordpressConnectorAutoUpdate,
+	directadmin_sync_accounts: processDirectAdminSyncAccounts,
+	directadmin_sync_packages: processDirectAdminSyncPackages
 };
 
 /**
@@ -276,7 +280,8 @@ export const startScheduler = async () => {
 		'whmcs-invoice-reconcile',
 		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
 		'ads-optimizer-outcome-evaluator',
-		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor'
+		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
+		'directadmin-sync-accounts', 'directadmin-sync-packages'
 	]);
 
 	try {
@@ -905,6 +910,30 @@ export const startScheduler = async () => {
 		}
 	);
 	logInfo('scheduler', '[scheduler] meta-token-expiration-monitor registered (0 9 * * * Europe/Bucharest)');
+
+	// DirectAdmin hosting account sync — every 6h. Refreshes daPackageName, additionalDomains,
+	// usage stats. Skips servers that errored recently to avoid hammering broken hosts.
+	await schedulerQueue.add(
+		'directadmin-sync-accounts',
+		{ type: 'directadmin_sync_accounts', params: {} },
+		{
+			repeat: { pattern: '0 */6 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'directadmin-sync-accounts'
+		}
+	);
+	logInfo('scheduler', '[scheduler] directadmin-sync-accounts registered (0 */6 * * * Europe/Bucharest)');
+
+	// DirectAdmin package catalog sync — daily at 03:00 RO. Captures new/renamed packages
+	// so the per-account sync can resolve daPackageId FK on the freshest catalog.
+	await schedulerQueue.add(
+		'directadmin-sync-packages',
+		{ type: 'directadmin_sync_packages', params: {} },
+		{
+			repeat: { pattern: '0 3 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'directadmin-sync-packages'
+		}
+	);
+	logInfo('scheduler', '[scheduler] directadmin-sync-packages registered (0 3 * * * Europe/Bucharest)');
 
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });

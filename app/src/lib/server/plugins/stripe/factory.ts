@@ -135,12 +135,18 @@ export function clearStripeCache(tenantId: string) {
  */
 export async function getWebhookSecretForTenant(tenantId: string): Promise<string | null> {
 	const [integration] = await db
-		.select({ webhookSecretEncrypted: table.stripeIntegration.webhookSecretEncrypted })
+		.select({
+			webhookSecretEncrypted: table.stripeIntegration.webhookSecretEncrypted,
+			isActive: table.stripeIntegration.isActive
+		})
 		.from(table.stripeIntegration)
 		.where(eq(table.stripeIntegration.tenantId, tenantId))
 		.limit(1);
 
-	if (integration?.webhookSecretEncrypted) {
+	// Respect admin's "disable" toggle — dacă integrarea a fost marcată inactivă,
+	// nu folosim webhook secret-ul din DB. Asta blochează webhook-urile primite
+	// fără să facem cleanup pe DB (admin poate reactiva tenant-ul oricând).
+	if (integration?.webhookSecretEncrypted && integration.isActive) {
 		return decrypt(tenantId, integration.webhookSecretEncrypted);
 	}
 

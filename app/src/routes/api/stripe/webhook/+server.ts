@@ -97,7 +97,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		const [existing] = await db
 			.select({
 				status: table.processedStripeEvent.status,
-				retryCount: table.processedStripeEvent.retryCount
+				retryCount: table.processedStripeEvent.retryCount,
+				startedAt: table.processedStripeEvent.startedAt
 			})
 			.from(table.processedStripeEvent)
 			.where(eq(table.processedStripeEvent.id, event.id))
@@ -125,10 +126,26 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		if (existing.status === 'processing') {
-			// Un alt request paralel îl procesează acum (retry rapid de la Stripe).
-			// Returnăm 409 ca Stripe să retry-uiască cu backoff (nu pierdem event-ul).
-			logWarning('directadmin', `Webhook event already in flight: ${event.id}`, { tenantId });
-			return new Response('Event currently processing, retry later', { status: 409 });
+			// Recovery pentru worker mort: dacă startedAt > 10 min, tratăm ca abandoned
+			// și luăm peste. Fără asta, un kill -9 sau OOM lăsa event-ul "in flight"
+			// permanent → toate retry-urile Stripe ulterioare returnau 409 forever.
+			const STUCK_THRESHOLD_MS = 10 * 60 * 1000;
+			const startedMs = existing.startedAt ? Date.parse(existing.startedAt) : 0;
+			const isStuck = startedMs > 0 && Date.now() - startedMs > STUCK_THRESHOLD_MS;
+
+			if (!isStuck) {
+				// Un alt request paralel îl procesează acum (retry rapid de la Stripe).
+				// Returnăm 409 ca Stripe să retry-uiască cu backoff (nu pierdem event-ul).
+				logWarning('directadmin', `Webhook event already in flight: ${event.id}`, { tenantId });
+				return new Response('Event currently processing, retry later', { status: 409 });
+			}
+
+			logWarning(
+				'directadmin',
+				`Webhook event stuck >10min, taking over: ${event.id} (started ${existing.startedAt})`,
+				{ tenantId, metadata: { eventId: event.id, startedAt: existing.startedAt } }
+			);
+			// Cădem prin la UPDATE-ul de mai jos care reia status='processing'.
 		}
 
 		// 'failed' → reluăm cu retry (UPDATE atomicizat back to 'processing')

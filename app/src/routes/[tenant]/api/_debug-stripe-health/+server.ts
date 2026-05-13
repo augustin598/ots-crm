@@ -126,6 +126,28 @@ export const GET: RequestHandler = async (event) => {
 		if (!eventId) throw error(400, 'eventId query param is required');
 		if (!isValidStripeEventId(eventId)) throw error(400, 'eventId must match evt_[A-Za-z0-9]+');
 
+		// SECURITY: verifică că eventId aparține tenant-ului curent înainte de
+		// orice altă acțiune. Fără filtrul ăsta, admin tenant A putea replay
+		// event-ul tenantului B (cross-tenant leak).
+		const [ownership] = await db
+			.select({
+				tenantId: table.processedStripeEvent.tenantId,
+				status: table.processedStripeEvent.status
+			})
+			.from(table.processedStripeEvent)
+			.where(eq(table.processedStripeEvent.id, eventId))
+			.limit(1);
+		if (!ownership) {
+			return json({ ok: false, reason: 'event not found in this CRM' }, { status: 404 });
+		}
+		if (ownership.tenantId !== tenantId) {
+			logError('directadmin', `Cross-tenant replay attempt blocked`, {
+				tenantId,
+				metadata: { eventId, eventTenantId: ownership.tenantId }
+			});
+			throw error(403, 'Event belongs to a different tenant');
+		}
+
 		let stripeEvent;
 		try {
 			const stripe = await getStripeForTenant(tenantId);
@@ -136,6 +158,7 @@ export const GET: RequestHandler = async (event) => {
 		}
 
 		// Reset row state ca să forțăm re-procesare (idempotent dacă handler-ul însuși e idempotent).
+		// Tot updateul filtrează pe (id, tenant_id) ca defense-in-depth.
 		const nowIso = new Date().toISOString();
 		await db
 			.update(table.processedStripeEvent)
@@ -145,14 +168,24 @@ export const GET: RequestHandler = async (event) => {
 				errorMessage: null,
 				retryCount: sql`${table.processedStripeEvent.retryCount} + 1`
 			})
-			.where(eq(table.processedStripeEvent.id, eventId));
+			.where(
+				and(
+					eq(table.processedStripeEvent.id, eventId),
+					eq(table.processedStripeEvent.tenantId, tenantId)
+				)
+			);
 
 		try {
 			const result = await dispatchStripeEvent(stripeEvent);
 			await db
 				.update(table.processedStripeEvent)
 				.set({ status: 'completed', completedAt: new Date().toISOString() })
-				.where(eq(table.processedStripeEvent.id, eventId));
+				.where(
+					and(
+						eq(table.processedStripeEvent.id, eventId),
+						eq(table.processedStripeEvent.tenantId, tenantId)
+					)
+				);
 			logInfo('directadmin', `Manual replay: ${stripeEvent.type} (${eventId}) → ${result}`, {
 				tenantId,
 				metadata: { eventId }
@@ -163,7 +196,12 @@ export const GET: RequestHandler = async (event) => {
 			await db
 				.update(table.processedStripeEvent)
 				.set({ status: 'failed', errorMessage: message })
-				.where(eq(table.processedStripeEvent.id, eventId));
+				.where(
+					and(
+						eq(table.processedStripeEvent.id, eventId),
+						eq(table.processedStripeEvent.tenantId, tenantId)
+					)
+				);
 			logError('directadmin', `Manual replay failed for ${eventId}: ${message}`, {
 				tenantId,
 				metadata: { eventId }

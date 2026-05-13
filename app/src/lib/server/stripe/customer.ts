@@ -44,10 +44,16 @@ export async function getOrCreateStripeCustomer(clientRow: {
 	const existing = await stripe.customers.list({ email: clientRow.email, limit: 1 });
 	let customerId: string;
 
+	// Attach `eu_vat` tax_id DOAR pentru plătitori de TVA (vatNumber începe cu
+	// prefixul "RO" — convenția din public-hosting.remote.ts:472 unde se setează
+	// RO{cui} pentru `vatPayer=true` și doar `cui` pentru non-plătitori).
+	// Fără check-ul ăsta, atașam `eu_vat=RO{cui}` la non-plătitori → Stripe marca
+	// tax ID ca "unverified" la lookup VIES + factura Stripe avea date eronate.
+	const isVatPayer = (clientRow.vatNumber ?? '').toUpperCase().startsWith('RO');
+
 	if (existing.data.length > 0) {
 		customerId = existing.data[0].id;
-		// Update tax_id dacă lipsește pe customer-ul existent
-		if (clientRow.vatNumber) {
+		if (isVatPayer && clientRow.vatNumber) {
 			await ensureRomanianVatId(stripe, customerId, clientRow.vatNumber);
 		}
 	} else {
@@ -71,7 +77,7 @@ export async function getOrCreateStripeCustomer(clientRow: {
 			}
 		});
 		customerId = created.id;
-		if (clientRow.vatNumber) {
+		if (isVatPayer && clientRow.vatNumber) {
 			await ensureRomanianVatId(stripe, customerId, clientRow.vatNumber);
 		}
 	}
