@@ -1,0 +1,17 @@
+[mcp_servers.chrome-devtools]
+args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+]
+command = "npx"
+
+[mcp_servers.playwright]
+args = ["@anthropic-ai/playwright-mcp@latest"]
+command = "npx"
+
+[mcp_servers.svelte]
+args = [
+    "-y",
+    "@sveltejs/mcp",
+]
+command = "npx"

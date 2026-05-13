@@ -7,6 +7,10 @@ skills-lock.json
 
 # Database backups (taken before risky migrations; never committed)
 backups/
+whmcs-backup-*.sql
+
+# Local design exploration / mock-ups (not part of the app)
+new_design/
 
 # Plugin build artifacts (use ots-wp-connector/build.sh to produce)
 ots-wp-connector*.zip
