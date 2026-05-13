@@ -29,7 +29,8 @@
 
 	const NO_ACCESS_LOCAL: AccessFlags = {
 		invoices: false, contracts: false, tasks: false, marketing: false,
-		reports: false, leads: false, accessData: false, backlinks: false, budgets: false
+		reports: false, leads: false, accessData: false, backlinks: false, budgets: false,
+		hosting: false
 	};
 	import TeamMemberCard from './TeamMemberCard.svelte';
 	import TeamInviteModal from './TeamInviteModal.svelte';
@@ -61,7 +62,8 @@
 		{ key: 'leads', label: 'Leads' },
 		{ key: 'accessData', label: 'Date acces' },
 		{ key: 'backlinks', label: 'Backlinks' },
-		{ key: 'budgets', label: 'Bugete' }
+		{ key: 'budgets', label: 'Bugete' },
+		{ key: 'hosting', label: 'Hosting' }
 	];
 
 	function resolvedFlags(se: { accessFlagsResolved?: Partial<AccessFlags> | null }): AccessFlags {

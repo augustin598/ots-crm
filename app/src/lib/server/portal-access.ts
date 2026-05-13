@@ -28,7 +28,8 @@ export type AccessCategory =
 	| 'leads'
 	| 'accessData'
 	| 'backlinks'
-	| 'budgets';
+	| 'budgets'
+	| 'hosting';
 
 export type AccessFlags = Record<AccessCategory, boolean>;
 
@@ -41,7 +42,8 @@ export const ACCESS_CATEGORIES: readonly AccessCategory[] = [
 	'leads',
 	'accessData',
 	'backlinks',
-	'budgets'
+	'budgets',
+	'hosting'
 ] as const;
 
 export const ALL_ACCESS_TRUE: AccessFlags = {
@@ -53,7 +55,8 @@ export const ALL_ACCESS_TRUE: AccessFlags = {
 	leads: true,
 	accessData: true,
 	backlinks: true,
-	budgets: true
+	budgets: true,
+	hosting: true
 };
 
 export const NO_ACCESS: AccessFlags = {
@@ -65,7 +68,8 @@ export const NO_ACCESS: AccessFlags = {
 	leads: false,
 	accessData: false,
 	backlinks: false,
-	budgets: false
+	budgets: false,
+	hosting: false
 };
 
 type SecondaryEmailAccessRow = {
@@ -158,5 +162,6 @@ export function routeRequiresAccess(pathname: string, tenantSlug: string): Acces
 	if (rest.startsWith('/access-data')) return 'accessData';
 	if (rest.startsWith('/backlinks')) return 'backlinks';
 	if (rest.startsWith('/budgets')) return 'budgets';
+	if (rest.startsWith('/hosting')) return 'hosting';
 	return null;
 }

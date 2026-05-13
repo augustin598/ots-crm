@@ -167,6 +167,38 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		description: 'Sincronizare facturi, storno, validare, e-Factura, importuri.'
 	},
 
+	// Hosting (DirectAdmin plugin)
+	{
+		id: 'admin.hosting.view',
+		domain: 'admin',
+		groupLabel: 'Hosting',
+		label: 'Vezi pagini Hosting',
+		description: 'Acces la /hosting (servere DA, conturi, produse).'
+	},
+	{
+		id: 'admin.hosting.manage',
+		domain: 'admin',
+		groupLabel: 'Hosting',
+		label: 'Gestionare conturi & produse hosting',
+		description: 'Creare/suspend/unsuspend/terminate conturi hosting; CRUD produse hosting.'
+	},
+	{
+		id: 'admin.hosting.servers.manage',
+		domain: 'admin',
+		groupLabel: 'Hosting',
+		label: 'Gestionare servere DirectAdmin',
+		description: 'Adăugare/test/ștergere servere DA și sync pachete.',
+		unsafeUnlessRole: 'admin'
+	},
+	{
+		id: 'admin.hosting.import',
+		domain: 'admin',
+		groupLabel: 'Hosting',
+		label: 'Import WHMCS hosting',
+		description: 'Import wizard pentru produse/servicii/domenii din baza WHMCS.',
+		unsafeUnlessRole: 'admin'
+	},
+
 	// Scheduler / Operations
 	{
 		id: 'admin.scheduler.view',
@@ -281,6 +313,13 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		description: 'Vezi bugete alocate per campanie/lună.'
 	},
 	{
+		id: 'portal.hosting.view',
+		domain: 'portal',
+		groupLabel: 'Cont companie',
+		label: 'Hosting',
+		description: 'Vezi conturile de hosting și pachetele disponibile.'
+	},
+	{
 		id: 'portal.team.manage',
 		domain: 'portal',
 		groupLabel: 'Cont companie',
@@ -335,6 +374,11 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Integrations
 		'admin.integrations.manage',
 		'admin.keez.write',
+		// Hosting
+		'admin.hosting.view',
+		'admin.hosting.manage',
+		'admin.hosting.servers.manage',
+		'admin.hosting.import',
 		// Operations
 		'admin.scheduler.view',
 		'admin.scheduler.trigger',
@@ -363,6 +407,11 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Integrations
 		'admin.integrations.manage',
 		'admin.keez.write',
+		// Hosting
+		'admin.hosting.view',
+		'admin.hosting.manage',
+		'admin.hosting.servers.manage',
+		'admin.hosting.import',
 		// Operations (no scheduler.trigger)
 		'admin.scheduler.view',
 		'admin.logs.view',
@@ -380,6 +429,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		'admin.campaigns.launch',
 		// Finance — invoice only
 		'admin.finance.invoice',
+		// Hosting — view + manage accounts (no servers/import)
+		'admin.hosting.view',
+		'admin.hosting.manage',
 		// Operations
 		'admin.keez.write',
 		'admin.apiKeys.manage'
@@ -387,12 +439,16 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 	member: [
 		// Campaigns — only create
 		'admin.campaigns.create',
+		// Hosting — read only
+		'admin.hosting.view',
 		// Operations
 		'admin.keez.write'
 	],
 	viewer: [
 		// Operations only — read-only across the system
-		'admin.apiKeys.manage'
+		'admin.apiKeys.manage',
+		// Hosting — read only
+		'admin.hosting.view'
 	]
 };
 
@@ -416,7 +472,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.leads.view',
 		'portal.accessData.view',
 		'portal.backlinks.view',
-		'portal.budgets.view'
+		'portal.budgets.view',
+		'portal.hosting.view'
 	],
 	manager: [
 		'portal.invoices.view',
@@ -426,7 +483,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.reports.view',
 		'portal.leads.view',
 		'portal.backlinks.view',
-		'portal.budgets.view'
+		'portal.budgets.view',
+		'portal.hosting.view'
 		// no accessData
 	],
 	marketing: [
@@ -451,7 +509,8 @@ const LEGACY_FLAG_TO_CAP: Record<string, Capability> = {
 	leads: 'portal.leads.view',
 	accessData: 'portal.accessData.view',
 	backlinks: 'portal.backlinks.view',
-	budgets: 'portal.budgets.view'
+	budgets: 'portal.budgets.view',
+	hosting: 'portal.hosting.view'
 };
 
 export function legacyFlagsToCapabilities(
@@ -494,6 +553,7 @@ export function routeRequiresCapability(
 	if (rest.startsWith('/access-data')) return 'portal.accessData.view';
 	if (rest.startsWith('/backlinks')) return 'portal.backlinks.view';
 	if (rest.startsWith('/budgets')) return 'portal.budgets.view';
+	if (rest.startsWith('/hosting')) return 'portal.hosting.view';
 	if (rest.startsWith('/team')) return 'portal.team.manage';
 	return null;
 }

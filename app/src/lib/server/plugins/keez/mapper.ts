@@ -1019,7 +1019,12 @@ export function mapKeezPartnerToClient(
 		budgetWarningThreshold: null,
 		avatarPath: null,
 		avatarSource: 'whatsapp',
-		whmcsClientId: null
+		whmcsClientId: null,
+		// Sprint 8: onboarding fields. Keez import → client e deja activ.
+		legalType: keezPartner.isLegalPerson ? 'srl' : 'pf',
+		signupSource: 'keez-import',
+		onboardingStatus: 'active',
+		stripeCustomerId: null
 	};
 }
 

@@ -14,6 +14,7 @@ export type LogSource =
 	| 'gmail'
 	| 'keez'
 	| 'smartbill'
+	| 'directadmin'
 	| 'bnr'
 	| 'anaf-spv'
 	| 'banking'

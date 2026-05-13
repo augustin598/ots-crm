@@ -166,6 +166,16 @@ export const client = sqliteTable('client', {
 	avatarPath: text('avatar_path'),
 	avatarSource: text('avatar_source').notNull().default('whatsapp'),
 	whmcsClientId: integer('whmcs_client_id'), // WHMCS user ID — stable match key after first sync
+	// === Auto-onboarding fields (Sprint 8) ===
+	/** Forma juridică detectată din ANAF sau setată manual. */
+	legalType: text('legal_type'), // 'srl' | 'pfa' | 'pf' | 'ong' | null
+	/** Cum a fost creat clientul (audit + analytics). */
+	signupSource: text('signup_source'), // 'public-form' | 'admin-created' | 'whmcs-imported' | 'magic-link'
+	/** Stare onboarding pentru clienții auto-create din /pachete-hosting. */
+	onboardingStatus: text('onboarding_status').notNull().default('active'),
+	// 'pending_email' | 'pending_payment' | 'active' | 'churned'
+	/** Stripe Customer ID — cache-uit la prima checkout pentru a evita customers duplicați. */
+	stripeCustomerId: text('stripe_customer_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -503,6 +513,12 @@ export const invoice = sqliteTable('invoice', {
 	contractId: text('contract_id').references(() => contract.id),
 	projectId: text('project_id').references(() => project.id),
 	serviceId: text('service_id').references(() => service.id),
+	/**
+	 * Link to hosting account — propagated from `recurringInvoice.hostingAccountId` when the
+	 * recurring scheduler generates this invoice. Enables the DA plugin to suspend ONLY the
+	 * specific hosting account when this invoice goes overdue (vs all client accounts).
+	 */
+	hostingAccountId: text('hosting_account_id'),
 	invoiceNumber: text('invoice_number').notNull(),
 	status: text('status').notNull().default('draft'), // 'draft', 'sent', 'paid', 'overdue', 'cancelled'
 	amount: integer('amount'), // in cents
@@ -538,6 +554,10 @@ export const invoice = sqliteTable('invoice', {
 	externalSource: text('external_source'), // 'whmcs', 'manual', 'meta-ads' — discriminator for origin
 	externalInvoiceId: integer('external_invoice_id'), // WHMCS invoice ID (or other source)
 	externalTransactionId: text('external_transaction_id'), // Stripe txn_... or other payment provider ref
+	// === Stripe-specific (Sprint 8) ===
+	stripePaymentIntentId: text('stripe_payment_intent_id'), // pi_... — pentru reconciliere
+	stripeSessionId: text('stripe_session_id'), // cs_... — Checkout Session ID
+	stripeSubscriptionId: text('stripe_subscription_id'), // sub_... pentru recurring
 	createdByUserId: text('created_by_user_id')
 		.notNull()
 		.references(() => user.id),
@@ -582,6 +602,12 @@ export const recurringInvoice = sqliteTable('recurring_invoice', {
 	contractId: text('contract_id').references(() => contract.id),
 	projectId: text('project_id').references(() => project.id),
 	serviceId: text('service_id').references(() => service.id),
+	/**
+	 * Link to hosting account — populated when this recurring invoice was created from a
+	 * DirectAdmin hosting service (via WHMCS import or manual creation). The DA plugin uses
+	 * this to suspend the SPECIFIC hosting account on invoice overdue (instead of all client accounts).
+	 */
+	hostingAccountId: text('hosting_account_id'),
 	name: text('name').notNull(),
 	amount: integer('amount').notNull(), // in cents
 	taxRate: integer('tax_rate').notNull().default(1900), // in cents, e.g., 1900 = 19%
@@ -641,6 +667,354 @@ export const tenantPlugin = sqliteTable('tenant_plugin', {
 		.notNull()
 		.default(sql`current_date`)
 });
+
+// ─── DirectAdmin Plugin Tables ─────────────────────────────────────────────────
+
+export const daServer = sqliteTable(
+	'da_server',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		name: text('name').notNull(),
+		hostname: text('hostname').notNull(),
+		port: integer('port').notNull().default(2222),
+		useHttps: boolean('use_https').notNull().default(true),
+		usernameEncrypted: text('username_encrypted').notNull(),
+		passwordEncrypted: text('password_encrypted').notNull(),
+		isActive: boolean('is_active').notNull().default(true),
+		lastCheckedAt: text('last_checked_at'),
+		lastError: text('last_error'),
+		daVersion: text('da_version'),
+		/**
+		 * Last package-sync run summary: { ranAt, packageCount, synced, updated,
+		 * deactivated, failures: [{pkg, error}] }. Used by admin UI to show
+		 * sync status + diagnose failures without tailing server logs.
+		 */
+		lastSyncResult: jsonb('last_sync_result').$type<{
+			ranAt: string;
+			packageCount: number;
+			synced: number;
+			updated: number;
+			deactivated: number;
+			failures: { pkg: string; error: string }[];
+		}>(),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [index('da_server_tenant_idx').on(t.tenantId)]
+);
+
+export const daPackage = sqliteTable(
+	'da_package',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		daServerId: text('da_server_id')
+			.notNull()
+			.references(() => daServer.id, { onDelete: 'cascade' }),
+		daName: text('da_name').notNull(),
+		type: text('type').notNull().default('user'), // 'user' | 'reseller'
+		bandwidth: integer('bandwidth'),
+		quota: integer('quota'),
+		maxEmailAccounts: integer('max_email_accounts'),
+		maxEmailForwarders: integer('max_email_forwarders'),
+		maxMailingLists: integer('max_mailing_lists'),
+		maxAutoresponders: integer('max_autoresponders'),
+		maxDatabases: integer('max_databases'),
+		maxFtpAccounts: integer('max_ftp_accounts'),
+		maxDomains: integer('max_domains'),
+		maxSubdomains: integer('max_subdomains'),
+		maxDomainPointers: integer('max_domain_pointers'),
+		maxInodes: integer('max_inodes'),
+		emailDailyLimit: integer('email_daily_limit'),
+		// Boolean access flags — true = enabled in this package
+		anonymousFtp: boolean('anonymous_ftp').notNull().default(false),
+		cgi: boolean('cgi').notNull().default(false),
+		php: boolean('php').notNull().default(false),
+		ssl: boolean('ssl').notNull().default(false),
+		ssh: boolean('ssh').notNull().default(false),
+		dnsControl: boolean('dns_control').notNull().default(false),
+		cron: boolean('cron').notNull().default(false),
+		spam: boolean('spam').notNull().default(false),
+		clamav: boolean('clamav').notNull().default(false),
+		wordpress: boolean('wordpress').notNull().default(false),
+		git: boolean('git').notNull().default(false),
+		redis: boolean('redis').notNull().default(false),
+		suspendAtLimit: boolean('suspend_at_limit').notNull().default(false),
+		oversold: boolean('oversold').notNull().default(false),
+		skin: text('skin'),
+		language: text('language'),
+		rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+		/**
+		 * Soft-delete marker. Set to false when a package disappears from DA
+		 * (rather than hard-deleting, which would break hostingProduct.daPackageId
+		 * and hostingAccount.daPackageId FKs).
+		 */
+		isActive: boolean('is_active').notNull().default(true),
+		lastSyncedAt: text('last_synced_at'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [index('da_package_server_idx').on(t.daServerId)]
+);
+
+export const hostingProduct = sqliteTable(
+	'hosting_product',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		daServerId: text('da_server_id').references(() => daServer.id, { onDelete: 'set null' }),
+		daPackageId: text('da_package_id').references(() => daPackage.id, { onDelete: 'set null' }),
+		name: text('name').notNull(),
+		/** Plain-text summary shown on cards. NO HTML — features go in `features` JSON. */
+		description: text('description'),
+		/** Free-form bullet points: "Backup zilnic", "Suport 24/7", "WP Toolkit". */
+		features: jsonb('features').$type<string[]>(),
+		/** Optional ribbon label: "Cel mai vândut", "Recomandat". */
+		highlightBadge: text('highlight_badge'),
+		/** Display ordering (asc) pe portalul client. Ties broken by price. */
+		sortOrder: integer('sort_order').notNull().default(0),
+		/** Afișează pe pagina publică `/pachete-hosting` (marketing, fără login). */
+		isPublic: boolean('is_public').notNull().default(false),
+		/** Ordering pe pagina publică (separat de cea internă, ca admin să poată reordona pentru marketing). */
+		publicSortOrder: integer('public_sort_order').notNull().default(0),
+		price: integer('price').notNull().default(0), // cents
+		currency: text('currency').notNull().default('RON'),
+		billingCycle: text('billing_cycle').notNull().default('monthly'), // monthly|quarterly|annually|biannually|triennially|one_time
+		setupFee: integer('setup_fee').notNull().default(0),
+		isActive: boolean('is_active').notNull().default(true),
+		whmcsProductId: integer('whmcs_product_id'),
+		/**
+		 * Stripe Price ID — lazy-created la primul checkout, cached pentru a evita
+		 * re-creare la fiecare comandă. Reset la null dacă preț/currency se schimbă
+		 * (Stripe Prices sunt immutable).
+		 */
+		stripePriceId: text('stripe_price_id'),
+		/** Stripe Product ID — un Product per hostingProduct, mai multe Prices posibile (diferite currencies/cicluri). */
+		stripeProductId: text('stripe_product_id'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [index('hosting_product_tenant_idx').on(t.tenantId)]
+);
+
+export const hostingAccount = sqliteTable(
+	'hosting_account',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id').references(() => client.id, { onDelete: 'set null' }),
+		daServerId: text('da_server_id')
+			.notNull()
+			.references(() => daServer.id),
+		daPackageId: text('da_package_id').references(() => daPackage.id, { onDelete: 'set null' }),
+		hostingProductId: text('hosting_product_id').references(() => hostingProduct.id, {
+			onDelete: 'set null'
+		}),
+		daUsername: text('da_username').notNull(),
+		domain: text('domain').notNull(),
+		status: text('status').notNull().default('pending'), // pending|active|suspended|terminated|cancelled
+		suspendReason: text('suspend_reason'),
+		/**
+		 * If non-null, the account was auto-suspended by the DA plugin in response to
+		 * this specific invoice going overdue. (Other docstring preserved below.)
+		 *
+		 * Marker, not FK — keep simple to avoid circular reference with invoice table. Set when the suspend hook runs and
+		 * cleared when the invoice is paid (and no other overdue invoices remain).
+		 *
+		 * Replaces the fragile `suspendReason LIKE 'Overdue invoice%'` check that
+		 * broke on Romanian-language reasons or staff-edited strings.
+		 *
+		 * FK with ON DELETE SET NULL — if the invoice is deleted, the marker becomes
+		 * NULL and the account stays suspended (staff must reconcile manually).
+		 */
+		autoSuspendedByInvoiceId: text('auto_suspended_by_invoice_id'),
+		daCredentialsEncrypted: text('da_credentials_encrypted'),
+		diskUsage: integer('disk_usage'),
+		bandwidthUsage: integer('bandwidth_usage'),
+		emailCount: integer('email_count'),
+		dbCount: integer('db_count'),
+		inodeCount: integer('inode_count'),
+		/** When the hosting service started (WHMCS `tblhosting.regdate`). */
+		startDate: text('start_date'),
+		nextDueDate: text('next_due_date'),
+		recurringAmount: integer('recurring_amount').notNull().default(0), // cents — per-cycle, NOT monthly
+		currency: text('currency').notNull().default('RON'),
+		/** Billing cycle for `recurringAmount`. monthly|quarterly|semiannually|annually|biennially|triennially|one_time */
+		billingCycle: text('billing_cycle').notNull().default('monthly'),
+		/**
+		 * Cached package name from DirectAdmin (kept in sync via syncAccountStats).
+		 * The source of truth lives on the DA server — this is a snapshot for UI display.
+		 */
+		daPackageName: text('da_package_name'),
+		/**
+		 * Addon domains hosted on this DA user (besides the primary `domain`).
+		 * Populated by syncAccountStats from `getUserConfig().domains` (filtered to exclude the primary).
+		 * stored as JSON array of strings.
+		 */
+		additionalDomains: jsonb('additional_domains').$type<string[]>(),
+		notes: text('notes'),
+		whmcsServiceId: integer('whmcs_service_id'),
+		lastSyncedAt: text('last_synced_at'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [
+		index('hosting_account_tenant_idx').on(t.tenantId),
+		index('hosting_account_client_idx').on(t.clientId),
+		index('hosting_account_server_idx').on(t.daServerId),
+		index('hosting_account_status_idx').on(t.status)
+	]
+);
+
+/**
+ * Hosting inquiries received via the public marketing page `/pachete-hosting`.
+ * Captures prospect contact + desired package; staff converts to a client manually
+ * (or Sprint 4 wires Stripe checkout that auto-converts).
+ */
+export const hostingInquiry = sqliteTable(
+	'hosting_inquiry',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		hostingProductId: text('hosting_product_id').references(() => hostingProduct.id, {
+			onDelete: 'set null'
+		}),
+		contactName: text('contact_name').notNull(),
+		contactEmail: text('contact_email').notNull(),
+		contactPhone: text('contact_phone'),
+		companyName: text('company_name'),
+		vatNumber: text('vat_number'),
+		message: text('message'),
+		status: text('status').notNull().default('new'), // 'new' | 'contacted' | 'converted' | 'discarded'
+		clientId: text('client_id').references(() => client.id, { onDelete: 'set null' }),
+		source: text('source').notNull().default('pachete-hosting'),
+		ipAddress: text('ip_address'),
+		userAgent: text('user_agent'),
+		// === Stripe + onboarding tracking (Sprint 8) ===
+		stripeCheckoutSessionId: text('stripe_checkout_session_id'),
+		clientCreated: boolean('client_created').notNull().default(false),
+		clientCreatedAt: timestamp('client_created_at', { withTimezone: true, mode: 'date' }),
+		proformaInvoiceId: text('proforma_invoice_id'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`),
+		contactedAt: timestamp('contacted_at', { withTimezone: true, mode: 'date' })
+	},
+	(t) => [
+		index('hosting_inquiry_tenant_idx').on(t.tenantId),
+		index('hosting_inquiry_status_idx').on(t.status),
+		index('hosting_inquiry_created_idx').on(t.createdAt)
+	]
+);
+
+/**
+ * Idempotency log for Stripe webhook events. Stripe retransmite webhook-uri pe
+ * 4xx/5xx response → fără asta, am procesa duplicate events (de ex. dublu
+ * `checkout.session.completed` ar crea 2 clienți).
+ *
+ * Flow: înainte de a procesa un event, încercăm INSERT cu event.id ca PK.
+ * Dacă există deja (constraint violation), skip silent → return 200 OK.
+ * Retentie: pot fi pruned >90 zile (Stripe nu mai retry-uiește).
+ */
+export const processedStripeEvent = sqliteTable(
+	'processed_stripe_event',
+	{
+		id: text('id').primaryKey(), // stripe event.id (evt_...)
+		eventType: text('event_type').notNull(),
+		tenantId: text('tenant_id').references(() => tenant.id),
+		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [
+		index('processed_stripe_event_processed_at_idx').on(t.processedAt),
+		index('processed_stripe_event_type_idx').on(t.eventType)
+	]
+);
+
+export const daAuditLog = sqliteTable(
+	'da_audit_log',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		hostingAccountId: text('hosting_account_id').references(() => hostingAccount.id, {
+			onDelete: 'set null'
+		}),
+		daServerId: text('da_server_id').references(() => daServer.id, { onDelete: 'set null' }),
+		action: text('action').notNull(), // suspend|unsuspend|create|delete|sync|test|package-change
+		trigger: text('trigger').notNull(), // hook:invoice.status.changed|hook:invoice.paid|manual|cron
+		invoiceId: text('invoice_id'),
+		success: boolean('success').notNull(),
+		errorMessage: text('error_message'),
+		durationMs: integer('duration_ms'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [
+		index('da_audit_log_tenant_idx').on(t.tenantId),
+		index('da_audit_log_account_idx').on(t.hostingAccountId),
+		index('da_audit_log_action_idx').on(t.action)
+	]
+);
+
+export const whmcsHostingImportLog = sqliteTable(
+	'whmcs_hosting_import_log',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		importedAt: text('imported_at').notNull(),
+		importedByUserId: text('imported_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		entityType: text('entity_type').notNull(), // product|service|domain
+		sourceId: integer('source_id').notNull(),
+		targetId: text('target_id').notNull(),
+		status: text('status').notNull(), // success|skipped|error
+		errorMessage: text('error_message'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_date`)
+	},
+	(t) => [
+		index('whmcs_hosting_import_log_tenant_idx').on(t.tenantId),
+		index('whmcs_hosting_import_log_entity_idx').on(t.entityType, t.sourceId)
+	]
+);
 
 export const invoiceSettings = sqliteTable('invoice_settings', {
 	id: text('id').primaryKey(),
@@ -3337,6 +3711,18 @@ export type Plugin = typeof plugin.$inferSelect;
 export type NewPlugin = typeof plugin.$inferInsert;
 export type TenantPlugin = typeof tenantPlugin.$inferSelect;
 export type NewTenantPlugin = typeof tenantPlugin.$inferInsert;
+export type DaServer = typeof daServer.$inferSelect;
+export type NewDaServer = typeof daServer.$inferInsert;
+export type DaPackage = typeof daPackage.$inferSelect;
+export type NewDaPackage = typeof daPackage.$inferInsert;
+export type HostingProduct = typeof hostingProduct.$inferSelect;
+export type NewHostingProduct = typeof hostingProduct.$inferInsert;
+export type HostingAccount = typeof hostingAccount.$inferSelect;
+export type NewHostingAccount = typeof hostingAccount.$inferInsert;
+export type DaAuditLog = typeof daAuditLog.$inferSelect;
+export type NewDaAuditLog = typeof daAuditLog.$inferInsert;
+export type WhmcsHostingImportLog = typeof whmcsHostingImportLog.$inferSelect;
+export type NewWhmcsHostingImportLog = typeof whmcsHostingImportLog.$inferInsert;
 export type InvoiceSettings = typeof invoiceSettings.$inferSelect;
 export type NewInvoiceSettings = typeof invoiceSettings.$inferInsert;
 export type TaskSettings = typeof taskSettings.$inferSelect;

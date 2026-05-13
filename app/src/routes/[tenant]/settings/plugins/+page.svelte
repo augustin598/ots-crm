@@ -170,6 +170,22 @@
 							</div>
 						</CardContent>
 					{/if}
+					{#if plugin.name === 'directadmin'}
+						<CardContent>
+							<Separator class="mb-4" />
+							<div class="space-y-2">
+								<p class="text-sm font-medium">DirectAdmin Hosting</p>
+								<p class="text-sm text-muted-foreground">
+									Manage DirectAdmin servers, packages and hosting accounts. Auto-suspends accounts when invoices go overdue.
+								</p>
+								{#if isEnabled}
+									<Button variant="outline" size="sm" href="/{tenantSlug}/settings/directadmin">
+										Configure DirectAdmin
+									</Button>
+								{/if}
+							</div>
+						</CardContent>
+					{/if}
 					{#if plugin.name === 'banking-revolut'}
 						<CardContent>
 							<Separator class="mb-4" />

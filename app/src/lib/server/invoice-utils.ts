@@ -275,6 +275,51 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		throw new Error('Recurring invoice has ended');
 	}
 
+	// Hosting context: when the template links to a hosting account, we render line item
+	// descriptions as "<package> - <domain> (dd/MM/yyyy - dd/MM/yyyy)" so both the CRM UI and
+	// the Keez proforma show what's actually being billed. We re-derive the description on
+	// every generation so package renames / domain changes since template creation are
+	// reflected in the current invoice (the template's lineItemsJson is a seed, not a frozen
+	// snapshot). Period uses the SCHEDULED run date (recurringInvoice.nextRunDate) so cycles
+	// align with billing periods even if the scheduler runs late.
+	const hostingAccountId =
+		(recurringInvoice as { hostingAccountId?: string | null }).hostingAccountId ?? null;
+	let hostingAccount: typeof table.hostingAccount.$inferSelect | null = null;
+	if (hostingAccountId) {
+		const [ha] = await db
+			.select()
+			.from(table.hostingAccount)
+			.where(
+				and(
+					eq(table.hostingAccount.id, hostingAccountId),
+					eq(table.hostingAccount.tenantId, recurringInvoice.tenantId)
+				)
+			)
+			.limit(1);
+		hostingAccount = ha ?? null;
+	}
+	const periodStart = new Date(recurringInvoice.nextRunDate);
+	const periodEnd = calculateNextRunDate(
+		periodStart,
+		recurringInvoice.recurringType,
+		recurringInvoice.recurringInterval
+	);
+	periodEnd.setDate(periodEnd.getDate() - 1); // inclusive last day (e.g., next cycle starts 29/01 → period ends 28/01)
+	const fmtPeriodDate = (d: Date) =>
+		`${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+	const hostingPeriodSuffix = hostingAccountId
+		? ` (${fmtPeriodDate(periodStart)} - ${fmtPeriodDate(periodEnd)})`
+		: '';
+	const hostingBaseDescription = hostingAccountId
+		? (() => {
+				const pkg = hostingAccount?.daPackageName?.trim();
+				const dom = hostingAccount?.domain;
+				if (pkg && dom) return `${pkg} - ${dom}`;
+				if (dom) return `Hosting - ${dom}`;
+				return null;
+			})()
+		: null;
+
 	// Calculate issue date and due date
 	const issueDate = new Date(now);
 	issueDate.setDate(issueDate.getDate() + recurringInvoice.issueDateOffset);
@@ -561,6 +606,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		clientId: recurringInvoice.clientId,
 		projectId: recurringInvoice.projectId || null,
 		serviceId: recurringInvoice.serviceId || null,
+		hostingAccountId,
 		invoiceNumber,
 		status: 'draft' as const, // Created as draft; auto-send sets to 'sent' after email delivery
 		amount,
@@ -618,11 +664,18 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 					}
 				}
 
+				// For hosting templates, override the description with the freshly-derived
+				// "<package> - <domain> (period)" — falls back to the template's static text
+				// if hostingAccount lookup failed (e.g., account deleted).
+				const description = hostingAccountId
+					? `${hostingBaseDescription ?? item.description}${hostingPeriodSuffix}`
+					: item.description;
+
 				return {
 					id: generateInvoiceLineItemId(),
 					invoiceId,
 					serviceId: item.serviceId || null,
-					description: item.description,
+					description,
 					quantity: item.quantity,
 					rate: itemRate,
 					amount: itemSubtotal,
@@ -638,11 +691,16 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 
 			await tx.insert(table.invoiceLineItem).values(lineItemsToInsert);
 		} else {
+			// Fallback when lineItemsJson is null and notes-format parse failed — still respect
+			// hosting context so generated invoices for un-backfilled templates aren't generic.
+			const fallbackDescription = hostingAccountId
+				? `${hostingBaseDescription ?? recurringInvoice.name ?? 'Hosting'}${hostingPeriodSuffix}`
+				: recurringInvoice.name || 'Recurring Invoice Item';
 			const lineItemToInsert = {
 				id: generateInvoiceLineItemId(),
 				invoiceId,
 				serviceId: recurringInvoice.serviceId || null,
-				description: recurringInvoice.name || 'Recurring Invoice Item',
+				description: fallbackDescription,
 				quantity: 1,
 				rate: amount,
 				amount: amount,

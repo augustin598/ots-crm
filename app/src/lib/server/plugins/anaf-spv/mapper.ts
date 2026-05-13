@@ -68,6 +68,7 @@ export function mapUblInvoiceToCrm(
 		contractId: null,
 		projectId: null,
 		serviceId: null,
+		hostingAccountId: null,
 		invoiceNumber: ublData.invoiceNumber,
 		status: 'sent' as const,
 		remainingAmount: null,
@@ -103,6 +104,10 @@ export function mapUblInvoiceToCrm(
 		externalSource: null,
 		externalInvoiceId: null,
 		externalTransactionId: null,
+		// Sprint 8: Stripe identifiers (null pentru import ANAF)
+		stripePaymentIntentId: null,
+		stripeSessionId: null,
+		stripeSubscriptionId: null,
 		createdByUserId: userId,
 		lineItems
 	};
@@ -245,7 +250,12 @@ export function mapAnafCompanyToClient(
 		budgetWarningThreshold: null,
 		avatarPath: null,
 		avatarSource: 'whatsapp',
-		whmcsClientId: null
+		whmcsClientId: null,
+		// Sprint 8: onboarding fields (default pentru ANAF import)
+		legalType: 'srl',
+		signupSource: 'anaf-spv-import',
+		onboardingStatus: 'active',
+		stripeCustomerId: null
 	};
 }
 

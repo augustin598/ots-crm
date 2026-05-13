@@ -31,7 +31,12 @@ export type IconKey =
 	| 'settings'
 	| 'meta'
 	| 'google'
-	| 'tiktok';
+	| 'tiktok'
+	| 'hosting'
+	| 'hosting-server'
+	| 'hosting-account'
+	| 'hosting-product'
+	| 'hosting-import';
 
 export type RoleRequirement = 'admin' | 'owner';
 
@@ -44,6 +49,8 @@ export interface NavItem {
 	badge?: number;
 	children?: NavItem[];
 	requiredRole?: RoleRequirement;
+	/** If set, item only shows when the plugin with this name is active for the tenant. */
+	requiredPlugin?: string;
 }
 
 export interface NavGroup {
@@ -113,6 +120,56 @@ export const SIDEBAR_NAV: NavGroup[] = [
 				label: 'Facturi Furnizori',
 				icon: 'supplier-invoices',
 				href: '/banking/supplier-invoices'
+			}
+		]
+	},
+	{
+		id: 'hosting',
+		label: 'Hosting',
+		items: [
+			{
+				id: 'hosting-overview',
+				label: 'Hosting',
+				icon: 'hosting',
+				href: '/hosting',
+				requiredPlugin: 'directadmin'
+			},
+			{
+				id: 'hosting-servers',
+				label: 'Servere DA',
+				icon: 'hosting-server',
+				href: '/hosting/servers',
+				requiredPlugin: 'directadmin',
+				requiredRole: 'admin'
+			},
+			{
+				id: 'hosting-accounts',
+				label: 'Conturi Hosting',
+				icon: 'hosting-account',
+				href: '/hosting/accounts',
+				requiredPlugin: 'directadmin'
+			},
+			{
+				id: 'hosting-products',
+				label: 'Produse Hosting',
+				icon: 'hosting-product',
+				href: '/hosting/products',
+				requiredPlugin: 'directadmin'
+			},
+			{
+				id: 'hosting-inquiries',
+				label: 'Cereri ofertă',
+				icon: 'leads',
+				href: '/hosting/inquiries',
+				requiredPlugin: 'directadmin'
+			},
+			{
+				id: 'hosting-import',
+				label: 'Import WHMCS',
+				icon: 'hosting-import',
+				href: '/hosting/import-whmcs',
+				requiredPlugin: 'directadmin',
+				requiredRole: 'admin'
 			}
 		]
 	},
@@ -242,6 +299,22 @@ export function filterByRole(groups: NavGroup[], role: string | undefined): NavG
 					...it,
 					children: it.children?.filter((c) => !c.requiredRole || isAdmin)
 				}))
+		}))
+		.filter((g) => g.items.length > 0);
+}
+
+// Filter out items that require a plugin which isn't active for the current tenant.
+export function filterByPlugins(
+	groups: NavGroup[],
+	activePlugins: ReadonlySet<string>
+): NavGroup[] {
+	const isAllowed = (it: NavItem) => !it.requiredPlugin || activePlugins.has(it.requiredPlugin);
+	return groups
+		.map((g) => ({
+			...g,
+			items: g.items
+				.filter(isAllowed)
+				.map((it) => ({ ...it, children: it.children?.filter(isAllowed) }))
 		}))
 		.filter((g) => g.items.length > 0);
 }

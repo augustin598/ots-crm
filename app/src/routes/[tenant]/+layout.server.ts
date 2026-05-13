@@ -72,6 +72,26 @@ export const load: LayoutServerLoad = async (event) => {
 		/* empty */
 	}
 
+	// Load active plugins for this tenant — drives plugin-gated sidebar items
+	// (e.g. the Hosting / DirectAdmin section).
+	let activePluginNames: string[] = [];
+	try {
+		const rows = await db
+			.select({ name: table.plugin.name })
+			.from(table.tenantPlugin)
+			.innerJoin(table.plugin, eq(table.tenantPlugin.pluginId, table.plugin.id))
+			.where(
+				and(
+					eq(table.tenantPlugin.tenantId, access.tenant.id),
+					eq(table.tenantPlugin.isActive, true),
+					eq(table.plugin.isActive, true)
+				)
+			);
+		activePluginNames = rows.map((r) => r.name);
+	} catch {
+		activePluginNames = [];
+	}
+
 	// Load sidebar pins (best-effort — empty list if anything fails)
 	let sidebarPins: string[] = [];
 	try {
@@ -97,6 +117,7 @@ export const load: LayoutServerLoad = async (event) => {
 		allTenants,
 		sidebarPins,
 		sidebarCounts,
+		activePluginNames,
 		user: {
 			id: event.locals.user.id,
 			email: event.locals.user.email,

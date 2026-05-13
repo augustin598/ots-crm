@@ -19,6 +19,7 @@
 	import {
 		SIDEBAR_NAV,
 		filterByRole,
+		filterByPlugins,
 		flattenNav,
 		buildHref,
 		isItemActive,
@@ -47,7 +48,8 @@
 		subtitle,
 		logoutPath = '/login',
 		switchTenantUrlBuilder,
-		badges = {}
+		badges = {},
+		activePluginNames = []
 	}: {
 		tenant: { slug: string; name: string | null; website?: string | null } | null;
 		tenantUser: { role: string } | null;
@@ -61,6 +63,7 @@
 		logoutPath?: string;
 		switchTenantUrlBuilder?: (slug: string) => string;
 		badges?: Record<string, number>;
+		activePluginNames?: string[];
 	} = $props();
 
 	// Client-side override: sync clients badge with the localStorage filter set
@@ -116,7 +119,10 @@
 	const currentPath = $derived(page.url.pathname);
 	const role = $derived(tenantUser?.role ?? 'member');
 
-	const visibleGroups = $derived(filterByRole(navGroups, role));
+	const activePluginSet = $derived(new Set(activePluginNames));
+	const visibleGroups = $derived(
+		filterByPlugins(filterByRole(navGroups, role), activePluginSet)
+	);
 	const flatVisible = $derived(flattenNav(visibleGroups));
 
 	// pins (mirror of server state, optimistic on toggle)

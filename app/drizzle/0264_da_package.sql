@@ -1,0 +1,21 @@
+CREATE TABLE `da_package` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`da_server_id` text NOT NULL,
+	`da_name` text NOT NULL,
+	`type` text DEFAULT 'user' NOT NULL,
+	`bandwidth` integer,
+	`quota` integer,
+	`max_email_accounts` integer,
+	`max_databases` integer,
+	`max_ftp_accounts` integer,
+	`max_domains` integer,
+	`max_subdomains` integer,
+	`max_inodes` integer,
+	`raw_data` text,
+	`last_synced_at` text,
+	`created_at` text DEFAULT (current_timestamp) NOT NULL,
+	`updated_at` text DEFAULT (current_timestamp) NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`da_server_id`) REFERENCES `da_server`(`id`) ON UPDATE no action ON DELETE cascade
+);

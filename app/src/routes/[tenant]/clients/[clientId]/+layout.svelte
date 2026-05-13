@@ -50,7 +50,8 @@
 		{ id: 'projects', label: `Projects (${projects.length})`, href: `/${tenantSlug}/clients/${clientId}/projects` },
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
-		{ id: 'budget', label: 'Buget', href: `/${tenantSlug}/clients/${clientId}/budget` }
+		{ id: 'budget', label: 'Buget', href: `/${tenantSlug}/clients/${clientId}/budget` },
+		{ id: 'access-data', label: 'Date client', href: `/${tenantSlug}/clients/${clientId}/access-data` }
 	]);
 
 	let magicLinkDialogOpen = $state(false);
@@ -136,6 +137,7 @@
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/budget`)) return 'budget';
+		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/access-data`)) return 'access-data';
 		return 'overview';
 	});
 </script>
@@ -246,7 +248,7 @@
 	</Dialog.Root>
 
 	<Tabs value={activeTab()} class="w-full">
-		<TabsList class="grid w-full grid-cols-6">
+		<TabsList class="grid w-full grid-cols-7">
 			{#each tabs as tab (tab.id)}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{tab.label}

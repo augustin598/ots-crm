@@ -20,6 +20,11 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import FileDownIcon from '@lucide/svelte/icons/file-down';
+	import ServerIcon from '@lucide/svelte/icons/server';
+	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import BoxIcon from '@lucide/svelte/icons/box';
+	import PackageIcon from '@lucide/svelte/icons/package';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 	import IconKeez from '$lib/components/marketing/icon-keez.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
@@ -82,4 +87,14 @@
 	<IconWhatsapp class={className} />
 {:else if icon === 'settings'}
 	<SettingsIcon class={className} />
+{:else if icon === 'hosting'}
+	<ServerIcon class={className} />
+{:else if icon === 'hosting-server'}
+	<HardDriveIcon class={className} />
+{:else if icon === 'hosting-account'}
+	<BoxIcon class={className} />
+{:else if icon === 'hosting-product'}
+	<PackageIcon class={className} />
+{:else if icon === 'hosting-import'}
+	<DownloadIcon class={className} />
 {/if}

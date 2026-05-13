@@ -40,6 +40,7 @@
 			user={data.user ?? null}
 			initialPins={data.sidebarPins ?? []}
 			badges={data.sidebarCounts ?? {}}
+			activePluginNames={data.activePluginNames ?? []}
 		/>
 	</Sidebar>
 	<SidebarInset>

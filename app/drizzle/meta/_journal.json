@@ -1,1840 +1,2092 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1767785824443,
-      "tag": "0000_slim_stephen_strange",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1767798010114,
-      "tag": "0001_sharp_living_mummy",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1767798691205,
-      "tag": "0002_smart_forgotten_one",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1767798879143,
-      "tag": "0003_chemical_union_jack",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1768051722833,
-      "tag": "0004_peaceful_starfox",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1768065437220,
-      "tag": "0005_smooth_manta",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1768070441089,
-      "tag": "0006_overrated_wither",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1768071409598,
-      "tag": "0007_public_may_parker",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1768072838245,
-      "tag": "0008_nosy_robbie_robertson",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1768076694852,
-      "tag": "0009_bored_magus",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1768077778308,
-      "tag": "0010_majestic_chronomancer",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "6",
-      "when": 1768117948172,
-      "tag": "0011_sudden_komodo",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "6",
-      "when": 1768118958707,
-      "tag": "0012_acoustic_klaw",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "6",
-      "when": 1768134416050,
-      "tag": "0013_classy_overlord",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "6",
-      "when": 1768141128859,
-      "tag": "0014_fast_wild_child",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "6",
-      "when": 1768147692341,
-      "tag": "0015_good_mathemanic",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "6",
-      "when": 1768151728149,
-      "tag": "0016_watery_toad_men",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "6",
-      "when": 1768159273506,
-      "tag": "0017_black_timeslip",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "6",
-      "when": 1768160517838,
-      "tag": "0018_watery_sheva_callister",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "6",
-      "when": 1768230759209,
-      "tag": "0019_easy_dust",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "6",
-      "when": 1768246450079,
-      "tag": "0020_dashing_morph",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "6",
-      "when": 1768248744151,
-      "tag": "0021_reflective_toad_men",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "6",
-      "when": 1768250282035,
-      "tag": "0022_purple_pixie",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "6",
-      "when": 1768250588014,
-      "tag": "0023_young_terrax",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "6",
-      "when": 1768317913243,
-      "tag": "0024_pale_proteus",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "6",
-      "when": 1768318805033,
-      "tag": "0025_safe_lockjaw",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "6",
-      "when": 1768320290226,
-      "tag": "0026_big_morlocks",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "6",
-      "when": 1768321096912,
-      "tag": "0027_oval_jean_grey",
-      "breakpoints": true
-    },
-    {
-      "idx": 28,
-      "version": "6",
-      "when": 1768404535539,
-      "tag": "0028_careful_quicksilver",
-      "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "6",
-      "when": 1768339934913,
-      "tag": "0029_equal_reavers",
-      "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "6",
-      "when": 1768416880072,
-      "tag": "0030_dusty_human_robot",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "6",
-      "when": 1768418746422,
-      "tag": "0031_black_mandrill",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "6",
-      "when": 1768419053519,
-      "tag": "0032_complete_loners",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "6",
-      "when": 1768423831360,
-      "tag": "0033_optimal_jamie_braddock",
-      "breakpoints": true
-    },
-    {
-      "idx": 34,
-      "version": "6",
-      "when": 1768555092854,
-      "tag": "0034_natural_puff_adder",
-      "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "6",
-      "when": 1768760583633,
-      "tag": "0035_familiar_payback",
-      "breakpoints": true
-    },
-    {
-      "idx": 36,
-      "version": "6",
-      "when": 1771580984586,
-      "tag": "0036_bent_miracleman",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "6",
-      "when": 1771944973109,
-      "tag": "0037_uneven_spirit",
-      "breakpoints": true
-    },
-    {
-      "idx": 38,
-      "version": "6",
-      "when": 1772014149424,
-      "tag": "0038_abnormal_phil_sheldon",
-      "breakpoints": true
-    },
-    {
-      "idx": 39,
-      "version": "6",
-      "when": 1772014942576,
-      "tag": "0039_soft_shard",
-      "breakpoints": true
-    },
-    {
-      "idx": 40,
-      "version": "6",
-      "when": 1772046215787,
-      "tag": "0040_third_centennial",
-      "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "6",
-      "when": 1772046215788,
-      "tag": "0041_client_websites",
-      "breakpoints": true
-    },
-    {
-      "idx": 42,
-      "version": "6",
-      "when": 1772100000000,
-      "tag": "0042_tenant_website",
-      "breakpoints": true
-    },
-    {
-      "idx": 43,
-      "version": "6",
-      "when": 1772198123624,
-      "tag": "0043_cuddly_nicolaos",
-      "breakpoints": true
-    },
-    {
-      "idx": 44,
-      "version": "6",
-      "when": 1772212106384,
-      "tag": "0044_naive_omega_flight",
-      "breakpoints": true
-    },
-    {
-      "idx": 45,
-      "version": "6",
-      "when": 1772216636119,
-      "tag": "0045_closed_spyke",
-      "breakpoints": true
-    },
-    {
-      "idx": 46,
-      "version": "6",
-      "when": 1772217439139,
-      "tag": "0046_gigantic_loners",
-      "breakpoints": true
-    },
-    {
-      "idx": 47,
-      "version": "6",
-      "when": 1772262919782,
-      "tag": "0047_lean_microchip",
-      "breakpoints": true
-    },
-    {
-      "idx": 48,
-      "version": "6",
-      "when": 1772295616630,
-      "tag": "0048_shiny_jack_power",
-      "breakpoints": true
-    },
-    {
-      "idx": 49,
-      "version": "6",
-      "when": 1772300037779,
-      "tag": "0049_careful_quasimodo",
-      "breakpoints": true
-    },
-    {
-      "idx": 50,
-      "version": "6",
-      "when": 1772449845273,
-      "tag": "0050_tense_beyonder",
-      "breakpoints": true
-    },
-    {
-      "idx": 51,
-      "version": "6",
-      "when": 1772452888654,
-      "tag": "0051_easy_true_believers",
-      "breakpoints": true
-    },
-    {
-      "idx": 52,
-      "version": "6",
-      "when": 1772457284128,
-      "tag": "0052_whole_mulholland_black",
-      "breakpoints": true
-    },
-    {
-      "idx": 53,
-      "version": "6",
-      "when": 1772462259013,
-      "tag": "0053_many_phalanx",
-      "breakpoints": true
-    },
-    {
-      "idx": 54,
-      "version": "6",
-      "when": 1772467099293,
-      "tag": "0054_unknown_romulus",
-      "breakpoints": true
-    },
-    {
-      "idx": 55,
-      "version": "6",
-      "when": 1772476156372,
-      "tag": "0055_funny_mantis",
-      "breakpoints": true
-    },
-    {
-      "idx": 56,
-      "version": "6",
-      "when": 1772477678755,
-      "tag": "0056_conscious_valeria_richards",
-      "breakpoints": true
-    },
-    {
-      "idx": 57,
-      "version": "6",
-      "when": 1772635786875,
-      "tag": "0057_last_cobalt_man",
-      "breakpoints": true
-    },
-    {
-      "idx": 58,
-      "version": "6",
-      "when": 1772732619029,
-      "tag": "0058_watery_hammerhead",
-      "breakpoints": true
-    },
-    {
-      "idx": 59,
-      "version": "6",
-      "when": 1774440290883,
-      "tag": "0059_google_ads_currency_code",
-      "breakpoints": true
-    },
-    {
-      "idx": 60,
-      "version": "6",
-      "when": 1774440300000,
-      "tag": "0060_client_user_unique_constraint",
-      "breakpoints": true
-    },
-    {
-      "idx": 61,
-      "version": "6",
-      "when": 1774440310000,
-      "tag": "0061_client_access_data",
-      "breakpoints": true
-    },
-    {
-      "idx": 62,
-      "version": "6",
-      "when": 1774440320000,
-      "tag": "0062_secondary_email_notifications",
-      "breakpoints": true
-    },
-    {
-      "idx": 63,
-      "version": "6",
-      "when": 1774440330000,
-      "tag": "0063_client_email_unique",
-      "breakpoints": true
-    },
-    {
-      "idx": 64,
-      "version": "6",
-      "when": 1774440340000,
-      "tag": "0064_seo_link_article_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 65,
-      "version": "6",
-      "when": 1774440350000,
-      "tag": "0065_marketing_material_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 66,
-      "version": "6",
-      "when": 1774440360000,
-      "tag": "0066_task_comment_attachments",
-      "breakpoints": true
-    },
-    {
-      "idx": 67,
-      "version": "6",
-      "when": 1774440370000,
-      "tag": "0067_contract_audit_fixes",
-      "breakpoints": true
-    },
-    {
-      "idx": 68,
-      "version": "6",
-      "when": 1774440380000,
-      "tag": "0068_contract_sprint3",
-      "breakpoints": true
-    },
-    {
-      "idx": 69,
-      "version": "6",
-      "when": 1774440390000,
-      "tag": "0069_invoice_view_token",
-      "breakpoints": true
-    },
-    {
-      "idx": 70,
-      "version": "6",
-      "when": 1774440400000,
-      "tag": "0070_email_log_html_body",
-      "breakpoints": true
-    },
-    {
-      "idx": 71,
-      "version": "6",
-      "when": 1774440410000,
-      "tag": "0071_google_ads_integration",
-      "breakpoints": true
-    },
-    {
-      "idx": 72,
-      "version": "6",
-      "when": 1774440420000,
-      "tag": "0072_google_ads_accounts",
-      "breakpoints": true
-    },
-    {
-      "idx": 73,
-      "version": "6",
-      "when": 1774440430000,
-      "tag": "0073_meta_ads_integration",
-      "breakpoints": true
-    },
-    {
-      "idx": 74,
-      "version": "6",
-      "when": 1774440440000,
-      "tag": "0074_meta_ads_invoice_dedup_fix",
-      "breakpoints": true
-    },
-    {
-      "idx": 75,
-      "version": "6",
-      "when": 1774440450000,
-      "tag": "0075_meta_ads_spending",
-      "breakpoints": true
-    },
-    {
-      "idx": 76,
-      "version": "6",
-      "when": 1774440460000,
-      "tag": "0076_meta_invoice_downloads",
-      "breakpoints": true
-    },
-    {
-      "idx": 77,
-      "version": "6",
-      "when": 1774440470000,
-      "tag": "0077_tiktok_ads_integration",
-      "breakpoints": true
-    },
-    {
-      "idx": 78,
-      "version": "6",
-      "when": 1774440480000,
-      "tag": "0078_task_comment_replies",
-      "breakpoints": true
-    },
-    {
-      "idx": 79,
-      "version": "6",
-      "when": 1774440490000,
-      "tag": "0079_client_restricted_access",
-      "breakpoints": true
-    },
-    {
-      "idx": 80,
-      "version": "6",
-      "when": 1774440500000,
-      "tag": "0080_google_ads_cookies",
-      "breakpoints": true
-    },
-    {
-      "idx": 81,
-      "version": "6",
-      "when": 1774440510000,
-      "tag": "0081_google_ads_account_currency_fix",
-      "breakpoints": true
-    },
-    {
-      "idx": 82,
-      "version": "6",
-      "when": 1774440520000,
-      "tag": "0082_notification_table",
-      "breakpoints": true
-    },
-    {
-      "idx": 83,
-      "version": "6",
-      "when": 1774440530000,
-      "tag": "0083_google_ads_spending",
-      "breakpoints": true
-    },
-    {
-      "idx": 84,
-      "version": "6",
-      "when": 1774648800000,
-      "tag": "0084_meta_invoice_txid",
-      "breakpoints": true
-    },
-    {
-      "idx": 85,
-      "version": "6",
-      "when": 1774648810000,
-      "tag": "0085_meta_invoice_number",
-      "breakpoints": true
-    },
-    {
-      "idx": 86,
-      "version": "6",
-      "when": 1774648820000,
-      "tag": "0086_meta_invoice_txid_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 87,
-      "version": "6",
-      "when": 1774648830000,
-      "tag": "0087_drop_meta_invoice_period_dedup",
-      "breakpoints": true
-    },
-    {
-      "idx": 88,
-      "version": "6",
-      "when": 1774648840000,
-      "tag": "0088_meta_invoice_amount",
-      "breakpoints": true
-    },
-    {
-      "idx": 89,
-      "version": "6",
-      "when": 1774648850000,
-      "tag": "0089_meta_invoice_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 90,
-      "version": "6",
-      "when": 1774698455242,
-      "tag": "0090_real_thaddeus_ross",
-      "breakpoints": true
-    },
-    {
-      "idx": 91,
-      "version": "6",
-      "when": 1774887192420,
-      "tag": "0091_tearful_alex_wilder",
-      "breakpoints": true
-    },
-    {
-      "idx": 92,
-      "version": "6",
-      "when": 1775145600000,
-      "tag": "0092_add_meta_ads_page_client_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 93,
-      "version": "6",
-      "when": 1775077644612,
-      "tag": "0093_solid_phalanx",
-      "breakpoints": true
-    },
-    {
-      "idx": 94,
-      "version": "6",
-      "when": 1775125511404,
-      "tag": "0094_burly_fallen_one",
-      "breakpoints": true
-    },
-    {
-      "idx": 95,
-      "version": "6",
-      "when": 1775154942564,
-      "tag": "0095_broad_justin_hammer",
-      "breakpoints": true
-    },
-    {
-      "idx": 96,
-      "version": "6",
-      "when": 1775174400000,
-      "tag": "0096_tiktok_integration_refresh_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 97,
-      "version": "6",
-      "when": 1775260800000,
-      "tag": "0097_lead_dedup_unique_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 98,
-      "version": "6",
-      "when": 1775260810000,
-      "tag": "0098_lead_unique_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 99,
-      "version": "6",
-      "when": 1775347200000,
-      "tag": "0099_meta_ads_account_payment_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 100,
-      "version": "6",
-      "when": 1775433600000,
-      "tag": "0100_debug_log_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 101,
-      "version": "6",
-      "when": 1775327661942,
-      "tag": "0101_saved_report_view",
-      "breakpoints": true
-    },
-    {
-      "idx": 102,
-      "version": "6",
-      "when": 1775332254442,
-      "tag": "0102_report_schedule",
-      "breakpoints": true
-    },
-    {
-      "idx": 103,
-      "version": "6",
-      "when": 1775418654000,
-      "tag": "0103_client_monthly_budget",
-      "breakpoints": true
-    },
-    {
-      "idx": 104,
-      "version": "6",
-      "when": 1775505054000,
-      "tag": "0104_marketing_collections",
-      "breakpoints": true
-    },
-    {
-      "idx": 105,
-      "version": "6",
-      "when": 1775505055000,
-      "tag": "0105_marketing_collection_materials",
-      "breakpoints": true
-    },
-    {
-      "idx": 106,
-      "version": "6",
-      "when": 1775591455000,
-      "tag": "0106_onboarding_tour_completed",
-      "breakpoints": true
-    },
-    {
-      "idx": 107,
-      "version": "6",
-      "when": 1775591456000,
-      "tag": "0107_onboarding_checklist",
-      "breakpoints": true
-    },
-    {
-      "idx": 108,
-      "version": "6",
-      "when": 1775591457000,
-      "tag": "0108_onboarding_tour_enabled",
-      "breakpoints": true
-    },
-    {
-      "idx": 109,
-      "version": "6",
-      "when": 1775677857000,
-      "tag": "0109_ads_account_budget",
-      "breakpoints": true
-    },
-    {
-      "idx": 110,
-      "version": "6",
-      "when": 1775462610096,
-      "tag": "0110_tearful_maverick",
-      "breakpoints": true
-    },
-    {
-      "idx": 111,
-      "version": "6",
-      "when": 1775764257000,
-      "tag": "0111_budget_currency_code",
-      "breakpoints": true
-    },
-    {
-      "idx": 112,
-      "version": "6",
-      "when": 1775818800000,
-      "tag": "0112_email_log_payload",
-      "breakpoints": true
-    },
-    {
-      "idx": 113,
-      "version": "6",
-      "when": 1775905200000,
-      "tag": "0113_seo_link_discovery_job",
-      "breakpoints": true
-    },
-    {
-      "idx": 114,
-      "version": "6",
-      "when": 1775905210000,
-      "tag": "0114_seo_link_discovery_result",
-      "breakpoints": true
-    },
-    {
-      "idx": 115,
-      "version": "6",
-      "when": 1775905220000,
-      "tag": "0115_sitemap_cache",
-      "breakpoints": true
-    },
-    {
-      "idx": 116,
-      "version": "6",
-      "when": 1775991620000,
-      "tag": "0116_notification_priority",
-      "breakpoints": true
-    },
-    {
-      "idx": 117,
-      "version": "6",
-      "when": 1775991630000,
-      "tag": "0117_notification_fingerprint",
-      "breakpoints": true
-    },
-    {
-      "idx": 118,
-      "version": "6",
-      "when": 1775991640000,
-      "tag": "0118_notification_count",
-      "breakpoints": true
-    },
-    {
-      "idx": 119,
-      "version": "6",
-      "when": 1775991650000,
-      "tag": "0119_notification_updated_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 120,
-      "version": "6",
-      "when": 1775991660000,
-      "tag": "0120_notification_last_email_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 121,
-      "version": "6",
-      "when": 1775991670000,
-      "tag": "0121_idx_notification_user_read_updated",
-      "breakpoints": true
-    },
-    {
-      "idx": 122,
-      "version": "6",
-      "when": 1775991680000,
-      "tag": "0122_idx_notification_user_priority",
-      "breakpoints": true
-    },
-    {
-      "idx": 123,
-      "version": "6",
-      "when": 1775991690000,
-      "tag": "0123_idx_notification_fingerprint",
-      "breakpoints": true
-    },
-    {
-      "idx": 124,
-      "version": "6",
-      "when": 1775991700000,
-      "tag": "0124_client_budget_warning_threshold",
-      "breakpoints": true
-    },
-    {
-      "idx": 125,
-      "version": "6",
-      "when": 1775991710000,
-      "tag": "0125_backfill_notification_updated_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 126,
-      "version": "6",
-      "when": 1775991720000,
-      "tag": "0126_email_settings_email_provider",
-      "breakpoints": true
-    },
-    {
-      "idx": 127,
-      "version": "6",
-      "when": 1775991730000,
-      "tag": "0127_gmail_granted_scopes",
-      "breakpoints": true
-    },
-    {
-      "idx": 128,
-      "version": "6",
-      "when": 1775991740000,
-      "tag": "0128_gmail_access_token_encrypted",
-      "breakpoints": true
-    },
-    {
-      "idx": 129,
-      "version": "6",
-      "when": 1775991750000,
-      "tag": "0129_gmail_refresh_token_encrypted",
-      "breakpoints": true
-    },
-    {
-      "idx": 130,
-      "version": "6",
-      "when": 1775991760000,
-      "tag": "0130_invoice_remaining_amount",
-      "breakpoints": true
-    },
-    {
-      "idx": 131,
-      "version": "6",
-      "when": 1776067200000,
-      "tag": "0131_email_suppression",
-      "breakpoints": true
-    },
-    {
-      "idx": 132,
-      "version": "6",
-      "when": 1776067201000,
-      "tag": "0132_email_suppression_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 133,
-      "version": "6",
-      "when": 1776672000000,
-      "tag": "0133_report_schedule_monthly_all",
-      "breakpoints": true
-    },
-    {
-      "idx": 134,
-      "version": "6",
-      "when": 1777363200000,
-      "tag": "0134_keez_integration_last_failure_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 135,
-      "version": "6",
-      "when": 1777363201000,
-      "tag": "0135_keez_integration_last_failure_reason",
-      "breakpoints": true
-    },
-    {
-      "idx": 136,
-      "version": "6",
-      "when": 1777363202000,
-      "tag": "0136_keez_integration_consecutive_failures",
-      "breakpoints": true
-    },
-    {
-      "idx": 137,
-      "version": "6",
-      "when": 1777363203000,
-      "tag": "0137_keez_integration_is_degraded",
-      "breakpoints": true
-    },
-    {
-      "idx": 138,
-      "version": "6",
-      "when": 1777420000000,
-      "tag": "0138_whatsapp_session",
-      "breakpoints": true
-    },
-    {
-      "idx": 139,
-      "version": "6",
-      "when": 1777420001000,
-      "tag": "0139_whatsapp_session_tenant_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 140,
-      "version": "6",
-      "when": 1777420002000,
-      "tag": "0140_whatsapp_message",
-      "breakpoints": true
-    },
-    {
-      "idx": 141,
-      "version": "6",
-      "when": 1777420003000,
-      "tag": "0141_whatsapp_message_tenant_created_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 142,
-      "version": "6",
-      "when": 1777420004000,
-      "tag": "0142_whatsapp_message_client_created_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 143,
-      "version": "6",
-      "when": 1777420005000,
-      "tag": "0143_whatsapp_message_remote_phone_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 144,
-      "version": "6",
-      "when": 1777420006000,
-      "tag": "0144_whatsapp_message_wam_unique",
-      "breakpoints": true
-    },
-    {
-      "idx": 145,
-      "version": "6",
-      "when": 1777420007000,
-      "tag": "0145_whatsapp_contact",
-      "breakpoints": true
-    },
-    {
-      "idx": 146,
-      "version": "6",
-      "when": 1777420008000,
-      "tag": "0146_whatsapp_contact_tenant_phone_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 147,
-      "version": "6",
-      "when": 1777420009000,
-      "tag": "0147_whatsapp_message_media_path",
-      "breakpoints": true
-    },
-    {
-      "idx": 148,
-      "version": "6",
-      "when": 1777420010000,
-      "tag": "0148_whatsapp_message_media_mime",
-      "breakpoints": true
-    },
-    {
-      "idx": 149,
-      "version": "6",
-      "when": 1777420011000,
-      "tag": "0149_whatsapp_message_media_filename",
-      "breakpoints": true
-    },
-    {
-      "idx": 150,
-      "version": "6",
-      "when": 1777420012000,
-      "tag": "0150_whatsapp_message_media_size",
-      "breakpoints": true
-    },
-    {
-      "idx": 151,
-      "version": "6",
-      "when": 1777420013000,
-      "tag": "0151_service_package_request",
-      "breakpoints": true
-    },
-    {
-      "idx": 152,
-      "version": "6",
-      "when": 1777420014000,
-      "tag": "0152_service_package_request_bundle_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 153,
-      "version": "6",
-      "when": 1777420015000,
-      "tag": "0153_service_package_request_services_json",
-      "breakpoints": true
-    },
-    {
-      "idx": 154,
-      "version": "6",
-      "when": 1777420016000,
-      "tag": "0154_meta_ads_account_payment_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 155,
-      "version": "6",
-      "when": 1777420017000,
-      "tag": "0155_meta_ads_account_payment_status_raw",
-      "breakpoints": true
-    },
-    {
-      "idx": 156,
-      "version": "6",
-      "when": 1777420018000,
-      "tag": "0156_meta_ads_account_payment_status_checked_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 157,
-      "version": "6",
-      "when": 1777420019000,
-      "tag": "0157_google_ads_account_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 158,
-      "version": "6",
-      "when": 1777420020000,
-      "tag": "0158_google_ads_account_billing_setup_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 159,
-      "version": "6",
-      "when": 1777420021000,
-      "tag": "0159_google_ads_account_payment_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 160,
-      "version": "6",
-      "when": 1777420022000,
-      "tag": "0160_google_ads_account_payment_status_raw",
-      "breakpoints": true
-    },
-    {
-      "idx": 161,
-      "version": "6",
-      "when": 1777420023000,
-      "tag": "0161_google_ads_account_payment_status_checked_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 162,
-      "version": "6",
-      "when": 1777420024000,
-      "tag": "0162_tiktok_ads_account_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 163,
-      "version": "6",
-      "when": 1777420025000,
-      "tag": "0163_tiktok_ads_account_payment_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 164,
-      "version": "6",
-      "when": 1777420026000,
-      "tag": "0164_tiktok_ads_account_payment_status_raw",
-      "breakpoints": true
-    },
-    {
-      "idx": 165,
-      "version": "6",
-      "when": 1777420027000,
-      "tag": "0165_tiktok_ads_account_payment_status_checked_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 166,
-      "version": "6",
-      "when": 1777425600000,
-      "tag": "0166_google_ads_account_integration_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 167,
-      "version": "6",
-      "when": 1777425601000,
-      "tag": "0167_google_ads_account_integration_id_backfill",
-      "breakpoints": true
-    },
-    {
-      "idx": 168,
-      "version": "6",
-      "when": 1777430000000,
-      "tag": "0168_meta_ads_account_last_alert_email_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 169,
-      "version": "6",
-      "when": 1777430001000,
-      "tag": "0169_meta_ads_account_alert_muted_at_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 170,
-      "version": "6",
-      "when": 1777430002000,
-      "tag": "0170_google_ads_account_last_alert_email_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 171,
-      "version": "6",
-      "when": 1777430003000,
-      "tag": "0171_google_ads_account_alert_muted_at_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 172,
-      "version": "6",
-      "when": 1777430004000,
-      "tag": "0172_tiktok_ads_account_last_alert_email_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 173,
-      "version": "6",
-      "when": 1777430005000,
-      "tag": "0173_tiktok_ads_account_alert_muted_at_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 174,
-      "version": "6",
-      "when": 1777430006000,
-      "tag": "0174_task_comment_attachment_table",
-      "breakpoints": true
-    },
-    {
-      "idx": 175,
-      "version": "6",
-      "when": 1777430007000,
-      "tag": "0175_task_comment_attachment_backfill",
-      "breakpoints": true
-    },
-    {
-      "idx": 176,
-      "version": "6",
-      "when": 1777430008000,
-      "tag": "0176_wordpress_site",
-      "breakpoints": true
-    },
-    {
-      "idx": 177,
-      "version": "6",
-      "when": 1777430009000,
-      "tag": "0177_wordpress_pending_update",
-      "breakpoints": true
-    },
-    {
-      "idx": 178,
-      "version": "6",
-      "when": 1777430010000,
-      "tag": "0178_wordpress_update_job",
-      "breakpoints": true
-    },
-    {
-      "idx": 179,
-      "version": "6",
-      "when": 1777430011000,
-      "tag": "0179_wordpress_backup",
-      "breakpoints": true
-    },
-    {
-      "idx": 180,
-      "version": "6",
-      "when": 1777430012000,
-      "tag": "0180_wordpress_site_paused",
-      "breakpoints": true
-    },
-    {
-      "idx": 181,
-      "version": "6",
-      "when": 1777430013000,
-      "tag": "0181_wordpress_post",
-      "breakpoints": true
-    },
-    {
-      "idx": 182,
-      "version": "6",
-      "when": 1777430100000,
-      "tag": "0182_client_avatar_path",
-      "breakpoints": true
-    },
-    {
-      "idx": 183,
-      "version": "6",
-      "when": 1777430101000,
-      "tag": "0183_client_avatar_source",
-      "breakpoints": true
-    },
-    {
-      "idx": 184,
-      "version": "6",
-      "when": 1777430102000,
-      "tag": "0184_whatsapp_contact_avatar_path",
-      "breakpoints": true
-    },
-    {
-      "idx": 185,
-      "version": "6",
-      "when": 1777430103000,
-      "tag": "0185_whatsapp_contact_avatar_mime_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 186,
-      "version": "6",
-      "when": 1777430104000,
-      "tag": "0186_whatsapp_contact_avatar_fetched_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 187,
-      "version": "6",
-      "when": 1777430105000,
-      "tag": "0187_whatsapp_contact_avatar_hidden",
-      "breakpoints": true
-    },
-    {
-      "idx": 188,
-      "version": "6",
-      "when": 1777430106000,
-      "tag": "0188_whmcs_integration",
-      "breakpoints": true
-    },
-    {
-      "idx": 189,
-      "version": "6",
-      "when": 1777430107000,
-      "tag": "0189_whmcs_invoice_sync",
-      "breakpoints": true
-    },
-    {
-      "idx": 190,
-      "version": "6",
-      "when": 1777430108000,
-      "tag": "0190_whmcs_client_sync",
-      "breakpoints": true
-    },
-    {
-      "idx": 191,
-      "version": "6",
-      "when": 1777430109000,
-      "tag": "0191_whmcs_product_sync",
-      "breakpoints": true
-    },
-    {
-      "idx": 192,
-      "version": "6",
-      "when": 1777430110000,
-      "tag": "0192_whmcs_transaction_sync",
-      "breakpoints": true
-    },
-    {
-      "idx": 193,
-      "version": "6",
-      "when": 1777430111000,
-      "tag": "0193_client_whmcs_client_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 194,
-      "version": "6",
-      "when": 1777430112000,
-      "tag": "0194_invoice_external_source",
-      "breakpoints": true
-    },
-    {
-      "idx": 195,
-      "version": "6",
-      "when": 1777430113000,
-      "tag": "0195_invoice_external_invoice_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 196,
-      "version": "6",
-      "when": 1777430114000,
-      "tag": "0196_invoice_external_transaction_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 197,
-      "version": "6",
-      "when": 1777430115000,
-      "tag": "0197_invoice_settings_keez_series_hosting",
-      "breakpoints": true
-    },
-    {
-      "idx": 198,
-      "version": "6",
-      "when": 1777430116000,
-      "tag": "0198_invoice_settings_keez_start_number_hosting",
-      "breakpoints": true
-    },
-    {
-      "idx": 199,
-      "version": "6",
-      "when": 1777430117000,
-      "tag": "0199_invoice_settings_keez_last_synced_number_hosting",
-      "breakpoints": true
-    },
-    {
-      "idx": 200,
-      "version": "6",
-      "when": 1777430118000,
-      "tag": "0200_invoice_settings_whmcs_auto_push_to_keez",
-      "breakpoints": true
-    },
-    {
-      "idx": 201,
-      "version": "6",
-      "when": 1777430120000,
-      "tag": "0201_whmcs_invoice_sync_next_retry_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 202,
-      "version": "6",
-      "when": 1777430121000,
-      "tag": "0202_whmcs_invoice_sync_last_push_attempt_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 203,
-      "version": "6",
-      "when": 1777430122000,
-      "tag": "0203_whmcs_invoice_sync_keez_push_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 204,
-      "version": "6",
-      "when": 1777430123000,
-      "tag": "0204_whmcs_invoice_sync_keez_push_status_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 205,
-      "version": "6",
-      "when": 1777433000000,
-      "tag": "0205_invoice_settings_whmcs_zero_vat_note_intracom",
-      "breakpoints": true
-    },
-    {
-      "idx": 206,
-      "version": "6",
-      "when": 1777433001000,
-      "tag": "0206_invoice_settings_whmcs_zero_vat_note_export",
-      "breakpoints": true
-    },
-    {
-      "idx": 207,
-      "version": "6",
-      "when": 1777433002000,
-      "tag": "0207_invoice_settings_whmcs_zero_vat_auto_detect",
-      "breakpoints": true
-    },
-    {
-      "idx": 208,
-      "version": "6",
-      "when": 1777433003000,
-      "tag": "0208_invoice_settings_whmcs_strict_bnr",
-      "breakpoints": true
-    },
-    {
-      "idx": 209,
-      "version": "6",
-      "when": 1777520000000,
-      "tag": "0209_task_is_recurring",
-      "breakpoints": true
-    },
-    {
-      "idx": 210,
-      "version": "6",
-      "when": 1777520001000,
-      "tag": "0210_task_recurring_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 211,
-      "version": "6",
-      "when": 1777520002000,
-      "tag": "0211_task_recurring_interval",
-      "breakpoints": true
-    },
-    {
-      "idx": 212,
-      "version": "6",
-      "when": 1777520003000,
-      "tag": "0212_task_recurring_end_date",
-      "breakpoints": true
-    },
-    {
-      "idx": 213,
-      "version": "6",
-      "when": 1777520004000,
-      "tag": "0213_task_recurring_parent_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 214,
-      "version": "6",
-      "when": 1777520005000,
-      "tag": "0214_task_recurring_spawned_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 215,
-      "version": "6",
-      "when": 1777940000000,
-      "tag": "0215_contract_unique_tenant_number",
-      "breakpoints": true
-    },
-    {
-      "idx": 216,
-      "version": "6",
-      "when": 1777950000000,
-      "tag": "0216_client_user_last_selected_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 217,
-      "version": "6",
-      "when": 1777950001000,
-      "tag": "0217_magic_link_matched_client_ids",
-      "breakpoints": true
-    },
-    {
-      "idx": 218,
-      "version": "6",
-      "when": 1777950002000,
-      "tag": "0218_client_cui_per_tenant_unique",
-      "breakpoints": true
-    },
-    {
-      "idx": 219,
-      "version": "6",
-      "when": 1777950003000,
-      "tag": "0219_client_secondary_email_access_flags",
-      "breakpoints": true
-    },
-    {
-      "idx": 220,
-      "version": "6",
-      "when": 1777950004000,
-      "tag": "0220_api_keys",
-      "breakpoints": true
-    },
-    {
-      "idx": 221,
-      "version": "6",
-      "when": 1777950005000,
-      "tag": "0221_campaigns",
-      "breakpoints": true
-    },
-    {
-      "idx": 222,
-      "version": "6",
-      "when": 1777406733014,
-      "tag": "0222_meta_ads_account_is_primary",
-      "breakpoints": true
-    },
-    {
-      "idx": 223,
-      "version": "6",
-      "when": 1777950100000,
-      "tag": "0223_ad_monitor_target",
-      "breakpoints": true
-    },
-    {
-      "idx": 224,
-      "version": "6",
-      "when": 1777950101000,
-      "tag": "0224_ad_metric_snapshot",
-      "breakpoints": true
-    },
-    {
-      "idx": 225,
-      "version": "6",
-      "when": 1777950102000,
-      "tag": "0225_user_telegram_link",
-      "breakpoints": true
-    },
-    {
-      "idx": 226,
-      "version": "6",
-      "when": 1777950103000,
-      "tag": "0226_ad_optimization_recommendation",
-      "breakpoints": true
-    },
-    {
-      "idx": 227,
-      "version": "6",
-      "when": 1777502689503,
-      "tag": "0227_calm_killmonger",
-      "breakpoints": true
-    },
-    {
-      "idx": 228,
-      "version": "6",
-      "when": 1777939200000,
-      "tag": "0228_meta_ads_backfill_primary",
-      "breakpoints": true
-    },
-    {
-      "idx": 229,
-      "version": "6",
-      "when": 1777538940306,
-      "tag": "0229_tough_salo",
-      "breakpoints": true
-    },
-    {
-      "idx": 230,
-      "version": "6",
-      "when": 1777950200000,
-      "tag": "0230_ads_optimization_task",
-      "breakpoints": true
-    },
-    {
-      "idx": 231,
-      "version": "6",
-      "when": 1777950201000,
-      "tag": "0231_ads_optimization_task_day_unique",
-      "breakpoints": true
-    },
-    {
-      "idx": 232,
-      "version": "6",
-      "when": 1777950202000,
-      "tag": "0232_ads_optimization_task_status_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 233,
-      "version": "6",
-      "when": 1777950203000,
-      "tag": "0233_ads_optimization_task_tenant_status_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 234,
-      "version": "6",
-      "when": 1746115200000,
-      "tag": "0234_ad_recommendation_decision_rationale",
-      "breakpoints": true
-    },
-    {
-      "idx": 235,
-      "version": "6",
-      "when": 1746201600000,
-      "tag": "0235_ad_rec_baseline_cpl",
-      "breakpoints": true
-    },
-    {
-      "idx": 236,
-      "version": "6",
-      "when": 1746201601000,
-      "tag": "0236_ad_rec_outcome_cpl_7d",
-      "breakpoints": true
-    },
-    {
-      "idx": 237,
-      "version": "6",
-      "when": 1746201602000,
-      "tag": "0237_ad_rec_outcome_verdict",
-      "breakpoints": true
-    },
-    {
-      "idx": 238,
-      "version": "6",
-      "when": 1746201603000,
-      "tag": "0238_ad_rec_outcome_evaluated_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 239,
-      "version": "6",
-      "when": 1746288000000,
-      "tag": "0239_ad_monitor_target_snooze_until",
-      "breakpoints": true
-    },
-    {
-      "idx": 240,
-      "version": "6",
-      "when": 1777644562990,
-      "tag": "0240_ads_task_claimed_by_instance_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 241,
-      "version": "6",
-      "when": 1777644562991,
-      "tag": "0241_personalops_instance",
-      "breakpoints": true
-    },
-    {
-      "idx": 242,
-      "version": "6",
-      "when": 1777644562992,
-      "tag": "0242_meta_ads_integration_last_token_check_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 243,
-      "version": "6",
-      "when": 1746374400000,
-      "tag": "0243_ad_monitor_target_optimizer_paused_until",
-      "breakpoints": true
-    },
-    {
-      "idx": 244,
-      "version": "6",
-      "when": 1746374400001,
-      "tag": "0244_ad_monitor_target_optimizer_paused_reason",
-      "breakpoints": true
-    },
-    {
-      "idx": 245,
-      "version": "6",
-      "when": 1746460800000,
-      "tag": "0245_telegram_messages",
-      "breakpoints": true
-    },
-    {
-      "idx": 246,
-      "version": "6",
-      "when": 1746460800001,
-      "tag": "0246_telegram_messages_chat_id_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 247,
-      "version": "6",
-      "when": 1746460800002,
-      "tag": "0247_telegram_messages_created_at_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 248,
-      "version": "6",
-      "when": 1746547200000,
-      "tag": "0248_user_sidebar_pin",
-      "breakpoints": true
-    },
-    {
-      "idx": 249,
-      "version": "6",
-      "when": 1746547200001,
-      "tag": "0249_user_sidebar_pin_user_tenant_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 250,
-      "version": "6",
-      "when": 1746547200002,
-      "tag": "0250_user_sidebar_pin_uniq",
-      "breakpoints": true
-    },
-    {
-      "idx": 251,
-      "version": "6",
-      "when": 1746633600000,
-      "tag": "0251_tenant_user_uniq",
-      "breakpoints": true
-    },
-    {
-      "idx": 252,
-      "version": "6",
-      "when": 1746633600001,
-      "tag": "0252_tenant_user_department",
-      "breakpoints": true
-    },
-    {
-      "idx": 253,
-      "version": "6",
-      "when": 1746633600002,
-      "tag": "0253_tenant_user_title",
-      "breakpoints": true
-    },
-    {
-      "idx": 254,
-      "version": "6",
-      "when": 1746633600003,
-      "tag": "0254_tenant_user_phone",
-      "breakpoints": true
-    },
-    {
-      "idx": 255,
-      "version": "6",
-      "when": 1746633600004,
-      "tag": "0255_invitation_department",
-      "breakpoints": true
-    },
-    {
-      "idx": 256,
-      "version": "6",
-      "when": 1746633600005,
-      "tag": "0256_invitation_title",
-      "breakpoints": true
-    },
-    {
-      "idx": 257,
-      "version": "6",
-      "when": 1746633600006,
-      "tag": "0257_tenant_user_skills",
-      "breakpoints": true
-    },
-    {
-      "idx": 258,
-      "version": "6",
-      "when": 1746633600007,
-      "tag": "0258_tenant_user_hourly_rate",
-      "breakpoints": true
-    },
-    {
-      "idx": 259,
-      "version": "6",
-      "when": 1746633600008,
-      "tag": "0259_tenant_user_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 260,
-      "version": "6",
-      "when": 1746633600009,
-      "tag": "0260_tenant_user_capabilities",
-      "breakpoints": true
-    },
-    {
-      "idx": 261,
-      "version": "6",
-      "when": 1746633600010,
-      "tag": "0261_access_capability",
-      "breakpoints": true
-    }
-  ]
+	"version": "7",
+	"dialect": "sqlite",
+	"entries": [
+		{
+			"idx": 0,
+			"version": "6",
+			"when": 1767785824443,
+			"tag": "0000_slim_stephen_strange",
+			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "6",
+			"when": 1767798010114,
+			"tag": "0001_sharp_living_mummy",
+			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "6",
+			"when": 1767798691205,
+			"tag": "0002_smart_forgotten_one",
+			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "6",
+			"when": 1767798879143,
+			"tag": "0003_chemical_union_jack",
+			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "6",
+			"when": 1768051722833,
+			"tag": "0004_peaceful_starfox",
+			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "6",
+			"when": 1768065437220,
+			"tag": "0005_smooth_manta",
+			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "6",
+			"when": 1768070441089,
+			"tag": "0006_overrated_wither",
+			"breakpoints": true
+		},
+		{
+			"idx": 7,
+			"version": "6",
+			"when": 1768071409598,
+			"tag": "0007_public_may_parker",
+			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "6",
+			"when": 1768072838245,
+			"tag": "0008_nosy_robbie_robertson",
+			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "6",
+			"when": 1768076694852,
+			"tag": "0009_bored_magus",
+			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "6",
+			"when": 1768077778308,
+			"tag": "0010_majestic_chronomancer",
+			"breakpoints": true
+		},
+		{
+			"idx": 11,
+			"version": "6",
+			"when": 1768117948172,
+			"tag": "0011_sudden_komodo",
+			"breakpoints": true
+		},
+		{
+			"idx": 12,
+			"version": "6",
+			"when": 1768118958707,
+			"tag": "0012_acoustic_klaw",
+			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "6",
+			"when": 1768134416050,
+			"tag": "0013_classy_overlord",
+			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "6",
+			"when": 1768141128859,
+			"tag": "0014_fast_wild_child",
+			"breakpoints": true
+		},
+		{
+			"idx": 15,
+			"version": "6",
+			"when": 1768147692341,
+			"tag": "0015_good_mathemanic",
+			"breakpoints": true
+		},
+		{
+			"idx": 16,
+			"version": "6",
+			"when": 1768151728149,
+			"tag": "0016_watery_toad_men",
+			"breakpoints": true
+		},
+		{
+			"idx": 17,
+			"version": "6",
+			"when": 1768159273506,
+			"tag": "0017_black_timeslip",
+			"breakpoints": true
+		},
+		{
+			"idx": 18,
+			"version": "6",
+			"when": 1768160517838,
+			"tag": "0018_watery_sheva_callister",
+			"breakpoints": true
+		},
+		{
+			"idx": 19,
+			"version": "6",
+			"when": 1768230759209,
+			"tag": "0019_easy_dust",
+			"breakpoints": true
+		},
+		{
+			"idx": 20,
+			"version": "6",
+			"when": 1768246450079,
+			"tag": "0020_dashing_morph",
+			"breakpoints": true
+		},
+		{
+			"idx": 21,
+			"version": "6",
+			"when": 1768248744151,
+			"tag": "0021_reflective_toad_men",
+			"breakpoints": true
+		},
+		{
+			"idx": 22,
+			"version": "6",
+			"when": 1768250282035,
+			"tag": "0022_purple_pixie",
+			"breakpoints": true
+		},
+		{
+			"idx": 23,
+			"version": "6",
+			"when": 1768250588014,
+			"tag": "0023_young_terrax",
+			"breakpoints": true
+		},
+		{
+			"idx": 24,
+			"version": "6",
+			"when": 1768317913243,
+			"tag": "0024_pale_proteus",
+			"breakpoints": true
+		},
+		{
+			"idx": 25,
+			"version": "6",
+			"when": 1768318805033,
+			"tag": "0025_safe_lockjaw",
+			"breakpoints": true
+		},
+		{
+			"idx": 26,
+			"version": "6",
+			"when": 1768320290226,
+			"tag": "0026_big_morlocks",
+			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "6",
+			"when": 1768321096912,
+			"tag": "0027_oval_jean_grey",
+			"breakpoints": true
+		},
+		{
+			"idx": 28,
+			"version": "6",
+			"when": 1768404535539,
+			"tag": "0028_careful_quicksilver",
+			"breakpoints": true
+		},
+		{
+			"idx": 29,
+			"version": "6",
+			"when": 1768339934913,
+			"tag": "0029_equal_reavers",
+			"breakpoints": true
+		},
+		{
+			"idx": 30,
+			"version": "6",
+			"when": 1768416880072,
+			"tag": "0030_dusty_human_robot",
+			"breakpoints": true
+		},
+		{
+			"idx": 31,
+			"version": "6",
+			"when": 1768418746422,
+			"tag": "0031_black_mandrill",
+			"breakpoints": true
+		},
+		{
+			"idx": 32,
+			"version": "6",
+			"when": 1768419053519,
+			"tag": "0032_complete_loners",
+			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "6",
+			"when": 1768423831360,
+			"tag": "0033_optimal_jamie_braddock",
+			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "6",
+			"when": 1768555092854,
+			"tag": "0034_natural_puff_adder",
+			"breakpoints": true
+		},
+		{
+			"idx": 35,
+			"version": "6",
+			"when": 1768760583633,
+			"tag": "0035_familiar_payback",
+			"breakpoints": true
+		},
+		{
+			"idx": 36,
+			"version": "6",
+			"when": 1771580984586,
+			"tag": "0036_bent_miracleman",
+			"breakpoints": true
+		},
+		{
+			"idx": 37,
+			"version": "6",
+			"when": 1771944973109,
+			"tag": "0037_uneven_spirit",
+			"breakpoints": true
+		},
+		{
+			"idx": 38,
+			"version": "6",
+			"when": 1772014149424,
+			"tag": "0038_abnormal_phil_sheldon",
+			"breakpoints": true
+		},
+		{
+			"idx": 39,
+			"version": "6",
+			"when": 1772014942576,
+			"tag": "0039_soft_shard",
+			"breakpoints": true
+		},
+		{
+			"idx": 40,
+			"version": "6",
+			"when": 1772046215787,
+			"tag": "0040_third_centennial",
+			"breakpoints": true
+		},
+		{
+			"idx": 41,
+			"version": "6",
+			"when": 1772046215788,
+			"tag": "0041_client_websites",
+			"breakpoints": true
+		},
+		{
+			"idx": 42,
+			"version": "6",
+			"when": 1772100000000,
+			"tag": "0042_tenant_website",
+			"breakpoints": true
+		},
+		{
+			"idx": 43,
+			"version": "6",
+			"when": 1772198123624,
+			"tag": "0043_cuddly_nicolaos",
+			"breakpoints": true
+		},
+		{
+			"idx": 44,
+			"version": "6",
+			"when": 1772212106384,
+			"tag": "0044_naive_omega_flight",
+			"breakpoints": true
+		},
+		{
+			"idx": 45,
+			"version": "6",
+			"when": 1772216636119,
+			"tag": "0045_closed_spyke",
+			"breakpoints": true
+		},
+		{
+			"idx": 46,
+			"version": "6",
+			"when": 1772217439139,
+			"tag": "0046_gigantic_loners",
+			"breakpoints": true
+		},
+		{
+			"idx": 47,
+			"version": "6",
+			"when": 1772262919782,
+			"tag": "0047_lean_microchip",
+			"breakpoints": true
+		},
+		{
+			"idx": 48,
+			"version": "6",
+			"when": 1772295616630,
+			"tag": "0048_shiny_jack_power",
+			"breakpoints": true
+		},
+		{
+			"idx": 49,
+			"version": "6",
+			"when": 1772300037779,
+			"tag": "0049_careful_quasimodo",
+			"breakpoints": true
+		},
+		{
+			"idx": 50,
+			"version": "6",
+			"when": 1772449845273,
+			"tag": "0050_tense_beyonder",
+			"breakpoints": true
+		},
+		{
+			"idx": 51,
+			"version": "6",
+			"when": 1772452888654,
+			"tag": "0051_easy_true_believers",
+			"breakpoints": true
+		},
+		{
+			"idx": 52,
+			"version": "6",
+			"when": 1772457284128,
+			"tag": "0052_whole_mulholland_black",
+			"breakpoints": true
+		},
+		{
+			"idx": 53,
+			"version": "6",
+			"when": 1772462259013,
+			"tag": "0053_many_phalanx",
+			"breakpoints": true
+		},
+		{
+			"idx": 54,
+			"version": "6",
+			"when": 1772467099293,
+			"tag": "0054_unknown_romulus",
+			"breakpoints": true
+		},
+		{
+			"idx": 55,
+			"version": "6",
+			"when": 1772476156372,
+			"tag": "0055_funny_mantis",
+			"breakpoints": true
+		},
+		{
+			"idx": 56,
+			"version": "6",
+			"when": 1772477678755,
+			"tag": "0056_conscious_valeria_richards",
+			"breakpoints": true
+		},
+		{
+			"idx": 57,
+			"version": "6",
+			"when": 1772635786875,
+			"tag": "0057_last_cobalt_man",
+			"breakpoints": true
+		},
+		{
+			"idx": 58,
+			"version": "6",
+			"when": 1772732619029,
+			"tag": "0058_watery_hammerhead",
+			"breakpoints": true
+		},
+		{
+			"idx": 59,
+			"version": "6",
+			"when": 1774440290883,
+			"tag": "0059_google_ads_currency_code",
+			"breakpoints": true
+		},
+		{
+			"idx": 60,
+			"version": "6",
+			"when": 1774440300000,
+			"tag": "0060_client_user_unique_constraint",
+			"breakpoints": true
+		},
+		{
+			"idx": 61,
+			"version": "6",
+			"when": 1774440310000,
+			"tag": "0061_client_access_data",
+			"breakpoints": true
+		},
+		{
+			"idx": 62,
+			"version": "6",
+			"when": 1774440320000,
+			"tag": "0062_secondary_email_notifications",
+			"breakpoints": true
+		},
+		{
+			"idx": 63,
+			"version": "6",
+			"when": 1774440330000,
+			"tag": "0063_client_email_unique",
+			"breakpoints": true
+		},
+		{
+			"idx": 64,
+			"version": "6",
+			"when": 1774440340000,
+			"tag": "0064_seo_link_article_type",
+			"breakpoints": true
+		},
+		{
+			"idx": 65,
+			"version": "6",
+			"when": 1774440350000,
+			"tag": "0065_marketing_material_indexes",
+			"breakpoints": true
+		},
+		{
+			"idx": 66,
+			"version": "6",
+			"when": 1774440360000,
+			"tag": "0066_task_comment_attachments",
+			"breakpoints": true
+		},
+		{
+			"idx": 67,
+			"version": "6",
+			"when": 1774440370000,
+			"tag": "0067_contract_audit_fixes",
+			"breakpoints": true
+		},
+		{
+			"idx": 68,
+			"version": "6",
+			"when": 1774440380000,
+			"tag": "0068_contract_sprint3",
+			"breakpoints": true
+		},
+		{
+			"idx": 69,
+			"version": "6",
+			"when": 1774440390000,
+			"tag": "0069_invoice_view_token",
+			"breakpoints": true
+		},
+		{
+			"idx": 70,
+			"version": "6",
+			"when": 1774440400000,
+			"tag": "0070_email_log_html_body",
+			"breakpoints": true
+		},
+		{
+			"idx": 71,
+			"version": "6",
+			"when": 1774440410000,
+			"tag": "0071_google_ads_integration",
+			"breakpoints": true
+		},
+		{
+			"idx": 72,
+			"version": "6",
+			"when": 1774440420000,
+			"tag": "0072_google_ads_accounts",
+			"breakpoints": true
+		},
+		{
+			"idx": 73,
+			"version": "6",
+			"when": 1774440430000,
+			"tag": "0073_meta_ads_integration",
+			"breakpoints": true
+		},
+		{
+			"idx": 74,
+			"version": "6",
+			"when": 1774440440000,
+			"tag": "0074_meta_ads_invoice_dedup_fix",
+			"breakpoints": true
+		},
+		{
+			"idx": 75,
+			"version": "6",
+			"when": 1774440450000,
+			"tag": "0075_meta_ads_spending",
+			"breakpoints": true
+		},
+		{
+			"idx": 76,
+			"version": "6",
+			"when": 1774440460000,
+			"tag": "0076_meta_invoice_downloads",
+			"breakpoints": true
+		},
+		{
+			"idx": 77,
+			"version": "6",
+			"when": 1774440470000,
+			"tag": "0077_tiktok_ads_integration",
+			"breakpoints": true
+		},
+		{
+			"idx": 78,
+			"version": "6",
+			"when": 1774440480000,
+			"tag": "0078_task_comment_replies",
+			"breakpoints": true
+		},
+		{
+			"idx": 79,
+			"version": "6",
+			"when": 1774440490000,
+			"tag": "0079_client_restricted_access",
+			"breakpoints": true
+		},
+		{
+			"idx": 80,
+			"version": "6",
+			"when": 1774440500000,
+			"tag": "0080_google_ads_cookies",
+			"breakpoints": true
+		},
+		{
+			"idx": 81,
+			"version": "6",
+			"when": 1774440510000,
+			"tag": "0081_google_ads_account_currency_fix",
+			"breakpoints": true
+		},
+		{
+			"idx": 82,
+			"version": "6",
+			"when": 1774440520000,
+			"tag": "0082_notification_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 83,
+			"version": "6",
+			"when": 1774440530000,
+			"tag": "0083_google_ads_spending",
+			"breakpoints": true
+		},
+		{
+			"idx": 84,
+			"version": "6",
+			"when": 1774648800000,
+			"tag": "0084_meta_invoice_txid",
+			"breakpoints": true
+		},
+		{
+			"idx": 85,
+			"version": "6",
+			"when": 1774648810000,
+			"tag": "0085_meta_invoice_number",
+			"breakpoints": true
+		},
+		{
+			"idx": 86,
+			"version": "6",
+			"when": 1774648820000,
+			"tag": "0086_meta_invoice_txid_index",
+			"breakpoints": true
+		},
+		{
+			"idx": 87,
+			"version": "6",
+			"when": 1774648830000,
+			"tag": "0087_drop_meta_invoice_period_dedup",
+			"breakpoints": true
+		},
+		{
+			"idx": 88,
+			"version": "6",
+			"when": 1774648840000,
+			"tag": "0088_meta_invoice_amount",
+			"breakpoints": true
+		},
+		{
+			"idx": 89,
+			"version": "6",
+			"when": 1774648850000,
+			"tag": "0089_meta_invoice_type",
+			"breakpoints": true
+		},
+		{
+			"idx": 90,
+			"version": "6",
+			"when": 1774698455242,
+			"tag": "0090_real_thaddeus_ross",
+			"breakpoints": true
+		},
+		{
+			"idx": 91,
+			"version": "6",
+			"when": 1774887192420,
+			"tag": "0091_tearful_alex_wilder",
+			"breakpoints": true
+		},
+		{
+			"idx": 92,
+			"version": "6",
+			"when": 1775145600000,
+			"tag": "0092_add_meta_ads_page_client_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 93,
+			"version": "6",
+			"when": 1775077644612,
+			"tag": "0093_solid_phalanx",
+			"breakpoints": true
+		},
+		{
+			"idx": 94,
+			"version": "6",
+			"when": 1775125511404,
+			"tag": "0094_burly_fallen_one",
+			"breakpoints": true
+		},
+		{
+			"idx": 95,
+			"version": "6",
+			"when": 1775154942564,
+			"tag": "0095_broad_justin_hammer",
+			"breakpoints": true
+		},
+		{
+			"idx": 96,
+			"version": "6",
+			"when": 1775174400000,
+			"tag": "0096_tiktok_integration_refresh_columns",
+			"breakpoints": true
+		},
+		{
+			"idx": 97,
+			"version": "6",
+			"when": 1775260800000,
+			"tag": "0097_lead_dedup_unique_index",
+			"breakpoints": true
+		},
+		{
+			"idx": 98,
+			"version": "6",
+			"when": 1775260810000,
+			"tag": "0098_lead_unique_index",
+			"breakpoints": true
+		},
+		{
+			"idx": 99,
+			"version": "6",
+			"when": 1775347200000,
+			"tag": "0099_meta_ads_account_payment_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 100,
+			"version": "6",
+			"when": 1775433600000,
+			"tag": "0100_debug_log_indexes",
+			"breakpoints": true
+		},
+		{
+			"idx": 101,
+			"version": "6",
+			"when": 1775327661942,
+			"tag": "0101_saved_report_view",
+			"breakpoints": true
+		},
+		{
+			"idx": 102,
+			"version": "6",
+			"when": 1775332254442,
+			"tag": "0102_report_schedule",
+			"breakpoints": true
+		},
+		{
+			"idx": 103,
+			"version": "6",
+			"when": 1775418654000,
+			"tag": "0103_client_monthly_budget",
+			"breakpoints": true
+		},
+		{
+			"idx": 104,
+			"version": "6",
+			"when": 1775505054000,
+			"tag": "0104_marketing_collections",
+			"breakpoints": true
+		},
+		{
+			"idx": 105,
+			"version": "6",
+			"when": 1775505055000,
+			"tag": "0105_marketing_collection_materials",
+			"breakpoints": true
+		},
+		{
+			"idx": 106,
+			"version": "6",
+			"when": 1775591455000,
+			"tag": "0106_onboarding_tour_completed",
+			"breakpoints": true
+		},
+		{
+			"idx": 107,
+			"version": "6",
+			"when": 1775591456000,
+			"tag": "0107_onboarding_checklist",
+			"breakpoints": true
+		},
+		{
+			"idx": 108,
+			"version": "6",
+			"when": 1775591457000,
+			"tag": "0108_onboarding_tour_enabled",
+			"breakpoints": true
+		},
+		{
+			"idx": 109,
+			"version": "6",
+			"when": 1775677857000,
+			"tag": "0109_ads_account_budget",
+			"breakpoints": true
+		},
+		{
+			"idx": 110,
+			"version": "6",
+			"when": 1775462610096,
+			"tag": "0110_tearful_maverick",
+			"breakpoints": true
+		},
+		{
+			"idx": 111,
+			"version": "6",
+			"when": 1775764257000,
+			"tag": "0111_budget_currency_code",
+			"breakpoints": true
+		},
+		{
+			"idx": 112,
+			"version": "6",
+			"when": 1775818800000,
+			"tag": "0112_email_log_payload",
+			"breakpoints": true
+		},
+		{
+			"idx": 113,
+			"version": "6",
+			"when": 1775905200000,
+			"tag": "0113_seo_link_discovery_job",
+			"breakpoints": true
+		},
+		{
+			"idx": 114,
+			"version": "6",
+			"when": 1775905210000,
+			"tag": "0114_seo_link_discovery_result",
+			"breakpoints": true
+		},
+		{
+			"idx": 115,
+			"version": "6",
+			"when": 1775905220000,
+			"tag": "0115_sitemap_cache",
+			"breakpoints": true
+		},
+		{
+			"idx": 116,
+			"version": "6",
+			"when": 1775991620000,
+			"tag": "0116_notification_priority",
+			"breakpoints": true
+		},
+		{
+			"idx": 117,
+			"version": "6",
+			"when": 1775991630000,
+			"tag": "0117_notification_fingerprint",
+			"breakpoints": true
+		},
+		{
+			"idx": 118,
+			"version": "6",
+			"when": 1775991640000,
+			"tag": "0118_notification_count",
+			"breakpoints": true
+		},
+		{
+			"idx": 119,
+			"version": "6",
+			"when": 1775991650000,
+			"tag": "0119_notification_updated_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 120,
+			"version": "6",
+			"when": 1775991660000,
+			"tag": "0120_notification_last_email_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 121,
+			"version": "6",
+			"when": 1775991670000,
+			"tag": "0121_idx_notification_user_read_updated",
+			"breakpoints": true
+		},
+		{
+			"idx": 122,
+			"version": "6",
+			"when": 1775991680000,
+			"tag": "0122_idx_notification_user_priority",
+			"breakpoints": true
+		},
+		{
+			"idx": 123,
+			"version": "6",
+			"when": 1775991690000,
+			"tag": "0123_idx_notification_fingerprint",
+			"breakpoints": true
+		},
+		{
+			"idx": 124,
+			"version": "6",
+			"when": 1775991700000,
+			"tag": "0124_client_budget_warning_threshold",
+			"breakpoints": true
+		},
+		{
+			"idx": 125,
+			"version": "6",
+			"when": 1775991710000,
+			"tag": "0125_backfill_notification_updated_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 126,
+			"version": "6",
+			"when": 1775991720000,
+			"tag": "0126_email_settings_email_provider",
+			"breakpoints": true
+		},
+		{
+			"idx": 127,
+			"version": "6",
+			"when": 1775991730000,
+			"tag": "0127_gmail_granted_scopes",
+			"breakpoints": true
+		},
+		{
+			"idx": 128,
+			"version": "6",
+			"when": 1775991740000,
+			"tag": "0128_gmail_access_token_encrypted",
+			"breakpoints": true
+		},
+		{
+			"idx": 129,
+			"version": "6",
+			"when": 1775991750000,
+			"tag": "0129_gmail_refresh_token_encrypted",
+			"breakpoints": true
+		},
+		{
+			"idx": 130,
+			"version": "6",
+			"when": 1775991760000,
+			"tag": "0130_invoice_remaining_amount",
+			"breakpoints": true
+		},
+		{
+			"idx": 131,
+			"version": "6",
+			"when": 1776067200000,
+			"tag": "0131_email_suppression",
+			"breakpoints": true
+		},
+		{
+			"idx": 132,
+			"version": "6",
+			"when": 1776067201000,
+			"tag": "0132_email_suppression_indexes",
+			"breakpoints": true
+		},
+		{
+			"idx": 133,
+			"version": "6",
+			"when": 1776672000000,
+			"tag": "0133_report_schedule_monthly_all",
+			"breakpoints": true
+		},
+		{
+			"idx": 134,
+			"version": "6",
+			"when": 1777363200000,
+			"tag": "0134_keez_integration_last_failure_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 135,
+			"version": "6",
+			"when": 1777363201000,
+			"tag": "0135_keez_integration_last_failure_reason",
+			"breakpoints": true
+		},
+		{
+			"idx": 136,
+			"version": "6",
+			"when": 1777363202000,
+			"tag": "0136_keez_integration_consecutive_failures",
+			"breakpoints": true
+		},
+		{
+			"idx": 137,
+			"version": "6",
+			"when": 1777363203000,
+			"tag": "0137_keez_integration_is_degraded",
+			"breakpoints": true
+		},
+		{
+			"idx": 138,
+			"version": "6",
+			"when": 1777420000000,
+			"tag": "0138_whatsapp_session",
+			"breakpoints": true
+		},
+		{
+			"idx": 139,
+			"version": "6",
+			"when": 1777420001000,
+			"tag": "0139_whatsapp_session_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 140,
+			"version": "6",
+			"when": 1777420002000,
+			"tag": "0140_whatsapp_message",
+			"breakpoints": true
+		},
+		{
+			"idx": 141,
+			"version": "6",
+			"when": 1777420003000,
+			"tag": "0141_whatsapp_message_tenant_created_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 142,
+			"version": "6",
+			"when": 1777420004000,
+			"tag": "0142_whatsapp_message_client_created_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 143,
+			"version": "6",
+			"when": 1777420005000,
+			"tag": "0143_whatsapp_message_remote_phone_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 144,
+			"version": "6",
+			"when": 1777420006000,
+			"tag": "0144_whatsapp_message_wam_unique",
+			"breakpoints": true
+		},
+		{
+			"idx": 145,
+			"version": "6",
+			"when": 1777420007000,
+			"tag": "0145_whatsapp_contact",
+			"breakpoints": true
+		},
+		{
+			"idx": 146,
+			"version": "6",
+			"when": 1777420008000,
+			"tag": "0146_whatsapp_contact_tenant_phone_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 147,
+			"version": "6",
+			"when": 1777420009000,
+			"tag": "0147_whatsapp_message_media_path",
+			"breakpoints": true
+		},
+		{
+			"idx": 148,
+			"version": "6",
+			"when": 1777420010000,
+			"tag": "0148_whatsapp_message_media_mime",
+			"breakpoints": true
+		},
+		{
+			"idx": 149,
+			"version": "6",
+			"when": 1777420011000,
+			"tag": "0149_whatsapp_message_media_filename",
+			"breakpoints": true
+		},
+		{
+			"idx": 150,
+			"version": "6",
+			"when": 1777420012000,
+			"tag": "0150_whatsapp_message_media_size",
+			"breakpoints": true
+		},
+		{
+			"idx": 151,
+			"version": "6",
+			"when": 1777420013000,
+			"tag": "0151_service_package_request",
+			"breakpoints": true
+		},
+		{
+			"idx": 152,
+			"version": "6",
+			"when": 1777420014000,
+			"tag": "0152_service_package_request_bundle_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 153,
+			"version": "6",
+			"when": 1777420015000,
+			"tag": "0153_service_package_request_services_json",
+			"breakpoints": true
+		},
+		{
+			"idx": 154,
+			"version": "6",
+			"when": 1777420016000,
+			"tag": "0154_meta_ads_account_payment_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 155,
+			"version": "6",
+			"when": 1777420017000,
+			"tag": "0155_meta_ads_account_payment_status_raw",
+			"breakpoints": true
+		},
+		{
+			"idx": 156,
+			"version": "6",
+			"when": 1777420018000,
+			"tag": "0156_meta_ads_account_payment_status_checked_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 157,
+			"version": "6",
+			"when": 1777420019000,
+			"tag": "0157_google_ads_account_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 158,
+			"version": "6",
+			"when": 1777420020000,
+			"tag": "0158_google_ads_account_billing_setup_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 159,
+			"version": "6",
+			"when": 1777420021000,
+			"tag": "0159_google_ads_account_payment_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 160,
+			"version": "6",
+			"when": 1777420022000,
+			"tag": "0160_google_ads_account_payment_status_raw",
+			"breakpoints": true
+		},
+		{
+			"idx": 161,
+			"version": "6",
+			"when": 1777420023000,
+			"tag": "0161_google_ads_account_payment_status_checked_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 162,
+			"version": "6",
+			"when": 1777420024000,
+			"tag": "0162_tiktok_ads_account_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 163,
+			"version": "6",
+			"when": 1777420025000,
+			"tag": "0163_tiktok_ads_account_payment_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 164,
+			"version": "6",
+			"when": 1777420026000,
+			"tag": "0164_tiktok_ads_account_payment_status_raw",
+			"breakpoints": true
+		},
+		{
+			"idx": 165,
+			"version": "6",
+			"when": 1777420027000,
+			"tag": "0165_tiktok_ads_account_payment_status_checked_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 166,
+			"version": "6",
+			"when": 1777425600000,
+			"tag": "0166_google_ads_account_integration_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 167,
+			"version": "6",
+			"when": 1777425601000,
+			"tag": "0167_google_ads_account_integration_id_backfill",
+			"breakpoints": true
+		},
+		{
+			"idx": 168,
+			"version": "6",
+			"when": 1777430000000,
+			"tag": "0168_meta_ads_account_last_alert_email_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 169,
+			"version": "6",
+			"when": 1777430001000,
+			"tag": "0169_meta_ads_account_alert_muted_at_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 170,
+			"version": "6",
+			"when": 1777430002000,
+			"tag": "0170_google_ads_account_last_alert_email_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 171,
+			"version": "6",
+			"when": 1777430003000,
+			"tag": "0171_google_ads_account_alert_muted_at_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 172,
+			"version": "6",
+			"when": 1777430004000,
+			"tag": "0172_tiktok_ads_account_last_alert_email_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 173,
+			"version": "6",
+			"when": 1777430005000,
+			"tag": "0173_tiktok_ads_account_alert_muted_at_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 174,
+			"version": "6",
+			"when": 1777430006000,
+			"tag": "0174_task_comment_attachment_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 175,
+			"version": "6",
+			"when": 1777430007000,
+			"tag": "0175_task_comment_attachment_backfill",
+			"breakpoints": true
+		},
+		{
+			"idx": 176,
+			"version": "6",
+			"when": 1777430008000,
+			"tag": "0176_wordpress_site",
+			"breakpoints": true
+		},
+		{
+			"idx": 177,
+			"version": "6",
+			"when": 1777430009000,
+			"tag": "0177_wordpress_pending_update",
+			"breakpoints": true
+		},
+		{
+			"idx": 178,
+			"version": "6",
+			"when": 1777430010000,
+			"tag": "0178_wordpress_update_job",
+			"breakpoints": true
+		},
+		{
+			"idx": 179,
+			"version": "6",
+			"when": 1777430011000,
+			"tag": "0179_wordpress_backup",
+			"breakpoints": true
+		},
+		{
+			"idx": 180,
+			"version": "6",
+			"when": 1777430012000,
+			"tag": "0180_wordpress_site_paused",
+			"breakpoints": true
+		},
+		{
+			"idx": 181,
+			"version": "6",
+			"when": 1777430013000,
+			"tag": "0181_wordpress_post",
+			"breakpoints": true
+		},
+		{
+			"idx": 182,
+			"version": "6",
+			"when": 1777430100000,
+			"tag": "0182_client_avatar_path",
+			"breakpoints": true
+		},
+		{
+			"idx": 183,
+			"version": "6",
+			"when": 1777430101000,
+			"tag": "0183_client_avatar_source",
+			"breakpoints": true
+		},
+		{
+			"idx": 184,
+			"version": "6",
+			"when": 1777430102000,
+			"tag": "0184_whatsapp_contact_avatar_path",
+			"breakpoints": true
+		},
+		{
+			"idx": 185,
+			"version": "6",
+			"when": 1777430103000,
+			"tag": "0185_whatsapp_contact_avatar_mime_type",
+			"breakpoints": true
+		},
+		{
+			"idx": 186,
+			"version": "6",
+			"when": 1777430104000,
+			"tag": "0186_whatsapp_contact_avatar_fetched_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 187,
+			"version": "6",
+			"when": 1777430105000,
+			"tag": "0187_whatsapp_contact_avatar_hidden",
+			"breakpoints": true
+		},
+		{
+			"idx": 188,
+			"version": "6",
+			"when": 1777430106000,
+			"tag": "0188_whmcs_integration",
+			"breakpoints": true
+		},
+		{
+			"idx": 189,
+			"version": "6",
+			"when": 1777430107000,
+			"tag": "0189_whmcs_invoice_sync",
+			"breakpoints": true
+		},
+		{
+			"idx": 190,
+			"version": "6",
+			"when": 1777430108000,
+			"tag": "0190_whmcs_client_sync",
+			"breakpoints": true
+		},
+		{
+			"idx": 191,
+			"version": "6",
+			"when": 1777430109000,
+			"tag": "0191_whmcs_product_sync",
+			"breakpoints": true
+		},
+		{
+			"idx": 192,
+			"version": "6",
+			"when": 1777430110000,
+			"tag": "0192_whmcs_transaction_sync",
+			"breakpoints": true
+		},
+		{
+			"idx": 193,
+			"version": "6",
+			"when": 1777430111000,
+			"tag": "0193_client_whmcs_client_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 194,
+			"version": "6",
+			"when": 1777430112000,
+			"tag": "0194_invoice_external_source",
+			"breakpoints": true
+		},
+		{
+			"idx": 195,
+			"version": "6",
+			"when": 1777430113000,
+			"tag": "0195_invoice_external_invoice_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 196,
+			"version": "6",
+			"when": 1777430114000,
+			"tag": "0196_invoice_external_transaction_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 197,
+			"version": "6",
+			"when": 1777430115000,
+			"tag": "0197_invoice_settings_keez_series_hosting",
+			"breakpoints": true
+		},
+		{
+			"idx": 198,
+			"version": "6",
+			"when": 1777430116000,
+			"tag": "0198_invoice_settings_keez_start_number_hosting",
+			"breakpoints": true
+		},
+		{
+			"idx": 199,
+			"version": "6",
+			"when": 1777430117000,
+			"tag": "0199_invoice_settings_keez_last_synced_number_hosting",
+			"breakpoints": true
+		},
+		{
+			"idx": 200,
+			"version": "6",
+			"when": 1777430118000,
+			"tag": "0200_invoice_settings_whmcs_auto_push_to_keez",
+			"breakpoints": true
+		},
+		{
+			"idx": 201,
+			"version": "6",
+			"when": 1777430120000,
+			"tag": "0201_whmcs_invoice_sync_next_retry_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 202,
+			"version": "6",
+			"when": 1777430121000,
+			"tag": "0202_whmcs_invoice_sync_last_push_attempt_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 203,
+			"version": "6",
+			"when": 1777430122000,
+			"tag": "0203_whmcs_invoice_sync_keez_push_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 204,
+			"version": "6",
+			"when": 1777430123000,
+			"tag": "0204_whmcs_invoice_sync_keez_push_status_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 205,
+			"version": "6",
+			"when": 1777433000000,
+			"tag": "0205_invoice_settings_whmcs_zero_vat_note_intracom",
+			"breakpoints": true
+		},
+		{
+			"idx": 206,
+			"version": "6",
+			"when": 1777433001000,
+			"tag": "0206_invoice_settings_whmcs_zero_vat_note_export",
+			"breakpoints": true
+		},
+		{
+			"idx": 207,
+			"version": "6",
+			"when": 1777433002000,
+			"tag": "0207_invoice_settings_whmcs_zero_vat_auto_detect",
+			"breakpoints": true
+		},
+		{
+			"idx": 208,
+			"version": "6",
+			"when": 1777433003000,
+			"tag": "0208_invoice_settings_whmcs_strict_bnr",
+			"breakpoints": true
+		},
+		{
+			"idx": 209,
+			"version": "6",
+			"when": 1777520000000,
+			"tag": "0209_task_is_recurring",
+			"breakpoints": true
+		},
+		{
+			"idx": 210,
+			"version": "6",
+			"when": 1777520001000,
+			"tag": "0210_task_recurring_type",
+			"breakpoints": true
+		},
+		{
+			"idx": 211,
+			"version": "6",
+			"when": 1777520002000,
+			"tag": "0211_task_recurring_interval",
+			"breakpoints": true
+		},
+		{
+			"idx": 212,
+			"version": "6",
+			"when": 1777520003000,
+			"tag": "0212_task_recurring_end_date",
+			"breakpoints": true
+		},
+		{
+			"idx": 213,
+			"version": "6",
+			"when": 1777520004000,
+			"tag": "0213_task_recurring_parent_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 214,
+			"version": "6",
+			"when": 1777520005000,
+			"tag": "0214_task_recurring_spawned_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 215,
+			"version": "6",
+			"when": 1777940000000,
+			"tag": "0215_contract_unique_tenant_number",
+			"breakpoints": true
+		},
+		{
+			"idx": 216,
+			"version": "6",
+			"when": 1777950000000,
+			"tag": "0216_client_user_last_selected_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 217,
+			"version": "6",
+			"when": 1777950001000,
+			"tag": "0217_magic_link_matched_client_ids",
+			"breakpoints": true
+		},
+		{
+			"idx": 218,
+			"version": "6",
+			"when": 1777950002000,
+			"tag": "0218_client_cui_per_tenant_unique",
+			"breakpoints": true
+		},
+		{
+			"idx": 219,
+			"version": "6",
+			"when": 1777950003000,
+			"tag": "0219_client_secondary_email_access_flags",
+			"breakpoints": true
+		},
+		{
+			"idx": 220,
+			"version": "6",
+			"when": 1777950004000,
+			"tag": "0220_api_keys",
+			"breakpoints": true
+		},
+		{
+			"idx": 221,
+			"version": "6",
+			"when": 1777950005000,
+			"tag": "0221_campaigns",
+			"breakpoints": true
+		},
+		{
+			"idx": 222,
+			"version": "6",
+			"when": 1777406733014,
+			"tag": "0222_meta_ads_account_is_primary",
+			"breakpoints": true
+		},
+		{
+			"idx": 223,
+			"version": "6",
+			"when": 1777950100000,
+			"tag": "0223_ad_monitor_target",
+			"breakpoints": true
+		},
+		{
+			"idx": 224,
+			"version": "6",
+			"when": 1777950101000,
+			"tag": "0224_ad_metric_snapshot",
+			"breakpoints": true
+		},
+		{
+			"idx": 225,
+			"version": "6",
+			"when": 1777950102000,
+			"tag": "0225_user_telegram_link",
+			"breakpoints": true
+		},
+		{
+			"idx": 226,
+			"version": "6",
+			"when": 1777950103000,
+			"tag": "0226_ad_optimization_recommendation",
+			"breakpoints": true
+		},
+		{
+			"idx": 227,
+			"version": "6",
+			"when": 1777502689503,
+			"tag": "0227_calm_killmonger",
+			"breakpoints": true
+		},
+		{
+			"idx": 228,
+			"version": "6",
+			"when": 1777939200000,
+			"tag": "0228_meta_ads_backfill_primary",
+			"breakpoints": true
+		},
+		{
+			"idx": 229,
+			"version": "6",
+			"when": 1777538940306,
+			"tag": "0229_tough_salo",
+			"breakpoints": true
+		},
+		{
+			"idx": 230,
+			"version": "6",
+			"when": 1777950200000,
+			"tag": "0230_ads_optimization_task",
+			"breakpoints": true
+		},
+		{
+			"idx": 231,
+			"version": "6",
+			"when": 1777950201000,
+			"tag": "0231_ads_optimization_task_day_unique",
+			"breakpoints": true
+		},
+		{
+			"idx": 232,
+			"version": "6",
+			"when": 1777950202000,
+			"tag": "0232_ads_optimization_task_status_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 233,
+			"version": "6",
+			"when": 1777950203000,
+			"tag": "0233_ads_optimization_task_tenant_status_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 234,
+			"version": "6",
+			"when": 1746115200000,
+			"tag": "0234_ad_recommendation_decision_rationale",
+			"breakpoints": true
+		},
+		{
+			"idx": 235,
+			"version": "6",
+			"when": 1746201600000,
+			"tag": "0235_ad_rec_baseline_cpl",
+			"breakpoints": true
+		},
+		{
+			"idx": 236,
+			"version": "6",
+			"when": 1746201601000,
+			"tag": "0236_ad_rec_outcome_cpl_7d",
+			"breakpoints": true
+		},
+		{
+			"idx": 237,
+			"version": "6",
+			"when": 1746201602000,
+			"tag": "0237_ad_rec_outcome_verdict",
+			"breakpoints": true
+		},
+		{
+			"idx": 238,
+			"version": "6",
+			"when": 1746201603000,
+			"tag": "0238_ad_rec_outcome_evaluated_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 239,
+			"version": "6",
+			"when": 1746288000000,
+			"tag": "0239_ad_monitor_target_snooze_until",
+			"breakpoints": true
+		},
+		{
+			"idx": 240,
+			"version": "6",
+			"when": 1777644562990,
+			"tag": "0240_ads_task_claimed_by_instance_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 241,
+			"version": "6",
+			"when": 1777644562991,
+			"tag": "0241_personalops_instance",
+			"breakpoints": true
+		},
+		{
+			"idx": 242,
+			"version": "6",
+			"when": 1777644562992,
+			"tag": "0242_meta_ads_integration_last_token_check_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 243,
+			"version": "6",
+			"when": 1746374400000,
+			"tag": "0243_ad_monitor_target_optimizer_paused_until",
+			"breakpoints": true
+		},
+		{
+			"idx": 244,
+			"version": "6",
+			"when": 1746374400001,
+			"tag": "0244_ad_monitor_target_optimizer_paused_reason",
+			"breakpoints": true
+		},
+		{
+			"idx": 245,
+			"version": "6",
+			"when": 1746460800000,
+			"tag": "0245_telegram_messages",
+			"breakpoints": true
+		},
+		{
+			"idx": 246,
+			"version": "6",
+			"when": 1746460800001,
+			"tag": "0246_telegram_messages_chat_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 247,
+			"version": "6",
+			"when": 1746460800002,
+			"tag": "0247_telegram_messages_created_at_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 248,
+			"version": "6",
+			"when": 1746547200000,
+			"tag": "0248_user_sidebar_pin",
+			"breakpoints": true
+		},
+		{
+			"idx": 249,
+			"version": "6",
+			"when": 1746547200001,
+			"tag": "0249_user_sidebar_pin_user_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 250,
+			"version": "6",
+			"when": 1746547200002,
+			"tag": "0250_user_sidebar_pin_uniq",
+			"breakpoints": true
+		},
+		{
+			"idx": 251,
+			"version": "6",
+			"when": 1746633600000,
+			"tag": "0251_tenant_user_uniq",
+			"breakpoints": true
+		},
+		{
+			"idx": 252,
+			"version": "6",
+			"when": 1746633600001,
+			"tag": "0252_tenant_user_department",
+			"breakpoints": true
+		},
+		{
+			"idx": 253,
+			"version": "6",
+			"when": 1746633600002,
+			"tag": "0253_tenant_user_title",
+			"breakpoints": true
+		},
+		{
+			"idx": 254,
+			"version": "6",
+			"when": 1746633600003,
+			"tag": "0254_tenant_user_phone",
+			"breakpoints": true
+		},
+		{
+			"idx": 255,
+			"version": "6",
+			"when": 1746633600004,
+			"tag": "0255_invitation_department",
+			"breakpoints": true
+		},
+		{
+			"idx": 256,
+			"version": "6",
+			"when": 1746633600005,
+			"tag": "0256_invitation_title",
+			"breakpoints": true
+		},
+		{
+			"idx": 257,
+			"version": "6",
+			"when": 1746633600006,
+			"tag": "0257_tenant_user_skills",
+			"breakpoints": true
+		},
+		{
+			"idx": 258,
+			"version": "6",
+			"when": 1746633600007,
+			"tag": "0258_tenant_user_hourly_rate",
+			"breakpoints": true
+		},
+		{
+			"idx": 259,
+			"version": "6",
+			"when": 1746633600008,
+			"tag": "0259_tenant_user_status",
+			"breakpoints": true
+		},
+		{
+			"idx": 260,
+			"version": "6",
+			"when": 1746633600009,
+			"tag": "0260_tenant_user_capabilities",
+			"breakpoints": true
+		},
+		{
+			"idx": 261,
+			"version": "6",
+			"when": 1746633600010,
+			"tag": "0261_access_capability",
+			"breakpoints": true
+		},
+		{
+			"idx": 262,
+			"version": "6",
+			"when": 1747008000000,
+			"tag": "0262_da_server",
+			"breakpoints": true
+		},
+		{
+			"idx": 263,
+			"version": "6",
+			"when": 1747008000001,
+			"tag": "0263_da_server_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 264,
+			"version": "6",
+			"when": 1747008000002,
+			"tag": "0264_da_package",
+			"breakpoints": true
+		},
+		{
+			"idx": 265,
+			"version": "6",
+			"when": 1747008000003,
+			"tag": "0265_da_package_server_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 266,
+			"version": "6",
+			"when": 1747008000004,
+			"tag": "0266_hosting_product",
+			"breakpoints": true
+		},
+		{
+			"idx": 267,
+			"version": "6",
+			"when": 1747008000005,
+			"tag": "0267_hosting_product_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 268,
+			"version": "6",
+			"when": 1747008000006,
+			"tag": "0268_hosting_account",
+			"breakpoints": true
+		},
+		{
+			"idx": 269,
+			"version": "6",
+			"when": 1747008000007,
+			"tag": "0269_hosting_account_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 270,
+			"version": "6",
+			"when": 1747008000008,
+			"tag": "0270_hosting_account_client_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 271,
+			"version": "6",
+			"when": 1747008000009,
+			"tag": "0271_hosting_account_server_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 272,
+			"version": "6",
+			"when": 1747008000010,
+			"tag": "0272_hosting_account_status_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 273,
+			"version": "6",
+			"when": 1747008000011,
+			"tag": "0273_da_audit_log",
+			"breakpoints": true
+		},
+		{
+			"idx": 274,
+			"version": "6",
+			"when": 1747008000012,
+			"tag": "0274_da_audit_log_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 275,
+			"version": "6",
+			"when": 1747008000013,
+			"tag": "0275_da_audit_log_account_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 276,
+			"version": "6",
+			"when": 1747008000014,
+			"tag": "0276_da_audit_log_action_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 277,
+			"version": "6",
+			"when": 1747008000015,
+			"tag": "0277_whmcs_hosting_import_log",
+			"breakpoints": true
+		},
+		{
+			"idx": 278,
+			"version": "6",
+			"when": 1747008000016,
+			"tag": "0278_whmcs_hosting_import_log_tenant_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 279,
+			"version": "6",
+			"when": 1747008000017,
+			"tag": "0279_whmcs_hosting_import_log_entity_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 280,
+			"version": "6",
+			"when": 1747008100000,
+			"tag": "0280_da_server_use_https",
+			"breakpoints": true
+		},
+		{
+			"idx": 281,
+			"version": "6",
+			"when": 1747008200000,
+			"tag": "0281_hosting_account_client_nullable",
+			"breakpoints": true
+		},
+		{
+			"idx": 282,
+			"version": "6",
+			"when": 1747008300000,
+			"tag": "0282_hosting_account_billing_cycle",
+			"breakpoints": true
+		},
+		{
+			"idx": 283,
+			"version": "6",
+			"when": 1747008300001,
+			"tag": "0283_hosting_account_da_package_name",
+			"breakpoints": true
+		},
+		{
+			"idx": 284,
+			"version": "6",
+			"when": 1747008400000,
+			"tag": "0284_hosting_account_additional_domains",
+			"breakpoints": true
+		},
+		{
+			"idx": 285,
+			"version": "6",
+			"when": 1747008500000,
+			"tag": "0285_hosting_account_start_date",
+			"breakpoints": true
+		},
+		{
+			"idx": 286,
+			"version": "6",
+			"when": 1747008600000,
+			"tag": "0286_recurring_invoice_hosting_account_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 287,
+			"version": "6",
+			"when": 1747008600001,
+			"tag": "0287_invoice_hosting_account_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 288,
+			"version": "6",
+			"when": 1747008600002,
+			"tag": "0288_invoice_hosting_account_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 289,
+			"version": "6",
+			"when": 1747008600003,
+			"tag": "0289_recurring_invoice_hosting_account_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 290,
+			"version": "6",
+			"when": 1778593921452100,
+			"tag": "0290_hosting_account_auto_suspended_by_invoice",
+			"breakpoints": true
+		},
+		{
+			"idx": 291,
+			"version": "6",
+			"when": 1778593921452200,
+			"tag": "0291_backfill_auto_suspended_by_invoice",
+			"breakpoints": true
+		},
+		{
+			"idx": 292,
+			"version": "6",
+			"when": 1778593921452300,
+			"tag": "0292_hosting_product_features_da_package_active",
+			"breakpoints": true
+		},
+		{
+			"idx": 293,
+			"version": "6",
+			"when": 1778593921452400,
+			"tag": "0293_cleanup_hosting_products",
+			"breakpoints": true
+		},
+		{
+			"idx": 294,
+			"version": "6",
+			"when": 1778593921452500,
+			"tag": "0294_da_package_full_fields",
+			"breakpoints": true
+		},
+		{
+			"idx": 295,
+			"version": "6",
+			"when": 1778593921452600,
+			"tag": "0295_hosting_product_public",
+			"breakpoints": true
+		},
+		{
+			"idx": 296,
+			"version": "6",
+			"when": 1778593921452700,
+			"tag": "0296_hosting_inquiry",
+			"breakpoints": true
+		},
+		{
+			"idx": 297,
+			"version": "6",
+			"when": 1778593921452800,
+			"tag": "0297_stripe_onboarding",
+			"breakpoints": true
+		}
+	]
 }

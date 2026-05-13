@@ -9,7 +9,8 @@ export const ACCESS_CATEGORIES = [
 	'leads',
 	'accessData',
 	'backlinks',
-	'budgets'
+	'budgets',
+	'hosting'
 ] as const;
 
 export type AccessCategory = (typeof ACCESS_CATEGORIES)[number];
@@ -24,7 +25,8 @@ const ALL_ACCESS_TRUE: AccessFlags = {
 	leads: true,
 	accessData: true,
 	backlinks: true,
-	budgets: true
+	budgets: true,
+	hosting: true
 };
 
 const NO_ACCESS: AccessFlags = {
@@ -36,7 +38,8 @@ const NO_ACCESS: AccessFlags = {
 	leads: false,
 	accessData: false,
 	backlinks: false,
-	budgets: false
+	budgets: false,
+	hosting: false
 };
 
 // =============================================================================

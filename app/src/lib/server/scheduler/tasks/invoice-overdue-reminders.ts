@@ -3,6 +3,7 @@ import * as table from '../../db/schema';
 import { eq, and, lt, lte, notInArray, inArray, or, isNull, gte } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { getHooksManager } from '$lib/server/plugins/hooks';
 
 /**
  * Process invoice overdue reminders - finds overdue invoices (keezStatus='Valid')
@@ -63,13 +64,15 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 						)
 					);
 
-				// Auto-transition keezStatus='Valid' invoices past due date to 'overdue'
-				// Only for invoices not already overdue/paid/cancelled.
-				// Credit notes (isCreditNote=true OR totalAmount<0) are excluded —
-				// they represent money owed back to the client, not due from them.
-				await db
-					.update(table.invoice)
-					.set({ status: 'overdue', updatedAt: now })
+				// Auto-transition keezStatus='Valid' invoices past due date to 'overdue'.
+				// Step 1: SELECT candidates with their PREVIOUS status (so the hook can carry it).
+				// Step 2: UPDATE each row to 'overdue' and emit `invoice.status.changed` hook
+				//         so downstream plugins (DA auto-suspend, notifications, etc.) react.
+				// This used to be a bulk UPDATE but it was silent — auto-overdue never told the
+				// plugin system, leaving DA hosting accounts active despite unpaid invoices.
+				const toTransition = await db
+					.select()
+					.from(table.invoice)
 					.where(
 						and(
 							eq(table.invoice.tenantId, settings.tenantId),
@@ -80,6 +83,42 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							or(gte(table.invoice.totalAmount, 0), isNull(table.invoice.totalAmount))
 						)
 					);
+
+				if (toTransition.length > 0) {
+					const hooks = getHooksManager();
+					for (const oldInvoice of toTransition) {
+						const previousStatus = oldInvoice.status;
+						await db
+							.update(table.invoice)
+							.set({ status: 'overdue', updatedAt: now })
+							.where(eq(table.invoice.id, oldInvoice.id));
+						const updatedInvoice = { ...oldInvoice, status: 'overdue', updatedAt: now };
+						try {
+							await hooks.emit({
+								type: 'invoice.status.changed',
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								invoice: updatedInvoice as any,
+								previousStatus,
+								newStatus: 'overdue',
+								tenantId: settings.tenantId,
+								// Scheduler runs without a user context; use system marker
+								userId: 'system:scheduler'
+							});
+						} catch (hookErr) {
+							const { message } = serializeError(hookErr);
+							logError(
+								'scheduler',
+								`invoice.status.changed emit failed for ${oldInvoice.invoiceNumber}: ${message}`,
+								{ tenantId: settings.tenantId, metadata: { invoiceId: oldInvoice.id } }
+							);
+						}
+					}
+					logInfo(
+						'scheduler',
+						`Auto-overdue: transitioned ${toTransition.length} invoices, hooks emitted`,
+						{ tenantId: settings.tenantId, metadata: { count: toTransition.length } }
+					);
+				}
 
 				// Find overdue invoices: strictly keezStatus='Valid', dueDate past, not paid/cancelled, not credit notes
 				const overdueInvoices = await db
@@ -173,15 +212,40 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 
 						// Update invoice tracking only if at least one email was sent
 						if (atLeastOneSent) {
+							const wasNotOverdue = invoice.status !== 'overdue';
 							await db
 								.update(table.invoice)
 								.set({
 									overdueReminderCount: reminderCount + 1,
 									lastOverdueReminderAt: now,
-									...(invoice.status !== 'overdue' ? { status: 'overdue' as const } : {}),
+									...(wasNotOverdue ? { status: 'overdue' as const } : {}),
 									updatedAt: now
 								})
 								.where(eq(table.invoice.id, invoice.id));
+
+							// If we just flipped status to 'overdue' as a side-effect of the reminder,
+							// emit the hook so DA suspend (and any other listener) fires.
+							if (wasNotOverdue) {
+								try {
+									const hooks = getHooksManager();
+									await hooks.emit({
+										type: 'invoice.status.changed',
+										// eslint-disable-next-line @typescript-eslint/no-explicit-any
+										invoice: { ...invoice, status: 'overdue', updatedAt: now } as any,
+										previousStatus: invoice.status,
+										newStatus: 'overdue',
+										tenantId: settings.tenantId,
+										userId: 'system:scheduler'
+									});
+								} catch (hookErr) {
+									const { message } = serializeError(hookErr);
+									logError(
+										'scheduler',
+										`invoice.status.changed emit (reminder-path) failed for ${invoice.invoiceNumber}: ${message}`,
+										{ tenantId: settings.tenantId, metadata: { invoiceId: invoice.id } }
+									);
+								}
+							}
 
 							remindersSent++;
 						} else {

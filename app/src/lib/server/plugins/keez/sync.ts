@@ -532,48 +532,45 @@ async function _syncKeezInvoicesForTenantInner(
 			const invoiceInsertData = invoiceData;
 			const invoiceId = generateId();
 
-			await db.insert(table.invoice).values({
-				id: invoiceId,
-				tenantId: invoiceInsertData.tenantId || tenantId,
-				clientId: invoiceInsertData.clientId || clientId,
-				invoiceNumber: invoiceInsertData.invoiceNumber || invoiceHeader.externalId,
-				status: invoiceInsertData.status || 'sent',
-				amount: invoiceInsertData.amount || 0,
-				taxRate: invoiceInsertData.taxRate || 1900,
-				taxAmount: invoiceInsertData.taxAmount || 0,
-				totalAmount: invoiceInsertData.totalAmount || 0,
-				currency: invoiceInsertData.currency || 'RON',
-				invoiceCurrency: invoiceInsertData.invoiceCurrency || null,
-				exchangeRate: invoiceInsertData.exchangeRate || null,
-				issueDate: invoiceInsertData.issueDate ?? new Date(),
-				dueDate: invoiceInsertData.dueDate ?? null,
-				notes: invoiceInsertData.notes || null,
-				keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
-				keezExternalId: invoiceInsertData.keezExternalId || null,
-				keezStatus: invoiceInsertData.keezStatus || null,
-				taxApplicationType: 'apply',
-				createdByUserId: systemUserId
-			});
+			const newLineItemsData =
+				Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0
+					? mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, invoiceId)
+					: [];
 
-			if (Array.isArray(keezInvoice.invoiceDetails) && keezInvoice.invoiceDetails.length > 0) {
-				try {
-					const lineItemsData = mapKeezDetailsToLineItems(keezInvoice.invoiceDetails, invoiceId);
-					if (lineItemsData.length > 0) {
-						await withTursoBusyRetry(
-							() => db.insert(table.invoiceLineItem).values(
-								lineItemsData.map((item) => ({
-									...item,
-									id: generateId()
-								}))
-							),
-							{ tenantId, label: `insert line items for new invoice ${invoiceId}` }
+			// Atomic: invoice INSERT + line items INSERT in one transaction so
+			// a mid-write failure can't leave an invoice row with no line items.
+			await withTursoBusyRetry(
+				() => db.transaction(async (tx) => {
+					await tx.insert(table.invoice).values({
+						id: invoiceId,
+						tenantId: invoiceInsertData.tenantId || tenantId,
+						clientId: invoiceInsertData.clientId || clientId,
+						invoiceNumber: invoiceInsertData.invoiceNumber || invoiceHeader.externalId,
+						status: invoiceInsertData.status || 'sent',
+						amount: invoiceInsertData.amount || 0,
+						taxRate: invoiceInsertData.taxRate || 1900,
+						taxAmount: invoiceInsertData.taxAmount || 0,
+						totalAmount: invoiceInsertData.totalAmount || 0,
+						currency: invoiceInsertData.currency || 'RON',
+						invoiceCurrency: invoiceInsertData.invoiceCurrency || null,
+						exchangeRate: invoiceInsertData.exchangeRate || null,
+						issueDate: invoiceInsertData.issueDate ?? new Date(),
+						dueDate: invoiceInsertData.dueDate ?? null,
+						notes: invoiceInsertData.notes || null,
+						keezInvoiceId: invoiceInsertData.keezInvoiceId || null,
+						keezExternalId: invoiceInsertData.keezExternalId || null,
+						keezStatus: invoiceInsertData.keezStatus || null,
+						taxApplicationType: 'apply',
+						createdByUserId: systemUserId
+					});
+					if (newLineItemsData.length > 0) {
+						await tx.insert(table.invoiceLineItem).values(
+							newLineItemsData.map((item) => ({ ...item, id: generateId() }))
 						);
 					}
-				} catch (lineItemError) {
-					const lineErr = serializeError(lineItemError);
-					logError('keez', `Sync failed to insert line items for new invoice ${invoiceId}: ${lineErr.message}`, { tenantId, stackTrace: lineErr.stack });
-				}
-			}
+				}),
+				{ tenantId, label: `atomic create invoice ${invoiceId}` }
+			);
 
 			// Create sync record
 			await db.insert(table.keezInvoiceSync).values({

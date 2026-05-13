@@ -199,6 +199,30 @@
 				id: 'account',
 				label: 'Cont',
 				items: [
+					...(access.hosting
+						? [
+								{
+									id: 'hosting',
+									label: 'Hosting',
+									icon: 'hosting' as const,
+									href: '/hosting',
+									children: [
+										{
+											id: 'hosting-accounts',
+											label: 'Conturile mele',
+											icon: 'hosting-account' as const,
+											href: '/hosting'
+										},
+										{
+											id: 'hosting-packages',
+											label: 'Pachete',
+											icon: 'hosting-product' as const,
+											href: '/hosting/packages'
+										}
+									]
+								}
+							]
+						: []),
 					...(data.isClientUserPrimary
 						? [
 								{

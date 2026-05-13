@@ -6,6 +6,7 @@ import { anafSpvPlugin } from './anaf-spv/plugin';
 import { bankingRevolutPlugin } from './banking/revolut/plugin';
 import { bankingTransilvaniaPlugin } from './banking/transilvania/plugin';
 import { bankingBCRPlugin } from './banking/bcr/plugin';
+import { directAdminPlugin } from './directadmin/plugin';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -33,11 +34,15 @@ export async function initializePlugins(): Promise<void> {
 	registry.register(bankingTransilvaniaPlugin);
 	registry.register(bankingBCRPlugin);
 
+	// Register DirectAdmin plugin
+	registry.register(directAdminPlugin);
+
 	// Load plugin from database and ensure plugins are registered
 	await ensureSmartBillPluginInDatabase();
 	await ensureKeezPluginInDatabase();
 	await ensureAnafSpvPluginInDatabase();
 	await ensureBankingPluginsInDatabase();
+	await ensureDirectAdminPluginInDatabase();
 
 	// Initialize all registered plugins
 	await manager.loadPlugins();
@@ -187,5 +192,37 @@ async function ensureBankingPluginsInDatabase(): Promise<void> {
 			logError('plugin', `Failed to ensure ${pluginData.name} plugin: ${message}`, { stackTrace: stack });
 			// Don't throw - allow app to continue
 		}
+	}
+}
+
+/**
+ * Ensure DirectAdmin plugin exists in database
+ */
+async function ensureDirectAdminPluginInDatabase(): Promise<void> {
+	try {
+		const [existing] = await db
+			.select()
+			.from(table.plugin)
+			.where(eq(table.plugin.name, 'directadmin'))
+			.limit(1);
+
+		if (!existing) {
+			const pluginId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.plugin).values({
+				id: pluginId,
+				name: 'directadmin',
+				displayName: 'DirectAdmin Hosting',
+				description:
+					'Manage DirectAdmin servers, packages and hosting accounts; auto-suspend on overdue invoices.',
+				version: '1.0.0',
+				isActive: true,
+				config: {}
+			});
+			logInfo('plugin', 'Created DirectAdmin plugin in database');
+		}
+	} catch (error) {
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure DirectAdmin plugin: ${message}`, { stackTrace: stack });
+		// Don't throw - allow app to continue
 	}
 }

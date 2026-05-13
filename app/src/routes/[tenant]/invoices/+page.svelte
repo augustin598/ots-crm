@@ -126,6 +126,18 @@ import { goto } from '$app/navigation';
 	const recurringInvoicesQuery = getRecurringInvoices({});
 	const recurringInvoices = $derived(recurringInvoicesQuery.current || []);
 	const recurringInvoicesLoading = $derived(recurringInvoicesQuery.loading);
+	// Filter recurring list by hosting/service category. Declared here so the $derived below
+	// can reference it (Svelte 5 requires let bindings to appear before $derived consumers).
+	let recurringTypeFilter = $state<'all' | 'service' | 'hosting'>('all');
+	const filteredRecurringInvoices = $derived(
+		recurringTypeFilter === 'all'
+			? recurringInvoices
+			: recurringTypeFilter === 'hosting'
+				? recurringInvoices.filter((r) => r.hostingAccountId)
+				: recurringInvoices.filter((r) => !r.hostingAccountId)
+	);
+	const recurringCountHosting = $derived(recurringInvoices.filter((r) => r.hostingAccountId).length);
+	const recurringCountService = $derived(recurringInvoices.length - recurringCountHosting);
 
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
@@ -890,6 +902,11 @@ import { goto } from '$app/navigation';
 													</Badge>
 												{/if}
 											{/if}
+											{#if invoice.hostingAccountId}
+												<Badge variant="outline" class="text-xs px-2 py-0.5 border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300">
+													Hosting
+												</Badge>
+											{/if}
 											{#if emailLogsByInvoice[invoice.id]?.total > 0}
 											{@const emailStats = emailLogsByInvoice[invoice.id]}
 												<Popover.Root>
@@ -1155,8 +1172,31 @@ import { goto } from '$app/navigation';
 					</Button>
 				</Card>
 			{:else}
+				<div class="flex flex-wrap items-center gap-2">
+					<Button
+						size="sm"
+						variant={recurringTypeFilter === 'all' ? 'default' : 'outline'}
+						onclick={() => (recurringTypeFilter = 'all')}
+					>
+						Toate ({recurringInvoices.length})
+					</Button>
+					<Button
+						size="sm"
+						variant={recurringTypeFilter === 'service' ? 'default' : 'outline'}
+						onclick={() => (recurringTypeFilter = 'service')}
+					>
+						Servicii ({recurringCountService})
+					</Button>
+					<Button
+						size="sm"
+						variant={recurringTypeFilter === 'hosting' ? 'default' : 'outline'}
+						onclick={() => (recurringTypeFilter = 'hosting')}
+					>
+						Hosting ({recurringCountHosting})
+					</Button>
+				</div>
 				<div class="grid gap-4">
-					{#each recurringInvoices as recurringInvoice (recurringInvoice.id)}
+					{#each filteredRecurringInvoices as recurringInvoice (recurringInvoice.id)}
 						<Card class="p-6">
 							<div class="flex items-start justify-between">
 								<div class="flex-1 space-y-2">
@@ -1165,6 +1205,11 @@ import { goto } from '$app/navigation';
 										<Badge variant={recurringInvoice.isActive ? 'default' : 'secondary'}>
 											{recurringInvoice.isActive ? 'Active' : 'Inactive'}
 										</Badge>
+										{#if recurringInvoice.hostingAccountId}
+											<Badge variant="outline" class="border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+												Hosting
+											</Badge>
+										{/if}
 									</div>
 									<div class="grid grid-cols-2 gap-4 text-sm">
 										<div>
