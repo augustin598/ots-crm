@@ -1933,3 +1933,287 @@ export const getTags = query(async () => {
 		.where(eq(table.taskTag.tenantId, event.locals.tenant.id))
 		.orderBy(asc(table.taskTag.name));
 });
+
+export const toggleSubtask = command(
+	v.object({ subtaskId: v.pipe(v.string(), v.minLength(1)), done: v.boolean() }),
+	async ({ subtaskId, done }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [sub] = await db
+			.select()
+			.from(table.subtask)
+			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!sub) throw new Error('Subtask not found');
+
+		await db
+			.update(table.subtask)
+			.set({ done: done ? 1 : 0, updatedAt: Date.now() })
+			.where(eq(table.subtask.id, subtaskId));
+
+		return { success: true };
+	}
+);
+
+export const addSubtask = command(
+	v.object({ taskId: v.pipe(v.string(), v.minLength(1)), title: v.pipe(v.string(), v.minLength(1)) }),
+	async ({ taskId, title }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db
+			.select({ id: table.task.id, tenantId: table.task.tenantId })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!task) throw new Error('Task not found');
+
+		const [last] = await db
+			.select({ position: table.subtask.position })
+			.from(table.subtask)
+			.where(eq(table.subtask.taskId, taskId))
+			.orderBy(desc(table.subtask.position))
+			.limit(1);
+
+		const position = (last?.position ?? -1) + 1;
+		const id = generateTaskId();
+		const now = Date.now();
+
+		await db.insert(table.subtask).values({
+			id,
+			taskId,
+			tenantId: event.locals.tenant.id,
+			title: title.trim(),
+			done: 0,
+			position,
+			createdByUserId: event.locals.user.id,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		return { success: true, id };
+	}
+);
+
+export const deleteSubtask = command(
+	v.pipe(v.string(), v.minLength(1)),
+	async (subtaskId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		await db
+			.delete(table.subtask)
+			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)));
+
+		return { success: true };
+	}
+);
+
+export const updateSubtask = command(
+	v.object({
+		subtaskId: v.pipe(v.string(), v.minLength(1)),
+		done: v.optional(v.boolean()),
+		title: v.optional(v.pipe(v.string(), v.minLength(1)))
+	}),
+	async ({ subtaskId, done, title }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [sub] = await db
+			.select()
+			.from(table.subtask)
+			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!sub) throw new Error('Subtask not found');
+
+		await db.update(table.subtask).set({
+			...(done !== undefined ? { done: done ? 1 : 0 } : {}),
+			...(title !== undefined ? { title } : {}),
+			updatedAt: Date.now()
+		}).where(eq(table.subtask.id, subtaskId));
+
+		return { success: true };
+	}
+);
+
+export const addAssignee = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		userId: v.pipe(v.string(), v.minLength(1)),
+		role: v.optional(v.string())
+	}),
+	async ({ taskId, userId, role }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+		if (!task) throw new Error('Task not found');
+
+		const [existing] = await db.select({ taskId: table.taskAssignee.taskId })
+			.from(table.taskAssignee)
+			.where(and(
+				eq(table.taskAssignee.taskId, taskId),
+				eq(table.taskAssignee.userId, userId),
+				eq(table.taskAssignee.tenantId, event.locals.tenant.id)
+			))
+			.limit(1);
+
+		if (!existing) {
+			await db.insert(table.taskAssignee).values({
+				taskId, userId,
+				tenantId: event.locals.tenant.id,
+				role: role ?? null,
+				createdAt: Date.now()
+			});
+		}
+
+		return { success: true };
+	}
+);
+
+export const removeAssignee = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		userId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async ({ taskId, userId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+		if (!task) throw new Error('Task not found');
+
+		await db.transaction(async (tx) => {
+			await tx.delete(table.taskAssignee)
+				.where(and(
+					eq(table.taskAssignee.taskId, taskId),
+					eq(table.taskAssignee.userId, userId),
+					eq(table.taskAssignee.tenantId, event.locals.tenant.id)
+				));
+
+			if (task.assignedToUserId === userId) {
+				const [next] = await tx.select({ userId: table.taskAssignee.userId })
+					.from(table.taskAssignee)
+					.where(and(
+						eq(table.taskAssignee.taskId, taskId),
+						eq(table.taskAssignee.tenantId, event.locals.tenant.id)
+					))
+					.orderBy(asc(table.taskAssignee.createdAt))
+					.limit(1);
+
+				await tx.update(table.task).set({
+					assignedToUserId: next?.userId ?? null,
+					updatedAt: new Date()
+				}).where(eq(table.task.id, taskId));
+			}
+		});
+
+		return { success: true };
+	}
+);
+
+export const addTag = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		tagName: v.pipe(v.string(), v.minLength(1))
+	}),
+	async ({ taskId, tagName }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+		if (!task) throw new Error('Task not found');
+
+		const tenantId = event.locals.tenant.id;
+		const normalizedName = (tagName.trim().startsWith('#') ? tagName.trim() : `#${tagName.trim()}`).toLowerCase();
+
+		await db.transaction(async (tx) => {
+			const [existing] = await tx.select({ id: table.taskTag.id })
+				.from(table.taskTag)
+				.where(and(eq(table.taskTag.tenantId, tenantId), eq(table.taskTag.name, normalizedName)))
+				.limit(1);
+
+			const tagId = existing?.id ?? generateTaskId();
+			if (!existing) {
+				await tx.insert(table.taskTag).values({ id: tagId, tenantId, name: normalizedName, createdAt: Date.now() });
+			}
+
+			const [existingLink] = await tx.select({ taskId: table.taskToTag.taskId })
+				.from(table.taskToTag)
+				.where(and(eq(table.taskToTag.taskId, taskId), eq(table.taskToTag.tagId, tagId)))
+				.limit(1);
+
+			if (!existingLink) {
+				await tx.insert(table.taskToTag).values({ taskId, tagId, tenantId });
+			}
+		});
+
+		return { success: true };
+	}
+);
+
+export const removeTag = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		tagId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async ({ taskId, tagId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+		if (!task) throw new Error('Task not found');
+
+		await db.delete(table.taskToTag)
+			.where(and(
+				eq(table.taskToTag.taskId, taskId),
+				eq(table.taskToTag.tagId, tagId),
+				eq(table.taskToTag.tenantId, event.locals.tenant.id)
+			));
+
+		return { success: true };
+	}
+);
+
+export const scheduleMeet = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		meetLink: v.optional(v.string()),
+		meetTime: v.optional(v.string()),
+		meetDurationMinutes: v.optional(v.number())
+	}),
+	async ({ taskId, meetTime, meetDurationMinutes }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+
+		const [task] = await db.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+		if (!task) throw new Error('Task not found');
+
+		await db.update(table.task).set({
+			meetTime: meetTime ?? null,
+			meetDurationMinutes: meetDurationMinutes ?? null,
+			updatedAt: new Date()
+		}).where(eq(table.task.id, taskId));
+
+		return { success: true };
+	}
+);
