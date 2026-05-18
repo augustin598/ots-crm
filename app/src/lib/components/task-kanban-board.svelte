@@ -1,34 +1,39 @@
 <script lang="ts">
-	import { Card } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import {
-		DropdownMenu,
-		DropdownMenuContent,
-		DropdownMenuItem,
-		DropdownMenuTrigger
-	} from '$lib/components/ui/dropdown-menu';
-	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
-	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import type { Task } from '$lib/server/db/schema';
 	import { updateTaskPosition, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
-	import { formatStatus, getPriorityColor, getPriorityDotColor, getPriorityCardClass, formatPriority, formatDate } from './task-kanban-utils';
+	import { formatStatus } from './task-kanban-utils';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { toast } from 'svelte-sonner';
 	import { tick } from 'svelte';
+	import TaskCard, { type AssigneeInfo, type TagInfo, type SubtaskProgress } from './task-card.svelte';
+
+	type TaskWithIncludes = Task & {
+		subtaskCount?: number;
+		subtaskDoneCount?: number;
+		tags?: TagInfo[];
+		assignees?: AssigneeInfo[];
+	};
 
 	type Props = {
-		tasks: Task[];
+		tasks: TaskWithIncludes[];
 		projectMap: Map<string, string>;
 		userMap: Map<string, string>;
 		clientMap: Map<string, string>;
+		clientColorMap?: Map<string, string>;
 		tenantSlug: string;
 		onTaskClick: (task: Task) => void;
 		onEditTask: (task: Task) => void;
 		onDeleteTask: (taskId: string) => void;
 		onTasksUpdate?: () => void;
+		onAddTask?: (status: string) => void;
+		selectedIds?: Set<string>;
+		onTaskSelectChange?: (taskId: string, selected: boolean) => void;
+		showSelectionCheckbox?: boolean;
 	};
 
 	let {
@@ -36,17 +41,63 @@
 		projectMap,
 		userMap,
 		clientMap,
+		clientColorMap,
 		tenantSlug,
 		onTaskClick,
 		onEditTask,
 		onDeleteTask,
-		onTasksUpdate
+		onTasksUpdate,
+		onAddTask,
+		selectedIds,
+		onTaskSelectChange,
+		showSelectionCheckbox = false
 	}: Props = $props();
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
 
-	const STATUSES = ['pending-approval', 'todo', 'in-progress', 'review', 'done'] as const;
+	// Column order per design 1:1 (tasks-data.jsx STATUSES order):
+	// pending → todo → in-progress → review → done → blocked
+	const STATUSES = ['pending-approval', 'todo', 'in-progress', 'review', 'done', 'blocked'] as const;
+
+	type ColumnStatus = (typeof STATUSES)[number];
+
+	// Per-status dot color (matches design's tk-col-dot)
+	const STATUS_DOT: Record<ColumnStatus, string> = {
+		'pending-approval': '#f59e0b',
+		todo: '#64748b',
+		'in-progress': '#1877F2',
+		review: '#8b5cf6',
+		done: '#10b981',
+		blocked: '#ef4444'
+	};
+
+	function buildAssigneeInfos(task: TaskWithIncludes): AssigneeInfo[] {
+		// Prefer the `assignees` array from include.assignees=true; fall back to legacy single assignee.
+		if (Array.isArray(task.assignees) && task.assignees.length > 0) {
+			return task.assignees as AssigneeInfo[];
+		}
+		if (task.assignedToUserId) {
+			const name = userMap.get(task.assignedToUserId) || '';
+			const [firstName, ...rest] = name.split(' ');
+			return [
+				{
+					id: task.assignedToUserId,
+					firstName: firstName ?? null,
+					lastName: rest.join(' ') || null,
+					email: null,
+					displayName: name
+				}
+			];
+		}
+		return [];
+	}
+
+	function buildSubtaskProgress(task: TaskWithIncludes): SubtaskProgress | null {
+		const total = task.subtaskCount ?? 0;
+		if (total <= 0) return null;
+		return { done: task.subtaskDoneCount ?? 0, total };
+	}
 
 	// Optimistic updates for active tasks — synced from prop via $effect
 	let optimisticTasks = $state<Task[]>([]);
@@ -110,12 +161,13 @@
 
 	// Group tasks by status and sort by position
 	const groupedTasks = $derived.by(() => {
-		const groups: Record<string, Task[]> = {
+		const groups: Record<string, TaskWithIncludes[]> = {
 			'pending-approval': [],
 			todo: [],
 			'in-progress': [],
 			review: [],
-			done: []
+			done: [],
+			blocked: []
 		};
 
 		// Active tasks — from optimisticTasks (excludes done/cancelled)
@@ -169,28 +221,29 @@
 	});
 
 	function handleDragStart(e: DragEvent, task: Task, status: string, index: number) {
-		if (!(e.target instanceof HTMLElement)) return;
 		draggedTask = task;
 		draggedFromStatus = status;
 		draggedFromIndex = index;
 		isDragging = true;
-		e.dataTransfer!.effectAllowed = 'move';
-		e.dataTransfer!.dropEffect = 'move';
-		if (e.target) {
-			e.target.style.opacity = '0.5';
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.dropEffect = 'move';
+			// Required by Firefox to start drag
+			try {
+				e.dataTransfer.setData('text/plain', task.id);
+			} catch {
+				// ignore — some browsers throw if called after the event has propagated
+			}
 		}
 	}
 
-	function handleDragEnd(e: DragEvent) {
+	function handleDragEnd(_e: DragEvent) {
 		isDragging = false;
 		draggedTask = null;
 		draggedFromStatus = null;
 		draggedFromIndex = -1;
 		dragOverStatus = null;
 		dragOverIndex = -1;
-		if (e.target instanceof HTMLElement) {
-			e.target.style.opacity = '1';
-		}
 	}
 
 	function handleDragOver(e: DragEvent, status: string, index: number) {
@@ -475,179 +528,153 @@
 		}
 	}
 
-	function formatDueDate(date: Date | string | null): string {
-		if (!date) return 'No due date';
-		return formatDate(date, 'short');
-	}
 </script>
 
 <div class="sr-only" role="status" aria-live="assertive" aria-atomic="true">
 	{liveRegionMessage}
 </div>
-<div class="grid gap-6 lg:grid-cols-5 overflow-x-auto pb-4">
-	{#each STATUSES as status}
+<div class="grid grid-cols-[repeat(6,minmax(280px,1fr))] gap-3 overflow-x-auto pb-4">
+	{#each STATUSES as status (status)}
 		{@const statusTasks = groupedTasks[status] || []}
-		<div class="flex flex-col min-w-[280px]" role="region" aria-label="{formatStatus(status)} column, {statusTasks.length} tasks">
-			<div class="flex items-center justify-between mb-4">
-				{#if status === 'done'}
-					<div class="flex items-center gap-2 w-full">
-						<CheckCircle2Icon class="h-4 w-4 text-emerald-500 shrink-0" />
-						<div class="flex-1 min-w-0">
-							<h3 class="font-semibold text-emerald-700 dark:text-emerald-400">
-								Finalizate
-								<span class="ml-1 text-xs font-normal text-muted-foreground">
-									{doneTotalCount}
-								</span>
-							</h3>
-						</div>
-						{#if optimisticDoneTasks.length > DONE_COLLAPSED_COUNT}
-							<button
-								class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-								onclick={() => { doneExpanded = !doneExpanded; }}
-							>
-								{#if doneExpanded}
-									<ChevronUpIcon class="h-3.5 w-3.5" />
-									<span>Restrânge</span>
-								{:else}
-									<ChevronDownIcon class="h-3.5 w-3.5" />
-									<span>Toate</span>
-								{/if}
-							</button>
-						{/if}
-					</div>
-				{:else}
-					<h3 class="font-semibold capitalize">
-						{formatStatus(status)} ({statusTasks.length})
-					</h3>
-				{/if}
+		{@const isDoneCol = status === 'done'}
+		{@const isHighlight = dragOverStatus === status}
+		<div
+			class={[
+				'tk-col flex min-h-[120px] flex-col gap-2 rounded-xl bg-[#eef1f6] p-2.5 transition-colors',
+				isHighlight ? 'bg-[#dbe7fb] outline outline-2 outline-dashed outline-[#1877F2] -outline-offset-1' : ''
+			].filter(Boolean).join(' ')}
+			role="region"
+			aria-label={`${formatStatus(status)} column, ${statusTasks.length} tasks`}
+		>
+			<!-- Column header: dot + title + count + actions -->
+			<div class="tk-col-head flex items-center gap-2 px-1.5 pt-1 pb-1.5">
+				<span
+					class="h-2 w-2 shrink-0 rounded-full"
+					style:background-color={STATUS_DOT[status]}
+				></span>
+				<span
+					class="text-[12px] font-bold uppercase tracking-[.04em] text-[#0f172a]"
+				>
+					{#if status === 'done'}Finalizate{:else}{formatStatus(status)}{/if}
+				</span>
+				<span
+					class="rounded-[10px] bg-white px-[7px] py-[1px] text-[11px] font-bold text-[#475569]"
+				>
+					{isDoneCol ? doneTotalCount : statusTasks.length}
+				</span>
+				<div class="ml-auto flex items-center gap-0.5">
+					{#if isDoneCol && optimisticDoneTasks.length > DONE_COLLAPSED_COUNT}
+						<button
+							type="button"
+							class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[#94a3b8] transition-colors hover:bg-white hover:text-[#0f172a]"
+							onclick={() => {
+								doneExpanded = !doneExpanded;
+							}}
+						>
+							{#if doneExpanded}
+								<ChevronUpIcon class="h-3 w-3" />
+								<span>Restrânge</span>
+							{:else}
+								<ChevronDownIcon class="h-3 w-3" />
+								<span>Toate</span>
+							{/if}
+						</button>
+					{/if}
+					{#if onAddTask}
+						<button
+							type="button"
+							class="grid h-[22px] w-[22px] place-items-center rounded-md text-[#94a3b8] transition-colors hover:bg-white hover:text-[#0f172a]"
+							onclick={() => onAddTask?.(status)}
+							aria-label={`Add task to ${formatStatus(status)}`}
+						>
+							<PlusIcon class="h-3 w-3" />
+						</button>
+					{/if}
+				</div>
 			</div>
-			<div class="{status === 'done' && doneExpanded ? 'relative' : ''}">
+
+			<!-- Body / drop zone -->
 			<div
-				class="flex-1 space-y-3 min-h-[200px] {status === 'done' && doneExpanded ? 'max-h-[600px] overflow-y-auto pr-1 done-scroll-area' : ''}"
+				class={[
+					'flex flex-1 min-h-[200px] flex-col gap-2',
+					isDoneCol && doneExpanded ? 'max-h-[600px] overflow-y-auto pr-1 done-scroll-area' : ''
+				].filter(Boolean).join(' ')}
 				role="list"
 				ondragover={(e) => handleDragOver(e, status, statusTasks.length)}
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, status, statusTasks.length)}
 			>
-				{#each statusTasks as task, index}
-					{@const projectName = task.projectId ? projectMap.get(task.projectId) || '' : ''}
-					{@const clientName = task.clientId ? clientMap.get(task.clientId) || '' : ''}
-					{@const assigneeName = task.assignedToUserId ? userMap.get(task.assignedToUserId) || '' : ''}
-					{@const isDragged = draggedTask?.id === task.id}
-					{@const isDragOver = dragOverStatus === status && dragOverIndex === index}
-					<Card
-						class="group p-0 cursor-move hover:shadow-md transition-all overflow-hidden {status === 'done' ? 'opacity-60 blur-[0.5px] hover:opacity-90 hover:blur-none border-l-4 border-l-emerald-400/50 dark:border-l-emerald-700/50' : getPriorityCardClass(task.priority || 'medium')} {isDragged
-							? 'opacity-50'
-							: ''} {isDragOver ? 'ring-2 ring-primary' : ''} {pickedUpTask?.id === task.id ? 'ring-2 ring-primary bg-primary/5' : ''}"
-						draggable={true}
-						tabindex={0}
-						role="button"
-						aria-roledescription="Draggable task"
-						aria-label="{task.title}, {formatStatus(status)}, position {index + 1} of {statusTasks.length}"
-						data-task-id={task.id}
-						ondragstart={(e) => handleDragStart(e, task, status, index)}
-						ondragend={handleDragEnd}
-						onclick={() => onTaskClick(task)}
-						onkeydown={(e) => handleCardKeyDown(e, task, status, index)}
-					>
-						<div class="p-3.5">
-							<!-- Header: priority badge + title + menu -->
-							<div class="flex items-start justify-between gap-2 mb-2">
-								<div class="flex-1 min-w-0">
-									<div class="flex items-center gap-1.5 mb-1">
-										<span class="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded {getPriorityColor(task.priority || 'medium')}">
-											{formatPriority(task.priority || 'medium')}
-										</span>
-										{#if task.isRecurring || task.recurringParentId}
-											<RepeatIcon class="h-3 w-3 text-blue-600" aria-label="Task recurent" />
-										{/if}
-									</div>
-									<h4 class="font-medium text-sm leading-snug line-clamp-2 {status === 'done' ? 'text-muted-foreground line-through decoration-muted-foreground/40' : ''}">{task.title}</h4>
-								</div>
-								<DropdownMenu>
-									<DropdownMenuTrigger>
-										{#snippet child({props})}
-										<Button {...props} variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-											<MoreVerticalIcon class="h-3 w-3" />
-										</Button>
-										{/snippet}
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end">
-										<DropdownMenuItem onclick={(e) => {
-											e.stopPropagation();
-											onEditTask(task);
-										}}>
-											Edit
-										</DropdownMenuItem>
-										<DropdownMenuItem
-											class="text-destructive"
-											onclick={(e) => {
-												e.stopPropagation();
-												onDeleteTask(task.id);
-											}}
-										>
-											Delete
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							</div>
-
-							<!-- Tags row: client + project -->
-							{#if clientName || projectName}
-								<div class="flex flex-wrap gap-1.5 mb-2.5">
-									{#if clientName}
-										<span class="inline-flex items-center gap-1 text-[11px] font-medium bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 px-1.5 py-0.5 rounded">
-											{clientName}
-										</span>
-									{/if}
-									{#if projectName}
-										<a
-											href="/{tenantSlug}/projects/{task.projectId}"
-											onclick={(e) => e.stopPropagation()}
-											class="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 px-1.5 py-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors"
-										>
-											{projectName}
-										</a>
-									{/if}
-								</div>
-							{/if}
-
-							<!-- Dates row -->
-							<div class="flex items-center gap-3 mb-2.5 text-[11px] text-muted-foreground">
-								<span title="Due date">Due: {formatDueDate(task.dueDate)}</span>
-								<span title="Created">Creat: {formatDate(task.createdAt, 'short')}</span>
-							</div>
-
-							<!-- Footer: assignee -->
-							{#if assigneeName}
-								<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<div class="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-semibold shrink-0">
-										{assigneeName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
-									</div>
-									<span class="truncate max-w-[120px]">{assigneeName}</span>
-								</div>
-							{/if}
+				{#if statusTasks.length === 0}
+					{#if isDoneCol && doneIsLoading}
+						<div class="rounded-lg border border-dashed border-[#e5e9f0] bg-white py-[22px] px-2 text-center text-[11.5px] text-[#94a3b8]">
+							Se încarcă…
 						</div>
-					</Card>
-				{/each}
-				{#if dragOverStatus === status && dragOverIndex === statusTasks.length && draggedTask}
-					<div class="h-2 border-2 border-dashed border-primary rounded"></div>
+					{:else}
+						<div class="rounded-lg border border-dashed border-[#e5e9f0] bg-white py-[22px] px-2 text-center text-[11.5px] text-[#94a3b8]">
+							Niciun task aici.<br />Trage unul aici.
+						</div>
+					{/if}
+				{:else}
+					{#each statusTasks as task, index (task.id)}
+						{@const projectName = task.projectId ? projectMap.get(task.projectId) || null : null}
+						{@const clientName = task.clientId ? clientMap.get(task.clientId) || null : null}
+						{@const clientColor = task.clientId ? clientColorMap?.get(task.clientId) ?? null : null}
+						<TaskCard
+							{task}
+							{projectName}
+							projectId={task.projectId}
+							{clientName}
+							{clientColor}
+							assignees={buildAssigneeInfos(task)}
+							tags={task.tags ?? []}
+							subtaskProgress={buildSubtaskProgress(task)}
+							{tenantSlug}
+							selected={selectedIds?.has(task.id) ?? false}
+							onSelectChange={(v) => onTaskSelectChange?.(task.id, v)}
+							onClick={() => onTaskClick(task)}
+							onEdit={() => onEditTask(task)}
+							onDelete={() => onDeleteTask(task.id)}
+							dragState={draggedTask?.id === task.id
+								? 'dragging'
+								: pickedUpTask?.id === task.id
+									? 'pickedUp'
+									: dragOverStatus === status && dragOverIndex === index
+										? 'over'
+										: 'idle'}
+							{showSelectionCheckbox}
+							onDragStart={(e) => handleDragStart(e, task, status, index)}
+							onDragEnd={(e) => handleDragEnd(e)}
+							onKeyDown={(e) => handleCardKeyDown(e, task, status, index)}
+							ariaLabel={`${task.title}, ${formatStatus(status)}, position ${index + 1} of ${statusTasks.length}`}
+							dataTaskId={task.id}
+						/>
+					{/each}
 				{/if}
-				{#if status === 'done' && doneHasCollapsedItems}
+
+				{#if dragOverStatus === status && dragOverIndex === statusTasks.length && draggedTask}
+					<div class="h-2 rounded border-2 border-dashed border-[#1877F2]"></div>
+				{/if}
+
+				{#if isDoneCol && doneHasCollapsedItems}
 					<button
-						class="w-full mt-3 py-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors rounded-md border border-dashed border-muted-foreground/20 hover:border-emerald-500/30 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20"
-						onclick={() => { doneExpanded = true; }}
+						type="button"
+						class="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[#cbd5e1] bg-transparent py-2 text-xs font-semibold text-[#64748b] transition-colors hover:border-[#1877F2] hover:bg-[#1877F2]/[0.04] hover:text-[#1877F2]"
+						onclick={() => {
+							doneExpanded = true;
+						}}
 					>
 						<ChevronDownIcon class="h-3.5 w-3.5" />
 						Arată toate ({doneTotalCount})
 					</button>
 				{/if}
-				{#if status === 'done' && doneExpanded && doneHasMore}
+				{#if isDoneCol && doneExpanded && doneHasMore}
 					<Button
 						variant="outline"
-						class="w-full mt-2"
+						class="mt-1 w-full"
 						disabled={doneIsLoading}
-						onclick={() => { doneLoadedPages += 1; }}
+						onclick={() => {
+							doneLoadedPages += 1;
+						}}
 					>
 						{doneIsLoading
 							? 'Se încarcă...'
@@ -655,10 +682,18 @@
 					</Button>
 				{/if}
 			</div>
-			{#if status === 'done' && doneExpanded}
-				<div class="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent rounded-b-md"></div>
+
+			<!-- Bottom "Adaugă task" button (per design's .tk-add-card) -->
+			{#if !isDoneCol && onAddTask}
+				<button
+					type="button"
+					class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#cbd5e1] bg-transparent py-[9px] text-xs font-semibold text-[#64748b] transition-colors hover:border-[#1877F2] hover:bg-[#1877F2]/[0.04] hover:text-[#1877F2]"
+					onclick={() => onAddTask?.(status)}
+				>
+					<PlusIcon class="h-3 w-3" />
+					Adaugă task
+				</button>
 			{/if}
-			</div>
 		</div>
 	{/each}
 </div>

@@ -77,11 +77,13 @@
 	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
 
 	// Fetch data — in kanban view, exclude done/cancelled (they are loaded lazily by the kanban board)
+	// include.{subtasks,tags,assignees} hydrates TaskCard with the data it needs to render fully.
 	const tasksQuery = $derived(
 		getTasks({
 			...filterParams,
 			excludeCompleted:
-				view.current === 'kanban' && !filterParams.status ? true : undefined
+				view.current === 'kanban' && !filterParams.status ? true : undefined,
+			include: { subtasks: true, tags: true, assignees: true }
 		})
 	);
 	const tasks = $derived(tasksQuery.current || []);
@@ -172,7 +174,13 @@
 
 	// Dialog states
 	let isCreateDialogOpen = $state(false);
+	let createDialogDefaultStatus = $state<string | undefined>(undefined);
 	let editingTask = $state<Task | null>(null);
+
+	function openCreateDialog(defaultStatus?: string) {
+		createDialogDefaultStatus = defaultStatus;
+		isCreateDialogOpen = true;
+	}
 
 	function openTaskFromList(task: Task) {
 		if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -252,7 +260,7 @@
 				Table
 			</Button>
 		</div>
-		<Button onclick={() => (isCreateDialogOpen = true)}>
+		<Button onclick={() => openCreateDialog()}>
 			<PlusIcon class="mr-2 h-4 w-4" />
 			New Task
 		</Button>
@@ -283,8 +291,10 @@
 <!-- Dialogs -->
 <CreateTaskDialog
 	open={isCreateDialogOpen}
+	defaultStatus={createDialogDefaultStatus}
 	onOpenChange={(open) => {
 		isCreateDialogOpen = open;
+		if (!open) createDialogDefaultStatus = undefined;
 	}}
 	onSuccess={handleCreateSuccess}
 />
@@ -315,6 +325,7 @@
 		onTaskClick={openTaskFromList}
 		onEditTask={handleEditTask}
 		onDeleteTask={handleDeleteTask}
+		onAddTask={(status) => openCreateDialog(status)}
 		onTasksUpdate={() => {
 			// Tasks will be refreshed automatically via .updates() in the component
 		}}

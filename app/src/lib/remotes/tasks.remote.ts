@@ -1593,6 +1593,113 @@ export const updateTaskPosition = command(
 	}
 );
 
+/**
+ * Inline status edit (Table view + future bulk actions).
+ * Tenant-scoped; records `status_changed` activity; fires client notification.
+ * No position rebalancing — for ordered moves use updateTaskPosition.
+ */
+export const updateTaskStatus = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		newStatus: v.picklist(VALID_STATUSES)
+	}),
+	async ({ taskId, newStatus }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const [task] = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!task) {
+			throw new Error('Task not found');
+		}
+
+		const oldStatus = task.status;
+		if (oldStatus === newStatus) {
+			return { success: true, changed: false };
+		}
+
+		await db
+			.update(table.task)
+			.set({ status: newStatus, updatedAt: new Date() })
+			.where(eq(table.task.id, taskId));
+
+		await recordTaskActivity({
+			taskId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'status_changed',
+			field: 'status',
+			oldValue: oldStatus,
+			newValue: newStatus
+		});
+
+		await sendClientNotificationIfEnabled(
+			taskId,
+			event.locals.tenant.id,
+			'status-change',
+			{ newStatus },
+			event.locals.user.email
+		);
+
+		return { success: true, changed: true };
+	}
+);
+
+/**
+ * Inline priority edit (Table view + future bulk actions).
+ * Tenant-scoped; records `priority_changed` activity.
+ */
+export const updateTaskPriority = command(
+	v.object({
+		taskId: v.pipe(v.string(), v.minLength(1)),
+		newPriority: v.picklist(VALID_PRIORITIES)
+	}),
+	async ({ taskId, newPriority }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+
+		const [task] = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.limit(1);
+
+		if (!task) {
+			throw new Error('Task not found');
+		}
+
+		const oldPriority = task.priority ?? 'medium';
+		if (oldPriority === newPriority) {
+			return { success: true, changed: false };
+		}
+
+		await db
+			.update(table.task)
+			.set({ priority: newPriority, updatedAt: new Date() })
+			.where(eq(table.task.id, taskId));
+
+		await recordTaskActivity({
+			taskId,
+			userId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			action: 'priority_changed',
+			field: 'priority',
+			oldValue: oldPriority,
+			newValue: newPriority
+		});
+
+		return { success: true, changed: true };
+	}
+);
+
 export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {

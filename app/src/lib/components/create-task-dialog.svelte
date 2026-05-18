@@ -25,6 +25,8 @@
 		defaultMilestoneId?: string;
 		defaultDueDate?: string;
 		defaultPriority?: string;
+		/** Pre-select an initial status when the dialog opens. Falls back to 'todo' (or 'pending-approval' for client users). */
+		defaultStatus?: string;
 		isClient?: boolean;
 		additionalQueriesToUpdate?: any[];
 		initialType?: 'task' | 'meet';
@@ -40,6 +42,7 @@
 		defaultMilestoneId,
 		defaultDueDate,
 		defaultPriority: defaultPriorityProp,
+		defaultStatus,
 		isClient = false,
 		additionalQueriesToUpdate = [],
 		initialType,
@@ -77,7 +80,9 @@
 
 	const STATUSES_CREATE = [
 		{ id: 'todo', label: 'Todo' },
-		{ id: 'in-progress', label: 'In Progress' }
+		{ id: 'in-progress', label: 'In Progress' },
+		{ id: 'review', label: 'Review' },
+		{ id: 'blocked', label: 'Blocked' }
 	];
 
 	function getInitialDueDate(): string {
@@ -146,7 +151,8 @@
 			draft.projectId = defaultProjectId || '';
 			draft.milestoneId = defaultMilestoneId || '';
 			draft.priority = defaultPriorityProp || 'medium';
-			draft.status = isClient ? 'pending-approval' : 'todo';
+			// Client users always create as pending-approval; otherwise honor explicit defaultStatus, fall back to 'todo'.
+			draft.status = isClient ? 'pending-approval' : defaultStatus || 'todo';
 			draft.dueDate = getInitialDueDate();
 			draft.assigneeIds = !isClient && currentUserId ? [currentUserId] : [];
 			draft.tags = initialType === 'meet' ? ['#meeting'] : [];

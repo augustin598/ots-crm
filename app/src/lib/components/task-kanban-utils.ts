@@ -60,7 +60,7 @@ export function getStatusColor(status: string | null): string {
 		case 'cancelled':
 			return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
 		case 'blocked':
-			return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300';
+			return 'bg-[#fee2e2] text-[#b91c1c] dark:bg-red-900/30 dark:text-red-400';
 		default:
 			return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
 	}
@@ -81,7 +81,7 @@ export function getStatusDotColor(status: string | null): string {
 		case 'cancelled':
 			return 'bg-red-500';
 		case 'blocked':
-			return 'bg-zinc-500';
+			return 'bg-[#ef4444]';
 		default:
 			return 'bg-slate-400';
 	}
@@ -122,7 +122,7 @@ export function getActivityValueColor(field: string | null | undefined, value: s
 			case 'review': return 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800';
 			case 'done': return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
 			case 'cancelled': return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-			case 'blocked': return 'bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-300 dark:border-zinc-700';
+			case 'blocked': return 'bg-[#fee2e2] text-[#b91c1c] border-[#fecaca] dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
 		}
 	}
 	return '';
