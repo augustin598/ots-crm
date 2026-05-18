@@ -808,100 +808,117 @@ export const createTask = command(taskSchema, async (data) => {
 
 	const nextPosition = (maxPositionResult?.maxPosition ?? -1) + 1;
 
-	await db.insert(table.task).values({
-		id: taskId,
-		tenantId: targetTenantId,
-		projectId: data.projectId || null,
-		clientId: clientId,
-		milestoneId: data.milestoneId || null,
-		title: data.title,
-		description: data.description || null,
-		status: status,
-		priority: data.priority || 'medium',
-		position: nextPosition,
-		dueDate: data.dueDate ? new Date(data.dueDate) : null,
-		assignedToUserId: data.assignedToUserId || null,
-		createdByUserId: event.locals.user.id,
-		isRecurring: !!data.isRecurring,
-		recurringType: data.isRecurring ? data.recurringType ?? null : null,
-		recurringInterval: data.isRecurring ? data.recurringInterval ?? 1 : null,
-		recurringEndDate: data.isRecurring && data.recurringEndDate ? new Date(data.recurringEndDate) : null,
-		recurringParentId: null,
-		recurringSpawnedAt: null,
-		type: data.type || null
-	});
+	// Normalize tag names: lowercase + #-prefix + deduplicate (SQLite collation is case-sensitive)
+	const uniqueTags = [
+		...new Set(
+			(data.tagNames || [])
+				.map((t) => {
+					const stripped = t.trim().startsWith('#') ? t.trim() : `#${t.trim()}`;
+					return stripped.toLowerCase();
+				})
+				.filter((t) => t.length > 1)
+		)
+	];
 
-	// Insert subtasks
-	if (data.subtasks?.length) {
-		for (let i = 0; i < data.subtasks.length; i++) {
-			const subtaskId = generateTaskId();
-			const now = Date.now();
-			await db.insert(table.subtask).values({
-				id: subtaskId,
-				taskId,
-				tenantId: targetTenantId,
-				title: data.subtasks[i],
-				done: 0,
-				position: i,
-				createdByUserId: event.locals.user.id,
-				createdAt: now,
-				updatedAt: now
-			});
+	// Deduplicate assignee IDs before insert
+	const uniqueAssigneeIds = [...new Set(data.assigneeUserIds || [])];
+
+	// Atomic: task + subtasks + tags + assignees + watchers in one transaction
+	await db.transaction(async (tx) => {
+		await tx.insert(table.task).values({
+			id: taskId,
+			tenantId: targetTenantId,
+			projectId: data.projectId || null,
+			clientId: clientId,
+			milestoneId: data.milestoneId || null,
+			title: data.title,
+			description: data.description || null,
+			status: status,
+			priority: data.priority || 'medium',
+			position: nextPosition,
+			dueDate: data.dueDate ? new Date(data.dueDate) : null,
+			assignedToUserId: data.assignedToUserId || null,
+			createdByUserId: event.locals.user.id,
+			isRecurring: !!data.isRecurring,
+			recurringType: data.isRecurring ? data.recurringType ?? null : null,
+			recurringInterval: data.isRecurring ? data.recurringInterval ?? 1 : null,
+			recurringEndDate:
+				data.isRecurring && data.recurringEndDate ? new Date(data.recurringEndDate) : null,
+			recurringParentId: null,
+			recurringSpawnedAt: null,
+			type: data.type || null
+		});
+
+		// Insert subtasks
+		if (data.subtasks?.length) {
+			for (let i = 0; i < data.subtasks.length; i++) {
+				const subtaskId = generateTaskId();
+				const now = Date.now();
+				await tx.insert(table.subtask).values({
+					id: subtaskId,
+					taskId,
+					tenantId: targetTenantId,
+					title: data.subtasks[i],
+					done: 0,
+					position: i,
+					createdByUserId: event.locals.user.id,
+					createdAt: now,
+					updatedAt: now
+				});
+			}
 		}
-	}
 
-	// Find-or-create tags and link to task
-	if (data.tagNames?.length) {
-		for (const name of data.tagNames) {
-			const cleanName = name.startsWith('#') ? name : `#${name}`;
-			const [existingTag] = await db
+		// Find-or-create tags and link to task (names already normalized + deduplicated)
+		for (const normalizedName of uniqueTags) {
+			const [existingTag] = await tx
 				.select()
 				.from(table.taskTag)
-				.where(and(eq(table.taskTag.tenantId, targetTenantId), eq(table.taskTag.name, cleanName)))
+				.where(and(eq(table.taskTag.tenantId, targetTenantId), eq(table.taskTag.name, normalizedName)))
 				.limit(1);
 			let tagId: string;
 			if (existingTag) {
 				tagId = existingTag.id;
 			} else {
 				tagId = generateTaskId();
-				await db.insert(table.taskTag).values({
+				await tx.insert(table.taskTag).values({
 					id: tagId,
 					tenantId: targetTenantId,
-					name: cleanName,
+					name: normalizedName,
 					createdAt: Date.now()
 				});
 			}
-			try {
-				await db.insert(table.taskToTag).values({ taskId, tagId, tenantId: targetTenantId });
-			} catch {
-				// ignore duplicate
-			}
+			await tx.insert(table.taskToTag).values({ taskId, tagId, tenantId: targetTenantId });
 		}
-	}
 
-	// Insert multi-assignees
-	if (data.assigneeUserIds?.length) {
-		for (const userId of data.assigneeUserIds) {
-			try {
-				await db.insert(table.taskAssignee).values({
-					taskId,
-					userId,
-					tenantId: targetTenantId,
-					createdAt: Date.now()
-				});
-			} catch {
-				// ignore duplicate
-			}
+		// Insert multi-assignees (deduplicated)
+		for (const userId of uniqueAssigneeIds) {
+			await tx.insert(table.taskAssignee).values({
+				taskId,
+				userId,
+				tenantId: targetTenantId,
+				createdAt: Date.now()
+			});
 		}
-	}
 
-	// Auto-watch task for creator
-	const watcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-	await db.insert(table.taskWatcher).values({
-		id: watcherId,
-		taskId,
-		userId: event.locals.user.id,
-		tenantId: targetTenantId
+		// Auto-watch for creator
+		const watcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		await tx.insert(table.taskWatcher).values({
+			id: watcherId,
+			taskId,
+			userId: event.locals.user.id,
+			tenantId: targetTenantId
+		});
+
+		// Auto-watch for assignee (if different from creator)
+		if (data.assignedToUserId && data.assignedToUserId !== event.locals.user.id) {
+			const assigneeWatcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await tx.insert(table.taskWatcher).values({
+				id: assigneeWatcherId,
+				taskId,
+				userId: data.assignedToUserId,
+				tenantId: targetTenantId
+			});
+		}
 	});
 
 	// Emit task.created hook (always, regardless of assignee)
@@ -923,17 +940,8 @@ export const createTask = command(taskSchema, async (data) => {
 		// Don't throw - task creation should succeed even if notification fails
 	}
 
-	// If task is assigned, auto-watch for assignee and send assignment email
+	// If task is assigned, send assignment email and in-app notification
 	if (data.assignedToUserId) {
-		// Auto-watch for assignee
-		const assigneeWatcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-		await db.insert(table.taskWatcher).values({
-			id: assigneeWatcherId,
-			taskId,
-			userId: data.assignedToUserId,
-			tenantId: targetTenantId
-		});
-
 		// Get assignee email
 		const [assignee] = await db
 			.select()
