@@ -16,6 +16,14 @@
 
 	let { images, index, open, onClose, onIndexChange }: Props = $props();
 
+	let overlayEl = $state<HTMLDivElement | null>(null);
+
+	$effect(() => {
+		if (open && overlayEl) {
+			overlayEl.focus();
+		}
+	});
+
 	function nav(delta: number) {
 		const next = (index + delta + images.length) % images.length;
 		onIndexChange(next);
@@ -44,6 +52,7 @@
 
 {#if open && current}
 	<div
+		bind:this={overlayEl}
 		class="ct-lb-overlay fixed inset-0 z-[300] flex items-center justify-center bg-black/85"
 		onclick={onClose}
 		onkeydown={(e) => {

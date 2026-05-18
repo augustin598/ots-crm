@@ -15,6 +15,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import { toast } from 'svelte-sonner';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { onDestroy } from 'svelte';
 
 	const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
 
@@ -28,11 +29,10 @@
 
 	type Props = {
 		taskId: string;
-		currentUserId: string;
 		onOpenLightbox: (images: LightboxImage[], startIndex: number) => void;
 	};
 
-	let { taskId, currentUserId, onOpenLightbox }: Props = $props();
+	let { taskId, onOpenLightbox }: Props = $props();
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 
@@ -113,6 +113,10 @@
 		for (const a of pendingAttachments) URL.revokeObjectURL(a.previewUrl);
 		pendingAttachments = [];
 	}
+
+	onDestroy(() => {
+		for (const a of pendingAttachments) URL.revokeObjectURL(a.previewUrl);
+	});
 
 	async function submitTopLevel() {
 		const html = editorRef?.getHTML() ?? '';
