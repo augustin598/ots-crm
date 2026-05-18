@@ -49,6 +49,20 @@ const RECENT_MIGRATIONS: MigrationCheck[] = [
   { id: '0245', table: 'telegram_messages', isNewTable: true, columns: ['id', 'chat_id', 'text_snippet', 'ok', 'created_at'] },
   { id: '0246', table: 'telegram_messages', column: 'chat_id' },
   { id: '0247', table: 'telegram_messages', column: 'created_at' },
+  // Tasks Faza 1 — Phase 1 Foundation
+  { id: '0302', table: 'task', column: 'type' },
+  { id: '0303', table: 'subtask', isNewTable: true, columns: ['id', 'task_id', 'tenant_id', 'title', 'done', 'position', 'created_at', 'updated_at'] },
+  { id: '0304', table: 'subtask', column: 'task_id' },
+  { id: '0305', table: 'subtask', column: 'tenant_id' },
+  { id: '0306', table: 'task_tag', isNewTable: true, columns: ['id', 'tenant_id', 'name', 'color', 'created_at'] },
+  { id: '0307', table: 'task_tag', column: 'tenant_id' },
+  { id: '0308', table: 'task_tag', column: 'name' },
+  { id: '0309', table: 'task_to_tag', isNewTable: true, columns: ['task_id', 'tag_id', 'tenant_id'] },
+  { id: '0310', table: 'task_to_tag', column: 'task_id' },
+  { id: '0311', table: 'task_to_tag', column: 'tag_id' },
+  { id: '0312', table: 'task_assignee', isNewTable: true, columns: ['task_id', 'user_id', 'tenant_id', 'role', 'created_at'] },
+  { id: '0313', table: 'task_assignee', column: 'user_id' },
+  { id: '0314', table: 'task_assignee', column: 'tenant_id' },
 ];
 
 async function main() {

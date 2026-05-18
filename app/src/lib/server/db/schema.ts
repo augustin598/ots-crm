@@ -304,6 +304,7 @@ export const task = sqliteTable('task', {
 	recurringEndDate: timestamp('recurring_end_date', { withTimezone: true, mode: 'date' }),
 	recurringParentId: text('recurring_parent_id'),
 	recurringSpawnedAt: timestamp('recurring_spawned_at', { withTimezone: true, mode: 'date' }),
+	type: text('type'), // 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other' | null
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -505,6 +506,60 @@ export const taskMarketingMaterial = sqliteTable('task_marketing_material', {
 		.notNull()
 		.default(sql`current_timestamp`)
 });
+
+export const subtask = sqliteTable('subtask', {
+	id: text('id').primaryKey(),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id').notNull(),
+	title: text('title').notNull(),
+	done: integer('done').notNull().default(0),
+	position: integer('position').notNull().default(0),
+	createdByUserId: text('created_by_user_id'),
+	createdAt: integer('created_at').notNull(),
+	updatedAt: integer('updated_at').notNull()
+});
+
+export const taskTag = sqliteTable('task_tag', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id').notNull(),
+	name: text('name').notNull(),
+	color: text('color'),
+	createdAt: integer('created_at').notNull()
+});
+
+export const taskToTag = sqliteTable(
+	'task_to_tag',
+	{
+		taskId: text('task_id')
+			.notNull()
+			.references(() => task.id, { onDelete: 'cascade' }),
+		tagId: text('tag_id')
+			.notNull()
+			.references(() => taskTag.id, { onDelete: 'cascade' }),
+		tenantId: text('tenant_id').notNull()
+	},
+	(t) => ({
+		pk: index('task_to_tag_pk').on(t.taskId, t.tagId)
+	})
+);
+
+export const taskAssignee = sqliteTable(
+	'task_assignee',
+	{
+		taskId: text('task_id')
+			.notNull()
+			.references(() => task.id, { onDelete: 'cascade' }),
+		userId: text('user_id').notNull(),
+		tenantId: text('tenant_id').notNull(),
+		role: text('role'),
+		createdAt: integer('created_at').notNull()
+	},
+	(t) => ({
+		pk: index('task_assignee_pk').on(t.taskId, t.userId)
+	})
+);
 
 export const invoice = sqliteTable('invoice', {
 	id: text('id').primaryKey(),
@@ -2785,7 +2840,10 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 	comments: many(taskComment),
 	watchers: many(taskWatcher),
 	activities: many(taskActivity),
-	materials: many(taskMarketingMaterial)
+	materials: many(taskMarketingMaterial),
+	subtasks: many(subtask),
+	taskToTags: many(taskToTag),
+	assignees: many(taskAssignee)
 }));
 
 export const taskCommentRelations = relations(taskComment, ({ one, many }) => ({
@@ -2834,6 +2892,35 @@ export const taskActivityRelations = relations(taskActivity, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [taskActivity.tenantId],
 		references: [tenant.id]
+	})
+}));
+
+export const subtaskRelations = relations(subtask, ({ one }) => ({
+	task: one(task, {
+		fields: [subtask.taskId],
+		references: [task.id]
+	})
+}));
+
+export const taskTagRelations = relations(taskTag, ({ many }) => ({
+	taskToTags: many(taskToTag)
+}));
+
+export const taskToTagRelations = relations(taskToTag, ({ one }) => ({
+	task: one(task, {
+		fields: [taskToTag.taskId],
+		references: [task.id]
+	}),
+	tag: one(taskTag, {
+		fields: [taskToTag.tagId],
+		references: [taskTag.id]
+	})
+}));
+
+export const taskAssigneeRelations = relations(taskAssignee, ({ one }) => ({
+	task: one(task, {
+		fields: [taskAssignee.taskId],
+		references: [task.id]
 	})
 }));
 

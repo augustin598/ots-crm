@@ -2115,6 +2115,97 @@
 			"when": 1778593921453200,
 			"tag": "0301_post_payment_steps",
 			"breakpoints": true
+		},
+		{
+			"idx": 302,
+			"version": "6",
+			"when": 1778593921453300,
+			"tag": "0302_task_add_type",
+			"breakpoints": true
+		},
+		{
+			"idx": 303,
+			"version": "6",
+			"when": 1778593921453400,
+			"tag": "0303_subtask_create_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 304,
+			"version": "6",
+			"when": 1778593921453500,
+			"tag": "0304_subtask_task_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 305,
+			"version": "6",
+			"when": 1778593921453600,
+			"tag": "0305_subtask_tenant_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 306,
+			"version": "6",
+			"when": 1778593921453700,
+			"tag": "0306_task_tag_create_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 307,
+			"version": "6",
+			"when": 1778593921453800,
+			"tag": "0307_task_tag_tenant_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 308,
+			"version": "6",
+			"when": 1778593921453900,
+			"tag": "0308_task_tag_tenant_name_uniq",
+			"breakpoints": true
+		},
+		{
+			"idx": 309,
+			"version": "6",
+			"when": 1778593921454000,
+			"tag": "0309_task_to_tag_create_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 310,
+			"version": "6",
+			"when": 1778593921454100,
+			"tag": "0310_task_to_tag_task_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 311,
+			"version": "6",
+			"when": 1778593921454200,
+			"tag": "0311_task_to_tag_tag_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 312,
+			"version": "6",
+			"when": 1778593921454300,
+			"tag": "0312_task_assignee_create_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 313,
+			"version": "6",
+			"when": 1778593921454400,
+			"tag": "0313_task_assignee_user_id_idx",
+			"breakpoints": true
+		},
+		{
+			"idx": 314,
+			"version": "6",
+			"when": 1778593921454500,
+			"tag": "0314_task_assignee_tenant_id_idx",
+			"breakpoints": true
 		}
 	]
 }
