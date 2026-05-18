@@ -1940,18 +1940,13 @@ export const toggleSubtask = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 
-		const [sub] = await db
-			.select()
-			.from(table.subtask)
-			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!sub) throw new Error('Subtask not found');
-
-		await db
+		const result = await db
 			.update(table.subtask)
 			.set({ done: done ? 1 : 0, updatedAt: Date.now() })
-			.where(eq(table.subtask.id, subtaskId));
+			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)))
+			.returning({ id: table.subtask.id });
+
+		if (result.length === 0) throw new Error('Subtask not found');
 
 		return { success: true };
 	}
@@ -2004,9 +1999,12 @@ export const deleteSubtask = command(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 
-		await db
+		const result = await db
 			.delete(table.subtask)
-			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)));
+			.where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)))
+			.returning({ id: table.subtask.id });
+
+		if (result.length === 0) throw new Error('Subtask not found');
 
 		return { success: true };
 	}
