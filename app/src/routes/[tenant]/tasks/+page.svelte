@@ -21,8 +21,8 @@
 	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
-	import TaskFiltersPopover from '$lib/components/task-filters-popover.svelte';
-	import TaskStatsStrip from '$lib/components/task-stats-strip.svelte';
+	import TaskFilterPills from '$lib/components/task-filter-pills.svelte';
+	import TaskStatsStrip, { type CardFilter } from '$lib/components/task-stats-strip.svelte';
 	import TaskKanbanBoard from '$lib/components/task-kanban-board.svelte';
 	import TaskTableView from '$lib/components/task-table-view.svelte';
 	import TaskBulkActionBar from '$lib/components/task-bulk-action-bar.svelte';
@@ -36,8 +36,6 @@
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
-
-	type CardFilter = '' | 'in-progress' | 'overdue' | 'completed' | 'blocked' | 'recurring';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
@@ -64,7 +62,7 @@
 	const taskIdPanel = useQueryState('taskId', parseAsString);
 	const cardFilter = useQueryState(
 		'card',
-		parseAsStringEnum(['in-progress', 'overdue', 'completed', 'blocked', 'recurring'])
+		parseAsStringEnum(['overdue', 'today', 'week', 'completed'])
 	);
 
 	// Build filter params for getTasks
@@ -101,12 +99,43 @@
 	// Stats query — separate (no excludeCompleted) so live counts stay accurate even in kanban view.
 	const statsTasksQuery = $derived(getTasks({ ...filterParams }));
 	const statsTasks = $derived(statsTasksQuery.current || []);
+
+	function isDueToday(d: Date | string | null | undefined): boolean {
+		if (!d) return false;
+		const due = d instanceof Date ? d : new Date(d);
+		const now = new Date();
+		return (
+			due.getFullYear() === now.getFullYear() &&
+			due.getMonth() === now.getMonth() &&
+			due.getDate() === now.getDate()
+		);
+	}
+	function isDueWithinWeek(d: Date | string | null | undefined): boolean {
+		if (!d) return false;
+		const due = d instanceof Date ? d : new Date(d);
+		const now = new Date();
+		now.setHours(0, 0, 0, 0);
+		const dueMidnight = new Date(due);
+		dueMidnight.setHours(0, 0, 0, 0);
+		const diff = Math.round((dueMidnight.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+		return diff >= 0 && diff <= 7;
+	}
+	function isActiveStatus(s: string | null | undefined): boolean {
+		return s !== 'done' && s !== 'cancelled';
+	}
+
 	const stats = $derived({
 		total: statsTasks.length,
+		totalActive: statsTasks.filter((t: any) => isActiveStatus(t.status)).length,
 		inProgress: statsTasks.filter((t: any) => t.status === 'in-progress').length,
 		overdue: statsTasks.filter(
-			(t: any) =>
-				t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+			(t: any) => isActiveStatus(t.status) && isTaskOverdue(t.dueDate)
+		).length,
+		dueToday: statsTasks.filter(
+			(t: any) => isActiveStatus(t.status) && isDueToday(t.dueDate)
+		).length,
+		dueWeek: statsTasks.filter(
+			(t: any) => isActiveStatus(t.status) && isDueWithinWeek(t.dueDate)
 		).length,
 		completed: statsTasks.filter((t: any) => t.status === 'done').length,
 		blocked: statsTasks.filter((t: any) => t.status === 'blocked').length
@@ -116,13 +145,20 @@
 	const filteredTasksForView = $derived.by(() => {
 		const card = cardFilter.current;
 		if (!card) return tasks;
-		if (card === 'in-progress') return tasks.filter((t: any) => t.status === 'in-progress');
 		if (card === 'completed') return tasks.filter((t: any) => t.status === 'done');
-		if (card === 'blocked') return tasks.filter((t: any) => t.status === 'blocked');
 		if (card === 'overdue') {
 			return tasks.filter(
-				(t: any) =>
-					t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+				(t: any) => isActiveStatus(t.status) && isTaskOverdue(t.dueDate)
+			);
+		}
+		if (card === 'today') {
+			return tasks.filter(
+				(t: any) => isActiveStatus(t.status) && isDueToday(t.dueDate)
+			);
+		}
+		if (card === 'week') {
+			return tasks.filter(
+				(t: any) => isActiveStatus(t.status) && isDueWithinWeek(t.dueDate)
 			);
 		}
 		return tasks;
@@ -355,20 +391,24 @@
 	<title>Tasks - CRM</title>
 </svelte:head>
 
-<div class="mb-8 flex items-center justify-between">
+<div class="mb-6 flex items-start justify-between gap-4">
 	<div>
 		<h1 class="text-3xl font-bold tracking-tight">Tasks</h1>
-		<p class="text-muted-foreground mt-1">Manage and track all project tasks</p>
+		<p class="mt-1 text-sm text-muted-foreground">
+			Coordonează echipa: {stats.totalActive} active ·
+			<strong class="text-[#ef4444]">{stats.overdue} overdue</strong>
+			· {stats.dueToday} azi
+		</p>
 	</div>
 	<div class="flex items-center gap-2">
 		<!-- View Toggle -->
-		<div class="flex items-center gap-1 border rounded-md p-1">
+		<div class="flex items-center gap-1 rounded-md border p-1">
 			<Button
 				variant={view.current === 'kanban' ? 'default' : 'ghost'}
 				size="sm"
 				onclick={() => (view.current = 'kanban')}
 			>
-				<LayoutGridIcon class="h-4 w-4 mr-2" />
+				<LayoutGridIcon class="mr-2 h-4 w-4" />
 				Kanban
 			</Button>
 			<Button
@@ -376,36 +416,30 @@
 				size="sm"
 				onclick={() => (view.current = 'table')}
 			>
-				<TableIcon class="h-4 w-4 mr-2" />
-				Table
+				<TableIcon class="mr-2 h-4 w-4" />
+				Tabel
 			</Button>
 		</div>
 		<Button onclick={() => openCreateDialog()}>
 			<PlusIcon class="mr-2 h-4 w-4" />
-			New Task
+			Task nou
 		</Button>
 	</div>
 </div>
 
-<!-- Stats strip -->
-<div class="mb-6">
+<!-- Stats strip (5 cards 1:1 with design: Total active / Overdue / Scadente azi / Săptămâna asta / Finalizate) -->
+<div class="mb-4">
 	<TaskStatsStrip
 		{stats}
 		activeFilter={(cardFilter.current ?? '') as CardFilter}
 		onFilterChange={setCardFilter}
-		extraCard="blocked"
-		hideWhenEmpty={false}
+		cards={['all', 'overdue', 'today', 'week', 'completed']}
 	/>
 </div>
 
 <!-- Filters -->
 <div class="mb-6">
-	<TaskFiltersPopover
-		projects={projects}
-		users={users}
-		milestones={milestones}
-		clients={clientsForFilter}
-	/>
+	<TaskFilterPills users={users} clients={clientsForFilter} />
 </div>
 
 <!-- Dialogs -->

@@ -224,7 +224,7 @@
 			{stats}
 			activeFilter={cardFilter}
 			onFilterChange={(v) => (cardFilter = v as typeof cardFilter)}
-			extraCard="recurring"
+			cards={['all', 'in-progress', 'overdue', 'completed', 'recurring']}
 		/>
 	{/if}
 
