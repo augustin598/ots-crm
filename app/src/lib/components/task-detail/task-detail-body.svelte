@@ -577,7 +577,7 @@
 
 						<!-- Metadata row -->
 						<div
-							class="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border bg-slate-50/80 px-4 py-3 text-sm"
+							class="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-[#e5e9f0] bg-white px-4 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
 						>
 							<div class="flex items-center gap-2">
 								<User class="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -700,7 +700,7 @@
 
 				<!-- RIGHT RAIL -->
 				<aside
-					class="w-full border-t bg-slate-50/50 md:w-[280px] md:shrink-0 md:border-t-0 md:border-l"
+					class="w-full border-t border-[#e5e9f0] bg-white md:w-[280px] md:shrink-0 md:border-t-0 md:border-l dark:border-zinc-700 dark:bg-zinc-900"
 				>
 					<div class="space-y-3 p-4">
 
@@ -775,7 +775,7 @@
 										type="text"
 										bind:value={newSubtaskTitle}
 										placeholder="Adaugă subtask..."
-										class="h-8 flex-1 rounded-lg border bg-slate-50 px-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-ring"
+										class="h-8 flex-1 rounded-lg border border-[#d5dbe5] bg-[#f7f8fa] px-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-ring dark:border-zinc-700 dark:bg-zinc-800"
 									/>
 									<button
 										type="submit"
