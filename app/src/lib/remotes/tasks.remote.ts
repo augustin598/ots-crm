@@ -228,6 +228,7 @@ export const getTasks = query(
 		status: v.optional(v.union([v.string(), v.array(v.string())])),
 		priority: v.optional(v.union([v.string(), v.array(v.string())])),
 		assignee: v.optional(v.union([v.string(), v.array(v.string())])),
+		type: v.optional(v.union([v.string(), v.array(v.string())])),
 		search: v.optional(v.string()),
 		dueDate: v.optional(v.string()), // 'overdue', 'today', 'thisWeek', 'thisMonth', or date range
 		createdDate: v.optional(v.string()), // date range format: 'YYYY-MM-DD:YYYY-MM-DD'
@@ -304,6 +305,12 @@ export const getTasks = query(
 		if (filters.assignee) {
 			const assignees = Array.isArray(filters.assignee) ? filters.assignee : [filters.assignee];
 			conditions = and(conditions, inArray(table.task.assignedToUserId, assignees)) as any;
+		}
+
+		// Type filter (task.type — design/video/ads/dev/content/meeting/other)
+		if (filters.type) {
+			const types = Array.isArray(filters.type) ? filters.type : [filters.type];
+			conditions = and(conditions, inArray(table.task.type, types)) as any;
 		}
 
 		// Search filter (title and description)
@@ -515,6 +522,7 @@ export const getCompletedTasks = query(
 		milestoneId: v.optional(v.union([v.string(), v.array(v.string())])),
 		priority: v.optional(v.union([v.string(), v.array(v.string())])),
 		assignee: v.optional(v.union([v.string(), v.array(v.string())])),
+		type: v.optional(v.union([v.string(), v.array(v.string())])),
 		search: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
 		createdDate: v.optional(v.string()),
@@ -588,6 +596,12 @@ export const getCompletedTasks = query(
 		if (filters.assignee) {
 			const assignees = Array.isArray(filters.assignee) ? filters.assignee : [filters.assignee];
 			conditions = and(conditions, inArray(table.task.assignedToUserId, assignees)) as any;
+		}
+
+		// Type filter (task.type — design/video/ads/dev/content/meeting/other)
+		if (filters.type) {
+			const types = Array.isArray(filters.type) ? filters.type : [filters.type];
+			conditions = and(conditions, inArray(table.task.type, types)) as any;
 		}
 
 		// Search filter
