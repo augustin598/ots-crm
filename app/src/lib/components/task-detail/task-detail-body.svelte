@@ -80,10 +80,11 @@
 	interface Props {
 		task: (Task & { subtasks?: any[]; tags?: any[]; assignees?: any[] }) | null;
 		currentUserId?: string;
-		mode: 'panel' | 'dialog';
+		mode: 'panel' | 'dialog' | 'fullpage';
 		tenantSlug?: string;
 		onClose: () => void;
 		additionalQueriesToUpdate?: any[];
+		isClient?: boolean;
 	}
 
 	let {
@@ -92,7 +93,8 @@
 		mode,
 		tenantSlug = '',
 		onClose,
-		additionalQueriesToUpdate = []
+		additionalQueriesToUpdate = [],
+		isClient = false
 	}: Props = $props();
 
 	const filterParams = getTaskFilters();
@@ -116,7 +118,7 @@
 	let activityOpen = $state(false);
 
 	$effect(() => {
-		if (typeof window === 'undefined' || mode !== 'panel') return;
+		if (typeof window === 'undefined' || (mode !== 'panel' && mode !== 'fullpage')) return;
 		const mql = window.matchMedia('(max-width: 767px)');
 		const update = (matches: boolean) => {
 			isMobile = matches;
@@ -155,6 +157,8 @@
 	let materialPickerOpen = $state(false);
 	let materialSearchTerm = $state('');
 	let linkingMaterialId = $state<string | null>(null);
+	let uploadingMaterial = $state(false);
+	let materialFileInput: HTMLInputElement | null = $state(null);
 
 	// Meet modal (panel only)
 	let showMeetModal = $state(false);
@@ -419,6 +423,28 @@
 		}
 	}
 
+	async function handleUploadMaterial(file: File) {
+		if (!task || !tenantSlug) return;
+		uploadingMaterial = true;
+		try {
+			const fd = new FormData();
+			fd.append('file', file);
+			fd.append('taskId', task.id);
+			const res = await fetch(`/${tenantSlug}/task-materials/upload`, { method: 'POST', body: fd });
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({ message: 'Upload eșuat' }));
+				throw new Error(err.message || `HTTP ${res.status}`);
+			}
+			await getTaskMaterials(task.id).refresh?.();
+			toast.success('Material încărcat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la upload');
+		} finally {
+			uploadingMaterial = false;
+			if (materialFileInput) materialFileInput.value = '';
+		}
+	}
+
 	async function handleToggleSubtask(subtaskId: string, done: boolean) {
 		if (!task) return;
 		subtaskLoading = { ...subtaskLoading, [subtaskId]: true };
@@ -526,14 +552,15 @@
 		<p class="text-muted-foreground text-sm">Se încarcă...</p>
 	</div>
 {:else if task && currentTask}
-	{#if mode === 'panel'}
-		<!-- ══ PANEL LAYOUT ══ -->
+	{#if mode === 'panel' || mode === 'fullpage'}
+		<!-- ══ PANEL / FULLPAGE LAYOUT ══ -->
 		<div class="flex min-h-full flex-col">
 
 			<TaskDetailHeader
 				{currentTask}
 				{tags}
 				{isOverdue}
+				{isClient}
 				onBack={onClose}
 				onScheduleMeet={() => (showMeetModal = true)}
 				onSaveField={saveField}
@@ -627,6 +654,16 @@
 								<div class="flex items-center gap-1 text-muted-foreground">
 									<Clock class="h-3.5 w-3.5 shrink-0" />
 									<span>{formatDate(task.createdAt as any)}</span>
+								</div>
+							{/if}
+
+							{#if (currentTask as any).meetTime}
+								{@const mt = (currentTask as any).meetTime}
+								{@const dur = (currentTask as any).meetDurationMinutes}
+								{@const ml = (currentTask as any).meetLink}
+								{@const endHour = dur ? (() => { const [h, m] = mt.split(':').map(Number); const total = h * 60 + m + dur; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; })() : null}
+								<div class="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+									📅 {mt}{endHour ? ` - ${endHour}` : ''}{#if ml} — <a href={ml} target="_blank" rel="noopener noreferrer" class="underline hover:text-emerald-600">{new URL(ml).hostname}</a>{/if}
 								</div>
 							{/if}
 						</div>
@@ -900,6 +937,25 @@
 											{/each}
 										</div>
 									{/if}
+									<input
+										bind:this={materialFileInput}
+										type="file"
+										class="hidden"
+										accept="image/*,video/*,.pdf,.doc,.docx"
+										onchange={(e) => {
+											const f = (e.currentTarget as HTMLInputElement).files?.[0];
+											if (f) handleUploadMaterial(f);
+										}}
+									/>
+									<button
+										type="button"
+										class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 disabled:opacity-50"
+										disabled={uploadingMaterial}
+										onclick={() => materialFileInput?.click()}
+									>
+										<Plus class="h-3.5 w-3.5" />
+										{uploadingMaterial ? 'Se încarcă...' : 'Upload material nou'}
+									</button>
 									<Popover.Root bind:open={materialPickerOpen}>
 										<Popover.Trigger>
 											{#snippet child({ props })}
@@ -986,12 +1042,12 @@
 			<div
 				class="sticky bottom-0 z-20 flex shrink-0 items-center gap-2 border-t bg-white px-6 py-3"
 			>
-				{#if currentTask.status === 'done' || currentTask.status === 'cancelled'}
+				{#if !isClient && (currentTask.status === 'done' || currentTask.status === 'cancelled')}
 					<Button onclick={handleReopen} disabled={approvalLoading} variant="outline">
 						<RefreshCw class="mr-2 h-4 w-4" />
 						Redeschide task
 					</Button>
-				{:else if currentTask.status === 'pending-approval'}
+				{:else if !isClient && currentTask.status === 'pending-approval'}
 					<Button onclick={handleApprove} disabled={approvalLoading}>
 						<Check class="mr-2 h-4 w-4" />
 						Aprobă
@@ -1000,7 +1056,7 @@
 						<X class="mr-2 h-4 w-4" />
 						Respinge
 					</Button>
-				{:else}
+				{:else if !isClient}
 					<Button
 						onclick={() => saveField('status', 'done')}
 						class="bg-emerald-600 text-white hover:bg-emerald-700"

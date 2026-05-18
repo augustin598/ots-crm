@@ -307,6 +307,7 @@ export const task = sqliteTable('task', {
 	type: text('type'), // 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other' | null
 	meetTime: text('meet_time'), // e.g. "10:00" — only for type='meeting'
 	meetDurationMinutes: integer('meet_duration_minutes'), // e.g. 30, 60
+	meetLink: text('meet_link'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),
@@ -452,6 +453,17 @@ export const taskCommentAttachment = sqliteTable('task_comment_attachment', {
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
+});
+
+export const taskCommentReaction = sqliteTable('task_comment_reaction', {
+	id: text('id').primaryKey(),
+	commentId: text('comment_id')
+		.notNull()
+		.references(() => taskComment.id, { onDelete: 'cascade' }),
+	userId: text('user_id').notNull(),
+	tenantId: text('tenant_id').notNull(),
+	emoji: text('emoji').notNull(),
+	createdAt: integer('created_at').notNull()
 });
 
 export const taskWatcher = sqliteTable('task_watcher', {
@@ -2857,12 +2869,20 @@ export const taskCommentRelations = relations(taskComment, ({ one, many }) => ({
 		fields: [taskComment.userId],
 		references: [user.id]
 	}),
-	attachments: many(taskCommentAttachment)
+	attachments: many(taskCommentAttachment),
+	reactions: many(taskCommentReaction)
 }));
 
 export const taskCommentAttachmentRelations = relations(taskCommentAttachment, ({ one }) => ({
 	comment: one(taskComment, {
 		fields: [taskCommentAttachment.commentId],
+		references: [taskComment.id]
+	})
+}));
+
+export const taskCommentReactionRelations = relations(taskCommentReaction, ({ one }) => ({
+	comment: one(taskComment, {
+		fields: [taskCommentReaction.commentId],
 		references: [taskComment.id]
 	})
 }));
@@ -3885,6 +3905,8 @@ export type TaskComment = typeof taskComment.$inferSelect;
 export type NewTaskComment = typeof taskComment.$inferInsert;
 export type TaskCommentAttachment = typeof taskCommentAttachment.$inferSelect;
 export type NewTaskCommentAttachment = typeof taskCommentAttachment.$inferInsert;
+export type TaskCommentReaction = typeof taskCommentReaction.$inferSelect;
+export type NewTaskCommentReaction = typeof taskCommentReaction.$inferInsert;
 export type TaskWatcher = typeof taskWatcher.$inferSelect;
 export type NewTaskWatcher = typeof taskWatcher.$inferInsert;
 export type DocumentTemplate = typeof documentTemplate.$inferSelect;

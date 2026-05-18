@@ -2196,7 +2196,7 @@ export const scheduleMeet = command(
 		meetTime: v.optional(v.string()),
 		meetDurationMinutes: v.optional(v.number())
 	}),
-	async ({ taskId, meetTime, meetDurationMinutes }) => {
+	async ({ taskId, meetLink, meetTime, meetDurationMinutes }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 
@@ -2207,6 +2207,7 @@ export const scheduleMeet = command(
 		if (!task) throw new Error('Task not found');
 
 		await db.update(table.task).set({
+			meetLink: meetLink ?? null,
 			meetTime: meetTime ?? null,
 			meetDurationMinutes: meetDurationMinutes ?? null,
 			updatedAt: new Date()

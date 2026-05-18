@@ -3,6 +3,9 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
+import { error } from '@sveltejs/kit';
+
+const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import sanitizeHtml from 'sanitize-html';
 import { recordTaskActivity } from '$lib/server/task-activity';
@@ -131,10 +134,32 @@ export const getTaskComments = query(
 			attachmentsByComment.set(a.commentId, existing);
 		}
 
+		const reactions = await db
+			.select()
+			.from(table.taskCommentReaction)
+			.where(
+				and(
+					inArray(table.taskCommentReaction.commentId, commentIds),
+					eq(table.taskCommentReaction.tenantId, event.locals.tenant.id)
+				)
+			);
+
+		type ReactionEntry = { count: number; mine: boolean; userIds: string[] };
+		const reactionsByComment = new Map<string, Record<string, ReactionEntry>>();
+		for (const r of reactions) {
+			if (!reactionsByComment.has(r.commentId)) reactionsByComment.set(r.commentId, {});
+			const byEmoji = reactionsByComment.get(r.commentId)!;
+			if (!byEmoji[r.emoji]) byEmoji[r.emoji] = { count: 0, mine: false, userIds: [] };
+			byEmoji[r.emoji].count++;
+			byEmoji[r.emoji].userIds.push(r.userId);
+			if (r.userId === event.locals.user!.id) byEmoji[r.emoji].mine = true;
+		}
+
 		return comments.map(c => ({
 			...c,
 			authorName: `${c.authorName || ''} ${c.authorLastName || ''}`.trim() || c.authorEmail || c.userId,
-			attachments: attachmentsByComment.get(c.id) || []
+			attachments: attachmentsByComment.get(c.id) || [],
+			reactions: reactionsByComment.get(c.id) || {}
 		}));
 	}
 );
@@ -546,5 +571,54 @@ export const getAttachmentUrl = query(
 
 		const url = await storage.getDownloadUrl(row.path, 300);
 		return { url, fileName: row.fileName, mimeType: row.mimeType };
+	}
+);
+
+export const toggleReaction = command(
+	v.object({
+		commentId: v.pipe(v.string(), v.minLength(1)),
+		emoji: v.picklist([...VALID_EMOJIS])
+	}),
+	async ({ commentId, emoji }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		const { tenant, user } = event.locals;
+
+		const deleted = await db
+			.delete(table.taskCommentReaction)
+			.where(
+				and(
+					eq(table.taskCommentReaction.commentId, commentId),
+					eq(table.taskCommentReaction.userId, user.id),
+					eq(table.taskCommentReaction.emoji, emoji),
+					eq(table.taskCommentReaction.tenantId, tenant.id)
+				)
+			)
+			.returning();
+
+		if (deleted.length === 0) {
+			const [comment] = await db
+				.select({ tenantId: table.task.tenantId })
+				.from(table.taskComment)
+				.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
+				.where(eq(table.taskComment.id, commentId))
+				.limit(1);
+			if (!comment || comment.tenantId !== tenant.id) throw error(404, 'Comment not found');
+
+			const bytes = crypto.getRandomValues(new Uint8Array(15));
+			const { encodeBase32LowerCase } = await import('@oslojs/encoding');
+			const id = encodeBase32LowerCase(bytes);
+
+			await db.insert(table.taskCommentReaction).values({
+				id,
+				commentId,
+				userId: user.id,
+				tenantId: tenant.id,
+				emoji,
+				createdAt: Date.now()
+			});
+		}
+
+		return { ok: true };
 	}
 );

@@ -4,8 +4,11 @@
 		createTaskComment,
 		updateTaskComment,
 		deleteTaskComment,
-		getAttachmentUrl
+		getAttachmentUrl,
+		toggleReaction
 	} from '$lib/remotes/task-comments.remote';
+
+	const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { Button } from '$lib/components/ui/button';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
@@ -196,6 +199,14 @@
 			toast.error(e instanceof Error ? e.message : 'Eroare');
 		}
 	}
+
+	async function handleToggleReaction(commentId: string, emoji: (typeof VALID_EMOJIS)[number]) {
+		try {
+			await toggleReaction({ commentId, emoji }).updates(getTaskComments(taskId));
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la reacție');
+		}
+	}
 </script>
 
 <div>
@@ -292,6 +303,24 @@
 					{:else}
 						<div class="comment-display text-sm leading-relaxed">{@html comment.content}</div>
 					{/if}
+
+					<div class="mt-2 flex flex-wrap gap-1">
+						{#each VALID_EMOJIS as emoji}
+							{@const reactionData = comment.reactions?.[emoji]}
+							{@const count = reactionData?.count ?? 0}
+							{@const mine = reactionData?.mine ?? false}
+							<button
+								type="button"
+								class="reaction-btn {mine ? 'mine' : ''}"
+								aria-pressed={mine}
+								aria-label="{mine ? 'Elimină' : 'Adaugă'} reacția {emoji}"
+								onclick={() => handleToggleReaction(comment.id, emoji)}
+							>
+								<span>{emoji}</span>
+								{#if count > 0}<span class="count">{count}</span>{/if}
+							</button>
+						{/each}
+					</div>
 
 					{#if comment.attachments?.length}
 						<div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -420,6 +449,33 @@
 <ImageLightbox src={lightboxSrc} open={lightboxOpen} onClose={() => (lightboxOpen = false)} />
 
 <style>
+	.reaction-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.15rem 0.5rem;
+		border-radius: 9999px;
+		border: 1px solid hsl(var(--border));
+		background: transparent;
+		font-size: 0.8rem;
+		cursor: pointer;
+		transition: background 0.15s, border-color 0.15s;
+	}
+	.reaction-btn:hover {
+		background: hsl(var(--muted));
+	}
+	.reaction-btn.mine {
+		border-color: hsl(var(--primary));
+		background: hsl(var(--primary) / 0.08);
+	}
+	.reaction-btn .count {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: hsl(var(--muted-foreground));
+	}
+	.reaction-btn.mine .count {
+		color: hsl(var(--primary));
+	}
 	.comment-display :global(a) {
 		color: hsl(var(--primary));
 		text-decoration: underline;

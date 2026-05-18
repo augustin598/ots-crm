@@ -22,6 +22,7 @@
 		onSaveField: (field: any, value: any) => void | Promise<void>;
 		onRemoveTag: (tagId: string) => void;
 		onAddTag: (tagName: string) => void;
+		isClient?: boolean;
 	}
 
 	let {
@@ -32,7 +33,8 @@
 		onScheduleMeet,
 		onSaveField,
 		onRemoveTag,
-		onAddTag
+		onAddTag,
+		isClient = false
 	}: Props = $props();
 
 	const TYPE_COLORS: Record<string, string> = {
@@ -84,6 +86,7 @@
 			<ChevronLeft class="h-4 w-4" />
 			Înapoi
 		</button>
+		{#if !isClient}
 		<button
 			type="button"
 			class="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
@@ -101,6 +104,7 @@
 			</svg>
 			Programează Google Meet
 		</button>
+		{/if}
 	</div>
 
 	<h1 class="mb-2 text-xl font-bold leading-tight text-gray-900">
@@ -113,6 +117,14 @@
 	</h1>
 
 	<div class="flex flex-wrap items-center gap-2">
+		{#if isClient}
+			<Badge variant={getStatusBadgeVariant(currentTask.status)}>
+				{formatStatus(currentTask.status || 'todo')}
+			</Badge>
+			<Badge class={getPriorityColor(currentTask.priority || 'medium')}>
+				{formatPriority(currentTask.priority || 'medium')}
+			</Badge>
+		{:else}
 		<Popover.Root>
 			<Popover.Trigger>
 				{#snippet child({ props })}
@@ -168,6 +180,7 @@
 				{/each}
 			</Popover.Content>
 		</Popover.Root>
+		{/if}
 
 		{#if isOverdue}
 			<span

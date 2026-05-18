@@ -65,6 +65,11 @@ const RECENT_MIGRATIONS: MigrationCheck[] = [
   { id: '0314', table: 'task_assignee', column: 'tenant_id' },
   { id: '0315', table: 'task', column: 'meet_time' },
   { id: '0316', table: 'task', column: 'meet_duration_minutes' },
+  { id: '0317', table: 'task_comment_reaction', isNewTable: true, columns: ['id', 'comment_id', 'user_id', 'tenant_id', 'emoji', 'created_at'] },
+  { id: '0318', table: 'task_comment_reaction', column: 'comment_id' },
+  { id: '0319', table: 'task_comment_reaction', column: 'comment_id' },
+  { id: '0320', table: 'task_comment_reaction', column: 'tenant_id' },
+  { id: '0321', table: 'task', column: 'meet_link' },
 ];
 
 async function main() {
