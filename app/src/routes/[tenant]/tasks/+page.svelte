@@ -64,6 +64,7 @@
 		'card',
 		parseAsStringEnum(['overdue', 'today', 'week', 'completed'])
 	);
+	type TaskType = 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other';
 	const taskType = useQueryState(
 		'type',
 		parseAsStringEnum(['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'])
@@ -77,7 +78,7 @@
 		projectId: (projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0 ? (projectIds.current as string[]) : undefined,
 		milestoneId: (milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0 ? (milestoneIds.current as string[]) : undefined,
 		clientId: clientIdFilter.current || undefined,
-		type: (taskType.current as string | null) || undefined,
+		type: (taskType.current as TaskType | null) ?? undefined,
 		search: search.current || undefined,
 		dueDate: dueDate.current || undefined,
 		sortBy: sortBy.current || undefined,

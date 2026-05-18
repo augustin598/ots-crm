@@ -228,7 +228,9 @@ export const getTasks = query(
 		status: v.optional(v.union([v.string(), v.array(v.string())])),
 		priority: v.optional(v.union([v.string(), v.array(v.string())])),
 		assignee: v.optional(v.union([v.string(), v.array(v.string())])),
-		type: v.optional(v.union([v.string(), v.array(v.string())])),
+		type: v.optional(
+			v.union([v.picklist(VALID_TASK_TYPES), v.array(v.picklist(VALID_TASK_TYPES))])
+		),
 		search: v.optional(v.string()),
 		dueDate: v.optional(v.string()), // 'overdue', 'today', 'thisWeek', 'thisMonth', or date range
 		createdDate: v.optional(v.string()), // date range format: 'YYYY-MM-DD:YYYY-MM-DD'
@@ -522,7 +524,9 @@ export const getCompletedTasks = query(
 		milestoneId: v.optional(v.union([v.string(), v.array(v.string())])),
 		priority: v.optional(v.union([v.string(), v.array(v.string())])),
 		assignee: v.optional(v.union([v.string(), v.array(v.string())])),
-		type: v.optional(v.union([v.string(), v.array(v.string())])),
+		type: v.optional(
+			v.union([v.picklist(VALID_TASK_TYPES), v.array(v.picklist(VALID_TASK_TYPES))])
+		),
 		search: v.optional(v.string()),
 		dueDate: v.optional(v.string()),
 		createdDate: v.optional(v.string()),
@@ -1897,74 +1901,91 @@ export const bulkDuplicateTasks = command(
 		const nowDate = new Date();
 		const nowMs = Date.now();
 
-		await db.transaction(async (tx) => {
-			for (const src of sourceTasks) {
-				const newId = generateTaskId();
-				newIds.push(newId);
+		// Pre-build ALL insert rows OUTSIDE the transaction to avoid sequential awaits
+		// inside it (Turso has ~30s tx time limits — 2000+ sequential round-trips would
+		// reliably timeout for tenants with subtask-heavy task sets).
+		const taskRows: Array<typeof table.task.$inferInsert> = [];
+		const subtaskRows: Array<typeof table.subtask.$inferInsert> = [];
+		const tagLinkRows: Array<typeof table.taskToTag.$inferInsert> = [];
+		const assigneeRows: Array<typeof table.taskAssignee.$inferInsert> = [];
 
-				await tx.insert(table.task).values({
-					id: newId,
+		for (const src of sourceTasks) {
+			const newId = generateTaskId();
+			newIds.push(newId);
+
+			taskRows.push({
+				id: newId,
+				tenantId,
+				projectId: src.projectId,
+				clientId: src.clientId,
+				milestoneId: src.milestoneId,
+				title: `Copie - ${src.title}`,
+				description: src.description,
+				status: 'todo',
+				priority: src.priority,
+				position: null,
+				dueDate: src.dueDate,
+				assignedToUserId: src.assignedToUserId,
+				createdByUserId: userId,
+				isRecurring: false,
+				recurringType: null,
+				recurringInterval: null,
+				recurringEndDate: null,
+				recurringParentId: null,
+				type: src.type,
+				meetTime: null,
+				meetDurationMinutes: null,
+				createdAt: nowDate,
+				updatedAt: nowDate
+			});
+
+			for (const s of subtasksByTask.get(src.id) ?? []) {
+				subtaskRows.push({
+					id: generateTaskId(),
+					taskId: newId,
 					tenantId,
-					projectId: src.projectId,
-					clientId: src.clientId,
-					milestoneId: src.milestoneId,
-					title: `Copie - ${src.title}`,
-					description: src.description,
-					status: 'todo',
-					priority: src.priority,
-					position: null,
-					dueDate: src.dueDate,
-					assignedToUserId: src.assignedToUserId,
+					title: s.title,
+					done: 0,
+					position: s.position,
 					createdByUserId: userId,
-					isRecurring: false,
-					recurringType: null,
-					recurringInterval: null,
-					recurringEndDate: null,
-					recurringParentId: null,
-					type: src.type,
-					meetTime: null,
-					meetDurationMinutes: null,
-					createdAt: nowDate,
-					updatedAt: nowDate
+					createdAt: nowMs,
+					updatedAt: nowMs
 				});
+			}
 
-				// Duplicate subtasks (reset done=0; integer timestamps)
-				const srcSubtasks = subtasksByTask.get(src.id) ?? [];
-				for (const s of srcSubtasks) {
-					await tx.insert(table.subtask).values({
-						id: generateTaskId(),
-						taskId: newId,
-						tenantId,
-						title: s.title,
-						done: 0,
-						position: s.position,
-						createdByUserId: userId,
-						createdAt: nowMs,
-						updatedAt: nowMs
-					});
-				}
+			for (const tl of tagLinksByTask.get(src.id) ?? []) {
+				tagLinkRows.push({
+					taskId: newId,
+					tagId: tl.tagId,
+					tenantId
+				});
+			}
 
-				// Duplicate tag links (reuse existing tag rows)
-				const srcTagLinks = tagLinksByTask.get(src.id) ?? [];
-				for (const tl of srcTagLinks) {
-					await tx.insert(table.taskToTag).values({
-						taskId: newId,
-						tagId: tl.tagId,
-						tenantId
-					});
-				}
+			for (const a of assigneesByTask.get(src.id) ?? []) {
+				assigneeRows.push({
+					taskId: newId,
+					userId: a.userId,
+					role: a.role,
+					tenantId,
+					createdAt: nowMs
+				});
+			}
+		}
 
-				// Duplicate assignees (composite PK taskId+userId, no id column; createdAt is integer)
-				const srcAssignees = assigneesByTask.get(src.id) ?? [];
-				for (const a of srcAssignees) {
-					await tx.insert(table.taskAssignee).values({
-						taskId: newId,
-						userId: a.userId,
-						role: a.role,
-						tenantId,
-						createdAt: nowMs
-					});
-				}
+		// Single transaction with at most 4 INSERT statements regardless of input size.
+		// Drizzle batches the rows into one parameterized statement per table.
+		await db.transaction(async (tx) => {
+			if (taskRows.length > 0) {
+				await tx.insert(table.task).values(taskRows);
+			}
+			if (subtaskRows.length > 0) {
+				await tx.insert(table.subtask).values(subtaskRows);
+			}
+			if (tagLinkRows.length > 0) {
+				await tx.insert(table.taskToTag).values(tagLinkRows);
+			}
+			if (assigneeRows.length > 0) {
+				await tx.insert(table.taskAssignee).values(assigneeRows);
 			}
 		});
 

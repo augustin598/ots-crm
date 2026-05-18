@@ -40,7 +40,12 @@ mock.module('$lib/server/db', () => ({
 		insert: () => ({ values: () => Promise.resolve() }),
 		update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
 		delete: () => ({ where: () => Promise.resolve() }),
-		transaction: (fn: Function) => fn({ insert: () => ({ values: () => Promise.resolve() }), update: () => ({ set: () => ({ where: () => Promise.resolve() }) }) })
+		transaction: (fn: Function) =>
+			fn({
+				insert: () => ({ values: () => Promise.resolve() }),
+				update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+				delete: () => ({ where: () => Promise.resolve() })
+			})
 	}
 }));
 
@@ -110,7 +115,15 @@ mock.module('$lib/server/recurring-tasks', () => ({
 	spawnNextRecurringTask: async () => {}
 }));
 
-const { getTask, getTasks } = await import('../tasks.remote');
+const {
+	getTask,
+	getTasks,
+	updateTaskStatus,
+	updateTaskPriority,
+	bulkUpdateTaskStatus,
+	bulkDeleteTasks,
+	bulkDuplicateTasks
+} = await import('../tasks.remote');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -323,5 +336,237 @@ describe('getTasks — backward compat: legacy assignedToUserId filter', () => {
 
 		expect(result).toHaveLength(1);
 		expect(result[0].assignedToUserId).toBe('user-x');
+	});
+});
+
+// ─── updateTaskStatus / updateTaskPriority — single inline edits ─────────────
+
+describe('updateTaskStatus', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('rejects task not owned by current tenant', async () => {
+		// Whitelist SELECT scoped by tenantId returns nothing for cross-tenant ID
+		queryQueue.push([]);
+		await expect(
+			updateTaskStatus({ taskId: 'task-from-tenant-b', newStatus: 'blocked' })
+		).rejects.toThrow(/not found/i);
+	});
+
+	test('skips no-op when newStatus equals oldStatus', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'in-progress', priority: 'medium' }]);
+		const result = await updateTaskStatus({ taskId: 'task-a1', newStatus: 'in-progress' });
+		expect(result.success).toBe(true);
+		expect(result.changed).toBe(false);
+	});
+
+	test('updates task when status changes', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'todo', priority: 'medium' }]);
+		// taskSettings probe (client notification gate — returns empty so no email is sent)
+		queryQueue.push([{ tenantId: 'tenant-a', clientEmailsEnabled: 0 }]);
+		const result = await updateTaskStatus({ taskId: 'task-a1', newStatus: 'blocked' });
+		expect(result.success).toBe(true);
+		expect(result.changed).toBe(true);
+	});
+
+	test('throws Unauthorized when no tenant in context', async () => {
+		currentEvent = { locals: { user: null, tenant: null, isClientUser: false, client: null } };
+		await expect(
+			updateTaskStatus({ taskId: 'task-a1', newStatus: 'done' })
+		).rejects.toThrow(/Unauthorized/i);
+	});
+});
+
+describe('updateTaskPriority', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('rejects task not owned by current tenant', async () => {
+		queryQueue.push([]);
+		await expect(
+			updateTaskPriority({ taskId: 'task-from-tenant-b', newPriority: 'urgent' })
+		).rejects.toThrow(/not found/i);
+	});
+
+	test('skips no-op when newPriority equals oldPriority', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'todo', priority: 'high' }]);
+		const result = await updateTaskPriority({ taskId: 'task-a1', newPriority: 'high' });
+		expect(result.success).toBe(true);
+		expect(result.changed).toBe(false);
+	});
+
+	test('updates task when priority changes', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'todo', priority: 'medium' }]);
+		const result = await updateTaskPriority({ taskId: 'task-a1', newPriority: 'urgent' });
+		expect(result.success).toBe(true);
+		expect(result.changed).toBe(true);
+	});
+});
+
+// ─── Bulk operations — multi-tenant whitelist enforcement ────────────────────
+
+describe('bulkUpdateTaskStatus — tenant whitelist', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('only counts tenant-a tasks even when payload includes tenant-b IDs', async () => {
+		// User sends 3 IDs; whitelist SELECT (scoped by tenant_id=tenant-a) returns only 2.
+		// The third ID belongs to tenant-b and is filtered out by the WHERE clause.
+		queryQueue.push([
+			{ id: 'task-a1', status: 'todo' },
+			{ id: 'task-a2', status: 'in-progress' }
+			// task-b1 NOT returned — different tenant
+		]);
+
+		const result = await bulkUpdateTaskStatus({
+			taskIds: ['task-a1', 'task-a2', 'task-b1'],
+			newStatus: 'blocked'
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.totalRequested).toBe(3);
+		expect(result.owned).toBe(2);
+		expect(result.changed).toBe(2);
+	});
+
+	test('returns changed=0 when all tasks already have target status', async () => {
+		queryQueue.push([
+			{ id: 'task-a1', status: 'blocked' },
+			{ id: 'task-a2', status: 'blocked' }
+		]);
+		const result = await bulkUpdateTaskStatus({
+			taskIds: ['task-a1', 'task-a2'],
+			newStatus: 'blocked'
+		});
+		expect(result.owned).toBe(2);
+		expect(result.changed).toBe(0);
+	});
+
+	test('counts only the tasks where status actually changes', async () => {
+		queryQueue.push([
+			{ id: 'task-a1', status: 'todo' }, // will change
+			{ id: 'task-a2', status: 'blocked' } // no-op
+		]);
+		const result = await bulkUpdateTaskStatus({
+			taskIds: ['task-a1', 'task-a2'],
+			newStatus: 'blocked'
+		});
+		expect(result.owned).toBe(2);
+		expect(result.changed).toBe(1);
+	});
+
+	test('returns 0 when no requested IDs belong to the tenant', async () => {
+		queryQueue.push([]); // tenant-a owns none of the requested IDs
+		const result = await bulkUpdateTaskStatus({
+			taskIds: ['task-b1', 'task-b2'],
+			newStatus: 'blocked'
+		});
+		expect(result.totalRequested).toBe(2);
+		expect(result.owned).toBe(0);
+		expect(result.changed).toBe(0);
+	});
+});
+
+describe('bulkDeleteTasks — tenant whitelist', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('deletes only tenant-a tasks when payload mixes tenants', async () => {
+		queryQueue.push([{ id: 'task-a1' }, { id: 'task-a2' }]); // whitelist returns 2 of 3
+		const result = await bulkDeleteTasks(['task-a1', 'task-a2', 'task-b1']);
+		expect(result.success).toBe(true);
+		expect(result.totalRequested).toBe(3);
+		expect(result.deleted).toBe(2);
+	});
+
+	test('returns 0 deletions when no IDs belong to tenant', async () => {
+		queryQueue.push([]);
+		const result = await bulkDeleteTasks(['task-b1', 'task-b2']);
+		expect(result.totalRequested).toBe(2);
+		expect(result.deleted).toBe(0);
+	});
+});
+
+describe('bulkDuplicateTasks — tenant whitelist + batch inserts', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('duplicates only tenant-a tasks when payload mixes tenants', async () => {
+		// Source whitelist SELECT — returns 2 of 3 (third is tenant-b, filtered)
+		queryQueue.push([
+			{
+				id: 'task-a1',
+				tenantId: 'tenant-a',
+				title: 'Task A1',
+				description: 'desc',
+				status: 'in-progress',
+				priority: 'high',
+				type: 'video',
+				projectId: null,
+				clientId: null,
+				milestoneId: null,
+				dueDate: null,
+				assignedToUserId: null,
+				recurringType: null,
+				recurringInterval: null,
+				recurringEndDate: null,
+				recurringParentId: null,
+				meetTime: null,
+				meetDurationMinutes: null
+			},
+			{
+				id: 'task-a2',
+				tenantId: 'tenant-a',
+				title: 'Task A2',
+				description: null,
+				status: 'todo',
+				priority: 'medium',
+				type: 'design',
+				projectId: null,
+				clientId: null,
+				milestoneId: null,
+				dueDate: null,
+				assignedToUserId: null,
+				recurringType: null,
+				recurringInterval: null,
+				recurringEndDate: null,
+				recurringParentId: null,
+				meetTime: null,
+				meetDurationMinutes: null
+			}
+		]);
+		// Promise.all of 3 follow-up queries (subtasks, tag links, assignees)
+		queryQueue.push([]); // subtasks
+		queryQueue.push([]); // tag links
+		queryQueue.push([]); // assignees
+
+		const result = await bulkDuplicateTasks(['task-a1', 'task-a2', 'task-b1']);
+
+		expect(result.success).toBe(true);
+		expect(result.totalRequested).toBe(3);
+		expect(result.duplicated).toBe(2);
+		expect(result.newIds).toHaveLength(2);
+		// IDs must be freshly generated, not the source IDs
+		expect(result.newIds).not.toContain('task-a1');
+		expect(result.newIds).not.toContain('task-a2');
+		expect(result.newIds).not.toContain('task-b1');
+	});
+
+	test('returns empty newIds when no requested IDs belong to tenant', async () => {
+		queryQueue.push([]); // source whitelist empty
+		const result = await bulkDuplicateTasks(['task-b1']);
+		expect(result.totalRequested).toBe(1);
+		expect(result.duplicated).toBe(0);
+		expect(result.newIds).toHaveLength(0);
 	});
 });
