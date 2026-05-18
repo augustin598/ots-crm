@@ -5,11 +5,12 @@
 	import { getMilestones } from '$lib/remotes/milestones.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { useQueryState } from 'nuqs-svelte';
 	import { parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
 	import { setContext } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import TaskDetailDialog from '$lib/components/task-detail-dialog.svelte';
+	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
 	import TaskFilters from '$lib/components/task-filters.svelte';
@@ -47,6 +48,7 @@
 	const dueDate = useQueryState('dueDate', parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth']));
 	const sortBy = useQueryState('sortBy', parseAsString.withDefault(''));
 	const sortDir = useQueryState('sortDir', parseAsStringEnum(['asc', 'desc']));
+	const taskIdPanel = useQueryState('taskId', parseAsString);
 
 	// Build filter params for getTasks
 	const filterParams = $derived({
@@ -127,13 +129,18 @@
 
 	// Dialog states
 	let isCreateDialogOpen = $state(false);
-	let selectedTask = $state<Task | null>(null);
-	let isTaskDetailOpen = $state(false);
 	let editingTask = $state<Task | null>(null);
 
-	function handleTaskClick(task: Task) {
-		selectedTask = task;
-		isTaskDetailOpen = true;
+	function openTaskFromList(task: Task) {
+		if (typeof window !== 'undefined' && window.innerWidth < 768) {
+			goto(`/${tenantSlug}/tasks/${task.id}`);
+		} else {
+			taskIdPanel.current = task.id;
+		}
+	}
+
+	function closePanel() {
+		taskIdPanel.current = null;
 	}
 
 	function handleCreateSuccess() {
@@ -150,9 +157,8 @@
 				getTasks({ ...filterParams, excludeCompleted: view.current === 'kanban' && !filterParams.status ? true : undefined }),
 				getCompletedTasks({ ...(filterParams as any), page: 1, pageSize: 20 })
 			);
-			if (selectedTask?.id === taskId) {
-				isTaskDetailOpen = false;
-				selectedTask = null;
+			if (taskIdPanel.current === taskId) {
+				taskIdPanel.current = null;
 			}
 			toast.success('Task deleted');
 		} catch (e) {
@@ -162,19 +168,10 @@
 
 	function handleEditTask(task: Task) {
 		editingTask = task;
-		isTaskDetailOpen = false;
 	}
 
 	function handleEditSuccess() {
-		// Data will be refreshed automatically via .updates() in the dialog
-		if (selectedTask) {
-			// Refresh selected task from updated tasks list
-			const updatedTask = tasks.find((t: any) => t.id === selectedTask?.id);
-			if (updatedTask) {
-				selectedTask = updatedTask;
-				isTaskDetailOpen = true;
-			}
-		}
+		// Data refreshed automatically via .updates() in the dialog
 	}
 
 	function handleSortChange(column: string, direction: 'asc' | 'desc') {
@@ -249,17 +246,6 @@
 	/>
 {/if}
 
-<TaskDetailDialog
-	task={selectedTask}
-	open={isTaskDetailOpen}
-	onOpenChange={(open) => {
-		isTaskDetailOpen = open;
-		if (!open) selectedTask = null;
-	}}
-	{tenantSlug}
-	currentUserId={(page.data as any)?.tenantUser?.userId}
-/>
-
 <!-- Content -->
 {#if loading}
 	<div class="flex items-center justify-center py-12">
@@ -272,7 +258,7 @@
 		{userMap}
 		{clientMap}
 		{tenantSlug}
-		onTaskClick={handleTaskClick}
+		onTaskClick={openTaskFromList}
 		onEditTask={handleEditTask}
 		onDeleteTask={handleDeleteTask}
 		onTasksUpdate={() => {
@@ -289,7 +275,7 @@
 			sortBy={sortBy.current || null}
 			sortDir={(sortDir.current as 'asc' | 'desc' | null) || 'asc'}
 			onSortChange={handleSortChange}
-			onTaskClick={handleTaskClick}
+			onTaskClick={openTaskFromList}
 			onEditTask={handleEditTask}
 			onDeleteTask={handleDeleteTask}
 		/>
@@ -323,3 +309,10 @@
 			</div>
 		{/if}
 {/if}
+
+<TaskDetailPanel
+	taskId={taskIdPanel.current}
+	onClose={closePanel}
+	{tenantSlug}
+	currentUserId={(page.data as any)?.tenantUser?.userId}
+/>
