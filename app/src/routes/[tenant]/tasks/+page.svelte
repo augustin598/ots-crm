@@ -26,10 +26,14 @@
 	import TaskKanbanBoard from '$lib/components/task-kanban-board.svelte';
 	import TaskTableView from '$lib/components/task-table-view.svelte';
 	import TaskBulkActionBar from '$lib/components/task-bulk-action-bar.svelte';
+	import TaskCalendarView from '$lib/components/task-calendar-view.svelte';
+	import TaskTeamView from '$lib/components/task-team-view.svelte';
 	import { isTaskOverdue } from '$lib/utils/task-filters';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import TableIcon from '@lucide/svelte/icons/table';
+	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
+	import UsersIcon from '@lucide/svelte/icons/users';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import type { Task } from '$lib/server/db/schema';
@@ -40,7 +44,10 @@
 	const tenantSlug = $derived(page.params.tenant || '');
 
 	// View state
-	const view = useQueryState('view', parseAsStringEnum(['kanban', 'table']).withDefault('kanban'));
+	const view = useQueryState(
+		'view',
+		parseAsStringEnum(['kanban', 'table', 'calendar', 'team']).withDefault('kanban')
+	);
 
 	// Filter states
 	const statuses = useQueryState(
@@ -226,10 +233,27 @@
 	// Dialog states
 	let isCreateDialogOpen = $state(false);
 	let createDialogDefaultStatus = $state<string | undefined>(undefined);
+	let createDialogInitialDay = $state<Date | null>(null);
+	let createDialogInitialType = $state<'task' | 'meet' | undefined>(undefined);
 	let editingTask = $state<Task | null>(null);
 
 	function openCreateDialog(defaultStatus?: string) {
 		createDialogDefaultStatus = defaultStatus;
+		createDialogInitialDay = null;
+		createDialogInitialType = undefined;
+		isCreateDialogOpen = true;
+	}
+
+	function openCreateDialogFromCalendar(isoDate: string, kind: 'task' | 'meet') {
+		// ISO date is local-tz YYYY-MM-DD from the calendar grid; parse into a Date
+		const [y, m, d] = isoDate.split('-').map(Number);
+		if (y && m && d) {
+			createDialogInitialDay = new Date(y, m - 1, d);
+		} else {
+			createDialogInitialDay = null;
+		}
+		createDialogInitialType = kind;
+		createDialogDefaultStatus = undefined;
 		isCreateDialogOpen = true;
 	}
 
@@ -425,6 +449,22 @@
 				<TableIcon class="mr-2 h-4 w-4" />
 				Tabel
 			</Button>
+			<Button
+				variant={view.current === 'calendar' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => (view.current = 'calendar')}
+			>
+				<CalendarDaysIcon class="mr-2 h-4 w-4" />
+				Calendar
+			</Button>
+			<Button
+				variant={view.current === 'team' ? 'default' : 'ghost'}
+				size="sm"
+				onclick={() => (view.current = 'team')}
+			>
+				<UsersIcon class="mr-2 h-4 w-4" />
+				Team
+			</Button>
 		</div>
 		<Button onclick={() => openCreateDialog()}>
 			<PlusIcon class="mr-2 h-4 w-4" />
@@ -452,9 +492,15 @@
 <CreateTaskDialog
 	open={isCreateDialogOpen}
 	defaultStatus={createDialogDefaultStatus}
+	initialDay={createDialogInitialDay}
+	initialType={createDialogInitialType}
 	onOpenChange={(open) => {
 		isCreateDialogOpen = open;
-		if (!open) createDialogDefaultStatus = undefined;
+		if (!open) {
+			createDialogDefaultStatus = undefined;
+			createDialogInitialDay = null;
+			createDialogInitialType = undefined;
+		}
 	}}
 	onSuccess={handleCreateSuccess}
 />
@@ -493,7 +539,7 @@
 			// Tasks will be refreshed automatically via .updates() in the component
 		}}
 	/>
-{:else}
+{:else if view.current === 'table'}
 		<TaskTableView
 			tasks={paginatedTasks}
 			{projectMap}
@@ -540,6 +586,23 @@
 				{/if}
 			</div>
 		{/if}
+{:else if view.current === 'calendar'}
+	<TaskCalendarView
+		tasks={filteredTasksForView}
+		onTaskClick={openTaskFromList}
+		onAddDay={openCreateDialogFromCalendar}
+	/>
+{:else if view.current === 'team'}
+	<TaskTeamView
+		tasks={filteredTasksForView}
+		{users}
+		{projectMap}
+		{clientMap}
+		{tenantSlug}
+		onTaskClick={openTaskFromList}
+		onEditTask={handleEditTask}
+		onDeleteTask={handleDeleteTask}
+	/>
 {/if}
 
 <TaskDetailPanel
