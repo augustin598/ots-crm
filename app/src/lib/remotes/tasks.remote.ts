@@ -1700,6 +1700,291 @@ export const updateTaskPriority = command(
 	}
 );
 
+/**
+ * Bulk status update — admin bulk action bar.
+ * Multi-tenant safety: pre-fetch whitelist of task IDs scoped to current tenant
+ * (never trust user-provided IDs directly in `IN (...)`).
+ * Skips no-op rows; writes one `bulk_status_changed` activity row per changed task.
+ */
+export const bulkUpdateTaskStatus = command(
+	v.object({
+		taskIds: v.pipe(v.array(v.pipe(v.string(), v.minLength(1))), v.minLength(1), v.maxLength(500)),
+		newStatus: v.picklist(VALID_STATUSES)
+	}),
+	async ({ taskIds, newStatus }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		const tenantId = event.locals.tenant.id;
+		const userId = event.locals.user.id;
+
+		// Whitelist IDs that actually belong to this tenant
+		const ownedTasks = await db
+			.select({ id: table.task.id, status: table.task.status })
+			.from(table.task)
+			.where(and(eq(table.task.tenantId, tenantId), inArray(table.task.id, taskIds)));
+
+		// Filter to tasks where status actually changes
+		const changedTasks = ownedTasks.filter((t) => t.status !== newStatus);
+		const changedIds = changedTasks.map((t) => t.id);
+
+		if (changedIds.length === 0) {
+			return {
+				success: true,
+				totalRequested: taskIds.length,
+				owned: ownedTasks.length,
+				changed: 0
+			};
+		}
+
+		await db.transaction(async (tx) => {
+			await tx
+				.update(table.task)
+				.set({ status: newStatus, updatedAt: new Date() })
+				.where(
+					and(eq(table.task.tenantId, tenantId), inArray(table.task.id, changedIds))
+				);
+		});
+
+		// Record activity per changed task (skip no-ops above already filtered)
+		for (const t of changedTasks) {
+			try {
+				await recordTaskActivity({
+					taskId: t.id,
+					userId,
+					tenantId,
+					action: 'bulk_status_changed',
+					field: 'status',
+					oldValue: t.status,
+					newValue: newStatus
+				});
+				await sendClientNotificationIfEnabled(
+					t.id,
+					tenantId,
+					'status-change',
+					{ newStatus },
+					event.locals.user.email
+				);
+			} catch (error) {
+				logWarning('server', `Bulk status activity/notification failed for task ${t.id}`, {
+					tenantId,
+					metadata: { error: (error as Error).message, newStatus }
+				});
+			}
+		}
+
+		return {
+			success: true,
+			totalRequested: taskIds.length,
+			owned: ownedTasks.length,
+			changed: changedIds.length
+		};
+	}
+);
+
+/**
+ * Bulk delete — admin bulk action bar.
+ * Hard delete; FK cascades remove subtasks/activity/assignees/tags-join.
+ * Multi-tenant safety via whitelist.
+ */
+export const bulkDeleteTasks = command(
+	v.pipe(v.array(v.pipe(v.string(), v.minLength(1))), v.minLength(1), v.maxLength(500)),
+	async (taskIds) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		const tenantId = event.locals.tenant.id;
+
+		const owned = await db
+			.select({ id: table.task.id })
+			.from(table.task)
+			.where(and(eq(table.task.tenantId, tenantId), inArray(table.task.id, taskIds)));
+		const ownedIds = owned.map((t) => t.id);
+		if (ownedIds.length === 0) {
+			return { success: true, totalRequested: taskIds.length, deleted: 0 };
+		}
+
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(table.task)
+				.where(and(eq(table.task.tenantId, tenantId), inArray(table.task.id, ownedIds)));
+		});
+
+		return { success: true, totalRequested: taskIds.length, deleted: ownedIds.length };
+	}
+);
+
+/**
+ * Bulk duplicate — admin bulk action bar.
+ * Copies title (prefixed "Copie - "), description, priority, type, client/project/milestone refs,
+ * subtasks, tags-join, and assignees. New tasks land in `status='todo'` with `position=null`.
+ * Recurring metadata is reset (the copy is a one-off).
+ */
+export const bulkDuplicateTasks = command(
+	v.pipe(v.array(v.pipe(v.string(), v.minLength(1))), v.minLength(1), v.maxLength(100)),
+	async (taskIds) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		const tenantId = event.locals.tenant.id;
+		const userId = event.locals.user.id;
+
+		// Whitelist + fetch full rows
+		const sourceTasks = await db
+			.select()
+			.from(table.task)
+			.where(and(eq(table.task.tenantId, tenantId), inArray(table.task.id, taskIds)));
+
+		if (sourceTasks.length === 0) {
+			return { success: true, totalRequested: taskIds.length, duplicated: 0, newIds: [] as string[] };
+		}
+
+		// Pre-load subtasks, tag-joins, and assignees for the source set
+		const sourceIds = sourceTasks.map((t) => t.id);
+		const [sourceSubtasks, sourceTagLinks, sourceAssignees] = await Promise.all([
+			db
+				.select()
+				.from(table.subtask)
+				.where(and(eq(table.subtask.tenantId, tenantId), inArray(table.subtask.taskId, sourceIds))),
+			db
+				.select()
+				.from(table.taskToTag)
+				.where(and(eq(table.taskToTag.tenantId, tenantId), inArray(table.taskToTag.taskId, sourceIds))),
+			db
+				.select()
+				.from(table.taskAssignee)
+				.where(and(eq(table.taskAssignee.tenantId, tenantId), inArray(table.taskAssignee.taskId, sourceIds)))
+		]);
+
+		// Group by source task id
+		const subtasksByTask = new Map<string, typeof sourceSubtasks>();
+		for (const s of sourceSubtasks) {
+			const list = subtasksByTask.get(s.taskId) ?? [];
+			list.push(s);
+			subtasksByTask.set(s.taskId, list);
+		}
+		const tagLinksByTask = new Map<string, typeof sourceTagLinks>();
+		for (const tl of sourceTagLinks) {
+			const list = tagLinksByTask.get(tl.taskId) ?? [];
+			list.push(tl);
+			tagLinksByTask.set(tl.taskId, list);
+		}
+		const assigneesByTask = new Map<string, typeof sourceAssignees>();
+		for (const a of sourceAssignees) {
+			const list = assigneesByTask.get(a.taskId) ?? [];
+			list.push(a);
+			assigneesByTask.set(a.taskId, list);
+		}
+
+		const newIds: string[] = [];
+		const nowDate = new Date();
+		const nowMs = Date.now();
+
+		await db.transaction(async (tx) => {
+			for (const src of sourceTasks) {
+				const newId = generateTaskId();
+				newIds.push(newId);
+
+				await tx.insert(table.task).values({
+					id: newId,
+					tenantId,
+					projectId: src.projectId,
+					clientId: src.clientId,
+					milestoneId: src.milestoneId,
+					title: `Copie - ${src.title}`,
+					description: src.description,
+					status: 'todo',
+					priority: src.priority,
+					position: null,
+					dueDate: src.dueDate,
+					assignedToUserId: src.assignedToUserId,
+					createdByUserId: userId,
+					isRecurring: false,
+					recurringType: null,
+					recurringInterval: null,
+					recurringEndDate: null,
+					recurringParentId: null,
+					type: src.type,
+					meetTime: null,
+					meetDurationMinutes: null,
+					createdAt: nowDate,
+					updatedAt: nowDate
+				});
+
+				// Duplicate subtasks (reset done=0; integer timestamps)
+				const srcSubtasks = subtasksByTask.get(src.id) ?? [];
+				for (const s of srcSubtasks) {
+					await tx.insert(table.subtask).values({
+						id: generateTaskId(),
+						taskId: newId,
+						tenantId,
+						title: s.title,
+						done: 0,
+						position: s.position,
+						createdByUserId: userId,
+						createdAt: nowMs,
+						updatedAt: nowMs
+					});
+				}
+
+				// Duplicate tag links (reuse existing tag rows)
+				const srcTagLinks = tagLinksByTask.get(src.id) ?? [];
+				for (const tl of srcTagLinks) {
+					await tx.insert(table.taskToTag).values({
+						taskId: newId,
+						tagId: tl.tagId,
+						tenantId
+					});
+				}
+
+				// Duplicate assignees (composite PK taskId+userId, no id column; createdAt is integer)
+				const srcAssignees = assigneesByTask.get(src.id) ?? [];
+				for (const a of srcAssignees) {
+					await tx.insert(table.taskAssignee).values({
+						taskId: newId,
+						userId: a.userId,
+						role: a.role,
+						tenantId,
+						createdAt: nowMs
+					});
+				}
+			}
+		});
+
+		// Activity log: 'duplicated' on each NEW task
+		for (let i = 0; i < sourceTasks.length; i++) {
+			const src = sourceTasks[i];
+			const newId = newIds[i];
+			try {
+				await recordTaskActivity({
+					taskId: newId,
+					userId,
+					tenantId,
+					action: 'duplicated',
+					field: 'origin',
+					oldValue: null,
+					newValue: src.id
+				});
+			} catch (error) {
+				logWarning('server', `Bulk duplicate activity log failed for new task ${newId}`, {
+					tenantId,
+					metadata: { error: (error as Error).message, sourceId: src.id }
+				});
+			}
+		}
+
+		return {
+			success: true,
+			totalRequested: taskIds.length,
+			duplicated: sourceTasks.length,
+			newIds
+		};
+	}
+);
+
 export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {

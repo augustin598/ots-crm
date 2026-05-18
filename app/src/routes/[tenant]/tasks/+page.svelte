@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { getTasks, deleteTask, getCompletedTasks, getTaskClientIds } from '$lib/remotes/tasks.remote';
+	import {
+		getTasks,
+		deleteTask,
+		getCompletedTasks,
+		getTaskClientIds,
+		bulkUpdateTaskStatus,
+		bulkDeleteTasks,
+		bulkDuplicateTasks
+	} from '$lib/remotes/tasks.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
 	import { getMilestones } from '$lib/remotes/milestones.remote';
@@ -17,6 +25,7 @@
 	import TaskStatsStrip from '$lib/components/task-stats-strip.svelte';
 	import TaskKanbanBoard from '$lib/components/task-kanban-board.svelte';
 	import TaskTableView from '$lib/components/task-table-view.svelte';
+	import TaskBulkActionBar from '$lib/components/task-bulk-action-bar.svelte';
 	import { isTaskOverdue } from '$lib/utils/task-filters';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
@@ -182,6 +191,117 @@
 		isCreateDialogOpen = true;
 	}
 
+	// --- Bulk selection state ---
+	let selectedIds = $state(new Set<string>());
+	let bulkBusy = $state(false);
+
+	function toggleTaskSelection(taskId: string, sel: boolean) {
+		const next = new Set(selectedIds);
+		if (sel) next.add(taskId);
+		else next.delete(taskId);
+		selectedIds = next;
+	}
+
+	function toggleSelectAllVisible(selectAll: boolean) {
+		const next = new Set(selectedIds);
+		if (selectAll) {
+			for (const t of paginatedTasks) next.add(t.id);
+		} else {
+			for (const t of paginatedTasks) next.delete(t.id);
+		}
+		selectedIds = next;
+	}
+
+	function clearSelection() {
+		selectedIds = new Set();
+	}
+
+	// Tasks already in done/cancelled — Pause is a no-op for them; show warning chip.
+	const inactiveSelectedCount = $derived(
+		[...selectedIds].filter((id) => {
+			const t = tasks.find((x: any) => x.id === id) || statsTasks.find((x: any) => x.id === id);
+			return t && (t.status === 'done' || t.status === 'cancelled');
+		}).length
+	);
+
+	function getStatsRefreshQueries() {
+		return [
+			getTasks({
+				...filterParams,
+				excludeCompleted:
+					view.current === 'kanban' && !filterParams.status ? true : undefined,
+				include: { subtasks: true, tags: true, assignees: true }
+			}),
+			getTasks({ ...filterParams })
+		];
+	}
+
+	async function handleBulkPause() {
+		if (selectedIds.size === 0 || bulkBusy) return;
+		const ids = [...selectedIds];
+		bulkBusy = true;
+		try {
+			const res = await bulkUpdateTaskStatus({ taskIds: ids, newStatus: 'blocked' }).updates(
+				...getStatsRefreshQueries()
+			);
+			toast.success(
+				res.changed > 0
+					? `${res.changed} task-uri marcate ca blocked`
+					: 'Niciun task afectat'
+			);
+			clearSelection();
+		} catch (e) {
+			clientLogger.apiError('task_bulk_pause', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la pauzarea task-urilor');
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	async function handleBulkDuplicate() {
+		if (selectedIds.size === 0 || bulkBusy) return;
+		const ids = [...selectedIds];
+		bulkBusy = true;
+		try {
+			const res = await bulkDuplicateTasks(ids).updates(...getStatsRefreshQueries());
+			toast.success(`${res.duplicated} task-uri duplicate`);
+			clearSelection();
+		} catch (e) {
+			clientLogger.apiError('task_bulk_duplicate', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la duplicarea task-urilor');
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	async function handleBulkDelete() {
+		if (selectedIds.size === 0 || bulkBusy) return;
+		const ids = [...selectedIds];
+		if (
+			typeof window !== 'undefined' &&
+			!confirm(
+				`Sigur ștergi ${ids.length} task-uri? Acțiunea e ireversibilă (subtaskuri, tags și assignees sunt și ele șterse).`
+			)
+		) {
+			return;
+		}
+		bulkBusy = true;
+		try {
+			const res = await bulkDeleteTasks(ids).updates(...getStatsRefreshQueries());
+			toast.success(`${res.deleted} task-uri șterse`);
+			// Close detail panel if it was for one of the deleted tasks
+			if (taskIdPanel.current && ids.includes(taskIdPanel.current)) {
+				taskIdPanel.current = null;
+			}
+			clearSelection();
+		} catch (e) {
+			clientLogger.apiError('task_bulk_delete', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergerea task-urilor');
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
 	function openTaskFromList(task: Task) {
 		if (typeof window !== 'undefined' && window.innerWidth < 768) {
 			goto(`/${tenantSlug}/tasks/${task.id}`);
@@ -326,6 +446,9 @@
 		onEditTask={handleEditTask}
 		onDeleteTask={handleDeleteTask}
 		onAddTask={(status) => openCreateDialog(status)}
+		{selectedIds}
+		onTaskSelectChange={toggleTaskSelection}
+		showSelectionCheckbox={selectedIds.size > 0}
 		onTasksUpdate={() => {
 			// Tasks will be refreshed automatically via .updates() in the component
 		}}
@@ -343,6 +466,10 @@
 			onTaskClick={openTaskFromList}
 			onEditTask={handleEditTask}
 			onDeleteTask={handleDeleteTask}
+			{selectedIds}
+			onTaskSelectChange={toggleTaskSelection}
+			onToggleSelectAll={toggleSelectAllVisible}
+			showSelectionCheckbox={true}
 		/>
 		{#if filteredTasksForView.length > 0}
 			<div class="flex items-center justify-between mt-4">
@@ -380,4 +507,14 @@
 	onClose={closePanel}
 	{tenantSlug}
 	currentUserId={(page.data as any)?.tenantUser?.userId}
+/>
+
+<TaskBulkActionBar
+	count={selectedIds.size}
+	inactiveCount={inactiveSelectedCount}
+	onPause={handleBulkPause}
+	onDuplicate={handleBulkDuplicate}
+	onDelete={handleBulkDelete}
+	onClear={clearSelection}
+	busy={bulkBusy}
 />
