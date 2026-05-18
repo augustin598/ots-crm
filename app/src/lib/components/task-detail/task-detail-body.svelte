@@ -705,7 +705,7 @@
 					<div class="space-y-3 p-4">
 
 						<!-- PROGRES / SUBTASKS card — eager -->
-						<details bind:open={progressOpen} class="overflow-hidden rounded-xl border bg-white shadow-sm">
+						<details bind:open={progressOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
 							<summary
 								class="flex cursor-pointer select-none list-none items-center justify-between p-4 text-sm font-semibold"
 							>
@@ -790,7 +790,7 @@
 						</details>
 
 						<!-- ECHIPĂ card — eager -->
-						<details bind:open={teamOpen} class="overflow-hidden rounded-xl border bg-white shadow-sm">
+						<details bind:open={teamOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
 							<summary
 								class="flex cursor-pointer select-none list-none items-center justify-between p-4 text-sm font-semibold"
 							>
@@ -871,7 +871,7 @@
 						</details>
 
 						<!-- MATERIALE card — lazy (loads on open) -->
-						<details bind:open={materialsOpen} class="overflow-hidden rounded-xl border bg-white shadow-sm">
+						<details bind:open={materialsOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
 							<summary
 								class="flex cursor-pointer select-none list-none items-center justify-between p-4 text-sm font-semibold"
 							>
@@ -1006,7 +1006,7 @@
 						</details>
 
 						<!-- ACTIVITATE card — lazy (loads on open) -->
-						<details bind:open={activityOpen} class="overflow-hidden rounded-xl border bg-white shadow-sm">
+						<details bind:open={activityOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
 							<summary
 								class="flex cursor-pointer select-none list-none items-center justify-between p-4 text-sm font-semibold"
 							>
