@@ -13,9 +13,11 @@
 	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
 	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
-	import TaskFilters from '$lib/components/task-filters.svelte';
+	import TaskFiltersPopover from '$lib/components/task-filters-popover.svelte';
+	import TaskStatsStrip from '$lib/components/task-stats-strip.svelte';
 	import TaskKanbanBoard from '$lib/components/task-kanban-board.svelte';
 	import TaskTableView from '$lib/components/task-table-view.svelte';
+	import { isTaskOverdue } from '$lib/utils/task-filters';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import TableIcon from '@lucide/svelte/icons/table';
@@ -26,6 +28,8 @@
 	import { clientLogger } from '$lib/client-logger';
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
 
+	type CardFilter = '' | 'in-progress' | 'overdue' | 'completed' | 'blocked' | 'recurring';
+
 	const tenantSlug = $derived(page.params.tenant || '');
 
 	// View state
@@ -34,7 +38,7 @@
 	// Filter states
 	const statuses = useQueryState(
 		'status',
-		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval']))
+		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked']))
 	);
 	const priorities = useQueryState(
 		'priority',
@@ -49,6 +53,10 @@
 	const sortBy = useQueryState('sortBy', parseAsString.withDefault(''));
 	const sortDir = useQueryState('sortDir', parseAsStringEnum(['asc', 'desc']));
 	const taskIdPanel = useQueryState('taskId', parseAsString);
+	const cardFilter = useQueryState(
+		'card',
+		parseAsStringEnum(['in-progress', 'overdue', 'completed', 'blocked', 'recurring'])
+	);
 
 	// Build filter params for getTasks
 	const filterParams = $derived({
@@ -78,6 +86,36 @@
 	);
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
+
+	// Stats query — separate (no excludeCompleted) so live counts stay accurate even in kanban view.
+	const statsTasksQuery = $derived(getTasks({ ...filterParams }));
+	const statsTasks = $derived(statsTasksQuery.current || []);
+	const stats = $derived({
+		total: statsTasks.length,
+		inProgress: statsTasks.filter((t: any) => t.status === 'in-progress').length,
+		overdue: statsTasks.filter(
+			(t: any) =>
+				t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+		).length,
+		completed: statsTasks.filter((t: any) => t.status === 'done').length,
+		blocked: statsTasks.filter((t: any) => t.status === 'blocked').length
+	});
+
+	// Apply cardFilter (quick stat-card narrowing) as a post-filter on tasks for views.
+	const filteredTasksForView = $derived.by(() => {
+		const card = cardFilter.current;
+		if (!card) return tasks;
+		if (card === 'in-progress') return tasks.filter((t: any) => t.status === 'in-progress');
+		if (card === 'completed') return tasks.filter((t: any) => t.status === 'done');
+		if (card === 'blocked') return tasks.filter((t: any) => t.status === 'blocked');
+		if (card === 'overdue') {
+			return tasks.filter(
+				(t: any) =>
+					t.status !== 'done' && t.status !== 'cancelled' && isTaskOverdue(t.dueDate)
+			);
+		}
+		return tasks;
+	});
 
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
@@ -113,19 +151,24 @@
 	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
 	const clientMap = $derived(new Map(clients.map((c: any) => [c.id, c.name])));
 
-	// Pagination state (table view only)
+	// Pagination state (table view only) — operates on filteredTasksForView
 	let currentPage = $state(1);
 	let pageSize = $state(25);
-	const totalPages = $derived(Math.ceil(tasks.length / pageSize));
+	const totalPages = $derived(Math.ceil(filteredTasksForView.length / pageSize));
 	const paginatedTasks = $derived(
-		tasks.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+		filteredTasksForView.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 	);
 
-	// Reset to page 1 when filters change
+	// Reset to page 1 when filters change (incl. cardFilter)
 	$effect(() => {
 		filterParams;
+		cardFilter.current;
 		currentPage = 1;
 	});
+
+	function setCardFilter(v: CardFilter) {
+		cardFilter.current = (v === '' ? null : v) as any;
+	}
 
 	// Dialog states
 	let isCreateDialogOpen = $state(false);
@@ -216,9 +259,20 @@
 	</div>
 </div>
 
+<!-- Stats strip -->
+<div class="mb-6">
+	<TaskStatsStrip
+		{stats}
+		activeFilter={(cardFilter.current ?? '') as CardFilter}
+		onFilterChange={setCardFilter}
+		extraCard="blocked"
+		hideWhenEmpty={false}
+	/>
+</div>
+
 <!-- Filters -->
 <div class="mb-6">
-	<TaskFilters
+	<TaskFiltersPopover
 		projects={projects}
 		users={users}
 		milestones={milestones}
@@ -253,7 +307,7 @@
 	</div>
 {:else if view.current === 'kanban'}
 	<TaskKanbanBoard
-		{tasks}
+		tasks={filteredTasksForView}
 		{projectMap}
 		{userMap}
 		{clientMap}
@@ -279,11 +333,11 @@
 			onEditTask={handleEditTask}
 			onDeleteTask={handleDeleteTask}
 		/>
-		{#if tasks.length > 0}
+		{#if filteredTasksForView.length > 0}
 			<div class="flex items-center justify-between mt-4">
 				<div class="flex items-center gap-4">
 					<p class="text-sm text-muted-foreground">
-						{Math.min((currentPage - 1) * pageSize + 1, tasks.length)}-{Math.min(currentPage * pageSize, tasks.length)} of {tasks.length} tasks
+						{Math.min((currentPage - 1) * pageSize + 1, filteredTasksForView.length)}-{Math.min(currentPage * pageSize, filteredTasksForView.length)} of {filteredTasksForView.length} tasks
 					</p>
 					<select
 						class="h-8 rounded-md border border-input bg-background px-2 text-sm"

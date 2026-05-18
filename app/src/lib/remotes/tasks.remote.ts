@@ -93,7 +93,7 @@ function generateTaskId() {
 	return encodeBase32LowerCase(bytes);
 }
 
-const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'] as const;
+const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 const VALID_TASK_TYPES = ['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'] as const;

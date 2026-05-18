@@ -9,6 +9,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { goto } from '$app/navigation';
 	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
+	import TaskStatsStrip from '$lib/components/task-stats-strip.svelte';
 	import {
 		formatStatus,
 		getStatusDotColor,
@@ -22,9 +23,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ListTodoIcon from '@lucide/svelte/icons/list-todo';
-	import PlayIcon from '@lucide/svelte/icons/play';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
-	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -99,7 +98,7 @@
 		}
 		// Sort
 		const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-		const statusOrder: Record<string, number> = { 'pending-approval': 0, 'todo': 1, 'in-progress': 2, 'review': 3, 'done': 4, 'cancelled': 5 };
+		const statusOrder: Record<string, number> = { 'pending-approval': 0, 'todo': 1, 'in-progress': 2, 'review': 3, 'blocked': 4, 'done': 5, 'cancelled': 6 };
 		const isInactive = (s: string) => s === 'done' || s === 'cancelled' ? 1 : 0;
 		result = [...result].sort((a, b) => {
 			// Always push done/cancelled to the end
@@ -129,10 +128,6 @@
 		completed: tasks.filter((t: any) => t.status === 'done').length,
 		recurring: tasks.filter((t: any) => t.isRecurring || t.recurringParentId).length
 	});
-
-	function toggleCardFilter(value: typeof cardFilter) {
-		cardFilter = cardFilter === value ? '' : value;
-	}
 
 	function cardFilterLabel(value: typeof cardFilter): string {
 		switch (value) {
@@ -224,89 +219,13 @@
 	</div>
 
 	<!-- Stats cards -->
-	{#if !loading && tasks.length > 0}
-		<div class="grid gap-4 grid-cols-2 md:grid-cols-5">
-			<button
-				type="button"
-				onclick={() => (cardFilter = '')}
-				aria-pressed={cardFilter === ''}
-				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === '' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
-			>
-				<div class="flex items-center gap-3">
-					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
-						<ListTodoIcon class="h-5 w-5 text-blue-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Total Tasks</p>
-						<p class="text-2xl font-bold">{stats.total}</p>
-					</div>
-				</div>
-			</button>
-			<button
-				type="button"
-				onclick={() => toggleCardFilter('in-progress')}
-				aria-pressed={cardFilter === 'in-progress'}
-				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'in-progress' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
-			>
-				<div class="flex items-center gap-3">
-					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
-						<PlayIcon class="h-5 w-5 text-blue-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">In Progress</p>
-						<p class="text-2xl font-bold">{stats.inProgress}</p>
-					</div>
-				</div>
-			</button>
-			<button
-				type="button"
-				onclick={() => toggleCardFilter('overdue')}
-				aria-pressed={cardFilter === 'overdue'}
-				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'overdue' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
-			>
-				<div class="flex items-center gap-3">
-					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10">
-						<AlertTriangleIcon class="h-5 w-5 text-red-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Overdue</p>
-						<p class="text-2xl font-bold {stats.overdue > 0 ? 'text-red-600' : ''}">{stats.overdue}</p>
-					</div>
-				</div>
-			</button>
-			<button
-				type="button"
-				onclick={() => toggleCardFilter('completed')}
-				aria-pressed={cardFilter === 'completed'}
-				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'completed' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
-			>
-				<div class="flex items-center gap-3">
-					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
-						<CheckCircle2Icon class="h-5 w-5 text-green-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Completed</p>
-						<p class="text-2xl font-bold">{stats.completed}</p>
-					</div>
-				</div>
-			</button>
-			<button
-				type="button"
-				onclick={() => toggleCardFilter('recurring')}
-				aria-pressed={cardFilter === 'recurring'}
-				class="cursor-pointer rounded-xl border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary {cardFilter === 'recurring' ? 'border-primary/50 ring-2 ring-primary/30' : 'border-border/40'}"
-			>
-				<div class="flex items-center gap-3">
-					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
-						<RepeatIcon class="h-5 w-5 text-blue-600" />
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Task recurent</p>
-						<p class="text-2xl font-bold">{stats.recurring}</p>
-					</div>
-				</div>
-			</button>
-		</div>
+	{#if !loading}
+		<TaskStatsStrip
+			{stats}
+			activeFilter={cardFilter}
+			onFilterChange={(v) => (cardFilter = v as typeof cardFilter)}
+			extraCard="recurring"
+		/>
 	{/if}
 
 	<!-- Filter bar -->

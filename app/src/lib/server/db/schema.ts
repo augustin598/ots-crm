@@ -291,7 +291,7 @@ export const task = sqliteTable('task', {
 	milestoneId: text('milestone_id').references(() => milestone.id),
 	title: text('title').notNull(),
 	description: text('description'),
-	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'
+	status: text('status').notNull().default('todo'), // 'todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked'
 	priority: text('priority').default('medium'), // 'low', 'medium', 'high', 'urgent'
 	position: integer('position'), // Position within status column for custom ordering
 	dueDate: timestamp('due_date', { withTimezone: true, mode: 'date' }),

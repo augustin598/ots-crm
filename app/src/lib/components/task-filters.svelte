@@ -25,7 +25,7 @@
 	// Query states using nuqs-svelte
 	const statuses = useQueryState(
 		'status',
-		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval']))
+		parseAsArrayOf(parseAsStringEnum(['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked']))
 	);
 	const priorities = useQueryState(
 		'priority',
