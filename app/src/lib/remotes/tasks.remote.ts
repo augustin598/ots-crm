@@ -152,26 +152,65 @@ export const getTask = query(v.pipe(v.string(), v.minLength(1)), async (taskId) 
 		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
 		.limit(1);
 
-	if (task) {
-		return task;
+	let resolvedTask = task;
+
+	if (!resolvedTask) {
+		// Check shared task
+		const [sharedTask] = await db
+			.select({ task: table.task })
+			.from(table.task)
+			.innerJoin(table.projectPartner, eq(table.task.projectId, table.projectPartner.projectId))
+			.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
+			.where(
+				and(eq(table.task.id, taskId), eq(table.partner.partnerTenantId, event.locals.tenant.id))
+			)
+			.limit(1);
+
+		if (sharedTask) {
+			resolvedTask = sharedTask.task;
+		}
 	}
 
-	// Check shared task
-	const [sharedTask] = await db
-		.select({ task: table.task })
-		.from(table.task)
-		.innerJoin(table.projectPartner, eq(table.task.projectId, table.projectPartner.projectId))
-		.innerJoin(table.partner, eq(table.projectPartner.partnerId, table.partner.id))
-		.where(
-			and(eq(table.task.id, taskId), eq(table.partner.partnerTenantId, event.locals.tenant.id))
-		)
-		.limit(1);
-
-	if (sharedTask) {
-		return sharedTask.task;
+	if (!resolvedTask) {
+		throw new Error('Task not found');
 	}
 
-	throw new Error('Task not found');
+	const resolvedTenantId = resolvedTask.tenantId;
+
+	const subtasks = await db
+		.select()
+		.from(table.subtask)
+		.where(and(eq(table.subtask.taskId, taskId), eq(table.subtask.tenantId, resolvedTenantId)))
+		.orderBy(asc(table.subtask.position), asc(table.subtask.createdAt));
+
+	const tagRows = await db
+		.select({
+			id: table.taskTag.id,
+			name: table.taskTag.name,
+			color: table.taskTag.color
+		})
+		.from(table.taskToTag)
+		.innerJoin(table.taskTag, eq(table.taskToTag.tagId, table.taskTag.id))
+		.where(and(eq(table.taskToTag.taskId, taskId), eq(table.taskToTag.tenantId, resolvedTenantId)));
+
+	const assigneeRows = await db
+		.select({
+			userId: table.taskAssignee.userId,
+			role: table.taskAssignee.role,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName,
+			email: table.user.email
+		})
+		.from(table.taskAssignee)
+		.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+		.where(and(eq(table.taskAssignee.taskId, taskId), eq(table.taskAssignee.tenantId, resolvedTenantId)));
+
+	return {
+		...resolvedTask,
+		subtasks,
+		tags: tagRows,
+		assignees: assigneeRows
+	};
 });
 
 export const getTasks = query(
@@ -187,7 +226,12 @@ export const getTasks = query(
 		createdDate: v.optional(v.string()), // date range format: 'YYYY-MM-DD:YYYY-MM-DD'
 		sortBy: v.optional(v.string()),
 		sortDir: v.optional(v.union([v.literal('asc'), v.literal('desc')])),
-		excludeCompleted: v.optional(v.boolean()) // when true, excludes done/cancelled (used by kanban view)
+		excludeCompleted: v.optional(v.boolean()), // when true, excludes done/cancelled (used by kanban view)
+		include: v.optional(v.object({
+			tags: v.optional(v.boolean()),
+			assignees: v.optional(v.boolean()),
+			subtasks: v.optional(v.boolean())
+		}))
 	}),
 	async (filters) => {
 		const event = getRequestEvent();
@@ -368,7 +412,76 @@ export const getTasks = query(
 			);
 		}
 
-		return await queryBuilder;
+		const tasks = await queryBuilder;
+
+		if (!filters.include || tasks.length === 0) {
+			return tasks;
+		}
+
+		const taskIds = tasks.map((t: { id: string }) => t.id);
+		const tenantId = event.locals.tenant.id;
+
+		const subtaskCountMap: Record<string, { total: number; done: number }> = {};
+		if (filters.include.subtasks) {
+			const rows = await db
+				.select({
+					taskId: table.subtask.taskId,
+					total: sql<number>`count(*)`,
+					done: sql<number>`sum(case when ${table.subtask.done} = 1 then 1 else 0 end)`
+				})
+				.from(table.subtask)
+				.where(and(inArray(table.subtask.taskId, taskIds), eq(table.subtask.tenantId, tenantId)))
+				.groupBy(table.subtask.taskId);
+			for (const row of rows) {
+				subtaskCountMap[row.taskId] = { total: Number(row.total), done: Number(row.done) };
+			}
+		}
+
+		const tagsByTask: Record<string, Array<{ id: string; name: string; color: string | null }>> = {};
+		if (filters.include.tags) {
+			const rows = await db
+				.select({
+					taskId: table.taskToTag.taskId,
+					id: table.taskTag.id,
+					name: table.taskTag.name,
+					color: table.taskTag.color
+				})
+				.from(table.taskToTag)
+				.innerJoin(table.taskTag, eq(table.taskToTag.tagId, table.taskTag.id))
+				.where(and(inArray(table.taskToTag.taskId, taskIds), eq(table.taskToTag.tenantId, tenantId)));
+			for (const row of rows) {
+				(tagsByTask[row.taskId] ??= []).push({ id: row.id, name: row.name, color: row.color });
+			}
+		}
+
+		const assigneesByTask: Record<string, Array<{ userId: string; role: string | null; firstName: string; lastName: string; email: string }>> = {};
+		if (filters.include.assignees) {
+			const rows = await db
+				.select({
+					taskId: table.taskAssignee.taskId,
+					userId: table.taskAssignee.userId,
+					role: table.taskAssignee.role,
+					firstName: table.user.firstName,
+					lastName: table.user.lastName,
+					email: table.user.email
+				})
+				.from(table.taskAssignee)
+				.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+				.where(and(inArray(table.taskAssignee.taskId, taskIds), eq(table.taskAssignee.tenantId, tenantId)));
+			for (const row of rows) {
+				(assigneesByTask[row.taskId] ??= []).push({ userId: row.userId, role: row.role, firstName: row.firstName, lastName: row.lastName, email: row.email });
+			}
+		}
+
+		return tasks.map((t: { id: string }) => ({
+			...t,
+			...(filters.include!.subtasks ? {
+				subtaskCount: subtaskCountMap[t.id]?.total ?? 0,
+				subtaskDoneCount: subtaskCountMap[t.id]?.done ?? 0
+			} : {}),
+			...(filters.include!.tags ? { tags: tagsByTask[t.id] ?? [] } : {}),
+			...(filters.include!.assignees ? { assignees: assigneesByTask[t.id] ?? [] } : {})
+		}));
 	}
 );
 
