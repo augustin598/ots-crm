@@ -218,14 +218,6 @@
 			label: c.name
 		}))
 	]);
-	const projectOptions = $derived([
-		{ value: '', label: '—' },
-		...(projects as { id: string; name: string }[]).map((p) => ({
-			value: p.id,
-			label: p.name
-		}))
-	]);
-
 	async function saveField<K extends keyof Task>(field: K, value: Task[K]) {
 		if (!task) return;
 		if (field === 'title' && !String(value ?? '').trim()) {

@@ -96,6 +96,7 @@ function generateTaskId() {
 const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
+const VALID_TASK_TYPES = ['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'] as const;
 
 const taskSchema = v.object({
 	title: v.pipe(v.string(), v.minLength(1, 'Title is required')),
@@ -110,7 +111,13 @@ const taskSchema = v.object({
 	isRecurring: v.optional(v.boolean()),
 	recurringType: v.optional(v.picklist(VALID_RECURRING_TYPES)),
 	recurringInterval: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(365))),
-	recurringEndDate: v.optional(v.string())
+	recurringEndDate: v.optional(v.string()),
+	type: v.optional(v.picklist(VALID_TASK_TYPES)),
+	meetTime: v.optional(v.string()),
+	meetDurationMinutes: v.optional(v.number()),
+	subtasks: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+	tagNames: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+	assigneeUserIds: v.optional(v.array(v.pipe(v.string(), v.minLength(1))))
 });
 
 function validateRecurringPayload(data: {
@@ -732,6 +739,11 @@ export const createTask = command(taskSchema, async (data) => {
 
 	validateRecurringPayload(data);
 
+	// Resolve primary assignee from multi-select if provided
+	if (!data.assignedToUserId && data.assigneeUserIds?.length) {
+		data.assignedToUserId = data.assigneeUserIds[0];
+	}
+
 	const taskId = generateTaskId();
 	// If client user, set status to pending-approval, otherwise use provided status or default to 'todo'
 	const status = event.locals.isClientUser ? 'pending-approval' : data.status || 'todo';
@@ -815,8 +827,73 @@ export const createTask = command(taskSchema, async (data) => {
 		recurringInterval: data.isRecurring ? data.recurringInterval ?? 1 : null,
 		recurringEndDate: data.isRecurring && data.recurringEndDate ? new Date(data.recurringEndDate) : null,
 		recurringParentId: null,
-		recurringSpawnedAt: null
+		recurringSpawnedAt: null,
+		type: data.type || null
 	});
+
+	// Insert subtasks
+	if (data.subtasks?.length) {
+		for (let i = 0; i < data.subtasks.length; i++) {
+			const subtaskId = generateTaskId();
+			const now = Date.now();
+			await db.insert(table.subtask).values({
+				id: subtaskId,
+				taskId,
+				tenantId: targetTenantId,
+				title: data.subtasks[i],
+				done: 0,
+				position: i,
+				createdByUserId: event.locals.user.id,
+				createdAt: now,
+				updatedAt: now
+			});
+		}
+	}
+
+	// Find-or-create tags and link to task
+	if (data.tagNames?.length) {
+		for (const name of data.tagNames) {
+			const cleanName = name.startsWith('#') ? name : `#${name}`;
+			const [existingTag] = await db
+				.select()
+				.from(table.taskTag)
+				.where(and(eq(table.taskTag.tenantId, targetTenantId), eq(table.taskTag.name, cleanName)))
+				.limit(1);
+			let tagId: string;
+			if (existingTag) {
+				tagId = existingTag.id;
+			} else {
+				tagId = generateTaskId();
+				await db.insert(table.taskTag).values({
+					id: tagId,
+					tenantId: targetTenantId,
+					name: cleanName,
+					createdAt: Date.now()
+				});
+			}
+			try {
+				await db.insert(table.taskToTag).values({ taskId, tagId, tenantId: targetTenantId });
+			} catch {
+				// ignore duplicate
+			}
+		}
+	}
+
+	// Insert multi-assignees
+	if (data.assigneeUserIds?.length) {
+		for (const userId of data.assigneeUserIds) {
+			try {
+				await db.insert(table.taskAssignee).values({
+					taskId,
+					userId,
+					tenantId: targetTenantId,
+					createdAt: Date.now()
+				});
+			} catch {
+				// ignore duplicate
+			}
+		}
+	}
 
 	// Auto-watch task for creator
 	const watcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -1027,6 +1104,11 @@ export const updateTask = command(
 			recurringType: _rt,
 			recurringInterval: _ri,
 			recurringEndDate: _red,
+			subtasks: _subtasks,
+			tagNames: _tagNames,
+			assigneeUserIds: _assigneeUserIds,
+			meetTime: _meetTime,
+			meetDurationMinutes: _meetDurationMinutes,
 			...restUpdateData
 		} = updateData;
 
@@ -1829,4 +1911,17 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 	}, event.locals.user.email);
 
 	return { success: true, taskId };
+});
+
+export const getTags = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+
+	return db
+		.select()
+		.from(table.taskTag)
+		.where(eq(table.taskTag.tenantId, event.locals.tenant.id))
+		.orderBy(asc(table.taskTag.name));
 });

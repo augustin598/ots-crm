@@ -3,23 +3,18 @@
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
-	import { getMilestones } from '$lib/remotes/milestones.remote';
-	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-	import * as Popover from '$lib/components/ui/popover';
-	import { Calendar } from '$lib/components/ui/calendar';
-	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { page } from '$app/state';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
-	import { getPriorityDotColor, getStatusDotColor } from '$lib/components/task-kanban-utils';
-	import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date';
-	import CalendarIcon from '@lucide/svelte/icons/calendar';
-	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import XIcon from '@lucide/svelte/icons/x';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 
 	interface Props {
 		open: boolean;
@@ -32,441 +27,801 @@
 		defaultPriority?: string;
 		isClient?: boolean;
 		additionalQueriesToUpdate?: any[];
+		initialType?: 'task' | 'meet';
+		initialDay?: Date | null;
 	}
 
-	let { open, onOpenChange, onSuccess, defaultProjectId, defaultClientId, defaultMilestoneId, defaultDueDate, defaultPriority: defaultPriorityProp, isClient = false, additionalQueriesToUpdate = [] }: Props = $props();
+	let {
+		open,
+		onOpenChange,
+		onSuccess,
+		defaultProjectId,
+		defaultClientId,
+		defaultMilestoneId,
+		defaultDueDate,
+		defaultPriority: defaultPriorityProp,
+		isClient = false,
+		additionalQueriesToUpdate = [],
+		initialType,
+		initialDay
+	}: Props = $props();
 
-	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
 
 	const clientsQuery = $derived(getClients());
 	const clients = $derived(clientsQuery.current || []);
-	const clientMap = $derived(new Map(clients.map((c) => [c.id, c.name])));
 
 	const projectsQuery = $derived(getProjects(undefined));
-	const projects = $derived(projectsQuery.current || []);
-	const projectMap = $derived(new Map(projects.map((p) => [p.id, p.name])));
-
-	const clientOptions = $derived([
-		{ value: '', label: 'None' },
-		...clients.map((c) => ({ value: c.id, label: c.name }))
-	]);
-	const projectOptions = $derived([
-		{ value: '', label: 'None' },
-		...projects.map((p) => ({ value: p.id, label: p.name }))
-	]);
+	const allProjects = $derived(projectsQuery.current || []);
 
 	const usersQuery = $derived(getTenantUsers());
 	const users = $derived(usersQuery.current || []);
-	const userMap = $derived(
-		new Map(
-			users.map((u) => [
-				u.id,
-				`${u.firstName} ${u.lastName}`.trim() || u.email
-			])
-		)
-	);
-
-	let title = $state('');
-	let description = $state('');
-	let clientId = $state('');
-	let projectId = $state('');
-	let milestoneId = $state('');
-	let previousProjectId = $state('');
-	let status = $state('todo');
-	let priority = $state('medium');
-
-	$effect(() => {
-		if (defaultPriorityProp) priority = defaultPriorityProp;
-	});
-	let assignedToUserId = $state('');
-	let dueDate = $state('');
-	let dueDateOpen = $state(false);
-	let dueDateValue = $state<DateValue | undefined>(undefined);
-	let loading = $state(false);
-	let error = $state<string | null>(null);
-
-	let isRecurring = $state(false);
-	let recurringType = $state<'daily' | 'weekly' | 'monthly' | 'yearly'>('weekly');
-	let recurringInterval = $state(1);
-	let recurringEndDate = $state('');
-	let recurringEndDateOpen = $state(false);
-	let recurringEndDateValue = $state<DateValue | undefined>(undefined);
-
-	// Clients must schedule tasks from tomorrow onwards; admins have no restriction.
-	const tomorrow = $derived(today(getLocalTimeZone()).add({ days: 1 }));
-	const minDueDate = $derived(isClient ? tomorrow : undefined);
-
-	function toDateString(value: DateValue): string {
-		return `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
-	}
-
-	// Sync dueDate string → CalendarDate
-	$effect(() => {
-		if (dueDate) {
-			const [y, m, d] = dueDate.split('-').map(Number);
-			if (y && m && d) dueDateValue = new CalendarDate(y, m, d);
-		} else {
-			dueDateValue = undefined;
-		}
-	});
-
-	function handleDateSelect(value: DateValue | undefined) {
-		if (value) {
-			dueDate = `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
-		} else {
-			dueDate = '';
-		}
-		dueDateOpen = false;
-	}
-
-	function formatDisplayDate(dateStr: string): string {
-		if (!dateStr) return '';
-		const [y, m, d] = dateStr.split('-').map(Number);
-		if (!y || !m || !d) return dateStr;
-		return new Date(y, m - 1, d).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
-	}
-
-	// Load milestones for selected project
-	const milestonesQuery = $derived(
-		projectId ? getMilestones(projectId) : null
-	);
-	const milestones = $derived(milestonesQuery?.current || []);
-	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
 
 	const currentUserId = $derived((page.data as any)?.tenantUser?.userId as string | undefined);
 
+	const TYPES = [
+		{ id: 'design', label: 'Design', color: '#8b5cf6' },
+		{ id: 'video', label: 'Video', color: '#ec4899' },
+		{ id: 'ads', label: 'Ads', color: '#1877F2' },
+		{ id: 'dev', label: 'Dev', color: '#06b6d4' },
+		{ id: 'content', label: 'Content', color: '#10b981' },
+		{ id: 'meeting', label: 'Meeting', color: '#f59e0b' }
+	];
+
+	const PRIORITIES = [
+		{ id: 'urgent', label: 'Urgent', color: '#ef4444' },
+		{ id: 'high', label: 'High', color: '#f59e0b' },
+		{ id: 'medium', label: 'Medium', color: '#10b981' },
+		{ id: 'low', label: 'Low', color: '#94a3b8' }
+	];
+
+	const STATUSES_CREATE = [
+		{ id: 'todo', label: 'Todo' },
+		{ id: 'in-progress', label: 'In Progress' }
+	];
+
+	function getInitialDueDate(): string {
+		if (initialDay) {
+			const y = initialDay.getFullYear();
+			const m = String(initialDay.getMonth() + 1).padStart(2, '0');
+			const d = String(initialDay.getDate()).padStart(2, '0');
+			return `${y}-${m}-${d}`;
+		}
+		return defaultDueDate || '';
+	}
+
+	let step = $state(1);
+	let draft = $state({
+		title: '',
+		description: '',
+		type: initialType === 'meet' ? 'meeting' : 'design',
+		clientId: defaultClientId || '',
+		projectId: defaultProjectId || '',
+		milestoneId: defaultMilestoneId || '',
+		priority: defaultPriorityProp || 'medium',
+		status: 'todo',
+		dueDate: getInitialDueDate(),
+		assigneeIds: [] as string[],
+		tags: initialType === 'meet' ? ['#meeting'] : ([] as string[]),
+		subtasks: [] as string[],
+		isRecurring: false,
+		recurringType: 'weekly' as 'daily' | 'weekly' | 'monthly' | 'yearly',
+		recurringInterval: 1,
+		recurringEndDate: '',
+		meetTime: '10:00',
+		meetDurationMinutes: 30
+	});
+
+	let tagInput = $state('');
+	let subtaskInput = $state('');
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+
+	const projects = $derived(
+		draft.clientId
+			? allProjects.filter((p: any) => !p.clientId || p.clientId === draft.clientId)
+			: allProjects
+	);
+
+	const isMeet = $derived(draft.type === 'meeting');
+
+	const canCreate = $derived(
+		isClient
+			? !!draft.title.trim()
+			: !!draft.title.trim() && !!draft.clientId && draft.assigneeIds.length > 0
+	);
+
+	const step1Valid = $derived(
+		isClient ? !!draft.title.trim() : !!draft.title.trim() && !!draft.clientId
+	);
+	const step2Valid = $derived(isClient ? true : draft.assigneeIds.length > 0);
+
 	$effect(() => {
 		if (open) {
-			// Reset form when dialog opens
-			title = '';
-			description = '';
-			clientId = defaultClientId || '';
-			projectId = defaultProjectId || '';
-			previousProjectId = defaultProjectId || '';
-			milestoneId = defaultMilestoneId || '';
-			status = isClient ? 'pending-approval' : 'todo';
-			priority = defaultPriorityProp || 'medium';
-			assignedToUserId = !isClient && currentUserId ? currentUserId : '';
-			dueDate = defaultDueDate || (isClient ? toDateString(tomorrow) : '');
-			isRecurring = false;
-			recurringType = 'weekly';
-			recurringInterval = 1;
-			recurringEndDate = '';
-			recurringEndDateValue = undefined;
+			step = 1;
+			draft.title = '';
+			draft.description = '';
+			draft.type = initialType === 'meet' ? 'meeting' : 'design';
+			draft.clientId = defaultClientId || '';
+			draft.projectId = defaultProjectId || '';
+			draft.milestoneId = defaultMilestoneId || '';
+			draft.priority = defaultPriorityProp || 'medium';
+			draft.status = isClient ? 'pending-approval' : 'todo';
+			draft.dueDate = getInitialDueDate();
+			draft.assigneeIds = !isClient && currentUserId ? [currentUserId] : [];
+			draft.tags = initialType === 'meet' ? ['#meeting'] : [];
+			draft.subtasks = [];
+			draft.isRecurring = false;
+			draft.recurringType = 'weekly';
+			draft.recurringInterval = 1;
+			draft.recurringEndDate = '';
+			draft.meetTime = '10:00';
+			draft.meetDurationMinutes = 30;
+			tagInput = '';
+			subtaskInput = '';
 			error = null;
 		}
 	});
 
-	$effect(() => {
-		if (recurringEndDate) {
-			const [y, m, d] = recurringEndDate.split('-').map(Number);
-			if (y && m && d) recurringEndDateValue = new CalendarDate(y, m, d);
+	function toggleAssignee(userId: string) {
+		if (draft.assigneeIds.includes(userId)) {
+			draft.assigneeIds = draft.assigneeIds.filter((id) => id !== userId);
 		} else {
-			recurringEndDateValue = undefined;
+			draft.assigneeIds = [...draft.assigneeIds, userId];
 		}
-	});
-
-	function handleRecurringEndDateSelect(value: DateValue | undefined) {
-		if (value) {
-			recurringEndDate = `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
-		} else {
-			recurringEndDate = '';
-		}
-		recurringEndDateOpen = false;
 	}
 
-	$effect(() => {
-		// Reset milestone when project changes
-		if (projectId !== previousProjectId && previousProjectId !== '') {
-			milestoneId = '';
+	function addTag() {
+		const t = tagInput.trim();
+		if (!t) return;
+		const tag = t.startsWith('#') ? t : `#${t}`;
+		if (!draft.tags.includes(tag)) {
+			draft.tags = [...draft.tags, tag];
 		}
-		previousProjectId = projectId;
-	});
+		tagInput = '';
+	}
 
-	async function handleSubmit() {
-		if (!title.trim()) {
-			error = 'Title is required';
-			return;
-		}
+	function removeTag(tag: string) {
+		draft.tags = draft.tags.filter((x) => x !== tag);
+	}
 
-		if (isClient && dueDate) {
-			const [y, m, d] = dueDate.split('-').map(Number);
-			if (y && m && d) {
-				const picked = new CalendarDate(y, m, d);
-				if (picked.compare(tomorrow) < 0) {
-					error = 'Data limită trebuie să fie de mâine sau mai târziu.';
-					return;
-				}
-			}
-		}
+	function addSubtask() {
+		const t = subtaskInput.trim();
+		if (!t) return;
+		draft.subtasks = [...draft.subtasks, t];
+		subtaskInput = '';
+	}
 
-		if (isRecurring && !dueDate) {
-			error = 'Selectează data limită pentru task-ul recurent.';
-			return;
-		}
+	function removeSubtask(idx: number) {
+		draft.subtasks = draft.subtasks.filter((_, i) => i !== idx);
+	}
 
+	function getUserInitials(user: { firstName: string; lastName: string; email: string }): string {
+		const first = user.firstName?.charAt(0) || '';
+		const last = user.lastName?.charAt(0) || '';
+		return (first + last).toUpperCase() || user.email.charAt(0).toUpperCase();
+	}
+
+	function getUserColor(userId: string): string {
+		const palette = [
+			'#1877F2',
+			'#8b5cf6',
+			'#10b981',
+			'#ec4899',
+			'#f59e0b',
+			'#06b6d4',
+			'#ef4444',
+			'#6366f1'
+		];
+		let hash = 0;
+		for (let i = 0; i < userId.length; i++)
+			hash = (hash * 31 + userId.charCodeAt(i)) & 0xffffffff;
+		return palette[Math.abs(hash) % palette.length];
+	}
+
+	function getUserName(user: { firstName: string; lastName: string; email: string }): string {
+		return `${user.firstName} ${user.lastName}`.trim() || user.email;
+	}
+
+	const clientName = $derived(clients.find((c) => c.id === draft.clientId)?.name || '—');
+	const priorityLabel = $derived(PRIORITIES.find((p) => p.id === draft.priority)?.label || '—');
+	const statusLabel = $derived(
+		draft.status === 'todo'
+			? 'Todo'
+			: draft.status === 'in-progress'
+				? 'In Progress'
+				: draft.status
+	);
+
+	async function handleCreate() {
+		if (!canCreate) return;
 		loading = true;
 		error = null;
-
 		try {
-			// Refresh getTasks query with the same filters as the page
+			const tagNames = draft.tags
+				.map((t) => (t.startsWith('#') ? t.slice(1) : t))
+				.filter(Boolean);
 			await createTask({
-				title,
-				description: description || undefined,
-				clientId: clientId || undefined,
-				projectId: projectId || undefined,
-				milestoneId: milestoneId || undefined,
-				status: (status || undefined) as 'done' | 'todo' | 'in-progress' | 'review' | 'cancelled' | 'pending-approval' | undefined,
-				priority: (priority || undefined) as 'medium' | 'low' | 'high' | 'urgent' | undefined,
-				dueDate: dueDate || undefined,
-				assignedToUserId: assignedToUserId || undefined,
-				isRecurring: isRecurring || undefined,
-				recurringType: isRecurring ? recurringType : undefined,
-				recurringInterval: isRecurring ? recurringInterval : undefined,
-				recurringEndDate: isRecurring && recurringEndDate ? recurringEndDate : undefined
-			}).updates(getTasks({ ...(filterParams as any || {}), excludeCompleted: true }), getCompletedTasks({ ...(filterParams as any || {}), page: 1, pageSize: 20 }), ...additionalQueriesToUpdate);
-
+				title: draft.title,
+				description: draft.description || undefined,
+				clientId: draft.clientId || undefined,
+				projectId: draft.projectId || undefined,
+				milestoneId: draft.milestoneId || undefined,
+				status: (isClient ? 'pending-approval' : draft.status) as any,
+				priority: draft.priority as any,
+				dueDate: draft.dueDate || undefined,
+				assignedToUserId: draft.assigneeIds[0] || undefined,
+				assigneeUserIds: draft.assigneeIds.length ? draft.assigneeIds : undefined,
+				isRecurring: draft.isRecurring || undefined,
+				recurringType: draft.isRecurring ? (draft.recurringType as any) : undefined,
+				recurringInterval: draft.isRecurring ? draft.recurringInterval : undefined,
+				recurringEndDate:
+					draft.isRecurring && draft.recurringEndDate ? draft.recurringEndDate : undefined,
+				type: draft.type as any,
+				meetTime: isMeet && draft.meetTime ? draft.meetTime : undefined,
+				meetDurationMinutes: isMeet ? draft.meetDurationMinutes : undefined,
+				subtasks: draft.subtasks.length ? draft.subtasks : undefined,
+				tagNames: tagNames.length ? tagNames : undefined
+			}).updates(
+				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
+				...additionalQueriesToUpdate
+			);
 			onOpenChange(false);
 			onSuccess?.();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to create task';
+			error = e instanceof Error ? e.message : 'A apărut o eroare';
 		} finally {
 			loading = false;
 		}
 	}
+
+	const STEPS = [
+		{ n: 1, label: 'Detalii' },
+		{ n: 2, label: 'Echipă & Plan' },
+		{ n: 3, label: 'Subtaskuri & Final' }
+	];
 </script>
 
-<Dialog bind:open onOpenChange={onOpenChange}>
-	<DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
-		<DialogHeader>
-			<DialogTitle>Create New Task</DialogTitle>
-			<DialogDescription>Add a new task to a project</DialogDescription>
-		</DialogHeader>
-		<div class="grid gap-4 py-4">
-			<div class="grid gap-2">
-				<Label for="title">Task Title</Label>
-				<Input id="title" bind:value={title} placeholder="Design homepage mockup" required />
+<Dialog bind:open {onOpenChange}>
+	<DialogContent class="flex flex-col gap-0 p-0 sm:max-w-[680px] max-h-[90vh] overflow-hidden">
+		<!-- Header -->
+		<div class="flex items-center gap-3 border-b px-5 py-4">
+			<span
+				class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"
+			>
+				<PlusIcon class="h-4 w-4" />
+			</span>
+			<div class="min-w-0 flex-1">
+				<h2 class="text-sm font-semibold leading-tight text-slate-900">
+					{isMeet ? 'Meeting nou (Google Meet)' : 'Task nou'}
+				</h2>
+				<p class="mt-0.5 text-xs text-slate-500">
+					{isMeet
+						? 'Programează o întâlnire cu echipa'
+						: 'Creează un task pentru echipă'} · Pasul {step}/3
+				</p>
 			</div>
-			<div class="grid gap-2">
-				<Label for="description">Description</Label>
-				<Textarea id="description" bind:value={description} placeholder="Add details about the task..." />
-			</div>
-			{#if !isClient}
-				<div class="grid gap-2">
-					<Label for="client">Client</Label>
-					<Combobox
-						bind:value={clientId}
-						options={clientOptions}
-						placeholder="Select a client (optional)"
-						searchPlaceholder="Search clients..."
-					/>
-				</div>
-			{/if}
-			<div class="grid gap-2">
-				<Label for="project">Project</Label>
-				<Combobox
-					bind:value={projectId}
-					options={projectOptions}
-					placeholder="Select a project (optional)"
-					searchPlaceholder="Search projects..."
-				/>
-			</div>
-			{#if projectId && milestones.length > 0}
-				<div class="grid gap-2">
-					<Label for="milestone">Milestone (Optional)</Label>
-					<Select type="single" bind:value={milestoneId}>
-						<SelectTrigger id="milestone">
-							{#if milestoneId && milestoneMap.has(milestoneId)}
-								{milestoneMap.get(milestoneId)}
-							{:else}
-								Select a milestone
-							{/if}
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="">None</SelectItem>
-							{#each milestones as milestone}
-								<SelectItem value={milestone.id}>{milestone.name}</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
-				</div>
-			{/if}
-			<div class="grid grid-cols-2 gap-4">
-				{#if !isClient}
-					<div class="grid gap-2">
-						<Label for="status">Status</Label>
-						<Select type="single" bind:value={status}>
-							<SelectTrigger id="status">
-								<div class="flex items-center gap-2">
-									<span class="h-2 w-2 rounded-full {getStatusDotColor(status)}"></span>
-									{#if status === 'todo'}
-										To Do
-									{:else if status === 'in-progress'}
-										In Progress
-									{:else if status === 'review'}
-										Review
-									{:else if status === 'done'}
-										Done
-									{:else}
-										Select status
-									{/if}
-								</div>
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="todo"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-slate-400"></span> To Do</div></SelectItem>
-								<SelectItem value="in-progress"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-blue-500"></span> In Progress</div></SelectItem>
-								<SelectItem value="review"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-purple-500"></span> Review</div></SelectItem>
-								<SelectItem value="done"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-green-500"></span> Done</div></SelectItem>
-							</SelectContent>
-						</Select>
+			<button
+				class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+				onclick={() => onOpenChange(false)}
+				aria-label="Închide"
+			>
+				<XIcon class="h-4 w-4" />
+			</button>
+		</div>
+
+		<!-- Stepper -->
+		<div class="flex gap-1.5 border-b bg-slate-50 px-5 py-3">
+			{#each STEPS as s}
+				<button
+					class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all hover:bg-white/60
+						{step === s.n ? 'bg-white text-slate-900 shadow-sm' : ''}
+						{step > s.n ? 'text-emerald-600' : ''}
+						{step < s.n ? 'text-slate-400' : ''}"
+					onclick={() => {
+						if (
+							s.n < step ||
+							(s.n === 2 && step1Valid) ||
+							(s.n === 3 && step1Valid && step2Valid)
+						) {
+							step = s.n;
+						}
+					}}
+				>
+					<span
+						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold
+							{step === s.n ? 'bg-blue-600 text-white' : ''}
+							{step > s.n ? 'bg-emerald-500 text-white' : ''}
+							{step < s.n ? 'bg-slate-200 text-slate-500' : ''}"
+					>
+						{#if step > s.n}
+							<CheckIcon class="h-2.5 w-2.5" />
+						{:else}
+							{s.n}
+						{/if}
+					</span>
+					<span>{s.label}</span>
+				</button>
+			{/each}
+		</div>
+
+		<!-- Body -->
+		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+			{#if step === 1}
+				<div class="grid grid-cols-2 gap-4">
+					<!-- Title -->
+					<div class="col-span-2 flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+							Titlu {isMeet ? 'meeting' : 'task'}
+							<span class="text-red-500">*</span>
+						</label>
+						<!-- svelte-ignore a11y_autofocus -->
+						<input
+							autofocus
+							class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+							placeholder={isMeet
+								? 'Ex: Sync săptămânal Heylux'
+								: 'Ex: Materiale TikTok – campanie nouă'}
+							bind:value={draft.title}
+						/>
 					</div>
-				{/if}
-				<div class="grid gap-2">
-					<Label for="priority">Priority</Label>
-					<Select type="single" bind:value={priority}>
-						<SelectTrigger id="priority">
-							<div class="flex items-center gap-2">
-								<span class="h-2 w-2 rounded-full {getPriorityDotColor(priority)}"></span>
-								{#if priority === 'low'}
-									Low
-								{:else if priority === 'medium'}
-									Medium
-								{:else if priority === 'high'}
-									High
-								{:else if priority === 'urgent'}
-									Urgent
-								{:else}
-									Select priority
-								{/if}
-							</div>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="low"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-gray-400"></span> Low</div></SelectItem>
-							<SelectItem value="medium"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-green-500"></span> Medium</div></SelectItem>
-							<SelectItem value="high"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-orange-500"></span> High</div></SelectItem>
-							<SelectItem value="urgent"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-red-500"></span> Urgent</div></SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-			</div>
-			<div class="grid grid-cols-2 gap-4">
-				{#if !isClient}
-					<div class="grid gap-2">
-						<Label for="assignee">Assignee</Label>
-						<Select type="single" bind:value={assignedToUserId}>
-							<SelectTrigger id="assignee">
-								{#if assignedToUserId && userMap.has(assignedToUserId)}
-									{userMap.get(assignedToUserId)}
-								{:else if assignedToUserId}
-									{assignedToUserId.substring(0, 8)}...
-								{:else}
-									Select a user
-								{/if}
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="">None</SelectItem>
-								{#each users as user}
-									<SelectItem value={user.id}>
-										{`${user.firstName} ${user.lastName}`.trim() || user.email}
-									</SelectItem>
+
+					{#if isMeet}
+						<!-- Meet time -->
+						<div class="flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Oră început</label
+							>
+							<input
+								type="time"
+								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+								bind:value={draft.meetTime}
+							/>
+						</div>
+						<!-- Duration -->
+						<div class="flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Durată</label
+							>
+							<div class="flex gap-1.5">
+								{#each [15, 30, 45, 60] as dur}
+									<button
+										class="flex-1 rounded-lg border py-2 text-xs font-semibold transition-all
+											{draft.meetDurationMinutes === dur
+												? 'border-blue-500 bg-blue-50 text-blue-700'
+												: 'border-slate-200 bg-white text-slate-500 hover:border-blue-300'}"
+										onclick={() => (draft.meetDurationMinutes = dur)}
+									>
+										{dur < 60 ? dur + ' min' : '1 oră'}
+									</button>
 								{/each}
-							</SelectContent>
-						</Select>
-					</div>
-				{/if}
-				<div class="grid gap-2">
-					<Label>Due Date</Label>
-					<Popover.Root bind:open={dueDateOpen}>
-						<Popover.Trigger>
-							{#snippet child({ props })}
-								<Button {...props} variant="outline" class="w-full h-9 justify-start text-start font-normal text-sm">
-									<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-									{dueDate ? formatDisplayDate(dueDate) : 'Select date'}
-								</Button>
-							{/snippet}
-						</Popover.Trigger>
-						<Popover.Content class="w-auto p-0" align="start">
-							<div class="flex flex-col">
-								<Calendar type="single" value={dueDateValue} onValueChange={handleDateSelect} locale="ro-RO" minValue={minDueDate} />
-								{#if dueDate}
-									<Button variant="ghost" class="rounded-t-none border-t text-muted-foreground text-sm" onclick={() => { dueDate = ''; dueDateValue = undefined; dueDateOpen = false; }}>
-										Clear date
-									</Button>
-								{/if}
 							</div>
-						</Popover.Content>
-					</Popover.Root>
-				</div>
-			</div>
-			<div class="grid gap-3 rounded-md border bg-slate-50/50 p-3">
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						<RepeatIcon class="h-4 w-4 text-muted-foreground" />
-						<Label for="recurring-toggle" class="cursor-pointer">Task recurent</Label>
-					</div>
-					<Switch id="recurring-toggle" bind:checked={isRecurring} disabled={!dueDate} />
-				</div>
-				{#if !dueDate}
-					<p class="text-xs text-muted-foreground">Selectează o dată limită ca să activezi recurența.</p>
-				{/if}
-				{#if isRecurring}
-					<div class="grid grid-cols-2 gap-3">
-						<div class="grid gap-1.5">
-							<Label class="text-xs">Frecvență</Label>
-							<Select type="single" value={recurringType} onValueChange={(v) => { if (v) recurringType = v as typeof recurringType; }}>
-								<SelectTrigger>
-									{#if recurringType === 'daily'}Zilnic{:else if recurringType === 'weekly'}Săptămânal{:else if recurringType === 'monthly'}Lunar{:else}Anual{/if}
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="daily">Zilnic</SelectItem>
-									<SelectItem value="weekly">Săptămânal</SelectItem>
-									<SelectItem value="monthly">Lunar</SelectItem>
-									<SelectItem value="yearly">Anual</SelectItem>
-								</SelectContent>
-							</Select>
 						</div>
-						<div class="grid gap-1.5">
-							<Label class="text-xs">La fiecare</Label>
-							<Input type="number" min="1" max="365" bind:value={recurringInterval} />
+						<!-- Meet info banner -->
+						<div
+							class="col-span-2 flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3"
+						>
+							<div class="text-xs text-blue-700">
+								<strong>Link Google Meet</strong> va fi generat automat la creare (Faza 3)
+							</div>
+						</div>
+					{/if}
+
+					<!-- Description -->
+					<div class="col-span-2 flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Descriere</label
+						>
+						<Textarea
+							class="min-h-[80px] resize-y text-sm"
+							placeholder="Detalii, link-uri, brief..."
+							bind:value={draft.description}
+						/>
+					</div>
+
+					{#if !isClient}
+						<!-- Client -->
+						<div class="flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+								Client <span class="text-red-500">*</span>
+							</label>
+							<select
+								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+								bind:value={draft.clientId}
+							>
+								<option value="">Alege client...</option>
+								{#each clients as client}
+									<option value={client.id}>{client.name}</option>
+								{/each}
+							</select>
+						</div>
+
+						<!-- Project -->
+						<div class="flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Proiect</label
+							>
+							<select
+								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+								bind:value={draft.projectId}
+							>
+								<option value="">Niciun proiect</option>
+								{#each projects as project}
+									<option value={project.id}>{project.name}</option>
+								{/each}
+							</select>
+						</div>
+					{/if}
+
+					<!-- Type chips -->
+					<div class="col-span-2 flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tip</label>
+						<div class="flex flex-wrap gap-1.5">
+							{#each TYPES as t}
+								<button
+									class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all"
+									style={draft.type === t.id
+										? `border-color: ${t.color}; background: ${t.color}18; color: ${t.color};`
+										: 'border-color: #d5dbe5; background: white; color: #475569;'}
+									onclick={() => (draft.type = t.id)}
+								>
+									<span
+										class="h-1.5 w-1.5 shrink-0 rounded-full"
+										style="background: {t.color}"
+									></span>
+									{t.label}
+								</button>
+							{/each}
 						</div>
 					</div>
-					<div class="grid gap-1.5">
-						<Label class="text-xs">Data sfârșit (opțional)</Label>
-						<Popover.Root bind:open={recurringEndDateOpen}>
-							<Popover.Trigger>
-								{#snippet child({ props })}
-									<Button {...props} variant="outline" class="w-full h-9 justify-start text-start font-normal text-sm">
-										<CalendarIcon class="mr-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-										{recurringEndDate ? formatDisplayDate(recurringEndDate) : 'Fără limită'}
-									</Button>
-								{/snippet}
-							</Popover.Trigger>
-							<Popover.Content class="w-auto p-0" align="start">
-								<div class="flex flex-col">
-									<Calendar type="single" value={recurringEndDateValue} onValueChange={handleRecurringEndDateSelect} locale="ro-RO" />
-									{#if recurringEndDate}
-										<Button variant="ghost" class="rounded-t-none border-t text-muted-foreground text-sm" onclick={() => { recurringEndDate = ''; recurringEndDateValue = undefined; recurringEndDateOpen = false; }}>
-											Șterge data
-										</Button>
-									{/if}
+				</div>
+			{:else if step === 2}
+				<div class="grid grid-cols-2 gap-4">
+					{#if !isClient}
+						<!-- Assignees -->
+						<div class="col-span-2 flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+								Responsabili <span class="text-red-500">*</span>
+							</label>
+							<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+								{#each users as user}
+									{@const selected = draft.assigneeIds.includes(user.id)}
+									<button
+										class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
+											{selected
+												? 'border-blue-500 bg-blue-50 text-slate-900'
+												: 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}"
+										onclick={() => toggleAssignee(user.id)}
+									>
+										<span
+											class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+											style="background: {getUserColor(user.id)}"
+										>
+											{getUserInitials(user)}
+										</span>
+										<span class="flex-1 truncate">{getUserName(user)}</span>
+										{#if selected}
+											<span
+												class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+											>
+												<CheckIcon class="h-2.5 w-2.5" />
+											</span>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Priority -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Prioritate</label
+						>
+						<div class="flex flex-wrap gap-1.5">
+							{#each PRIORITIES as p}
+								<button
+									class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all"
+									style={draft.priority === p.id
+										? `border-color: ${p.color}; background: ${p.color}18; color: ${p.color};`
+										: 'border-color: #d5dbe5; background: white; color: #475569;'}
+									onclick={() => (draft.priority = p.id)}
+								>
+									<span
+										class="h-2 w-2 shrink-0 rounded-full"
+										style="background: {p.color}"
+									></span>
+									{p.label}
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					<!-- Status -->
+					{#if !isClient}
+						<div class="flex flex-col gap-1.5">
+							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Status inițial</label
+							>
+							<div class="flex gap-1.5">
+								{#each STATUSES_CREATE as s}
+									<button
+										class="flex-1 rounded-lg border py-2 text-xs font-semibold transition-all
+											{draft.status === s.id
+												? 'border-blue-500 bg-blue-50 text-blue-700'
+												: 'border-slate-200 bg-white text-slate-500 hover:border-blue-300'}"
+										onclick={() => (draft.status = s.id)}
+									>
+										{s.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Due date -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Deadline</label
+						>
+						<input
+							type="date"
+							class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+							bind:value={draft.dueDate}
+						/>
+					</div>
+
+					<!-- Recurring -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Recurență</label
+						>
+						<label
+							class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+						>
+							<Switch bind:checked={draft.isRecurring} disabled={!draft.dueDate} />
+							<span class="text-xs text-slate-600">Task recurent</span>
+						</label>
+					</div>
+
+					{#if draft.isRecurring}
+						<div
+							class="col-span-2 grid grid-cols-2 gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3"
+						>
+							<div class="flex flex-col gap-1">
+								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>Frecvență</label
+								>
+								<select
+									class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none"
+									bind:value={draft.recurringType}
+								>
+									<option value="daily">Zilnic</option>
+									<option value="weekly">Săptămânal</option>
+									<option value="monthly">Lunar</option>
+									<option value="yearly">Anual</option>
+								</select>
+							</div>
+							<div class="flex flex-col gap-1">
+								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>La fiecare</label
+								>
+								<Input type="number" min="1" max="365" bind:value={draft.recurringInterval} />
+							</div>
+							<div class="col-span-2 flex flex-col gap-1">
+								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>Data sfârșit (opțional)</label
+								>
+								<input
+									type="date"
+									class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none"
+									bind:value={draft.recurringEndDate}
+								/>
+							</div>
+						</div>
+					{/if}
+
+					<!-- Tags -->
+					<div class="col-span-2 flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Tag-uri</label
+						>
+						<div class="flex gap-2">
+							<input
+								class="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+								placeholder="Adaugă tag și apasă Enter"
+								bind:value={tagInput}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') {
+										e.preventDefault();
+										addTag();
+									}
+								}}
+							/>
+							<button
+								class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-blue-400 hover:text-blue-600"
+								onclick={addTag}
+							>
+								<PlusIcon class="h-3.5 w-3.5" />
+							</button>
+						</div>
+						<div class="flex min-h-[28px] flex-wrap gap-1.5">
+							{#each draft.tags as tag}
+								<span
+									class="inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+								>
+									{tag}
+									<button
+										onclick={() => removeTag(tag)}
+										class="ml-0.5 text-blue-400 hover:text-blue-700"
+									>
+										<XIcon class="h-2.5 w-2.5" />
+									</button>
+								</span>
+							{:else}
+								<span class="text-xs text-slate-400">Niciun tag</span>
+							{/each}
+						</div>
+					</div>
+				</div>
+			{:else}
+				<div class="grid grid-cols-1 gap-4">
+					<!-- Subtasks -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+							Subtaskuri ({draft.subtasks.length})
+						</label>
+						<div class="flex gap-2">
+							<input
+								class="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+								placeholder="Ex: Pregătire brief, Filmare, Editare..."
+								bind:value={subtaskInput}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') {
+										e.preventDefault();
+										addSubtask();
+									}
+								}}
+							/>
+							<button
+								class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-400 hover:text-blue-600"
+								onclick={addSubtask}
+							>
+								<PlusIcon class="h-3 w-3" /> Adaugă
+							</button>
+						</div>
+						<div class="flex min-h-[40px] flex-col gap-1">
+							{#each draft.subtasks as sub, i}
+								<div
+									class="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2"
+								>
+									<span
+										class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500"
+										>{i + 1}</span
+									>
+									<span class="flex-1 text-sm text-slate-800">{sub}</span>
+									<button
+										onclick={() => removeSubtask(i)}
+										class="text-slate-300 transition-colors hover:text-red-500"
+									>
+										<XIcon class="h-3.5 w-3.5" />
+									</button>
 								</div>
-							</Popover.Content>
-						</Popover.Root>
+							{:else}
+								<div
+									class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-center text-xs text-slate-400"
+								>
+									Niciun subtask. Sparge task-ul mare în pași mici.
+								</div>
+							{/each}
+						</div>
 					</div>
+
+					<!-- Attachments stub -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Atașamente</label
+						>
+						<div
+							class="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 py-6 text-xs text-slate-400"
+						>
+							<span class="text-base">📎</span>
+							<div class="text-center">
+								<strong class="text-slate-500">Trage fișiere aici</strong>
+								<p class="mt-0.5">sau click pentru a selecta · max 25MB</p>
+								<p class="mt-0.5 text-slate-300">Upload disponibil în Faza 3</p>
+							</div>
+						</div>
+					</div>
+
+					<!-- Summary -->
+					<div class="flex flex-col gap-1.5">
+						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Sumar task</label
+						>
+						<div
+							class="flex flex-col divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm"
+						>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Titlu</span>
+								<strong class="text-slate-900">{draft.title || '—'}</strong>
+							</div>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Client</span>
+								<strong class="text-slate-900">{clientName}</strong>
+							</div>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Responsabili</span>
+								<strong class="truncate text-slate-900">
+									{draft.assigneeIds.length > 0
+										? draft.assigneeIds
+												.map((id) => {
+													const u = users.find((x: any) => x.id === id);
+													return u ? getUserName(u) : id;
+												})
+												.join(', ')
+										: '—'}
+								</strong>
+							</div>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Prioritate · Status</span>
+								<strong class="text-slate-900">{priorityLabel} · {statusLabel}</strong>
+							</div>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Deadline</span>
+								<strong class="text-slate-900">{draft.dueDate || 'fără termen'}</strong>
+							</div>
+							<div class="flex items-center justify-between px-4 py-2.5">
+								<span class="text-slate-500">Subtaskuri · Tag-uri</span>
+								<strong class="text-slate-900"
+									>{draft.subtasks.length} subtaskuri · {draft.tags.length} tag-uri</strong
+								>
+							</div>
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			{#if error}
+				<div class="mt-3 rounded-lg bg-red-50 px-4 py-3">
+					<p class="text-sm text-red-700">{error}</p>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Footer -->
+		<div class="flex items-center justify-between border-t bg-white px-5 py-3">
+			<button
+				class="text-sm text-slate-500 transition-colors hover:text-slate-700"
+				onclick={() => onOpenChange(false)}
+			>
+				Anulează
+			</button>
+			<div class="flex items-center gap-2">
+				{#if step > 1}
+					<Button variant="outline" size="sm" onclick={() => (step -= 1)}>
+						<ChevronLeftIcon class="mr-1 h-3.5 w-3.5" /> Înapoi
+					</Button>
+				{/if}
+				{#if step < 3}
+					<Button
+						size="sm"
+						disabled={step === 1 ? !step1Valid : !step2Valid}
+						onclick={() => (step += 1)}
+					>
+						Continuă <ChevronRightIcon class="ml-1 h-3.5 w-3.5" />
+					</Button>
+				{:else}
+					<Button size="sm" disabled={!canCreate || loading} onclick={handleCreate}>
+						{#if loading}
+							Se creează...
+						{:else}
+							<CheckIcon class="mr-1 h-3.5 w-3.5" /> Creează task
+						{/if}
+					</Button>
 				{/if}
 			</div>
 		</div>
-		{#if error}
-			<div class="rounded-md bg-red-50 p-3">
-				<p class="text-sm text-red-800">{error}</p>
-			</div>
-		{/if}
-		<DialogFooter>
-			<Button variant="outline" onclick={() => onOpenChange(false)}>Cancel</Button>
-			<Button onclick={handleSubmit} disabled={loading}>
-				{loading ? 'Creating...' : 'Create Task'}
-			</Button>
-		</DialogFooter>
 	</DialogContent>
 </Dialog>

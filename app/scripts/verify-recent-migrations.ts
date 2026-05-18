@@ -63,6 +63,8 @@ const RECENT_MIGRATIONS: MigrationCheck[] = [
   { id: '0312', table: 'task_assignee', isNewTable: true, columns: ['task_id', 'user_id', 'tenant_id', 'role', 'created_at'] },
   { id: '0313', table: 'task_assignee', column: 'user_id' },
   { id: '0314', table: 'task_assignee', column: 'tenant_id' },
+  { id: '0315', table: 'task', column: 'meet_time' },
+  { id: '0316', table: 'task', column: 'meet_duration_minutes' },
 ];
 
 async function main() {

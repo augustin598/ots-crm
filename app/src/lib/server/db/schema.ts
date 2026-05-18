@@ -305,6 +305,8 @@ export const task = sqliteTable('task', {
 	recurringParentId: text('recurring_parent_id'),
 	recurringSpawnedAt: timestamp('recurring_spawned_at', { withTimezone: true, mode: 'date' }),
 	type: text('type'), // 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other' | null
+	meetTime: text('meet_time'), // e.g. "10:00" — only for type='meeting'
+	meetDurationMinutes: integer('meet_duration_minutes'), // e.g. 30, 60
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`),

@@ -2206,6 +2206,20 @@
 			"when": 1778593921454500,
 			"tag": "0314_task_assignee_tenant_id_idx",
 			"breakpoints": true
+		},
+		{
+			"idx": 315,
+			"version": "6",
+			"when": 1747600000000000,
+			"tag": "0315_task_meet_time",
+			"breakpoints": true
+		},
+		{
+			"idx": 316,
+			"version": "6",
+			"when": 1747600000001000,
+			"tag": "0316_task_meet_duration_minutes",
+			"breakpoints": true
 		}
 	]
 }
