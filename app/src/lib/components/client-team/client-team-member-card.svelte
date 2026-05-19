@@ -1,6 +1,6 @@
 <!-- src/lib/components/client-team/client-team-member-card.svelte -->
 <script lang="ts">
-	import { avatarColor, avatarInitials } from '$lib/config/team';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import ClockIcon from '@lucide/svelte/icons/clock';
@@ -65,11 +65,13 @@
 	{/if}
 
 	<div class="cteam-card-head flex items-center gap-3 pr-7">
-		<div
-			class="cteam-av relative grid h-[46px] w-[46px] shrink-0 place-items-center rounded-full text-[14px] font-bold text-white"
-			style:background-color={avatarColor(email ?? id)}
-		>
-			{avatarInitials(firstName, lastName, email)}
+		<div class="cteam-av relative shrink-0">
+			<ContactAvatar
+				src={null}
+				name={name}
+				phoneE164={email ?? id}
+				size="lg"
+			/>
 			<span
 				class={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${online ? 'bg-[#10b981]' : 'bg-[#cbd5e1]'}`}
 				aria-label={online ? 'Online' : 'Offline'}

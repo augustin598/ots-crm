@@ -9,7 +9,7 @@
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { page } from '$app/state';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
-	import { avatarColor, avatarInitials } from '$lib/config/team';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import type { LightboxImage } from './client-task-lightbox.svelte';
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -256,16 +256,13 @@
 				{@const replies = repliesMap.get(c.id) ?? []}
 				{@const authorDisplay = c.authorName || c.authorEmail || c.userId}
 				<div class="ct-comment flex gap-3 border-b border-[#f1f5f9] py-3.5 last:border-b-0">
-					<div
-						class="ct-comment-av grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold text-white"
-						style:background-color={avatarColor(c.authorEmail ?? c.userId)}
-					>
-						{avatarInitials(
-							firstName(c.authorName),
-							lastNameOf(c.authorName, c.authorLastName),
-							c.authorEmail ?? null
-						)}
-					</div>
+					<ContactAvatar
+						src={null}
+						name={c.authorName ?? c.authorEmail ?? ''}
+						phoneE164={c.authorEmail ?? c.userId}
+						size="md"
+						class="ct-comment-av"
+					/>
 					<div class="ct-comment-body min-w-0 flex-1">
 						<div class="ct-comment-head flex items-baseline gap-2">
 							<span class="ct-comment-name text-[12.5px] font-bold text-[#0f172a]">
@@ -388,16 +385,13 @@
 								{#each replies as r (r.id)}
 									{@const replyAuthor = r.authorName || r.authorEmail || r.userId}
 									<div class="flex gap-2.5">
-										<div
-											class="ct-reply-av grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white"
-											style:background-color={avatarColor(r.authorEmail ?? r.userId)}
-										>
-											{avatarInitials(
-												firstName(r.authorName),
-												lastNameOf(r.authorName, r.authorLastName),
-												r.authorEmail ?? null
-											)}
-										</div>
+										<ContactAvatar
+											src={null}
+											name={r.authorName ?? r.authorEmail ?? ''}
+											phoneE164={r.authorEmail ?? r.userId}
+											size="sm"
+											class="ct-reply-av"
+										/>
 										<div class="min-w-0 flex-1">
 											<div class="flex items-baseline gap-2">
 												<span class="text-[12px] font-bold text-[#0f172a]">

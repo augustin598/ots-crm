@@ -859,12 +859,14 @@
 								{#each assignees as assignee (assignee.userId)}
 									{@const fullName =
 										`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email}
+									{@const assigneePhone = (assignee as any).phone ?? (users.find((u) => u.id === assignee.userId) as any)?.phone ?? null}
 									<div class="group flex items-center gap-3">
-										<div
-											class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
-										>
-											{getInitials(fullName)}
-										</div>
+										<ContactAvatar
+											src={avatarSrcFromPhone(assigneePhone)}
+											name={fullName}
+											phoneE164={assigneePhone}
+											size="sm"
+										/>
 										<div class="min-w-0 flex-1">
 											<p class="truncate text-sm font-medium">{fullName}</p>
 											{#if assignee.role}

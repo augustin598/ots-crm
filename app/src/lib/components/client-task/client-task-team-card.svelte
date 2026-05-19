@@ -1,6 +1,6 @@
 <!-- src/lib/components/client-task/client-task-team-card.svelte -->
 <script lang="ts">
-	import { avatarColor, avatarInitials } from '$lib/config/team';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import XIcon from '@lucide/svelte/icons/x';
 
@@ -11,6 +11,7 @@
 		email?: string | null;
 		displayName?: string | null;
 		online?: boolean;
+		phone?: string | null;
 	};
 
 	type Props = {
@@ -54,11 +55,13 @@
 		<ul class="flex flex-col gap-2">
 			{#each assignees as a (a.userId)}
 				<li class="group flex items-center gap-2.5">
-					<div
-						class="relative grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white"
-						style:background-color={avatarColor(a.email ?? a.userId)}
-					>
-						{avatarInitials(a.firstName ?? null, a.lastName ?? null, a.email ?? null)}
+					<div class="relative shrink-0">
+						<ContactAvatar
+							src={null}
+							name={displayName(a)}
+							phoneE164={a.phone ?? a.email ?? a.userId}
+							size="sm"
+						/>
 						{#if a.online !== undefined}
 							<span
 								class={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${a.online ? 'bg-[#10b981]' : 'bg-[#cbd5e1]'}`}

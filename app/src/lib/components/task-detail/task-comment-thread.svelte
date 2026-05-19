@@ -10,6 +10,7 @@
 
 	const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
@@ -225,11 +226,12 @@
 				{@const replies = repliesMap.get(comment.id) || []}
 				<div class="rounded-xl border bg-white p-4 shadow-sm">
 					<div class="mb-2 flex items-start gap-3">
-						<div
-							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
-						>
-							{getInitials(authorName)}
-						</div>
+						<ContactAvatar
+							src={null}
+							name={authorName}
+							phoneE164={null}
+							size="sm"
+						/>
 						<div class="min-w-0 flex-1">
 							<div class="flex flex-wrap items-center gap-2">
 								<p class="text-sm font-semibold">{authorName}</p>
@@ -356,11 +358,12 @@
 								{@const isOwnReply = currentUserId && reply.userId === currentUserId}
 								<div class="py-1.5">
 									<div class="mb-1 flex items-center gap-2">
-										<div
-											class="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
-										>
-											{getInitials(replyAuthor)}
-										</div>
+										<ContactAvatar
+											src={null}
+											name={replyAuthor}
+											phoneE164={null}
+											size="xs"
+										/>
 										<p class="text-xs font-medium">{replyAuthor}</p>
 										<p class="text-xs text-muted-foreground">{timeAgo(reply.createdAt)}</p>
 										{#if isOwnReply}
