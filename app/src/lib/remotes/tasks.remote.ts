@@ -1534,6 +1534,7 @@ export const updateTaskPosition = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const { taskId, newStatus, newPosition, oldStatus, oldPosition } = data;
 
@@ -2371,6 +2372,7 @@ export const toggleSubtask = command(
 	async ({ subtaskId, done }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const result = await db
 			.update(table.subtask)
@@ -2389,6 +2391,7 @@ export const addSubtask = command(
 	async ({ taskId, title }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const [task] = await db
 			.select({ id: table.task.id, tenantId: table.task.tenantId })
@@ -2430,6 +2433,7 @@ export const deleteSubtask = command(
 	async (subtaskId) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const result = await db
 			.delete(table.subtask)
@@ -2451,6 +2455,7 @@ export const updateSubtask = command(
 	async ({ subtaskId, done, title }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const [sub] = await db
 			.select()
@@ -2631,6 +2636,7 @@ export const scheduleMeet = command(
 	async ({ taskId, meetLink, meetTime, meetDurationMinutes }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
 		const [task] = await db.select({ id: table.task.id })
 			.from(table.task)
