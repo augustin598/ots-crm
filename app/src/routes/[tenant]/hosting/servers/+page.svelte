@@ -52,6 +52,22 @@
 		createdAt: Date;
 		accountsCount: number;
 		packagesCount: number;
+		metrics: {
+			cpu: number;
+			cpuModel: string | null;
+			coresCount: number;
+			load1: number;
+			load5: number;
+			load15: number;
+			memory: number;
+			ramUsedBytes: number;
+			ramTotalBytes: number;
+			disk: number;
+			diskUsedBytes: number;
+			diskTotalBytes: number;
+			diskMount: string;
+			bandwidthBytes: number | null;
+		} | null;
 	};
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -232,11 +248,25 @@
 		});
 	}
 
-	function meterClass(v: number | null): 'good' | 'warn' | 'danger' | 'empty' {
+	function meterClass(v: number | null | undefined): 'good' | 'warn' | 'danger' | 'empty' {
 		if (v === null || v === undefined) return 'empty';
 		if (v >= 80) return 'danger';
 		if (v >= 60) return 'warn';
 		return 'good';
+	}
+
+	function fmtPct(v: number | null | undefined): string {
+		if (v === null || v === undefined) return '—';
+		return `${Math.round(v)}%`;
+	}
+
+	function fmtBytes(bytes: number | null | undefined, fractionDigits = 1): string {
+		if (bytes === null || bytes === undefined) return '—';
+		const mb = bytes / 1_048_576;
+		if (mb < 1024) return `${mb.toFixed(0)} MB`;
+		const gb = mb / 1024;
+		if (gb < 1024) return `${gb.toFixed(fractionDigits)} GB`;
+		return `${(gb / 1024).toFixed(2)} TB`;
 	}
 
 	function statusLabel(s: Status): string {
@@ -255,6 +285,15 @@
 		{@const totalAccounts = servers.reduce((a, s) => a + s.accountsCount, 0)}
 		{@const totalPackages = servers.reduce((a, s) => a + s.packagesCount, 0)}
 		{@const alerts = servers.filter((s) => s.lastError).length}
+		{@const withMetrics = servers.filter((s) => s.metrics)}
+		{@const avgCpu =
+			withMetrics.length > 0
+				? Math.round(withMetrics.reduce((a, s) => a + (s.metrics?.cpu ?? 0), 0) / withMetrics.length)
+				: null}
+		{@const totalBandwidthBytes = servers.reduce(
+			(a, s) => a + (s.metrics?.bandwidthBytes ?? 0),
+			0
+		)}
 
 		<div class="hst-hero">
 			<div>
@@ -302,9 +341,13 @@
 					</div>
 					<span class="dash-kpi-label">CPU mediu</span>
 				</div>
-				<div class="dash-kpi-value">—</div>
+				<div class="dash-kpi-value">{avgCpu !== null ? `${avgCpu}%` : '—'}</div>
 				<div class="dash-kpi-foot">
-					<span class="dash-kpi-sub">metrici live indisponibile</span>
+					<span class="dash-kpi-sub">
+						{withMetrics.length > 0
+							? `pe ${withMetrics.length} ${withMetrics.length === 1 ? 'server' : 'servere'} cu metrici live`
+							: 'metrici live indisponibile'}
+					</span>
 				</div>
 			</div>
 
@@ -339,11 +382,17 @@
 					<div class="dash-kpi-icon" style="background:rgba(99,102,241,.12); color:#6366f1;">
 						<WifiIcon size={13} />
 					</div>
-					<span class="dash-kpi-label">Uptime mediu</span>
+					<span class="dash-kpi-label">Trafic total folosit</span>
 				</div>
-				<div class="dash-kpi-value">—</div>
+				<div class="dash-kpi-value">
+					{withMetrics.length > 0 ? fmtBytes(totalBandwidthBytes) : '—'}
+				</div>
 				<div class="dash-kpi-foot">
-					<span class="dash-kpi-sub">istoric uptime indisponibil</span>
+					<span class="dash-kpi-sub">
+						{withMetrics.length > 0
+							? `agregat din ${withMetrics.length} ${withMetrics.length === 1 ? 'server' : 'servere'}`
+							: 'metrici live indisponibile'}
+					</span>
 				</div>
 			</div>
 
@@ -436,6 +485,7 @@
 			<div class="hst-server-grid">
 				{#each filtered as s (s.id)}
 					{@const st = statusOf(s)}
+					{@const m = s.metrics}
 					<div class="hst-server-card" class:warning={st === 'warning'}>
 						<div class="hst-server-card-head">
 							<div class="hst-server-card-icon"><ServerIcon size={18} /></div>
@@ -459,25 +509,42 @@
 
 						<div class="hst-server-metrics">
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>CPU</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>CPU</span><strong>{fmtPct(m?.cpu)}</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(m?.cpu)}"
+										style="width:{m?.cpu ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>RAM</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>RAM</span><strong>{fmtPct(m?.memory)}</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(m?.memory)}"
+										style="width:{m?.memory ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>Disk</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>Disk</span><strong>{fmtPct(m?.disk)}</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(m?.disk)}"
+										style="width:{m?.disk ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>Trafic</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>Trafic</span><strong>{fmtBytes(m?.bandwidthBytes)}</strong>
+								</div>
 								<div class="hst-metric-bar">
 									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
 								</div>
@@ -605,6 +672,7 @@
 		{#if openServer}
 			{@const s = openServer}
 			{@const st = statusOf(s)}
+			{@const dm = s.metrics}
 			<div
 				class="hst-drawer-back"
 				role="dialog"
@@ -648,33 +716,69 @@
 						<h4>Resurse curente</h4>
 						<div class="hst-server-metrics">
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>CPU</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>CPU{dm?.cpuModel ? ` · ${dm.cpuModel}` : ''}</span>
+									<strong>{fmtPct(dm?.cpu)}</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(dm?.cpu)}"
+										style="width:{dm?.cpu ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>RAM</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>RAM</span>
+									<strong>
+										{#if dm}{fmtBytes(dm.ramUsedBytes)} / {fmtBytes(dm.ramTotalBytes)}{:else}—{/if}
+									</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(dm?.memory)}"
+										style="width:{dm?.memory ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>Disk</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>Disk{dm?.diskMount ? ` · ${dm.diskMount}` : ''}</span>
+									<strong>
+										{#if dm}{fmtBytes(dm.diskUsedBytes)} / {fmtBytes(dm.diskTotalBytes)}{:else}—{/if}
+									</strong>
+								</div>
 								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+									<div
+										class="hst-metric-bar-fill {meterClass(dm?.disk)}"
+										style="width:{dm?.disk ?? 0}%"
+									></div>
 								</div>
 							</div>
 							<div class="hst-metric">
-								<div class="hst-metric-head"><span>Trafic</span><strong>—</strong></div>
+								<div class="hst-metric-head">
+									<span>Trafic folosit (lunar)</span>
+									<strong>{fmtBytes(dm?.bandwidthBytes)}</strong>
+								</div>
 								<div class="hst-metric-bar">
 									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
 								</div>
 							</div>
 						</div>
+						{#if dm}
+							<div class="hst-loadline">
+								Load {dm.load1.toFixed(2)} / {dm.load5.toFixed(2)} / {dm.load15.toFixed(2)}
+								· {dm.coresCount} {dm.coresCount === 1 ? 'core' : 'cores'}
+							</div>
+						{/if}
 						<p class="hst-note">
-							Metricile live (CPU/RAM/disk/trafic) nu sunt încă agregate din DA. Folosește butonul
-							<strong>Deschide DA</strong> pentru status în timp real.
+							{#if dm}
+								Date live preluate prin DirectAdmin API (resource-usage + admin-usage). Refresh la
+								60 s — reîncarcă pagina pentru o citire imediată.
+							{:else}
+								Metricile live nu au putut fi preluate (server offline, endpoint indisponibil, sau
+								timeout). Folosește <strong>Deschide DA</strong> pentru status în timp real.
+							{/if}
 						</p>
 					</section>
 
@@ -1598,6 +1702,17 @@
 		color: #94a3b8;
 		font-style: italic;
 		line-height: 1.5;
+	}
+	.hst-loadline {
+		margin-top: 10px;
+		font-size: 11.5px;
+		color: #475569;
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		padding: 6px 10px;
+		background: #fafbfd;
+		border: 1px solid #e5e9f0;
+		border-radius: 6px;
+		display: inline-block;
 	}
 	.hst-note strong {
 		color: #475569;

@@ -13,8 +13,16 @@ export interface EncryptedServerCreds {
  * Create a DirectAdmin client from an encrypted server record.
  * Decrypts credentials using the per-tenant AES-256-GCM scheme.
  * Defaults port to 2222 (DirectAdmin standard) if missing; defaults to HTTPS.
+ *
+ * `timeoutMs` lets callers shorten the request timeout for high-frequency,
+ * best-effort reads (e.g. live metrics on page load) so dead servers don't
+ * stall the request for the default 10s.
  */
-export function createDAClient(tenantId: string, server: EncryptedServerCreds): DirectAdminClient {
+export function createDAClient(
+	tenantId: string,
+	server: EncryptedServerCreds,
+	options: { timeoutMs?: number } = {}
+): DirectAdminClient {
 	const username = decrypt(tenantId, server.usernameEncrypted);
 	const password = decrypt(tenantId, server.passwordEncrypted);
 	return new DirectAdminClient({
@@ -22,6 +30,7 @@ export function createDAClient(tenantId: string, server: EncryptedServerCreds): 
 		port: server.port ?? 2222,
 		useHttps: server.useHttps !== false,
 		username,
-		password
+		password,
+		timeoutMs: options.timeoutMs
 	});
 }

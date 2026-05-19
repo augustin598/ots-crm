@@ -85,13 +85,63 @@ export interface DAUserUsage {
 	inodeCount: number;
 }
 
+/**
+ * Shape returned by `GET /api/admin-usage`. Field names match DirectAdmin's
+ * actual JSON, NOT the historical wrapper assumption (`bandwidth`/`quota` —
+ * those would always come back undefined on a real DA instance).
+ */
 export interface DAAdminUsage {
-	bandwidth: number;
-	quota: number;
+	bandwidthBytes: number;
+	quotaBytes: number;
+	dbQuotaBytes: number;
+	emailQuotaBytes: number;
+	otherQuotaBytes: number;
 	users: number;
 	resellers: number;
 	domains: number;
-	databases: number;
+	subdomains: number;
+	domainPointers: number;
+	mySqlDatabases: number;
+	emailAccounts: number;
+	emailForwarders: number;
+	emailDeliveries: number;
+	emailDeliveriesIncoming: number;
+	emailDeliveriesOutgoing: number;
+	ftpAccounts: number;
+	autoresponders: number;
+	mailingLists: number;
+	inode: number;
+	lastTally: string;
+}
+
+/** `GET /api/system-info/cpu` */
+export interface DASystemInfoCpu {
+	coresCount: number;
+	cores: { brand: string; model: string; clockMHz: number; bogoMIPS: number }[];
+}
+
+/** `GET /api/system-info/memory` */
+export interface DASystemInfoMemory {
+	ram: { totalBytes: number; usedBytes: number; cachedBytes: number; freeBytes: number };
+	swap: { totalBytes: number; usedBytes: number; freeBytes: number };
+}
+
+/** `GET /api/system-info/fs` — one entry per mounted filesystem */
+export interface DASystemInfoFsEntry {
+	device: string;
+	mountPoint: string;
+	fileSystem: string;
+	totalBytes: number;
+	availableBytes: number;
+	reservedBytes: number;
+	usedBytes: number;
+}
+
+/** `GET /api/system-info/load` */
+export interface DASystemInfoLoad {
+	last1: number;
+	last5: number;
+	last15: number;
 }
 
 export interface DAResellerConfig {
@@ -577,6 +627,22 @@ export class DirectAdminClient {
 
 	async getLatestResourceUsage(): Promise<DAResourceUsage> {
 		return this.request<DAResourceUsage>('GET', '/api/resource-usage/latest');
+	}
+
+	async getSystemInfoCpu(): Promise<DASystemInfoCpu> {
+		return this.request<DASystemInfoCpu>('GET', '/api/system-info/cpu');
+	}
+
+	async getSystemInfoMemory(): Promise<DASystemInfoMemory> {
+		return this.request<DASystemInfoMemory>('GET', '/api/system-info/memory');
+	}
+
+	async getSystemInfoFs(): Promise<DASystemInfoFsEntry[]> {
+		return this.request<DASystemInfoFsEntry[]>('GET', '/api/system-info/fs');
+	}
+
+	async getSystemInfoLoad(): Promise<DASystemInfoLoad> {
+		return this.request<DASystemInfoLoad>('GET', '/api/system-info/load');
 	}
 
 	async listLoginKeys(): Promise<DALoginKey[]> {

@@ -109,9 +109,150 @@ export const getDAServers = query(async () => {
 });
 
 /**
+ * In-memory cache for live DA metrics. Avoids hammering DA every time the
+ * servers page is rendered (HMR / quick re-navigation). 60s TTL is fresh
+ * enough for an admin-facing dashboard without being noisy.
+ *
+ * Keyed on `${tenantId}:${serverId}` so we never serve another tenant's
+ * cached value if the same serverId somehow collides (it can't, but cheap
+ * defence-in-depth — see [[multi-tenant]] in memory).
+ */
+export type LiveMetrics = {
+	/** CPU usage % derived from load1 / cores * 100 (capped at 100). */
+	cpu: number;
+	cpuModel: string | null;
+	coresCount: number;
+	load1: number;
+	load5: number;
+	load15: number;
+	/** RAM usage % from system-info/memory. */
+	memory: number;
+	ramUsedBytes: number;
+	ramTotalBytes: number;
+	/** Disk usage % from the primary user-data partition (prefers /home, falls back to /). */
+	disk: number;
+	diskUsedBytes: number;
+	diskTotalBytes: number;
+	diskMount: string;
+	/** Total bandwidth used across all users (bytes). */
+	bandwidthBytes: number | null;
+};
+const METRICS_CACHE = new Map<string, { value: LiveMetrics | null; expiresAt: number }>();
+const METRICS_TTL_MS = 60_000;
+
+/**
+ * Pick the most representative disk partition. DirectAdmin servers typically
+ * keep user data under /home; fall back to / if that's missing. Skip /boot,
+ * tmpfs, devtmpfs, etc.
+ */
+function pickPrimaryFs(
+	entries: { mountPoint: string; fileSystem: string; totalBytes: number; usedBytes: number }[]
+): { mountPoint: string; totalBytes: number; usedBytes: number } | null {
+	const real = entries.filter(
+		(e) =>
+			!['tmpfs', 'devtmpfs', 'overlay', 'squashfs'].includes(e.fileSystem.toLowerCase()) &&
+			e.totalBytes > 0
+	);
+	return (
+		real.find((e) => e.mountPoint === '/home') ??
+		real.find((e) => e.mountPoint === '/') ??
+		// Otherwise: largest real partition.
+		real.sort((a, b) => b.totalBytes - a.totalBytes)[0] ??
+		null
+	);
+}
+
+async function fetchLiveMetrics(
+	tenantId: string,
+	server: typeof table.daServer.$inferSelect
+): Promise<LiveMetrics | null> {
+	const cacheKey = `${tenantId}:${server.id}`;
+	const cached = METRICS_CACHE.get(cacheKey);
+	if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+	try {
+		// 4s timeout — page-load fetch shouldn't stall on dead servers. The
+		// caller swallows errors per-server so one bad host doesn't break the
+		// whole list.
+		const client = createDAClient(tenantId, server, { timeoutMs: 4_000 });
+		const [sysCpu, sysMem, sysFs, sysLoad, admin] = await Promise.allSettled([
+			client.getSystemInfoCpu(),
+			client.getSystemInfoMemory(),
+			client.getSystemInfoFs(),
+			client.getSystemInfoLoad(),
+			client.getAdminUsage()
+		]);
+
+		// CPU% — load1 / cores * 100, capped at 100. Not a perfect %
+		// (load includes I/O wait), but it's the closest single-shot proxy
+		// DirectAdmin exposes without sampling at intervals.
+		const cores = sysCpu.status === 'fulfilled' ? sysCpu.value.coresCount : 0;
+		const cpuModel =
+			sysCpu.status === 'fulfilled' && sysCpu.value.cores[0]
+				? sysCpu.value.cores[0].model
+				: null;
+		const load1 = sysLoad.status === 'fulfilled' ? sysLoad.value.last1 : 0;
+		const load5 = sysLoad.status === 'fulfilled' ? sysLoad.value.last5 : 0;
+		const load15 = sysLoad.status === 'fulfilled' ? sysLoad.value.last15 : 0;
+		const cpuPct =
+			cores > 0 && sysLoad.status === 'fulfilled'
+				? Math.min(100, Math.round((load1 / cores) * 100))
+				: 0;
+
+		// RAM%
+		const ramTotal = sysMem.status === 'fulfilled' ? sysMem.value.ram.totalBytes : 0;
+		const ramUsed = sysMem.status === 'fulfilled' ? sysMem.value.ram.usedBytes : 0;
+		const memoryPct = ramTotal > 0 ? Math.round((ramUsed / ramTotal) * 100) : 0;
+
+		// Disk%
+		const primary = sysFs.status === 'fulfilled' ? pickPrimaryFs(sysFs.value) : null;
+		const diskTotal = primary?.totalBytes ?? 0;
+		const diskUsed = primary?.usedBytes ?? 0;
+		const diskPct = diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 100) : 0;
+		const diskMount = primary?.mountPoint ?? '—';
+
+		// Bandwidth — across all users on this server.
+		const bandwidthBytes = admin.status === 'fulfilled' ? admin.value.bandwidthBytes : null;
+
+		// If we couldn't fetch any system-info endpoint, the server is unreachable.
+		// Treat that as "no metrics" rather than returning all zeros.
+		if (sysCpu.status !== 'fulfilled' && sysMem.status !== 'fulfilled' && sysFs.status !== 'fulfilled') {
+			METRICS_CACHE.set(cacheKey, { value: null, expiresAt: Date.now() + METRICS_TTL_MS });
+			return null;
+		}
+
+		const value: LiveMetrics = {
+			cpu: cpuPct,
+			cpuModel,
+			coresCount: cores,
+			load1,
+			load5,
+			load15,
+			memory: memoryPct,
+			ramUsedBytes: ramUsed,
+			ramTotalBytes: ramTotal,
+			disk: diskPct,
+			diskUsedBytes: diskUsed,
+			diskTotalBytes: diskTotal,
+			diskMount,
+			bandwidthBytes
+		};
+		METRICS_CACHE.set(cacheKey, { value, expiresAt: Date.now() + METRICS_TTL_MS });
+		return value;
+	} catch {
+		METRICS_CACHE.set(cacheKey, { value: null, expiresAt: Date.now() + METRICS_TTL_MS });
+		return null;
+	}
+}
+
+/**
  * Same as `getDAServers` but joins counts of hosting accounts and active
- * packages per server. Used by the redesigned servers page to render
- * "X conturi · Y pachete" footers without a second roundtrip per server.
+ * packages per server, AND fetches live CPU/RAM/disk/bandwidth metrics from
+ * DirectAdmin (`/api/resource-usage/latest` + `/api/admin-usage`) in parallel
+ * with a 60s in-memory cache. Used by the redesigned servers page.
+ *
+ * Dead/slow servers degrade gracefully: their `metrics` field is `null` and
+ * the UI shows "—" — the rest of the list still renders.
  */
 export const getDAServersWithStats = query(async () => {
 	const event = getRequestEvent();
@@ -121,20 +262,10 @@ export const getDAServersWithStats = query(async () => {
 
 	const tenantId = event.locals.tenant.id;
 
-	const rows = await db
-		.select({
-			id: table.daServer.id,
-			name: table.daServer.name,
-			hostname: table.daServer.hostname,
-			port: table.daServer.port,
-			useHttps: table.daServer.useHttps,
-			isActive: table.daServer.isActive,
-			lastCheckedAt: table.daServer.lastCheckedAt,
-			lastError: table.daServer.lastError,
-			daVersion: table.daServer.daVersion,
-			lastSyncResult: table.daServer.lastSyncResult,
-			createdAt: table.daServer.createdAt
-		})
+	// Full rows — need encrypted creds for the live-metrics fetch below.
+	// We strip them from the returned shape so credentials never reach the client.
+	const fullRows = await db
+		.select()
 		.from(table.daServer)
 		.where(
 			and(eq(table.daServer.tenantId, tenantId), eq(table.daServer.isActive, true))
@@ -165,11 +296,27 @@ export const getDAServersWithStats = query(async () => {
 	const accountsBySrv = new Map(accountsAgg.map((r) => [r.daServerId, r.total]));
 	const packagesBySrv = new Map(packagesAgg.map((r) => [r.daServerId, r.total]));
 
-	return rows.map((r) => ({
-		...r,
+	// Fan out metric fetches in parallel — each is independently catchable.
+	const metricsList = await Promise.all(
+		fullRows.map((row) => fetchLiveMetrics(tenantId, row))
+	);
+	const metricsBySrv = new Map(fullRows.map((r, i) => [r.id, metricsList[i]]));
+
+	return fullRows.map((r) => ({
+		id: r.id,
+		name: r.name,
+		hostname: r.hostname,
+		port: r.port,
+		useHttps: r.useHttps,
+		isActive: r.isActive,
+		lastCheckedAt: r.lastCheckedAt,
 		lastError: redactLastError(actor, r.lastError),
+		daVersion: r.daVersion,
+		lastSyncResult: r.lastSyncResult,
+		createdAt: r.createdAt,
 		accountsCount: accountsBySrv.get(r.id) ?? 0,
-		packagesCount: packagesBySrv.get(r.id) ?? 0
+		packagesCount: packagesBySrv.get(r.id) ?? 0,
+		metrics: metricsBySrv.get(r.id) ?? null
 	}));
 });
 
