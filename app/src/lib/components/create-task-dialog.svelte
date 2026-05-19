@@ -3,6 +3,7 @@
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -129,6 +130,10 @@
 	);
 
 	const isMeet = $derived(draft.type === 'meeting');
+
+	const calStatusQuery = $derived(isMeet ? getGoogleCalendarStatus() : null);
+	const calStatus = $derived(calStatusQuery?.current);
+	const tenantSlug = $derived(page.params.tenant ?? '');
 
 	const canCreate = $derived(
 		isClient
@@ -404,13 +409,26 @@
 								{/each}
 							</div>
 						</div>
-						<!-- Meet info banner -->
-						<div
-							class="col-span-2 flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3"
-						>
-							<div class="text-xs text-blue-700">
-								<strong>Link Google Meet</strong> va fi generat automat la creare (Faza 3)
-							</div>
+						<!-- Meet integration status banner — 2 state -->
+						<div class="col-span-2">
+							{#if !calStatus}
+								<!-- loading or non-meeting — no banner -->
+							{:else if !calStatus.connected}
+								<div class="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
+									<span class="mt-0.5 text-amber-600">⚠</span>
+									<div class="text-xs text-amber-800">
+										<strong>Conectează Google Calendar</strong> pentru a genera automat linkul Meet.
+										<a href="/{tenantSlug}/settings/google-calendar" class="ml-1 font-semibold underline">Conectează</a>
+									</div>
+								</div>
+							{:else}
+								<div class="flex items-center gap-3 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
+									<span class="text-emerald-600">✓</span>
+									<div class="text-xs text-emerald-800">
+										<strong>Linkul Meet va fi generat automat</strong> când salvezi (cont {calStatus.email}).
+									</div>
+								</div>
+							{/if}
 						</div>
 					{/if}
 
@@ -736,7 +754,6 @@
 							<div class="text-center">
 								<strong class="text-slate-500">Trage fișiere aici</strong>
 								<p class="mt-0.5">sau click pentru a selecta · max 25MB</p>
-								<p class="mt-0.5 text-slate-300">Upload disponibil în Faza 3</p>
 							</div>
 						</div>
 					</div>
