@@ -49,9 +49,11 @@ mock.module('googleapis', () => ({
 }));
 
 // Mock the auth module using the $lib path alias (how meet.ts references it after bundler resolution)
-const mockGetCalendarClient = mock(async () => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockGetCalendarClient = mock(async (): Promise<any> => {
 	const { google } = await import('googleapis');
-	return google.calendar();
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return (google.calendar as any)();
 });
 const mockGetCalendarStatus = mock(async () => ({ connected: true, email: 'a@b.com' }));
 
@@ -141,7 +143,8 @@ describe('deleteMeetEvent', () => {
 	});
 
 	it('returns true (idempotent) when event is already gone (404)', async () => {
-		mockGetCalendarClient.mockImplementationOnce(async () => ({
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		mockGetCalendarClient.mockImplementationOnce(async (): Promise<any> => ({
 			events: {
 				delete: async () => {
 					const err = Object.assign(new Error('Not Found'), { code: 404 });
