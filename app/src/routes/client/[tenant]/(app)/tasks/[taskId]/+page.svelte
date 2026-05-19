@@ -6,8 +6,6 @@
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 	const taskId = $derived(page.params.taskId!);
-	const currentUserId = $derived(((page.data as any)?.clientUser?.userId as string) ?? '');
-
 	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current ?? null);
 
@@ -20,4 +18,4 @@
 	<title>{task?.title ?? 'Task'} · Client Portal</title>
 </svelte:head>
 
-<ClientTaskDetailBody {task} {currentUserId} {tenantSlug} {onClose} />
+<ClientTaskDetailBody {task} {tenantSlug} {onClose} />

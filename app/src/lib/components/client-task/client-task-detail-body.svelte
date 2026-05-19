@@ -20,12 +20,11 @@
 
 	type Props = {
 		task: TaskWithIncludes | null;
-		currentUserId: string;
 		tenantSlug: string;
 		onClose: () => void;
 	};
 
-	let { task, currentUserId, tenantSlug, onClose }: Props = $props();
+	let { task, tenantSlug, onClose }: Props = $props();
 
 	const tenantUsersQuery = getTenantUsers();
 	const tenantUsers = $derived(tenantUsersQuery.current ?? []);
