@@ -10,7 +10,7 @@
 
 	type Subtask = { id: string; title: string; done: number | boolean; position: number };
 	type Assignee = {
-		id: string;
+		userId: string;
 		firstName?: string | null;
 		lastName?: string | null;
 		email?: string | null;

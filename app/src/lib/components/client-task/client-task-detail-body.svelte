@@ -132,7 +132,7 @@
 		taskId={task.id}
 		taskTitle={task.title}
 		availableInvitees={allInvitees}
-		defaultInviteeIds={(task.assignees ?? []).map((a: any) => a.id)}
+		defaultInviteeIds={(task.assignees ?? []).map((a: any) => a.userId)}
 		onClose={() => (meetOpen = false)}
 	/>
 

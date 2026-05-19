@@ -5,7 +5,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 
 	type Assignee = {
-		id: string;
+		userId: string;
 		firstName?: string | null;
 		lastName?: string | null;
 		email?: string | null;
@@ -16,7 +16,7 @@
 	type Props = {
 		assignees: Assignee[];
 		readonly?: boolean;
-		onRemove?: (assigneeId: string) => void;
+		onRemove?: (userId: string) => void;
 		onAddClick?: () => void;
 	};
 
@@ -25,7 +25,7 @@
 	function displayName(a: Assignee): string {
 		if (a.displayName) return a.displayName;
 		const full = `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim();
-		return full || a.email || a.id;
+		return full || a.email || a.userId;
 	}
 </script>
 
@@ -52,11 +52,11 @@
 		<div class="text-[12px] text-[#94a3b8]">Nimeni asignat încă.</div>
 	{:else}
 		<ul class="flex flex-col gap-2">
-			{#each assignees as a (a.id)}
+			{#each assignees as a (a.userId)}
 				<li class="group flex items-center gap-2.5">
 					<div
 						class="relative grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white"
-						style:background-color={avatarColor(a.email ?? a.id)}
+						style:background-color={avatarColor(a.email ?? a.userId)}
 					>
 						{avatarInitials(a.firstName ?? null, a.lastName ?? null, a.email ?? null)}
 						{#if a.online !== undefined}
@@ -72,7 +72,7 @@
 						<button
 							type="button"
 							class="opacity-0 transition-opacity group-hover:opacity-100 text-[#94a3b8] hover:text-[#ef4444]"
-							onclick={() => onRemove(a.id)}
+							onclick={() => onRemove(a.userId)}
 							aria-label={`Scoate ${displayName(a)}`}
 						>
 							<XIcon class="h-3.5 w-3.5" />
