@@ -278,10 +278,10 @@
 								type="button"
 								class="ct-comment-reply ml-auto inline-flex items-center gap-1 rounded text-[11px] text-[#94a3b8] hover:text-[#1877F2]"
 								onclick={() => (replyingToId = replyingToId === c.id ? null : c.id)}
-								aria-label="Răspunde"
+								aria-label={`Răspunde lui ${authorDisplay}`}
 							>
 								<RepeatIcon class="h-3 w-3" />
-								Reply
+								Răspunde
 							</button>
 						</div>
 						<div
