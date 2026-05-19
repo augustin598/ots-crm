@@ -67,6 +67,11 @@
 			.slice(0, 2);
 	}
 
+	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
+		if (!phone) return null;
+		return `/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+	}
+
 	function timeAgo(date: Date | string): string {
 		const now = new Date();
 		const d = new Date(date);
@@ -227,9 +232,9 @@
 				<div class="rounded-xl border bg-white p-4 shadow-sm">
 					<div class="mb-2 flex items-start gap-3">
 						<ContactAvatar
-							src={null}
+							src={avatarSrcFromPhone((comment as any).authorPhone)}
 							name={authorName}
-							phoneE164={null}
+							phoneE164={(comment as any).authorPhone ?? null}
 							size="sm"
 						/>
 						<div class="min-w-0 flex-1">
@@ -359,9 +364,9 @@
 								<div class="py-1.5">
 									<div class="mb-1 flex items-center gap-2">
 										<ContactAvatar
-											src={null}
+											src={avatarSrcFromPhone((reply as any).authorPhone)}
 											name={replyAuthor}
-											phoneE164={null}
+											phoneE164={(reply as any).authorPhone ?? null}
 											size="xs"
 										/>
 										<p class="text-xs font-medium">{replyAuthor}</p>

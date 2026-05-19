@@ -36,6 +36,11 @@
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 
+	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
+		if (!phone) return null;
+		return `/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+	}
+
 	const commentsQuery = $derived(getTaskComments(taskId));
 	const allComments = $derived(commentsQuery.current ?? []);
 
@@ -257,9 +262,9 @@
 				{@const authorDisplay = c.authorName || c.authorEmail || c.userId}
 				<div class="ct-comment flex gap-3 border-b border-[#f1f5f9] py-3.5 last:border-b-0">
 					<ContactAvatar
-						src={null}
+						src={avatarSrcFromPhone((c as any).authorPhone)}
 						name={c.authorName ?? c.authorEmail ?? ''}
-						phoneE164={c.authorEmail ?? c.userId}
+						phoneE164={(c as any).authorPhone ?? c.authorEmail ?? c.userId}
 						size="md"
 						class="ct-comment-av"
 					/>
@@ -386,9 +391,9 @@
 									{@const replyAuthor = r.authorName || r.authorEmail || r.userId}
 									<div class="flex gap-2.5">
 										<ContactAvatar
-											src={null}
+											src={avatarSrcFromPhone((r as any).authorPhone)}
 											name={r.authorName ?? r.authorEmail ?? ''}
-											phoneE164={r.authorEmail ?? r.userId}
+											phoneE164={(r as any).authorPhone ?? r.authorEmail ?? r.userId}
 											size="sm"
 											class="ct-reply-av"
 										/>

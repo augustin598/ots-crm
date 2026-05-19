@@ -109,11 +109,19 @@ export const getTaskComments = query(
 				authorName: table.user.firstName,
 				authorLastName: table.user.lastName,
 				authorEmail: table.user.email,
+				authorPhone: table.tenantUser.phone,
 				taskClientId: table.task.clientId
 			})
 			.from(table.taskComment)
 			.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
 			.leftJoin(table.user, eq(table.taskComment.userId, table.user.id))
+			.leftJoin(
+				table.tenantUser,
+				and(
+					eq(table.tenantUser.userId, table.taskComment.userId),
+					eq(table.tenantUser.tenantId, event.locals.tenant.id)
+				)
+			)
 			.where(
 				and(
 					eq(table.taskComment.taskId, taskId),
