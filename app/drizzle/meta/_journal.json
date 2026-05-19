@@ -2255,6 +2255,104 @@
       "when": 1747700000004000,
       "tag": "0321_task_meet_link",
       "breakpoints": true
+    },
+    {
+      "idx": 322,
+      "version": "6",
+      "when": 1747800000000000,
+      "tag": "0322_task_tenant_status_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 323,
+      "version": "6",
+      "when": 1747800000001000,
+      "tag": "0323_task_tenant_client_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 324,
+      "version": "6",
+      "when": 1747800000002000,
+      "tag": "0324_task_tenant_project_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 325,
+      "version": "6",
+      "when": 1747800000003000,
+      "tag": "0325_task_tenant_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 326,
+      "version": "6",
+      "when": 1747800000004000,
+      "tag": "0326_task_client_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 327,
+      "version": "6",
+      "when": 1747800000005000,
+      "tag": "0327_task_comment_task_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 328,
+      "version": "6",
+      "when": 1747800000006000,
+      "tag": "0328_task_activity_task_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 329,
+      "version": "6",
+      "when": 1747800000007000,
+      "tag": "0329_subtask_task_position_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 330,
+      "version": "6",
+      "when": 1747800000008000,
+      "tag": "0330_task_assignee_task_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 331,
+      "version": "6",
+      "when": 1747800000009000,
+      "tag": "0331_task_assignee_user_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 332,
+      "version": "6",
+      "when": 1747800000010000,
+      "tag": "0332_task_watcher_task_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 333,
+      "version": "6",
+      "when": 1747800000011000,
+      "tag": "0333_task_comment_attachment_comment_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 334,
+      "version": "6",
+      "when": 1747800000012000,
+      "tag": "0334_task_comment_reaction_comment_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 335,
+      "version": "6",
+      "when": 1747800000013000,
+      "tag": "0335_client_secondary_email_tenant_client_idx",
+      "breakpoints": true
     }
   ]
 }

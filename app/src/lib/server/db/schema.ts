@@ -314,7 +314,13 @@ export const task = sqliteTable('task', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	index('task_tenant_status_idx').on(t.tenantId, t.status),
+	index('task_tenant_client_idx').on(t.tenantId, t.clientId),
+	index('task_tenant_project_idx').on(t.tenantId, t.projectId),
+	index('task_tenant_created_idx').on(t.tenantId, t.createdAt),
+	index('task_client_idx').on(t.clientId)
+]);
 
 export const contractTemplate = sqliteTable('contract_template', {
 	id: text('id').primaryKey(),
@@ -439,7 +445,9 @@ export const taskComment = sqliteTable('task_comment', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	index('task_comment_task_created_idx').on(t.taskId, t.createdAt)
+]);
 
 export const taskCommentAttachment = sqliteTable('task_comment_attachment', {
 	id: text('id').primaryKey(),
@@ -453,7 +461,9 @@ export const taskCommentAttachment = sqliteTable('task_comment_attachment', {
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	index('task_comment_attachment_comment_idx').on(t.commentId)
+]);
 
 export const taskCommentReaction = sqliteTable('task_comment_reaction', {
 	id: text('id').primaryKey(),
@@ -464,7 +474,9 @@ export const taskCommentReaction = sqliteTable('task_comment_reaction', {
 	tenantId: text('tenant_id').notNull(),
 	emoji: text('emoji').notNull(),
 	createdAt: integer('created_at').notNull()
-});
+}, (t) => [
+	index('task_comment_reaction_comment_idx').on(t.commentId)
+]);
 
 export const taskWatcher = sqliteTable('task_watcher', {
 	id: text('id').primaryKey(),
@@ -480,7 +492,9 @@ export const taskWatcher = sqliteTable('task_watcher', {
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	index('task_watcher_task_idx').on(t.taskId)
+]);
 
 export const taskActivity = sqliteTable('task_activity', {
 	id: text('id').primaryKey(),
@@ -500,7 +514,9 @@ export const taskActivity = sqliteTable('task_activity', {
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`)
-});
+}, (t) => [
+	index('task_activity_task_created_idx').on(t.taskId, t.createdAt)
+]);
 
 export const taskMarketingMaterial = sqliteTable('task_marketing_material', {
 	id: text('id').primaryKey(),
@@ -533,7 +549,9 @@ export const subtask = sqliteTable('subtask', {
 	createdByUserId: text('created_by_user_id'),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull()
-});
+}, (t) => [
+	index('subtask_task_position_idx').on(t.taskId, t.position)
+]);
 
 export const taskTag = sqliteTable('task_tag', {
 	id: text('id').primaryKey(),
@@ -571,7 +589,9 @@ export const taskAssignee = sqliteTable(
 		createdAt: integer('created_at').notNull()
 	},
 	(t) => ({
-		pk: index('task_assignee_pk').on(t.taskId, t.userId)
+		pk: index('task_assignee_pk').on(t.taskId, t.userId),
+		taskIdx: index('task_assignee_task_idx').on(t.taskId),
+		userIdx: index('task_assignee_user_idx').on(t.userId)
 	})
 );
 
@@ -1740,7 +1760,9 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_date`)
-});
+}, (t) => [
+	index('client_secondary_email_tenant_client_idx').on(t.tenantId, t.clientId)
+]);
 
 export const seoLinkCheck = sqliteTable('seo_link_check', {
 	id: text('id').primaryKey(),
