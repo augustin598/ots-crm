@@ -436,44 +436,56 @@ export const getAssignableClientUsers = query(
 			rows.map((r) => r.userId)
 		);
 
-		// For non-primary users, look up their clientSecondaryEmail row to read accessFlags.
-		// Match by lower(email) since clientSecondaryEmail.email may have casing differences.
-		const nonPrimaryEmails = rows
-			.filter((r) => !r.isPrimary && r.email)
-			.map((r) => r.email.toLowerCase());
+		// For non-primary users, look up their clientSecondaryEmail row to read
+		// both accessFlags AND the admin-set label. The label is the source of
+		// truth for the displayed name — the `user.firstName/lastName` may be a
+		// stale placeholder (e.g., auto-filled with the client's company name
+		// at registration time, before the admin renamed the contact).
+		const cseRows = await db
+			.select({
+				email: table.clientSecondaryEmail.email,
+				label: table.clientSecondaryEmail.label,
+				accessFlags: table.clientSecondaryEmail.accessFlags,
+				notifyTasks: table.clientSecondaryEmail.notifyTasks
+			})
+			.from(table.clientSecondaryEmail)
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.clientId, clientId),
+					eq(table.clientSecondaryEmail.tenantId, tenantId)
+				)
+			);
 
-		let secondaryAccessByEmail = new Map<string, boolean>();
-		if (nonPrimaryEmails.length > 0) {
-			const cseRows = await db
-				.select({
-					email: table.clientSecondaryEmail.email,
-					accessFlags: table.clientSecondaryEmail.accessFlags,
-					notifyTasks: table.clientSecondaryEmail.notifyTasks
-				})
-				.from(table.clientSecondaryEmail)
-				.where(
-					and(
-						eq(table.clientSecondaryEmail.clientId, clientId),
-						eq(table.clientSecondaryEmail.tenantId, tenantId)
-					)
-				);
-
-			for (const r of cseRows) {
-				let hasTasksAccess = false;
-				if (r.accessFlags) {
-					try {
-						const flags = JSON.parse(r.accessFlags);
-						hasTasksAccess = !!flags.tasks;
-					} catch {
-						// fallthrough to legacy notify column
-					}
+		const secondaryAccessByEmail = new Map<string, boolean>();
+		const secondaryLabelByEmail = new Map<string, string | null>();
+		for (const r of cseRows) {
+			let hasTasksAccess = false;
+			if (r.accessFlags) {
+				try {
+					const flags = JSON.parse(r.accessFlags);
+					hasTasksAccess = !!flags.tasks;
+				} catch {
+					// fallthrough to legacy notify column
 				}
-				// Legacy fallback when accessFlags JSON not yet backfilled
-				if (!hasTasksAccess && r.notifyTasks) {
-					hasTasksAccess = true;
-				}
-				secondaryAccessByEmail.set(r.email.toLowerCase(), hasTasksAccess);
 			}
+			// Legacy fallback when accessFlags JSON not yet backfilled
+			if (!hasTasksAccess && r.notifyTasks) {
+				hasTasksAccess = true;
+			}
+			const key = r.email.toLowerCase();
+			secondaryAccessByEmail.set(key, hasTasksAccess);
+			if (r.label && r.label.trim()) secondaryLabelByEmail.set(key, r.label.trim());
+		}
+
+		// Resolve display name: prefer secondary label → fall back to user.firstName/lastName.
+		// Split label on first space so the existing { firstName, lastName } shape stays stable.
+		function pickNames(email: string, fnDb: string | null, lnDb: string | null) {
+			const label = email ? secondaryLabelByEmail.get(email.toLowerCase()) ?? null : null;
+			if (label) {
+				const [first, ...rest] = label.split(/\s+/);
+				return { firstName: first ?? '', lastName: rest.join(' ') };
+			}
+			return { firstName: fnDb ?? '', lastName: lnDb ?? '' };
 		}
 
 		return rows
@@ -481,16 +493,19 @@ export const getAssignableClientUsers = query(
 				if (r.isPrimary) return true;
 				return r.email ? secondaryAccessByEmail.get(r.email.toLowerCase()) === true : false;
 			})
-			.map((r) => ({
-				id: r.userId,
-				email: r.email,
-				firstName: r.firstName,
-				lastName: r.lastName,
-				isPrimary: r.isPrimary,
-				// Per-user WhatsApp phone from user_whatsapp_link table (deterministic, admin-set).
-				// null when admin hasn't linked this user's phone yet → UI falls back to initials.
-				phone: phonesByUser.get(r.userId) ?? null
-			}));
+			.map((r) => {
+				const { firstName, lastName } = pickNames(r.email, r.firstName, r.lastName);
+				return {
+					id: r.userId,
+					email: r.email,
+					firstName,
+					lastName,
+					isPrimary: r.isPrimary,
+					// Per-user WhatsApp phone from user_whatsapp_link table (deterministic, admin-set).
+					// null when admin hasn't linked this user's phone yet → UI falls back to initials.
+					phone: phonesByUser.get(r.userId) ?? null
+				};
+			});
 	}
 );
 
