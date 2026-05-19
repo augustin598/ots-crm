@@ -11,6 +11,7 @@
 	const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import { Button } from '$lib/components/ui/button';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import ImageLightbox from '$lib/components/image-lightbox.svelte';
@@ -68,8 +69,7 @@
 	}
 
 	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
-		if (!phone) return null;
-		return `/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+		return whatsappAvatarUrl(tenantSlug, phone);
 	}
 
 	function timeAgo(date: Date | string): string {

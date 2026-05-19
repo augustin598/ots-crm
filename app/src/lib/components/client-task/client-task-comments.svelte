@@ -10,6 +10,7 @@
 	import { page } from '$app/state';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import type { LightboxImage } from './client-task-lightbox.svelte';
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -37,8 +38,7 @@
 	const tenantSlug = $derived(page.params.tenant ?? '');
 
 	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
-		if (!phone) return null;
-		return `/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+		return whatsappAvatarUrl(tenantSlug, phone);
 	}
 
 	const commentsQuery = $derived(getTaskComments(taskId));

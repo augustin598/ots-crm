@@ -7,6 +7,7 @@ import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { validateOverride } from '$lib/server/access';
 import type { AdminRoleId } from '$lib/access/catalog';
+import { normalizePhoneE164 } from '$lib/utils/phone';
 
 export const getTenantUsers = query(async () => {
 	const event = getRequestEvent();
@@ -384,12 +385,14 @@ export const getAssignableClientUsers = query(
 		if (rows.length === 0) return [];
 
 		// Resolve the client phone once — fallback shared across all client users.
+		// IMPORTANT: client.phone is stored in RO national format (0xxxxxxxxx).
+		// The WhatsApp avatar endpoint expects E164 (+40xxxxxxxxx), so normalize.
 		const [clientRow] = await db
 			.select({ phone: table.client.phone })
 			.from(table.client)
 			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
 			.limit(1);
-		const clientPhone = clientRow?.phone ?? null;
+		const clientPhone = normalizePhoneE164(clientRow?.phone);
 
 		// Try to match each user to an individual whatsappContact by display name.
 		// `user` table has no phone column, so we fuzzy-match against contact names
@@ -406,7 +409,8 @@ export const getAssignableClientUsers = query(
 
 		function matchWhatsappPhone(
 			firstName: string | null | undefined,
-			lastName: string | null | undefined
+			lastName: string | null | undefined,
+			isPrimary: boolean
 		): string | null {
 			const first = (firstName ?? '').trim().toLowerCase();
 			const last = (lastName ?? '').trim().toLowerCase();
@@ -420,13 +424,20 @@ export const getAssignableClientUsers = query(
 					if (wcName && wcName === full) return wc.phoneE164;
 				}
 			}
-			// Pass 2: single first-name candidate (avoids ambiguous shared first names)
+			// Pass 2: first-name candidates. If there's exactly one, use it.
+			// If there are multiple, prefer the one that matches client.phone (primary contact).
 			if (first) {
 				const candidates = wcRows.filter((wc) => {
 					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
 					return wcName === first || wcName.startsWith(first + ' ');
 				});
 				if (candidates.length === 1) return candidates[0].phoneE164;
+				if (candidates.length > 1 && isPrimary && clientPhone) {
+					// Disambiguate primary contact: pick the candidate whose phone equals the
+					// client's primary phone (normalized).
+					const match = candidates.find((c) => c.phoneE164 === clientPhone);
+					if (match) return match.phoneE164;
+				}
 			}
 			return null;
 		}
@@ -483,8 +494,8 @@ export const getAssignableClientUsers = query(
 				lastName: r.lastName,
 				isPrimary: r.isPrimary,
 				// Prefer individual WhatsApp contact match (per-user avatar). Fall back
-				// to the shared client phone (company avatar) if no match found.
-				phone: matchWhatsappPhone(r.firstName, r.lastName) ?? clientPhone
+				// to the shared (normalized) client phone if no match found.
+				phone: matchWhatsappPhone(r.firstName, r.lastName, !!r.isPrimary) ?? clientPhone
 			}));
 	}
 );

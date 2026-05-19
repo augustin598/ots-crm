@@ -27,6 +27,7 @@
 	} from '$lib/remotes/tasks.remote';
 	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskComments } from '$lib/remotes/task-comments.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
@@ -316,9 +317,7 @@
 	);
 
 	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
-		if (!phone) return null;
-		const slug = (page.params.tenant as string) ?? '';
-		return `/${slug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+		return whatsappAvatarUrl((page.params.tenant as string) ?? '', phone);
 	}
 
 	// Kept for callers that previously read assigneeOptions (combined list)
