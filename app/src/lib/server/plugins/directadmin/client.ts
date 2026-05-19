@@ -144,6 +144,31 @@ export interface DASystemInfoLoad {
 	last15: number;
 }
 
+/**
+ * `GET /api/version` — current DA version + available update info, surfaced
+ * on the Updates page of DA's web UI. Drives the "DA update available"
+ * indicator on the servers list.
+ */
+export interface DAVersionInfo {
+	commit: string;
+	version: string;
+	arch: string;
+	os: string;
+	distro: string;
+	eol: boolean;
+	/** Server uptime in nanoseconds. */
+	uptime: number;
+	update: {
+		available: boolean;
+		availableChannels: string[];
+		channel: string;
+		commit: string;
+		version: string;
+	};
+	buildDistro: string;
+	detectedDistro: string;
+}
+
 export interface DAResellerConfig {
 	username: string;
 	domain: string;
@@ -643,6 +668,10 @@ export class DirectAdminClient {
 
 	async getSystemInfoLoad(): Promise<DASystemInfoLoad> {
 		return this.request<DASystemInfoLoad>('GET', '/api/system-info/load');
+	}
+
+	async getVersion(): Promise<DAVersionInfo> {
+		return this.request<DAVersionInfo>('GET', '/api/version');
 	}
 
 	async listLoginKeys(): Promise<DALoginKey[]> {

@@ -67,6 +67,13 @@
 			diskTotalBytes: number;
 			diskMount: string;
 			bandwidthBytes: number | null;
+			daVersion: string | null;
+			daUpdateAvailable: boolean;
+			daUpdateVersion: string | null;
+			daUpdateChannel: string | null;
+			daEol: boolean;
+			daOs: string | null;
+			daDistro: string | null;
 		} | null;
 	};
 
@@ -307,7 +314,10 @@
 		{@const filtered = applyFilters(servers)}
 		{@const totalAccounts = servers.reduce((a, s) => a + s.accountsCount, 0)}
 		{@const totalPackages = servers.reduce((a, s) => a + s.packagesCount, 0)}
-		{@const alerts = servers.filter((s) => s.lastError).length}
+		{@const errorAlerts = servers.filter((s) => s.lastError).length}
+		{@const updateAlerts = servers.filter((s) => s.metrics?.daUpdateAvailable).length}
+		{@const eolAlerts = servers.filter((s) => s.metrics?.daEol).length}
+		{@const alerts = errorAlerts + updateAlerts + eolAlerts}
 		{@const withMetrics = servers.filter((s) => s.metrics)}
 		{@const avgCpu =
 			withMetrics.length > 0
@@ -428,9 +438,19 @@
 				</div>
 				<div class="dash-kpi-value">{alerts}</div>
 				<div class="dash-kpi-foot">
-					<span class="dash-kpi-sub"
-						>{alerts === 0 ? 'toate serverele OK' : 'servere cu erori la ultim check'}</span
-					>
+					<span class="dash-kpi-sub">
+						{#if alerts === 0}
+							toate serverele OK
+						{:else}
+							{[
+								errorAlerts > 0 ? `${errorAlerts} erori` : null,
+								updateAlerts > 0 ? `${updateAlerts} update DA disponibil` : null,
+								eolAlerts > 0 ? `${eolAlerts} versiune EOL` : null
+							]
+								.filter(Boolean)
+								.join(' · ')}
+						{/if}
+					</span>
 				</div>
 			</div>
 		</div>
@@ -513,12 +533,30 @@
 						<div class="hst-server-card-head">
 							<div class="hst-server-card-icon"><ServerIcon size={18} /></div>
 							<div class="hst-server-card-text">
-								<div class="hst-server-card-name">{s.name}</div>
+								<div class="hst-server-card-name">
+									{s.name}
+									{#if m?.daUpdateAvailable}
+										<span
+											class="hst-update-badge"
+											title="DA {m.daVersion} → {m.daUpdateVersion} disponibil (canal {m.daUpdateChannel})"
+										>
+											<DownloadIcon size={10} /> DA {m.daUpdateVersion}
+										</span>
+									{/if}
+									{#if m?.daEol}
+										<span class="hst-eol-badge" title="Această versiune DA este end-of-life">
+											EOL
+										</span>
+									{/if}
+								</div>
 								<div class="hst-server-card-meta">
 									<span>{s.hostname}:{s.port}</span>
 									<span>·</span>
 									<span>{s.useHttps ? 'HTTPS' : 'HTTP'}</span>
-									{#if s.daVersion}
+									{#if m?.daVersion}
+										<span>·</span>
+										<span>DA {m.daVersion}</span>
+									{:else if s.daVersion}
 										<span>·</span>
 										<span>{s.daVersion}</span>
 									{/if}
@@ -845,6 +883,65 @@
 								<div class="hst-kv-v mono">{externalUrl(s)}</div>
 							</div>
 						</div>
+					</section>
+
+					<section class="hst-drawer-section">
+						<h4>Versiune DirectAdmin</h4>
+						{#if dm}
+							<div class="hst-kv-grid">
+								<div class="hst-kv">
+									<div class="hst-kv-l">Versiune curentă</div>
+									<div class="hst-kv-v mono">{dm.daVersion ?? '—'}</div>
+								</div>
+								<div class="hst-kv">
+									<div class="hst-kv-l">Canal update</div>
+									<div class="hst-kv-v">{dm.daUpdateChannel ?? '—'}</div>
+								</div>
+								<div class="hst-kv">
+									<div class="hst-kv-l">OS</div>
+									<div class="hst-kv-v">
+										{dm.daOs ?? '—'}{dm.daDistro ? ` · ${dm.daDistro}` : ''}
+									</div>
+								</div>
+								<div class="hst-kv">
+									<div class="hst-kv-l">Update disponibil</div>
+									<div class="hst-kv-v">
+										{#if dm.daUpdateAvailable}
+											<span class="hst-update-text">
+												{dm.daVersion} → <strong>{dm.daUpdateVersion}</strong>
+											</span>
+										{:else}
+											<span style="color:#047857">la zi</span>
+										{/if}
+									</div>
+								</div>
+							</div>
+							{#if dm.daUpdateAvailable}
+								<div class="hst-update-callout">
+									<DownloadIcon size={14} />
+									<div>
+										<strong>Update disponibil: DA {dm.daUpdateVersion}</strong>
+										<span>
+											Aplică-l din Control Panel → Updates pe
+											<a href={externalUrl(s)} target="_blank" rel="noopener noreferrer"
+												>{s.hostname}</a
+											>. Activul rămâne online — restart DA durează ~5s.
+										</span>
+									</div>
+								</div>
+							{/if}
+							{#if dm.daEol}
+								<div class="hst-eol-callout">
+									<AlertTriangleIcon size={14} />
+									<div>
+										<strong>Versiune end-of-life</strong>
+										<span>DA {dm.daVersion} nu mai primește patch-uri de securitate. Migrează urgent pe ultima versiune.</span>
+									</div>
+								</div>
+							{/if}
+						{:else}
+							<p class="hst-note">Informații versiune indisponibile (server unreachable).</p>
+						{/if}
 					</section>
 
 					<section class="hst-drawer-section">
@@ -1458,6 +1555,39 @@
 		border-radius: 50%;
 		background: currentColor;
 	}
+	.hst-update-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 2px 7px;
+		margin-left: 6px;
+		border-radius: 999px;
+		font-size: 10px;
+		font-weight: 700;
+		background: rgba(99, 102, 241, 0.12);
+		color: #4338ca;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		font-family:
+			'Inter',
+			system-ui,
+			sans-serif;
+		vertical-align: middle;
+	}
+	.hst-eol-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 7px;
+		margin-left: 6px;
+		border-radius: 999px;
+		font-size: 10px;
+		font-weight: 700;
+		background: #fee2e2;
+		color: #b91c1c;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		vertical-align: middle;
+	}
 
 	.hst-server-metrics {
 		display: grid;
@@ -1768,6 +1898,67 @@
 		border-radius: 8px;
 		padding: 12px 14px;
 		line-height: 1.5;
+	}
+	.hst-update-text {
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		color: #4338ca;
+	}
+	.hst-update-text strong {
+		color: #4338ca;
+	}
+	.hst-update-callout {
+		margin-top: 10px;
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 12px 14px;
+		background: rgba(99, 102, 241, 0.08);
+		border: 1px solid rgba(99, 102, 241, 0.25);
+		border-radius: 10px;
+		font-size: 12px;
+		color: #3730a3;
+		line-height: 1.55;
+	}
+	.hst-update-callout :global(svg) {
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+	.hst-update-callout strong {
+		display: block;
+		font-size: 12.5px;
+		color: #312e81;
+		margin-bottom: 2px;
+	}
+	.hst-update-callout a {
+		color: #4338ca;
+		font-weight: 600;
+		text-decoration: none;
+	}
+	.hst-update-callout a:hover {
+		text-decoration: underline;
+	}
+	.hst-eol-callout {
+		margin-top: 10px;
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 12px 14px;
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		border-radius: 10px;
+		font-size: 12px;
+		color: #b91c1c;
+		line-height: 1.55;
+	}
+	.hst-eol-callout :global(svg) {
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+	.hst-eol-callout strong {
+		display: block;
+		font-size: 12.5px;
+		color: #7f1d1d;
+		margin-bottom: 2px;
 	}
 	.hst-cred-note a {
 		color: #1877f2;

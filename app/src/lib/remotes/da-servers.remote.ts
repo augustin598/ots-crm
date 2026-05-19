@@ -136,6 +136,14 @@ export type LiveMetrics = {
 	diskMount: string;
 	/** Total bandwidth used across all users (bytes). */
 	bandwidthBytes: number | null;
+	/** DA version + available update — drives the "Alerte active" KPI. */
+	daVersion: string | null;
+	daUpdateAvailable: boolean;
+	daUpdateVersion: string | null;
+	daUpdateChannel: string | null;
+	daEol: boolean;
+	daOs: string | null;
+	daDistro: string | null;
 };
 const METRICS_CACHE = new Map<string, { value: LiveMetrics | null; expiresAt: number }>();
 const METRICS_TTL_MS = 60_000;
@@ -175,12 +183,13 @@ async function fetchLiveMetrics(
 		// caller swallows errors per-server so one bad host doesn't break the
 		// whole list.
 		const client = createDAClient(tenantId, server, { timeoutMs: 4_000 });
-		const [sysCpu, sysMem, sysFs, sysLoad, admin] = await Promise.allSettled([
+		const [sysCpu, sysMem, sysFs, sysLoad, admin, version] = await Promise.allSettled([
 			client.getSystemInfoCpu(),
 			client.getSystemInfoMemory(),
 			client.getSystemInfoFs(),
 			client.getSystemInfoLoad(),
-			client.getAdminUsage()
+			client.getAdminUsage(),
+			client.getVersion()
 		]);
 
 		// CPU% — load1 / cores * 100, capped at 100. Not a perfect %
@@ -221,6 +230,8 @@ async function fetchLiveMetrics(
 			return null;
 		}
 
+		// DA version + update detection.
+		const v = version.status === 'fulfilled' ? version.value : null;
 		const value: LiveMetrics = {
 			cpu: cpuPct,
 			cpuModel,
@@ -235,7 +246,14 @@ async function fetchLiveMetrics(
 			diskUsedBytes: diskUsed,
 			diskTotalBytes: diskTotal,
 			diskMount,
-			bandwidthBytes
+			bandwidthBytes,
+			daVersion: v?.version ?? null,
+			daUpdateAvailable: v?.update?.available ?? false,
+			daUpdateVersion: v?.update?.version ?? null,
+			daUpdateChannel: v?.update?.channel ?? null,
+			daEol: v?.eol ?? false,
+			daOs: v?.os ?? null,
+			daDistro: v?.distro ?? null
 		};
 		METRICS_CACHE.set(cacheKey, { value, expiresAt: Date.now() + METRICS_TTL_MS });
 		return value;
