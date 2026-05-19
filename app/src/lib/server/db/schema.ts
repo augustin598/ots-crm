@@ -313,6 +313,7 @@ export const task = sqliteTable('task', {
 	meetTime: text('meet_time'), // e.g. "10:00" — only for type='meeting'
 	meetDurationMinutes: integer('meet_duration_minutes'), // e.g. 30, 60
 	meetLink: text('meet_link'),
+	googleCalendarEventId: text('google_calendar_event_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -2049,6 +2050,28 @@ export const gmailIntegration = sqliteTable('gmail_integration', {
 		.default(sql`current_timestamp`)
 });
 
+export const googleCalendarIntegration = sqliteTable('google_calendar_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	accessTokenEncrypted: text('access_token_encrypted').notNull(),
+	refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
+	grantedScopes: text('granted_scopes'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 export const supplierInvoice = sqliteTable('supplier_invoice', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -2709,6 +2732,7 @@ export const tenantRelations = relations(tenant, ({ many, one }) => ({
 	contracts: many(contract),
 	contractTemplates: many(contractTemplate),
 	gmailIntegration: one(gmailIntegration),
+	googleCalendarIntegration: one(googleCalendarIntegration),
 	googleAdsIntegration: one(googleAdsIntegration),
 	supplierInvoices: many(supplierInvoice),
 	googleAdsAccounts: many(googleAdsAccount),
@@ -3281,6 +3305,13 @@ export const supplierRelations = relations(supplier, ({ one, many }) => ({
 export const gmailIntegrationRelations = relations(gmailIntegration, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [gmailIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+
+export const googleCalendarIntegrationRelations = relations(googleCalendarIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleCalendarIntegration.tenantId],
 		references: [tenant.id]
 	})
 }));
@@ -4028,6 +4059,8 @@ export type ContractLineItem = typeof contractLineItem.$inferSelect;
 export type NewContractLineItem = typeof contractLineItem.$inferInsert;
 export type GmailIntegration = typeof gmailIntegration.$inferSelect;
 export type NewGmailIntegration = typeof gmailIntegration.$inferInsert;
+export type GoogleCalendarIntegration = typeof googleCalendarIntegration.$inferSelect;
+export type NewGoogleCalendarIntegration = typeof googleCalendarIntegration.$inferInsert;
 export type SupplierInvoice = typeof supplierInvoice.$inferSelect;
 export type NewSupplierInvoice = typeof supplierInvoice.$inferInsert;
 export type BnrExchangeRate = typeof bnrExchangeRate.$inferSelect;
