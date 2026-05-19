@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, count, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan, can } from '$lib/server/access';
@@ -106,6 +106,71 @@ export const getDAServers = query(async () => {
 		);
 
 	return rows.map((r) => ({ ...r, lastError: redactLastError(actor, r.lastError) }));
+});
+
+/**
+ * Same as `getDAServers` but joins counts of hosting accounts and active
+ * packages per server. Used by the redesigned servers page to render
+ * "X conturi · Y pachete" footers without a second roundtrip per server.
+ */
+export const getDAServersWithStats = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.view');
+
+	const tenantId = event.locals.tenant.id;
+
+	const rows = await db
+		.select({
+			id: table.daServer.id,
+			name: table.daServer.name,
+			hostname: table.daServer.hostname,
+			port: table.daServer.port,
+			useHttps: table.daServer.useHttps,
+			isActive: table.daServer.isActive,
+			lastCheckedAt: table.daServer.lastCheckedAt,
+			lastError: table.daServer.lastError,
+			daVersion: table.daServer.daVersion,
+			lastSyncResult: table.daServer.lastSyncResult,
+			createdAt: table.daServer.createdAt
+		})
+		.from(table.daServer)
+		.where(
+			and(eq(table.daServer.tenantId, tenantId), eq(table.daServer.isActive, true))
+		);
+
+	// One aggregate query per dimension keeps the SQL portable across libSQL /
+	// Postgres. With <100 servers per tenant the join cost is negligible.
+	const accountsAgg = await db
+		.select({
+			daServerId: table.hostingAccount.daServerId,
+			total: count().as('total')
+		})
+		.from(table.hostingAccount)
+		.where(eq(table.hostingAccount.tenantId, tenantId))
+		.groupBy(table.hostingAccount.daServerId);
+
+	const packagesAgg = await db
+		.select({
+			daServerId: table.daPackage.daServerId,
+			total: count().as('total')
+		})
+		.from(table.daPackage)
+		.where(
+			and(eq(table.daPackage.tenantId, tenantId), eq(table.daPackage.isActive, true))
+		)
+		.groupBy(table.daPackage.daServerId);
+
+	const accountsBySrv = new Map(accountsAgg.map((r) => [r.daServerId, r.total]));
+	const packagesBySrv = new Map(packagesAgg.map((r) => [r.daServerId, r.total]));
+
+	return rows.map((r) => ({
+		...r,
+		lastError: redactLastError(actor, r.lastError),
+		accountsCount: accountsBySrv.get(r.id) ?? 0,
+		packagesCount: packagesBySrv.get(r.id) ?? 0
+	}));
 });
 
 export const getDAServer = query(IdSchema, async (serverId) => {
