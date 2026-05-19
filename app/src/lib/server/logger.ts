@@ -44,7 +44,8 @@ export type LogSource =
 	| 'whmcs'
 	| 'packages'
 	| 'telegram'
-	| 'ads-monitor';
+	| 'ads-monitor'
+	| 'google-calendar';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
