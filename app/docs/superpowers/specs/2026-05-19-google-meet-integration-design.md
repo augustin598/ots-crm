@@ -1,13 +1,13 @@
-# Google Meet Auto-Generation — Design Spec
+# Google Meet Auto-Generation — Design Spec (v2 — Separate Module)
 
 **Date:** 2026-05-19
-**Status:** Approved — implementation plan to follow
-**Effort estimate:** ~2.5-3 days (~21-25h)
-**Triggered by:** Broken "Faza 3" promise in `create-task-dialog.svelte` — user-visible auto-generation that doesn't exist
+**Status:** v2 approved — implementation plan rewritten
+**Effort estimate:** ~3 days (~25-31h)
+**Revision rationale:** User decision to make Calendar a **separate integration module** with its own OAuth flow, dedicated settings page, and dedicated DB table — rather than extending the Gmail OAuth scope. Same Google account (typically), but independent connection lifecycle.
 
 ## Goal
 
-When a user creates a task with `type='meeting'`, the system auto-generates a Google Meet link by creating a Google Calendar event on the connected tenant's primary calendar. Bidirectional sync: changes to the task's meeting time/duration/assignees propagate to the Calendar event; task deletion deletes the event.
+When a user creates a task with `type='meeting'`, the system auto-generates a Google Meet link by creating a Google Calendar event. Calendar integration is a **standalone module** that the tenant connects separately from Gmail (using the same Google account, by recommendation but not enforcement). Bidirectional sync: changes to the task's meeting time/duration/assignees propagate to the Calendar event; task deletion deletes the event.
 
 ## Non-Goals (v1)
 
@@ -16,167 +16,205 @@ When a user creates a task with `type='meeting'`, the system auto-generates a Go
 - RSVP tracking from Google back to CRM
 - Custom invitation email templates
 - Working-hours validation
+- Cross-account warning (UI does NOT actively verify Calendar account = Gmail account; documented recommendation only)
 
 ---
 
-## §1. OAuth Strategy — extend existing Gmail flow
+## §1. Integration Architecture — Standalone Calendar Module
 
-**Decision: ADD `calendar.events` to the existing Gmail OAuth scope list.**
+**Decision: separate `google_calendar_integration` table + dedicated OAuth flow + dedicated settings page.**
 
-Rationale:
-- `gmail_integration` table already holds encrypted tokens per-tenant with `grantedScopes` column
-- Same Google user that sends mail can manage their Calendar
-- Avoids double-OAuth friction
+### Why separate (vs. extending Gmail scope)
+- **Independent lifecycle:** tenant can have Gmail without Calendar or vice versa; revoke/reconnect one without affecting the other
+- **Cleaner mental model for users:** "Email" and "Calendar" are visibly separate features in UI
+- **No existing-tenant disruption:** Gmail-connected tenants do NOT need to re-consent; they connect Calendar additionally if they want Meet
+- **Simpler scope checking:** Calendar tokens have `calendar.events`. The row's existence implies the scope was granted
+- **Token refresh and error handling isolated per integration**
 
-**Migration:**
-- `SCOPES` array in `src/lib/server/gmail/auth.ts` extends with `https://www.googleapis.com/auth/calendar.events`
-- Existing tokens don't have it → server checks `grantedScopes` JSON before attempting Calendar calls
-- Re-consent UX: **banner non-blocking** on Gmail integrations page when `calendar.events` is missing from grantedScopes, with "Reconectează" CTA that triggers `prompt: 'consent'` OAuth
-- Tenants without Gmail entirely: separate copy "Conectează Gmail pentru auto-Meet" — task creation still works without link
+### Connection assumption
+- Tenant typically uses the **same Google account** for Gmail + Calendar (Workspace account)
+- UI does **NOT verify** the two emails match. Documented as recommendation, not enforced.
 
-## §2. Calendar Configuration
+## §2. Database Schema
 
-- **Target calendar:** primary calendar of the connected Gmail account
-- **Timezone:** `tenant.timezone` if column exists; else `Europe/Bucharest` server default
-- **Notification:** `sendUpdates: 'all'` — Google emails attendees automatically
-- **Conference type:** `conferenceData.createRequest.conferenceSolutionKey.type = 'hangoutsMeet'`
+### New table: `google_calendar_integration`
 
-## §3. Attendees — auto-derived from context
-
-| Trigger | Attendees |
-|---|---|
-| `createTask({type:'meeting'})` wizard | Agency assignees (`task.assigneeUserIds` → `user.email`) + client primary (`client.email`) |
-| `scheduleMeet` admin Meet modal | Same as wizard |
-| `client-task-meet-modal.svelte` invite picker | User-selected (existing UI: tenant + client users) |
-
-All attendees receive Google Calendar invitations. No invite picker in `create-task-dialog.svelte` v1.
-
-## §4. Trigger Points & Sync Behavior (V1+V2 in one)
-
-| Event | Calendar action | Failure handling |
-|---|---|---|
-| `createTask` task with `type='meeting'` saved | Create Calendar event with Meet; persist `meetLink` + `googleCalendarEventId` | Task remains; toast warning; log `meet_event_failed` |
-| `scheduleMeet({taskId})` on task without `googleCalendarEventId` | Same as create | Same |
-| `updateTask` changes `meetTime` or `meetDurationMinutes` on task with `googleCalendarEventId` | Calendar event UPDATE (start/end times); log `meet_event_updated` | Task update succeeds; log fail |
-| `updateTask` changes `assigneeUserIds` on task with `googleCalendarEventId` | Calendar event UPDATE (attendees list) | Same |
-| `updateTask` changes `type` from `meeting` to other | Calendar event DELETE; clear `meetLink` + `googleCalendarEventId` in DB | Task succeeds; log fail |
-| Task `delete` | Calendar event DELETE (best-effort, before DB delete) | DB delete succeeds; log fail |
-
-**Concurrency:** No write lock per Calendar event. Google API tolerates rapid sequential updates — last write wins on Google's side. Acceptable for v1.
-
-## §5. Failure Handling — never block task work
-
-```
-DB write succeeds → Calendar API call (async, best-effort)
-  ├─ Success → persist event ID/link on task row → audit log
-  └─ Failure → toast.warning to actor → audit log `meet_event_*_failed` with error metadata
-                → user retries via admin Meet modal (existing fallback)
+```ts
+export const googleCalendarIntegration = sqliteTable('google_calendar_integration', {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().references(() => tenant.id),
+    email: text('email').notNull(),
+    accessTokenEncrypted: text('access_token_encrypted').notNull(),
+    refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+    lastRefreshError: text('last_refresh_error'),
+    consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
+    grantedScopes: text('granted_scopes'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+        .notNull()
+        .default(sql`current_timestamp`),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+        .notNull()
+        .default(sql`current_timestamp`)
+});
 ```
 
-Calendar API errors (network, quota, revoked token, scope missing) **never roll back DB writes**. The CRM task is the source of truth; Calendar is an integration.
+Notes vs. `gmail_integration`:
+- Encrypted tokens are **mandatory** (no legacy plain-text columns)
+- No sync-related columns — Calendar is write-only, no inbound sync
+- One Calendar connection per tenant
 
-## §6. Schema Changes
-
-**Add 1 column to `task` table:**
+### Modified table: `task` — add `googleCalendarEventId`
 
 ```ts
 googleCalendarEventId: text('google_calendar_event_id')
 ```
 
-No new tables. No new indexes needed (event ID is opaque, queried only on update/delete paths).
+### Migrations (Turso one-statement per file)
 
-**Migration:** `drizzle/0336_task_google_calendar_event_id.sql` (single-statement, Turso-compatible)
+- `0336_task_google_calendar_event_id.sql` — single ALTER
+- `0337_create_google_calendar_integration.sql` — full CREATE TABLE
+- `meta/_journal.json` — 2 new entries
+
+## §3. OAuth Flow — Separate from Gmail
+
+**Start endpoint:** `GET /api/integrations/google-calendar/auth`
+
+Mirrors Gmail OAuth start pattern. Returns Google consent URL with:
+- Scope: ONLY `https://www.googleapis.com/auth/calendar.events`
+- `access_type: 'offline'`, `prompt: 'consent'`, `state: tenantId`
+
+**Callback endpoint:** `GET /api/integrations/google-calendar/callback`
+
+- Verify `state` matches `event.locals.tenant.id`
+- Exchange code for tokens
+- Fetch user email via `oauth2.userinfo.get()`
+- Encrypt tokens via `encryptVerified(tenantId, token)`
+- Delete-then-insert row in `google_calendar_integration` (upsert per tenant)
+- Redirect to `/[tenant]/settings/google-calendar?status=connected`
+
+## §4. Calendar Configuration
+
+- **Target calendar:** primary
+- **Timezone:** `tenant.timezone` if column exists; else `Europe/Bucharest`
+- **Notification:** `sendUpdates: 'all'`
+- **Conference:** `conferenceData.createRequest.conferenceSolutionKey.type = 'hangoutsMeet'`
+
+## §5. Attendees — auto-derived
+
+| Trigger | Attendees |
+|---|---|
+| `createTask({type:'meeting'})` wizard | Agency assignees + client primary email |
+| `scheduleMeet` admin modal | Same |
+| `client-task-meet-modal.svelte` invite picker | User-selected (existing UI) |
+
+## §6. Trigger Points & Sync (V1+V2 in one)
+
+| Event | Calendar action |
+|---|---|
+| `createTask` saved with `type='meeting'` + connected | Create event with Meet; persist `meetLink` + `googleCalendarEventId` |
+| `scheduleMeet` on task w/o `googleCalendarEventId` | Same |
+| `updateTask` changes meetTime/duration/assignees on task with event | `events.patch` |
+| `updateTask` changes `type` from `meeting` to other | Delete event, clear DB fields |
+| `updateTask` promotes to `type='meeting'` with meetTime | Create event |
+| Task `delete` | Delete event pre-DB-delete (best-effort) |
+
+**Failure handling:** DB writes always succeed; Calendar errors logged via `recordTaskActivity` with `meet_event_failed` action. If `CalendarNotConnected` thrown, skip silently (expected state).
 
 ## §7. New Code Surface
 
-**New module:** `src/lib/server/google-calendar/`
-- `auth.ts` — `getCalendarClient(tenantId)` returns authenticated googleapis Calendar client; checks `grantedScopes` includes `calendar.events`, throws `CalendarScopeMissing` if not
-- `meet.ts`:
-  - `createMeetEvent({tenantId, title, startTime, durationMinutes, timezone, attendees, description})` → `{eventId, hangoutLink}`
-  - `updateMeetEvent({tenantId, eventId, startTime?, durationMinutes?, attendees?, title?, description?})` → `boolean`
-  - `deleteMeetEvent({tenantId, eventId})` → `boolean`
-- `__tests__/meet.test.ts` — googleapis mocked; covers happy + scope-missing + token-revoked + concurrent paths
+**New server module:** `src/lib/server/google-calendar/`
+- `auth.ts` — `getCalendarStatus`, `getCalendarClient`, `getOAuthUrl`, `exchangeCodeAndSave`, `disconnectCalendar`
+- `meet.ts` — `createMeetEvent`, `updateMeetEvent`, `deleteMeetEvent`
+- `__tests__/meet.test.ts` — 5 unit tests
+
+**New routes:**
+- `src/routes/api/integrations/google-calendar/auth/+server.ts`
+- `src/routes/api/integrations/google-calendar/callback/+server.ts`
+- `src/routes/[tenant]/settings/google-calendar/+page.svelte`
+- `src/routes/[tenant]/settings/google-calendar/+page.server.ts`
 
 **Modified files:**
-- `src/lib/server/gmail/auth.ts` — `SCOPES` add `calendar.events`
-- `src/lib/server/db/schema.ts` — add `task.googleCalendarEventId`
-- `drizzle/0336_task_google_calendar_event_id.sql` — migration
-- `src/lib/remotes/tasks.remote.ts`:
-  - `createTask` — post-insert hook for type=meeting
-  - `scheduleMeet` — same hook
-  - `updateTask` — diff old vs new on meetTime/duration/assignees/type, fire updateMeetEvent or deleteMeetEvent accordingly
-  - `deleteTask` — pre-delete hook fires deleteMeetEvent
-- `src/lib/server/task-activity.ts` — new actions: `meet_event_created`, `meet_event_updated`, `meet_event_deleted`, `meet_event_failed`
-- `src/lib/components/create-task-dialog.svelte` — conditional banner based on integration status (3 states: no-gmail / gmail-no-calendar-scope / fully-connected)
-- `src/lib/components/task-detail/task-detail-body.svelte` — admin Meet modal: if `googleCalendarEventId` exists, show "Calendar event #..." instead of paste field
-- `src/lib/components/client-task/client-task-meet-modal.svelte` — same conditional UX
-- `src/routes/[tenant]/integrations/gmail/+page.svelte` (or equivalent) — re-consent banner
+- `src/lib/server/db/schema.ts` — `googleCalendarIntegration` table + relations + `task.googleCalendarEventId`
+- `drizzle/0336_*.sql`, `drizzle/0337_*.sql`, `drizzle/meta/_journal.json`
+- `src/lib/remotes/tasks.remote.ts` — hooks in createTask/scheduleMeet/updateTask/deleteTask
+- `src/lib/remotes/integrations.remote.ts` — `getGoogleCalendarStatus()` query
+- `src/lib/server/task-activity.ts` — register `meet_event_*` action types
+- `src/lib/components/create-task-dialog.svelte` — 2-state banner
+- `src/lib/components/task-detail/task-detail-body.svelte` — admin Meet modal
+- `src/lib/components/client-task/client-task-meet-modal.svelte` — client Meet modal
 
-**Helper for conditional UI:** `src/lib/remotes/integrations.remote.ts` (or extend tasks.remote.ts) — query `getGmailMeetStatus(tenantId)` → `{ connected: bool, hasCalendarScope: bool, email: string | null }`. UI components consume this.
+**Removed from v1 plan:**
+- ~~Gmail SCOPES extension~~ (not needed)
+- ~~Gmail settings page re-consent banner~~ (replaced by dedicated Calendar settings page)
 
 ## §8. Multi-Tenant Safety
 
-- `getCalendarClient(tenantId)` ALWAYS scopes to the requesting tenant's `gmail_integration` row
-- Calendar event IDs are opaque to clients — never accept event ID from request body for mutation paths; always derive from `task.googleCalendarEventId` after tenant-scoped task fetch
-- Audit log every Calendar mutation through `recordTaskActivity` with `userId` from `event.locals.user.id`
+- `google_calendar_integration.tenantId` is the tenant scope
+- All queries `WHERE tenant_id = event.locals.tenant.id`
+- `getCalendarClient(tenantId)` ALWAYS uses passed `tenantId`
+- Calendar event IDs never accepted from request body
+- OAuth `state` parameter = tenantId, verified in callback against `event.locals.tenant.id`
 
-## §9. Testing Plan
+## §9. UI — 2-state model
 
-- **Unit tests** (Bun script): 8-10 cases mocking googleapis
-  - createMeetEvent happy path
-  - createMeetEvent with no Calendar scope → CalendarScopeMissing
-  - createMeetEvent with revoked token → handles error gracefully
-  - updateMeetEvent happy path
-  - updateMeetEvent on non-existent event → 404 surfaced
-  - deleteMeetEvent happy path
-  - createTask + meeting type integration happy path
-  - createTask + meeting + Calendar fail → task still saved, log captured
-  - Multi-tenant: tenant A cannot create event on tenant B's calendar (impossible by construction)
-  - updateTask diff detects assignee change and updates Calendar attendees
+**Banner copy (Meet modals + create-task-dialog):**
 
-- **Integration smoke** (post-deploy): manual checklist
-  - Create meeting task with type=meeting → verify Calendar event + Meet link
-  - Edit meetTime → verify Calendar event updated
-  - Change assignees → verify Calendar attendees updated
-  - Delete task → verify Calendar event deleted
+| State | UI |
+|---|---|
+| **Not connected** | Amber: "Conectează Google Calendar pentru auto-generare Meet. [Conectează]" → `/[tenant]/settings/google-calendar` |
+| **Connected** | Green: "✓ Linkul Meet va fi generat automat (cont {email})" |
 
-## §10. Effort Breakdown
+**Settings page `/settings/google-calendar`:**
+- Status card: "Conectat ca {email}" (green) OR "Nu este conectat" (gray)
+- Connect button (when not connected) → OAuth start
+- Disconnect button (when connected) → sets `isActive=false`
+- Note: "Folosește același cont Google ca Gmail pentru consistență"
+
+## §10. Testing
+
+- **Unit tests** (Bun, mocked googleapis):
+  - createMeetEvent happy
+  - createMeetEvent — `CalendarNotConnected` thrown → caller can catch
+  - updateMeetEvent happy (patch)
+  - deleteMeetEvent happy
+  - deleteMeetEvent — 404 idempotent
+- **Multi-tenant smoke:** assert tenant A cannot fetch B's integration row
+- **Post-deploy manual checklist** at `app/docs/superpowers/meet-integration-smoke-checklist.md`
+
+## §11. Effort Breakdown
 
 | Phase | Scope | Effort |
 |---|---|---|
-| 1. Server foundation | `google-calendar/` module (auth + meet 3 methods) + scope upgrade + schema migration | ~4-6h |
-| 2. `createTask` + `scheduleMeet` wiring | Hook in create paths + audit logging | ~3h |
-| 3. `updateTask` + delete sync (V2 capabilities) | Diff detection + update/delete event handlers | ~4-5h |
-| 4. UI conditional copy | 3-state banner in create-task-dialog + Meet modals; helper query | ~3h |
-| 5. Re-consent banner on integrations page | Gmail card detects missing scope, shows Reconectează CTA | ~2h |
-| 6. Tests | 8-10 unit + smoke checklist | ~5h |
-| 7. Polish + audit edge cases | Concurrency review, error copy, manual recovery flow | ~2-3h |
-| **TOTAL** | | **~23-27h, ~2.5-3 days** |
-
-## §11. Rollout Sequence
-
-1. Ship in feature branch `feat/google-meet-integration`
-2. **Pre-deploy:** verify `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` env vars unchanged (no infra change needed)
-3. **Deploy code:** existing tenants see banner immediately; meet-type tasks created post-deploy try Calendar (gracefully fail until tenant re-consents)
-4. **Manual smoke:** verify with a connected tenant (Augustin's own OTS tenant) before broadcasting
-5. **Communication:** brief in-app announcement bar "Generare automată Meet — reconectează Gmail" pentru tenanții relevanți (out of scope for this design but recommended)
+| 1. Schema | `google_calendar_integration` table + `task.googleCalendarEventId` + 2 migrations | ~2h |
+| 2. `auth.ts` | client + status + OAuth helpers + disconnect | ~3-4h |
+| 3. `meet.ts` 3 fns + 5 tests | TDD per function | ~4-5h |
+| 4. OAuth routes (start + callback) | start + callback endpoints | ~3h |
+| 5. Settings page | UI + load + actions | ~3h |
+| 6. `createTask` + `scheduleMeet` hooks | Post-insert + audit | ~3h |
+| 7. `updateTask` + `deleteTask` hooks | Diff + bidirectional sync | ~4-5h |
+| 8. UI conditional 2-state banners | 3 components | ~2h |
+| 9. Tests + smoke + verification | Final pass | ~2h |
+| **TOTAL** | | **~26-31h, ~3 days** |
 
 ## §12. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Existing tenants confused by re-consent prompt | Banner copy is explicit; Gmail send keeps working; no forced re-OAuth |
-| Calendar API quota (1M req/day default) | Quota is per-project, not per-tenant; current scale (~50 tenants) far below |
-| Token refresh while in-flight Calendar call | Existing `gmail/transporter.ts` retry pattern reused |
-| User edits task right after creation; first event still creating | Defer Calendar create to a small `await` immediately after task insert (sequential, simple); for v2 consider background job |
-| Calendar event ID drift (manual deletion outside CRM) | updateMeetEvent surfaces 404 → log `meet_event_orphaned`, clear `googleCalendarEventId`, prompt user to re-link |
-| Client portal users cannot create Calendar events (no isClientUser path) | All `isClientUser` blocks in remote handlers (already in place from hotfix) prevent this |
+| User connects Calendar with different account than Gmail | Document recommendation; no enforcement; both work independently |
+| Token refresh race during Calendar call | Reuse googleapis OAuth2Client auto-refresh; existing pattern |
+| User edits task rapidly; first event still creating | Sequential `await` after task insert; simple v1 |
+| Calendar event manually deleted in Google | `updateMeetEvent` 404 → log `meet_event_orphaned`, clear `googleCalendarEventId`, surface in UI |
+| Calendar API quota (1M req/day) | Per-project; ~50 tenants far below |
+| Client portal users invoking admin mutations | All `isClientUser` blocks already in place from prior hotfix |
 
 ---
 
 ## Spec Self-Review
 
-- **Placeholder scan:** none (all sections concrete)
-- **Internal consistency:** §4 trigger table + §7 modified files list align (createTask/updateTask/deleteTask all listed)
-- **Scope check:** single subsystem (Meet integration); does not bleed into invoices, contracts, etc. ✅
-- **Ambiguity check:** §2 "primary calendar" = user's Google Calendar default; §3 "agency assignees" = users in `taskAssignee` table for this task. Both unambiguous.
+- **Placeholder scan:** none
+- **Internal consistency:** §6 trigger table + §7 modified files align
+- **Scope check:** single subsystem (Calendar Meet)
+- **Ambiguity check:** §1 "same account" = recommendation only, not enforced; §4 "primary calendar" = Google Calendar default per-user; §9 UI states are mutually exclusive (no scope-missing state needed since v1's 3-state collapsed to 2-state)

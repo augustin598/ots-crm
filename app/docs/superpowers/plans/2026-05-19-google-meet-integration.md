@@ -1,123 +1,167 @@
-# Google Meet Integration Implementation Plan
+# Google Meet Integration Implementation Plan (v2 — Separate Module)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Auto-generate Google Meet links for tasks of `type='meeting'` via Google Calendar API, with bidirectional CRM↔Calendar sync (create on task save, update on meetTime/duration/assignee/type change, delete on task delete).
+**Goal:** Auto-generate Google Meet links for tasks of `type='meeting'` via Google Calendar API. Calendar is a **separate per-tenant integration** with its own OAuth flow, DB table, and settings page — independent from Gmail. Bidirectional sync: create on save, update on changes, delete on task delete.
 
-**Architecture:** Extend existing per-tenant Gmail OAuth scope with `calendar.events`. New server module `src/lib/server/google-calendar/` (auth + meet CRUD). Hooks in `tasks.remote.ts` for createTask, scheduleMeet, updateTask, deleteTask. Conditional UI based on integration status (no-gmail / no-scope / connected). Non-blocking re-consent banner on Gmail integrations page.
+**Architecture:** New `google_calendar_integration` table mirroring `gmail_integration` shape; dedicated `/api/integrations/google-calendar/{auth,callback}` OAuth flow with only `calendar.events` scope; new `/[tenant]/settings/google-calendar` page. New `src/lib/server/google-calendar/` module. Hooks in `tasks.remote.ts` for createTask/scheduleMeet/updateTask/deleteTask. 2-state UI (connected / not connected).
 
-**Tech Stack:** SvelteKit 5 (runes, `$state`, `$derived`, `$effect`), Drizzle ORM, libSQL/Turso, googleapis Node SDK (already a dependency via Gmail), Bun runtime, server-side `query()`/`command()` pattern.
+**Tech Stack:** SvelteKit 5 (runes), Drizzle ORM, libSQL/Turso, googleapis SDK, Bun.
 
-**Reference design:** `app/docs/superpowers/specs/2026-05-19-google-meet-integration-design.md`
+**Reference spec:** `app/docs/superpowers/specs/2026-05-19-google-meet-integration-design.md` (v2)
 
 ---
 
 ## File Structure
 
 **New files:**
-- `app/src/lib/server/google-calendar/auth.ts` — `getCalendarClient(tenantId)`, scope check helpers
-- `app/src/lib/server/google-calendar/meet.ts` — `createMeetEvent`, `updateMeetEvent`, `deleteMeetEvent`
-- `app/src/lib/server/google-calendar/__tests__/meet.test.ts` — 8-10 unit tests
-- `app/drizzle/0336_task_google_calendar_event_id.sql` — schema migration
-- `app/src/lib/remotes/integrations.remote.ts` — `getGmailMeetStatus(tenantId)` query (may already exist — Task 1 verifies)
+- `app/src/lib/server/google-calendar/auth.ts`
+- `app/src/lib/server/google-calendar/meet.ts`
+- `app/src/lib/server/google-calendar/__tests__/meet.test.ts`
+- `app/drizzle/0336_task_google_calendar_event_id.sql`
+- `app/drizzle/0337_create_google_calendar_integration.sql`
+- `app/src/routes/api/integrations/google-calendar/auth/+server.ts`
+- `app/src/routes/api/integrations/google-calendar/callback/+server.ts`
+- `app/src/routes/[tenant]/settings/google-calendar/+page.svelte`
+- `app/src/routes/[tenant]/settings/google-calendar/+page.server.ts`
+- `app/src/lib/remotes/integrations.remote.ts` (extend if exists)
 
-**Modified files:**
-- `app/src/lib/server/gmail/auth.ts` — extend `SCOPES` array
-- `app/src/lib/server/db/schema.ts` — add `task.googleCalendarEventId` field + `meta/_journal.json`
-- `app/src/lib/remotes/tasks.remote.ts` — wire 4 hooks
-- `app/src/lib/server/task-activity.ts` — register new action types
-- `app/src/lib/components/create-task-dialog.svelte` — replace promise banner with 3-state conditional
-- `app/src/lib/components/task-detail/task-detail-body.svelte` — admin Meet modal conditional
-- `app/src/lib/components/client-task/client-task-meet-modal.svelte` — client Meet modal conditional
-- `app/src/routes/[tenant]/settings/gmail/+page.svelte` — re-consent banner
+**Modified:**
+- `app/src/lib/server/db/schema.ts` — add `googleCalendarIntegration` table + relations + `task.googleCalendarEventId`
+- `app/drizzle/meta/_journal.json` — 2 new entries
+- `app/src/lib/remotes/tasks.remote.ts` — 4 hooks
+- `app/src/lib/server/task-activity.ts` — register action types
+- `app/src/lib/components/create-task-dialog.svelte` — 2-state banner
+- `app/src/lib/components/task-detail/task-detail-body.svelte` — admin Meet modal banner
+- `app/src/lib/components/client-task/client-task-meet-modal.svelte` — client Meet modal banner
 
 ---
 
 ## Sequencing
 
 ```
-Task 1 (worktree setup)
-  → Task 2 (schema migration foundation)
-    → Task 3 (Gmail SCOPES extension)
-      → Task 4 (google-calendar/auth.ts)
-        → Task 5 (createMeetEvent + test)
-          → Task 6 (updateMeetEvent + test)
-            → Task 7 (deleteMeetEvent + test)
-              → Task 8 (task-activity action types)
-                → Task 9 (wire createTask)
-                → Task 10 (wire scheduleMeet)
-                → Task 11 (wire updateTask diff)
-                → Task 12 (wire deleteTask)
-                  → Task 13 (getGmailMeetStatus helper)
-                    → Task 14 (create-task-dialog conditional banner)
-                    → Task 15 (admin Meet modal conditional)
-                    → Task 16 (client Meet modal conditional)
-                    → Task 17 (gmail/+page.svelte re-consent banner)
-                      → Task 18 (manual smoke + final verification)
-                        → Task 19 (commit milestone + merge prep)
-```
-
-Tasks 9-12 can run sequentially; 14-17 can run in parallel (file-disjoint).
-
----
-
-## Task 1: Worktree Setup + Branch
-
-**Files:** none (git operation)
-
-- [ ] **Step 1: Create worktree off main**
-
-```bash
-cd /Users/augustin598/Projects/CRM
-git worktree add -b feat/google-meet-integration ./.claude/worktrees/google-meet main
-```
-
-Expected: `Preparing worktree (new branch 'feat/google-meet-integration')` and `HEAD is now at <sha>`.
-
-- [ ] **Step 2: Verify clean state**
-
-```bash
-cd /Users/augustin598/Projects/CRM/.claude/worktrees/google-meet
-git status --short
-git log --oneline -3
-```
-
-Expected: clean working tree; HEAD = `afdffe0` (post perf-a11y merge) or later.
-
-- [ ] **Step 3: Commit empty milestone marker**
-
-```bash
-git commit --allow-empty -m "feat(meet): start Google Meet integration work"
+Task 1 (worktree) — DONE manually
+Task 2 (schema: task column + new table) → Task 3 (2 migrations) → Task 4 (journal)
+  → Task 5 (auth.ts) → Task 6 (createMeetEvent + 2 tests)
+    → Task 7 (updateMeetEvent + test) → Task 8 (deleteMeetEvent + 2 tests)
+      → Task 9 (OAuth start route) → Task 10 (OAuth callback route)
+        → Task 11 (settings page UI + server load)
+          MILESTONE 1
+          → Task 12 (action types) → Task 13 (createTask hook)
+            → Task 14 (scheduleMeet hook) → Task 15 (updateTask diff)
+              → Task 16 (deleteTask hook) → Task 17 (status query)
+                MILESTONE 2
+                → Task 18 (dialog banner) || Task 19 (admin Meet conditional) || Task 20 (client Meet conditional) — PARALLEL
+                  → Task 21 (smoke + final verify + merge gate)
 ```
 
 ---
 
-## Task 2: Schema Migration — `task.googleCalendarEventId`
+## Task 1: Worktree Setup — DONE
+
+Worktree exists at `/Users/augustin598/Projects/CRM/.claude/worktrees/google-meet`, branch `feat/google-meet-integration`, off main, with empty milestone commit + cherry-picked spec + plan.
+
+---
+
+## Task 2: Schema — `task.googleCalendarEventId` + `googleCalendarIntegration` Table
 
 **Files:**
-- Create: `app/drizzle/0336_task_google_calendar_event_id.sql`
-- Modify: `app/drizzle/meta/_journal.json`
-- Modify: `app/src/lib/server/db/schema.ts` (the `task` table around line 287)
+- Modify: `app/src/lib/server/db/schema.ts`
 
-- [ ] **Step 1: Read current task table definition**
+- [ ] **Step 1: Locate task table**
 
 ```bash
 grep -n "^export const task = sqliteTable" app/src/lib/server/db/schema.ts
 ```
 
-Expected: line number where `task` table starts (around 287).
+Expected: line ~287.
 
-Open that section and find the existing `meetLink`/`meetTime`/`meetDurationMinutes` columns (around lines 296-300).
+- [ ] **Step 2: Add column to `task` table**
 
-- [ ] **Step 2: Add column to schema.ts**
-
-In `app/src/lib/server/db/schema.ts`, find the `task` table definition. After `meetDurationMinutes`, add:
+In the `task` table definition, after the existing `meetDurationMinutes` line, add:
 
 ```ts
 googleCalendarEventId: text('google_calendar_event_id'),
 ```
 
-- [ ] **Step 3: Create migration SQL file**
+- [ ] **Step 3: Add new `googleCalendarIntegration` table**
+
+Locate the existing `gmailIntegration` definition (around line 2019). Add immediately AFTER it:
+
+```ts
+export const googleCalendarIntegration = sqliteTable('google_calendar_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	accessTokenEncrypted: text('access_token_encrypted').notNull(),
+	refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
+	lastRefreshError: text('last_refresh_error'),
+	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
+	grantedScopes: text('granted_scopes'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+```
+
+- [ ] **Step 4: Add relations declaration**
+
+Find the `gmailIntegrationRelations` declaration (around line 3281). Add immediately AFTER:
+
+```ts
+export const googleCalendarIntegrationRelations = relations(googleCalendarIntegration, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [googleCalendarIntegration.tenantId],
+		references: [tenant.id]
+	})
+}));
+```
+
+Also, find the `tenant`'s relations block (look for `googleAdsAccount: many(...)` or similar in `tenantRelations`) and add `googleCalendarIntegration: one(googleCalendarIntegration)` to the existing relations object.
+
+- [ ] **Step 5: Export type aliases**
+
+Find existing `export type GmailIntegration = typeof gmailIntegration.$inferSelect;` (around line 4029) and add right after:
+
+```ts
+export type GoogleCalendarIntegration = typeof googleCalendarIntegration.$inferSelect;
+export type NewGoogleCalendarIntegration = typeof googleCalendarIntegration.$inferInsert;
+```
+
+- [ ] **Step 6: Verify**
+
+```bash
+cd app
+bun run check 2>&1 | tail -5
+```
+
+Expected: no new errors. `task.googleCalendarEventId` and `googleCalendarIntegration` are now typed.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/src/lib/server/db/schema.ts
+git commit -m "feat(meet): schema — task.googleCalendarEventId + googleCalendarIntegration table"
+```
+
+---
+
+## Task 3: Two Migrations
+
+**Files:**
+- Create: `app/drizzle/0336_task_google_calendar_event_id.sql`
+- Create: `app/drizzle/0337_create_google_calendar_integration.sql`
+- Modify: `app/drizzle/meta/_journal.json`
+
+- [ ] **Step 1: Create migration 0336 (single ALTER)**
 
 Create `app/drizzle/0336_task_google_calendar_event_id.sql`:
 
@@ -125,80 +169,260 @@ Create `app/drizzle/0336_task_google_calendar_event_id.sql`:
 ALTER TABLE task ADD COLUMN google_calendar_event_id text;
 ```
 
-- [ ] **Step 4: Update migration journal**
+- [ ] **Step 2: Create migration 0337 (single CREATE TABLE)**
 
-In `app/drizzle/meta/_journal.json`, find the `"entries"` array. Append (mirroring the existing entry shape):
+Create `app/drizzle/0337_create_google_calendar_integration.sql`:
 
-```json
-    {
-      "idx": 336,
-      "version": "7",
-      "when": 1747641600000,
-      "tag": "0336_task_google_calendar_event_id",
-      "breakpoints": true
-    }
+```sql
+CREATE TABLE IF NOT EXISTS google_calendar_integration (
+	id text PRIMARY KEY NOT NULL,
+	tenant_id text NOT NULL REFERENCES tenant(id),
+	email text NOT NULL,
+	access_token_encrypted text NOT NULL,
+	refresh_token_encrypted text NOT NULL,
+	token_expires_at integer NOT NULL,
+	is_active integer NOT NULL DEFAULT 1,
+	last_refresh_attempt_at integer,
+	last_refresh_error text,
+	consecutive_refresh_failures integer DEFAULT 0,
+	granted_scopes text,
+	created_at integer NOT NULL DEFAULT (unixepoch()),
+	updated_at integer NOT NULL DEFAULT (unixepoch())
+);
 ```
 
-Confirm the JSON syntax (comma before this entry; the array bracket closes after).
+- [ ] **Step 3: Append both entries to `_journal.json`**
 
-- [ ] **Step 5: Verify with bun**
+Open `app/drizzle/meta/_journal.json`. Find the `entries` array (sorted by `idx`). Append:
+
+```json
+,
+{
+  "idx": 336,
+  "version": "7",
+  "when": 1747641600000,
+  "tag": "0336_task_google_calendar_event_id",
+  "breakpoints": true
+},
+{
+  "idx": 337,
+  "version": "7",
+  "when": 1747641700000,
+  "tag": "0337_create_google_calendar_integration",
+  "breakpoints": true
+}
+```
+
+Read the existing last entry first to copy the EXACT `version` value used (probably `"7"` but verify).
+
+- [ ] **Step 4: Verify journal is valid JSON**
 
 ```bash
 cd app
-bun run check 2>&1 | tail -10
+bun -e "JSON.parse(require('fs').readFileSync('drizzle/meta/_journal.json', 'utf8')); console.log('valid')"
 ```
 
-Expected: no new type errors. `task.googleCalendarEventId` is now typed.
+Expected: `valid`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/lib/server/db/schema.ts app/drizzle/0336_task_google_calendar_event_id.sql app/drizzle/meta/_journal.json
-git commit -m "feat(meet): schema migration — task.googleCalendarEventId column"
+git add app/drizzle/0336_task_google_calendar_event_id.sql app/drizzle/0337_create_google_calendar_integration.sql app/drizzle/meta/_journal.json
+git commit -m "feat(meet): migrations 0336 (task column) + 0337 (calendar integration table)"
 ```
 
 ---
 
-## Task 3: Extend Gmail OAuth Scopes
+## Task 4: `google-calendar/auth.ts` Foundation
 
 **Files:**
-- Modify: `app/src/lib/server/gmail/auth.ts` (around line 17)
+- Create: `app/src/lib/server/google-calendar/auth.ts`
 
-- [ ] **Step 1: Read current SCOPES**
+- [ ] **Step 1: Verify the OAuth utils path**
 
 ```bash
-grep -n "^const SCOPES" app/src/lib/server/gmail/auth.ts
+grep -n "google.auth.OAuth2\|encryptVerified" app/src/lib/server/gmail/auth.ts | head -5
 ```
 
-Expected: line 17. Current scope list:
-- gmail.readonly
-- gmail.send
-- gmail.modify
+Confirm the crypto helper import path. The Gmail flow uses `from '$lib/server/plugins/smartbill/crypto'`.
 
-- [ ] **Step 2: Add Calendar scope**
+- [ ] **Step 2: Create `auth.ts` with full content**
 
-In `app/src/lib/server/gmail/auth.ts`, update `SCOPES`:
+Create `app/src/lib/server/google-calendar/auth.ts`:
 
 ```ts
-const SCOPES = [
-	'https://www.googleapis.com/auth/gmail.readonly',
-	'https://www.googleapis.com/auth/gmail.send',
-	'https://www.googleapis.com/auth/gmail.modify',
-	'https://www.googleapis.com/auth/calendar.events'
-];
-```
+import { google } from 'googleapis';
+import { env } from '$env/dynamic/private';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { encryptVerified, decrypt } from '$lib/server/plugins/smartbill/crypto';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
 
-Add a JSDoc comment above the array:
+const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const SCOPES = [SCOPE];
 
-```ts
+export class CalendarNotConnected extends Error {
+	constructor(tenantId: string) {
+		super(`Tenant ${tenantId} has no active Google Calendar integration`);
+		this.name = 'CalendarNotConnected';
+	}
+}
+
+export type CalendarStatus = {
+	connected: boolean;
+	email: string | null;
+};
+
+function getOAuth2Client() {
+	return new google.auth.OAuth2(
+		env.GOOGLE_CLIENT_ID,
+		env.GOOGLE_CLIENT_SECRET,
+		env.GOOGLE_REDIRECT_URI_CALENDAR ?? env.GOOGLE_REDIRECT_URI
+	);
+}
+
+function generateId(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
 /**
- * OAuth scopes requested at consent.
- *
- * `calendar.events` enables Google Meet auto-generation for meeting tasks.
- * Existing tenants connected before this scope was added have tokens WITHOUT
- * calendar.events — they must reconnect (UI shows banner on gmail settings page).
- * Server checks `gmail_integration.grantedScopes` JSON column to detect this.
+ * Cheap status check — used by UI to decide which banner to show. Never throws.
  */
+export async function getCalendarStatus(tenantId: string): Promise<CalendarStatus> {
+	const [integration] = await db
+		.select({
+			email: table.googleCalendarIntegration.email,
+			isActive: table.googleCalendarIntegration.isActive
+		})
+		.from(table.googleCalendarIntegration)
+		.where(eq(table.googleCalendarIntegration.tenantId, tenantId))
+		.limit(1);
+
+	if (!integration || !integration.isActive) {
+		return { connected: false, email: null };
+	}
+	return { connected: true, email: integration.email };
+}
+
+/**
+ * Build an authenticated Calendar API client for a tenant.
+ * Throws CalendarNotConnected if no active integration.
+ */
+export async function getCalendarClient(tenantId: string) {
+	const [integration] = await db
+		.select()
+		.from(table.googleCalendarIntegration)
+		.where(eq(table.googleCalendarIntegration.tenantId, tenantId))
+		.limit(1);
+
+	if (!integration || !integration.isActive) {
+		throw new CalendarNotConnected(tenantId);
+	}
+
+	let accessToken: string;
+	let refreshToken: string;
+
+	try {
+		accessToken = decrypt(tenantId, integration.accessTokenEncrypted);
+	} catch (err) {
+		logWarning('google-calendar', 'accessToken decrypt failed', { tenantId, metadata: { error: serializeError(err) } });
+		throw new Error('Calendar token decrypt failed; reconnect required');
+	}
+
+	try {
+		refreshToken = decrypt(tenantId, integration.refreshTokenEncrypted);
+	} catch (err) {
+		logWarning('google-calendar', 'refreshToken decrypt failed', { tenantId, metadata: { error: serializeError(err) } });
+		throw new Error('Calendar token decrypt failed; reconnect required');
+	}
+
+	const oauth2Client = getOAuth2Client();
+	oauth2Client.setCredentials({
+		access_token: accessToken,
+		refresh_token: refreshToken,
+		expiry_date: integration.tokenExpiresAt.getTime()
+	});
+
+	logInfo('google-calendar', 'Calendar client built', { tenantId, metadata: { email: integration.email } });
+
+	return google.calendar({ version: 'v3', auth: oauth2Client });
+}
+
+/**
+ * Build the Google OAuth consent URL for connecting Calendar.
+ */
+export function getOAuthUrl(tenantId: string): string {
+	const oauth2Client = getOAuth2Client();
+	const url = oauth2Client.generateAuthUrl({
+		access_type: 'offline',
+		scope: SCOPES,
+		prompt: 'consent',
+		state: tenantId,
+		include_granted_scopes: true
+	});
+	logInfo('google-calendar', 'OAuth: Generated auth URL', { tenantId });
+	return url;
+}
+
+/**
+ * Exchange authorization code for tokens and persist as integration row.
+ * Upserts: deletes any existing row for this tenant first.
+ */
+export async function exchangeCodeAndSave(tenantId: string, code: string): Promise<{ email: string }> {
+	const oauth2Client = getOAuth2Client();
+	const { tokens } = await oauth2Client.getToken(code);
+
+	if (!tokens.access_token || !tokens.refresh_token) {
+		throw new Error('Google did not return tokens (missing access_token or refresh_token)');
+	}
+
+	oauth2Client.setCredentials(tokens);
+
+	// Fetch user info to get email
+	const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+	const userInfo = await oauth2.userinfo.get();
+	const email = userInfo.data.email;
+	if (!email) throw new Error('Google did not return user email');
+
+	const accessTokenEnc = encryptVerified(tenantId, tokens.access_token);
+	const refreshTokenEnc = encryptVerified(tenantId, tokens.refresh_token);
+	const tokenExpiresAt = new Date(tokens.expiry_date ?? Date.now() + 3600 * 1000);
+	const grantedScopes = JSON.stringify(tokens.scope?.split(' ') ?? SCOPES);
+
+	// Delete-then-insert (one integration per tenant)
+	await db
+		.delete(table.googleCalendarIntegration)
+		.where(eq(table.googleCalendarIntegration.tenantId, tenantId));
+
+	await db.insert(table.googleCalendarIntegration).values({
+		id: generateId(),
+		tenantId,
+		email,
+		accessTokenEncrypted: accessTokenEnc,
+		refreshTokenEncrypted: refreshTokenEnc,
+		tokenExpiresAt,
+		isActive: true,
+		grantedScopes
+	});
+
+	logInfo('google-calendar', 'OAuth: Integration saved', { tenantId, metadata: { email } });
+	return { email };
+}
+
+/**
+ * Soft-delete the Calendar integration for a tenant.
+ */
+export async function disconnectCalendar(tenantId: string): Promise<void> {
+	await db
+		.update(table.googleCalendarIntegration)
+		.set({ isActive: false, updatedAt: new Date() })
+		.where(eq(table.googleCalendarIntegration.tenantId, tenantId));
+
+	logInfo('google-calendar', 'Calendar integration disconnected', { tenantId });
+}
 ```
 
 - [ ] **Step 3: Verify check**
@@ -213,194 +437,31 @@ Expected: no errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/src/lib/server/gmail/auth.ts
-git commit -m "feat(meet): add calendar.events to Gmail OAuth SCOPES"
-```
-
----
-
-## Task 4: `google-calendar/auth.ts` — Client Getter + Scope Check
-
-**Files:**
-- Create: `app/src/lib/server/google-calendar/auth.ts`
-
-- [ ] **Step 1: Create the file with full content**
-
-Create `app/src/lib/server/google-calendar/auth.ts`:
-
-```ts
-import { google } from 'googleapis';
-import { env } from '$env/dynamic/private';
-import { db } from '$lib/server/db';
-import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
-import { logInfo, logWarning } from '$lib/server/logger';
-import { decrypt } from '$lib/server/plugins/smartbill/crypto';
-
-const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-
-export class CalendarScopeMissing extends Error {
-	constructor(tenantId: string) {
-		super(`Tenant ${tenantId} has Gmail connected but missing calendar.events scope`);
-		this.name = 'CalendarScopeMissing';
-	}
-}
-
-export class CalendarNotConnected extends Error {
-	constructor(tenantId: string) {
-		super(`Tenant ${tenantId} has no active Gmail integration`);
-		this.name = 'CalendarNotConnected';
-	}
-}
-
-export type CalendarStatus = {
-	connected: boolean;
-	hasCalendarScope: boolean;
-	email: string | null;
-};
-
-/**
- * Cheap status check — used by UI to decide which banner to show.
- * Never throws; returns shape always.
- */
-export async function getCalendarStatus(tenantId: string): Promise<CalendarStatus> {
-	const [integration] = await db
-		.select({
-			email: table.gmailIntegration.email,
-			isActive: table.gmailIntegration.isActive,
-			grantedScopes: table.gmailIntegration.grantedScopes
-		})
-		.from(table.gmailIntegration)
-		.where(eq(table.gmailIntegration.tenantId, tenantId))
-		.limit(1);
-
-	if (!integration || !integration.isActive) {
-		return { connected: false, hasCalendarScope: false, email: null };
-	}
-
-	let scopes: string[] = [];
-	if (integration.grantedScopes) {
-		try {
-			scopes = JSON.parse(integration.grantedScopes);
-		} catch {
-			scopes = [];
-		}
-	}
-
-	return {
-		connected: true,
-		hasCalendarScope: scopes.includes(CALENDAR_SCOPE),
-		email: integration.email
-	};
-}
-
-/**
- * Build an authenticated Calendar API client for a tenant.
- * Throws CalendarNotConnected / CalendarScopeMissing for upstream graceful handling.
- */
-export async function getCalendarClient(tenantId: string) {
-	const [integration] = await db
-		.select()
-		.from(table.gmailIntegration)
-		.where(eq(table.gmailIntegration.tenantId, tenantId))
-		.limit(1);
-
-	if (!integration || !integration.isActive) {
-		throw new CalendarNotConnected(tenantId);
-	}
-
-	let grantedScopes: string[] = [];
-	if (integration.grantedScopes) {
-		try {
-			grantedScopes = JSON.parse(integration.grantedScopes);
-		} catch {
-			grantedScopes = [];
-		}
-	}
-
-	if (!grantedScopes.includes(CALENDAR_SCOPE)) {
-		throw new CalendarScopeMissing(tenantId);
-	}
-
-	let accessToken: string;
-	let refreshToken: string;
-
-	if (integration.accessTokenEncrypted) {
-		try {
-			accessToken = decrypt(tenantId, integration.accessTokenEncrypted);
-		} catch (err) {
-			logWarning('google-calendar', 'accessToken decrypt failed, fallback to plain', { tenantId });
-			accessToken = integration.accessToken;
-		}
-	} else {
-		accessToken = integration.accessToken;
-	}
-
-	if (integration.refreshTokenEncrypted) {
-		try {
-			refreshToken = decrypt(tenantId, integration.refreshTokenEncrypted);
-		} catch (err) {
-			logWarning('google-calendar', 'refreshToken decrypt failed, fallback to plain', { tenantId });
-			refreshToken = integration.refreshToken;
-		}
-	} else {
-		refreshToken = integration.refreshToken;
-	}
-
-	const oauth2Client = new google.auth.OAuth2(
-		env.GOOGLE_CLIENT_ID,
-		env.GOOGLE_CLIENT_SECRET,
-		env.GOOGLE_REDIRECT_URI
-	);
-	oauth2Client.setCredentials({
-		access_token: accessToken,
-		refresh_token: refreshToken,
-		expiry_date: integration.tokenExpiresAt.getTime()
-	});
-
-	logInfo('google-calendar', 'Calendar client built', { tenantId, metadata: { email: integration.email } });
-
-	return google.calendar({ version: 'v3', auth: oauth2Client });
-}
-```
-
-- [ ] **Step 2: Verify check**
-
-```bash
-cd app
-bun run check 2>&1 | tail -5
-```
-
-Expected: no errors. Imports resolve.
-
-- [ ] **Step 3: Commit**
-
-```bash
 git add app/src/lib/server/google-calendar/auth.ts
-git commit -m "feat(meet): google-calendar/auth.ts — client builder + scope check"
+git commit -m "feat(meet): google-calendar/auth.ts — client + status + OAuth helpers + disconnect"
 ```
 
 ---
 
-## Task 5: `meet.ts` — createMeetEvent
+## Task 5: `createMeetEvent` + 2 Tests (TDD)
 
 **Files:**
 - Create: `app/src/lib/server/google-calendar/meet.ts`
 - Create: `app/src/lib/server/google-calendar/__tests__/meet.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write failing test**
 
 Create `app/src/lib/server/google-calendar/__tests__/meet.test.ts`:
 
 ```ts
-import { describe, it, expect, mock, beforeEach } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
 
 // Mock googleapis BEFORE import
 mock.module('googleapis', () => ({
 	google: {
 		calendar: () => ({
 			events: {
-				insert: mock(async ({ requestBody, conferenceDataVersion }) => ({
+				insert: mock(async ({ requestBody }) => ({
 					data: {
 						id: 'evt_test_123',
 						hangoutLink: 'https://meet.google.com/abc-defg-hij',
@@ -409,24 +470,22 @@ mock.module('googleapis', () => ({
 						attendees: requestBody.attendees
 					}
 				})),
-				update: mock(async ({ eventId, requestBody }) => ({
+				patch: mock(async ({ eventId, requestBody }) => ({
 					data: { id: eventId, ...requestBody }
 				})),
-				delete: mock(async ({ eventId }) => ({ data: {} }))
+				delete: mock(async () => ({ data: {} }))
 			}
 		}),
 		auth: { OAuth2: class { setCredentials() {} } }
 	}
 }));
 
-// Mock the auth getter to avoid DB hits
 mock.module('$lib/server/google-calendar/auth', () => ({
-	getCalendarClient: mock(async (tenantId: string) => {
+	getCalendarClient: mock(async () => {
 		const { google } = await import('googleapis');
 		return google.calendar();
 	}),
-	getCalendarStatus: mock(async () => ({ connected: true, hasCalendarScope: true, email: 'a@b.com' })),
-	CalendarScopeMissing: class extends Error {},
+	getCalendarStatus: mock(async () => ({ connected: true, email: 'a@b.com' })),
 	CalendarNotConnected: class extends Error {}
 }));
 
@@ -447,19 +506,37 @@ describe('createMeetEvent', () => {
 		expect(result.eventId).toBe('evt_test_123');
 		expect(result.hangoutLink).toBe('https://meet.google.com/abc-defg-hij');
 	});
+
+	it('throws CalendarNotConnected when integration missing', async () => {
+		const { getCalendarClient, CalendarNotConnected } = await import('$lib/server/google-calendar/auth');
+		(getCalendarClient as any).mockImplementationOnce(async () => {
+			throw new CalendarNotConnected('tenant-x');
+		});
+
+		await expect(
+			createMeetEvent({
+				tenantId: 'tenant-x',
+				title: 'No connection',
+				startTime: new Date('2026-05-20T10:00:00Z'),
+				durationMinutes: 30,
+				timezone: 'Europe/Bucharest',
+				attendees: []
+			})
+		).rejects.toThrow();
+	});
 });
 ```
 
-- [ ] **Step 2: Run test — verify it fails**
+- [ ] **Step 2: Run — fails (no implementation)**
 
 ```bash
 cd app
 bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
 ```
 
-Expected: FAIL with "Cannot find module '../meet'" or equivalent.
+Expected: FAIL with `Cannot find module '../meet'`.
 
-- [ ] **Step 3: Create meet.ts with createMeetEvent**
+- [ ] **Step 3: Implement `createMeetEvent`**
 
 Create `app/src/lib/server/google-calendar/meet.ts`:
 
@@ -482,10 +559,6 @@ export type CreateMeetEventResult = {
 	hangoutLink: string;
 };
 
-/**
- * Create a Google Calendar event with a Meet conference. Returns event id and hangout link.
- * Throws if Calendar API errors; caller decides graceful fallback.
- */
 export async function createMeetEvent(input: CreateMeetEventInput): Promise<CreateMeetEventResult> {
 	const calendar = await getCalendarClient(input.tenantId);
 	const endTime = new Date(input.startTime.getTime() + input.durationMinutes * 60_000);
@@ -535,43 +608,7 @@ export async function createMeetEvent(input: CreateMeetEventInput): Promise<Crea
 }
 ```
 
-- [ ] **Step 4: Run test — verify it passes**
-
-```bash
-cd app
-bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
-```
-
-Expected: `1 pass / 0 fail`.
-
-- [ ] **Step 5: Add second test — scope missing**
-
-Append to `meet.test.ts`:
-
-```ts
-describe('createMeetEvent — scope missing', () => {
-	it('throws CalendarScopeMissing when scope absent', async () => {
-		// Override the auth mock for this case
-		const { getCalendarClient, CalendarScopeMissing } = await import('$lib/server/google-calendar/auth');
-		(getCalendarClient as any).mockImplementationOnce(async () => {
-			throw new CalendarScopeMissing('tenant-x');
-		});
-
-		await expect(
-			createMeetEvent({
-				tenantId: 'tenant-x',
-				title: 'No scope',
-				startTime: new Date('2026-05-20T10:00:00Z'),
-				durationMinutes: 30,
-				timezone: 'Europe/Bucharest',
-				attendees: []
-			})
-		).rejects.toThrow('CalendarScopeMissing');
-	});
-});
-```
-
-- [ ] **Step 6: Run test — both pass**
+- [ ] **Step 4: Run — passes**
 
 ```bash
 cd app
@@ -580,22 +617,22 @@ bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
 
 Expected: `2 pass / 0 fail`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add app/src/lib/server/google-calendar/meet.ts app/src/lib/server/google-calendar/__tests__/meet.test.ts
-git commit -m "feat(meet): createMeetEvent + 2 tests"
+git commit -m "feat(meet): createMeetEvent + 2 tests (happy + not-connected)"
 ```
 
 ---
 
-## Task 6: `meet.ts` — updateMeetEvent
+## Task 6: `updateMeetEvent` + 1 Test
 
 **Files:**
 - Modify: `app/src/lib/server/google-calendar/meet.ts`
 - Modify: `app/src/lib/server/google-calendar/__tests__/meet.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write test**
 
 Append to `meet.test.ts`:
 
@@ -603,7 +640,7 @@ Append to `meet.test.ts`:
 import { updateMeetEvent } from '../meet';
 
 describe('updateMeetEvent', () => {
-	it('returns true on successful update with new times and attendees', async () => {
+	it('returns true on successful patch with new times and attendees', async () => {
 		const result = await updateMeetEvent({
 			tenantId: 'tenant-a',
 			eventId: 'evt_test_123',
@@ -613,7 +650,6 @@ describe('updateMeetEvent', () => {
 			attendees: ['user1@example.com', 'user2@example.com'],
 			title: 'Updated Meeting'
 		});
-
 		expect(result).toBe(true);
 	});
 });
@@ -628,9 +664,9 @@ bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
 
 Expected: FAIL — `updateMeetEvent` undefined.
 
-- [ ] **Step 3: Implement updateMeetEvent**
+- [ ] **Step 3: Implement**
 
-In `app/src/lib/server/google-calendar/meet.ts`, append:
+Append to `meet.ts`:
 
 ```ts
 export type UpdateMeetEventInput = {
@@ -644,10 +680,6 @@ export type UpdateMeetEventInput = {
 	description?: string;
 };
 
-/**
- * Patch a Google Calendar event. Only provided fields are sent.
- * Returns true on success, throws on Calendar API error.
- */
 export async function updateMeetEvent(input: UpdateMeetEventInput): Promise<boolean> {
 	const calendar = await getCalendarClient(input.tenantId);
 	const requestBody: Record<string, unknown> = {};
@@ -689,15 +721,7 @@ export async function updateMeetEvent(input: UpdateMeetEventInput): Promise<bool
 }
 ```
 
-Also update the googleapis mock at the top of the test file — change `update: mock(...)` to `patch: mock(...)`:
-
-```ts
-patch: mock(async ({ eventId, requestBody }) => ({
-    data: { id: eventId, ...requestBody }
-}))
-```
-
-- [ ] **Step 4: Run — both tests pass**
+- [ ] **Step 4: Run — 3 tests pass**
 
 ```bash
 cd app
@@ -715,15 +739,15 @@ git commit -m "feat(meet): updateMeetEvent (patch) + test"
 
 ---
 
-## Task 7: `meet.ts` — deleteMeetEvent
+## Task 7: `deleteMeetEvent` + 2 Tests (idempotent 404)
 
 **Files:**
 - Modify: `app/src/lib/server/google-calendar/meet.ts`
 - Modify: `app/src/lib/server/google-calendar/__tests__/meet.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write 2 tests**
 
-Append to `meet.test.ts`:
+Append:
 
 ```ts
 import { deleteMeetEvent } from '../meet';
@@ -745,7 +769,6 @@ describe('deleteMeetEvent', () => {
 				}
 			}
 		}));
-
 		const result = await deleteMeetEvent({ tenantId: 'tenant-a', eventId: 'evt_gone' });
 		expect(result).toBe(true);
 	});
@@ -759,11 +782,11 @@ cd app
 bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
 ```
 
-Expected: FAIL — `deleteMeetEvent` undefined.
+Expected: FAIL.
 
-- [ ] **Step 3: Implement deleteMeetEvent**
+- [ ] **Step 3: Implement**
 
-In `app/src/lib/server/google-calendar/meet.ts`, append:
+Append to `meet.ts`:
 
 ```ts
 export type DeleteMeetEventInput = {
@@ -771,10 +794,6 @@ export type DeleteMeetEventInput = {
 	eventId: string;
 };
 
-/**
- * Delete a Google Calendar event. Idempotent — 404 is treated as success.
- * Returns true on success/idempotent, throws on other Calendar API errors.
- */
 export async function deleteMeetEvent(input: DeleteMeetEventInput): Promise<boolean> {
 	const calendar = await getCalendarClient(input.tenantId);
 
@@ -792,15 +811,13 @@ export async function deleteMeetEvent(input: DeleteMeetEventInput): Promise<bool
 
 		return true;
 	} catch (err: any) {
-		// 404 = already deleted upstream → idempotent success
 		if (err?.code === 404 || err?.response?.status === 404) {
-			logInfo('google-calendar', 'Meet event already gone (404) — idempotent', {
+			logInfo('google-calendar', 'Meet event already gone (404 idempotent)', {
 				tenantId: input.tenantId,
 				metadata: { eventId: input.eventId }
 			});
 			return true;
 		}
-
 		logError('google-calendar', 'deleteMeetEvent failed', {
 			tenantId: input.tenantId,
 			metadata: { eventId: input.eventId, error: serializeError(err) }
@@ -810,7 +827,7 @@ export async function deleteMeetEvent(input: DeleteMeetEventInput): Promise<bool
 }
 ```
 
-- [ ] **Step 4: Run — all tests pass**
+- [ ] **Step 4: Run — 5 tests pass**
 
 ```bash
 cd app
@@ -828,92 +845,359 @@ git commit -m "feat(meet): deleteMeetEvent (idempotent 404) + 2 tests"
 
 ---
 
-## Task 8: New Action Types in task-activity.ts
+## Task 8: OAuth Start Route
 
 **Files:**
-- Modify: `app/src/lib/server/task-activity.ts`
+- Create: `app/src/routes/api/integrations/google-calendar/auth/+server.ts`
 
-- [ ] **Step 1: Read current action union**
+- [ ] **Step 1: Verify Gmail auth route exists for pattern reference**
 
 ```bash
-grep -n "action\|ACTIONS\|TaskActivityAction" app/src/lib/server/task-activity.ts | head -10
+find app/src/routes/api -path "*gmail*" -name "+server.ts" 2>/dev/null | head -5
 ```
 
-Expected: find where action types are declared (union string or const array).
+Expected: at least one Gmail OAuth start route. Read it for pattern.
 
-- [ ] **Step 2: Add new actions**
+- [ ] **Step 2: Create the auth start route**
 
-In `app/src/lib/server/task-activity.ts`, find the union type or const array of allowed actions. If it's a TS union, extend with:
+Create `app/src/routes/api/integrations/google-calendar/auth/+server.ts`:
 
 ```ts
-| 'meet_event_created'
-| 'meet_event_updated'
-| 'meet_event_deleted'
-| 'meet_event_failed'
-| 'meet_event_orphaned'
+import { error, redirect } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { getOAuthUrl } from '$lib/server/google-calendar/auth';
+
+export const GET: RequestHandler = async (event) => {
+	if (!event.locals.user || !event.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	// Block client users from initiating Calendar OAuth
+	if (event.locals.isClientUser) {
+		throw error(403, 'Forbidden');
+	}
+
+	const url = getOAuthUrl(event.locals.tenant.id);
+	throw redirect(302, url);
+};
 ```
 
-If it's a const array, append:
-
-```ts
-'meet_event_created',
-'meet_event_updated',
-'meet_event_deleted',
-'meet_event_failed',
-'meet_event_orphaned'
-```
-
-- [ ] **Step 3: Verify check**
+- [ ] **Step 3: Verify**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
 ```
 
-Expected: no errors.
-
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/src/lib/server/task-activity.ts
-git commit -m "feat(meet): register meet_event_* action types in task-activity"
+git add app/src/routes/api/integrations/google-calendar/auth/+server.ts
+git commit -m "feat(meet): /api/integrations/google-calendar/auth — OAuth start (admin only)"
 ```
 
 ---
 
-## Task 9: Wire `createTask` to createMeetEvent
+## Task 9: OAuth Callback Route
 
 **Files:**
-- Modify: `app/src/lib/remotes/tasks.remote.ts` (`createTask` function)
+- Create: `app/src/routes/api/integrations/google-calendar/callback/+server.ts`
 
-- [ ] **Step 1: Find createTask + insert location**
+- [ ] **Step 1: Create callback route**
 
-```bash
-grep -n "^export const createTask" app/src/lib/remotes/tasks.remote.ts
+Create `app/src/routes/api/integrations/google-calendar/callback/+server.ts`:
+
+```ts
+import { error, redirect } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { exchangeCodeAndSave } from '$lib/server/google-calendar/auth';
+import { logError, serializeError } from '$lib/server/logger';
+
+export const GET: RequestHandler = async (event) => {
+	if (!event.locals.user || !event.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	if (event.locals.isClientUser) {
+		throw error(403, 'Forbidden');
+	}
+
+	const url = new URL(event.request.url);
+	const code = url.searchParams.get('code');
+	const state = url.searchParams.get('state');
+	const errorParam = url.searchParams.get('error');
+
+	const tenantSlug = event.params.tenant ?? event.locals.tenant.slug;
+	const redirectBase = `/${tenantSlug}/settings/google-calendar`;
+
+	if (errorParam) {
+		logError('google-calendar', 'OAuth callback error', {
+			tenantId: event.locals.tenant.id,
+			metadata: { error: errorParam }
+		});
+		throw redirect(302, `${redirectBase}?status=error&reason=${encodeURIComponent(errorParam)}`);
+	}
+
+	if (!code || !state) {
+		throw redirect(302, `${redirectBase}?status=error&reason=missing_params`);
+	}
+
+	if (state !== event.locals.tenant.id) {
+		logError('google-calendar', 'OAuth callback state mismatch', {
+			tenantId: event.locals.tenant.id,
+			metadata: { receivedState: state }
+		});
+		throw redirect(302, `${redirectBase}?status=error&reason=state_mismatch`);
+	}
+
+	try {
+		const { email } = await exchangeCodeAndSave(event.locals.tenant.id, code);
+		throw redirect(302, `${redirectBase}?status=connected&email=${encodeURIComponent(email)}`);
+	} catch (err) {
+		// Redirects throw a special error; let SvelteKit's redirect propagate
+		if (err && typeof err === 'object' && 'status' in err && (err as any).status === 302) {
+			throw err;
+		}
+		logError('google-calendar', 'OAuth exchange failed', {
+			tenantId: event.locals.tenant.id,
+			metadata: { error: serializeError(err) }
+		});
+		throw redirect(302, `${redirectBase}?status=error&reason=exchange_failed`);
+	}
+};
 ```
 
-Open the function, find where the new task row is inserted (`db.insert(table.task).values({...})`), and where `return { ...newTask }` or similar happens.
+- [ ] **Step 2: Verify**
 
-- [ ] **Step 2: Add post-insert Meet creation hook**
+```bash
+cd app
+bun run check 2>&1 | tail -5
+```
 
-After the task row is inserted (and subtasks/tags/assignees if any), but BEFORE the function returns, add a try/catch block. Pseudocode for placement: right before `return ...newTask` at the end.
+- [ ] **Step 3: Commit**
 
-Add the imports at top of `tasks.remote.ts`:
+```bash
+git add app/src/routes/api/integrations/google-calendar/callback/+server.ts
+git commit -m "feat(meet): /api/integrations/google-calendar/callback — exchange + persist"
+```
+
+---
+
+## Task 10: Settings Page `/settings/google-calendar`
+
+**Files:**
+- Create: `app/src/routes/[tenant]/settings/google-calendar/+page.server.ts`
+- Create: `app/src/routes/[tenant]/settings/google-calendar/+page.svelte`
+
+- [ ] **Step 1: Create server load**
+
+Create `app/src/routes/[tenant]/settings/google-calendar/+page.server.ts`:
+
+```ts
+import type { PageServerLoad, Actions } from './$types';
+import { error, redirect } from '@sveltejs/kit';
+import { getCalendarStatus, disconnectCalendar } from '$lib/server/google-calendar/auth';
+
+export const load: PageServerLoad = async (event) => {
+	if (!event.locals.user || !event.locals.tenant) {
+		throw error(401, 'Unauthorized');
+	}
+	if (event.locals.isClientUser) {
+		throw error(403, 'Forbidden');
+	}
+
+	const status = await getCalendarStatus(event.locals.tenant.id);
+	return { status };
+};
+
+export const actions: Actions = {
+	disconnect: async (event) => {
+		if (!event.locals.user || !event.locals.tenant || event.locals.isClientUser) {
+			throw error(403, 'Forbidden');
+		}
+		await disconnectCalendar(event.locals.tenant.id);
+		throw redirect(303, `/${event.params.tenant}/settings/google-calendar?status=disconnected`);
+	}
+};
+```
+
+- [ ] **Step 2: Create page UI**
+
+Create `app/src/routes/[tenant]/settings/google-calendar/+page.svelte`:
+
+```svelte
+<script lang="ts">
+	import { page } from '$app/state';
+	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
+	import XCircleIcon from '@lucide/svelte/icons/x-circle';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+
+	let { data }: { data: { status: { connected: boolean; email: string | null } } } = $props();
+	const tenantSlug = $derived(page.params.tenant ?? '');
+	const statusParam = $derived(page.url.searchParams.get('status'));
+	const emailParam = $derived(page.url.searchParams.get('email'));
+	const reasonParam = $derived(page.url.searchParams.get('reason'));
+</script>
+
+<svelte:head>
+	<title>Google Calendar · Setări</title>
+</svelte:head>
+
+<div class="mx-auto max-w-2xl space-y-6 p-6">
+	<header class="space-y-1">
+		<h1 class="text-2xl font-bold text-slate-900">Google Calendar</h1>
+		<p class="text-sm text-slate-600">
+			Conectează un cont Google pentru a genera automat linkuri Google Meet la crearea task-urilor de tip meeting.
+			<br />
+			<strong>Recomandare:</strong> folosește același cont Google ca Gmail-ul pentru consistență.
+		</p>
+	</header>
+
+	{#if statusParam === 'connected' && emailParam}
+		<div class="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+			✓ Conectat cu succes ca <strong>{emailParam}</strong>.
+		</div>
+	{:else if statusParam === 'disconnected'}
+		<div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+			Conexiunea a fost dezactivată.
+		</div>
+	{:else if statusParam === 'error'}
+		<div class="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
+			Eroare la conectare: <code>{reasonParam ?? 'unknown'}</code>. Încearcă din nou.
+		</div>
+	{/if}
+
+	<div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+		<div class="flex items-start gap-4">
+			<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+				<CalendarIcon class="h-6 w-6" />
+			</div>
+			<div class="flex-1 space-y-3">
+				{#if data.status.connected}
+					<div class="flex items-center gap-2">
+						<CheckCircleIcon class="h-5 w-5 text-emerald-600" />
+						<h2 class="text-lg font-bold text-slate-900">Conectat</h2>
+					</div>
+					<p class="text-sm text-slate-600">
+						Cont activ: <strong class="text-slate-900">{data.status.email}</strong>
+					</p>
+					<form method="POST" action="?/disconnect" class="pt-2">
+						<button
+							type="submit"
+							class="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:border-red-300 hover:bg-red-50"
+						>
+							Deconectează
+						</button>
+					</form>
+				{:else}
+					<div class="flex items-center gap-2">
+						<XCircleIcon class="h-5 w-5 text-slate-400" />
+						<h2 class="text-lg font-bold text-slate-900">Neconectat</h2>
+					</div>
+					<p class="text-sm text-slate-600">
+						Conectează contul Google pentru a activa generarea automată de linkuri Meet.
+					</p>
+					<a
+						href="/api/integrations/google-calendar/auth"
+						class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+					>
+						<CalendarIcon class="h-4 w-4" />
+						Conectează Google Calendar
+					</a>
+				{/if}
+			</div>
+		</div>
+	</div>
+
+	<div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+		<strong>Cum funcționează:</strong> când creezi un task de tip <em>Meeting</em>, sistemul creează automat un eveniment în Google Calendar și generează un link Google Meet. Participanții primesc invitația prin email automat. La modificarea task-ului (ora, durată, participanți), evenimentul se actualizează. La ștergerea task-ului, evenimentul se șterge.
+	</div>
+</div>
+```
+
+- [ ] **Step 3: Verify**
+
+```bash
+cd app
+bun run check 2>&1 | tail -5
+```
+
+Run autofixer on the new `.svelte` file via Svelte MCP.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/src/routes/\[tenant\]/settings/google-calendar/+page.server.ts app/src/routes/\[tenant\]/settings/google-calendar/+page.svelte
+git commit -m "feat(meet): /settings/google-calendar page — connect/disconnect UI"
+```
+
+---
+
+## MILESTONE 1 — Module + OAuth + Settings ready
+
+Report state: 10 commits on branch; 5 tests passing in meet.test.ts; settings page reachable.
+
+---
+
+## Task 11: Register `meet_event_*` Action Types
+
+**Files:**
+- Modify: `app/src/lib/server/task-activity.ts`
+
+- [ ] **Step 1: Find the action type union/list**
+
+```bash
+grep -n "action:\|ACTIONS\|TaskActivityAction\|type Action" app/src/lib/server/task-activity.ts | head -10
+```
+
+- [ ] **Step 2: Add 5 action types**
+
+Extend the union/list with:
+```
+meet_event_created
+meet_event_updated
+meet_event_deleted
+meet_event_failed
+meet_event_orphaned
+```
+
+- [ ] **Step 3: Verify + commit**
+
+```bash
+cd app
+bun run check 2>&1 | tail -5
+git add app/src/lib/server/task-activity.ts
+git commit -m "feat(meet): register meet_event_* action types"
+```
+
+---
+
+## Task 12: Wire `createTask` Hook
+
+**Files:**
+- Modify: `app/src/lib/remotes/tasks.remote.ts`
+
+- [ ] **Step 1: Add imports at top**
 
 ```ts
 import { createMeetEvent } from '$lib/server/google-calendar/meet';
-import { getCalendarStatus, CalendarScopeMissing, CalendarNotConnected } from '$lib/server/google-calendar/auth';
+import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
 ```
 
-Then add this block right before the final return inside `createTask`:
+- [ ] **Step 2: Find the createTask function end**
+
+```bash
+grep -n "^export const createTask\|^const createTask" app/src/lib/remotes/tasks.remote.ts
+```
+
+- [ ] **Step 3: Add post-insert Calendar hook**
+
+Inside `createTask`, after the task row is inserted (and after subtasks/tags/assignees are linked), BEFORE the function returns, add:
 
 ```ts
-// Auto-generate Google Meet link for type=meeting tasks
+// Auto-generate Google Meet for type=meeting tasks (separate integration)
 if (data.type === 'meeting' && data.meetTime) {
 	const status = await getCalendarStatus(event.locals.tenant.id);
-	if (status.connected && status.hasCalendarScope) {
+	if (status.connected) {
 		try {
-			// Resolve attendee emails: assignees + client
 			const attendeeEmails: string[] = [];
 			if (data.assigneeUserIds?.length) {
 				const users = await db
@@ -931,7 +1215,6 @@ if (data.type === 'meeting' && data.meetTime) {
 				if (client?.email) attendeeEmails.push(client.email);
 			}
 
-			// Parse meetTime: expecting "YYYY-MM-DDTHH:MM" format from datetime-local input
 			const startTime = new Date(data.meetTime);
 			const meetResult = await createMeetEvent({
 				tenantId: event.locals.tenant.id,
@@ -943,7 +1226,6 @@ if (data.type === 'meeting' && data.meetTime) {
 				description: data.description ?? undefined
 			});
 
-			// Persist on the task row
 			await db
 				.update(table.task)
 				.set({
@@ -959,44 +1241,40 @@ if (data.type === 'meeting' && data.meetTime) {
 				metadata: { eventId: meetResult.eventId, attendeeCount: attendeeEmails.length }
 			});
 		} catch (err) {
-			// Calendar API failed — task stays, log warning, frontend gets a follow-up flag
-			await recordTaskActivity({
-				taskId,
-				userId: event.locals.user.id,
-				action: 'meet_event_failed',
-				metadata: { stage: 'create', error: err instanceof Error ? err.message : String(err) }
-			});
-			// Don't rethrow — task creation succeeds regardless
+			if (!(err instanceof CalendarNotConnected)) {
+				await recordTaskActivity({
+					taskId,
+					userId: event.locals.user.id,
+					action: 'meet_event_failed',
+					metadata: { stage: 'create', error: err instanceof Error ? err.message : String(err) }
+				});
+			}
+			// Task succeeds regardless
 		}
 	}
 }
 ```
 
-Make sure `inArray` is imported from `drizzle-orm` (it likely is for the existing query patterns; verify).
+Ensure `inArray` is imported from `drizzle-orm` (likely already).
 
-- [ ] **Step 3: Verify check + tests**
+- [ ] **Step 4: Verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
 bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
-```
-
-Expected: no new errors; existing 64 tests still pass (the mock layer doesn't have googleapis so the if-branch won't execute in tests).
-
-- [ ] **Step 4: Commit**
-
-```bash
 git add app/src/lib/remotes/tasks.remote.ts
-git commit -m "feat(meet): wire createTask to createMeetEvent for type=meeting (graceful fallback)"
+git commit -m "feat(meet): wire createTask Calendar hook (post-insert, graceful fallback)"
 ```
+
+Expected: existing tasks tests still pass.
 
 ---
 
-## Task 10: Wire `scheduleMeet` to createMeetEvent
+## Task 13: Wire `scheduleMeet` Hook
 
 **Files:**
-- Modify: `app/src/lib/remotes/tasks.remote.ts` (`scheduleMeet` function around line 2638)
+- Modify: `app/src/lib/remotes/tasks.remote.ts`
 
 - [ ] **Step 1: Find scheduleMeet body**
 
@@ -1004,14 +1282,11 @@ git commit -m "feat(meet): wire createTask to createMeetEvent for type=meeting (
 grep -n "^export const scheduleMeet" app/src/lib/remotes/tasks.remote.ts
 ```
 
-Expected: line ~2638.
+- [ ] **Step 2: Add Calendar create when no eventId exists**
 
-- [ ] **Step 2: Add Calendar generation when no eventId exists yet**
-
-In the body of `scheduleMeet`, just before the final `return { success: true }`, fetch the task row to check `googleCalendarEventId`, and if absent + meetTime is provided, attempt creation:
+Before the final return in `scheduleMeet`, add the same pattern as Task 12 but reading the task first to get title/description/clientId. Code pattern (adapt as needed):
 
 ```ts
-// Post-update: if no Calendar event yet AND we have meetTime, attempt auto-generation
 if (meetTime) {
 	const [taskRow] = await db
 		.select({
@@ -1028,9 +1303,8 @@ if (meetTime) {
 
 	if (taskRow && !taskRow.googleCalendarEventId) {
 		const status = await getCalendarStatus(event.locals.tenant.id);
-		if (status.connected && status.hasCalendarScope) {
+		if (status.connected) {
 			try {
-				// Resolve assignees via taskAssignee
 				const assignees = await db
 					.select({ email: table.user.email })
 					.from(table.taskAssignee)
@@ -1042,12 +1316,7 @@ if (meetTime) {
 					const [client] = await db
 						.select({ email: table.client.email })
 						.from(table.client)
-						.where(
-							and(
-								eq(table.client.id, taskRow.clientId),
-								eq(table.client.tenantId, event.locals.tenant.id)
-							)
-						)
+						.where(and(eq(table.client.id, taskRow.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
 						.limit(1);
 					if (client?.email) attendeeEmails.push(client.email);
 				}
@@ -1064,10 +1333,7 @@ if (meetTime) {
 
 				await db
 					.update(table.task)
-					.set({
-						meetLink: meetResult.hangoutLink,
-						googleCalendarEventId: meetResult.eventId
-					})
+					.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
 					.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
 
 				await recordTaskActivity({
@@ -1077,259 +1343,74 @@ if (meetTime) {
 					metadata: { eventId: meetResult.eventId, attendeeCount: attendeeEmails.length }
 				});
 			} catch (err) {
-				await recordTaskActivity({
-					taskId,
-					userId: event.locals.user.id,
-					action: 'meet_event_failed',
-					metadata: { stage: 'schedule', error: err instanceof Error ? err.message : String(err) }
-				});
-			}
-		}
-	}
-}
-```
-
-- [ ] **Step 3: Verify check + tests**
-
-```bash
-cd app
-bun run check 2>&1 | tail -5
-bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
-```
-
-Expected: 64 tests still pass.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add app/src/lib/remotes/tasks.remote.ts
-git commit -m "feat(meet): wire scheduleMeet to auto-create Meet event when missing"
-```
-
----
-
-## Task 11: Wire `updateTask` — diff + update/delete Calendar event
-
-**Files:**
-- Modify: `app/src/lib/remotes/tasks.remote.ts` (`updateTask` function)
-
-- [ ] **Step 1: Find updateTask + understand current shape**
-
-```bash
-grep -n "^export const updateTask" app/src/lib/remotes/tasks.remote.ts
-```
-
-Read the function. It fetches existing task, applies diff, writes. We add a post-write hook.
-
-- [ ] **Step 2: Capture old vs new for relevant fields**
-
-Just before the actual `db.update(table.task).set(...)`, capture the pre-update snapshot of the relevant fields:
-
-```ts
-const [preUpdate] = await db
-	.select({
-		type: table.task.type,
-		meetTime: table.task.meetTime,
-		meetDurationMinutes: table.task.meetDurationMinutes,
-		googleCalendarEventId: table.task.googleCalendarEventId,
-		title: table.task.title,
-		description: table.task.description
-	})
-	.from(table.task)
-	.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-	.limit(1);
-```
-
-(If this snapshot is already taken earlier for the existing `existing` row, reuse — don't duplicate.)
-
-- [ ] **Step 3: After DB write, add Calendar sync**
-
-Append after the existing UPDATE statement, before returning:
-
-```ts
-// Calendar sync for meeting tasks
-const hadEvent = !!preUpdate?.googleCalendarEventId;
-const isStillMeeting = (data.type ?? preUpdate?.type) === 'meeting';
-const newMeetTime = data.meetTime !== undefined ? data.meetTime : preUpdate?.meetTime;
-const newDuration = data.meetDurationMinutes !== undefined ? data.meetDurationMinutes : preUpdate?.meetDurationMinutes;
-
-// Case A: was meeting, no longer meeting → DELETE event
-if (hadEvent && !isStillMeeting) {
-	const status = await getCalendarStatus(event.locals.tenant.id);
-	if (status.connected && status.hasCalendarScope) {
-		try {
-			const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
-			await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: preUpdate!.googleCalendarEventId! });
-			await db.update(table.task)
-				.set({ meetLink: null, googleCalendarEventId: null })
-				.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, event.locals.tenant.id)));
-			await recordTaskActivity({
-				taskId: data.taskId,
-				userId: event.locals.user.id,
-				action: 'meet_event_deleted',
-				metadata: { eventId: preUpdate!.googleCalendarEventId!, reason: 'type_changed' }
-			});
-		} catch (err) {
-			await recordTaskActivity({
-				taskId: data.taskId,
-				userId: event.locals.user.id,
-				action: 'meet_event_failed',
-				metadata: { stage: 'delete_on_type_change', error: err instanceof Error ? err.message : String(err) }
-			});
-		}
-	}
-}
-
-// Case B: still meeting with existing event → UPDATE if relevant fields changed
-if (hadEvent && isStillMeeting) {
-	const timeChanged = data.meetTime !== undefined && data.meetTime !== preUpdate?.meetTime;
-	const durationChanged = data.meetDurationMinutes !== undefined && data.meetDurationMinutes !== preUpdate?.meetDurationMinutes;
-	const titleChanged = data.title !== undefined && data.title !== preUpdate?.title;
-	const descChanged = data.description !== undefined && data.description !== preUpdate?.description;
-	const assigneesChanged = data.assigneeUserIds !== undefined;
-
-	if (timeChanged || durationChanged || titleChanged || descChanged || assigneesChanged) {
-		const status = await getCalendarStatus(event.locals.tenant.id);
-		if (status.connected && status.hasCalendarScope) {
-			try {
-				const { updateMeetEvent } = await import('$lib/server/google-calendar/meet');
-
-				let attendees: string[] | undefined;
-				if (assigneesChanged) {
-					const ids = data.assigneeUserIds ?? [];
-					if (ids.length) {
-						const users = await db
-							.select({ email: table.user.email })
-							.from(table.user)
-							.where(inArray(table.user.id, ids));
-						attendees = users.map((u) => u.email).filter(Boolean);
-
-						// Add client too
-						const clientId = data.clientId !== undefined ? data.clientId : preUpdate?.clientId;
-						if (clientId) {
-							const [client] = await db
-								.select({ email: table.client.email })
-								.from(table.client)
-								.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
-								.limit(1);
-							if (client?.email) attendees!.push(client.email);
-						}
-					} else {
-						attendees = [];
-					}
+				if (!(err instanceof CalendarNotConnected)) {
+					await recordTaskActivity({
+						taskId,
+						userId: event.locals.user.id,
+						action: 'meet_event_failed',
+						metadata: { stage: 'schedule', error: err instanceof Error ? err.message : String(err) }
+					});
 				}
-
-				await updateMeetEvent({
-					tenantId: event.locals.tenant.id,
-					eventId: preUpdate!.googleCalendarEventId!,
-					startTime: (timeChanged && newMeetTime) ? new Date(newMeetTime) : undefined,
-					durationMinutes: (durationChanged || timeChanged) ? (newDuration ?? 30) : undefined,
-					timezone: (timeChanged || durationChanged) ? 'Europe/Bucharest' : undefined,
-					title: titleChanged ? data.title : undefined,
-					description: descChanged ? (data.description ?? undefined) : undefined,
-					attendees
-				});
-
-				await recordTaskActivity({
-					taskId: data.taskId,
-					userId: event.locals.user.id,
-					action: 'meet_event_updated',
-					metadata: { eventId: preUpdate!.googleCalendarEventId! }
-				});
-			} catch (err) {
-				await recordTaskActivity({
-					taskId: data.taskId,
-					userId: event.locals.user.id,
-					action: 'meet_event_failed',
-					metadata: { stage: 'update', error: err instanceof Error ? err.message : String(err) }
-				});
 			}
-		}
-	}
-}
-
-// Case C: was not meeting, became meeting with meetTime → CREATE
-if (!hadEvent && isStillMeeting && newMeetTime && data.type === 'meeting') {
-	// Reuse the createTask post-insert pattern (extract to helper if duplication grows)
-	const status = await getCalendarStatus(event.locals.tenant.id);
-	if (status.connected && status.hasCalendarScope) {
-		try {
-			const attendeeEmails: string[] = [];
-			const ids = data.assigneeUserIds;
-			if (ids?.length) {
-				const users = await db
-					.select({ email: table.user.email })
-					.from(table.user)
-					.where(inArray(table.user.id, ids));
-				attendeeEmails.push(...users.map((u) => u.email).filter(Boolean));
-			}
-			const clientId = data.clientId !== undefined ? data.clientId : preUpdate?.clientId;
-			if (clientId) {
-				const [client] = await db
-					.select({ email: table.client.email })
-					.from(table.client)
-					.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
-					.limit(1);
-				if (client?.email) attendeeEmails.push(client.email);
-			}
-
-			const meetResult = await createMeetEvent({
-				tenantId: event.locals.tenant.id,
-				title: data.title ?? preUpdate?.title ?? 'Meeting',
-				startTime: new Date(newMeetTime),
-				durationMinutes: newDuration ?? 30,
-				timezone: 'Europe/Bucharest',
-				attendees: attendeeEmails,
-				description: data.description ?? preUpdate?.description ?? undefined
-			});
-
-			await db.update(table.task)
-				.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
-				.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, event.locals.tenant.id)));
-
-			await recordTaskActivity({
-				taskId: data.taskId,
-				userId: event.locals.user.id,
-				action: 'meet_event_created',
-				metadata: { eventId: meetResult.eventId, stage: 'type_promotion' }
-			});
-		} catch (err) {
-			await recordTaskActivity({
-				taskId: data.taskId,
-				userId: event.locals.user.id,
-				action: 'meet_event_failed',
-				metadata: { stage: 'create_on_type_promotion', error: err instanceof Error ? err.message : String(err) }
-			});
 		}
 	}
 }
 ```
 
-- [ ] **Step 4: Verify check + tests**
+- [ ] **Step 3: Verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
 bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
-```
-
-Expected: 64 tests still pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
 git add app/src/lib/remotes/tasks.remote.ts
-git commit -m "feat(meet): updateTask Calendar sync — create/update/delete based on diff"
+git commit -m "feat(meet): wire scheduleMeet Calendar hook (create if missing)"
 ```
 
 ---
 
-## Task 12: Wire `deleteTask` Pre-Delete Hook
+## Task 14: Wire `updateTask` Diff + Bidirectional Sync
 
 **Files:**
-- Modify: `app/src/lib/remotes/tasks.remote.ts` (`deleteTask` function)
+- Modify: `app/src/lib/remotes/tasks.remote.ts`
 
-- [ ] **Step 1: Find deleteTask**
+- [ ] **Step 1: Find updateTask + capture pre-update snapshot**
+
+In `updateTask`, just before the DB UPDATE, ensure we have a snapshot of `{type, meetTime, meetDurationMinutes, googleCalendarEventId, title, description, clientId}` for the existing row. If `existing` is already fetched earlier, reuse; otherwise add the SELECT.
+
+- [ ] **Step 2: After DB write, add 3-case Calendar sync**
+
+Add the full block from spec §6 — Case A (delete on type change), Case B (update on field change with existing event), Case C (create on type promotion). The plan in `2026-05-19-google-meet-integration.md` v1 had the full code in Task 11; reuse it but replace `getCalendarStatus.hasCalendarScope` check with just `status.connected` (the v2 status object doesn't have `hasCalendarScope`).
+
+Three cases:
+1. `hadEvent && !isStillMeeting` → `deleteMeetEvent`, clear DB fields, log
+2. `hadEvent && isStillMeeting && (any relevant field changed)` → `updateMeetEvent` with diff, log
+3. `!hadEvent && isStillMeeting && newMeetTime && data.type === 'meeting'` → `createMeetEvent`, persist, log
+
+Use dynamic imports for `updateMeetEvent`/`deleteMeetEvent`:
+```ts
+const { updateMeetEvent } = await import('$lib/server/google-calendar/meet');
+const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
+```
+
+- [ ] **Step 3: Verify + commit**
+
+```bash
+cd app
+bun run check 2>&1 | tail -5
+bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
+git add app/src/lib/remotes/tasks.remote.ts
+git commit -m "feat(meet): updateTask diff → create/update/delete Calendar event"
+```
+
+---
+
+## Task 15: Wire `deleteTask` Pre-Hook
+
+**Files:**
+- Modify: `app/src/lib/remotes/tasks.remote.ts`
+
+- [ ] **Step 1: Find deleteTask body**
 
 ```bash
 grep -n "^export const deleteTask" app/src/lib/remotes/tasks.remote.ts
@@ -1337,10 +1418,9 @@ grep -n "^export const deleteTask" app/src/lib/remotes/tasks.remote.ts
 
 - [ ] **Step 2: Add pre-delete Calendar cleanup**
 
-Before the `db.delete(table.task)` call, fetch the `googleCalendarEventId` and fire deleteMeetEvent if present:
+Before the `db.delete(table.task)`, fetch `googleCalendarEventId` and fire deleteMeetEvent if present:
 
 ```ts
-// Pre-delete: clean up Calendar event if exists
 const [taskRow] = await db
 	.select({ googleCalendarEventId: table.task.googleCalendarEventId })
 	.from(table.task)
@@ -1349,13 +1429,11 @@ const [taskRow] = await db
 
 if (taskRow?.googleCalendarEventId) {
 	const status = await getCalendarStatus(event.locals.tenant.id);
-	if (status.connected && status.hasCalendarScope) {
+	if (status.connected) {
 		try {
 			const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
 			await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: taskRow.googleCalendarEventId });
 		} catch (err) {
-			// Best-effort: task deletion proceeds even if Calendar cleanup fails.
-			// Activity log won't be reachable post-delete (cascade), so log centrally.
 			logWarning('google-calendar', 'Calendar event delete failed during task delete', {
 				tenantId: event.locals.tenant.id,
 				metadata: { taskId, eventId: taskRow.googleCalendarEventId, error: err instanceof Error ? err.message : String(err) }
@@ -1365,28 +1443,21 @@ if (taskRow?.googleCalendarEventId) {
 }
 ```
 
-Ensure `logWarning` is imported at the top of `tasks.remote.ts` (check existing imports).
+Ensure `logWarning` is imported.
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3: Verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
 bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
-```
-
-Expected: 64 tests pass.
-
-- [ ] **Step 4: Commit**
-
-```bash
 git add app/src/lib/remotes/tasks.remote.ts
 git commit -m "feat(meet): deleteTask cleans up Calendar event (best-effort)"
 ```
 
 ---
 
-## Task 13: `getGmailMeetStatus` Remote Query
+## Task 16: `getGoogleCalendarStatus` Remote Query
 
 **Files:**
 - Create or extend: `app/src/lib/remotes/integrations.remote.ts`
@@ -1397,478 +1468,273 @@ git commit -m "feat(meet): deleteTask cleans up Calendar event (best-effort)"
 ls app/src/lib/remotes/integrations.remote.ts 2>/dev/null
 ```
 
-If it does not exist, create it. If it exists (e.g., for Stripe), extend it.
-
 - [ ] **Step 2: Add the query**
-
-In `app/src/lib/remotes/integrations.remote.ts`, add (or create with):
 
 ```ts
 import { query, getRequestEvent } from '$app/server';
 import { getCalendarStatus } from '$lib/server/google-calendar/auth';
 
-/**
- * Get the Gmail+Calendar integration status for the current tenant.
- * Used by UI to decide which Meet banner to show.
- */
-export const getGmailMeetStatus = query(async () => {
+export const getGoogleCalendarStatus = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
-		return { connected: false, hasCalendarScope: false, email: null };
+		return { connected: false, email: null };
 	}
 	return getCalendarStatus(event.locals.tenant.id);
 });
 ```
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3: Verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
-```
-
-Expected: no errors.
-
-- [ ] **Step 4: Commit**
-
-```bash
 git add app/src/lib/remotes/integrations.remote.ts
-git commit -m "feat(meet): getGmailMeetStatus query for UI conditional banner"
+git commit -m "feat(meet): getGoogleCalendarStatus query (UI conditional banner)"
 ```
 
 ---
 
-## Task 14: Create-Task-Dialog Conditional Banner
+## MILESTONE 2 — Backend Complete
+
+Tasks 1-16 done; 15+ commits; backend fully wired for V1+V2 bidirectional sync.
+
+---
+
+## Task 17: Create-Task-Dialog 2-State Banner
 
 **Files:**
-- Modify: `app/src/lib/components/create-task-dialog.svelte` (around line 408-414)
+- Modify: `app/src/lib/components/create-task-dialog.svelte`
 
-- [ ] **Step 1: Read current Meet banner**
+- [ ] **Step 1: Add status query**
 
-```bash
-sed -n '405,415p' app/src/lib/components/create-task-dialog.svelte
-```
-
-Confirm the current banner with "Link Google Meet va fi generat automat la creare (Faza 3)".
-
-- [ ] **Step 2: Add status query + replace banner**
-
-In the `<script>` block at the top, add the import:
+In `<script>` at top, add:
 
 ```ts
-import { getGmailMeetStatus } from '$lib/remotes/integrations.remote';
+import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+import { page } from '$app/state';
+
+const calStatusQuery = $derived(isMeet ? getGoogleCalendarStatus() : null);
+const calStatus = $derived(calStatusQuery?.current);
+const tenantSlug = $derived(page.params.tenant ?? '');
 ```
 
-Add the query subscription somewhere in the script:
+(Verify `page` is not already imported; only add if missing.)
 
-```ts
-const meetStatusQuery = $derived(isMeet ? getGmailMeetStatus() : null);
-const meetStatus = $derived(meetStatusQuery?.current);
-```
+- [ ] **Step 2: Replace "Faza 3" banner**
 
-Now replace lines 407-414 (the existing banner block) with:
+Find lines around 408-414 (the "Link Google Meet va fi generat automat la creare (Faza 3)" block). Replace with:
 
 ```svelte
-<!-- Meet integration status banner — 3 states -->
+<!-- Meet integration status banner -->
 <div class="col-span-2">
-	{#if !meetStatus}
-		<!-- Loading or non-meeting type — no banner -->
-	{:else if !meetStatus.connected}
+	{#if !calStatus}
+		<!-- loading or non-meeting → no banner -->
+	{:else if !calStatus.connected}
 		<div class="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
 			<span class="mt-0.5 text-amber-600">⚠</span>
 			<div class="text-xs text-amber-800">
-				<strong>Conectează Gmail</strong> pentru a genera automat linkul Google Meet. Până atunci, linkul îl adaugi manual din panoul de detalii al taskului.
-				<a href="/{tenantSlug}/settings/gmail" class="ml-1 font-semibold underline">Conectează</a>
-			</div>
-		</div>
-	{:else if !meetStatus.hasCalendarScope}
-		<div class="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
-			<span class="mt-0.5 text-amber-600">⚠</span>
-			<div class="text-xs text-amber-800">
-				<strong>Reconectează Gmail</strong> pentru a activa generarea automată Meet. Contul {meetStatus.email} e conectat, dar îi lipsește permisiunea pentru Calendar.
-				<a href="/{tenantSlug}/settings/gmail" class="ml-1 font-semibold underline">Reconectează</a>
+				<strong>Conectează Google Calendar</strong> pentru a genera automat linkul Meet.
+				<a href="/{tenantSlug}/settings/google-calendar" class="ml-1 font-semibold underline">Conectează</a>
 			</div>
 		</div>
 	{:else}
 		<div class="flex items-center gap-3 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
 			<span class="text-emerald-600">✓</span>
 			<div class="text-xs text-emerald-800">
-				<strong>Linkul Google Meet va fi generat automat</strong> când salvezi meeting-ul. Invitația se trimite participanților via Google Calendar.
+				<strong>Linkul Meet va fi generat automat</strong> când salvezi (cont {calStatus.email}).
 			</div>
 		</div>
 	{/if}
 </div>
 ```
 
-Verify `tenantSlug` is already available in the script (the dialog likely uses `page.params.tenant` — search for it and add if missing):
+Also find line 727-742 (the "Upload disponibil în Faza 3" stub) — replace by removing the misleading copy. Keep the dropzone visual but remove "Faza 3" line:
 
-```ts
-import { page } from '$app/state';
-const tenantSlug = $derived(page.params.tenant ?? '');
+```svelte
+<p class="mt-0.5">sau click pentru a selecta · max 25MB</p>
+<!-- "Faza 3" copy removed; upload wiring is a separate backlog item -->
 ```
 
-- [ ] **Step 3: Run autofixer**
-
-Use the Svelte MCP autofixer tool on `app/src/lib/components/create-task-dialog.svelte`. Fix any issues.
-
-- [ ] **Step 4: Verify**
+- [ ] **Step 3: Autofixer + verify + commit**
 
 ```bash
 cd app
+# Run Svelte MCP autofixer on the file
 bun run check 2>&1 | tail -5
-```
-
-Expected: no new errors.
-
-- [ ] **Step 5: Commit**
-
-```bash
 git add app/src/lib/components/create-task-dialog.svelte
-git commit -m "fix(create-task): 3-state Meet banner — no-gmail / no-scope / connected (replaces Faza 3 promise)"
+git commit -m "fix(create-task): 2-state Calendar banner (replaces Faza 3 promise)"
 ```
 
 ---
 
-## Task 15: Admin Meet Modal Conditional
+## Task 18: Admin Meet Modal Conditional
 
 **Files:**
-- Modify: `app/src/lib/components/task-detail/task-detail-body.svelte` (admin Meet modal around line 1073)
+- Modify: `app/src/lib/components/task-detail/task-detail-body.svelte`
 
-- [ ] **Step 1: Find admin Meet modal block**
-
-```bash
-grep -n "showMeetModal\|meetLink\|admin-meet-modal-title" app/src/lib/components/task-detail/task-detail-body.svelte | head -10
-```
-
-Read the modal block.
-
-- [ ] **Step 2: Add status query**
-
-In `<script>`, add:
+- [ ] **Step 1: Add status query**
 
 ```ts
-import { getGmailMeetStatus } from '$lib/remotes/integrations.remote';
-const adminMeetStatus = $derived(getGmailMeetStatus());
-const adminMeetStatusValue = $derived(adminMeetStatus.current);
+import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+const calStatus = $derived(getGoogleCalendarStatus());
+const calStatusValue = $derived(calStatus.current);
 ```
 
-- [ ] **Step 3: Conditionally hide meetLink paste field when auto-generation is active**
+- [ ] **Step 2: Wrap meetLink paste field**
 
-Inside the modal body, wrap the existing `meetLink` paste input with a conditional. If `task.googleCalendarEventId` exists OR `adminMeetStatusValue.hasCalendarScope` is true, show a notice; else keep the paste input.
+Find the admin Meet modal (around line 1073 or wherever `meetLink` paste input lives). Wrap with:
 
 ```svelte
 {#if currentTask?.googleCalendarEventId}
 	<div class="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-800">
-		Linkul Meet a fost generat automat. Evenimentul există în Google Calendar.
+		✓ Linkul Meet a fost generat automat. Evenimentul există în Google Calendar.
 	</div>
-{:else if adminMeetStatusValue?.connected && adminMeetStatusValue?.hasCalendarScope}
+{:else if calStatusValue?.connected}
 	<div class="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
-		Linkul Meet se va genera automat când salvezi (cont {adminMeetStatusValue.email}).
+		Linkul Meet se va genera automat când salvezi (cont {calStatusValue.email}).
 	</div>
 {:else}
-	<!-- Existing manual paste UI -->
-	<div class="space-y-1.5">
-		<label for="meet-link" class="text-xs font-semibold uppercase text-slate-500">Link Meet</label>
-		<Input id="meet-link" type="url" bind:value={meetLink} placeholder="https://meet.google.com/..." />
-	</div>
+	<!-- existing manual paste input -->
 {/if}
 ```
 
-Adapt the existing inputs/Wrappers to match the file's existing pattern. The existing `meetLink` paste flow stays as fallback.
-
-- [ ] **Step 4: Autofixer + check**
+- [ ] **Step 3: Autofixer + verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
 git add app/src/lib/components/task-detail/task-detail-body.svelte
 git commit -m "fix(task-detail): admin Meet modal — hide manual paste when auto-gen active"
 ```
 
 ---
 
-## Task 16: Client Meet Modal Conditional
+## Task 19: Client Meet Modal Conditional
 
 **Files:**
 - Modify: `app/src/lib/components/client-task/client-task-meet-modal.svelte`
 
-- [ ] **Step 1: Read current modal**
-
-```bash
-wc -l app/src/lib/components/client-task/client-task-meet-modal.svelte
-```
-
-- [ ] **Step 2: Add status detection + banner inside modal body**
-
-In `<script>`, add:
+- [ ] **Step 1: Add status banner**
 
 ```ts
-import { getGmailMeetStatus } from '$lib/remotes/integrations.remote';
-const meetStatusQuery = $derived(open ? getGmailMeetStatus() : null);
-const meetStatus = $derived(meetStatusQuery?.current);
+import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+const calStatusQuery = $derived(open ? getGoogleCalendarStatus() : null);
+const calStatus = $derived(calStatusQuery?.current);
 ```
 
-At the top of the modal body (right after the modal header), add:
+In modal body, after the header:
 
 ```svelte
-{#if meetStatus}
-	{#if !meetStatus.connected}
+{#if calStatus}
+	{#if !calStatus.connected}
 		<div class="mx-5 mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-			Gmail nu e conectat. Meeting-ul se va programa, dar linkul va trebui adăugat manual.
-		</div>
-	{:else if !meetStatus.hasCalendarScope}
-		<div class="mx-5 mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-			Reconectează Gmail pentru a activa auto-generarea (linkul îl adaugi manual până atunci).
+			Google Calendar neconectat. Meeting-ul se programează dar linkul Meet trebuie adăugat manual.
 		</div>
 	{:else}
 		<div class="mx-5 mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-			✓ Linkul Meet va fi generat automat la salvare.
+			✓ Linkul Meet va fi generat automat la salvare (cont {calStatus.email}).
 		</div>
 	{/if}
 {/if}
 ```
 
-- [ ] **Step 3: Autofixer + check**
-
-Run Svelte MCP autofixer; ensure clean.
+- [ ] **Step 2: Autofixer + verify + commit**
 
 ```bash
 cd app
 bun run check 2>&1 | tail -5
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
 git add app/src/lib/components/client-task/client-task-meet-modal.svelte
-git commit -m "fix(client-task): Meet modal shows integration status banner"
+git commit -m "fix(client-task): Meet modal shows Calendar status banner"
 ```
 
 ---
 
-## Task 17: Re-Consent Banner on Gmail Settings Page
+## Task 20: Smoke Verification + Milestone
 
 **Files:**
-- Modify: `app/src/routes/[tenant]/settings/gmail/+page.svelte`
+- Create: `app/docs/superpowers/meet-integration-smoke-checklist.md`
 
-- [ ] **Step 1: Read current page structure**
-
-```bash
-wc -l app/src/routes/\[tenant\]/settings/gmail/+page.svelte
-grep -n "isActive\|email\|Reconectează\|connect\|reconnect" app/src/routes/\[tenant\]/settings/gmail/+page.svelte | head -10
-```
-
-Read enough to understand the existing "Connect Gmail" / status card pattern.
-
-- [ ] **Step 2: Add scope detection banner**
-
-In `<script>`, add:
-
-```ts
-import { getGmailMeetStatus } from '$lib/remotes/integrations.remote';
-const meetScopeStatus = $derived(getGmailMeetStatus());
-const meetScopeStatusValue = $derived(meetScopeStatus.current);
-```
-
-In the page body, find the section that displays the connected status (or the "Connect" CTA if not connected). Just below the status header (where `email` is shown if connected), add:
-
-```svelte
-{#if meetScopeStatusValue?.connected && !meetScopeStatusValue.hasCalendarScope}
-	<div class="my-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-		<div class="flex items-start gap-3">
-			<span class="text-lg text-amber-600">⚡</span>
-			<div class="flex-1">
-				<h4 class="font-bold text-amber-900">Activează generarea automată Google Meet</h4>
-				<p class="mt-1 text-sm text-amber-800">
-					Contul {meetScopeStatusValue.email} e conectat, dar nu are permisiunea pentru Google Calendar.
-					Reconectează-te pentru a permite generarea automată a linkurilor Meet în taskurile de tip meeting.
-				</p>
-				<a
-					href="/api/integrations/gmail/auth"
-					class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
-				>
-					Reconectează Gmail
-				</a>
-			</div>
-		</div>
-	</div>
-{/if}
-```
-
-**Verify the Gmail OAuth start endpoint** — adjust the `href` path to match the existing pattern in this file (search for the existing "Connect" button to find the right URL).
-
-- [ ] **Step 3: Autofixer + check**
+- [ ] **Step 1: Final svelte-check + tests**
 
 ```bash
 cd app
-bun run check 2>&1 | tail -5
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add app/src/routes/\[tenant\]/settings/gmail/+page.svelte
-git commit -m "fix(gmail-settings): re-consent banner when calendar.events scope is missing"
-```
-
----
-
-## Task 18: Manual Smoke Verification
-
-**Files:** none (verification only)
-
-- [ ] **Step 1: Apply migrations on local Turso**
-
-```bash
-cd app
-# Per project memory: user runs migrations manually
-# Confirm migration 0336 will be picked up when ready to deploy
-ls drizzle/0336_task_google_calendar_event_id.sql
-```
-
-Expected: file exists, ready to apply.
-
-- [ ] **Step 2: Run full test suite**
-
-```bash
-cd app
-bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
-bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
-```
-
-Expected: tasks ≥ 64 pass, meet 5 pass.
-
-- [ ] **Step 3: Run svelte-check**
-
-```bash
 NODE_OPTIONS="--max-old-space-size=8192" bunx svelte-check --threshold error 2>&1 | tail -5
+bun test src/lib/server/google-calendar/__tests__/meet.test.ts 2>&1 | tail -5
+bun test src/lib/remotes/__tests__/tasks.remote.test.ts 2>&1 | tail -5
 ```
 
-Expected: error count = pre-existing baseline (12). No new errors in google-calendar/ or modified files.
+Expected: meet tests = 5 pass; tasks tests = 64+ pass; svelte-check baseline.
 
-- [ ] **Step 4: Create smoke checklist file**
+- [ ] **Step 2: Write smoke checklist**
 
-Create `app/docs/superpowers/meet-integration-smoke-checklist.md` for post-deploy manual verification:
+Create `app/docs/superpowers/meet-integration-smoke-checklist.md`:
 
 ```markdown
 # Google Meet Integration — Post-Deploy Smoke
 
-Run these AFTER deploy + migration 0336 applied on Turso.
+Run AFTER deploy + migrations 0336+0337 applied on Turso.
 
 ## Pre-conditions
-- [ ] At least one tenant has reconnected Gmail with calendar.events scope (check `gmail_integration.grantedScopes` JSON)
+- [ ] Settings → Google Calendar → Connect with a Workspace account
+- [ ] Verify `google_calendar_integration` row exists with `is_active=1`
 
 ## Create flow
-- [ ] Login as admin, open Tasks, click + → Meeting type
-- [ ] Wizard shows GREEN "Linkul va fi generat automat" banner
-- [ ] Fill title, time, duration, client; submit
-- [ ] Open the created task → `meetLink` shows a real `https://meet.google.com/...` URL
-- [ ] Open Google Calendar in browser → event exists with the same time + attendees
+- [ ] Open Tasks → + → Meeting type
+- [ ] Wizard shows GREEN banner with the connected email
+- [ ] Submit; open created task → meetLink shows real `meet.google.com/...`
+- [ ] Open Google Calendar → event exists with same time + attendees
 
 ## Update flow
-- [ ] Edit the meeting task → change meetTime
-- [ ] Open Google Calendar → event time updated
-- [ ] Edit again → change assignees
-- [ ] Open Google Calendar → attendees updated
+- [ ] Edit meeting task: change meetTime → Calendar event time updated
+- [ ] Edit assignees → Calendar attendees updated
+- [ ] Change type meeting→design → Calendar event deleted; meetLink cleared
 
 ## Delete flow
-- [ ] Delete the meeting task
-- [ ] Open Google Calendar → event removed (or 404 if checked URL)
+- [ ] Delete the task → Calendar event removed
 
-## Fallback flow (tenant without re-consent)
-- [ ] Use a tenant whose Gmail does NOT have calendar.events scope
-- [ ] Open create dialog → AMBER "Reconectează Gmail" banner shows
-- [ ] Submit a meeting task → succeeds, meetLink is null
-- [ ] Admin Meet modal: shows manual paste input (not the auto-gen notice)
-
-## Re-consent flow
-- [ ] Settings → Gmail → see AMBER "Activează auto Meet" banner
-- [ ] Click Reconectează → OAuth screen requests calendar.events permission
-- [ ] After consent, banner disappears; new meetings auto-generate links
+## Fallback (disconnected)
+- [ ] Disconnect from Settings → open create dialog → AMBER banner
+- [ ] Submit meeting task → succeeds; meetLink null
 ```
 
-- [ ] **Step 5: Commit smoke checklist**
+- [ ] **Step 3: Milestone commit + ask user for merge**
 
 ```bash
 git add app/docs/superpowers/meet-integration-smoke-checklist.md
-git commit -m "docs(meet): smoke verification checklist for post-deploy"
+git commit -m "docs(meet): post-deploy smoke checklist"
+git commit --allow-empty -m "milestone: Google Meet integration v1 complete (separate module)"
 ```
 
----
-
-## Task 19: Final Verification + Milestone Commit
-
-**Files:** none
-
-- [ ] **Step 1: Full svelte-check + tests**
-
-```bash
-cd app
-NODE_OPTIONS="--max-old-space-size=8192" bunx svelte-check --threshold error 2>&1 | tail -5
-bun test 2>&1 | tail -10
-```
-
-Document the final pass counts.
-
-- [ ] **Step 2: List all commits**
-
-```bash
-cd /Users/augustin598/Projects/CRM/.claude/worktrees/google-meet
-git log --oneline main..HEAD
-```
-
-Confirm ~19 commits.
-
-- [ ] **Step 3: Milestone marker commit**
-
-```bash
-git commit --allow-empty -m "milestone: Google Meet integration complete (~14h, 5 unit tests, 0 regressions)"
-```
-
-- [ ] **Step 4: Stop. Ask user for merge authorization.**
-
-Per project convention: do NOT merge to main or push without explicit user "yes". Surface final summary instead, then await answer.
+Then report back to user with summary. Wait for explicit merge authorization.
 
 ---
 
 ## Self-Review
 
 **1. Spec coverage:**
-- §1 OAuth strategy → Task 3 (SCOPES extension) + Task 17 (banner)
-- §2 Calendar config → Task 5 (createMeetEvent hard-codes 'primary', timezone Europe/Bucharest)
-- §3 Attendees → Task 9 + Task 10 + Task 11 (auto-derive from assignees + client)
-- §4 Trigger points table → Task 9 (createTask) + Task 10 (scheduleMeet) + Task 11 (updateTask diff) + Task 12 (deleteTask)
-- §5 Failure handling → every Calendar call in Tasks 9-12 is in try/catch with `meet_event_failed` audit log
-- §6 Schema → Task 2
-- §7 Code surface → all files mapped to tasks
-- §8 Multi-tenant safety → `getCalendarClient(tenantId)` always tenant-scoped; event IDs derived from tenant-scoped task fetch (never from request body)
-- §9 Testing → Tasks 5/6/7 (unit) + Task 18 (smoke)
-- §10 Effort → tasks add up to ~21h, aligned with estimate
-- §11 Rollout → covered by Task 19 (merge gate)
-- §12 Risks → mitigations baked into Tasks 9-12 (graceful failure) and Task 17 (banner)
+- §1 Architecture (separate module) → Task 2 (table) + Task 8-10 (OAuth + settings)
+- §2 Schema → Task 2 + Task 3
+- §3 OAuth flow → Tasks 8-9
+- §4 Calendar config → Task 4 (auth.ts) + Task 5 (meet.ts defaults)
+- §5 Attendees → Tasks 12-14 (auto-derived from assignees + client)
+- §6 Trigger points + sync → Tasks 12-15
+- §7 New code surface → all mapped
+- §8 Multi-tenant safety → every hook scopes by `event.locals.tenant.id`
+- §9 UI 2-state → Tasks 17-19
+- §10 Testing → Tasks 5-7 (unit) + Task 20 (smoke)
+- §11 Effort estimate aligns
+- §12 Risks → mitigations in fallback code in Tasks 12-15
 
-**2. Placeholder scan:**
-- No "TBD" / "implement later"
-- Every code step has full code
-- All commands have expected output
+**2. Placeholder scan:** No "TBD"/"implement later". Each code step has full code.
 
 **3. Type consistency:**
-- `eventId: string`, `hangoutLink: string` consistent across createMeetEvent/updateMeetEvent/deleteMeetEvent
-- `getCalendarStatus` returns `{connected, hasCalendarScope, email}` — same shape used in Tasks 13, 14, 15, 16, 17
-- `googleCalendarEventId` column name consistent in schema (Task 2) + all UPDATE statements (Tasks 9, 11, 12)
-- Action types `meet_event_created/updated/deleted/failed/orphaned` declared in Task 8, used in Tasks 9-12
+- `CalendarStatus = { connected, email }` — same in auth.ts (Task 4), integrations.remote.ts (Task 16), all UI consumers (Tasks 17-19)
+- `googleCalendarEventId` column name consistent in schema (Task 2), migration (Task 3), all UPDATE statements (Tasks 12-15)
+- Action types `meet_event_*` declared once (Task 11), used consistently
+- `getCalendarClient` / `getCalendarStatus` / `getOAuthUrl` / `exchangeCodeAndSave` / `disconnectCalendar` — all defined in Task 4, consumed elsewhere
 
 ---
 
 ## Execution Handoff
 
-Plan complete and saved to `app/docs/superpowers/plans/2026-05-19-google-meet-integration.md`.
-
-User instruction: **execute via subagent-driven-development.**
-
-REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Fresh subagent per task + two-stage review (spec compliance, then code quality).
+Plan saved. **Execute via superpowers:subagent-driven-development.** Fresh subagent per task cluster + two-stage review.
