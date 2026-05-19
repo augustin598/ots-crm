@@ -1,5 +1,6 @@
 <!-- src/lib/components/client-task/client-task-lightbox.svelte -->
 <script lang="ts">
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -16,26 +17,18 @@
 
 	let { images, index, open, onClose, onIndexChange }: Props = $props();
 
-	let overlayEl = $state<HTMLDivElement | null>(null);
-
-	$effect(() => {
-		if (open && overlayEl) {
-			overlayEl.focus();
-		}
-	});
-
 	function nav(delta: number) {
 		const next = (index + delta + images.length) % images.length;
 		onIndexChange(next);
 	}
 
+	// Arrow key navigation is a non-standard keyboard shortcut — handled on
+	// the window so it works regardless of which element inside has focus.
+	// Escape is delegated to focusTrap.onEscape.
 	$effect(() => {
 		if (!open) return;
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				onClose();
-			} else if (e.key === 'ArrowLeft' && images.length > 1) {
+			if (e.key === 'ArrowLeft' && images.length > 1) {
 				e.preventDefault();
 				nav(-1);
 			} else if (e.key === 'ArrowRight' && images.length > 1) {
@@ -52,19 +45,14 @@
 
 {#if open && current}
 	<div
-		bind:this={overlayEl}
 		class="ct-lb-overlay fixed inset-0 z-[300] flex items-center justify-center bg-black/85"
-		onclick={onClose}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				onClose();
-			}
-		}}
 		role="dialog"
 		aria-modal="true"
-		aria-label="Image lightbox"
+		aria-label="Image viewer"
 		tabindex={-1}
+		onclick={onClose}
+		onkeydown={() => {}}
+		use:focusTrap={{ active: open, onEscape: onClose }}
 	>
 		<button
 			type="button"
