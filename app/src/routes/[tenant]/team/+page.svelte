@@ -47,11 +47,15 @@
 	import TeamPendingBanner from '$lib/components/team/TeamPendingBanner.svelte';
 	import TeamPermissionsMatrix from '$lib/components/team/TeamPermissionsMatrix.svelte';
 	import TeamProfileModal, { type ProfileMember } from '$lib/components/team/TeamProfileModal.svelte';
+	import TeamClientCard from '$lib/components/team/TeamClientCard.svelte';
+	import TeamClientPanel from '$lib/components/team/TeamClientPanel.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import UsersIcon from '@lucide/svelte/icons/users';
+	import { page } from '$app/state';
 
 	let { data }: { data: PageData } = $props();
 
+	let activeTab = $state<'ots' | 'clients'>('ots');
 	let view = $state<'grid' | 'table' | 'lanes'>('grid');
 	let search = $state('');
 	let deptFilter = $state<'all' | DepartmentId>('all');
@@ -61,6 +65,40 @@
 	let pendingListOpen = $state(false);
 	let profileOpen = $state(false);
 	let editingId = $state<string | null>(null);
+
+	// Clienți tab state
+	let clientSearch = $state('');
+	let clientFilter = $state<'all' | 'with-team' | 'no-team'>('all');
+	let clientPanelOpen = $state(false);
+	let activeClientId = $state<string | null>(null);
+	const tenantSlug = $derived(page.params.tenant ?? 'ots');
+
+	const filteredClients = $derived.by(() => {
+		const q = clientSearch.toLowerCase().trim();
+		return data.clients.filter((c) => {
+			if (clientFilter === 'with-team' && c.secondaryCount === 0) return false;
+			if (clientFilter === 'no-team' && c.secondaryCount > 0) return false;
+			if (!q) return true;
+			return (
+				c.name.toLowerCase().includes(q) ||
+				(c.businessName ?? '').toLowerCase().includes(q) ||
+				(c.email ?? '').toLowerCase().includes(q)
+			);
+		});
+	});
+	const activeClient = $derived(
+		activeClientId ? data.clients.find((c) => c.id === activeClientId) ?? null : null
+	);
+	const clientsWithTeam = $derived(data.clients.filter((c) => c.secondaryCount > 0).length);
+
+	function openClient(clientId: string) {
+		activeClientId = clientId;
+		clientPanelOpen = true;
+	}
+
+	$effect(() => {
+		if (!clientPanelOpen) activeClientId = null;
+	});
 
 	type RawMember = (typeof data.members)[number];
 
@@ -426,33 +464,71 @@
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">Team</h1>
 			<p class="text-sm text-muted-foreground mt-1">
-				{totalMembers} membri · {onlineCount} online · {pendingInvites} invitații în așteptare
+				{#if activeTab === 'ots'}
+					{totalMembers} membri · {onlineCount} online · {pendingInvites} invitații în așteptare
+				{:else}
+					{data.clients.length} clienți activi · {clientsWithTeam} cu echipă configurată
+				{/if}
 			</p>
 		</div>
 		<div class="flex items-center gap-2 flex-wrap">
-			<div class="relative">
-				<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-				<Input
-					bind:value={search}
-					placeholder="Caută membru, email, rol..."
-					class="pl-9 w-[280px]"
-				/>
-			</div>
-			<Button variant="outline" onclick={() => (permsOpen = true)}>
-				<LayersIcon class="mr-2 size-4" />
-				Permisiuni
-			</Button>
-			<Button variant="outline" onclick={exportCsv}>
-				<DownloadIcon class="mr-2 size-4" />
-				Export
-			</Button>
-			<Button onclick={() => (inviteOpen = true)}>
-				<PlusIcon class="mr-2 size-4" />
-				Invită membru
-			</Button>
+			{#if activeTab === 'ots'}
+				<div class="relative">
+					<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+					<Input
+						bind:value={search}
+						placeholder="Caută membru, email, rol..."
+						class="pl-9 w-[280px]"
+					/>
+				</div>
+				<Button variant="outline" onclick={() => (permsOpen = true)}>
+					<LayersIcon class="mr-2 size-4" />
+					Permisiuni
+				</Button>
+				<Button variant="outline" onclick={exportCsv}>
+					<DownloadIcon class="mr-2 size-4" />
+					Export
+				</Button>
+				<Button onclick={() => (inviteOpen = true)}>
+					<PlusIcon class="mr-2 size-4" />
+					Invită membru
+				</Button>
+			{:else}
+				<div class="relative">
+					<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+					<Input
+						bind:value={clientSearch}
+						placeholder="Caută client, email..."
+						class="pl-9 w-[280px]"
+					/>
+				</div>
+			{/if}
 		</div>
 	</div>
 
+	<!-- Tabs -->
+	<div class="team-tabs">
+		<button
+			type="button"
+			class="team-tab"
+			class:active={activeTab === 'ots'}
+			onclick={() => (activeTab = 'ots')}
+		>
+			Echipa OTS
+			<span class="team-tab-count">{activeMembers.length}</span>
+		</button>
+		<button
+			type="button"
+			class="team-tab"
+			class:active={activeTab === 'clients'}
+			onclick={() => (activeTab = 'clients')}
+		>
+			Clienți
+			<span class="team-tab-count">{data.clients.length}</span>
+		</button>
+	</div>
+
+	{#if activeTab === 'ots'}
 	<!-- KPIs (5 carduri) -->
 	<TeamKpiStrip
 		items={[
@@ -626,6 +702,51 @@
 			{/if}
 		</div>
 	{/if}
+	{:else}
+		<!-- Clienți tab content -->
+		<div class="flex items-center gap-2 flex-wrap">
+			<button
+				type="button"
+				class="chip"
+				class:active={clientFilter === 'all'}
+				onclick={() => (clientFilter = 'all')}
+			>
+				Toți <span class="count">{data.clients.length}</span>
+			</button>
+			<button
+				type="button"
+				class="chip"
+				class:active={clientFilter === 'with-team'}
+				onclick={() => (clientFilter = 'with-team')}
+			>
+				Cu echipă <span class="count">{clientsWithTeam}</span>
+			</button>
+			<button
+				type="button"
+				class="chip"
+				class:active={clientFilter === 'no-team'}
+				onclick={() => (clientFilter = 'no-team')}
+			>
+				Doar contact principal <span class="count">{data.clients.length - clientsWithTeam}</span>
+			</button>
+		</div>
+
+		{#if filteredClients.length === 0}
+			<div class="empty-state">
+				{#if data.clients.length === 0}
+					Niciun client activ. Adaugă unul din pagina <a href={`/${tenantSlug}/clients`} class="text-primary font-semibold underline">Clienți</a>.
+				{:else}
+					Niciun client găsit pentru filtrul curent.
+				{/if}
+			</div>
+		{:else}
+			<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">
+				{#each filteredClients as c (c.id)}
+					<TeamClientCard client={c} onclick={() => openClient(c.id)} />
+				{/each}
+			</div>
+		{/if}
+	{/if}
 </div>
 
 <!-- Invite modal -->
@@ -710,7 +831,66 @@
 	onReactivate={handleReactivate}
 />
 
+<!-- Client team panel modal -->
+<Dialog.Root bind:open={clientPanelOpen}>
+	<Dialog.Content class="sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
+		<Dialog.Title class="sr-only">Echipa clientului</Dialog.Title>
+		{#if activeClient}
+			<TeamClientPanel
+				clientId={activeClient.id}
+				clientName={activeClient.name}
+				clientEmail={activeClient.email}
+				clientPhone={activeClient.phone}
+				{tenantSlug}
+			/>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
 <style>
+	.team-tabs {
+		display: flex;
+		gap: 4px;
+		border-bottom: 1px solid var(--border);
+		margin-top: -8px;
+	}
+	.team-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 16px;
+		background: transparent;
+		border: none;
+		border-bottom: 2px solid transparent;
+		font-family: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		margin-bottom: -1px;
+		transition: all 0.12s;
+	}
+	.team-tab:hover {
+		color: var(--foreground);
+	}
+	.team-tab.active {
+		color: var(--primary);
+		border-bottom-color: var(--primary);
+	}
+	.team-tab-count {
+		display: inline-block;
+		min-width: 22px;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: color-mix(in oklch, var(--foreground) 7%, transparent);
+		color: var(--muted-foreground);
+		font-size: 11px;
+		text-align: center;
+	}
+	.team-tab.active .team-tab-count {
+		background: color-mix(in oklch, var(--primary) 14%, transparent);
+		color: var(--primary);
+	}
 	.chip {
 		display: inline-flex;
 		align-items: center;
