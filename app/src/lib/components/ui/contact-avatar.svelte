@@ -3,13 +3,13 @@
 		src?: string | null;
 		name: string;
 		phoneE164?: string | null;
-		size?: 'sm' | 'md' | 'lg';
+		size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 		class?: string;
 	}
 
 	let { src = null, name, phoneE164 = null, size = 'md', class: className = '' }: Props = $props();
 
-	const SIZE_PX = { sm: 32, md: 40, lg: 48 } as const;
+	const SIZE_PX = { xs: 24, sm: 32, md: 40, lg: 48, xl: 56 } as const;
 	const PALETTE = [
 		'#2563eb', // blue-600
 		'#059669', // emerald-600
