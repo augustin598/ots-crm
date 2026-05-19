@@ -60,7 +60,14 @@
 		</h3>
 	</div>
 
-	<div class="ct-progress-bar h-2 overflow-hidden rounded-full bg-[#f1f5f9]">
+	<div
+		class="ct-progress-bar h-2 overflow-hidden rounded-full bg-[#f1f5f9]"
+		role="progressbar"
+		aria-valuenow={pct}
+		aria-valuemin="0"
+		aria-valuemax="100"
+		aria-label="Progres subtask-uri"
+	>
 		<div
 			class="ct-progress-fill h-full rounded-full transition-[width] duration-300"
 			style:width={`${pct}%`}

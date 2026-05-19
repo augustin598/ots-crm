@@ -34,8 +34,15 @@
 		startDate: 'data de început',
 		assignee: 'echipa',
 		assignees: 'echipa',
+		assignedToUserId: 'responsabil',
 		tag: 'tag',
-		subtask: 'subtask'
+		subtask: 'subtask',
+		clientId: 'client',
+		projectId: 'proiect',
+		milestoneId: 'milestone',
+		isRecurring: 'recurență',
+		recurringType: 'tip recurență',
+		recurringInterval: 'interval recurență'
 	};
 
 	function fieldLabelFor(action: string, field: string | null): string {
@@ -66,6 +73,20 @@
 	function looksLikeLongText(v: string | null | undefined): boolean {
 		return !!v && v.length > 60;
 	}
+
+	// CRM IDs are encodeBase32LowerCase(15 bytes) → 24 lowercase alphanumeric chars.
+	// Suppress raw IDs from the diff line — they're meaningless to clients.
+	function looksLikeOpaqueId(v: string | null | undefined): boolean {
+		if (!v) return false;
+		if (v.length < 18 || v.length > 36) return false;
+		return /^[a-z0-9]+$/.test(v);
+	}
+
+	function displayDiffValue(v: string | null | undefined): string {
+		if (!v) return '';
+		if (looksLikeOpaqueId(v)) return '—';
+		return v;
+	}
 </script>
 
 <div class="ct-card rounded-[12px] border border-[#e5e9f0] bg-white p-[18px]">
@@ -74,7 +95,7 @@
 			<ClockIcon class="h-3.5 w-3.5" />
 		</span>
 		<h3 class="text-[15px] font-bold text-[#0f172a]">
-			Activity ({activities.length})
+			Activitate ({activities.length})
 		</h3>
 	</div>
 
@@ -115,15 +136,15 @@
 									{fieldLabelFor(a.action, a.field)}
 								</span>
 							</div>
-							{#if a.oldValue && a.newValue && !looksLikeLongText(a.newValue) && !looksLikeLongText(a.oldValue)}
+							{#if a.oldValue && a.newValue && !looksLikeLongText(a.newValue) && !looksLikeLongText(a.oldValue) && !(looksLikeOpaqueId(a.oldValue) && looksLikeOpaqueId(a.newValue))}
 								<div
 									class="ct-act-diff mt-[3px] flex items-center gap-1.5 font-mono text-[11.5px] text-[#64748b]"
 								>
-									<span class="truncate">{a.oldValue}</span>
+									<span class="truncate">{displayDiffValue(a.oldValue)}</span>
 									<span class="ct-act-arrow text-[#cbd5e1]">→</span>
-									<span class="truncate">{a.newValue}</span>
+									<span class="truncate">{displayDiffValue(a.newValue)}</span>
 								</div>
-							{:else if a.newValue && !looksLikeLongText(a.newValue) && fieldLabelFor(a.action, a.field) !== 'descriere'}
+							{:else if a.newValue && !looksLikeLongText(a.newValue) && !looksLikeOpaqueId(a.newValue) && fieldLabelFor(a.action, a.field) !== 'descriere'}
 								<div
 									class="ct-act-diff mt-[3px] font-mono text-[11.5px] text-[#64748b]"
 								>

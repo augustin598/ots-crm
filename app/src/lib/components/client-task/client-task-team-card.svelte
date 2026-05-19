@@ -64,7 +64,8 @@
 									'absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-white',
 									a.online ? 'bg-[#10b981]' : 'bg-[#cbd5e1]'
 								].join(' ')}
-								aria-hidden="true"
+								role="status"
+								aria-label={a.online ? 'Online' : 'Offline'}
 							></span>
 						{/if}
 					</div>
@@ -79,7 +80,7 @@
 					{#if !readonly && onRemove}
 						<button
 							type="button"
-							class="ct-team-remove grid h-[22px] w-[22px] place-items-center rounded-full bg-[#f1f5f9] text-[#94a3b8] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#fee2e2] hover:text-[#ef4444]"
+							class="ct-team-remove grid h-[22px] w-[22px] place-items-center rounded-full bg-[#f1f5f9] text-[#94a3b8] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[#1877F2] hover:bg-[#fee2e2] hover:text-[#ef4444]"
 							onclick={() => onRemove(a.userId)}
 							aria-label={`Scoate ${displayName(a)}`}
 						>
