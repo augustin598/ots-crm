@@ -26,6 +26,7 @@
 		scheduleMeet
 	} from '$lib/remotes/tasks.remote';
 	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskComments } from '$lib/remotes/task-comments.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
@@ -287,6 +288,7 @@
 		label: string;
 		kind: 'agency' | 'client';
 		email?: string;
+		phone?: string | null;
 	};
 
 	const agencyAssigneeOptions = $derived<AssigneeOption[]>(
@@ -296,7 +298,8 @@
 				value: u.id,
 				label: `${u.firstName} ${u.lastName}`.trim() || u.email,
 				kind: 'agency' as const,
-				email: u.email
+				email: u.email,
+				phone: (u as any).phone ?? null
 			}))
 	);
 
@@ -307,9 +310,16 @@
 				value: u.id,
 				label: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email,
 				kind: 'client' as const,
-				email: u.email
+				email: u.email,
+				phone: u.phone ?? null
 			}))
 	);
+
+	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
+		if (!phone) return null;
+		const slug = (page.params.tenant as string) ?? '';
+		return `/${slug}/api/whatsapp/avatar/${encodeURIComponent(phone)}`;
+	}
 
 	// Kept for callers that previously read assigneeOptions (combined list)
 	const assigneeOptions = $derived<AssigneeOption[]>([
@@ -888,7 +898,7 @@
 												</button>
 											{/snippet}
 										</Popover.Trigger>
-										<Popover.Content class="w-72 p-2">
+										<Popover.Content class="w-80 p-2">
 											<div class="max-h-72 space-y-0.5 overflow-y-auto">
 												{#if agencyAssigneeOptions.length > 0}
 													<div class="px-2 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -897,15 +907,18 @@
 													{#each agencyAssigneeOptions as opt (opt.value)}
 														<button
 															type="button"
-															class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+															class="flex w-full items-center gap-3 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
 															onclick={() => handleAddAssignee(opt.value)}
 														>
-															<div
-																class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary"
-															>
-																{getInitials(opt.label)}
+															<ContactAvatar
+																src={avatarSrcFromPhone(opt.phone)}
+																name={opt.label}
+																phoneE164={opt.phone ?? null}
+																size="sm"
+															/>
+															<div class="min-w-0 flex-1">
+																<span class="block truncate font-medium">{opt.label}</span>
 															</div>
-															<span class="truncate">{opt.label}</span>
 														</button>
 													{/each}
 												{/if}
@@ -919,18 +932,20 @@
 													{#each clientAssigneeOptions as opt (opt.value)}
 														<button
 															type="button"
-															class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+															class="flex w-full items-center gap-3 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
 															onclick={() => handleAddAssignee(opt.value)}
 														>
-															<div
-																class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-medium text-emerald-700"
-															>
-																{getInitials(opt.label)}
-															</div>
-															<div class="flex min-w-0 flex-1 flex-col">
-																<span class="truncate">{opt.label}</span>
+															<ContactAvatar
+																src={avatarSrcFromPhone(opt.phone)}
+																name={opt.label}
+																phoneE164={opt.phone ?? null}
+																size="sm"
+																class="ring-2 ring-emerald-100"
+															/>
+															<div class="min-w-0 flex-1">
+																<span class="block truncate font-medium">{opt.label}</span>
 																{#if opt.email && opt.email !== opt.label}
-																	<span class="truncate text-[10px] text-muted-foreground">{opt.email}</span>
+																	<span class="block truncate text-[11px] leading-tight text-muted-foreground">{opt.email}</span>
 																{/if}
 															</div>
 														</button>
