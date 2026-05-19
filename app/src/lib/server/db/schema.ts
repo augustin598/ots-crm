@@ -181,6 +181,13 @@ export const client = sqliteTable('client', {
 	// 'pending_email' | 'pending_payment' | 'active' | 'churned'
 	/** Stripe Customer ID — cache-uit la prima checkout pentru a evita customers duplicați. */
 	stripeCustomerId: text('stripe_customer_id'),
+	// === Hosting grouped-by-client redesign (HOST pack) ===
+	/** Optional human-set "client since" date (YYYY-MM-DD). Falls back to created_at in UI. */
+	clientSince: text('client_since'),
+	/** Tier: 'vip' | 'standard' | 'watch'. Affects group header badge + edge color. */
+	tier: text('tier').default('standard'),
+	/** Lifetime value in cents — sum of all paid invoices. Refreshed by recalcClientLTV(). */
+	ltvCents: integer('ltv_cents').notNull().default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -980,6 +987,8 @@ export const hostingAccount = sqliteTable(
 		 * a suspenda contul corect. NULL pentru conturile manuale sau one-time.
 		 */
 		stripeSubscriptionId: text('stripe_subscription_id'),
+		/** Whether the contract renews automatically. UI toggle on the "Ciclu" column. */
+		autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(true),
 		lastSyncedAt: text('last_synced_at'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()

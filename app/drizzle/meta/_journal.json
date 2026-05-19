@@ -2381,6 +2381,34 @@
       "when": 1747800200000,
       "tag": "0342_tenant_user_preferences_user_tenant_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 343,
+      "version": "6",
+      "when": 1747876800000,
+      "tag": "0343_client_client_since",
+      "breakpoints": true
+    },
+    {
+      "idx": 344,
+      "version": "6",
+      "when": 1747876801000,
+      "tag": "0344_client_tier",
+      "breakpoints": true
+    },
+    {
+      "idx": 345,
+      "version": "6",
+      "when": 1747876802000,
+      "tag": "0345_client_ltv_cents",
+      "breakpoints": true
+    },
+    {
+      "idx": 346,
+      "version": "6",
+      "when": 1747876803000,
+      "tag": "0346_hosting_account_auto_renew",
+      "breakpoints": true
     }
   ]
 }
