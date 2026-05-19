@@ -1442,6 +1442,141 @@ export const updateTask = command(
 			}
 		}
 
+		// ── Calendar diff sync (3-case) ──────────────────────────────────────────
+		try {
+			const hadEvent = Boolean(existing.googleCalendarEventId);
+			const newType = updateData.type ?? existing.type;
+			const isStillMeeting = newType === 'meeting';
+			const newMeetTime = _meetTime ?? existing.meetTime;
+			const newDuration = _meetDurationMinutes ?? existing.meetDurationMinutes;
+
+			if (hadEvent && !isStillMeeting) {
+				// Case A: type changed away from meeting → delete Calendar event
+				const calStatus = await getCalendarStatus(event.locals.tenant.id);
+				if (calStatus.connected) {
+					const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
+					await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: existing.googleCalendarEventId! });
+					await db
+						.update(table.task)
+						.set({ meetLink: null, googleCalendarEventId: null })
+						.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, existing.tenantId)));
+					await recordTaskActivity({
+						taskId,
+						userId: event.locals.user.id,
+						tenantId: existing.tenantId,
+						action: 'meet_event_deleted'
+					});
+				}
+			} else if (hadEvent && isStillMeeting) {
+				// Case B: still a meeting + event exists → update if relevant field changed
+				const titleChanged = updateData.title !== undefined && updateData.title !== existing.title;
+				const descChanged = updateData.description !== undefined && updateData.description !== existing.description;
+				const timeChanged = _meetTime !== undefined && _meetTime !== existing.meetTime;
+				const durationChanged = _meetDurationMinutes !== undefined && _meetDurationMinutes !== existing.meetDurationMinutes;
+				const clientChanged = updateData.clientId !== undefined && updateData.clientId !== existing.clientId;
+				const assigneeChanged2 = updateData.assigneeUserIds !== undefined;
+
+				if (titleChanged || descChanged || timeChanged || durationChanged || clientChanged || assigneeChanged2) {
+					const calStatus = await getCalendarStatus(event.locals.tenant.id);
+					if (calStatus.connected) {
+						const { updateMeetEvent } = await import('$lib/server/google-calendar/meet');
+
+						// Build fresh attendee list
+						const assignees = await db
+							.select({ email: table.user.email })
+							.from(table.taskAssignee)
+							.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+							.where(eq(table.taskAssignee.taskId, taskId));
+						const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
+						const effectiveClientId = updateData.clientId ?? existing.clientId;
+						if (effectiveClientId) {
+							const [clientRow] = await db
+								.select({ email: table.client.email })
+								.from(table.client)
+								.where(and(eq(table.client.id, effectiveClientId), eq(table.client.tenantId, event.locals.tenant.id)))
+								.limit(1);
+							if (clientRow?.email) attendeeEmails.push(clientRow.email);
+						}
+
+						const startTime = newMeetTime ? new Date(newMeetTime) : undefined;
+						await updateMeetEvent({
+							tenantId: event.locals.tenant.id,
+							eventId: existing.googleCalendarEventId!,
+							title: updateData.title,
+							description: updateData.description,
+							startTime,
+							durationMinutes: newDuration ?? undefined,
+							timezone: 'Europe/Bucharest',
+							attendees: attendeeEmails
+						});
+						await recordTaskActivity({
+							taskId,
+							userId: event.locals.user.id,
+							tenantId: existing.tenantId,
+							action: 'meet_event_updated',
+							newValue: JSON.stringify({ eventId: existing.googleCalendarEventId })
+						});
+					}
+				}
+			} else if (!hadEvent && isStillMeeting && newMeetTime && updateData.type === 'meeting') {
+				// Case C: just promoted to meeting type with a time → create Calendar event
+				const calStatus = await getCalendarStatus(event.locals.tenant.id);
+				if (calStatus.connected) {
+					const { createMeetEvent: createMeet } = await import('$lib/server/google-calendar/meet');
+
+					const assignees = await db
+						.select({ email: table.user.email })
+						.from(table.taskAssignee)
+						.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+						.where(eq(table.taskAssignee.taskId, taskId));
+					const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
+					const effectiveClientId = updateData.clientId ?? existing.clientId;
+					if (effectiveClientId) {
+						const [clientRow] = await db
+							.select({ email: table.client.email })
+							.from(table.client)
+							.where(and(eq(table.client.id, effectiveClientId), eq(table.client.tenantId, event.locals.tenant.id)))
+							.limit(1);
+						if (clientRow?.email) attendeeEmails.push(clientRow.email);
+					}
+
+					const meetResult = await createMeet({
+						tenantId: event.locals.tenant.id,
+						title: updateData.title ?? existing.title,
+						startTime: new Date(newMeetTime),
+						durationMinutes: newDuration ?? 30,
+						timezone: 'Europe/Bucharest',
+						attendees: attendeeEmails,
+						description: updateData.description ?? existing.description ?? undefined
+					});
+
+					await db
+						.update(table.task)
+						.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
+						.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, existing.tenantId)));
+
+					await recordTaskActivity({
+						taskId,
+						userId: event.locals.user.id,
+						tenantId: existing.tenantId,
+						action: 'meet_event_created',
+						newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
+					});
+				}
+			}
+		} catch (err) {
+			if (!(err instanceof CalendarNotConnected)) {
+				await recordTaskActivity({
+					taskId,
+					userId: event.locals.user.id,
+					tenantId: existing.tenantId,
+					action: 'meet_event_failed',
+					newValue: JSON.stringify({ stage: 'update', error: err instanceof Error ? err.message : String(err) })
+				});
+			}
+			// Calendar failure must not roll back the task update
+		}
+
 		return { success: true };
 	}
 );
