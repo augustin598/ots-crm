@@ -2367,6 +2367,20 @@
       "when": 1747641700000,
       "tag": "0337_create_google_calendar_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 341,
+      "version": "6",
+      "when": 1747800100000,
+      "tag": "0341_create_tenant_user_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 342,
+      "version": "6",
+      "when": 1747800200000,
+      "tag": "0342_tenant_user_preferences_user_tenant_idx",
+      "breakpoints": true
     }
   ]
 }

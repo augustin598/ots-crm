@@ -11,7 +11,10 @@
  * Applies:
  *  - actor exclusion (an event never emails its own actor)
  *  - per-clientUser preference gates (notifyTaskAssigned / notifyNewComment /
- *    notifyTaskStatusChange) — agency staff have no per-user opt-out
+ *    notifyTaskStatusChange)
+ *  - per-agency-user preference gates via tenant_user_preferences
+ *    (notifyTaskAssigned / notifyNewComment / notifyTaskStatusChange /
+ *    notifyMention) — defaults to allow when no row exists
  *  - case-insensitive email dedup across the final recipient set
  *  - URL routing by recipient kind:
  *      agency  → `/{tenantSlug}/tasks/{taskId}`
@@ -22,14 +25,15 @@
  *    master switch `taskSettings.clientEmailsEnabled`. That toggle still
  *    gates the legacy company-level pathway (handled separately by
  *    `sendClientNotificationIfEnabled` in tasks.remote.ts).
- *  - Agency staff always get assignment/comment/status emails when
- *    they're a current assignee, watcher, or mention. No opt-out yet.
+ *  - Mention reason on a comment event uses `notifyMention`, not
+ *    `notifyNewComment`, so mentions can be opted out independently.
  */
 
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { env as publicEnv } from '$env/dynamic/public';
+import { tenantUserPrefAllowsBatch, type TenantUserNotifyKey } from './tenant-user-preferences';
 
 export type TaskEvent = 'assigned' | 'comment' | 'status-change';
 
@@ -219,9 +223,7 @@ export async function resolveTaskRecipients(args: {
 	const filtered = candidates.filter((c) => c.userId !== actorUserId && !!c.email);
 	if (filtered.length === 0) return [];
 
-	// 5. Per-clientUser preference gate. Agency staff have no per-user
-	//    opt-out (today). For client users, load clientUserPreferences and
-	//    check the event-specific flag.
+	// 5a. Per-clientUser preference gate.
 	const clientUserIds = [
 		...new Set(filtered.filter((c) => c.kind === 'client').map((c) => c.userId))
 	];
@@ -260,14 +262,49 @@ export async function resolveTaskRecipients(args: {
 		}
 	}
 
+	// 5b. Per-agency-user preference gate. A single agency candidate can be
+	//     covered by either the assignee/watcher key OR (for mentions) the
+	//     mention key — so we may need to look up two keys. Batch each key
+	//     separately and consult both at gate time.
+	const agencyUserIds = [
+		...new Set(filtered.filter((c) => c.kind === 'agency').map((c) => c.userId))
+	];
+
+	let agencyMainPrefs = new Map<string, boolean>();
+	let agencyMentionPrefs = new Map<string, boolean>();
+
+	if (agencyUserIds.length > 0) {
+		const mainKey: TenantUserNotifyKey =
+			event === 'assigned'
+				? 'notifyTaskAssigned'
+				: event === 'status-change'
+					? 'notifyTaskStatusChange'
+					: 'notifyNewComment';
+		agencyMainPrefs = await tenantUserPrefAllowsBatch(agencyUserIds, tenantId, mainKey);
+		if (event === 'comment') {
+			agencyMentionPrefs = await tenantUserPrefAllowsBatch(
+				agencyUserIds,
+				tenantId,
+				'notifyMention'
+			);
+		}
+	}
+
 	function passesPrefGate(c: CandidateRow): boolean {
-		if (c.kind === 'agency') return true;
-		const p = prefsMap.get(c.userId);
-		if (!p) return true; // default ON when no prefs row exists
-		if (event === 'assigned') return p.assigned;
-		if (event === 'comment') return p.comment;
-		if (event === 'status-change') return p.statusChange;
-		return true;
+		if (c.kind === 'client') {
+			const p = prefsMap.get(c.userId);
+			if (!p) return true; // default ON when no prefs row exists
+			if (event === 'assigned') return p.assigned;
+			if (event === 'comment') return p.comment;
+			if (event === 'status-change') return p.statusChange;
+			return true;
+		}
+		// agency: use mention key for mention reason on comment events,
+		// main event key otherwise. Default true via batch helper.
+		if (event === 'comment' && c.reason === 'mention') {
+			return agencyMentionPrefs.get(c.userId) !== false;
+		}
+		return agencyMainPrefs.get(c.userId) !== false;
 	}
 
 	// 6. Dedup by (userId) keeping the strongest reason (assignee > mention > watcher)

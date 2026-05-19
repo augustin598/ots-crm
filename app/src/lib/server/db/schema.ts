@@ -1969,6 +1969,33 @@ export const clientUserPreferences = sqliteTable('client_user_preferences', {
 		.default(sql`current_timestamp`)
 });
 
+// Agency-user (tenant_user) notification preferences. Mirrors client_user_preferences
+// but keyed on (userId, tenantId) — same user across multiple tenants gets separate rows.
+// All flags default true so existing users see no behavior change until they opt out.
+export const tenantUserPreferences = sqliteTable('tenant_user_preferences', {
+	id: text('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => user.id, { onDelete: 'cascade' }),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id, { onDelete: 'cascade' }),
+	notifyTaskAssigned: boolean('notify_task_assigned').notNull().default(true),
+	notifyNewComment: boolean('notify_new_comment').notNull().default(true),
+	notifyTaskStatusChange: boolean('notify_task_status_change').notNull().default(true),
+	notifyTaskApprovedRejected: boolean('notify_task_approved_rejected').notNull().default(true),
+	notifyTaskReopened: boolean('notify_task_reopened').notNull().default(true),
+	notifyMention: boolean('notify_mention').notNull().default(true),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+}, (t) => ({
+	userTenantIdx: uniqueIndex('tenant_user_preferences_user_tenant_idx').on(t.userId, t.tenantId)
+}));
+
 export const magicLinkToken = sqliteTable('magic_link_token', {
 	id: text('id').primaryKey(),
 	token: text('token').notNull().unique(), // Hashed token
@@ -3609,6 +3636,17 @@ export const clientUserPreferencesRelations = relations(clientUserPreferences, (
 	})
 }));
 
+export const tenantUserPreferencesRelations = relations(tenantUserPreferences, ({ one }) => ({
+	user: one(user, {
+		fields: [tenantUserPreferences.userId],
+		references: [user.id]
+	}),
+	tenant: one(tenant, {
+		fields: [tenantUserPreferences.tenantId],
+		references: [tenant.id]
+	})
+}));
+
 // Contract relations
 export const contractTemplateRelations = relations(contractTemplate, ({ one, many }) => ({
 	tenant: one(tenant, {
@@ -4068,6 +4106,8 @@ export type TaskActivity = typeof taskActivity.$inferSelect;
 export type NewTaskActivity = typeof taskActivity.$inferInsert;
 export type ClientUserPreferences = typeof clientUserPreferences.$inferSelect;
 export type NewClientUserPreferences = typeof clientUserPreferences.$inferInsert;
+export type TenantUserPreferences = typeof tenantUserPreferences.$inferSelect;
+export type NewTenantUserPreferences = typeof tenantUserPreferences.$inferInsert;
 export type EmailLog = typeof emailLog.$inferSelect;
 export type NewEmailLog = typeof emailLog.$inferInsert;
 export type DebugLog = typeof debugLog.$inferSelect;

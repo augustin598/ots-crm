@@ -9,6 +9,7 @@ import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-re
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
+import { tenantUserPrefAllows, tenantUserPrefAllowsBatch } from '$lib/server/tenant-user-preferences';
 import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
 import { createMeetEvent } from '$lib/server/google-calendar/meet';
 import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
@@ -1374,13 +1375,20 @@ export const updateTask = command(
 				.limit(1);
 
 			if (assignee?.email) {
-				try {
-					const assigneeName =
-						`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
-					await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
-				} catch (error) {
-					logWarning('email', `Failed to send task assignment email: ${(error as Error).message}`);
-					// Don't throw - task update should succeed even if email fails
+				const allowed = await tenantUserPrefAllows(
+					newAssigneeId,
+					event.locals.tenant.id,
+					'notifyTaskAssigned'
+				);
+				if (allowed) {
+					try {
+						const assigneeName =
+							`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
+						await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
+					} catch (error) {
+						logWarning('email', `Failed to send task assignment email: ${(error as Error).message}`);
+						// Don't throw - task update should succeed even if email fails
+					}
 				}
 			}
 
@@ -1434,9 +1442,24 @@ export const updateTask = command(
 
 			// Release the write lock — email I/O runs AFTER DB work is complete.
 			// Fire all notifications in parallel so one slow/failing send doesn't block the rest.
+			// Pre-batch per-user notification prefs once so a 100-watcher loop runs one DB query
+			// instead of N.
+			const eligibleWatcherIds = watcherUsers
+				.filter((w) => w.userId !== event.locals.user.id && w.email)
+				.map((w) => w.userId);
+			const watcherPrefMap = await tenantUserPrefAllowsBatch(
+				eligibleWatcherIds,
+				event.locals.tenant.id,
+				'notifyTaskStatusChange'
+			);
 			await Promise.allSettled(
 				watcherUsers
-					.filter((w) => w.userId !== event.locals.user.id && w.email)
+					.filter(
+						(w) =>
+							w.userId !== event.locals.user.id &&
+							w.email &&
+							watcherPrefMap.get(w.userId) !== false
+					)
 					.map(async (w) => {
 						const watcherName = `${w.firstName} ${w.lastName}`.trim() || w.email!;
 						await sendTaskUpdateEmail(taskId, w.email!, watcherName, changeType);
@@ -1735,15 +1758,22 @@ export const reopenTask = command(
 		// Notify assignee (skip if reopener is the assignee)
 		if (existing.assignedToUserId && existing.assignedToUserId !== currentUserId) {
 			try {
-				const [assignee] = await db
-					.select()
-					.from(table.user)
-					.where(eq(table.user.id, existing.assignedToUserId))
-					.limit(1);
+				const allowed = await tenantUserPrefAllows(
+					existing.assignedToUserId,
+					event.locals.tenant.id,
+					'notifyTaskReopened'
+				);
+				if (allowed) {
+					const [assignee] = await db
+						.select()
+						.from(table.user)
+						.where(eq(table.user.id, existing.assignedToUserId))
+						.limit(1);
 
-				if (assignee?.email) {
-					const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
-					await sendTaskUpdateEmail(taskId, assignee.email, assigneeName, `Task redeschis de ${reopenerName} - necesită aprobare`);
+					if (assignee?.email) {
+						const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
+						await sendTaskUpdateEmail(taskId, assignee.email, assigneeName, `Task redeschis de ${reopenerName} - necesită aprobare`);
+					}
 				}
 			} catch (error) {
 				logError('email', 'Failed to send reopen notification email', { stackTrace: error instanceof Error ? error.stack : String(error) });
@@ -1763,8 +1793,24 @@ export const reopenTask = command(
 					)
 				);
 
+			const eligibleAdminIds = adminUsers
+				.map(({ user: u }) => u.id)
+				.filter(
+					(id) => id !== existing.assignedToUserId && id !== currentUserId
+				);
+			const adminPrefMap = await tenantUserPrefAllowsBatch(
+				eligibleAdminIds,
+				event.locals.tenant.id,
+				'notifyTaskReopened'
+			);
+
 			for (const { user: adminUser } of adminUsers) {
-				if (adminUser.email && adminUser.id !== existing.assignedToUserId && adminUser.id !== currentUserId) {
+				if (
+					adminUser.email &&
+					adminUser.id !== existing.assignedToUserId &&
+					adminUser.id !== currentUserId &&
+					adminPrefMap.get(adminUser.id) !== false
+				) {
 					const adminName = `${adminUser.firstName} ${adminUser.lastName}`.trim() || adminUser.email;
 					await sendTaskUpdateEmail(taskId, adminUser.email, adminName, `Task redeschis de ${reopenerName} - necesită aprobare`);
 				}
