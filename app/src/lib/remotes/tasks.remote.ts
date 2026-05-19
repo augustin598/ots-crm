@@ -2248,6 +2248,22 @@ export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 		throw new Error('Task not found');
 	}
 
+	// Best-effort: delete Calendar event before removing the task row
+	if (task.googleCalendarEventId) {
+		const calStatus = await getCalendarStatus(event.locals.tenant.id);
+		if (calStatus.connected) {
+			try {
+				const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
+				await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: task.googleCalendarEventId });
+			} catch (err) {
+				logWarning('google-calendar', 'Calendar event delete failed during task delete', {
+					tenantId: event.locals.tenant.id,
+					metadata: { taskId, eventId: task.googleCalendarEventId, error: err instanceof Error ? err.message : String(err) }
+				});
+			}
+		}
+	}
+
 	// Use transaction to update positions after deletion
 	await db.transaction(async (tx) => {
 		// Delete the task
