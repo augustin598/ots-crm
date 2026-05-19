@@ -22,11 +22,42 @@ export type CalendarStatus = {
 	email: string | null;
 };
 
+/**
+ * Resolve the Calendar OAuth callback URL.
+ *
+ * Priority:
+ *  1. Explicit `GOOGLE_REDIRECT_URI_CALENDAR` env var (set this in production)
+ *  2. Auto-derived from `GOOGLE_REDIRECT_URI` (Gmail's URI) — replaces the path
+ *     so origin stays the same. Avoids the fallback bug where Calendar OAuth
+ *     accidentally redirects to Gmail's callback.
+ *
+ * Both URIs (Gmail's + Calendar's) must be registered in Google Cloud Console
+ * → APIs & Services → Credentials → OAuth Client → Authorized redirect URIs.
+ */
+function getCalendarRedirectUri(): string {
+	const explicit = env.GOOGLE_REDIRECT_URI_CALENDAR;
+	if (explicit) return explicit;
+
+	const gmail = env.GOOGLE_REDIRECT_URI;
+	if (!gmail) {
+		throw new Error(
+			'GOOGLE_REDIRECT_URI_CALENDAR or GOOGLE_REDIRECT_URI must be set for Calendar OAuth'
+		);
+	}
+
+	try {
+		const u = new URL(gmail);
+		return `${u.origin}/api/integrations/google-calendar/callback`;
+	} catch {
+		throw new Error(`GOOGLE_REDIRECT_URI is not a valid URL: ${gmail}`);
+	}
+}
+
 function getOAuth2Client() {
 	return new google.auth.OAuth2(
 		env.GOOGLE_CLIENT_ID,
 		env.GOOGLE_CLIENT_SECRET,
-		env.GOOGLE_REDIRECT_URI_CALENDAR ?? env.GOOGLE_REDIRECT_URI
+		getCalendarRedirectUri()
 	);
 }
 
