@@ -87,44 +87,24 @@
 		lastRefreshAt = Date.now();
 	}
 
-	/**
-	 * Auto-refresh aligned with the 60s server-side metrics cache. Paused when
-	 * the tab is hidden so we don't keep hammering DA for an off-screen page;
-	 * also forces a fresh fetch the moment the tab regains focus IF the last
-	 * refresh is older than 60s.
-	 */
-	$effect(() => {
-		if (typeof document === 'undefined') return;
-		const timer = setInterval(() => {
-			if (!document.hidden) void refresh();
-		}, 60_000);
-		const onVisibility = () => {
-			if (document.hidden) return;
-			if (Date.now() - lastRefreshAt > 60_000) void refresh();
-		};
-		document.addEventListener('visibilitychange', onVisibility);
-		return () => {
-			clearInterval(timer);
-			document.removeEventListener('visibilitychange', onVisibility);
-		};
-	});
-
-	function fmtSecondsAgo(t: number): string {
-		const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+	function fmtSecondsAgo(t: number, ref: number): string {
+		const sec = Math.max(0, Math.floor((ref - t) / 1000));
 		if (sec < 5) return 'chiar acum';
 		if (sec < 60) return `acum ${sec}s`;
 		const min = Math.floor(sec / 60);
-		return `acum ${min} ${min === 1 ? 'minut' : 'minute'}`;
+		if (min < 60) return `acum ${min} ${min === 1 ? 'minut' : 'minute'}`;
+		const h = Math.floor(min / 60);
+		return `acum ${h} ${h === 1 ? 'oră' : 'ore'}`;
 	}
 
-	// Tick once per second so the "ultim refresh acum Xs" label stays fresh
-	// without re-rendering the whole tree.
+	// Per-second tick so the "Ultim refresh acum Xs" indicator stays fresh
+	// without re-rendering the whole tree. No DA traffic — just a UI label.
 	let now = $state(Date.now());
 	$effect(() => {
 		const t = setInterval(() => (now = Date.now()), 1000);
 		return () => clearInterval(t);
 	});
-	const sinceLastRefresh = $derived(fmtSecondsAgo(lastRefreshAt) + (now ? '' : ''));
+	const sinceLastRefresh = $derived(fmtSecondsAgo(lastRefreshAt, now));
 
 	function statusOf(s: ServerRow): Status {
 		if (s.lastError) return 'warning';
@@ -378,7 +358,7 @@
 				</p>
 			</div>
 			<div class="hst-hero-actions">
-				<span class="hst-refresh-indicator" title="Auto-refresh la 60s sub fila vizibilă">
+				<span class="hst-refresh-indicator" title="Click Refresh sau reîncarcă pagina pentru valori noi">
 					<span class="hst-refresh-dot"></span>
 					Ultim refresh: {sinceLastRefresh}
 				</span>
@@ -899,9 +879,9 @@
 						{/if}
 						<p class="hst-note">
 							{#if dm}
-								Date live din DirectAdmin (system-info + admin-usage + version). Auto-refresh la
-								60s sub fila vizibilă; click <strong>Refresh</strong> sau reîncarcă pagina pentru o
-								citire imediată.
+								Date live din DirectAdmin (system-info + admin-usage + version). Se preiau la
+								accesarea paginii. Click <strong>Refresh</strong> în header pentru o citire nouă
+								(cache server 60 s).
 							{:else}
 								Metricile live nu au putut fi preluate (server offline, endpoint indisponibil, sau
 								timeout). Folosește <strong>Deschide DA</strong> pentru status în timp real.
