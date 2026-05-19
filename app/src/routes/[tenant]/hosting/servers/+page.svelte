@@ -144,20 +144,34 @@
 		}
 	}
 
-	async function handleDelete(s: ServerRow) {
-		if (
-			!confirm(
-				`Dezactivezi „${s.name}"? Va dispărea din listă (soft-delete, datele rămân în DB pentru audit).`
-			)
-		)
-			return;
+	// Typed-confirmation pattern (GitHub-style): user must type the server
+	// name exactly to enable the confirm button. Prevents accidental
+	// dezactivare and forces the user to read which server they're acting on.
+	let deleteCandidate = $state<ServerRow | null>(null);
+	let deleteInput = $state('');
+	let deleting = $state(false);
+
+	function openDeleteDialog(s: ServerRow) {
+		deleteCandidate = s;
+		deleteInput = '';
+	}
+
+	async function confirmDelete() {
+		if (!deleteCandidate) return;
+		if (deleteInput.trim() !== deleteCandidate.name) return;
+		deleting = true;
 		try {
-			await deleteDAServer(s.id);
-			toast.success('Server dezactivat');
-			if (openServer?.id === s.id) openServer = null;
+			const id = deleteCandidate.id;
+			await deleteDAServer(id);
+			toast.success(`Server „${deleteCandidate.name}" dezactivat`);
+			if (openServer?.id === id) openServer = null;
+			deleteCandidate = null;
+			deleteInput = '';
 			await refresh();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare ștergere');
+		} finally {
+			deleting = false;
 		}
 	}
 
@@ -793,7 +807,7 @@
 					<div class="hst-foot-group">
 						<button
 							class="btn-ghost danger"
-							onclick={() => handleDelete(s)}
+							onclick={() => openDeleteDialog(s)}
 							aria-label="Dezactivează server"
 							title="Dezactivează server"
 						>
@@ -823,6 +837,99 @@
 					await refresh();
 				}}
 			/>
+		{/if}
+
+		{#if deleteCandidate}
+			{@const cand = deleteCandidate}
+			{@const matches = deleteInput.trim() === cand.name}
+			<div
+				class="hst-confirm-back"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="confirm-del-title"
+				tabindex={-1}
+				onclick={() => {
+					if (!deleting) deleteCandidate = null;
+				}}
+				onkeydown={() => {
+					/* focusTrap handles Escape */
+				}}
+				use:focusTrap={{
+					active: true,
+					onEscape: () => {
+						if (!deleting) deleteCandidate = null;
+					},
+					initialFocus: '#confirm-del-input'
+				}}
+			>
+				<div
+					class="hst-confirm"
+					role="none"
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={() => {}}
+				>
+					<div class="hst-confirm-head">
+						<div class="hst-confirm-icon"><Trash2Icon size={18} /></div>
+						<div style="flex:1; min-width:0">
+							<div class="hst-confirm-title" id="confirm-del-title">Dezactivează server</div>
+							<div class="hst-confirm-sub">Acțiune cu impact — citește înainte de confirmare.</div>
+						</div>
+					</div>
+
+					<div class="hst-confirm-body">
+						<p class="hst-confirm-text">
+							Vei dezactiva serverul <strong>{cand.name}</strong>
+							(<span class="mono">{cand.hostname}:{cand.port}</span>). Acesta:
+						</p>
+						<ul class="hst-confirm-list">
+							<li>dispare din listă și din selectoarele de pachete / conturi noi;</li>
+							<li>
+								<strong>{cand.accountsCount}</strong> conturi hosting și
+								<strong>{cand.packagesCount}</strong> pachete sincronizate <strong>rămân</strong> în DB
+								(soft-delete — fără pierdere de date);
+							</li>
+							<li>auditul ulterior funcționează normal — nu pierzi istoric.</li>
+						</ul>
+						<p class="hst-confirm-text">
+							Ca să confirmi, scrie exact numele serverului: <code>{cand.name}</code>
+						</p>
+						<input
+							id="confirm-del-input"
+							class="hst-confirm-input"
+							placeholder={cand.name}
+							autocomplete="off"
+							spellcheck="false"
+							bind:value={deleteInput}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' && matches && !deleting) confirmDelete();
+							}}
+						/>
+					</div>
+
+					<div class="hst-confirm-foot">
+						<button
+							type="button"
+							class="btn-secondary"
+							onclick={() => (deleteCandidate = null)}
+							disabled={deleting}
+						>
+							Anulează
+						</button>
+						<button
+							type="button"
+							class="btn-danger"
+							disabled={!matches || deleting}
+							onclick={confirmDelete}
+						>
+							{#if deleting}
+								<RefreshCwIcon class="hst-spin" size={13} /> Se dezactivează…
+							{:else}
+								<Trash2Icon size={13} /> Dezactivează definitiv
+							{/if}
+						</button>
+					</div>
+				</div>
+			</div>
 		{/if}
 
 		{#if flash}
@@ -1511,6 +1618,162 @@
 	}
 	.hst-cred-note a:hover {
 		text-decoration: underline;
+	}
+
+	/* ===== Typed-confirmation delete dialog ===== */
+	.hst-confirm-back {
+		position: fixed;
+		inset: 0;
+		z-index: 99;
+		background: rgba(15, 23, 42, 0.45);
+		backdrop-filter: blur(3px);
+		display: grid;
+		place-items: center;
+		padding: 16px;
+		border: none;
+		cursor: default;
+	}
+	.hst-confirm {
+		width: 520px;
+		max-width: calc(100vw - 32px);
+		background: white;
+		border-radius: 14px;
+		box-shadow:
+			0 28px 64px rgba(15, 23, 42, 0.25),
+			0 8px 20px rgba(15, 23, 42, 0.1);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		font-family:
+			'Inter',
+			system-ui,
+			-apple-system,
+			sans-serif;
+		animation: popIn 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+	}
+	@keyframes popIn {
+		from {
+			opacity: 0;
+			transform: scale(0.96);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+	.hst-confirm-head {
+		padding: 18px 22px;
+		border-bottom: 1px solid #e5e9f0;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.hst-confirm-icon {
+		width: 36px;
+		height: 36px;
+		border-radius: 9px;
+		background: linear-gradient(135deg, #ef4444, #b91c1c);
+		color: white;
+		display: grid;
+		place-items: center;
+		flex-shrink: 0;
+	}
+	.hst-confirm-title {
+		font-size: 16px;
+		font-weight: 700;
+		color: #0f172a;
+		letter-spacing: -0.01em;
+	}
+	.hst-confirm-sub {
+		font-size: 12px;
+		color: #94a3b8;
+		margin-top: 2px;
+	}
+	.hst-confirm-body {
+		padding: 18px 22px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.hst-confirm-text {
+		margin: 0;
+		font-size: 13px;
+		color: #475569;
+		line-height: 1.55;
+	}
+	.hst-confirm-text strong {
+		color: #0f172a;
+	}
+	.hst-confirm-text .mono,
+	.hst-confirm-text code {
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 12px;
+		background: #f1f5f9;
+		padding: 1px 6px;
+		border-radius: 4px;
+		color: #0f172a;
+	}
+	.hst-confirm-list {
+		margin: 0;
+		padding-left: 22px;
+		font-size: 12.5px;
+		color: #475569;
+		line-height: 1.6;
+	}
+	.hst-confirm-list strong {
+		color: #0f172a;
+	}
+	.hst-confirm-input {
+		width: 100%;
+		padding: 10px 12px;
+		background: white;
+		border: 1px solid #d5dbe5;
+		border-radius: 8px;
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 13px;
+		color: #0f172a;
+		outline: none;
+		box-sizing: border-box;
+		transition:
+			border-color 0.12s,
+			box-shadow 0.12s;
+	}
+	.hst-confirm-input:focus {
+		border-color: #ef4444;
+		box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+	}
+	.hst-confirm-input::placeholder {
+		color: #cbd5e1;
+	}
+	.hst-confirm-foot {
+		padding: 14px 22px;
+		border-top: 1px solid #e5e9f0;
+		background: #fafbfd;
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.btn-danger {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		border-radius: 7px;
+		background: #ef4444;
+		color: white;
+		border: none;
+		font-size: 12.5px;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.btn-danger:hover:not(:disabled) {
+		background: #dc2626;
+	}
+	.btn-danger:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	/* ===== Flash toast ===== */
