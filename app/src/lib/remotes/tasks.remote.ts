@@ -9,6 +9,8 @@ import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
 import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
+import { createMeetEvent } from '$lib/server/google-calendar/meet';
+import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -1013,6 +1015,68 @@ export const createTask = command(taskSchema, async (data) => {
 
 	// Send client notification
 	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created', undefined, event.locals.user.email);
+
+	// Auto-generate Google Meet for type=meeting tasks (separate integration)
+	if (data.type === 'meeting' && data.meetTime) {
+		const calStatus = await getCalendarStatus(event.locals.tenant.id);
+		if (calStatus.connected) {
+			try {
+				const attendeeEmails: string[] = [];
+				if (data.assigneeUserIds?.length) {
+					const users = await db
+						.select({ email: table.user.email })
+						.from(table.user)
+						.where(inArray(table.user.id, data.assigneeUserIds));
+					attendeeEmails.push(...users.map((u) => u.email).filter((e): e is string => Boolean(e)));
+				}
+				if (clientId) {
+					const [clientRow] = await db
+						.select({ email: table.client.email })
+						.from(table.client)
+						.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+						.limit(1);
+					if (clientRow?.email) attendeeEmails.push(clientRow.email);
+				}
+
+				const meetResult = await createMeetEvent({
+					tenantId: event.locals.tenant.id,
+					title: data.title,
+					startTime: new Date(data.meetTime),
+					durationMinutes: data.meetDurationMinutes ?? 30,
+					timezone: 'Europe/Bucharest',
+					attendees: attendeeEmails,
+					description: data.description ?? undefined
+				});
+
+				await db
+					.update(table.task)
+					.set({
+						meetLink: meetResult.hangoutLink,
+						googleCalendarEventId: meetResult.eventId
+					})
+					.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
+
+				await recordTaskActivity({
+					taskId,
+					userId: event.locals.user.id,
+					tenantId: targetTenantId,
+					action: 'meet_event_created',
+					newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
+				});
+			} catch (err) {
+				if (!(err instanceof CalendarNotConnected)) {
+					await recordTaskActivity({
+						taskId,
+						userId: event.locals.user.id,
+						tenantId: targetTenantId,
+						action: 'meet_event_failed',
+						newValue: JSON.stringify({ stage: 'create', error: err instanceof Error ? err.message : String(err) })
+					});
+				}
+				// Task succeeds regardless of Calendar failure
+			}
+		}
+	}
 
 	// Emit approval.requested hook if task needs approval
 	if (status === 'pending-approval') {

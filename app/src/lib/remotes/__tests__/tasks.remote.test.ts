@@ -112,7 +112,17 @@ mock.module('$lib/server/plugins/hooks', () => ({
 mock.module('$lib/server/logger', () => ({
 	logError: () => {},
 	logWarning: () => {},
-	logInfo: () => {}
+	logInfo: () => {},
+	serializeError: (err: unknown) => (err instanceof Error ? err.message : String(err))
+}));
+
+mock.module('$lib/server/google-calendar/meet', () => ({
+	createMeetEvent: async () => ({ eventId: 'evt_mock', hangoutLink: 'https://meet.google.com/mock' })
+}));
+
+mock.module('$lib/server/google-calendar/auth', () => ({
+	getCalendarStatus: async () => ({ connected: false, email: null }),
+	CalendarNotConnected: class extends Error {}
 }));
 
 mock.module('$lib/server/recurring-tasks', () => ({
