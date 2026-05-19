@@ -901,6 +901,7 @@
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
+		white-space: nowrap;
 	}
 	.btn-primary:hover {
 		background: #0d5cc7;
@@ -923,6 +924,7 @@
 		font-family: inherit;
 		cursor: pointer;
 		text-decoration: none;
+		white-space: nowrap;
 	}
 	.btn-secondary:hover {
 		border-color: #1877f2;
@@ -1345,7 +1347,7 @@
 		top: 0;
 		right: 0;
 		bottom: 0;
-		width: 600px;
+		width: 720px;
 		max-width: 100vw;
 		background: white;
 		z-index: 80;
