@@ -9,8 +9,11 @@
 	import ClientTaskDescription from './client-task-description.svelte';
 	import ClientTaskComments from './client-task-comments.svelte';
 	import ClientTaskRail from './client-task-rail.svelte';
-	import ClientTaskMeetModal from './client-task-meet-modal.svelte';
-	import ClientTaskLightbox, { type LightboxImage } from './client-task-lightbox.svelte';
+	import type ClientTaskMeetModalType from './client-task-meet-modal.svelte';
+	import type ClientTaskLightboxType from './client-task-lightbox.svelte';
+
+	// Inline type (mirrors the export in client-task-lightbox.svelte — safe to duplicate as types are erased at runtime)
+	type LightboxImage = { url: string; name?: string };
 
 	type TaskWithIncludes = Task & {
 		subtasks?: any[];
@@ -43,12 +46,27 @@
 		return full || u.email;
 	});
 
+	let MeetModalComp = $state<typeof ClientTaskMeetModalType | null>(null);
+	let LightboxComp = $state<typeof ClientTaskLightboxType | null>(null);
+
 	let meetOpen = $state(false);
 	let lbOpen = $state(false);
 	let lbImages = $state<LightboxImage[]>([]);
 	let lbIndex = $state(0);
 
-	function openLightbox(images: LightboxImage[], startIndex: number) {
+	async function openMeet() {
+		if (!MeetModalComp) {
+			const module = await import('./client-task-meet-modal.svelte');
+			MeetModalComp = module.default;
+		}
+		meetOpen = true;
+	}
+
+	async function openLightbox(images: LightboxImage[], startIndex: number) {
+		if (!LightboxComp) {
+			const module = await import('./client-task-lightbox.svelte');
+			LightboxComp = module.default;
+		}
 		lbImages = images;
 		lbIndex = startIndex;
 		lbOpen = true;
@@ -105,7 +123,7 @@
 						clientName={client?.name ?? null}
 						tags={task.tags ?? []}
 						onBack={onClose}
-						onScheduleMeet={() => (meetOpen = true)}
+						onScheduleMeet={openMeet}
 					/>
 					<ClientTaskDescription description={task.description} />
 					<ClientTaskComments
@@ -126,22 +144,26 @@
 		</div>
 	</div>
 
-	<ClientTaskMeetModal
-		open={meetOpen}
-		taskId={task.id}
-		taskTitle={task.title}
-		availableInvitees={allInvitees}
-		defaultInviteeIds={(task.assignees ?? []).map((a: any) => a.userId)}
-		onClose={() => (meetOpen = false)}
-	/>
+	{#if MeetModalComp && meetOpen}
+		<MeetModalComp
+			open={meetOpen}
+			taskId={task.id}
+			taskTitle={task.title}
+			availableInvitees={allInvitees}
+			defaultInviteeIds={(task.assignees ?? []).map((a: any) => a.userId)}
+			onClose={() => (meetOpen = false)}
+		/>
+	{/if}
 
-	<ClientTaskLightbox
-		images={lbImages}
-		index={lbIndex}
-		open={lbOpen}
-		onClose={() => (lbOpen = false)}
-		onIndexChange={(i) => (lbIndex = i)}
-	/>
+	{#if LightboxComp && lbOpen}
+		<LightboxComp
+			images={lbImages}
+			index={lbIndex}
+			open={lbOpen}
+			onClose={() => (lbOpen = false)}
+			onIndexChange={(i) => (lbIndex = i)}
+		/>
+	{/if}
 {:else}
 	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
 		<div class="client-main flex-1 flex flex-col animate-pulse">
