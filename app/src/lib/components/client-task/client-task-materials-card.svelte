@@ -7,7 +7,6 @@
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import DownloadIcon from '@lucide/svelte/icons/download';
-	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import PaperclipIcon from '@lucide/svelte/icons/paperclip';
 	import { toast } from 'svelte-sonner';
 	import type { LightboxImage } from './client-task-lightbox.svelte';
@@ -217,14 +216,6 @@
 								<DownloadIcon class="h-3.5 w-3.5" />
 							</a>
 						{/if}
-						<button
-							type="button"
-							class="grid h-7 w-7 place-items-center rounded-md text-[#475569] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
-							title="Mai mult"
-							aria-label="Mai mult"
-						>
-							<MoreVerticalIcon class="h-3.5 w-3.5" />
-						</button>
 					</div>
 				</li>
 			{/each}

@@ -316,8 +316,9 @@
 															if (img.dataset.retried === 'true') return;
 															img.dataset.retried = 'true';
 															try {
-																const fresh = await getAttachmentUrl(att.id).refresh();
-																const newUrl = fresh?.url ?? '';
+																const q = getAttachmentUrl(att.id);
+																await q.refresh?.();
+																const newUrl = q.current?.url ?? '';
 																if (newUrl) {
 																	attachmentUrls = { ...attachmentUrls, [att.id]: newUrl };
 																	img.src = newUrl;
