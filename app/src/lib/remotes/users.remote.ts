@@ -402,8 +402,10 @@ export const getAssignableClientUsers = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
-		// Client users cannot use this picker
-		if (event.locals.isClientUser) {
+		// Client users can only list their own client's team — used by the client
+		// portal's create-task wizard to populate "Echipa ta". Cross-client lookups
+		// stay blocked.
+		if (event.locals.isClientUser && event.locals.client?.id !== clientId) {
 			throw new Error('Unauthorized');
 		}
 

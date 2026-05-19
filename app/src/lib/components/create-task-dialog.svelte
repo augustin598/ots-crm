@@ -79,7 +79,12 @@
 		return whatsappAvatarUrl((page.params.tenant as string) ?? '', phone);
 	}
 
-	const currentUserId = $derived((page.data as any)?.tenantUser?.userId as string | undefined);
+	// Admin sessions expose tenantUser.userId; client portal sessions only expose
+	// `user.id` (the canonical users.id). Both resolve to a valid taskAssignee.userId.
+	const currentUserId = $derived(
+		((page.data as any)?.tenantUser?.userId as string | undefined) ??
+			((page.data as any)?.user?.id as string | undefined)
+	);
 
 	const TYPES = [
 		{ id: 'design', label: 'Design', color: '#8b5cf6' },
@@ -187,8 +192,10 @@
 			: allProjects
 	);
 
+	// Fetch the client's team for both admin (after picking a client) AND the
+	// client portal (clientId injected via defaultClientId from layout context).
 	const clientUsersQuery = $derived(
-		!isClient && draft.clientId ? getAssignableClientUsers(draft.clientId) : null
+		draft.clientId ? getAssignableClientUsers(draft.clientId) : null
 	);
 	const clientUsers = $derived(clientUsersQuery?.current ?? []);
 
@@ -242,7 +249,10 @@
 			// Client users always create as pending-approval; otherwise honor explicit defaultStatus, fall back to 'todo'.
 			draft.status = isClient ? 'pending-approval' : defaultStatus || 'todo';
 			draft.dueDate = getInitialDueDate();
-			draft.assigneeIds = !isClient && currentUserId ? [currentUserId] : [];
+			// Pre-select the creator as the default assignee in both modes — the
+			// client picks teammates on top, or stays solo and the server falls back
+			// to the agency owner if they deselect themselves.
+			draft.assigneeIds = currentUserId ? [currentUserId] : [];
 			draft.tags = initialType === 'meet' ? ['#meeting'] : [];
 			draft.subtasks = [];
 			draft.isRecurring = false;
@@ -261,11 +271,15 @@
 	// client (e.g., user switched client in Step 1 — the previous client's
 	// people are no longer assignable).
 	$effect(() => {
-		if (!open || isClient) return;
+		if (!open) return;
 		const valid = new Set<string>([
 			...agencyAssigneeOptions.map((o) => o.value),
 			...clientAssigneeOptions.map((o) => o.value)
 		]);
+		// Client portal: the creator (currentUserId) is not in either list when
+		// they're a clientUser of the same client but the picker filter has not
+		// yet loaded — keep them whitelisted so the default doesn't get pruned.
+		if (isClient && currentUserId) valid.add(currentUserId);
 		const pruned = draft.assigneeIds.filter((id) => valid.has(id));
 		if (pruned.length !== draft.assigneeIds.length) {
 			draft.assigneeIds = pruned;
@@ -603,54 +617,62 @@
 				</div>
 			{:else if step === 2}
 				<div class="grid grid-cols-2 gap-4">
-					{#if !isClient}
-						<!-- Assignees: agency + (optional) client team -->
+					{#if !isClient || clientAssigneeOptions.length > 0}
+						<!-- Assignees: agency + (optional) client team in admin; "Echipa ta" in client portal -->
 						<div class="col-span-2 flex flex-col gap-2">
 							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-								Responsabili <span class="text-red-500">*</span>
+								{#if isClient}
+									Echipa ta
+								{:else}
+									Responsabili <span class="text-red-500">*</span>
+								{/if}
 							</label>
 
-							<!-- Agency section -->
-							<div class="flex flex-col gap-1">
-								<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-									Agenție
+							{#if !isClient}
+								<!-- Agency section (admin only) -->
+								<div class="flex flex-col gap-1">
+									<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+										Agenție
+									</div>
+									<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+										{#each agencyAssigneeOptions as opt (opt.value)}
+											{@const selected = draft.assigneeIds.includes(opt.value)}
+											<button
+												type="button"
+												class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
+													{selected
+														? 'border-blue-500 bg-blue-50 text-slate-900'
+														: 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}"
+												onclick={() => toggleAssignee(opt.value)}
+											>
+												<ContactAvatar
+													src={avatarSrcFromPhone(opt.phone)}
+													name={opt.label}
+													phoneE164={opt.phone ?? null}
+													size="sm"
+												/>
+												<span class="flex-1 truncate">{opt.label}</span>
+												{#if selected}
+													<span
+														class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+													>
+														<CheckIcon class="h-2.5 w-2.5" />
+													</span>
+												{/if}
+											</button>
+										{/each}
+									</div>
 								</div>
-								<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-									{#each agencyAssigneeOptions as opt (opt.value)}
-										{@const selected = draft.assigneeIds.includes(opt.value)}
-										<button
-											type="button"
-											class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
-												{selected
-													? 'border-blue-500 bg-blue-50 text-slate-900'
-													: 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}"
-											onclick={() => toggleAssignee(opt.value)}
-										>
-											<ContactAvatar
-												src={avatarSrcFromPhone(opt.phone)}
-												name={opt.label}
-												phoneE164={opt.phone ?? null}
-												size="sm"
-											/>
-											<span class="flex-1 truncate">{opt.label}</span>
-											{#if selected}
-												<span
-													class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-												>
-													<CheckIcon class="h-2.5 w-2.5" />
-												</span>
-											{/if}
-										</button>
-									{/each}
-								</div>
-							</div>
+							{/if}
 
-							<!-- Client section (only when a client is selected and has assignable people) -->
+							<!-- Client team section: admin sees it as "Echipa {clientName}"; client portal sees it as the only section -->
 							{#if clientAssigneeOptions.length > 0}
 								<div class="mt-1 flex flex-col gap-1">
-									<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-										Echipa {clientName}
-									</div>
+									{#if !isClient}
+										<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+											Echipa {clientName}
+										</div>
+									{/if}
 									<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
 										{#each clientAssigneeOptions as opt (opt.value)}
 											{@const selected = draft.assigneeIds.includes(opt.value)}

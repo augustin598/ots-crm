@@ -491,6 +491,7 @@
 <CreateTaskDialog
 	open={createDialogOpen}
 	isClient={true}
+	defaultClientId={(page.data as any)?.client?.id}
 	defaultPriority={prefs?.defaultPriority}
 	onSuccess={() => {
 		createDialogOpen = false;
