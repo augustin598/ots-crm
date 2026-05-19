@@ -40,6 +40,18 @@
 	};
 
 	const ROLE_FLAGS: Record<string, AccessFlags> = {
+		owner: {
+			invoices: true,
+			contracts: true,
+			tasks: true,
+			marketing: true,
+			reports: true,
+			leads: true,
+			accessData: true,
+			backlinks: true,
+			budgets: true,
+			hosting: true
+		},
 		admin: {
 			invoices: true,
 			contracts: true,
