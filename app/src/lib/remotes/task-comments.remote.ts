@@ -95,22 +95,8 @@ export const getTaskComments = query(
 			throw new Error('Unauthorized');
 		}
 
-		// Verify task belongs to tenant
-		const [task] = await db
-			.select()
-			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-			.limit(1);
-
-		if (!task) {
-			throw new Error('Task not found');
-		}
-
-		// Client portal isolation: client users can only see THEIR OWN client's tasks.
-		if (event.locals.isClientUser && task.clientId !== event.locals.client?.id) {
-			throw new Error('Task not found');
-		}
-
+		// Collapse preflight tenant-check into the main comments query via JOIN on task.
+		// Tenant isolation + IDOR guard (isClientUser clientId) are enforced by WHERE clauses.
 		const comments = await db
 			.select({
 				id: table.taskComment.id,
@@ -122,11 +108,21 @@ export const getTaskComments = query(
 				updatedAt: table.taskComment.updatedAt,
 				authorName: table.user.firstName,
 				authorLastName: table.user.lastName,
-				authorEmail: table.user.email
+				authorEmail: table.user.email,
+				taskClientId: table.task.clientId
 			})
 			.from(table.taskComment)
+			.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
 			.leftJoin(table.user, eq(table.taskComment.userId, table.user.id))
-			.where(eq(table.taskComment.taskId, taskId))
+			.where(
+				and(
+					eq(table.taskComment.taskId, taskId),
+					eq(table.task.tenantId, event.locals.tenant.id),
+					...(event.locals.isClientUser && event.locals.client
+						? [eq(table.task.clientId, event.locals.client.id)]
+						: [])
+				)
+			)
 			.orderBy(table.taskComment.createdAt);
 
 		if (comments.length === 0) return [];
