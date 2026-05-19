@@ -144,7 +144,44 @@
 		onIndexChange={(i) => (lbIndex = i)}
 	/>
 {:else}
-	<div class="flex h-full items-center justify-center p-8">
-		<p class="text-[#94a3b8] text-sm">Se încarcă...</p>
+	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
+		<div class="client-main flex-1 flex flex-col animate-pulse">
+			<!-- Breadcrumb skeleton -->
+			<div class="border-b border-[#e5e9f0] bg-white px-7 py-3.5">
+				<div class="flex items-center gap-2">
+					<div class="h-3.5 w-3.5 rounded bg-[#e5e9f0]"></div>
+					<div class="h-3 w-3 rounded bg-[#cbd5e1]"></div>
+					<div class="h-3 w-16 rounded bg-[#e5e9f0]"></div>
+					<div class="h-3 w-3 rounded bg-[#cbd5e1]"></div>
+					<div class="h-3 w-24 rounded bg-[#e5e9f0]"></div>
+				</div>
+			</div>
+			<div class="mx-auto grid w-full max-w-[1280px] gap-6 p-7" style:grid-template-columns="1fr 320px">
+				<div class="flex min-w-0 flex-col gap-5">
+					<!-- Page head skeleton -->
+					<div class="space-y-3">
+						<div class="h-4 w-32 rounded bg-[#e5e9f0]"></div>
+						<div class="h-8 w-3/4 rounded bg-[#e5e9f0]"></div>
+						<div class="flex gap-2">
+							<div class="h-6 w-20 rounded-full bg-[#e5e9f0]"></div>
+							<div class="h-6 w-24 rounded-full bg-[#e5e9f0]"></div>
+						</div>
+					</div>
+					<!-- Description skeleton -->
+					<div class="h-24 rounded-[10px] bg-[#e5e9f0]"></div>
+					<!-- Comments skeleton -->
+					<div class="space-y-3">
+						<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
+						<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
+					</div>
+				</div>
+				<!-- Rail skeleton -->
+				<div class="flex flex-col gap-3.5">
+					{#each Array(5) as _, i (i)}
+						<div class="h-32 rounded-[12px] bg-[#e5e9f0]"></div>
+					{/each}
+				</div>
+			</div>
+		</div>
 	</div>
 {/if}
