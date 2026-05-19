@@ -2001,26 +2001,26 @@ export const bulkDuplicateTasks = command(
 			}
 		});
 
-		// Activity log: 'duplicated' on each NEW task
-		for (let i = 0; i < sourceTasks.length; i++) {
-			const src = sourceTasks[i];
-			const newId = newIds[i];
-			try {
-				await recordTaskActivity({
-					taskId: newId,
-					userId,
-					tenantId,
-					action: 'duplicated',
-					field: 'origin',
-					oldValue: null,
-					newValue: src.id
-				});
-			} catch (error) {
-				logWarning('server', `Bulk duplicate activity log failed for new task ${newId}`, {
-					tenantId,
-					metadata: { error: (error as Error).message, sourceId: src.id }
-				});
-			}
+		// Activity log: 'duplicated' on each NEW task — single batched INSERT
+		const duplicateActivityRows = sourceTasks.map((src, i) => ({
+			id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15))),
+			taskId: newIds[i],
+			userId,
+			tenantId,
+			action: 'duplicated',
+			field: 'origin',
+			oldValue: null as string | null,
+			newValue: src.id,
+			createdAt: new Date()
+		}));
+
+		try {
+			await db.insert(table.taskActivity).values(duplicateActivityRows);
+		} catch (error) {
+			logWarning('server', `Bulk duplicate activity insert failed for ${duplicateActivityRows.length} tasks`, {
+				tenantId,
+				metadata: { error: (error as Error).message }
+			});
 		}
 
 		return {
