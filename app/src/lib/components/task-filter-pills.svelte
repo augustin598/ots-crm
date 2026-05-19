@@ -22,9 +22,11 @@
 	type Props = {
 		clients?: ClientOpt[];
 		users?: UserOpt[];
+		/** When set, hides the assignee dropdown and shows a non-removable "Doar al meu" pill instead. */
+		lockedAssignee?: string;
 	};
 
-	let { clients = [], users = [] }: Props = $props();
+	let { clients = [], users = [], lockedAssignee }: Props = $props();
 
 	// Re-uses the SAME nuqs query keys as TaskFilters/TaskFiltersPopover so URL state
 	// stays in sync across components. Pills are single-select; multi-select arrays
@@ -82,7 +84,7 @@
 	const activeCount = $derived(
 		(selectedPriority ? 1 : 0) +
 			(clientId.current ? 1 : 0) +
-			(selectedAssignee ? 1 : 0) +
+			(lockedAssignee ? 0 : selectedAssignee ? 1 : 0) +
 			(taskType.current ? 1 : 0)
 	);
 
@@ -108,7 +110,7 @@
 	function clearAll() {
 		setPriority(null);
 		setClient(null);
-		setAssignee(null);
+		if (!lockedAssignee) setAssignee(null);
 		setType(null);
 		search.current = '';
 	}
@@ -269,7 +271,15 @@
 	{/if}
 
 	<!-- Responsabil pill -->
-	{#if users.length > 0}
+	{#if lockedAssignee}
+		<span
+			class="inline-flex items-center gap-1.5 rounded-lg border border-[#1877F2] bg-[#f0f7ff] px-3 py-2 text-[12.5px] font-medium text-[#1877F2]"
+			title="Filtrat la utilizatorul curent"
+		>
+			<UsersIcon class="h-3 w-3" />
+			Doar al meu
+		</span>
+	{:else if users.length > 0}
 		<Popover>
 			<PopoverTrigger>
 				{#snippet child({ props })}

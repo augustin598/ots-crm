@@ -2,47 +2,13 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, gte, lte, isNotNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 function generateUserWorkHoursId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
 }
-
-export const getMyPlansTasks = query(
-	v.object({
-		startDate: v.pipe(v.string(), v.minLength(1)),
-		endDate: v.pipe(v.string(), v.minLength(1))
-	}),
-	async (filters) => {
-		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) {
-			throw new Error('Unauthorized');
-		}
-
-		const startDate = new Date(filters.startDate);
-		startDate.setHours(0, 0, 0, 0);
-		const endDate = new Date(filters.endDate);
-		endDate.setHours(23, 59, 59, 999);
-
-		const tasks = await db
-			.select()
-			.from(table.task)
-			.where(
-				and(
-					eq(table.task.tenantId, event.locals.tenant.id),
-					eq(table.task.assignedToUserId, event.locals.user.id),
-					isNotNull(table.task.dueDate),
-					gte(table.task.dueDate, startDate),
-					lte(table.task.dueDate, endDate)
-				)
-			)
-			.orderBy(table.task.dueDate);
-
-		return tasks;
-	}
-);
 
 export const getUserWorkHours = query(async () => {
 	const event = getRequestEvent();
@@ -116,32 +82,4 @@ export const updateUserWorkHours = command(updateUserWorkHoursSchema, async (dat
 	}
 
 	return { success: true };
-});
-
-export const getUserTasksForDate = query(v.pipe(v.string(), v.minLength(1)), async (dateStr) => {
-	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) {
-		throw new Error('Unauthorized');
-	}
-
-	const targetDate = new Date(dateStr);
-	targetDate.setHours(0, 0, 0, 0);
-	const targetDateEnd = new Date(targetDate);
-	targetDateEnd.setHours(23, 59, 59, 999);
-
-	const tasks = await db
-		.select()
-		.from(table.task)
-		.where(
-			and(
-				eq(table.task.tenantId, event.locals.tenant.id),
-				eq(table.task.assignedToUserId, event.locals.user.id),
-				isNotNull(table.task.dueDate),
-				gte(table.task.dueDate, targetDate),
-				lte(table.task.dueDate, targetDateEnd)
-			)
-		)
-		.orderBy(table.task.dueDate);
-
-	return tasks;
 });
