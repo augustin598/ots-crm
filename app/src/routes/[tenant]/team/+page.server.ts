@@ -8,7 +8,7 @@ export const load: PageServerLoad = async (event) => {
 	await ensureAdminTeamAccess(event);
 	const tenantId = event.locals.tenant!.id;
 
-	const [members, invitations, taskCounts, sessionRows] = await Promise.all([
+	const [members, invitations, taskCounts, sessionRows, clientRows] = await Promise.all([
 		db
 			.select({
 				tenantUserId: table.tenantUser.id,
@@ -62,7 +62,27 @@ export const load: PageServerLoad = async (event) => {
 				latestExpiresAt: sql<Date>`MAX(${table.session.expiresAt})`
 			})
 			.from(table.session)
-			.groupBy(table.session.userId)
+			.groupBy(table.session.userId),
+		// Active clients with secondary-email count for the "Clienți" tab.
+		db
+			.select({
+				id: table.client.id,
+				name: table.client.name,
+				businessName: table.client.businessName,
+				email: table.client.email,
+				phone: table.client.phone,
+				avatarPath: table.client.avatarPath,
+				secondaryCount: sql<number>`COUNT(${table.clientSecondaryEmail.id})`.as(
+					'secondary_count'
+				)
+			})
+			.from(table.client)
+			.leftJoin(
+				table.clientSecondaryEmail,
+				eq(table.client.id, table.clientSecondaryEmail.clientId)
+			)
+			.where(and(eq(table.client.tenantId, tenantId), eq(table.client.status, 'active')))
+			.groupBy(table.client.id)
 	]);
 
 	const stats: Record<string, { active: number; done: number; onTimePct: number | null }> = {};
@@ -89,11 +109,22 @@ export const load: PageServerLoad = async (event) => {
 		};
 	}
 
+	const clients = clientRows.map((c) => ({
+		id: c.id,
+		name: c.name,
+		businessName: c.businessName,
+		email: c.email,
+		phone: c.phone,
+		avatarPath: c.avatarPath,
+		secondaryCount: Number(c.secondaryCount ?? 0)
+	}));
+
 	return {
 		members,
 		invitations,
 		stats,
 		sessions,
+		clients,
 		currentUserId: event.locals.user!.id,
 		currentRole: event.locals.tenantUser!.role
 	};
