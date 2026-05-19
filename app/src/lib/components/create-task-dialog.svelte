@@ -11,11 +11,15 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Switch } from '$lib/components/ui/switch';
+	import * as Popover from '$lib/components/ui/popover';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import { page } from '$app/state';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 
@@ -136,6 +140,46 @@
 	let subtaskInput = $state('');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+
+	let dueDateOpen = $state(false);
+	let recurringEndDateOpen = $state(false);
+
+	const dueDateValue = $derived<DateValue | undefined>(parseIsoDate(draft.dueDate));
+	const recurringEndDateValue = $derived<DateValue | undefined>(
+		parseIsoDate(draft.recurringEndDate)
+	);
+
+	function parseIsoDate(s: string): DateValue | undefined {
+		if (!s) return undefined;
+		const [y, m, d] = s.split('-').map(Number);
+		if (!y || !m || !d) return undefined;
+		return new CalendarDate(y, m, d);
+	}
+
+	function formatIsoDate(v: DateValue): string {
+		return `${v.year}-${String(v.month).padStart(2, '0')}-${String(v.day).padStart(2, '0')}`;
+	}
+
+	function formatDisplayDate(s: string): string {
+		if (!s) return '';
+		const [y, m, d] = s.split('-').map(Number);
+		if (!y || !m || !d) return s;
+		return new Date(y, m - 1, d).toLocaleDateString('ro-RO', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric'
+		});
+	}
+
+	function handleDueDateSelect(v: DateValue | undefined) {
+		draft.dueDate = v ? formatIsoDate(v) : '';
+		dueDateOpen = false;
+	}
+
+	function handleRecurringEndDateSelect(v: DateValue | undefined) {
+		draft.recurringEndDate = v ? formatIsoDate(v) : '';
+		recurringEndDateOpen = false;
+	}
 
 	const projects = $derived(
 		draft.clientId
@@ -689,11 +733,44 @@
 						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
 							>Deadline</label
 						>
-						<input
-							type="date"
-							class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
-							bind:value={draft.dueDate}
-						/>
+						<Popover.Root bind:open={dueDateOpen}>
+							<Popover.Trigger>
+								{#snippet child({ props })}
+									<button
+										{...props}
+										type="button"
+										class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-900 transition-colors hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+									>
+										<CalendarIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+										<span class={draft.dueDate ? '' : 'text-slate-400'}>
+											{draft.dueDate ? formatDisplayDate(draft.dueDate) : 'Selectează data'}
+										</span>
+									</button>
+								{/snippet}
+							</Popover.Trigger>
+							<Popover.Content class="w-auto p-0" align="start">
+								<div class="flex flex-col">
+									<Calendar
+										type="single"
+										value={dueDateValue}
+										onValueChange={handleDueDateSelect}
+										locale="ro-RO"
+									/>
+									{#if draft.dueDate}
+										<Button
+											variant="ghost"
+											class="rounded-t-none border-t text-sm text-muted-foreground"
+											onclick={() => {
+												draft.dueDate = '';
+												dueDateOpen = false;
+											}}
+										>
+											Șterge data
+										</Button>
+									{/if}
+								</div>
+							</Popover.Content>
+						</Popover.Root>
 					</div>
 
 					<!-- Recurring -->
@@ -737,11 +814,46 @@
 								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
 									>Data sfârșit (opțional)</label
 								>
-								<input
-									type="date"
-									class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none"
-									bind:value={draft.recurringEndDate}
-								/>
+								<Popover.Root bind:open={recurringEndDateOpen}>
+									<Popover.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-900 transition-colors hover:border-blue-300 focus:border-blue-500 focus:outline-none"
+											>
+												<CalendarIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+												<span class={draft.recurringEndDate ? '' : 'text-slate-400'}>
+													{draft.recurringEndDate
+														? formatDisplayDate(draft.recurringEndDate)
+														: 'Selectează data'}
+												</span>
+											</button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-auto p-0" align="start">
+										<div class="flex flex-col">
+											<Calendar
+												type="single"
+												value={recurringEndDateValue}
+												onValueChange={handleRecurringEndDateSelect}
+												locale="ro-RO"
+											/>
+											{#if draft.recurringEndDate}
+												<Button
+													variant="ghost"
+													class="rounded-t-none border-t text-sm text-muted-foreground"
+													onclick={() => {
+														draft.recurringEndDate = '';
+														recurringEndDateOpen = false;
+													}}
+												>
+													Șterge data
+												</Button>
+											{/if}
+										</div>
+									</Popover.Content>
+								</Popover.Root>
 							</div>
 						</div>
 					{/if}
