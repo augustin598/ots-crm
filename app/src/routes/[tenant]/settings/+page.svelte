@@ -26,6 +26,8 @@
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
+	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
 	import { getTiktokAdsConnectionStatus } from '$lib/remotes/tiktok-ads.remote';
@@ -122,6 +124,10 @@
 	// Gmail status
 	const gmailStatusQuery = getGmailConnectionStatus();
 	const gmailStatus = $derived(gmailStatusQuery.current);
+
+	// Google Calendar status (separate integration from Gmail — own table + OAuth)
+	const calendarStatusQuery = getGoogleCalendarStatus();
+	const calendarStatus = $derived(calendarStatusQuery.current);
 
 	// WHMCS integration status
 	const whmcsStatusQuery = getWhmcsStatus();
@@ -731,6 +737,34 @@
 					</div>
 					<div class="flex items-center gap-2">
 						{#if gmailStatus?.connected}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/google-calendar`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<CalendarIcon class="h-5 w-5" />
+						<div>
+							<CardTitle>Google Calendar</CardTitle>
+							<CardDescription>
+								{#if calendarStatus?.connected}
+									Conectat ca {calendarStatus.email} — generează automat linkuri Meet
+								{:else}
+									Conectează un cont Google pentru auto-generare linkuri Meet la task-urile de tip meeting
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if calendarStatus?.connected}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
