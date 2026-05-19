@@ -1274,17 +1274,7 @@ export const updateTask = command(
 
 		// Notify all watchers of other changes (except assignment changes which were handled above)
 		if (!assigneeChanged) {
-			const watchers = await db
-				.select()
-				.from(table.taskWatcher)
-				.where(
-					and(
-						eq(table.taskWatcher.taskId, taskId),
-						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
-					)
-				);
-
-			// Determine change type
+			// Determine change type BEFORE the email loop
 			let changeType: string | undefined;
 			if (updateData.status !== undefined && updateData.status !== existing.status) {
 				changeType = 'status';
@@ -1294,29 +1284,33 @@ export const updateTask = command(
 				changeType = 'general';
 			}
 
-			// Send update emails to all watchers (excluding the user who made the change)
-			for (const watcher of watchers) {
-				if (watcher.userId === event.locals.user.id) {
-					continue; // Don't notify the person who made the change
-				}
+			// Single JOIN query — one DB roundtrip instead of N+1
+			const watcherUsers = await db
+				.select({
+					userId: table.taskWatcher.userId,
+					firstName: table.user.firstName,
+					lastName: table.user.lastName,
+					email: table.user.email
+				})
+				.from(table.taskWatcher)
+				.innerJoin(table.user, eq(table.taskWatcher.userId, table.user.id))
+				.where(
+					and(
+						eq(table.taskWatcher.taskId, taskId),
+						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
+					)
+				);
 
-				const [watcherUser] = await db
-					.select()
-					.from(table.user)
-					.where(eq(table.user.id, watcher.userId))
-					.limit(1);
-
-				if (watcherUser?.email) {
-					try {
-						const watcherName =
-							`${watcherUser.firstName} ${watcherUser.lastName}`.trim() || watcherUser.email;
-						await sendTaskUpdateEmail(taskId, watcherUser.email, watcherName, changeType);
-					} catch (error) {
-						logWarning('email', `Failed to send task update email: ${(error as Error).message}`);
-						// Continue with other watchers even if one fails
-					}
-				}
-			}
+			// Release the write lock — email I/O runs AFTER DB work is complete.
+			// Fire all notifications in parallel so one slow/failing send doesn't block the rest.
+			await Promise.allSettled(
+				watcherUsers
+					.filter((w) => w.userId !== event.locals.user.id && w.email)
+					.map(async (w) => {
+						const watcherName = `${w.firstName} ${w.lastName}`.trim() || w.email!;
+						await sendTaskUpdateEmail(taskId, w.email!, watcherName, changeType);
+					})
+			);
 		}
 
 		// Send client notification
