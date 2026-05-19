@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -567,4 +567,295 @@ export const syncAllHostingAccounts = command(BulkSyncSchema, async (params) => 
 		failed: errors.length,
 		errors
 	};
+});
+
+// =============================================================================
+//  Grouped-by-client query (HOST design pack — /[tenant]/hosting/accounts)
+// =============================================================================
+
+export type LastInvoiceLite = {
+	id: string;
+	status:
+		| 'paid'
+		| 'pending'
+		| 'overdue'
+		| 'sent'
+		| 'draft'
+		| 'cancelled'
+		| 'partially_paid'
+		| 'n/a';
+	date: string | null;
+	amountCents: number;
+	daysOverdue?: number;
+};
+
+export type AccountInGroup = {
+	id: string;
+	daUsername: string;
+	domain: string;
+	additionalDomains: string[] | null;
+	daPackageName: string | null;
+	linkedPackageName: string | null;
+	serverName: string | null;
+	status: string;
+	billingCycle: string;
+	autoRenew: boolean;
+	startDate: string | null;
+	nextDueDate: string | null;
+	/** Days until next due date (positive = future, negative = past). */
+	expiresInDays: number | null;
+	recurringAmount: number;
+	currency: string;
+	lastInvoice: LastInvoiceLite;
+};
+
+export type ClientGroup = {
+	clientId: string | null;
+	client: {
+		id: string | null;
+		name: string;
+		businessName: string | null;
+		cui: string | null;
+		email: string | null;
+		phone: string | null;
+		tier: 'vip' | 'standard' | 'watch';
+		clientSince: string | null;
+		ltvCents: number;
+	};
+	accounts: AccountInGroup[];
+	totals: {
+		count: number;
+		addonCount: number;
+		mrrCents: number;
+		arrCents: number;
+		byStatus: Record<string, number>;
+		overdueCount: number;
+		nextExpiry: { date: string; days: number } | null;
+		oldestOverdue: { date: string; daysOverdue: number } | null;
+	};
+};
+
+const CYCLE_MONTHS_GROUPED: Record<string, number> = {
+	monthly: 1,
+	quarterly: 3,
+	semiannually: 6,
+	biannually: 6,
+	annually: 12,
+	biennially: 24,
+	triennially: 36,
+	one_time: 0
+};
+
+function toMonthlyCentsGrouped(amount: number | null, cycle: string | null): number {
+	const months = CYCLE_MONTHS_GROUPED[cycle ?? 'monthly'] ?? 1;
+	if (months === 0 || !amount) return 0;
+	return Math.round(amount / months);
+}
+
+/**
+ * Days between two ISO dates (toDate - fromDate). Returns null if either is invalid.
+ * NOTE: This returns the difference in days from `fromISO` to `toISO`.
+ */
+function daysDiff(
+	fromISO: string | null | undefined,
+	toISO: string | null | undefined
+): number | null {
+	if (!fromISO || !toISO) return null;
+	const a = new Date(fromISO);
+	const b = new Date(toISO);
+	if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+	return Math.round((b.getTime() - a.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) => {
+	const event = getRequestEvent();
+	const tenantId = event.locals.tenant?.id;
+	if (!tenantId) throw new Error('Tenant context required');
+
+	const rows = await db
+		.select({
+			id: table.hostingAccount.id,
+			clientId: table.hostingAccount.clientId,
+			daUsername: table.hostingAccount.daUsername,
+			domain: table.hostingAccount.domain,
+			additionalDomains: table.hostingAccount.additionalDomains,
+			daPackageName: table.hostingAccount.daPackageName,
+			linkedPackageName: table.hostingProduct.name,
+			serverName: table.daServer.name,
+			status: table.hostingAccount.status,
+			billingCycle: table.hostingAccount.billingCycle,
+			autoRenew: table.hostingAccount.autoRenew,
+			startDate: table.hostingAccount.startDate,
+			nextDueDate: table.hostingAccount.nextDueDate,
+			recurringAmount: table.hostingAccount.recurringAmount,
+			currency: table.hostingAccount.currency,
+			client_id: table.client.id,
+			client_name: table.client.name,
+			client_businessName: table.client.businessName,
+			client_cui: table.client.cui,
+			client_email: table.client.email,
+			client_phone: table.client.phone,
+			client_tier: table.client.tier,
+			client_clientSince: table.client.clientSince,
+			client_ltvCents: table.client.ltvCents
+		})
+		.from(table.hostingAccount)
+		.leftJoin(table.client, eq(table.client.id, table.hostingAccount.clientId))
+		.leftJoin(table.daServer, eq(table.daServer.id, table.hostingAccount.daServerId))
+		.leftJoin(
+			table.hostingProduct,
+			eq(table.hostingProduct.id, table.hostingAccount.hostingProductId)
+		)
+		.where(
+			and(
+				eq(table.hostingAccount.tenantId, tenantId),
+				filters?.status ? eq(table.hostingAccount.status, filters.status) : undefined,
+				filters?.clientId ? eq(table.hostingAccount.clientId, filters.clientId) : undefined,
+				filters?.serverId ? eq(table.hostingAccount.daServerId, filters.serverId) : undefined
+			)
+		)
+		.limit(filters?.limit ?? 500);
+
+	const accountIds = rows.map((r) => r.id);
+
+	const invRows = accountIds.length
+		? await db
+				.select({
+					id: table.invoice.id,
+					hostingAccountId: table.invoice.hostingAccountId,
+					status: table.invoice.status,
+					dueDate: table.invoice.dueDate,
+					issueDate: table.invoice.issueDate,
+					totalAmount: table.invoice.totalAmount
+				})
+				.from(table.invoice)
+				.where(
+					and(
+						eq(table.invoice.tenantId, tenantId),
+						inArray(table.invoice.hostingAccountId, accountIds)
+					)
+				)
+				.orderBy(desc(table.invoice.issueDate))
+		: [];
+
+	const todayISO = new Date().toISOString().slice(0, 10);
+	const lastInvoiceByAccount = new Map<string, LastInvoiceLite>();
+	for (const inv of invRows) {
+		if (!inv.hostingAccountId) continue;
+		if (lastInvoiceByAccount.has(inv.hostingAccountId)) continue;
+		const dateISO = inv.issueDate ? new Date(inv.issueDate).toISOString().slice(0, 10) : null;
+		const dueISO = inv.dueDate ? new Date(inv.dueDate).toISOString().slice(0, 10) : null;
+		let mapped: LastInvoiceLite['status'] = inv.status as LastInvoiceLite['status'];
+		if (inv.status !== 'paid' && inv.status !== 'cancelled' && dueISO && dueISO < todayISO) {
+			mapped = 'overdue';
+		}
+		const daysOverdue =
+			mapped === 'overdue' && dueISO ? Math.max(0, daysDiff(dueISO, todayISO) ?? 0) : undefined;
+		lastInvoiceByAccount.set(inv.hostingAccountId, {
+			id: inv.id,
+			status: mapped,
+			date: dateISO,
+			amountCents: Number(inv.totalAmount ?? 0),
+			daysOverdue
+		});
+	}
+
+	const groups = new Map<string, ClientGroup>();
+	for (const r of rows) {
+		const key = r.clientId ?? '__unassigned__';
+		if (!groups.has(key)) {
+			groups.set(key, {
+				clientId: r.clientId,
+				client: {
+					id: r.client_id,
+					name:
+						r.client_name ?? (r.clientId ? `Client #${r.clientId.slice(0, 6)}` : 'Neasignat'),
+					businessName: r.client_businessName,
+					cui: r.client_cui,
+					email: r.client_email,
+					phone: r.client_phone,
+					tier: (r.client_tier as ClientGroup['client']['tier']) ?? 'standard',
+					clientSince: r.client_clientSince,
+					ltvCents: Number(r.client_ltvCents ?? 0)
+				},
+				accounts: [],
+				totals: {
+					count: 0,
+					addonCount: 0,
+					mrrCents: 0,
+					arrCents: 0,
+					byStatus: {},
+					overdueCount: 0,
+					nextExpiry: null,
+					oldestOverdue: null
+				}
+			});
+		}
+		const g = groups.get(key)!;
+		const expiresInDays = daysDiff(todayISO, r.nextDueDate);
+
+		const lastInv: LastInvoiceLite =
+			lastInvoiceByAccount.get(r.id) ?? {
+				id: '',
+				status: 'n/a',
+				date: null,
+				amountCents: 0
+			};
+
+		const acc: AccountInGroup = {
+			id: r.id,
+			daUsername: r.daUsername,
+			domain: r.domain,
+			additionalDomains: r.additionalDomains,
+			daPackageName: r.daPackageName,
+			linkedPackageName: r.linkedPackageName,
+			serverName: r.serverName,
+			status: r.status,
+			billingCycle: r.billingCycle,
+			autoRenew: r.autoRenew === true,
+			startDate: r.startDate,
+			nextDueDate: r.nextDueDate,
+			expiresInDays,
+			recurringAmount: r.recurringAmount,
+			currency: r.currency,
+			lastInvoice: lastInv
+		};
+		g.accounts.push(acc);
+		g.totals.count++;
+		g.totals.addonCount += acc.additionalDomains?.length ?? 0;
+		g.totals.byStatus[r.status] = (g.totals.byStatus[r.status] ?? 0) + 1;
+		if (r.status === 'active' || r.status === 'pending') {
+			g.totals.mrrCents += toMonthlyCentsGrouped(r.recurringAmount, r.billingCycle);
+		}
+		if (lastInv.status === 'overdue') g.totals.overdueCount++;
+		if (
+			(r.status === 'active' || r.status === 'pending') &&
+			expiresInDays !== null &&
+			expiresInDays >= 0 &&
+			(g.totals.nextExpiry === null || expiresInDays < g.totals.nextExpiry.days)
+		) {
+			g.totals.nextExpiry = { date: r.nextDueDate ?? '', days: expiresInDays };
+		}
+		if (
+			lastInv.status === 'overdue' &&
+			lastInv.daysOverdue !== undefined &&
+			(g.totals.oldestOverdue === null || lastInv.daysOverdue > g.totals.oldestOverdue.daysOverdue)
+		) {
+			g.totals.oldestOverdue = {
+				date: lastInv.date ?? '',
+				daysOverdue: lastInv.daysOverdue
+			};
+		}
+	}
+
+	for (const g of groups.values()) {
+		g.totals.arrCents = g.totals.mrrCents * 12;
+	}
+
+	return Array.from(groups.values()).sort((a, b) => {
+		if (!a.clientId && b.clientId) return -1;
+		if (a.clientId && !b.clientId) return 1;
+		if (b.totals.mrrCents !== a.totals.mrrCents) return b.totals.mrrCents - a.totals.mrrCents;
+		return b.totals.count - a.totals.count;
+	});
 });

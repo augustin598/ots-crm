@@ -551,6 +551,13 @@ export async function syncRevolutTransactionsForAccount(
 										updatedAt: new Date()
 									})
 									.where(eq(table.invoice.id, invoice.id));
+
+								try {
+									const { recalcClientLTV } = await import('$lib/server/hosting/ltv');
+									await recalcClientLTV(invoice.tenantId, invoice.clientId);
+								} catch (e) {
+									console.warn('[revolut.sync] LTV refresh failed for client', invoice.clientId, e);
+								}
 							}
 						}
 

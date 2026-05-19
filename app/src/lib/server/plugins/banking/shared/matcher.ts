@@ -223,6 +223,13 @@ export async function autoMatchTransactions(tenantId: string): Promise<number> {
 						updatedAt: new Date()
 					})
 					.where(eq(table.invoice.id, matchedInvoice.id));
+
+				try {
+					const { recalcClientLTV } = await import('$lib/server/hosting/ltv');
+					await recalcClientLTV(matchedInvoice.tenantId, matchedInvoice.clientId);
+				} catch (e) {
+					console.warn('[banking.matcher] LTV refresh failed for client', matchedInvoice.clientId, e);
+				}
 			}
 
 			matchedCount++;
