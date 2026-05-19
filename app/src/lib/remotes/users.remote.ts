@@ -8,12 +8,21 @@ import { assertCan } from '$lib/server/access';
 import { validateOverride } from '$lib/server/access';
 import type { AdminRoleId } from '$lib/access/catalog';
 import { normalizePhoneE164 } from '$lib/utils/phone';
+import { getUserWhatsappPhonesBatch } from '$lib/server/whatsapp/resolve-phone';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
+
+function generateWhatsappLinkId(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
 
 export const getTenantUsers = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+
+	const tenantId = event.locals.tenant.id;
 
 	// Returns one row per tenantUser with the joined user info + role + meta.
 	const tenantUsers = await db
@@ -32,9 +41,19 @@ export const getTenantUsers = query(async () => {
 		})
 		.from(table.tenantUser)
 		.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))
-		.where(eq(table.tenantUser.tenantId, event.locals.tenant.id));
+		.where(eq(table.tenantUser.tenantId, tenantId));
 
-	return tenantUsers;
+	// Resolve WhatsApp phone per user via canonical link table.
+	// Falls back to tenantUser.phone (normalized) when user has no explicit link
+	// — admin profile is still the implicit source for avatar lookup if link unset.
+	const phonesByUser = await getUserWhatsappPhonesBatch(
+		tenantId,
+		tenantUsers.map((u) => u.id)
+	);
+	return tenantUsers.map((u) => ({
+		...u,
+		whatsappPhone: phonesByUser.get(u.id) ?? normalizePhoneE164(u.phone)
+	}));
 });
 
 const updateRoleSchema = v.object({
@@ -119,6 +138,32 @@ export const updateTenantUserMeta = command(updateMetaSchema, async (data) => {
 	if ('hourlyRate' in data) patch.hourlyRate = data.hourlyRate ?? null;
 	if (Object.keys(patch).length === 0) return { ok: true };
 	await db.update(table.tenantUser).set(patch).where(eq(table.tenantUser.id, data.tenantUserId));
+
+	// Auto-sync user_whatsapp_link when admin edits phone in the team profile.
+	// Single source of truth for avatars: any phone change here propagates to
+	// the canonical link table. Source = 'manual' for explicit admin edits.
+	if ('phone' in data) {
+		const tenantId = event.locals.tenant.id;
+		const e164 = normalizePhoneE164(data.phone);
+		await db
+			.delete(table.userWhatsappLink)
+			.where(
+				and(
+					eq(table.userWhatsappLink.tenantId, tenantId),
+					eq(table.userWhatsappLink.userId, target.userId)
+				)
+			);
+		if (e164) {
+			await db.insert(table.userWhatsappLink).values({
+				id: generateWhatsappLinkId(),
+				tenantId,
+				userId: target.userId,
+				phoneE164: e164,
+				source: 'manual'
+			});
+		}
+	}
+
 	return { ok: true };
 });
 
@@ -384,63 +429,12 @@ export const getAssignableClientUsers = query(
 
 		if (rows.length === 0) return [];
 
-		// Resolve the client phone once — fallback shared across all client users.
-		// IMPORTANT: client.phone is stored in RO national format (0xxxxxxxxx).
-		// The WhatsApp avatar endpoint expects E164 (+40xxxxxxxxx), so normalize.
-		const [clientRow] = await db
-			.select({ phone: table.client.phone })
-			.from(table.client)
-			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
-			.limit(1);
-		const clientPhone = normalizePhoneE164(clientRow?.phone);
-
-		// Try to match each user to an individual whatsappContact by display name.
-		// `user` table has no phone column, so we fuzzy-match against contact names
-		// for the same tenant. Exact full-name match wins; single first-name match
-		// is acceptable; otherwise fall back to the shared client phone.
-		const wcRows = await db
-			.select({
-				phoneE164: table.whatsappContact.phoneE164,
-				displayName: table.whatsappContact.displayName,
-				pushName: table.whatsappContact.pushName
-			})
-			.from(table.whatsappContact)
-			.where(eq(table.whatsappContact.tenantId, tenantId));
-
-		function matchWhatsappPhone(
-			firstName: string | null | undefined,
-			lastName: string | null | undefined,
-			isPrimary: boolean
-		): string | null {
-			const first = (firstName ?? '').trim().toLowerCase();
-			const last = (lastName ?? '').trim().toLowerCase();
-			const full = `${first} ${last}`.trim();
-			if (!full && !first) return null;
-
-			// Pass 1: exact full-name match on displayName/pushName
-			if (full) {
-				for (const wc of wcRows) {
-					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
-					if (wcName && wcName === full) return wc.phoneE164;
-				}
-			}
-			// Pass 2: first-name candidates. If there's exactly one, use it.
-			// If there are multiple, prefer the one that matches client.phone (primary contact).
-			if (first) {
-				const candidates = wcRows.filter((wc) => {
-					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
-					return wcName === first || wcName.startsWith(first + ' ');
-				});
-				if (candidates.length === 1) return candidates[0].phoneE164;
-				if (candidates.length > 1 && isPrimary && clientPhone) {
-					// Disambiguate primary contact: pick the candidate whose phone equals the
-					// client's primary phone (normalized).
-					const match = candidates.find((c) => c.phoneE164 === clientPhone);
-					if (match) return match.phoneE164;
-				}
-			}
-			return null;
-		}
+		// Resolve per-user WhatsApp phone via the canonical user_whatsapp_link table.
+		// No name-based guessing — only deterministic phone links count.
+		const phonesByUser = await getUserWhatsappPhonesBatch(
+			tenantId,
+			rows.map((r) => r.userId)
+		);
 
 		// For non-primary users, look up their clientSecondaryEmail row to read accessFlags.
 		// Match by lower(email) since clientSecondaryEmail.email may have casing differences.
@@ -493,9 +487,93 @@ export const getAssignableClientUsers = query(
 				firstName: r.firstName,
 				lastName: r.lastName,
 				isPrimary: r.isPrimary,
-				// Prefer individual WhatsApp contact match (per-user avatar). Fall back
-				// to the shared (normalized) client phone if no match found.
-				phone: matchWhatsappPhone(r.firstName, r.lastName, !!r.isPrimary) ?? clientPhone
+				// Per-user WhatsApp phone from user_whatsapp_link table (deterministic, admin-set).
+				// null when admin hasn't linked this user's phone yet → UI falls back to initials.
+				phone: phonesByUser.get(r.userId) ?? null
 			}));
 	}
 );
+
+// ============================================================================
+// WhatsApp phone linking (admin only)
+// ============================================================================
+
+const linkPhoneSchema = v.object({
+	userId: v.pipe(v.string(), v.minLength(1)),
+	phone: v.string() // accepts any format; normalized server-side
+});
+
+/**
+ * Link a WhatsApp phone to a user in the current tenant.
+ * Idempotent: re-linking overwrites the existing row (UNIQUE constraint).
+ * If `phone` normalizes to null (empty/invalid), this becomes an unlink.
+ */
+export const linkUserWhatsappPhone = command(
+	linkPhoneSchema,
+	async ({ userId, phone }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+		const tenantId = event.locals.tenant.id;
+		const e164 = normalizePhoneE164(phone);
+
+		// Validate the target user exists in this tenant — either via tenant_user (agency)
+		// or via client_user (client portal contact). Prevents linking phones to random user ids.
+		const [tu] = await db
+			.select({ userId: table.tenantUser.userId })
+			.from(table.tenantUser)
+			.where(and(eq(table.tenantUser.userId, userId), eq(table.tenantUser.tenantId, tenantId)))
+			.limit(1);
+		if (!tu) {
+			const [cu] = await db
+				.select({ userId: table.clientUser.userId })
+				.from(table.clientUser)
+				.where(and(eq(table.clientUser.userId, userId), eq(table.clientUser.tenantId, tenantId)))
+				.limit(1);
+			if (!cu) throw new Error('User not found in this tenant');
+		}
+
+		// Remove any existing link first (idempotent re-link), then insert if phone is valid.
+		await db
+			.delete(table.userWhatsappLink)
+			.where(
+				and(
+					eq(table.userWhatsappLink.tenantId, tenantId),
+					eq(table.userWhatsappLink.userId, userId)
+				)
+			);
+
+		if (e164) {
+			await db.insert(table.userWhatsappLink).values({
+				id: generateWhatsappLinkId(),
+				tenantId,
+				userId,
+				phoneE164: e164,
+				source: 'manual'
+			});
+		}
+
+		return { success: true, phoneE164: e164 };
+	}
+);
+
+const unlinkSchema = v.object({
+	userId: v.pipe(v.string(), v.minLength(1))
+});
+
+export const unlinkUserWhatsappPhone = command(unlinkSchema, async ({ userId }) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	if (event.locals.isClientUser) throw new Error('Unauthorized');
+
+	await db
+		.delete(table.userWhatsappLink)
+		.where(
+			and(
+				eq(table.userWhatsappLink.tenantId, event.locals.tenant.id),
+				eq(table.userWhatsappLink.userId, userId)
+			)
+		);
+	return { success: true };
+});

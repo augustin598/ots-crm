@@ -270,6 +270,7 @@
 		department?: DepartmentId | null;
 		title?: string | null;
 		hourlyRate?: string | null;
+		phone?: string | null;
 	}) {
 		const m = editingMember;
 		if (!m) return;

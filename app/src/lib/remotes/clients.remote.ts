@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, ne, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { normalizePhoneE164 } from '$lib/utils/phone';
 
 function isPrivateHost(hostname: string): boolean {
 	if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
@@ -30,6 +31,11 @@ function generateClientId() {
 }
 
 function generatePartnerId() {
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return encodeBase32LowerCase(bytes);
+}
+
+function generateWhatsappLinkId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
 }
@@ -384,6 +390,10 @@ export const updateClient = command(
 		const newEmail = (rest.email || '').toLowerCase().trim();
 		const emailChanged = oldEmail !== newEmail && oldEmail !== '';
 
+		const oldPhone = (existing.phone || '').trim();
+		const newPhone = ('phone' in rest ? rest.phone || '' : oldPhone).trim();
+		const phoneChanged = 'phone' in rest && oldPhone !== newPhone;
+
 		// Email/phone may be shared across clients (same person manages multiple
 		// companies). Uniqueness is enforced on CUI alone.
 		const newCui = (rest.cui || '').toString();
@@ -487,6 +497,42 @@ export const updateClient = command(
 				}
 			}
 		});
+
+		if (phoneChanged) {
+			const [primary] = await db
+				.select({ userId: table.clientUser.userId })
+				.from(table.clientUser)
+				.where(
+					and(
+						eq(table.clientUser.clientId, clientId),
+						eq(table.clientUser.tenantId, tenantId),
+						eq(table.clientUser.isPrimary, true)
+					)
+				)
+				.limit(1);
+
+			if (primary) {
+				await db
+					.delete(table.userWhatsappLink)
+					.where(
+						and(
+							eq(table.userWhatsappLink.userId, primary.userId),
+							eq(table.userWhatsappLink.tenantId, tenantId)
+						)
+					);
+
+				const e164 = normalizePhoneE164(newPhone);
+				if (e164) {
+					await db.insert(table.userWhatsappLink).values({
+						id: generateWhatsappLinkId(),
+						tenantId,
+						userId: primary.userId,
+						phoneE164: e164,
+						source: 'seed_client'
+					});
+				}
+			}
+		}
 
 		return { success: true };
 	}

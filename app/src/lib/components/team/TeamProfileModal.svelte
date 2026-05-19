@@ -69,6 +69,7 @@
 			department?: DepartmentId | null;
 			title?: string | null;
 			hourlyRate?: string | null;
+			phone?: string | null;
 		}) => Promise<void> | void;
 		onSaveSkills: (skills: string[]) => Promise<void> | void;
 		onSaveCapabilities?: (capabilities: string[] | null) => Promise<void> | void;
@@ -79,6 +80,7 @@
 
 	let titleDraft = $state('');
 	let rateDraft = $state('');
+	let phoneDraft = $state('');
 	let skillsDraft = $state<string[]>([]);
 	let newSkill = $state('');
 	let busy = $state(false);
@@ -92,6 +94,7 @@
 		if (member) {
 			titleDraft = member.title ?? '';
 			rateDraft = member.hourlyRate ?? '';
+			phoneDraft = member.phone ?? '';
 			skillsDraft = [...member.skills];
 
 			// Initialize capabilities draft from member's override or role defaults
@@ -180,13 +183,22 @@
 		if (!member) return;
 		busy = true;
 		try {
-			const patch: { title?: string | null; hourlyRate?: string | null; department?: DepartmentId | null } = {};
+			const patch: {
+				title?: string | null;
+				hourlyRate?: string | null;
+				department?: DepartmentId | null;
+				phone?: string | null;
+			} = {};
 			if (titleDraft.trim() !== (member.title ?? '')) {
 				patch.title = titleDraft.trim() || null;
 			}
 			const rateVal = rateDraft.trim();
 			if (rateVal !== (member.hourlyRate ?? '')) {
 				patch.hourlyRate = rateVal || null;
+			}
+			const phoneVal = phoneDraft.trim();
+			if (phoneVal !== (member.phone ?? '')) {
+				patch.phone = phoneVal || null;
 			}
 			if (Object.keys(patch).length > 0) await onSaveMeta(patch);
 			const before = JSON.stringify([...member.skills].sort());
@@ -301,6 +313,21 @@
 						</div>
 					</div>
 				{/if}
+
+				<!-- WhatsApp phone — controls the avatar shown across the app -->
+				<div class="fld">
+					<Label class="fld-label">Telefon WhatsApp</Label>
+					<Input
+						bind:value={phoneDraft}
+						placeholder="+40712345678 sau 0712345678"
+						type="tel"
+						autocomplete="tel"
+					/>
+					<p class="hint">
+						Folosit pentru a afișa avatarul WhatsApp în taskuri, comments și echipă.
+						Format acceptat: +40… sau 07… (RO).
+					</p>
+				</div>
 
 				<!-- Skills -->
 				<div class="fld">
@@ -620,6 +647,12 @@
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
+	}
+	.hint {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		margin: 0;
+		line-height: 1.4;
 	}
 	:global(.team-profile-modal .fld-label) {
 		font-size: 11px;

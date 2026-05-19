@@ -5102,6 +5102,39 @@ export const adMetricSnapshot = sqliteTable(
 	})
 );
 
+// WhatsApp phone linking — admin-controlled, deterministic per-user mapping.
+// Why: many people share first names → name-based fuzzy match attaches wrong
+// avatars. Phone is the only unique key. This table is the single source of
+// truth for "which WhatsApp phone belongs to which user record".
+// Seed: tenantUser.phone + primary client.phone via backfill script.
+// Admin can override from Settings → Team and Client edit pages.
+export const userWhatsappLink = sqliteTable(
+	'user_whatsapp_link',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id),
+		phoneE164: text('phone_e164').notNull(), // canonical E164 (+40xxxxxxxxx)
+		source: text('source').notNull(), // 'manual' | 'seed_client' | 'seed_tenant_user' | 'lead_form' | 'whatsapp_chat'
+		linkedAt: timestamp('linked_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		// One canonical WhatsApp phone per user per tenant (overridable by admin via re-link)
+		uniqUser: uniqueIndex('user_whatsapp_link_user_uidx').on(t.tenantId, t.userId),
+		// Reverse lookup: phone → user(s) — may share among family members, so non-unique
+		phoneIdx: index('user_whatsapp_link_phone_idx').on(t.tenantId, t.phoneE164)
+	})
+);
+
 // Telegram chat linking — global bot, per-user pairing via /start <code>
 export const userTelegramLink = sqliteTable(
 	'user_telegram_link',
