@@ -138,6 +138,17 @@ function makeEvent(tenantId: string) {
 	};
 }
 
+function makeClientEvent(tenantId: string, clientId: string) {
+	return {
+		locals: {
+			user: { id: 'client-user-1', email: 'client@example.com', firstName: 'Client', lastName: 'User' },
+			tenant: { id: tenantId, slug: tenantId },
+			isClientUser: true,
+			client: { id: clientId, tenantId }
+		}
+	};
+}
+
 // ─── getTask ──────────────────────────────────────────────────────────────────
 
 describe('getTask', () => {
@@ -568,5 +579,38 @@ describe('bulkDuplicateTasks — tenant whitelist + batch inserts', () => {
 		expect(result.totalRequested).toBe(1);
 		expect(result.duplicated).toBe(0);
 		expect(result.newIds).toHaveLength(0);
+	});
+});
+
+// ─── P0 IDOR regression tests — client cross-client isolation ──────────────
+
+describe('getTask — client portal cross-client IDOR (P0 regression)', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+	});
+
+	test('client user from client-A cannot read a task belonging to client-B in same tenant', async () => {
+		// Task exists in tenant-a but belongs to client-b
+		const taskRow = { id: 'task-from-client-b', tenantId: 'tenant-a', clientId: 'client-b', title: 'Secret task', status: 'todo', priority: 'medium' };
+		queryQueue.push([taskRow]); // main task query returns the task
+		queryQueue.push([]); // no shared project match
+
+		// Client user is from client-a, not client-b
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(getTask('task-from-client-b')).rejects.toThrow('Task not found');
+	});
+
+	test('client user can read their own task', async () => {
+		const taskRow = { id: 'task-from-client-a', tenantId: 'tenant-a', clientId: 'client-a', title: 'My task', status: 'todo', priority: 'medium' };
+		queryQueue.push([taskRow]); // main task query
+		queryQueue.push([]); // subtasks
+		queryQueue.push([]); // tags
+		queryQueue.push([]); // assignees
+
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		const result = await getTask('task-from-client-a') as any;
+		expect(result.id).toBe('task-from-client-a');
 	});
 });

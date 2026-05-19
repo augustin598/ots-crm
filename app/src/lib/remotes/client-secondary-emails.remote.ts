@@ -187,7 +187,7 @@ export const updateClientSecondaryEmailAccess = command(
 				notifyContracts: sanitized.contracts,
 				updatedAt: new Date()
 			})
-			.where(eq(table.clientSecondaryEmail.id, data.secondaryEmailId));
+			.where(and(eq(table.clientSecondaryEmail.id, data.secondaryEmailId), eq(table.clientSecondaryEmail.tenantId, tenantHint)));
 
 		return { success: true };
 	}
@@ -215,7 +215,7 @@ export const deleteClientSecondaryEmail = command(
 
 		await db
 			.delete(table.clientSecondaryEmail)
-			.where(eq(table.clientSecondaryEmail.id, secondaryEmailId));
+			.where(and(eq(table.clientSecondaryEmail.id, secondaryEmailId), eq(table.clientSecondaryEmail.tenantId, tenantHint)));
 
 		return { success: true };
 	}

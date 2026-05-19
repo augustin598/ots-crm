@@ -473,7 +473,7 @@ export const updateTaskComment = command(
 				content: sanitizeCommentHtml(data.content),
 				updatedAt: new Date()
 			})
-			.where(eq(table.taskComment.id, data.commentId));
+			.where(and(eq(table.taskComment.id, data.commentId), eq(table.taskComment.taskId, comment.comment.taskId)));
 
 		return { success: true };
 	}

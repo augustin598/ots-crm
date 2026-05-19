@@ -1152,7 +1152,7 @@ export const updateTask = command(
 				milestoneId: updateData.milestoneId || undefined,
 				updatedAt: new Date()
 			})
-			.where(eq(table.task.id, taskId));
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, existing.tenantId)));
 
 		// Record activity for changed fields
 		const fieldsToTrack = ['title', 'description', 'status', 'priority', 'assignedToUserId', 'dueDate', 'clientId', 'projectId', 'milestoneId', 'isRecurring', 'recurringType', 'recurringInterval', 'recurringEndDate'] as const;
@@ -1443,6 +1443,7 @@ export const reopenTask = command(
 			.where(
 				and(
 					eq(table.task.id, taskId),
+					eq(table.task.tenantId, existing.tenantId),
 					inArray(table.task.status, ['done', 'cancelled'])
 				)
 			);
@@ -2279,7 +2280,7 @@ export const approveTask = command(
 				status,
 				updatedAt: new Date()
 			})
-			.where(eq(table.task.id, taskId));
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
 
 		await recordTaskActivity({
 			taskId,
@@ -2334,7 +2335,7 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 			status: 'cancelled',
 			updatedAt: new Date()
 		})
-		.where(eq(table.task.id, taskId));
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
 
 	await recordTaskActivity({
 		taskId,
@@ -2469,7 +2470,7 @@ export const updateSubtask = command(
 			...(done !== undefined ? { done: done ? 1 : 0 } : {}),
 			...(title !== undefined ? { title } : {}),
 			updatedAt: Date.now()
-		}).where(eq(table.subtask.id, subtaskId));
+		}).where(and(eq(table.subtask.id, subtaskId), eq(table.subtask.tenantId, event.locals.tenant.id)));
 
 		return { success: true };
 	}
