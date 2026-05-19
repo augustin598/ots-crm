@@ -20,7 +20,7 @@
 			<UsersIcon class="h-[18px] w-[18px]" />
 		</div>
 		<div>
-			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Active Members</div>
+			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Membri activi</div>
 			<div class="text-[22px] font-bold leading-[1.1] tracking-tight text-[#0f172a]">{total}</div>
 		</div>
 	</div>
@@ -38,7 +38,7 @@
 			<ClockIcon class="h-[18px] w-[18px]" />
 		</div>
 		<div>
-			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Pending Approvals</div>
+			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Aprobări în așteptare</div>
 			<div class="text-[22px] font-bold leading-[1.1] tracking-tight text-[#0f172a]">{pending}</div>
 		</div>
 	</div>
@@ -47,7 +47,7 @@
 			<CheckSquareIcon class="h-[18px] w-[18px]" />
 		</div>
 		<div>
-			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Open Tasks</div>
+			<div class="text-[10.5px] font-semibold uppercase tracking-[.04em] text-[#475569]">Taskuri active</div>
 			<div class="text-[22px] font-bold leading-[1.1] tracking-tight text-[#0f172a]">{openTasks}</div>
 		</div>
 	</div>
