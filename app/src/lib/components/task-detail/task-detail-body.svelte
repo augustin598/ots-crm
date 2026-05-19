@@ -25,6 +25,7 @@
 		removeTag,
 		scheduleMeet
 	} from '$lib/remotes/tasks.remote';
+	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskComments } from '$lib/remotes/task-comments.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
@@ -251,6 +252,10 @@
 	const projectsQuery = getProjects(undefined);
 	const projects = $derived(projectsQuery.current || []);
 	const projectMap = $derived(new Map(projects.map((p) => [p.id, p.name])));
+
+	// Google Calendar connection status (admin side)
+	const adminCalStatus = $derived(getGoogleCalendarStatus());
+	const adminCalStatusValue = $derived(adminCalStatus.current);
 
 	const clientsQuery = getClients();
 	const clientsList = $derived(clientsQuery.current || []);
@@ -1145,16 +1150,26 @@
 							</div>
 						</div>
 						<div class="space-y-1.5">
-							<label class="text-sm font-medium" for="meet-link"
-								>Link Google Meet (opțional)</label
-							>
-							<Input
-								id="meet-link"
-								type="url"
-								bind:value={meetLink}
-								placeholder="https://meet.google.com/..."
-							/>
-							<p class="text-xs text-muted-foreground">Lipește linkul Meet generat manual</p>
+							{#if currentTask?.googleCalendarEventId}
+								<div class="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-800">
+									✓ Linkul Meet a fost generat automat. Evenimentul există în Google Calendar.
+								</div>
+							{:else if adminCalStatusValue?.connected}
+								<div class="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
+									Linkul Meet se va genera automat când salvezi (cont {adminCalStatusValue.email}).
+								</div>
+							{:else}
+								<label class="text-sm font-medium" for="meet-link"
+									>Link Google Meet (opțional)</label
+								>
+								<Input
+									id="meet-link"
+									type="url"
+									bind:value={meetLink}
+									placeholder="https://meet.google.com/..."
+								/>
+								<p class="text-xs text-muted-foreground">Lipește linkul Meet generat manual</p>
+							{/if}
 						</div>
 					</div>
 					<div class="flex items-center justify-end gap-2 border-t px-6 py-4">
