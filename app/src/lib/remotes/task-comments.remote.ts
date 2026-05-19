@@ -93,6 +93,11 @@ export const getTaskComments = query(
 			throw new Error('Task not found');
 		}
 
+		// Client portal isolation: client users can only see THEIR OWN client's tasks.
+		if (event.locals.isClientUser && task.clientId !== event.locals.client?.id) {
+			throw new Error('Task not found');
+		}
+
 		const comments = await db
 			.select({
 				id: table.taskComment.id,
