@@ -119,14 +119,15 @@
 			<div class="ct-meet-head flex items-start justify-between border-b border-[#e5e9f0] p-5">
 				<div class="flex items-start gap-3">
 					<span
-						class="grid h-10 w-10 place-items-center rounded-[9px] bg-[#10b981]/10 text-[#10b981]"
+						class="grid h-10 w-10 place-items-center rounded-[9px] bg-[#f7f8fa]"
 					>
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-							<path d="M16 8.5V12.5L20 16V5L16 8.5Z" fill="#10b981" />
-							<path
-								d="M3 6V18C3 18.5523 3.44772 19 4 19H14C14.5523 19 15 18.5523 15 18V14L11 14V6H3Z"
-								fill="#a7f3d0"
-							/>
+						<svg width="20" height="20" viewBox="0 0 87 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M49.5 36L57.8025 45.45L69 52.605L70.9425 36.084L69 19.929L57.654 26.214L49.5 36Z" fill="#00832D"/>
+							<path d="M0 51.75V66.75C0 70.179 2.821 73 6.25 73H21.25L24.349 61.683L21.25 51.75L10.85 48.651L0 51.75Z" fill="#0066DA"/>
+							<path d="M21.25 0L0 21.25L10.85 24.349L21.25 21.25L24.302 11.452L21.25 0Z" fill="#E94235"/>
+							<path d="M21.25 21.25H0V51.75H21.25V21.25Z" fill="#2684FC"/>
+							<path d="M82.604 7.396L69 18.643V52.605L82.654 63.852C84.696 65.451 87.694 64.026 87.694 61.452V10.546C87.694 7.944 84.642 6.527 82.604 7.396ZM49.5 36V51.75H21.25V72H62.75C66.179 72 69 69.179 69 65.75V52.605L49.5 36Z" fill="#FFBA00"/>
+							<path d="M62.75 0H21.25V21.25H49.5V36L69 19.929V6.25C69 2.821 66.179 0 62.75 0Z" fill="#00AC47"/>
 						</svg>
 					</span>
 					<div>
