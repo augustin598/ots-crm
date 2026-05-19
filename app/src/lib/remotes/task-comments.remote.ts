@@ -326,6 +326,7 @@ export const createTaskComment = command(
 		// Send mention notifications to mentioned users (who aren't already watchers)
 		const mentionedUserIds = extractMentionIds(data.content);
 		if (mentionedUserIds.length > 0) {
+			// Single query for watchers
 			const watcherUserIds = new Set(
 				(await db
 					.select({ userId: table.taskWatcher.userId })
@@ -337,33 +338,40 @@ export const createTaskComment = command(
 				).map(w => w.userId)
 			);
 
-			for (const mentionedId of mentionedUserIds) {
-				// Skip self-mentions
-				if (mentionedId === event.locals.user.id) continue;
+			// Filter out self-mentions before any DB work
+			const nonSelfMentionIds = mentionedUserIds.filter(id => id !== event.locals.user.id);
 
+			// Single batched user lookup instead of N sequential SELECTs
+			const mentionedUsers = nonSelfMentionIds.length > 0
+				? await db
+					.select({
+						id: table.user.id,
+						email: table.user.email,
+						firstName: table.user.firstName,
+						lastName: table.user.lastName
+					})
+					.from(table.user)
+					.where(inArray(table.user.id, nonSelfMentionIds))
+				: [];
+
+			const mentionedUserMap = new Map(mentionedUsers.map(u => [u.id, u]));
+
+			const authorName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
+			const tenantSlug = event.locals.tenant.slug;
+
+			for (const mentionedId of nonSelfMentionIds) {
 				const isAlreadyWatcher = watcherUserIds.has(mentionedId);
+				const mentionedUser = mentionedUserMap.get(mentionedId);
 
 				// Send mention email only if not already notified as watcher
-				if (!isAlreadyWatcher) {
-					const [mentionedUser] = await db
-						.select()
-						.from(table.user)
-						.where(eq(table.user.id, mentionedId))
-						.limit(1);
-
-					if (mentionedUser?.email) {
-						try {
-							const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
-							await sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention');
-						} catch (error) {
-							console.error('Failed to send mention notification:', error);
-						}
-					}
+				if (!isAlreadyWatcher && mentionedUser?.email) {
+					const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
+					sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention').catch((error) => {
+						console.error('Failed to send mention notification:', error);
+					});
 				}
 
 				// In-app notification for @mention — always sent (even if watcher)
-				const authorName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
-				const tenantSlug = event.locals.tenant.slug;
 				await createNotification({
 					tenantId: event.locals.tenant.id,
 					userId: mentionedId,
