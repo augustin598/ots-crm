@@ -828,9 +828,14 @@
 
 <style>
 	/* ===== Reset for this page ===== */
+	/*
+	 * The parent layout `<main>` already provides p-6 (24px) of inset on all
+	 * sides, so this page does NOT add outer padding — only inter-section gap.
+	 * Matches the visual rhythm of the rest of the CRM and keeps the hero
+	 * tight against the OtsTopbar (design pack expects ~22px top, layout p-6
+	 * gives 24px which is close enough).
+	 */
 	.hst-page {
-		background: #f4f6fa;
-		min-height: 100%;
 		font-family:
 			'Inter',
 			system-ui,
@@ -840,7 +845,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
-		padding: 22px 4px 32px;
 	}
 	.hst-loading,
 	.hst-empty {
@@ -861,7 +865,6 @@
 
 	/* ===== Hero ===== */
 	.hst-hero {
-		padding: 0 20px;
 		display: flex;
 		align-items: flex-end;
 		gap: 18px;
@@ -948,7 +951,6 @@
 
 	/* ===== KPIs ===== */
 	.hst-kpis {
-		padding: 0 20px;
 		display: grid;
 		grid-template-columns: repeat(6, 1fr);
 		gap: 10px;
@@ -1000,7 +1002,6 @@
 
 	/* ===== Toolbar ===== */
 	.hst-toolbar {
-		padding: 0 20px;
 		display: flex;
 		gap: 10px;
 		align-items: center;
@@ -1085,7 +1086,6 @@
 
 	/* ===== Server grid (cards) ===== */
 	.hst-server-grid {
-		padding: 0 20px;
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
 		gap: 12px;
@@ -1270,7 +1270,6 @@
 
 	/* ===== Table view ===== */
 	.hst-table-wrap {
-		margin: 0 20px;
 		background: white;
 		border: 1px solid #e5e9f0;
 		border-radius: 12px;
