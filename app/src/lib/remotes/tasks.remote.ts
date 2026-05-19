@@ -182,6 +182,11 @@ export const getTask = query(v.pipe(v.string(), v.minLength(1)), async (taskId) 
 		throw new Error('Task not found');
 	}
 
+	// Client portal isolation: client users can only see THEIR OWN client's tasks.
+	if (event.locals.isClientUser && resolvedTask.clientId !== event.locals.client?.id) {
+		throw new Error('Task not found');
+	}
+
 	const resolvedTenantId = resolvedTask.tenantId;
 
 	const subtasks = await db
