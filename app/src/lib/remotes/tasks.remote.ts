@@ -189,33 +189,36 @@ export const getTask = query(v.pipe(v.string(), v.minLength(1)), async (taskId) 
 
 	const resolvedTenantId = resolvedTask.tenantId;
 
-	const subtasks = await db
-		.select()
-		.from(table.subtask)
-		.where(and(eq(table.subtask.taskId, taskId), eq(table.subtask.tenantId, resolvedTenantId)))
-		.orderBy(asc(table.subtask.position), asc(table.subtask.createdAt));
+	// All three queries depend only on taskId + resolvedTenantId — fire in parallel
+	const [subtasks, tagRows, assigneeRows] = await Promise.all([
+		db
+			.select()
+			.from(table.subtask)
+			.where(and(eq(table.subtask.taskId, taskId), eq(table.subtask.tenantId, resolvedTenantId)))
+			.orderBy(asc(table.subtask.position), asc(table.subtask.createdAt)),
 
-	const tagRows = await db
-		.select({
-			id: table.taskTag.id,
-			name: table.taskTag.name,
-			color: table.taskTag.color
-		})
-		.from(table.taskToTag)
-		.innerJoin(table.taskTag, eq(table.taskToTag.tagId, table.taskTag.id))
-		.where(and(eq(table.taskToTag.taskId, taskId), eq(table.taskToTag.tenantId, resolvedTenantId)));
+		db
+			.select({
+				id: table.taskTag.id,
+				name: table.taskTag.name,
+				color: table.taskTag.color
+			})
+			.from(table.taskToTag)
+			.innerJoin(table.taskTag, eq(table.taskToTag.tagId, table.taskTag.id))
+			.where(and(eq(table.taskToTag.taskId, taskId), eq(table.taskToTag.tenantId, resolvedTenantId))),
 
-	const assigneeRows = await db
-		.select({
-			userId: table.taskAssignee.userId,
-			role: table.taskAssignee.role,
-			firstName: table.user.firstName,
-			lastName: table.user.lastName,
-			email: table.user.email
-		})
-		.from(table.taskAssignee)
-		.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
-		.where(and(eq(table.taskAssignee.taskId, taskId), eq(table.taskAssignee.tenantId, resolvedTenantId)));
+		db
+			.select({
+				userId: table.taskAssignee.userId,
+				role: table.taskAssignee.role,
+				firstName: table.user.firstName,
+				lastName: table.user.lastName,
+				email: table.user.email
+			})
+			.from(table.taskAssignee)
+			.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+			.where(and(eq(table.taskAssignee.taskId, taskId), eq(table.taskAssignee.tenantId, resolvedTenantId)))
+	]);
 
 	return {
 		...resolvedTask,
