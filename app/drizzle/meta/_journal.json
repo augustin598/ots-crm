@@ -2353,6 +2353,20 @@
       "when": 1747800000013000,
       "tag": "0335_client_secondary_email_tenant_client_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 336,
+      "version": "6",
+      "when": 1747641600000,
+      "tag": "0336_task_google_calendar_event_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 337,
+      "version": "6",
+      "when": 1747641700000,
+      "tag": "0337_create_google_calendar_integration",
+      "breakpoints": true
     }
   ]
 }
