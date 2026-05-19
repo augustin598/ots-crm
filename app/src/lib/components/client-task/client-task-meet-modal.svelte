@@ -1,5 +1,6 @@
 <!-- src/lib/components/client-task/client-task-meet-modal.svelte -->
 <script lang="ts">
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import { scheduleMeet, getTask } from '$lib/remotes/tasks.remote';
 	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
@@ -99,22 +100,15 @@
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="meet-modal-title"
-		tabindex={0}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') onClose();
-		}}
+		tabindex={-1}
+		onclick={onClose}
+		onkeydown={() => {}}
+		use:focusTrap={{ active: open, onEscape: onClose, initialFocus: '#meet-title' }}
 	>
-		<!-- Backdrop click target -->
-		<button
-			type="button"
-			class="absolute inset-0 cursor-default"
-			aria-label="Închide dialog"
-			tabindex={-1}
-			onclick={onClose}
-		></button>
 		<div
 			class="ct-meet-modal relative z-10 w-[560px] max-w-[90vw] rounded-[14px] bg-white shadow-[0_20px_60px_rgba(15,23,42,0.25)]"
-			role="document"
+			onclick={(e) => e.stopPropagation()}
+			role="none"
 		>
 			<div class="ct-meet-head flex items-start justify-between border-b border-[#e5e9f0] p-5">
 				<div class="flex items-start gap-3">
