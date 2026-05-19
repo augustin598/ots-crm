@@ -1,3 +1,8 @@
+// NOTE(schema defaults): All timestamp columns declare `.default(sql`current_timestamp`)`.
+// This is a doc-only change — existing Turso tables retain their original `current_date`
+// defaults (SQLite ALTER TABLE cannot change defaults without recreating the table).
+// Runtime impact: zero — all code paths pass `new Date()` explicitly.
+// New tables created after this commit will use current_timestamp correctly.
 import { customType, sqliteTable, integer as serial, integer, text, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -62,10 +67,10 @@ export const tenant = sqliteTable('tenant', {
 	favicon: text('favicon'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const tenantUser = sqliteTable(
@@ -88,7 +93,7 @@ export const tenantUser = sqliteTable(
 		capabilities: text('capabilities'), // JSON array of capability IDs (override). NULL = use role defaults from access/catalog.ts
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => ({
 		uniqUserTenant: uniqueIndex('tenant_user_uniq').on(t.userId, t.tenantId)
@@ -109,7 +114,7 @@ export const accessCapability = sqliteTable('access_capability', {
 	unsafeUnlessRole: text('unsafe_unless_role'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const invitation = sqliteTable('invitation', {
@@ -130,7 +135,7 @@ export const invitation = sqliteTable('invitation', {
 	title: text('title'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const client = sqliteTable('client', {
@@ -178,10 +183,10 @@ export const client = sqliteTable('client', {
 	stripeCustomerId: text('stripe_customer_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	// Anti-duplicat la signup public (CUI = identitate fiscală unică per tenant).
 	// Partial index pe `cui IS NOT NULL` ca să permitem clienți fără CUI (PFA/PF).
@@ -201,10 +206,10 @@ export const partner = sqliteTable('partner', {
 		.references(() => tenant.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const project = sqliteTable('project', {
@@ -222,10 +227,10 @@ export const project = sqliteTable('project', {
 	currency: text('currency').notNull().default('RON'), // 'RON', 'EUR', 'USD', etc.
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const projectPartner = sqliteTable('project_partner', {
@@ -241,7 +246,7 @@ export const projectPartner = sqliteTable('project_partner', {
 		.references(() => partner.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const projectUser = sqliteTable('project_user', {
@@ -257,7 +262,7 @@ export const projectUser = sqliteTable('project_user', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const milestone = sqliteTable('milestone', {
@@ -275,10 +280,10 @@ export const milestone = sqliteTable('milestone', {
 	completedDate: timestamp('completed_date', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const task = sqliteTable('task', {
@@ -310,10 +315,10 @@ export const task = sqliteTable('task', {
 	meetLink: text('meet_link'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	index('task_tenant_status_idx').on(t.tenantId, t.status),
 	index('task_tenant_client_idx').on(t.tenantId, t.clientId),
@@ -338,10 +343,10 @@ export const contractTemplate = sqliteTable('contract_template', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const documentTemplate = sqliteTable('document_template', {
@@ -369,10 +374,10 @@ export const documentTemplate = sqliteTable('document_template', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const document = sqliteTable('document', {
@@ -397,7 +402,7 @@ export const document = sqliteTable('document', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const service = sqliteTable('service', {
@@ -419,10 +424,10 @@ export const service = sqliteTable('service', {
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const taskComment = sqliteTable('task_comment', {
@@ -441,10 +446,10 @@ export const taskComment = sqliteTable('task_comment', {
 	attachmentFileSize: integer('attachment_file_size'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	index('task_comment_task_created_idx').on(t.taskId, t.createdAt)
 ]);
@@ -460,7 +465,7 @@ export const taskCommentAttachment = sqliteTable('task_comment_attachment', {
 	fileSize: integer('file_size'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	index('task_comment_attachment_comment_idx').on(t.commentId)
 ]);
@@ -491,7 +496,7 @@ export const taskWatcher = sqliteTable('task_watcher', {
 		.references(() => tenant.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	index('task_watcher_task_idx').on(t.taskId)
 ]);
@@ -656,10 +661,10 @@ export const invoice = sqliteTable('invoice', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const invoiceLineItem = sqliteTable('invoice_line_item', {
@@ -681,7 +686,7 @@ export const invoiceLineItem = sqliteTable('invoice_line_item', {
 	keezItemExternalId: text('keez_item_external_id'), // Keez item external ID reference
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const recurringInvoice = sqliteTable('recurring_invoice', {
@@ -721,10 +726,10 @@ export const recurringInvoice = sqliteTable('recurring_invoice', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const plugin = sqliteTable('plugin', {
@@ -737,10 +742,10 @@ export const plugin = sqliteTable('plugin', {
 	config: jsonb('config').$type<Record<string, unknown>>(),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const tenantPlugin = sqliteTable('tenant_plugin', {
@@ -755,10 +760,10 @@ export const tenantPlugin = sqliteTable('tenant_plugin', {
 	config: jsonb('config').$type<Record<string, unknown>>(),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // ─── DirectAdmin Plugin Tables ─────────────────────────────────────────────────
@@ -795,10 +800,10 @@ export const daServer = sqliteTable(
 		}>(),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [index('da_server_tenant_idx').on(t.tenantId)]
 );
@@ -855,10 +860,10 @@ export const daPackage = sqliteTable(
 		lastSyncedAt: text('last_synced_at'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [index('da_package_server_idx').on(t.daServerId)]
 );
@@ -901,10 +906,10 @@ export const hostingProduct = sqliteTable(
 		stripeProductId: text('stripe_product_id'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [index('hosting_product_tenant_idx').on(t.tenantId)]
 );
@@ -977,10 +982,10 @@ export const hostingAccount = sqliteTable(
 		lastSyncedAt: text('last_synced_at'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [
 		index('hosting_account_tenant_idx').on(t.tenantId),
@@ -1024,10 +1029,10 @@ export const hostingInquiry = sqliteTable(
 		proformaInvoiceId: text('proforma_invoice_id'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		contactedAt: timestamp('contacted_at', { withTimezone: true, mode: 'date' })
 	},
 	(t) => [
@@ -1063,7 +1068,7 @@ export const processedStripeEvent = sqliteTable(
 		retryCount: integer('retry_count').notNull().default(0),
 		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [
 		index('processed_stripe_event_processed_at_idx').on(t.processedAt),
@@ -1150,10 +1155,10 @@ export const stripeIntegration = sqliteTable(
 		lastError: text('last_error'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [index('stripe_integration_tenant_idx').on(t.tenantId)]
 );
@@ -1177,7 +1182,7 @@ export const daAuditLog = sqliteTable(
 		durationMs: integer('duration_ms'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [
 		index('da_audit_log_tenant_idx').on(t.tenantId),
@@ -1204,7 +1209,7 @@ export const whmcsHostingImportLog = sqliteTable(
 		errorMessage: text('error_message'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => [
 		index('whmcs_hosting_import_log_tenant_idx').on(t.tenantId),
@@ -1257,10 +1262,10 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	invoiceLogo: text('invoice_logo'), // base64-encoded logo image for invoice PDFs
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const taskSettings = sqliteTable('task_settings', {
@@ -1280,10 +1285,10 @@ export const taskSettings = sqliteTable('task_settings', {
 	internalEmailOnComment: boolean('internal_email_on_comment').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const userWorkHours = sqliteTable('user_work_hours', {
@@ -1300,10 +1305,10 @@ export const userWorkHours = sqliteTable('user_work_hours', {
 	remindersEnabled: boolean('reminders_enabled').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const emailSettings = sqliteTable('email_settings', {
@@ -1322,10 +1327,10 @@ export const emailSettings = sqliteTable('email_settings', {
 	isEnabled: boolean('is_enabled').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const smartbillIntegration = sqliteTable('smartbill_integration', {
@@ -1340,10 +1345,10 @@ export const smartbillIntegration = sqliteTable('smartbill_integration', {
 	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const smartbillInvoiceSync = sqliteTable('smartbill_invoice_sync', {
@@ -1363,10 +1368,10 @@ export const smartbillInvoiceSync = sqliteTable('smartbill_invoice_sync', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const keezIntegration = sqliteTable('keez_integration', {
@@ -1388,10 +1393,10 @@ export const keezIntegration = sqliteTable('keez_integration', {
 	isDegraded: boolean('is_degraded').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const keezInvoiceSync = sqliteTable('keez_invoice_sync', {
@@ -1410,10 +1415,10 @@ export const keezInvoiceSync = sqliteTable('keez_invoice_sync', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const anafSpvIntegration = sqliteTable('anaf_spv_integration', {
@@ -1431,10 +1436,10 @@ export const anafSpvIntegration = sqliteTable('anaf_spv_integration', {
 	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const anafSpvInvoiceSync = sqliteTable('anaf_spv_invoice_sync', {
@@ -1451,10 +1456,10 @@ export const anafSpvInvoiceSync = sqliteTable('anaf_spv_invoice_sync', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const keezClientSync = sqliteTable('keez_client_sync', {
@@ -1472,10 +1477,10 @@ export const keezClientSync = sqliteTable('keez_client_sync', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const revolutIntegration = sqliteTable('revolut_integration', {
@@ -1491,10 +1496,10 @@ export const revolutIntegration = sqliteTable('revolut_integration', {
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const bankAccount = sqliteTable('bank_account', {
@@ -1514,10 +1519,10 @@ export const bankAccount = sqliteTable('bank_account', {
 	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const bankTransaction = sqliteTable('bank_transaction', {
@@ -1543,10 +1548,10 @@ export const bankTransaction = sqliteTable('bank_transaction', {
 	matchingMethod: text('matching_method'), // 'iban-amount', 'invoice-number', 'manual'
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const supplier = sqliteTable('supplier', {
@@ -1573,10 +1578,10 @@ export const supplier = sqliteTable('supplier', {
 	notes: text('notes'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const userBankAccount = sqliteTable('user_bank_account', {
@@ -1594,10 +1599,10 @@ export const userBankAccount = sqliteTable('user_bank_account', {
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const expense = sqliteTable('expense', {
@@ -1626,10 +1631,10 @@ export const expense = sqliteTable('expense', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const transactionInvoiceMatch = sqliteTable('transaction_invoice_match', {
@@ -1646,7 +1651,7 @@ export const transactionInvoiceMatch = sqliteTable('transaction_invoice_match', 
 	matchingMethod: text('matching_method').notNull(), // 'iban-amount', 'invoice-number', 'manual'
 	matchedAt: timestamp('matched_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	matchedByUserId: text('matched_by_user_id').references(() => user.id)
 });
 
@@ -1673,10 +1678,10 @@ export const transactionMatchRule = sqliteTable('transaction_match_rule', {
 	createdByUserId: text('created_by_user_id').references(() => user.id), // Who created the rule
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const seoLink = sqliteTable('seo_link', {
@@ -1713,10 +1718,10 @@ export const seoLink = sqliteTable('seo_link', {
 	gdriveUrl: text('gdrive_url'), // Google Drive link (used when articleType = 'gdrive')
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const clientWebsite = sqliteTable('client_website', {
@@ -1732,10 +1737,10 @@ export const clientWebsite = sqliteTable('client_website', {
 	isDefault: boolean('is_default').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
@@ -1756,10 +1761,10 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 	accessFlags: text('access_flags'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => [
 	index('client_secondary_email_tenant_client_idx').on(t.tenantId, t.clientId)
 ]);
@@ -1771,7 +1776,7 @@ export const seoLinkCheck = sqliteTable('seo_link_check', {
 		.references(() => seoLink.id, { onDelete: 'cascade' }),
 	checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	status: text('status').notNull(), // 'ok' | 'unreachable' | 'timeout' | 'redirect' | 'error'
 	httpCode: integer('http_code'),
 	responseTimeMs: integer('response_time_ms'),
@@ -1846,10 +1851,10 @@ export const contract = sqliteTable('contract', {
 		.references(() => user.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (t) => ({
 	uniqueTenantNumber: uniqueIndex('contract_tenant_number_unique').on(t.tenantId, t.contractNumber)
 }));
@@ -1883,7 +1888,7 @@ export const contractLineItem = sqliteTable('contract_line_item', {
 	sortOrder: integer('sort_order').notNull().default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const clientUser = sqliteTable('client_user', {
@@ -1901,10 +1906,10 @@ export const clientUser = sqliteTable('client_user', {
 	lastSelectedAt: timestamp('last_selected_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const servicePackageRequest = sqliteTable('service_package_request', {
@@ -1957,10 +1962,10 @@ export const clientUserPreferences = sqliteTable('client_user_preferences', {
 	// Timestamps
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const magicLinkToken = sqliteTable('magic_link_token', {
@@ -1977,7 +1982,7 @@ export const magicLinkToken = sqliteTable('magic_link_token', {
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const adminMagicLinkToken = sqliteTable('admin_magic_link_token', {
@@ -1989,7 +1994,7 @@ export const adminMagicLinkToken = sqliteTable('admin_magic_link_token', {
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const contractSignToken = sqliteTable('contract_sign_token', {
@@ -2008,7 +2013,7 @@ export const contractSignToken = sqliteTable('contract_sign_token', {
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const gmailIntegration = sqliteTable('gmail_integration', {
@@ -2038,10 +2043,10 @@ export const gmailIntegration = sqliteTable('gmail_integration', {
 	refreshTokenEncrypted: text('refresh_token_encrypted'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const supplierInvoice = sqliteTable('supplier_invoice', {
@@ -2065,10 +2070,10 @@ export const supplierInvoice = sqliteTable('supplier_invoice', {
 	importedAt: timestamp('imported_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const googleAdsIntegration = sqliteTable('google_ads_integration', {
@@ -2093,10 +2098,10 @@ export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Google Ads sub-accounts cached from MCC — each can be assigned to a CRM client
@@ -2121,10 +2126,10 @@ export const googleAdsAccount = sqliteTable('google_ads_account', {
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const googleAdsInvoice = sqliteTable('google_ads_invoice', {
@@ -2149,10 +2154,10 @@ export const googleAdsInvoice = sqliteTable('google_ads_invoice', {
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Google Ads spending — periodic spend data per account/client (mirrors meta_ads_spending pattern)
@@ -2176,10 +2181,10 @@ export const googleAdsSpending = sqliteTable('google_ads_spending', {
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Meta Ads integration — multiple per tenant (one per Business Manager)
@@ -2205,10 +2210,10 @@ export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	lastTokenCheckAt: timestamp('last_token_check_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Meta Ads ad accounts cached from Business Manager — each can be assigned to a CRM client
@@ -2236,10 +2241,10 @@ export const metaAdsAccount = sqliteTable('meta_ads_account', {
 	isPrimary: boolean('is_primary').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const metaAdsInvoice = sqliteTable('meta_ads_invoice', {
@@ -2267,10 +2272,10 @@ export const metaAdsInvoice = sqliteTable('meta_ads_invoice', {
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Meta Ads spending data synced from /insights endpoint per ad account
@@ -2297,10 +2302,10 @@ export const metaAdsSpending = sqliteTable('meta_ads_spending', {
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Meta Ads invoice downloads — real Facebook billing PDF receipts downloaded via invoices_generator
@@ -2328,10 +2333,10 @@ export const metaInvoiceDownload = sqliteTable('meta_invoice_download', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Meta Ads Pages — Facebook Pages connected for lead monitoring
@@ -2351,10 +2356,10 @@ export const metaAdsPage = sqliteTable('meta_ads_page', {
 	lastLeadSyncAt: timestamp('last_lead_sync_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // Leads — cross-platform lead storage (Facebook, TikTok, Google)
@@ -2382,13 +2387,13 @@ export const lead = sqliteTable('lead', {
 	externalCreatedAt: timestamp('external_created_at', { withTimezone: true, mode: 'date' }),
 	importedAt: timestamp('imported_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (table) => [
 	uniqueIndex('lead_tenant_external_platform_idx').on(table.tenantId, table.externalLeadId, table.platform)
 ]);
@@ -2418,10 +2423,10 @@ export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // TikTok Ads advertiser accounts cached — each can be assigned to a CRM client
@@ -2446,10 +2451,10 @@ export const tiktokAdsAccount = sqliteTable('tiktok_ads_account', {
 	lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // TikTok Ads spending data synced from Reporting API per advertiser
@@ -2477,10 +2482,10 @@ export const tiktokAdsSpending = sqliteTable('tiktok_ads_spending', {
 	syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // TikTok invoice downloads — billing PDF receipts downloaded via cookie-based API
@@ -2507,10 +2512,10 @@ export const tiktokInvoiceDownload = sqliteTable('tiktok_invoice_download', {
 	errorMessage: text('error_message'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const adsAccountBudget = sqliteTable('ads_account_budget', {
@@ -2528,10 +2533,10 @@ export const adsAccountBudget = sqliteTable('ads_account_budget', {
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 }, (table) => [
 	uniqueIndex('ads_account_budget_acc_idx').on(table.adsAccountId)
 ]);
@@ -2558,7 +2563,7 @@ export const passwordResetToken = sqliteTable('password_reset_token', {
 	usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // In-app notifications — delivered via SSE stream to connected users
@@ -2645,10 +2650,10 @@ export const reportSchedule = sqliteTable('report_schedule', {
 	lastSentAt: timestamp('last_sent_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 // ---- Saved Report Views ----
@@ -2667,10 +2672,10 @@ export const savedReportView = sqliteTable('saved_report_view', {
 	isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const tenantRelations = relations(tenant, ({ many, one }) => ({
@@ -4083,7 +4088,7 @@ export const invoiceViewToken = sqliteTable('invoice_view_token', {
 		.references(() => tenant.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
 });
 
@@ -4116,10 +4121,10 @@ export const seoLinkDiscoveryJob = sqliteTable('seo_link_discovery_job', {
 	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const seoLinkDiscoveryResult = sqliteTable('seo_link_discovery_result', {
@@ -4144,7 +4149,7 @@ export const seoLinkDiscoveryResult = sqliteTable('seo_link_discovery_result', {
 	savedAsSeoLinkId: text('saved_as_seo_link_id'),
 	foundAt: timestamp('found_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const sitemapCache = sqliteTable('sitemap_cache', {
@@ -4154,7 +4159,7 @@ export const sitemapCache = sqliteTable('sitemap_cache', {
 	byteSize: integer('byte_size').notNull().default(0),
 	fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
 });
 
@@ -4305,10 +4310,10 @@ export const wordpressSite = sqliteTable('wordpress_site', {
 	paused: integer('paused').notNull().default(0), // 1 = scheduler skips this site
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const wordpressSiteRelations = relations(wordpressSite, ({ one, many }) => ({
@@ -4346,7 +4351,7 @@ export const wordpressPendingUpdate = sqliteTable('wordpress_pending_update', {
 	autoUpdate: integer('auto_update').notNull().default(0), // 1 = WP auto-update is enabled (informational)
 	detectedAt: timestamp('detected_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const wordpressPendingUpdateRelations = relations(wordpressPendingUpdate, ({ one }) => ({
@@ -4380,7 +4385,7 @@ export const wordpressUpdateJob = sqliteTable('wordpress_update_job', {
 	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const wordpressUpdateJobRelations = relations(wordpressUpdateJob, ({ one }) => ({
@@ -4420,7 +4425,7 @@ export const wordpressBackup = sqliteTable('wordpress_backup', {
 	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const wordpressBackupRelations = relations(wordpressBackup, ({ one }) => ({
@@ -4463,13 +4468,13 @@ export const wordpressPost = sqliteTable('wordpress_post', {
 	publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }),
 	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 export const wordpressPostRelations = relations(wordpressPost, ({ one }) => ({
@@ -4509,10 +4514,10 @@ export const whmcsIntegration = sqliteTable('whmcs_integration', {
 	lastFailureReason: text('last_failure_reason'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`),
+		.default(sql`current_timestamp`),
 	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
 		.notNull()
-		.default(sql`current_date`)
+		.default(sql`current_timestamp`)
 });
 
 /**
@@ -4543,7 +4548,7 @@ export const whmcsInvoiceSync = sqliteTable(
 		rawPayload: text('raw_payload'), // redacted JSON
 		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' }),
 		// Keez auto-push state-machine, separate from `state` so the upstream
 		// Keez/CRM lifecycle and the downstream Keez push lifecycle don't conflict.
@@ -4586,7 +4591,7 @@ export const whmcsClientSync = sqliteTable(
 		rawPayload: text('raw_payload'),
 		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`),
+			.default(sql`current_timestamp`),
 		processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
 	},
 	(t) => ({
@@ -4612,7 +4617,7 @@ export const whmcsProductSync = sqliteTable(
 		rawPayload: text('raw_payload'),
 		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => ({
 		uniqPair: uniqueIndex('uniq_whmcs_tenant_product').on(t.tenantId, t.whmcsProductId)
@@ -4636,7 +4641,7 @@ export const whmcsTransactionSync = sqliteTable(
 		rawPayload: text('raw_payload'),
 		receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' })
 			.notNull()
-			.default(sql`current_date`)
+			.default(sql`current_timestamp`)
 	},
 	(t) => ({
 		uniqPair: uniqueIndex('uniq_whmcs_tenant_transaction').on(t.tenantId, t.whmcsTransactionId)
