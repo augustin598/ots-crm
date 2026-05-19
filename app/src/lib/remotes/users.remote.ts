@@ -14,8 +14,6 @@ export const getTenantUsers = query(async () => {
 		throw new Error('Unauthorized');
 	}
 
-	const tenantId = event.locals.tenant.id;
-
 	// Returns one row per tenantUser with the joined user info + role + meta.
 	const tenantUsers = await db
 		.select({
@@ -33,49 +31,7 @@ export const getTenantUsers = query(async () => {
 		})
 		.from(table.tenantUser)
 		.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))
-		.where(eq(table.tenantUser.tenantId, tenantId));
-
-	// Optionally fill missing phone from whatsappContact match by name — helps avatars
-	// when tenantUser.phone wasn't filled in profile but the person is on WhatsApp.
-	const needsMatch = tenantUsers.some((u) => !u.phone);
-	if (needsMatch) {
-		const wcRows = await db
-			.select({
-				phoneE164: table.whatsappContact.phoneE164,
-				displayName: table.whatsappContact.displayName,
-				pushName: table.whatsappContact.pushName
-			})
-			.from(table.whatsappContact)
-			.where(eq(table.whatsappContact.tenantId, tenantId));
-
-		const match = (firstName: string | null, lastName: string | null): string | null => {
-			const first = (firstName ?? '').trim().toLowerCase();
-			const last = (lastName ?? '').trim().toLowerCase();
-			const full = `${first} ${last}`.trim();
-			if (!full && !first) return null;
-			if (full) {
-				for (const wc of wcRows) {
-					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
-					if (wcName && wcName === full) return wc.phoneE164;
-				}
-			}
-			if (first) {
-				const candidates = wcRows.filter((wc) => {
-					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
-					return wcName === first || wcName.startsWith(first + ' ');
-				});
-				if (candidates.length === 1) return candidates[0].phoneE164;
-			}
-			return null;
-		};
-
-		for (const u of tenantUsers) {
-			if (!u.phone) {
-				const matched = match(u.firstName, u.lastName);
-				if (matched) (u as any).phone = matched;
-			}
-		}
-	}
+		.where(eq(table.tenantUser.tenantId, event.locals.tenant.id));
 
 	return tenantUsers;
 });
