@@ -308,9 +308,24 @@
 													aria-label={`Deschide ${att.fileName ?? 'imaginea'}`}
 												>
 													<img
-														src={resolvedUrl}
+														src={attachmentUrls[att.id] ?? resolvedUrl}
 														alt={att.fileName ?? ''}
 														class="h-full w-full object-cover"
+														onerror={async (e) => {
+															const img = e.currentTarget as HTMLImageElement;
+															if (img.dataset.retried === 'true') return;
+															img.dataset.retried = 'true';
+															try {
+																const fresh = await getAttachmentUrl(att.id).refresh();
+																const newUrl = fresh?.url ?? '';
+																if (newUrl) {
+																	attachmentUrls = { ...attachmentUrls, [att.id]: newUrl };
+																	img.src = newUrl;
+																}
+															} catch {
+																// give up — show broken state
+															}
+														}}
 													/>
 													{#if att.fileName}
 														<div
