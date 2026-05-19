@@ -700,11 +700,26 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 			client_ltvCents: table.client.ltvCents
 		})
 		.from(table.hostingAccount)
-		.leftJoin(table.client, eq(table.client.id, table.hostingAccount.clientId))
-		.leftJoin(table.daServer, eq(table.daServer.id, table.hostingAccount.daServerId))
+		.leftJoin(
+			table.client,
+			and(
+				eq(table.client.id, table.hostingAccount.clientId),
+				eq(table.client.tenantId, tenantId)
+			)
+		)
+		.leftJoin(
+			table.daServer,
+			and(
+				eq(table.daServer.id, table.hostingAccount.daServerId),
+				eq(table.daServer.tenantId, tenantId)
+			)
+		)
 		.leftJoin(
 			table.hostingProduct,
-			eq(table.hostingProduct.id, table.hostingAccount.hostingProductId)
+			and(
+				eq(table.hostingProduct.id, table.hostingAccount.hostingProductId),
+				eq(table.hostingProduct.tenantId, tenantId)
+			)
 		)
 		.where(
 			and(

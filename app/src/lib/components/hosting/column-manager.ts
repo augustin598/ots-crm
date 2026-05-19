@@ -44,7 +44,11 @@ export function loadPersistedColumnConfig(
 		const parsed = JSON.parse(raw) as Partial<ColumnConfig>;
 		const order = Array.isArray(parsed.order) ? parsed.order : fallback.order;
 		const visible =
-			parsed.visible && typeof parsed.visible === 'object' ? parsed.visible : fallback.visible;
+			parsed.visible &&
+			typeof parsed.visible === 'object' &&
+			!Array.isArray(parsed.visible)
+				? parsed.visible
+				: fallback.visible;
 		const cleanOrder = order.filter((k) => fallback.order.includes(k));
 		for (const k of fallback.order) if (!cleanOrder.includes(k)) cleanOrder.push(k);
 		const cleanVisible: Record<string, boolean> = {};
