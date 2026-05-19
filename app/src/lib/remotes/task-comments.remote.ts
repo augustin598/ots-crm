@@ -48,6 +48,19 @@ function generateTaskCommentId() {
 }
 
 /**
+ * Validate that a MinIO path belongs to the given tenant.
+ * Storage paths are scoped as: {tenantId}/{timestamp}-{filename}
+ * Reject any path that does not start with the tenant prefix to prevent
+ * a client from pointing to another tenant's objects.
+ */
+function assertTenantOwnedPath(path: string, tenantId: string): void {
+	const expectedPrefix = `${tenantId}/`;
+	if (!path.startsWith(expectedPrefix)) {
+		throw new Error('Invalid attachment path');
+	}
+}
+
+/**
  * Extract mentioned user IDs from TipTap HTML content.
  * TipTap outputs attributes in varying order, so we match data-id on any element
  * that also has data-type="mention" (handles both attribute orderings).
@@ -223,6 +236,11 @@ export const createTaskComment = command(
 						fileSize: data.attachmentFileSize
 					}]
 				: [];
+
+		// Validate that every attachment path is owned by this tenant (prevents cross-tenant object access)
+		for (const a of attachments) {
+			assertTenantOwnedPath(a.path, event.locals.tenant.id);
+		}
 
 		// Strip empty TipTap HTML (e.g. "<p></p>", "<p> </p>")
 		const textContent = data.content.replace(/<[^>]*>/g, '').trim();
