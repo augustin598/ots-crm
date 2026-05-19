@@ -71,6 +71,7 @@
 		Square,
 		ChevronLeft
 	} from '@lucide/svelte';
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import { toast } from 'svelte-sonner';
 	import type { Task } from '$lib/server/db/schema';
 	import TaskDetailHeader from './task-detail-header.svelte';
@@ -1070,25 +1071,22 @@
 
 		<!-- MEET MODAL (panel only) -->
 		{#if showMeetModal}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
 				onclick={(e) => {
 					if (e.target === e.currentTarget) showMeetModal = false;
 				}}
-				onkeydown={(e) => {
-					if (e.key === 'Escape') showMeetModal = false;
-				}}
+				onkeydown={() => {}}
 				role="dialog"
 				aria-modal="true"
-				tabindex="-1"
+				aria-labelledby="admin-meet-modal-title"
+				tabindex={-1}
+				use:focusTrap={{ active: showMeetModal, onEscape: () => (showMeetModal = false), initialFocus: '#meet-title' }}
 			>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="w-full max-w-md rounded-2xl bg-white shadow-2xl"
 					onclick={(e) => e.stopPropagation()}
-					onkeydown={() => {}}
-					role="document"
+					role="none"
 				>
 					<div class="flex items-center justify-between border-b px-6 py-4">
 						<div class="flex items-center gap-3">
@@ -1105,7 +1103,7 @@
 								</svg>
 							</div>
 							<div>
-								<h2 class="text-base font-bold text-gray-900">Programează Google Meet</h2>
+								<h2 id="admin-meet-modal-title" class="text-base font-bold text-gray-900">Programează Google Meet</h2>
 								<p class="text-xs text-muted-foreground">Salvează detaliile întâlnirii la task</p>
 							</div>
 						</div>
