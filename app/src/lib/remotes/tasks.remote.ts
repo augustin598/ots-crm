@@ -1766,32 +1766,40 @@ export const bulkUpdateTaskStatus = command(
 				);
 		});
 
-		// Record activity per changed task (skip no-ops above already filtered)
-		for (const t of changedTasks) {
-			try {
-				await recordTaskActivity({
-					taskId: t.id,
-					userId,
-					tenantId,
-					action: 'bulk_status_changed',
-					field: 'status',
-					oldValue: t.status,
-					newValue: newStatus
-				});
-				await sendClientNotificationIfEnabled(
+		// Batch activity insert — single DB roundtrip instead of N sequential inserts
+		const activityRows = changedTasks.map((t) => ({
+			id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15))),
+			taskId: t.id,
+			userId,
+			tenantId,
+			action: 'bulk_status_changed',
+			field: 'status',
+			oldValue: t.status,
+			newValue: newStatus,
+			createdAt: new Date()
+		}));
+
+		try {
+			await db.insert(table.taskActivity).values(activityRows);
+		} catch (error) {
+			logWarning('server', 'Bulk status activity insert failed', {
+				tenantId,
+				metadata: { error: (error as Error).message, newStatus, count: activityRows.length }
+			});
+		}
+
+		// Parallel client notifications — all fire concurrently, failures are isolated
+		await Promise.allSettled(
+			changedTasks.map((t) =>
+				sendClientNotificationIfEnabled(
 					t.id,
 					tenantId,
 					'status-change',
 					{ newStatus },
 					event.locals.user.email
-				);
-			} catch (error) {
-				logWarning('server', `Bulk status activity/notification failed for task ${t.id}`, {
-					tenantId,
-					metadata: { error: (error as Error).message, newStatus }
-				});
-			}
-		}
+				)
+			)
+		);
 
 		return {
 			success: true,
