@@ -383,6 +383,16 @@ export const getAssignableClientUsers = query(
 
 		if (rows.length === 0) return [];
 
+		// Resolve the client phone once — shared across all client users of this client.
+		// Used downstream to fetch the company's WhatsApp avatar (per design: client users
+		// share the company avatar for v1; individual per-contact phones not stored).
+		const [clientRow] = await db
+			.select({ phone: table.client.phone })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		const clientPhone = clientRow?.phone ?? null;
+
 		// For non-primary users, look up their clientSecondaryEmail row to read accessFlags.
 		// Match by lower(email) since clientSecondaryEmail.email may have casing differences.
 		const nonPrimaryEmails = rows
@@ -433,7 +443,10 @@ export const getAssignableClientUsers = query(
 				email: r.email,
 				firstName: r.firstName,
 				lastName: r.lastName,
-				isPrimary: r.isPrimary
+				isPrimary: r.isPrimary,
+				// Shared company phone — UI uses to fetch WhatsApp avatar via existing
+				// /[tenant]/api/whatsapp/avatar/[phoneE164] endpoint. null → initials fallback.
+				phone: clientPhone
 			}));
 	}
 );
