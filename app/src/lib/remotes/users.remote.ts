@@ -14,6 +14,8 @@ export const getTenantUsers = query(async () => {
 		throw new Error('Unauthorized');
 	}
 
+	const tenantId = event.locals.tenant.id;
+
 	// Returns one row per tenantUser with the joined user info + role + meta.
 	const tenantUsers = await db
 		.select({
@@ -31,7 +33,49 @@ export const getTenantUsers = query(async () => {
 		})
 		.from(table.tenantUser)
 		.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))
-		.where(eq(table.tenantUser.tenantId, event.locals.tenant.id));
+		.where(eq(table.tenantUser.tenantId, tenantId));
+
+	// Optionally fill missing phone from whatsappContact match by name — helps avatars
+	// when tenantUser.phone wasn't filled in profile but the person is on WhatsApp.
+	const needsMatch = tenantUsers.some((u) => !u.phone);
+	if (needsMatch) {
+		const wcRows = await db
+			.select({
+				phoneE164: table.whatsappContact.phoneE164,
+				displayName: table.whatsappContact.displayName,
+				pushName: table.whatsappContact.pushName
+			})
+			.from(table.whatsappContact)
+			.where(eq(table.whatsappContact.tenantId, tenantId));
+
+		const match = (firstName: string | null, lastName: string | null): string | null => {
+			const first = (firstName ?? '').trim().toLowerCase();
+			const last = (lastName ?? '').trim().toLowerCase();
+			const full = `${first} ${last}`.trim();
+			if (!full && !first) return null;
+			if (full) {
+				for (const wc of wcRows) {
+					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
+					if (wcName && wcName === full) return wc.phoneE164;
+				}
+			}
+			if (first) {
+				const candidates = wcRows.filter((wc) => {
+					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
+					return wcName === first || wcName.startsWith(first + ' ');
+				});
+				if (candidates.length === 1) return candidates[0].phoneE164;
+			}
+			return null;
+		};
+
+		for (const u of tenantUsers) {
+			if (!u.phone) {
+				const matched = match(u.firstName, u.lastName);
+				if (matched) (u as any).phone = matched;
+			}
+		}
+	}
 
 	return tenantUsers;
 });
@@ -383,15 +427,53 @@ export const getAssignableClientUsers = query(
 
 		if (rows.length === 0) return [];
 
-		// Resolve the client phone once — shared across all client users of this client.
-		// Used downstream to fetch the company's WhatsApp avatar (per design: client users
-		// share the company avatar for v1; individual per-contact phones not stored).
+		// Resolve the client phone once — fallback shared across all client users.
 		const [clientRow] = await db
 			.select({ phone: table.client.phone })
 			.from(table.client)
 			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
 			.limit(1);
 		const clientPhone = clientRow?.phone ?? null;
+
+		// Try to match each user to an individual whatsappContact by display name.
+		// `user` table has no phone column, so we fuzzy-match against contact names
+		// for the same tenant. Exact full-name match wins; single first-name match
+		// is acceptable; otherwise fall back to the shared client phone.
+		const wcRows = await db
+			.select({
+				phoneE164: table.whatsappContact.phoneE164,
+				displayName: table.whatsappContact.displayName,
+				pushName: table.whatsappContact.pushName
+			})
+			.from(table.whatsappContact)
+			.where(eq(table.whatsappContact.tenantId, tenantId));
+
+		function matchWhatsappPhone(
+			firstName: string | null | undefined,
+			lastName: string | null | undefined
+		): string | null {
+			const first = (firstName ?? '').trim().toLowerCase();
+			const last = (lastName ?? '').trim().toLowerCase();
+			const full = `${first} ${last}`.trim();
+			if (!full && !first) return null;
+
+			// Pass 1: exact full-name match on displayName/pushName
+			if (full) {
+				for (const wc of wcRows) {
+					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
+					if (wcName && wcName === full) return wc.phoneE164;
+				}
+			}
+			// Pass 2: single first-name candidate (avoids ambiguous shared first names)
+			if (first) {
+				const candidates = wcRows.filter((wc) => {
+					const wcName = (wc.displayName ?? wc.pushName ?? '').trim().toLowerCase();
+					return wcName === first || wcName.startsWith(first + ' ');
+				});
+				if (candidates.length === 1) return candidates[0].phoneE164;
+			}
+			return null;
+		}
 
 		// For non-primary users, look up their clientSecondaryEmail row to read accessFlags.
 		// Match by lower(email) since clientSecondaryEmail.email may have casing differences.
@@ -444,9 +526,9 @@ export const getAssignableClientUsers = query(
 				firstName: r.firstName,
 				lastName: r.lastName,
 				isPrimary: r.isPrimary,
-				// Shared company phone — UI uses to fetch WhatsApp avatar via existing
-				// /[tenant]/api/whatsapp/avatar/[phoneE164] endpoint. null → initials fallback.
-				phone: clientPhone
+				// Prefer individual WhatsApp contact match (per-user avatar). Fall back
+				// to the shared client phone (company avatar) if no match found.
+				phone: matchWhatsappPhone(r.firstName, r.lastName) ?? clientPhone
 			}));
 	}
 );
