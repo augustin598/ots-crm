@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, notInArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
+import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-recipients';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
@@ -19,7 +20,8 @@ async function sendClientNotificationIfEnabled(
 	tenantId: string,
 	notificationType: ClientNotificationType,
 	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string },
-	excludeEmail?: string
+	excludeEmail?: string,
+	excludeEmails?: Set<string>
 ): Promise<void> {
 	try {
 		// Load task settings
@@ -62,8 +64,11 @@ async function sendClientNotificationIfEnabled(
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
 		const errors: Array<{ email: string; error: string }> = [];
 		for (const recipient of recipients) {
+			const lower = recipient.email.toLowerCase().trim();
 			// Skip the user who performed the action (don't notify yourself)
-			if (excludeEmail && recipient.email.toLowerCase() === excludeEmail.toLowerCase()) continue;
+			if (excludeEmail && lower === excludeEmail.toLowerCase().trim()) continue;
+			// Skip emails already covered by the personal-assignment path (dedup)
+			if (excludeEmails && excludeEmails.has(lower)) continue;
 			try {
 				await sendTaskClientNotificationEmail(
 					taskId,
@@ -851,6 +856,42 @@ export const createTask = command(taskSchema, async (data) => {
 	// Deduplicate assignee IDs before insert
 	const uniqueAssigneeIds = [...new Set(data.assigneeUserIds || [])];
 
+	// Validate every assignee is either a tenantUser (agency) OR a clientUser for
+	// the task's clientId (mirror addAssignee:2720-2753). Fail fast on bad IDs.
+	if (uniqueAssigneeIds.length > 0) {
+		const agencyRows = await db
+			.select({ userId: table.tenantUser.userId })
+			.from(table.tenantUser)
+			.where(
+				and(
+					eq(table.tenantUser.tenantId, targetTenantId),
+					inArray(table.tenantUser.userId, uniqueAssigneeIds)
+				)
+			);
+		const agencyIds = new Set(agencyRows.map((r) => r.userId));
+
+		let clientIds = new Set<string>();
+		if (clientId) {
+			const clientRows = await db
+				.select({ userId: table.clientUser.userId })
+				.from(table.clientUser)
+				.where(
+					and(
+						eq(table.clientUser.tenantId, targetTenantId),
+						eq(table.clientUser.clientId, clientId),
+						inArray(table.clientUser.userId, uniqueAssigneeIds)
+					)
+				);
+			clientIds = new Set(clientRows.map((r) => r.userId));
+		}
+
+		for (const uid of uniqueAssigneeIds) {
+			if (!agencyIds.has(uid) && !clientIds.has(uid)) {
+				throw new Error('Unul dintre responsabili nu este membru valid al tenantului sau clientului.');
+			}
+		}
+	}
+
 	// Atomic: task + subtasks + tags + assignees + watchers in one transaction
 	await db.transaction(async (tx) => {
 		await tx.insert(table.task).values({
@@ -968,26 +1009,40 @@ export const createTask = command(taskSchema, async (data) => {
 		// Don't throw - task creation should succeed even if notification fails
 	}
 
-	// If task is assigned, send assignment email and in-app notification
-	if (data.assignedToUserId) {
-		// Get assignee email
-		const [assignee] = await db
-			.select()
-			.from(table.user)
-			.where(eq(table.user.id, data.assignedToUserId))
-			.limit(1);
-
-		if (assignee?.email) {
-			try {
-				const assigneeName = `${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email;
-				await sendTaskAssignmentEmail(taskId, assignee.email, assigneeName);
-			} catch (error) {
-				logWarning('email', `Failed to send task assignment email: ${(error as Error).message}`);
-				// Don't throw - task creation should succeed even if email fails
+	// Send individual assignment emails to every assignee (agency + client),
+	// each with the correct URL for their app surface (agency vs portal).
+	// Per-clientUser preferences are enforced inside resolveTaskRecipients.
+	let personalAssignmentEmails = new Set<string>();
+	if (uniqueAssigneeIds.length > 0) {
+		try {
+			const recipients = await resolveTaskRecipients({
+				tenantId: targetTenantId,
+				tenantSlug: event.locals.tenant.slug,
+				taskId,
+				event: 'assigned',
+				actorUserId: event.locals.user.id
+			});
+			personalAssignmentEmails = recipientEmailsLower(recipients);
+			for (const r of recipients) {
+				try {
+					await sendTaskAssignmentEmail(taskId, r.email, r.name, r.taskUrl);
+				} catch (error) {
+					logWarning(
+						'email',
+						`Failed to send task assignment email to ${r.email}: ${(error as Error).message}`
+					);
+				}
 			}
+		} catch (error) {
+			logWarning(
+				'email',
+				`resolveTaskRecipients(assigned) failed: ${(error as Error).message}`
+			);
 		}
+	}
 
-		// Emit task.assigned hook for in-app notification
+	// Emit task.assigned hook for the primary assignee (in-app notification path).
+	if (data.assignedToUserId) {
 		try {
 			const hooks = getHooksManager();
 			await hooks.emit({
@@ -1013,8 +1068,17 @@ export const createTask = command(taskSchema, async (data) => {
 		action: 'created'
 	});
 
-	// Send client notification
-	await sendClientNotificationIfEnabled(taskId, targetTenantId, 'created', undefined, event.locals.user.email);
+	// Send legacy company-level client notification, deduped against the
+	// personal-assignment set so a clientUser whose email matches client.email
+	// only gets ONE email (the assignee one).
+	await sendClientNotificationIfEnabled(
+		taskId,
+		targetTenantId,
+		'created',
+		undefined,
+		event.locals.user.email,
+		personalAssignmentEmails
+	);
 
 	// Auto-generate Google Meet for type=meeting tasks (separate integration)
 	if (data.type === 'meeting' && data.meetTime) {
@@ -1860,12 +1924,43 @@ export const updateTaskStatus = command(
 			newValue: newStatus
 		});
 
+		// Notify all current assignees (agency + clientUsers) — per-clientUser
+		// pref gate enforced inside resolveTaskRecipients. Returns URL-routed
+		// recipients, then we dedup against the legacy primary-contact path.
+		let personalEmails = new Set<string>();
+		try {
+			const recipients = await resolveTaskRecipients({
+				tenantId: event.locals.tenant.id,
+				tenantSlug: event.locals.tenant.slug,
+				taskId,
+				event: 'status-change',
+				actorUserId: event.locals.user.id
+			});
+			personalEmails = recipientEmailsLower(recipients);
+			for (const r of recipients) {
+				try {
+					await sendTaskUpdateEmail(taskId, r.email, r.name, 'status', r.taskUrl);
+				} catch (error) {
+					logWarning(
+						'email',
+						`Failed to send status-change email to ${r.email}: ${(error as Error).message}`
+					);
+				}
+			}
+		} catch (error) {
+			logWarning(
+				'email',
+				`resolveTaskRecipients(status-change) failed: ${(error as Error).message}`
+			);
+		}
+
 		await sendClientNotificationIfEnabled(
 			taskId,
 			event.locals.tenant.id,
 			'status-change',
 			{ newStatus },
-			event.locals.user.email
+			event.locals.user.email,
+			personalEmails
 		);
 
 		return { success: true, changed: true };

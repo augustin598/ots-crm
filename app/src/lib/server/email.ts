@@ -1461,7 +1461,8 @@ export async function sendPasswordResetEmail(
 export async function sendTaskAssignmentEmail(
 	taskId: string,
 	assigneeEmail: string,
-	assigneeName?: string
+	assigneeName?: string,
+	taskUrlOverride?: string
 ): Promise<void> {
 	if (assigneeName) assigneeName = escapeHtml(assigneeName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1483,7 +1484,7 @@ export async function sendTaskAssignmentEmail(
 			htmlBody: '',
 			payload: {
 				sendFn: 'sendTaskAssignmentEmail',
-				args: [taskId, assigneeEmail, assigneeName]
+				args: [taskId, assigneeEmail, assigneeName, taskUrlOverride]
 			}
 		},
 		async () => {
@@ -1511,7 +1512,8 @@ export async function sendTaskAssignmentEmail(
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const themeColor = normalizeThemeColor(tenant?.themeColor);
-			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+			const taskUrl =
+				taskUrlOverride || `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
 			const assignStatusColors = getEmailStatusColors(task.status);
 			const assignPriorityColors = getEmailPriorityColors(task.priority);
@@ -1585,7 +1587,8 @@ export async function sendTaskUpdateEmail(
 	taskId: string,
 	watcherEmail: string,
 	watcherName?: string,
-	changeType?: string
+	changeType?: string,
+	taskUrlOverride?: string
 ): Promise<void> {
 	if (watcherName) watcherName = escapeHtml(watcherName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1606,7 +1609,7 @@ export async function sendTaskUpdateEmail(
 			htmlBody: '',
 			payload: {
 				sendFn: 'sendTaskUpdateEmail',
-				args: [taskId, watcherEmail, watcherName, changeType]
+				args: [taskId, watcherEmail, watcherName, changeType, taskUrlOverride]
 			}
 		},
 		async () => {
@@ -1634,7 +1637,8 @@ export async function sendTaskUpdateEmail(
 			const fromEmail = resolveFromEmail(emailSettings);
 			const tenantName = tenant?.name || 'CRM';
 			const themeColor = normalizeThemeColor(tenant?.themeColor);
-			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
+			const taskUrl =
+				taskUrlOverride || `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
 			const changeDescription =
 				changeType === 'status'

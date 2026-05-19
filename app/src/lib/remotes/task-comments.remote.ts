@@ -10,6 +10,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import sanitizeHtml from 'sanitize-html';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
+import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-recipients';
 import * as storage from '$lib/server/storage';
 import { createNotification } from '$lib/server/notifications';
 import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
@@ -297,87 +298,43 @@ export const createTaskComment = command(
 			.where(eq(table.taskSettings.tenantId, event.locals.tenant.id))
 			.limit(1);
 
-		// Send internal notification to watchers (if enabled)
-		if (settings?.internalEmailOnComment !== false) {
-			const watchers = await db
-				.select({
-					userId: table.taskWatcher.userId,
-					email: table.user.email,
-					firstName: table.user.firstName,
-					lastName: table.user.lastName
-				})
-				.from(table.taskWatcher)
-				.innerJoin(table.user, eq(table.taskWatcher.userId, table.user.id))
-				.where(
-					and(
-						eq(table.taskWatcher.taskId, data.taskId),
-						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
-					)
-				);
+		const mentionedUserIds = extractMentionIds(data.content);
 
-			for (const watcher of watchers) {
-				if (watcher.userId === event.locals.user.id) continue;
-				if (!watcher.email) continue;
+		// Resolve all email recipients in one shot: assignees (agency + client),
+		// watchers (agency), mentions (agency + client). Kind-routed URLs,
+		// per-clientUser preferences enforced, deduped, actor excluded.
+		const personalRecipients = await resolveTaskRecipients({
+			tenantId: event.locals.tenant.id,
+			tenantSlug: event.locals.tenant.slug,
+			taskId: data.taskId,
+			event: 'comment',
+			actorUserId: event.locals.user.id,
+			mentionedUserIds
+		});
 
-				try {
-					const watcherName =
-						`${watcher.firstName} ${watcher.lastName}`.trim() || watcher.email;
-					await sendTaskUpdateEmail(data.taskId, watcher.email, watcherName, 'comment');
-				} catch (error) {
-					console.error('Failed to send comment notification to watcher:', error);
-				}
+		// Apply tenant-level internal-comment toggle to agency recipients only.
+		const internalEnabled = settings?.internalEmailOnComment !== false;
+		for (const r of personalRecipients) {
+			if (r.kind === 'agency' && !internalEnabled) continue;
+			const changeType = r.reason === 'mention' ? 'mention' : 'comment';
+			try {
+				await sendTaskUpdateEmail(data.taskId, r.email, r.name, changeType, r.taskUrl);
+			} catch (error) {
+				console.error(`Failed to send comment notification to ${r.email}:`, error);
 			}
 		}
 
-		// Send mention notifications to mentioned users (who aren't already watchers)
-		const mentionedUserIds = extractMentionIds(data.content);
+		// In-app + Telegram notifications for @mentions stay as before — they
+		// are a separate channel and fire even when email is throttled.
 		if (mentionedUserIds.length > 0) {
-			// Single query for watchers
-			const watcherUserIds = new Set(
-				(await db
-					.select({ userId: table.taskWatcher.userId })
-					.from(table.taskWatcher)
-					.where(and(
-						eq(table.taskWatcher.taskId, data.taskId),
-						eq(table.taskWatcher.tenantId, event.locals.tenant.id)
-					))
-				).map(w => w.userId)
+			const nonSelfMentionIds = mentionedUserIds.filter(
+				(id) => id !== event.locals.user.id
 			);
-
-			// Filter out self-mentions before any DB work
-			const nonSelfMentionIds = mentionedUserIds.filter(id => id !== event.locals.user.id);
-
-			// Single batched user lookup instead of N sequential SELECTs
-			const mentionedUsers = nonSelfMentionIds.length > 0
-				? await db
-					.select({
-						id: table.user.id,
-						email: table.user.email,
-						firstName: table.user.firstName,
-						lastName: table.user.lastName
-					})
-					.from(table.user)
-					.where(inArray(table.user.id, nonSelfMentionIds))
-				: [];
-
-			const mentionedUserMap = new Map(mentionedUsers.map(u => [u.id, u]));
-
-			const authorName = `${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() || event.locals.user.email;
+			const authorName =
+				`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||
+				event.locals.user.email;
 			const tenantSlug = event.locals.tenant.slug;
-
 			for (const mentionedId of nonSelfMentionIds) {
-				const isAlreadyWatcher = watcherUserIds.has(mentionedId);
-				const mentionedUser = mentionedUserMap.get(mentionedId);
-
-				// Send mention email only if not already notified as watcher
-				if (!isAlreadyWatcher && mentionedUser?.email) {
-					const mentionedName = `${mentionedUser.firstName} ${mentionedUser.lastName}`.trim() || mentionedUser.email;
-					sendTaskUpdateEmail(data.taskId, mentionedUser.email, mentionedName, 'mention').catch((error) => {
-						console.error('Failed to send mention notification:', error);
-					});
-				}
-
-				// In-app notification for @mention — always sent (even if watcher)
 				await createNotification({
 					tenantId: event.locals.tenant.id,
 					userId: mentionedId,
@@ -387,10 +344,9 @@ export const createTaskComment = command(
 					message: `Te-a menționat într-un comentariu la "${task.title}"`,
 					link: `/${tenantSlug}/tasks/${data.taskId}`,
 					priority: 'high',
-					metadata: { taskId: data.taskId, commentId },
+					metadata: { taskId: data.taskId, commentId }
 				}).catch(() => {});
 
-				// Telegram mention notification
 				void notifyTaskMention({
 					tenantId: event.locals.tenant.id,
 					tenantSlug,
@@ -399,14 +355,21 @@ export const createTaskComment = command(
 					mentionedUserId: mentionedId,
 					authorUserId: event.locals.user.id,
 					authorName,
-					commentSnippet: data.content,
+					commentSnippet: data.content
 				}).catch(() => {});
 			}
 		}
 
-		// Send client notification (if enabled) — skip when the comment author is a client user
+		// Legacy company-level client notification — deduped against the
+		// personal recipient set so a clientUser whose email matches
+		// `client.email` is NOT emailed twice. Skip when the comment author
+		// is themselves a client user.
 		const isClientUser = event.locals.isClientUser === true;
-		if (!isClientUser && settings?.clientEmailsEnabled && settings?.clientEmailOnComment !== false) {
+		if (
+			!isClientUser &&
+			settings?.clientEmailsEnabled &&
+			settings?.clientEmailOnComment !== false
+		) {
 			if (task.clientId) {
 				const [client] = await db
 					.select()
@@ -415,10 +378,13 @@ export const createTaskComment = command(
 					.limit(1);
 
 				if (client?.email) {
+					const personalEmails = recipientEmailsLower(personalRecipients);
+					const actorEmailLower = event.locals.user.email.toLowerCase().trim();
 					const recipients = await getNotificationRecipients(task.clientId, 'tasks');
 					for (const recipient of recipients) {
-						// Skip the comment author (don't notify yourself)
-						if (recipient.email.toLowerCase() === event.locals.user.email.toLowerCase()) continue;
+						const lower = recipient.email.toLowerCase().trim();
+						if (lower === actorEmailLower) continue;
+						if (personalEmails.has(lower)) continue;
 						try {
 							await sendTaskClientNotificationEmail(
 								data.taskId,
@@ -429,7 +395,6 @@ export const createTaskComment = command(
 							);
 						} catch (error) {
 							console.error(`Failed to send comment notification to ${recipient.email}:`, error);
-							// Continue with other recipients even if one fails
 						}
 					}
 				}

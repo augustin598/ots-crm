@@ -2,8 +2,10 @@
 	import { createTask, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
-	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getTenantUsers, getAssignableClientUsers } from '$lib/remotes/users.remote';
 	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -60,6 +62,18 @@
 
 	const usersQuery = $derived(getTenantUsers());
 	const users = $derived(usersQuery.current || []);
+
+	type AssigneeOption = {
+		value: string;
+		label: string;
+		kind: 'agency' | 'client';
+		email?: string;
+		phone?: string | null;
+	};
+
+	function avatarSrcFromPhone(phone: string | null | undefined): string | null {
+		return whatsappAvatarUrl((page.params.tenant as string) ?? '', phone);
+	}
 
 	const currentUserId = $derived((page.data as any)?.tenantUser?.userId as string | undefined);
 
@@ -129,6 +143,31 @@
 			: allProjects
 	);
 
+	const clientUsersQuery = $derived(
+		!isClient && draft.clientId ? getAssignableClientUsers(draft.clientId) : null
+	);
+	const clientUsers = $derived(clientUsersQuery?.current ?? []);
+
+	const agencyAssigneeOptions = $derived<AssigneeOption[]>(
+		users.map((u: any) => ({
+			value: u.id,
+			label: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email,
+			kind: 'agency' as const,
+			email: u.email,
+			phone: (u.whatsappPhone ?? u.phone) ?? null
+		}))
+	);
+
+	const clientAssigneeOptions = $derived<AssigneeOption[]>(
+		clientUsers.map((u: any) => ({
+			value: u.id,
+			label: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email,
+			kind: 'client' as const,
+			email: u.email,
+			phone: u.phone ?? null
+		}))
+	);
+
 	const isMeet = $derived(draft.type === 'meeting');
 
 	const calStatusQuery = $derived(isMeet ? getGoogleCalendarStatus() : null);
@@ -171,6 +210,21 @@
 			tagInput = '';
 			subtaskInput = '';
 			error = null;
+		}
+	});
+
+	// Prune selected assignees that are no longer valid for the current
+	// client (e.g., user switched client in Step 1 — the previous client's
+	// people are no longer assignable).
+	$effect(() => {
+		if (!open || isClient) return;
+		const valid = new Set<string>([
+			...agencyAssigneeOptions.map((o) => o.value),
+			...clientAssigneeOptions.map((o) => o.value)
+		]);
+		const pruned = draft.assigneeIds.filter((id) => valid.has(id));
+		if (pruned.length !== draft.assigneeIds.length) {
+			draft.assigneeIds = pruned;
 		}
 	});
 
@@ -503,38 +557,84 @@
 			{:else if step === 2}
 				<div class="grid grid-cols-2 gap-4">
 					{#if !isClient}
-						<!-- Assignees -->
-						<div class="col-span-2 flex flex-col gap-1.5">
+						<!-- Assignees: agency + (optional) client team -->
+						<div class="col-span-2 flex flex-col gap-2">
 							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 								Responsabili <span class="text-red-500">*</span>
 							</label>
-							<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-								{#each users as user}
-									{@const selected = draft.assigneeIds.includes(user.id)}
-									<button
-										class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
-											{selected
-												? 'border-blue-500 bg-blue-50 text-slate-900'
-												: 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}"
-										onclick={() => toggleAssignee(user.id)}
-									>
-										<span
-											class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-											style="background: {getUserColor(user.id)}"
+
+							<!-- Agency section -->
+							<div class="flex flex-col gap-1">
+								<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+									Agenție
+								</div>
+								<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+									{#each agencyAssigneeOptions as opt (opt.value)}
+										{@const selected = draft.assigneeIds.includes(opt.value)}
+										<button
+											type="button"
+											class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
+												{selected
+													? 'border-blue-500 bg-blue-50 text-slate-900'
+													: 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}"
+											onclick={() => toggleAssignee(opt.value)}
 										>
-											{getUserInitials(user)}
-										</span>
-										<span class="flex-1 truncate">{getUserName(user)}</span>
-										{#if selected}
-											<span
-												class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-											>
-												<CheckIcon class="h-2.5 w-2.5" />
-											</span>
-										{/if}
-									</button>
-								{/each}
+											<ContactAvatar
+												src={avatarSrcFromPhone(opt.phone)}
+												name={opt.label}
+												phoneE164={opt.phone ?? null}
+												size="sm"
+											/>
+											<span class="flex-1 truncate">{opt.label}</span>
+											{#if selected}
+												<span
+													class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+												>
+													<CheckIcon class="h-2.5 w-2.5" />
+												</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
 							</div>
+
+							<!-- Client section (only when a client is selected and has assignable people) -->
+							{#if clientAssigneeOptions.length > 0}
+								<div class="mt-1 flex flex-col gap-1">
+									<div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+										Echipa {clientName}
+									</div>
+									<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+										{#each clientAssigneeOptions as opt (opt.value)}
+											{@const selected = draft.assigneeIds.includes(opt.value)}
+											<button
+												type="button"
+												class="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-all
+													{selected
+														? 'border-emerald-500 bg-emerald-50 text-slate-900'
+														: 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50/40'}"
+												onclick={() => toggleAssignee(opt.value)}
+											>
+												<ContactAvatar
+													src={avatarSrcFromPhone(opt.phone)}
+													name={opt.label}
+													phoneE164={opt.phone ?? null}
+													size="sm"
+													class="ring-2 ring-emerald-100"
+												/>
+												<span class="flex-1 truncate">{opt.label}</span>
+												{#if selected}
+													<span
+														class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+													>
+														<CheckIcon class="h-2.5 w-2.5" />
+													</span>
+												{/if}
+											</button>
+										{/each}
+									</div>
+								</div>
+							{/if}
 						</div>
 					{/if}
 
