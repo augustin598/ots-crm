@@ -2721,6 +2721,78 @@ export const scheduleMeet = command(
 			updatedAt: new Date()
 		}).where(eq(table.task.id, taskId));
 
+		// Auto-generate Calendar event when scheduling a time (and no event yet)
+		if (meetTime) {
+			const [taskRow] = await db
+				.select({
+					id: table.task.id,
+					title: table.task.title,
+					description: table.task.description,
+					clientId: table.task.clientId,
+					meetDurationMinutes: table.task.meetDurationMinutes,
+					googleCalendarEventId: table.task.googleCalendarEventId
+				})
+				.from(table.task)
+				.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+				.limit(1);
+
+			if (taskRow && !taskRow.googleCalendarEventId) {
+				const calStatus = await getCalendarStatus(event.locals.tenant.id);
+				if (calStatus.connected) {
+					try {
+						const assignees = await db
+							.select({ email: table.user.email })
+							.from(table.taskAssignee)
+							.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+							.where(eq(table.taskAssignee.taskId, taskId));
+						const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
+
+						if (taskRow.clientId) {
+							const [clientRow] = await db
+								.select({ email: table.client.email })
+								.from(table.client)
+								.where(and(eq(table.client.id, taskRow.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+								.limit(1);
+							if (clientRow?.email) attendeeEmails.push(clientRow.email);
+						}
+
+						const meetResult = await createMeetEvent({
+							tenantId: event.locals.tenant.id,
+							title: taskRow.title,
+							startTime: new Date(meetTime),
+							durationMinutes: meetDurationMinutes ?? taskRow.meetDurationMinutes ?? 30,
+							timezone: 'Europe/Bucharest',
+							attendees: attendeeEmails,
+							description: taskRow.description ?? undefined
+						});
+
+						await db
+							.update(table.task)
+							.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
+							.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
+
+						await recordTaskActivity({
+							taskId,
+							userId: event.locals.user.id,
+							tenantId: event.locals.tenant.id,
+							action: 'meet_event_created',
+							newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
+						});
+					} catch (err) {
+						if (!(err instanceof CalendarNotConnected)) {
+							await recordTaskActivity({
+								taskId,
+								userId: event.locals.user.id,
+								tenantId: event.locals.tenant.id,
+								action: 'meet_event_failed',
+								newValue: JSON.stringify({ stage: 'schedule', error: err instanceof Error ? err.message : String(err) })
+							});
+						}
+					}
+				}
+			}
+		}
+
 		return { success: true };
 	}
 );
