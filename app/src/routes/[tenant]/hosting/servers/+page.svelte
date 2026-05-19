@@ -269,6 +269,29 @@
 		return `${(gb / 1024).toFixed(2)} TB`;
 	}
 
+	/**
+	 * Traffic doesn't have a per-server capacity cap that DA exposes (transfer
+	 * limits are a hosting-plan concept enforced at the network layer, not by
+	 * DirectAdmin). To give the bar visual meaning anyway, we map bandwidth to
+	 * a logarithmic 0–10 TB scale:
+	 *   0 GB    → 0%
+	 *   1 GB    → ~15%
+	 *   100 GB  → ~60%
+	 *   1 TB    → ~80%
+	 *   10 TB+  → 100%
+	 * The non-linear scale makes typical shared-hosting numbers (50–500 GB)
+	 * visible without making 1 TB look like nothing. Linear would compress all
+	 * realistic values into the first 10% of the bar.
+	 */
+	function trafficBarPct(bytes: number | null | undefined): number {
+		if (!bytes || bytes <= 0) return 0;
+		const gb = bytes / 1_073_741_824;
+		// log10(gb + 1) so 0 GB stays at 0; +1 prevents -Infinity.
+		// log10(10001) ≈ 4 → divide by 4 to normalize 10 TB to 100%.
+		const pct = (Math.log10(gb + 1) / 4) * 100;
+		return Math.min(100, Math.max(0, Math.round(pct)));
+	}
+
 	function statusLabel(s: Status): string {
 		return { online: 'Online', warning: 'Atenție', maintenance: 'Mentenanță', offline: 'Offline' }[
 			s
@@ -545,8 +568,14 @@
 								<div class="hst-metric-head">
 									<span>Trafic</span><strong>{fmtBytes(m?.bandwidthBytes)}</strong>
 								</div>
-								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+								<div
+									class="hst-metric-bar"
+									title="Scală logaritmică 0 → 10 TB"
+								>
+									<div
+										class="hst-metric-bar-fill traffic"
+										style="width:{trafficBarPct(m?.bandwidthBytes)}%"
+									></div>
 								</div>
 							</div>
 						</div>
@@ -760,8 +789,14 @@
 									<span>Trafic folosit (lunar)</span>
 									<strong>{fmtBytes(dm?.bandwidthBytes)}</strong>
 								</div>
-								<div class="hst-metric-bar">
-									<div class="hst-metric-bar-fill empty" style="width:0%"></div>
+								<div
+									class="hst-metric-bar"
+									title="Scală logaritmică 0 → 10 TB (DA nu expune un cap server-wide)"
+								>
+									<div
+										class="hst-metric-bar-fill traffic"
+										style="width:{trafficBarPct(dm?.bandwidthBytes)}%"
+									></div>
 								</div>
 							</div>
 						</div>
@@ -1470,6 +1505,14 @@
 	}
 	.hst-metric-bar-fill.empty {
 		background: transparent;
+	}
+	/*
+	 * Traffic bar has no real capacity cap. Use a blue→violet gradient on
+	 * a log scale so the user can see relative magnitude at a glance and
+	 * never mistakes the visualisation for a "% of quota" reading.
+	 */
+	.hst-metric-bar-fill.traffic {
+		background: linear-gradient(90deg, #60a5fa, #6366f1, #8b5cf6);
 	}
 
 	.hst-server-foot {
