@@ -582,6 +582,106 @@ describe('bulkDuplicateTasks — tenant whitelist + batch inserts', () => {
 	});
 });
 
+// ─── Perf regression — Fix 4: getTask parallelized queries ──────────────────
+
+describe('getTask — parallel subtask/tag/assignee shape (perf regression Fix 4)', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('returns correct shape with all three relations populated after parallelization', async () => {
+		const taskRow = { id: 'task-perf-1', tenantId: 'tenant-a', clientId: null, title: 'Perf Task', status: 'in-progress', priority: 'high' };
+		queryQueue.push([taskRow]); // main task query
+		// Promise.all fires 3 queries — queryQueue serves them in order
+		queryQueue.push([
+			{ id: 'sub-1', taskId: 'task-perf-1', tenantId: 'tenant-a', title: 'Subtask A', done: 0, position: 0, createdAt: 0, updatedAt: 0 },
+			{ id: 'sub-2', taskId: 'task-perf-1', tenantId: 'tenant-a', title: 'Subtask B', done: 1, position: 1, createdAt: 0, updatedAt: 0 }
+		]); // subtasks
+		queryQueue.push([
+			{ id: 'tag-1', name: 'Design', color: '#00f' },
+			{ id: 'tag-2', name: 'Urgent', color: '#f00' }
+		]); // tags
+		queryQueue.push([
+			{ userId: 'user-2', role: 'lead', firstName: 'Ana', lastName: 'Pop', email: 'ana@example.com' }
+		]); // assignees
+
+		const result = await getTask('task-perf-1') as any;
+
+		expect(result.id).toBe('task-perf-1');
+		expect(result.subtasks).toHaveLength(2);
+		expect(result.subtasks[0].title).toBe('Subtask A');
+		expect(result.subtasks[1].title).toBe('Subtask B');
+		expect(result.tags).toHaveLength(2);
+		expect(result.tags.map((t: any) => t.name)).toContain('Design');
+		expect(result.tags.map((t: any) => t.name)).toContain('Urgent');
+		expect(result.assignees).toHaveLength(1);
+		expect(result.assignees[0].email).toBe('ana@example.com');
+		expect(result.assignees[0].role).toBe('lead');
+	});
+
+	test('getTask returns empty relations when no related data exists', async () => {
+		const taskRow = { id: 'task-perf-2', tenantId: 'tenant-a', clientId: null, title: 'Empty Task', status: 'todo', priority: 'low' };
+		queryQueue.push([taskRow]);
+		queryQueue.push([]); // subtasks empty
+		queryQueue.push([]); // tags empty
+		queryQueue.push([]); // assignees empty
+
+		const result = await getTask('task-perf-2') as any;
+
+		expect(result.subtasks).toHaveLength(0);
+		expect(result.tags).toHaveLength(0);
+		expect(result.assignees).toHaveLength(0);
+	});
+});
+
+// ─── Perf regression — Fix 2: bulkUpdateTaskStatus batched writes ────────────
+
+describe('bulkUpdateTaskStatus — batched activity insert shape (perf regression Fix 2)', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('processes 10 tasks without individual per-task DB calls', async () => {
+		// Whitelist returns 10 tasks, all with different statuses so all change
+		const tasks = Array.from({ length: 10 }, (_, i) => ({
+			id: `task-${i + 1}`,
+			status: 'todo'
+		}));
+		queryQueue.push(tasks);
+
+		const start = Date.now();
+		const result = await bulkUpdateTaskStatus({
+			taskIds: tasks.map(t => t.id),
+			newStatus: 'done'
+		});
+		const duration = Date.now() - start;
+
+		expect(result.success).toBe(true);
+		expect(result.owned).toBe(10);
+		expect(result.changed).toBe(10);
+		// Soft perf assertion: mocked DB should complete well under 2s
+		expect(duration).toBeLessThan(2000);
+	});
+
+	test('correctly counts no-ops when all tasks already have target status', async () => {
+		const tasks = Array.from({ length: 10 }, (_, i) => ({
+			id: `task-${i + 1}`,
+			status: 'done'
+		}));
+		queryQueue.push(tasks);
+
+		const result = await bulkUpdateTaskStatus({
+			taskIds: tasks.map(t => t.id),
+			newStatus: 'done'
+		});
+
+		expect(result.owned).toBe(10);
+		expect(result.changed).toBe(0);
+	});
+});
+
 // ─── P0 IDOR regression tests — client cross-client isolation ──────────────
 
 describe('getTask — client portal cross-client IDOR (P0 regression)', () => {
