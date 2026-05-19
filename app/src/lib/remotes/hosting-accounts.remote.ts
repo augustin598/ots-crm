@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -520,9 +520,13 @@ export const syncAllHostingAccounts = command(BulkSyncSchema, async (params) => 
 
 	const tenantId = event.locals.tenant.id;
 
+	// Sync active AND pending accounts (pending = just-provisioned, sync confirms real DA state).
+	// Skip terminated/cancelled — no point hitting DA for accounts that shouldn't exist there.
+	// Require daUsername to be non-null otherwise the DA API call has nothing to look up.
 	const conditions = [
 		eq(table.hostingAccount.tenantId, tenantId),
-		eq(table.hostingAccount.status, 'active') // only sync active accounts
+		inArray(table.hostingAccount.status, ['active', 'pending']),
+		isNotNull(table.hostingAccount.daUsername)
 	];
 	if (params.serverId) {
 		conditions.push(eq(table.hostingAccount.daServerId, params.serverId));

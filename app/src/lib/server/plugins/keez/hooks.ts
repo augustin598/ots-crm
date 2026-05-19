@@ -17,6 +17,11 @@ function generateSyncId() {
  */
 export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) => {
 	const { invoice, tenantId } = event;
+	logInfo(
+		'keez',
+		`[trace-v2] hook entered for ${invoice.id} invoiceSeries=${JSON.stringify(invoice.invoiceSeries)} invoiceNumber=${JSON.stringify(invoice.invoiceNumber)}`,
+		{ tenantId, metadata: { invoiceId: invoice.id } }
+	);
 	logInfo('keez', `Invoice created event for invoice ${invoice.id}`, { tenantId, metadata: { invoiceId: invoice.id, clientId: invoice.clientId } });
 
 	// Check if Keez integration is active for tenant
@@ -46,8 +51,12 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		return;
 	}
 
-	// Allow proceeding if the invoice itself has a series (even if keezSeries/keezStartNumber not set in settings)
-	const effectiveSeries = settings?.keezSeries || invoice.invoiceSeries;
+	// `invoice.invoiceSeries` is the source of truth on the specific invoice — for hosting
+	// renewals this is "OTSH" (set by generateInvoiceFromRecurringTemplate from the resolved
+	// invoiceNumber prefix); for default invoices it's "OTS". Only fall back to
+	// settings.keezSeries when the invoice row itself has no series tagged (synthetic /
+	// legacy manual invoices).
+	const effectiveSeries = invoice.invoiceSeries || settings?.keezSeries;
 	if (!effectiveSeries) {
 		logWarning('keez', 'Invoice settings not configured: no keezSeries in settings and invoice has no invoiceSeries', { tenantId });
 		return;
@@ -210,12 +219,14 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	let invoiceSeries: string | undefined;
 	let invoiceNumber: string | undefined;
 
-	// Check if invoice has invoiceSeries that matches (or can substitute for) Keez series
-	if (
-		invoice.invoiceSeries &&
-		(!settings?.keezSeries || invoice.invoiceSeries.trim() === settings.keezSeries.trim())
-	) {
-		// Invoice series matches Keez series, use it
+	// If the invoice row carries an explicit series, trust it. The old equality
+	// check against `settings.keezSeries` (default series) silently routed hosting
+	// invoices (series="OTSH") to the wrong Keez series when settings.keezSeries
+	// was "OTS". invoice.invoiceSeries is now derived from the resolved invoice
+	// number by generateInvoiceFromRecurringTemplate, so it can be either the
+	// default OR the hosting series — both are valid.
+	logInfo('keez', `[trace] hook saw invoice.invoiceSeries=${JSON.stringify(invoice.invoiceSeries)} invoiceNumber=${JSON.stringify(invoice.invoiceNumber)}`, { tenantId, metadata: { invoiceId: invoice.id } });
+	if (invoice.invoiceSeries && invoice.invoiceSeries.trim() !== '') {
 		invoiceSeries = invoice.invoiceSeries.trim();
 		// Extract number from invoiceNumber if it contains the series
 		if (invoice.invoiceNumber) {
@@ -413,9 +424,12 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	};
 
 	// Extract and update invoice number from Keez (series + number)
-	// Try from header first, then from full invoice data
-	const keezSeries = keezInvoiceHeader?.series || keezInvoiceData?.series;
-	const keezNumber = keezInvoiceHeader?.number || keezInvoiceData?.number;
+	// PREFER `keezInvoiceData` (direct getInvoice by externalId) over `keezInvoiceHeader`
+	// (getInvoices with filter): Keez's `filter` param on the list endpoint is silently
+	// ignored, so the list-fetch returns the most recent invoice GLOBALLY, not the one
+	// we just created. Trusting the direct fetch keeps us pinned to the actual invoice.
+	const keezSeries = keezInvoiceData?.series || keezInvoiceHeader?.series;
+	const keezNumber = keezInvoiceData?.number || keezInvoiceHeader?.number;
 
 	if (keezSeries && keezNumber) {
 		// Format: "SERIES NUMBER" (e.g., "OTS 520")

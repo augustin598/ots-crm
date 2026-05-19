@@ -197,15 +197,22 @@ export async function getNextInvoiceNumberFromPlugin(
 			}
 
 			// Fallback chain. When the resolved series IS the hosting series, prefer
-			// hosting-specific stored numbers first, then cross-fall back to the default columns
-			// (safety net for tenants that set keezSeriesHosting but forgot to set the hosting
-			// last-synced / start-number). When non-hosting, original behavior preserved.
+			// hosting-specific stored numbers and STOP there — do NOT cross-fall back to
+			// the default series' last-synced number (that would assign OTS-series numbers
+			// to OTSH invoices, defeating the whole point of a separate series).
+			// When non-hosting, original behavior preserved.
 			const useHostingFallback = resolvedKeezSeries === keezHostingSeries;
 			let nextNum: string;
-			if (useHostingFallback && settings.keezLastSyncedNumberHosting) {
-				nextNum = generateNextKeezInvoiceNumber(extractInvoiceNumber(settings.keezLastSyncedNumberHosting));
-			} else if (useHostingFallback && settings.keezStartNumberHosting) {
-				nextNum = extractInvoiceNumber(settings.keezStartNumberHosting);
+			if (useHostingFallback) {
+				if (settings.keezLastSyncedNumberHosting) {
+					nextNum = generateNextKeezInvoiceNumber(
+						extractInvoiceNumber(settings.keezLastSyncedNumberHosting)
+					);
+				} else if (settings.keezStartNumberHosting) {
+					nextNum = extractInvoiceNumber(settings.keezStartNumberHosting);
+				} else {
+					nextNum = '1';
+				}
 			} else if (settings.keezLastSyncedNumber) {
 				nextNum = generateNextKeezInvoiceNumber(extractInvoiceNumber(settings.keezLastSyncedNumber));
 			} else if (settings.keezStartNumber) {
@@ -736,6 +743,17 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		? 'none'
 		: ((invoiceFields.taxApplicationType as 'apply' | 'none' | 'reverse' | undefined) || 'apply');
 
+	// Derive series tag from the resolved invoiceNumber prefix (Keez format
+	// "<SERIES> <NUM>"). For hosting templates this lands as "OTSH" which the
+	// Keez auto-push hook uses to keep the fiscal number in the hosting series.
+	// Falls back to invoiceFields metadata (operator-set), then null for
+	// synthetic numbers like "INV-1234567890".
+	const seriesParts = invoiceNumber.split(' ');
+	const derivedSeries =
+		seriesParts.length === 2 && /^[A-Z][A-Z0-9-]*$/i.test(seriesParts[0])
+			? seriesParts[0]
+			: null;
+
 	// Create invoice
 	const newInvoice = {
 		id: invoiceId,
@@ -754,7 +772,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		issueDate,
 		dueDate,
 		notes: finalNotes,
-		invoiceSeries: invoiceFields.invoiceSeries || null,
+		invoiceSeries: invoiceFields.invoiceSeries || derivedSeries,
 		invoiceCurrency: invoiceFields.invoiceCurrency || (invoiceCurrencyUpper !== 'RON' ? invoiceCurrencyRaw : null),
 		paymentTerms: invoiceFields.paymentTerms || null,
 		paymentMethod: invoiceFields.paymentMethod || null,

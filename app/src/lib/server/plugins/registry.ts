@@ -85,17 +85,22 @@ class PluginRegistry {
 	}
 
 	/**
-	 * Check if a plugin is active for a tenant
+	 * Check if a plugin is active for a tenant. Accepts the plugin's logical name
+	 * (e.g. 'directadmin', 'keez') — NOT the DB row id, which is base32 garbage.
+	 *
+	 * Bug history: previously matched against `tenantPlugin.pluginId` directly, which
+	 * stores the DB row id. All callers pass the plugin name, so this always returned
+	 * false — silently disabling DA hooks. Fix: match `plugin.name` via the join.
 	 */
-	async isPluginActiveForTenant(tenantId: string, pluginId: string): Promise<boolean> {
+	async isPluginActiveForTenant(tenantId: string, pluginName: string): Promise<boolean> {
 		const [result] = await db
-			.select()
+			.select({ id: table.tenantPlugin.id })
 			.from(table.tenantPlugin)
 			.innerJoin(table.plugin, eq(table.plugin.id, table.tenantPlugin.pluginId))
 			.where(
 				and(
 					eq(table.tenantPlugin.tenantId, tenantId),
-					eq(table.tenantPlugin.pluginId, pluginId),
+					eq(table.plugin.name, pluginName),
 					eq(table.tenantPlugin.isActive, true),
 					eq(table.plugin.isActive, true)
 				)

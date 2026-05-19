@@ -1,14 +1,25 @@
 /**
- * Format invoice number with series for Keez invoices
- * Based on WHMCS Keez integration: all invoices should use keezSeries when configured
- * @param invoice - Invoice object with invoiceNumber, keezInvoiceId, keezExternalId, smartbillSeries, smartbillNumber
- * @param invoiceSettings - Invoice settings with keezSeries
- * @returns Formatted invoice number (e.g., "OTS 520" for Keez, or just "520.0" for others)
+ * Format invoice number with series for display.
+ *
+ * Source-of-truth precedence:
+ *   1. SmartBill fields if populated → format "SERIA-NUMĂR".
+ *   2. `invoice.invoiceSeries` (per-row series tag, e.g. "OTSH" for hosting,
+ *      "OTS" for default) → strip the series from `invoiceNumber` to get the
+ *      numeric part, then render "<invoice.invoiceSeries> <NUMBER>".
+ *   3. `invoiceSettings.keezSeries` (tenant default) as fallback only when the
+ *      invoice row has no own series tag — handles legacy rows that pre-date
+ *      the per-invoice `invoiceSeries` column being populated.
+ *   4. Raw `invoice.invoiceNumber` if neither path applies.
+ *
+ * History: this used to blindly rewrite every invoice as
+ *   `settings.keezSeries + numericTail(invoiceNumber)`
+ * which mangled OTSH → OTS once a separate hosting series existed.
  */
 export function formatInvoiceNumberDisplay(
-	invoice: { 
-		invoiceNumber: string; 
-		keezInvoiceId?: string | null; 
+	invoice: {
+		invoiceNumber: string;
+		invoiceSeries?: string | null;
+		keezInvoiceId?: string | null;
 		keezExternalId?: string | null;
 		smartbillSeries?: string | null;
 		smartbillNumber?: string | null;
@@ -17,38 +28,37 @@ export function formatInvoiceNumberDisplay(
 ): string {
 	if (!invoice) return '';
 
-	// Check if invoice is from SmartBill (has priority - SmartBill has its own format)
+	// SmartBill takes priority — it has its own "SERIA-NUMĂR" format.
 	const isSmartBillInvoice = !!(invoice.smartbillSeries || invoice.smartbillNumber);
 	if (isSmartBillInvoice && invoice.smartbillSeries && invoice.smartbillNumber) {
-		// SmartBill invoices already have their own series format: "SERIA-NUMĂR"
 		return `${invoice.smartbillSeries}-${invoice.smartbillNumber}`;
 	}
 
-	// For Keez invoices (or all invoices when keezSeries is configured):
-	// If keezSeries is set, use it for all invoices (like WHMCS implementation)
-	// This matches the behavior where all invoices use the same series
-	if (invoiceSettings?.keezSeries) {
-		const series = invoiceSettings.keezSeries.trim();
-		if (series) {
-			let number = invoice.invoiceNumber;
-			
-			// Remove trailing ".0" if present (e.g., "520.0" -> "520")
-			if (number.endsWith('.0')) {
-				number = number.slice(0, -2);
-			}
-			
-			// Extract only numeric part if invoiceNumber contains series already
-			// Example: "OTS520" -> "520", "INV-123" -> "123"
-			const numericMatch = number.match(/(\d+)$/);
-			if (numericMatch) {
-				number = numericMatch[1];
-			}
-			
-			return `${series} ${number}`;
+	// Pick the series to render. Per-row wins; tenant default is fallback.
+	const effectiveSeries =
+		invoice.invoiceSeries?.trim() || invoiceSettings?.keezSeries?.trim() || null;
+
+	if (effectiveSeries) {
+		let number = invoice.invoiceNumber;
+		if (number.endsWith('.0')) number = number.slice(0, -2);
+
+		// Strip any leading series prefix that's already on the number, then
+		// take whatever trailing digits remain. Avoids "OTSH OTSH 1" or
+		// "OTSH OTS 1" mismatches when the stored number already includes a
+		// prefix.
+		const seriesEscaped = effectiveSeries.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const prefixed = number.match(new RegExp(`^${seriesEscaped}\\s*(\\d+)$`, 'i'));
+		if (prefixed) {
+			number = prefixed[1];
+		} else {
+			const trailingDigits = number.match(/(\d+)$/);
+			if (trailingDigits) number = trailingDigits[1];
 		}
+
+		return `${effectiveSeries} ${number}`;
 	}
 
-	// Fallback: return invoice number as is
+	// No series anywhere → return raw number (synthetic "INV-..." fallback).
 	return invoice.invoiceNumber;
 }
 
