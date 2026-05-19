@@ -18,7 +18,7 @@
 
 	export type SubtaskProgress = { done: number; total: number };
 	export type AssigneeInfo = {
-		id: string;
+		userId: string;
 		firstName?: string | null;
 		lastName?: string | null;
 		email?: string | null;
@@ -170,7 +170,7 @@
 	function assigneeDisplayName(a: AssigneeInfo): string {
 		if (a.displayName) return a.displayName;
 		const full = `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim();
-		return full || a.email || a.id;
+		return full || a.email || a.userId;
 	}
 
 	const visibleAssignees = $derived(assignees.slice(0, 3));
@@ -395,10 +395,10 @@
 
 			{#if assignees.length > 0}
 				<div class="tk-avatars ml-auto flex">
-					{#each visibleAssignees as a, i (a.id)}
+					{#each visibleAssignees as a, i (a.userId)}
 						<div
 							class="tk-avatar grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 border-white text-[9.5px] font-bold text-white"
-							style:background-color={avatarColor(a.email ?? a.id)}
+							style:background-color={avatarColor(a.email ?? a.userId)}
 							style:margin-left={i === 0 ? '0' : '-6px'}
 							title={assigneeDisplayName(a)}
 						>

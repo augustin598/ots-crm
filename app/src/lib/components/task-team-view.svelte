@@ -48,7 +48,7 @@
 
 	function assigneeIdsOf(t: TaskWithIncludes): string[] {
 		if (Array.isArray(t.assignees) && t.assignees.length > 0) {
-			return t.assignees.map((a) => a.id);
+			return t.assignees.map((a) => (a as any).userId ?? (a as any).id);
 		}
 		if (t.assignedToUserId) return [t.assignedToUserId];
 		return [];
@@ -99,7 +99,7 @@
 			const u = users.find((x) => x.id === t.assignedToUserId);
 			return [
 				{
-					id: t.assignedToUserId,
+					userId: t.assignedToUserId,
 					firstName: u?.firstName ?? null,
 					lastName: u?.lastName ?? null,
 					email: u?.email ?? null,

@@ -23,7 +23,7 @@
 	import { avatarColor, avatarInitials } from '$lib/config/team';
 
 	type AssigneeInfo = {
-		id: string;
+		userId: string;
 		firstName?: string | null;
 		lastName?: string | null;
 		email?: string | null;
@@ -237,7 +237,7 @@
 			const [firstName, ...rest] = name.split(' ');
 			return [
 				{
-					id: t.assignedToUserId,
+					userId: t.assignedToUserId,
 					firstName: firstName ?? null,
 					lastName: rest.join(' ') || null,
 					email: null,
@@ -251,7 +251,7 @@
 	function displayName(a: AssigneeInfo): string {
 		if (a.displayName) return a.displayName;
 		const full = `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim();
-		return full || a.email || a.id;
+		return full || a.email || a.userId;
 	}
 
 	// ── Client chip ──────────────────────────────────────────────────────────
@@ -444,10 +444,10 @@
 								<span class="text-[#cbd5e1]">—</span>
 							{:else}
 								<div class="flex">
-									{#each visibleAssignees as a, i (a.id)}
+									{#each visibleAssignees as a, i (a.userId)}
 										<div
 											class="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 border-white text-[9.5px] font-bold text-white dark:border-zinc-900"
-											style:background-color={avatarColor(a.email ?? a.id)}
+											style:background-color={avatarColor(a.email ?? a.userId)}
 											style:margin-left={i === 0 ? '0' : '-6px'}
 											title={displayName(a)}
 										>

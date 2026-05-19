@@ -82,7 +82,7 @@
 			const [firstName, ...rest] = name.split(' ');
 			return [
 				{
-					id: task.assignedToUserId,
+					userId: task.assignedToUserId,
 					firstName: firstName ?? null,
 					lastName: rest.join(' ') || null,
 					email: null,
