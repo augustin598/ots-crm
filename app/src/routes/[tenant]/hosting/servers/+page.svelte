@@ -80,10 +80,51 @@
 	const tenantSlug = $derived(page.params.tenant);
 
 	let serversPromise = $state(getDAServersWithStats());
+	let lastRefreshAt = $state(Date.now());
 
 	async function refresh() {
 		serversPromise = getDAServersWithStats();
+		lastRefreshAt = Date.now();
 	}
+
+	/**
+	 * Auto-refresh aligned with the 60s server-side metrics cache. Paused when
+	 * the tab is hidden so we don't keep hammering DA for an off-screen page;
+	 * also forces a fresh fetch the moment the tab regains focus IF the last
+	 * refresh is older than 60s.
+	 */
+	$effect(() => {
+		if (typeof document === 'undefined') return;
+		const timer = setInterval(() => {
+			if (!document.hidden) void refresh();
+		}, 60_000);
+		const onVisibility = () => {
+			if (document.hidden) return;
+			if (Date.now() - lastRefreshAt > 60_000) void refresh();
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+		return () => {
+			clearInterval(timer);
+			document.removeEventListener('visibilitychange', onVisibility);
+		};
+	});
+
+	function fmtSecondsAgo(t: number): string {
+		const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+		if (sec < 5) return 'chiar acum';
+		if (sec < 60) return `acum ${sec}s`;
+		const min = Math.floor(sec / 60);
+		return `acum ${min} ${min === 1 ? 'minut' : 'minute'}`;
+	}
+
+	// Tick once per second so the "ultim refresh acum Xs" label stays fresh
+	// without re-rendering the whole tree.
+	let now = $state(Date.now());
+	$effect(() => {
+		const t = setInterval(() => (now = Date.now()), 1000);
+		return () => clearInterval(t);
+	});
+	const sinceLastRefresh = $derived(fmtSecondsAgo(lastRefreshAt) + (now ? '' : ''));
 
 	function statusOf(s: ServerRow): Status {
 		if (s.lastError) return 'warning';
@@ -337,6 +378,18 @@
 				</p>
 			</div>
 			<div class="hst-hero-actions">
+				<span class="hst-refresh-indicator" title="Auto-refresh la 60s sub fila vizibilă">
+					<span class="hst-refresh-dot"></span>
+					Ultim refresh: {sinceLastRefresh}
+				</span>
+				<button
+					class="btn-secondary"
+					onclick={() => refresh()}
+					title="Forțează refetch metrici acum"
+					aria-label="Refresh metrici"
+				>
+					<RefreshCwIcon size={13} /> Refresh
+				</button>
 				<button
 					class="btn-secondary"
 					onclick={() => handleSyncAll(servers)}
@@ -846,8 +899,9 @@
 						{/if}
 						<p class="hst-note">
 							{#if dm}
-								Date live preluate prin DirectAdmin API (resource-usage + admin-usage). Refresh la
-								60 s — reîncarcă pagina pentru o citire imediată.
+								Date live din DirectAdmin (system-info + admin-usage + version). Auto-refresh la
+								60s sub fila vizibilă; click <strong>Refresh</strong> sau reîncarcă pagina pentru o
+								citire imediată.
 							{:else}
 								Metricile live nu au putut fi preluate (server offline, endpoint indisponibil, sau
 								timeout). Folosește <strong>Deschide DA</strong> pentru status în timp real.
@@ -1236,6 +1290,27 @@
 		display: flex;
 		gap: 8px;
 		align-items: center;
+	}
+	.hst-refresh-indicator {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11.5px;
+		color: #94a3b8;
+		font-variant-numeric: tabular-nums;
+		padding-right: 4px;
+	}
+	.hst-refresh-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: #10b981;
+		box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+		animation: hst-pulse 2s ease-in-out infinite;
+	}
+	@keyframes hst-pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
 	}
 
 	/* ===== Buttons ===== */
