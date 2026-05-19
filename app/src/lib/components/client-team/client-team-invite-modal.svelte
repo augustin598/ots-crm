@@ -1,5 +1,6 @@
 <!-- src/lib/components/client-team/client-team-invite-modal.svelte -->
 <script lang="ts">
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import XIcon from '@lucide/svelte/icons/x';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import {
@@ -125,18 +126,16 @@
 	<div
 		class="fixed inset-0 z-[200] flex items-center justify-center bg-[#0f172a]/55"
 		onclick={onClose}
+		onkeydown={() => {}}
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="invite-title"
 		tabindex={-1}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') onClose();
-		}}
+		use:focusTrap={{ active: open, onEscape: onClose, initialFocus: '#invite-email' }}
 	>
 		<div
 			class="cteam-modal w-[560px] max-w-[90vw] rounded-[16px] bg-white shadow-[0_30px_60px_rgba(15,23,42,0.3)]"
 			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
 			role="none"
 		>
 			<div class="flex items-center justify-between border-b border-[#e5e9f0] p-5">
