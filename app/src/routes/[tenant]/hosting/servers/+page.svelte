@@ -772,32 +772,40 @@
 				</div>
 
 				<div class="hst-drawer-foot">
-					<button
-						class="btn-secondary"
-						onclick={() => handleSync(s.id)}
-						disabled={syncingId === s.id}
-					>
-						<RefreshCwIcon class={syncingId === s.id ? 'hst-spin' : ''} size={13} />
-						{syncingId === s.id ? 'Se sincronizează…' : 'Sync acum'}
-					</button>
-					<a
-						class="btn-secondary"
-						href={externalUrl(s)}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						<ExternalLinkIcon size={13} /> Deschide DA
-					</a>
-					<button class="btn-secondary danger" onclick={() => handleDelete(s)}>
-						<Trash2Icon size={13} /> Dezactivează
-					</button>
-					<div style="flex:1"></div>
-					<button
-						class="btn-primary"
-						onclick={() => goto(`/${tenantSlug}/hosting/servers/${s.id}`)}
-					>
-						<PencilIcon size={13} /> Editează & pachete
-					</button>
+					<div class="hst-foot-group">
+						<button
+							class="btn-secondary"
+							onclick={() => handleSync(s.id)}
+							disabled={syncingId === s.id}
+						>
+							<RefreshCwIcon class={syncingId === s.id ? 'hst-spin' : ''} size={13} />
+							{syncingId === s.id ? 'Se sincronizează…' : 'Sync acum'}
+						</button>
+						<a
+							class="btn-secondary"
+							href={externalUrl(s)}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							<ExternalLinkIcon size={13} /> Deschide DA
+						</a>
+					</div>
+					<div class="hst-foot-group">
+						<button
+							class="btn-ghost danger"
+							onclick={() => handleDelete(s)}
+							aria-label="Dezactivează server"
+							title="Dezactivează server"
+						>
+							<Trash2Icon size={13} /> Dezactivează
+						</button>
+						<button
+							class="btn-primary"
+							onclick={() => goto(`/${tenantSlug}/hosting/servers/${s.id}`)}
+						>
+							<PencilIcon size={13} /> Editează & pachete
+						</button>
+					</div>
 				</div>
 			</div>
 			</div>
@@ -940,6 +948,32 @@
 	.btn-secondary.danger:hover {
 		border-color: #ef4444;
 		color: #ef4444;
+	}
+	.btn-ghost {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 12px;
+		border-radius: 7px;
+		background: transparent;
+		color: #475569;
+		border: none;
+		font-size: 12.5px;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.btn-ghost:hover {
+		background: #f4f6fa;
+		color: #0f172a;
+	}
+	.btn-ghost.danger {
+		color: #b91c1c;
+	}
+	.btn-ghost.danger:hover {
+		background: #fef2f2;
+		color: #b91c1c;
 	}
 
 	:global(.hst-spin) {
@@ -1347,7 +1381,7 @@
 		top: 0;
 		right: 0;
 		bottom: 0;
-		width: 720px;
+		width: 640px;
 		max-width: 100vw;
 		background: white;
 		z-index: 80;
@@ -1393,6 +1427,12 @@
 	.hst-drawer-foot {
 		padding: 14px 22px;
 		border-top: 1px solid #e5e9f0;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+	}
+	.hst-foot-group {
 		display: flex;
 		gap: 8px;
 		align-items: center;
