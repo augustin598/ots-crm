@@ -11,6 +11,7 @@
 	import ClientTeamMemberCard from '$lib/components/client-team/client-team-member-card.svelte';
 	import ClientTeamInviteModal from '$lib/components/client-team/client-team-invite-modal.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import { toast } from 'svelte-sonner';
 
 	let { data }: { data: { clientId: string; clientName: string; currentEmail: string } } = $props();
 
@@ -111,10 +112,7 @@
 		{stats}
 		{search}
 		onSearchChange={(v) => (search = v)}
-		onPermissionsClick={() => {
-			// Permissions matrix modal is out of scope for this redesign — keep existing
-			// flow or open a separate page. For now: no-op.
-		}}
+		onPermissionsClick={() => toast.info('Setarea permisiunilor va fi disponibilă în curând')}
 		onInviteClick={() => (inviteOpen = true)}
 	/>
 
