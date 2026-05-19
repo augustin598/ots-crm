@@ -336,7 +336,7 @@
 						</div>
 
 						<!-- Emailuri Secundare (extras în component reutilizabil) -->
-						<ClientTeamEditor clientId={clientId as string} mode="admin" />
+						<ClientTeamEditor clientId={clientId as string} />
 
 						<!-- Website-uri -->
 						<div class="space-y-2">
