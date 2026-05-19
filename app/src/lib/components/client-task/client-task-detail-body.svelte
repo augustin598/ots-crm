@@ -6,6 +6,7 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ClientTaskPageHead from './client-task-page-head.svelte';
+	import ClientTaskPills from './client-task-pills.svelte';
 	import ClientTaskDescription from './client-task-description.svelte';
 	import ClientTaskComments from './client-task-comments.svelte';
 	import ClientTaskRail from './client-task-rail.svelte';
@@ -103,33 +104,51 @@
 
 {#if task}
 	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
-		<div class="client-main flex-1 flex flex-col">
+		<div class="client-main flex flex-1 flex-col">
 			<!-- Topbar with breadcrumbs -->
-			<div class="client-topbar flex items-center gap-2 border-b border-[#e5e9f0] bg-white px-7 py-3.5 text-[13px] text-[#64748b]">
-				<a href="/client/{tenantSlug}/settings" class="client-crumb inline-flex items-center gap-1.5 hover:text-[#0f172a]">
+			<div
+				class="client-topbar flex items-center gap-2 border-b border-[#e5e9f0] bg-white px-7 py-3.5 text-[13px] text-[#64748b]"
+			>
+				<a
+					href="/client/{tenantSlug}/settings"
+					class="client-crumb inline-flex items-center gap-1.5 hover:text-[#1877F2]"
+				>
 					<SettingsIcon class="h-3.5 w-3.5" />
 				</a>
 				<ChevronRightIcon class="h-3 w-3 text-[#cbd5e1]" />
-				<a href="/client/{tenantSlug}/tasks" class="client-crumb hover:text-[#0f172a]">Tasks</a>
+				<a href="/client/{tenantSlug}/tasks" class="client-crumb hover:text-[#1877F2]">Tasks</a>
 				<ChevronRightIcon class="h-3 w-3 text-[#cbd5e1]" />
 				<span class="client-crumb current truncate font-semibold text-[#0f172a]">{task.title}</span>
 			</div>
 
 			<!-- Page body -->
-			<div class="client-task-page mx-auto grid w-full max-w-[1280px] gap-6 p-7" style:grid-template-columns="1fr 320px">
-				<div class="flex min-w-0 flex-col gap-5">
+			<div
+				class="client-task-page mx-auto grid w-full max-w-[1280px] gap-6 p-7"
+				style:grid-template-columns="1fr 320px"
+			>
+				<div class="flex min-w-0 flex-col">
 					<ClientTaskPageHead
-						{task}
 						clientName={client?.name ?? null}
-						tags={task.tags ?? []}
 						onBack={onClose}
 						onScheduleMeet={openMeet}
 					/>
-					<ClientTaskDescription description={task.description} />
-					<ClientTaskComments
-						taskId={task.id}
-						onOpenLightbox={openLightbox}
-					/>
+
+					<!-- Main white card containing title + pills + description + comments -->
+					<div class="ct-main rounded-[14px] border border-[#e5e9f0] bg-white p-7">
+						<h1
+							class="ct-title m-0 mb-3.5 text-[26px] font-extrabold leading-tight tracking-[-0.02em] text-[#0f172a]"
+						>
+							{task.title}
+						</h1>
+
+						<ClientTaskPills {task} tags={task.tags ?? []} />
+
+						<ClientTaskDescription description={task.description} />
+
+						<div class="ct-section mt-[26px]">
+							<ClientTaskComments taskId={task.id} onOpenLightbox={openLightbox} />
+						</div>
+					</div>
 				</div>
 
 				<ClientTaskRail
@@ -166,7 +185,7 @@
 	{/if}
 {:else}
 	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
-		<div class="client-main flex-1 flex flex-col animate-pulse">
+		<div class="client-main flex flex-1 animate-pulse flex-col">
 			<!-- Breadcrumb skeleton -->
 			<div class="border-b border-[#e5e9f0] bg-white px-7 py-3.5">
 				<div class="flex items-center gap-2">
@@ -177,23 +196,31 @@
 					<div class="h-3 w-24 rounded bg-[#e5e9f0]"></div>
 				</div>
 			</div>
-			<div class="mx-auto grid w-full max-w-[1280px] gap-6 p-7" style:grid-template-columns="1fr 320px">
-				<div class="flex min-w-0 flex-col gap-5">
+			<div
+				class="mx-auto grid w-full max-w-[1280px] gap-6 p-7"
+				style:grid-template-columns="1fr 320px"
+			>
+				<div class="flex min-w-0 flex-col gap-3.5">
 					<!-- Page head skeleton -->
-					<div class="space-y-3">
-						<div class="h-4 w-32 rounded bg-[#e5e9f0]"></div>
+					<div class="flex items-center justify-between">
+						<div class="h-3 w-36 rounded bg-[#e5e9f0]"></div>
+						<div class="flex gap-2">
+							<div class="h-8 w-44 rounded-lg bg-[#e5e9f0]"></div>
+							<div class="h-8 w-28 rounded-lg bg-[#e5e9f0]"></div>
+						</div>
+					</div>
+					<!-- Main card skeleton -->
+					<div class="space-y-4 rounded-[14px] border border-[#e5e9f0] bg-white p-7">
 						<div class="h-8 w-3/4 rounded bg-[#e5e9f0]"></div>
 						<div class="flex gap-2">
 							<div class="h-6 w-20 rounded-full bg-[#e5e9f0]"></div>
 							<div class="h-6 w-24 rounded-full bg-[#e5e9f0]"></div>
 						</div>
-					</div>
-					<!-- Description skeleton -->
-					<div class="h-24 rounded-[10px] bg-[#e5e9f0]"></div>
-					<!-- Comments skeleton -->
-					<div class="space-y-3">
-						<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
-						<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
+						<div class="h-24 rounded-[10px] bg-[#e5e9f0]"></div>
+						<div class="space-y-3">
+							<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
+							<div class="h-16 rounded-[12px] bg-[#e5e9f0]"></div>
+						</div>
 					</div>
 				</div>
 				<!-- Rail skeleton -->
