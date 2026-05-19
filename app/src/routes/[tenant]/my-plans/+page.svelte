@@ -1,767 +1,315 @@
 <script lang="ts">
-	import { getMyPlansTasks, getUserTasksForDate } from '$lib/remotes/my-plans.remote';
-	import { getTasks, updateTask } from '$lib/remotes/tasks.remote';
+	import { getTasks, deleteTask } from '$lib/remotes/tasks.remote';
+	import { getProjects } from '$lib/remotes/projects.remote';
+	import { getTenantUsers } from '$lib/remotes/users.remote';
+	import { getMilestones } from '$lib/remotes/milestones.remote';
+	import { getClients } from '$lib/remotes/clients.remote';
 	import { getCurrentUser } from '$lib/remotes/auth.remote';
-	import { Calendar as CalendarPrimitive } from 'bits-ui';
-	import * as CalendarComponents from '$lib/components/ui/calendar';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
-	import TaskDetailDialog from '$lib/components/task-detail-dialog.svelte';
-	import {
-		Dialog,
-		DialogContent,
-		DialogDescription,
-		DialogFooter,
-		DialogHeader,
-		DialogTitle
-	} from '$lib/components/ui/dialog';
-	import { Plus, ClipboardList, MoreVertical, Calendar as CalendarIcon } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import * as ContextMenu from '$lib/components/ui/context-menu';
-	import { today, getLocalTimeZone, isEqualMonth } from '@internationalized/date';
+	import { useQueryState, parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
 	import { setContext } from 'svelte';
-	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
+	import { Button } from '$lib/components/ui/button';
+	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
+	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
+	import CreateTaskDialog from '$lib/components/create-task-dialog.svelte';
+	import TaskFilterPills from '$lib/components/task-filter-pills.svelte';
+	import TaskStatsStrip, { type CardFilter } from '$lib/components/task-stats-strip.svelte';
+	import TaskCalendarView from '$lib/components/task-calendar-view.svelte';
+	import { isTaskOverdue } from '$lib/utils/task-filters';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import type { Task } from '$lib/server/db/schema';
-	import type { DateValue } from '@internationalized/date';
-	import TaskPill from '$lib/components/my-plans/task-pill.svelte';
-	import PlansToolbar from '$lib/components/my-plans/plans-toolbar.svelte';
-	import PlansLegend from '$lib/components/my-plans/plans-legend.svelte';
-	import {
-		parseFilters,
-		matchesFilters,
-		isTaskOverdue,
-		computeCounters,
-		getPriorityBadgeClasses,
-		type Filters
-	} from '$lib/components/my-plans/filters';
-	import { getClients } from '$lib/remotes/clients.remote';
+	import { toast } from 'svelte-sonner';
+	import { clientLogger } from '$lib/client-logger';
+	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
-	// Calendar state
-	const todayDate = today(getLocalTimeZone());
-	let selectedDate = $state<DateValue>(todayDate);
-	let calendarValue = $state<DateValue>(todayDate);
-	let calendarPlaceholder = $state<DateValue>(todayDate);
+	// Current user — drives assignee prefiltering
+	const currentUserQuery = getCurrentUser();
+	const currentUserId = $derived(currentUserQuery.current?.user?.id ?? '');
 
-	// Calculate date range for fetching tasks (3 months: current month, previous, next)
-	const startDate = $derived.by(() => {
-		const date = new Date(calendarValue.year, calendarValue.month - 1 - 1, 1);
-		return date.toISOString().split('T')[0];
-	});
-	const endDate = $derived.by(() => {
-		const date = new Date(calendarValue.year, calendarValue.month - 1 + 2, 0);
-		return date.toISOString().split('T')[0];
+	// Filter states (same URL contract as /tasks, minus the `view` toggle)
+	const statuses = useQueryState(
+		'status',
+		parseAsArrayOf(
+			parseAsStringEnum([
+				'todo',
+				'in-progress',
+				'review',
+				'done',
+				'cancelled',
+				'pending-approval',
+				'blocked'
+			])
+		)
+	);
+	const priorities = useQueryState(
+		'priority',
+		parseAsArrayOf(parseAsStringEnum(['low', 'medium', 'high', 'urgent']))
+	);
+	const projectIds = useQueryState('project', parseAsArrayOf(parseAsString));
+	const milestoneIds = useQueryState('milestone', parseAsArrayOf(parseAsString));
+	const clientIdFilter = useQueryState('client', parseAsString.withDefault(''));
+	const search = useQueryState('search', parseAsString.withDefault(''));
+	const dueDate = useQueryState(
+		'dueDate',
+		parseAsStringEnum(['overdue', 'today', 'thisWeek', 'thisMonth'])
+	);
+	const taskIdPanel = useQueryState('taskId', parseAsString);
+	const cardFilter = useQueryState(
+		'card',
+		parseAsStringEnum(['overdue', 'today', 'week', 'completed'])
+	);
+	type TaskType = 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other';
+	const taskType = useQueryState(
+		'type',
+		parseAsStringEnum(['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'])
+	);
+
+	// Build filter params. `assignee` is FORCED to current user — URL value is ignored.
+	const filterParams = $derived({
+		status:
+			(statuses.current as string[] | null) && (statuses.current as string[]).length > 0
+				? (statuses.current as string[])
+				: undefined,
+		priority:
+			(priorities.current as string[] | null) && (priorities.current as string[]).length > 0
+				? (priorities.current as string[])
+				: undefined,
+		assignee: currentUserId ? [currentUserId] : undefined,
+		projectId:
+			(projectIds.current as string[] | null) && (projectIds.current as string[]).length > 0
+				? (projectIds.current as string[])
+				: undefined,
+		milestoneId:
+			(milestoneIds.current as string[] | null) && (milestoneIds.current as string[]).length > 0
+				? (milestoneIds.current as string[])
+				: undefined,
+		clientId: clientIdFilter.current || undefined,
+		type: (taskType.current as TaskType | null) ?? undefined,
+		search: search.current || undefined,
+		dueDate: dueDate.current || undefined
 	});
 
-	// Fetch tasks for the date range
-	const tasksQuery = $derived(getMyPlansTasks({ startDate, endDate }));
+	// Provide filter context for child components (CreateTaskDialog reads it for default values)
+	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
+
+	const tasksQuery = $derived(
+		getTasks({
+			...filterParams,
+			include: { subtasks: true, tags: true, assignees: true }
+		})
+	);
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
 
-	// Filters from URL
-	const filters: Filters = $derived(parseFilters(page.url.searchParams));
-
-	// Clients for filter dropdown (only those that appear in the task range)
-	const clientsQuery = getClients();
-	const allClients = $derived(clientsQuery.current || []);
-	const clientIdsInRange = $derived(
-		new Set(tasks.map((t) => t.clientId).filter(Boolean) as string[])
-	);
-	const clientsForFilter = $derived(
-		allClients.filter((c) => clientIdsInRange.has(c.id)).map((c) => ({ id: c.id, name: c.name }))
-	);
-
-	// Counters (computed on full task list, not filtered — so they don't lie)
-	const counters = $derived(computeCounters(tasks, todayDate));
-
-	// Apply filters to individual task rendering decisions
-	function taskMatches(task: Task): boolean {
-		return matchesFilters(task, filters, todayDate);
+	function isDueToday(d: Date | string | null | undefined): boolean {
+		if (!d) return false;
+		const due = d instanceof Date ? d : new Date(d);
+		const now = new Date();
+		return (
+			due.getFullYear() === now.getFullYear() &&
+			due.getMonth() === now.getMonth() &&
+			due.getDate() === now.getDate()
+		);
+	}
+	function isDueWithinWeek(d: Date | string | null | undefined): boolean {
+		if (!d) return false;
+		const due = d instanceof Date ? d : new Date(d);
+		const now = new Date();
+		now.setHours(0, 0, 0, 0);
+		const dueMidnight = new Date(due);
+		dueMidnight.setHours(0, 0, 0, 0);
+		const diff = Math.round((dueMidnight.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+		return diff >= 0 && diff <= 7;
+	}
+	function isActiveStatus(s: string | null | undefined): boolean {
+		return s !== 'done' && s !== 'cancelled';
 	}
 
-	// Single-filter "onlyOverdue" => hide non-matching entirely; otherwise dim them
-	const shouldHideNonMatching = $derived(
-		filters.onlyOverdue &&
-			filters.status.length === 0 &&
-			filters.priority.length === 0 &&
-			filters.clientId === null
-	);
-
-	// Group tasks by date
-	const tasksByDate = $derived.by(() => {
-		const map = new Map<string, Task[]>();
-		for (const task of tasks) {
-			if (task.dueDate) {
-				const dateStr = new Date(task.dueDate).toISOString().split('T')[0];
-				if (!map.has(dateStr)) {
-					map.set(dateStr, []);
-				}
-				map.get(dateStr)!.push(task);
-			}
-		}
-		return map;
+	const stats = $derived({
+		total: tasks.length,
+		totalActive: tasks.filter((t: any) => isActiveStatus(t.status)).length,
+		inProgress: tasks.filter((t: any) => t.status === 'in-progress').length,
+		overdue: tasks.filter((t: any) => isActiveStatus(t.status) && isTaskOverdue(t.dueDate)).length,
+		dueToday: tasks.filter((t: any) => isActiveStatus(t.status) && isDueToday(t.dueDate)).length,
+		dueWeek: tasks.filter((t: any) => isActiveStatus(t.status) && isDueWithinWeek(t.dueDate))
+			.length,
+		completed: tasks.filter((t: any) => t.status === 'done').length,
+		blocked: tasks.filter((t: any) => t.status === 'blocked').length
 	});
 
-	// Get tasks for selected date
-	const selectedDateStr = $derived(
-		`${selectedDate.year}-${String(selectedDate.month).padStart(2, '0')}-${String(selectedDate.day).padStart(2, '0')}`
+	const filteredTasksForView = $derived.by(() => {
+		const card = cardFilter.current;
+		if (!card) return tasks;
+		if (card === 'completed') return tasks.filter((t: any) => t.status === 'done');
+		if (card === 'overdue') {
+			return tasks.filter((t: any) => isActiveStatus(t.status) && isTaskOverdue(t.dueDate));
+		}
+		if (card === 'today') {
+			return tasks.filter((t: any) => isActiveStatus(t.status) && isDueToday(t.dueDate));
+		}
+		if (card === 'week') {
+			return tasks.filter((t: any) => isActiveStatus(t.status) && isDueWithinWeek(t.dueDate));
+		}
+		return tasks;
+	});
+
+	const usersQuery = getTenantUsers();
+	const users = $derived(usersQuery.current || []);
+	const clientsQuery = getClients();
+	const clients = $derived(clientsQuery.current || []);
+
+	// Clients dropdown — only those with at least one task assigned to current user
+	const taskClientIds = $derived(
+		new Set(tasks.map((t: any) => t.clientId).filter(Boolean) as string[])
 	);
-	const selectedDateTasks = $derived(tasksByDate.get(selectedDateStr) || []);
+	const clientsForFilter = $derived(
+		clients
+			.filter((c: any) => taskClientIds.has(c.id))
+			.map((c: any) => ({ id: c.id, name: c.name }))
+	);
+
+	// Pre-warm projects/milestones queries so child dialogs hit cache
+	getProjects(undefined);
+	getMilestones(undefined);
+
+	function setCardFilter(v: CardFilter) {
+		cardFilter.current = (v === '' ? null : v) as any;
+	}
 
 	// Dialog state
 	let isCreateDialogOpen = $state(false);
-	let isAssignTasksDialogOpen = $state(false);
-	let assignLoading = $state(false);
-	let assignError = $state<string | null>(null);
-	let selectedTask = $state<Task | null>(null);
-	let isTaskDetailOpen = $state(false);
-	let selectedDayForDialog = $state<DateValue | null>(null);
-	let isDayDialogOpen = $state(false);
+	let createDialogInitialDay = $state<Date | null>(null);
+	let createDialogInitialType = $state<'task' | 'meet' | undefined>(undefined);
+	let editingTask = $state<Task | null>(null);
 
-	// Get current user
-	const currentUserQuery = getCurrentUser();
-	const currentUser = $derived(currentUserQuery.current?.user);
+	function openCreateDialog() {
+		createDialogInitialDay = null;
+		createDialogInitialType = undefined;
+		isCreateDialogOpen = true;
+	}
 
-	// Fetch all unassigned tasks (or tasks not assigned to current user) for assignment
-	const allTasksQuery = $derived(
-		getTasks({
-			assignee: currentUser?.id || ''
-		})
-	);
-	const allTasks = $derived(allTasksQuery.current || []);
+	function openCreateDialogFromCalendar(isoDate: string, kind: 'task' | 'meet') {
+		const [y, m, d] = isoDate.split('-').map(Number);
+		if (y && m && d) {
+			createDialogInitialDay = new Date(y, m - 1, d);
+		} else {
+			createDialogInitialDay = null;
+		}
+		createDialogInitialType = kind;
+		isCreateDialogOpen = true;
+	}
 
-	// Filter params for create task dialog - provide empty object for context
-	let filterParams = $state({
-		assignee: ''
-	});
-	$effect(() => {
-		filterParams.assignee = currentUser?.id || '';
-	});
+	function openTaskFromList(task: Task) {
+		if (typeof window !== 'undefined' && window.innerWidth < 768) {
+			goto(`/${tenantSlug}/tasks/${task.id}`);
+		} else {
+			taskIdPanel.current = task.id;
+		}
+	}
 
-	// Provide filterParams via context so create task dialog can access it
-	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
+	function closePanel() {
+		taskIdPanel.current = null;
+	}
 
 	function handleCreateSuccess() {
-		isCreateDialogOpen = false;
-		// additionalQueriesToUpdate doesn't reliably invalidate getMyPlansTasks when the
-		// query reference is passed through a layered dialog prop chain, so refresh
-		// explicitly here.
-		tasksQuery.refresh?.();
-		allTasksQuery.refresh?.();
+		// Updates are propagated via .updates() in the dialog
 	}
 
-	async function handleAssignTask(task: Task) {
-		if (!currentUser?.id) {
-			assignError = 'Unable to determine current user';
-			return;
-		}
-
-		assignLoading = true;
-		assignError = null;
-
+	async function handleDeleteTask(taskId: string) {
+		if (!confirm('Sigur ștergi acest task?')) return;
 		try {
-			await updateTask({
-				taskId: task.id,
-				dueDate: selectedDateStr,
-				title: task.title
-			}).updates(tasksQuery, allTasksQuery);
-
-			isAssignTasksDialogOpen = false;
+			await deleteTask(taskId).updates(getTasks({ ...filterParams }));
+			if (taskIdPanel.current === taskId) taskIdPanel.current = null;
+			toast.success('Task șters');
 		} catch (e) {
-			assignError = e instanceof Error ? e.message : 'Failed to assign task';
-		} finally {
-			assignLoading = false;
+			clientLogger.apiError('task_delete', e);
 		}
 	}
 
-	function formatDateKey(date: DateValue): string {
-		return `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+	function handleEditTask(task: Task) {
+		editingTask = task;
 	}
 
-	function getTasksForDate(date: DateValue): Task[] {
-		const dateKey = formatDateKey(date);
-		return tasksByDate.get(dateKey) || [];
-	}
-
-	function handleDateClick(date: DateValue) {
-		selectedDate = date;
-	}
-
-	function goToToday() {
-		calendarValue = todayDate;
-		calendarPlaceholder = todayDate;
-		selectedDate = todayDate;
-	}
-
-	function handleClickTodayBadge() {
-		selectedDate = todayDate;
-		selectedDayForDialog = todayDate;
-		isDayDialogOpen = true;
-	}
-
-	function handleTaskClick(task: Task, event: MouseEvent) {
-		event.stopPropagation();
-		selectedTask = task;
-		isTaskDetailOpen = true;
-	}
-
-	function handleDayIconClick(date: DateValue, event: MouseEvent) {
-		event.stopPropagation();
-		selectedDayForDialog = date;
-		isDayDialogOpen = true;
-	}
-
-	function handleContextMenuAction(date: DateValue, action: string) {
-		if (action === 'view') {
-			selectedDayForDialog = date;
-			isDayDialogOpen = true;
-		} else if (action === 'new-task') {
-			selectedDate = date;
-			isCreateDialogOpen = true;
-		} else if (action === 'assign-task') {
-			selectedDate = date;
-			isAssignTasksDialogOpen = true;
-		}
-	}
-
-	const selectedDayTasksForDialog = $derived.by(() => {
-		if (!selectedDayForDialog) return [];
-		const dateKey = formatDateKey(selectedDayForDialog);
-		return tasksByDate.get(dateKey) || [];
-	});
-
-	const selectedDayStrForDialog = $derived.by(() => {
-		if (!selectedDayForDialog) return '';
-		return formatDateKey(selectedDayForDialog);
-	});
-
-	// Drag and drop state
-	let draggedTask = $state<Task | null>(null);
-	let dragOverDate = $state<string | null>(null);
-	let isDragging = $state(false);
-
-	function handleDragStart(e: DragEvent, task: Task) {
-		if (!(e.target instanceof HTMLElement)) return;
-		draggedTask = task;
-		isDragging = true;
-		e.dataTransfer!.effectAllowed = 'move';
-		e.dataTransfer!.dropEffect = 'move';
-		if (e.target) {
-			e.target.style.opacity = '0.5';
-		}
-	}
-
-	function handleDragEnd(e: DragEvent) {
-		isDragging = false;
-		draggedTask = null;
-		dragOverDate = null;
-		if (e.target instanceof HTMLElement) {
-			e.target.style.opacity = '1';
-		}
-	}
-
-	function handleDragOver(e: DragEvent, date: DateValue) {
-		e.preventDefault();
-		const dateKey = formatDateKey(date);
-		if (dragOverDate !== dateKey) {
-			dragOverDate = dateKey;
-		}
-		e.dataTransfer!.dropEffect = 'move';
-	}
-
-	function handleDragLeave(e: DragEvent) {
-		// Only clear if we're leaving the drop target, not entering a child
-		// implementation detail: simplified for now, usually needs check for relatedTarget
-	}
-
-	async function handleDrop(e: DragEvent, date: DateValue) {
-		e.preventDefault();
-		const dateKey = formatDateKey(date);
-		dragOverDate = null;
-
-		if (!draggedTask) return;
-
-		// Don't do anything if dropping on same day
-		if (draggedTask.dueDate) {
-			const currentDueDate = new Date(draggedTask.dueDate).toISOString().split('T')[0];
-			if (currentDueDate === dateKey) {
-				handleDragEnd(e);
-				return;
-			}
-		}
-
-		const taskId = draggedTask.id;
-		const taskTitle = draggedTask.title;
-
-		// Optimistic update (optional, but good for UX)
-		// For now we rely on the server response to refresh the view
-		// since tasksQuery is reactive
-
-		try {
-			await updateTask({
-				taskId,
-				dueDate: dateKey,
-				title: taskTitle
-			}).updates(tasksQuery);
-		} catch (e) {
-			console.error('Failed to move task', e);
-			// Optionally show error toast
-		} finally {
-			handleDragEnd(e);
-		}
+	function handleEditSuccess() {
+		// Updates propagated via .updates() in the dialog
 	}
 </script>
 
-<div class="flex h-[calc(100vh-6rem)] flex-col">
-	<div class="mb-6 flex items-center justify-between">
-		<div>
-			<h1 class="text-3xl font-bold">My Plans</h1>
-			<p class="mt-1 text-muted-foreground">Plan and organize your tasks</p>
-		</div>
-		<Button onclick={() => (isCreateDialogOpen = true)}>
-			<Plus class="mr-2 h-4 w-4" />
-			New Task
-		</Button>
-	</div>
+<svelte:head>
+	<title>Plans mele - CRM</title>
+</svelte:head>
 
-	<PlansToolbar
-		{filters}
-		{counters}
-		clients={clientsForFilter}
-		onGoToToday={goToToday}
-		onClickToday={handleClickTodayBadge}
+<div class="mb-6 flex items-start justify-between gap-4">
+	<div>
+		<h1 class="text-3xl font-bold tracking-tight">Plans mele</h1>
+		<p class="mt-1 text-sm text-muted-foreground">
+			{stats.totalActive} active ·
+			<strong class="text-[#ef4444]">{stats.overdue} overdue</strong>
+			· {stats.dueToday} azi
+		</p>
+	</div>
+	<Button onclick={() => openCreateDialog()}>
+		<PlusIcon class="mr-2 h-4 w-4" />
+		Task nou
+	</Button>
+</div>
+
+<div class="mb-4">
+	<TaskStatsStrip
+		{stats}
+		activeFilter={(cardFilter.current ?? '') as CardFilter}
+		onFilterChange={setCardFilter}
+		cards={['all', 'overdue', 'today', 'week', 'completed']}
 	/>
+</div>
 
-	<div class="min-h-0 flex-1">
-		<Card class="flex h-full flex-col">
-			<CardContent class="min-h-0 flex-1 overflow-auto p-4">
-				{#if loading}
-					<div class="flex items-center justify-center py-12">
-						<p class="text-muted-foreground">Loading tasks...</p>
-					</div>
-				{:else}
-					<CalendarPrimitive.Root
-						type="single"
-						bind:value={calendarValue}
-						bind:placeholder={calendarPlaceholder}
-						locale="en-US"
-						class="w-full"
-					>
-						{#snippet children({ months, weekdays })}
-							<CalendarComponents.Months>
-								<CalendarComponents.Nav>
-									<CalendarComponents.PrevButton />
-									<CalendarComponents.NextButton />
-								</CalendarComponents.Nav>
-								{#each months as month, monthIndex}
-									<CalendarComponents.Month class="w-full">
-										<CalendarComponents.Header>
-											<CalendarComponents.Caption
-												captionLayout="label"
-												months={undefined}
-												monthFormat="long"
-												years={undefined}
-												yearFormat="numeric"
-												month={month.value}
-												bind:placeholder={calendarPlaceholder}
-												{monthIndex}
-												locale="en-US"
-											/>
-										</CalendarComponents.Header>
-										<CalendarComponents.Grid class="w-full border-collapse">
-											<CalendarComponents.GridHead class="w-full">
-												<CalendarComponents.GridRow class="w-full select-none">
-													{#each weekdays as weekday}
-														<CalendarComponents.HeadCell
-															class="w-full py-2 text-center text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-														>
-															{weekday.slice(0, 2)}
-														</CalendarComponents.HeadCell>
-													{/each}
-												</CalendarComponents.GridRow>
-											</CalendarComponents.GridHead>
-											<CalendarComponents.GridBody class="w-full">
-												{#each month.weeks as weekDates}
-													<CalendarComponents.GridRow class="w-full">
-														{#each weekDates as date}
-															{@const dayTasks = getTasksForDate(date)}
-															{@const isSelected =
-																date.year === selectedDate.year &&
-																date.month === selectedDate.month &&
-																date.day === selectedDate.day}
-															{@const isToday =
-																date.year === todayDate.year &&
-																date.month === todayDate.month &&
-																date.day === todayDate.day}
-															{@const isDragOver = dragOverDate === formatDateKey(date)}
-															{@const cellDate = date.toDate(getLocalTimeZone())}
-															{@const isWeekend =
-																cellDate.getDay() === 0 || cellDate.getDay() === 6}
-															{@const overdueInDay = dayTasks.filter((t) =>
-																isTaskOverdue(t, todayDate)
-															).length}
-															<CalendarComponents.Cell
-																{date}
-																month={month.value}
-																class="h-auto! min-h-[180px] w-full border border-border/50"
-															>
-																<ContextMenu.Root>
-																	<ContextMenu.Trigger>
-																		{#snippet child({ props })}
-																			<button
-																				{...props}
-																				type="button"
-																				class="group relative flex h-full min-h-[180px] w-full cursor-pointer flex-col items-start rounded-md p-2 transition-all hover:bg-accent/50 {isSelected
-																					? 'bg-primary/10 ring-2 ring-primary ring-offset-1'
-																					: ''} {isToday && !isSelected
-																					? 'bg-accent/30 ring-1 ring-primary/50'
-																					: ''} {!isEqualMonth(date, month.value)
-																					? 'opacity-40'
-																					: ''} {isDragOver
-																					? 'border-primary bg-primary/20 ring-2 ring-primary'
-																					: ''} {isWeekend && isEqualMonth(date, month.value)
-																					? 'bg-muted/20'
-																					: ''}"
-																				onclick={() => handleDateClick(date)}
-																				ondragover={(e) => handleDragOver(e, date)}
-																				ondrop={(e) => handleDrop(e, date)}
-																			>
-																				<div
-																					class="mb-1.5 flex w-full items-center justify-between"
-																				>
-																					<div class="flex items-center gap-1">
-																						<span
-																							class="text-sm font-semibold {isSelected
-																								? 'text-primary'
-																								: isToday && !isSelected
-																									? 'font-bold text-primary'
-																									: 'text-foreground'}"
-																						>
-																							{date.day}
-																						</span>
-																						{#if overdueInDay > 0}
-																							<span
-																								class="h-1.5 w-1.5 rounded-full bg-red-500"
-																								aria-label="{overdueInDay} overdue"
-																								title="{overdueInDay} overdue"
-																							></span>
-																						{/if}
-																						{#if isToday && !isSelected}
-																							<span
-																								class="text-[9px] font-semibold tracking-wider text-primary/70 uppercase"
-																								>TODAY</span
-																							>
-																						{/if}
-																					</div>
-																					<div
-																						role="button"
-																						tabindex="0"
-																						class="rounded-md p-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-accent/80 {isSelected
-																							? 'opacity-100'
-																							: ''}"
-																						onclick={(e) => handleDayIconClick(date, e)}
-																						onkeydown={(e) => {
-																							if (e.key === 'Enter' || e.key === ' ')
-																								handleDayIconClick(
-																									date,
-																									e as unknown as MouseEvent
-																								);
-																						}}
-																						title="View day details"
-																					>
-																						<CalendarIcon
-																							class="h-4 w-4 text-muted-foreground"
-																							aria-hidden="true"
-																						/>
-																					</div>
-																				</div>
-																				{#if dayTasks.length > 0}
-																					<div class="flex min-h-0 w-full flex-1 flex-col gap-1">
-																						{#each dayTasks.slice(0, 6) as task (task.id)}
-																							{@const pillOverdue = isTaskOverdue(task, todayDate)}
-																							{@const match = taskMatches(task)}
-																							{#if !match && shouldHideNonMatching}
-																								<!-- hidden by overdue-only filter -->
-																							{:else}
-																								<TaskPill
-																									{task}
-																									isOverdue={pillOverdue}
-																									dimmed={!match}
-																									onclick={(e) => handleTaskClick(task, e)}
-																									ondragstart={(e) => handleDragStart(e, task)}
-																									ondragend={handleDragEnd}
-																								/>
-																							{/if}
-																						{/each}
-																						{#if dayTasks.length > 6}
-																							<div
-																								class="truncate px-2 py-1 text-xs font-medium text-muted-foreground"
-																							>
-																								+{dayTasks.length - 6} more
-																							</div>
-																						{/if}
-																					</div>
-																				{:else}
-																					<div
-																						class="w-full flex-1"
-																						ondragover={(e) => handleDragOver(e, date)}
-																						ondrop={(e) => handleDrop(e, date)}
-																						role="application"
-																						aria-label="Drop zone"
-																					></div>
-																				{/if}
-																			</button>
-																		{/snippet}
-																	</ContextMenu.Trigger>
-																	<ContextMenu.Content>
-																		<ContextMenu.Item
-																			onclick={() => handleContextMenuAction(date, 'view')}
-																		>
-																			<CalendarIcon class="h-4 w-4" />
-																			View Day Details
-																		</ContextMenu.Item>
-																		<ContextMenu.Separator />
-																		<ContextMenu.Item
-																			onclick={() => handleContextMenuAction(date, 'new-task')}
-																		>
-																			<Plus class="h-4 w-4" />
-																			New Task
-																		</ContextMenu.Item>
-																		<ContextMenu.Item
-																			onclick={() => handleContextMenuAction(date, 'assign-task')}
-																		>
-																			<ClipboardList class="h-4 w-4" />
-																			Assign Existing Task
-																		</ContextMenu.Item>
-																	</ContextMenu.Content>
-																</ContextMenu.Root>
-															</CalendarComponents.Cell>
-														{/each}
-													</CalendarComponents.GridRow>
-												{/each}
-											</CalendarComponents.GridBody>
-										</CalendarComponents.Grid>
-									</CalendarComponents.Month>
-								{/each}
-							</CalendarComponents.Months>
-						{/snippet}
-					</CalendarPrimitive.Root>
-				{/if}
-			</CardContent>
-		</Card>
-	</div>
-
-	<div class="mt-2">
-		<PlansLegend />
-	</div>
+<div class="mb-6">
+	<TaskFilterPills {users} clients={clientsForFilter} lockedAssignee={currentUserId} />
 </div>
 
 <CreateTaskDialog
 	open={isCreateDialogOpen}
-	onOpenChange={(open) => (isCreateDialogOpen = open)}
-	onSuccess={handleCreateSuccess}
-	defaultDueDate={selectedDateStr}
-	additionalQueriesToUpdate={[tasksQuery, allTasksQuery]}
-/>
-
-<Dialog bind:open={isAssignTasksDialogOpen}>
-	<DialogContent class="max-h-[85vh] overflow-y-auto sm:max-w-[500px]">
-		<DialogHeader>
-			<DialogTitle>Assign Existing Task</DialogTitle>
-			<DialogDescription>
-				Assign a task to yourself for {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString(
-					'en-US',
-					{
-						weekday: 'long',
-						month: 'long',
-						day: 'numeric'
-					}
-				)}
-			</DialogDescription>
-		</DialogHeader>
-		<div class="max-h-[400px] overflow-y-auto">
-			{#if allTasks.length === 0}
-				<p class="py-4 text-center text-sm text-muted-foreground">
-					No unassigned tasks available. All tasks are already assigned to you.
-				</p>
-			{:else}
-				<div class="space-y-2">
-					{#each allTasks as task}
-						<div
-							class="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-accent"
-							role="button"
-							tabindex="0"
-							onclick={() => handleAssignTask(task)}
-							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									handleAssignTask(task);
-								}
-							}}
-						>
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1">
-									<h4 class="truncate font-medium">{task.title}</h4>
-									{#if task.description}
-										<p class="mt-1 line-clamp-2 text-sm text-muted-foreground">
-											{task.description}
-										</p>
-									{/if}
-									<div class="mt-2 flex items-center gap-2">
-										<Badge variant="outline" class="text-xs">{task.status}</Badge>
-										{#if task.priority}
-											<Badge class="text-xs {getPriorityBadgeClasses(task.priority)}"
-												>{task.priority}</Badge
-											>
-										{/if}
-									</div>
-								</div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-		{#if assignError}
-			<div class="mt-4 rounded-md bg-destructive/10 p-3">
-				<p class="text-sm text-destructive">{assignError}</p>
-			</div>
-		{/if}
-		<DialogFooter>
-			<Button
-				variant="outline"
-				onclick={() => (isAssignTasksDialogOpen = false)}
-				disabled={assignLoading}
-			>
-				Cancel
-			</Button>
-		</DialogFooter>
-	</DialogContent>
-</Dialog>
-
-<TaskDetailDialog
-	task={selectedTask}
-	open={isTaskDetailOpen}
+	initialDay={createDialogInitialDay}
+	initialType={createDialogInitialType}
 	onOpenChange={(open) => {
-		isTaskDetailOpen = open;
+		isCreateDialogOpen = open;
 		if (!open) {
-			selectedTask = null;
-			// Layered-prop additionalQueriesToUpdate doesn't reliably invalidate
-			// getMyPlansTasks; refresh on close so the calendar reflects any edits.
-			tasksQuery.refresh?.();
-			allTasksQuery.refresh?.();
+			createDialogInitialDay = null;
+			createDialogInitialType = undefined;
 		}
 	}}
-	{tenantSlug}
-	additionalQueriesToUpdate={[tasksQuery, allTasksQuery]}
+	onSuccess={handleCreateSuccess}
 />
 
-<Dialog bind:open={isDayDialogOpen}>
-	<DialogContent class="max-h-[80vh] overflow-y-auto sm:max-w-[600px]">
-		<DialogHeader>
-			<DialogTitle>
-				{selectedDayForDialog
-					? new Date(selectedDayStrForDialog + 'T00:00:00').toLocaleDateString('en-US', {
-							weekday: 'long',
-							year: 'numeric',
-							month: 'long',
-							day: 'numeric'
-						})
-					: ''}
-			</DialogTitle>
-			<DialogDescription>
-				{selectedDayTasksForDialog.length} task{selectedDayTasksForDialog.length !== 1 ? 's' : ''} scheduled
-				for this day
-			</DialogDescription>
-		</DialogHeader>
-		<div class="mt-4 space-y-4">
-			{#if selectedDayTasksForDialog.length === 0}
-				<p class="py-4 text-center text-sm text-muted-foreground">
-					No tasks scheduled for this day.
-				</p>
-			{:else}
-				<div class="space-y-2">
-					{#each selectedDayTasksForDialog as task}
-						<div
-							class="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-accent"
-							role="button"
-							tabindex="0"
-							onclick={() => {
-								isDayDialogOpen = false;
-								selectedTask = task;
-								isTaskDetailOpen = true;
-							}}
-							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									isDayDialogOpen = false;
-									selectedTask = task;
-									isTaskDetailOpen = true;
-								}
-							}}
-						>
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1">
-									<h4 class="truncate font-medium">{task.title}</h4>
-									{#if task.description}
-										<p class="mt-1 line-clamp-2 text-sm text-muted-foreground">
-											{task.description}
-										</p>
-									{/if}
-									<div class="mt-2 flex items-center gap-2">
-										<Badge variant="outline" class="text-xs">{task.status}</Badge>
-										{#if task.priority}
-											<Badge class="text-xs {getPriorityBadgeClasses(task.priority)}"
-												>{task.priority}</Badge
-											>
-										{/if}
-									</div>
-								</div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-			<div class="flex flex-col gap-2 border-t pt-4">
-				<Button
-					variant="outline"
-					class="w-full"
-					onclick={() => {
-						if (selectedDayForDialog) {
-							selectedDate = selectedDayForDialog;
-						}
-						isDayDialogOpen = false;
-						isCreateDialogOpen = true;
-					}}
-				>
-					<Plus class="mr-2 h-4 w-4" />
-					New Task
-				</Button>
-				<Button
-					variant="outline"
-					class="w-full"
-					onclick={() => {
-						if (selectedDayForDialog) {
-							selectedDate = selectedDayForDialog;
-						}
-						isDayDialogOpen = false;
-						isAssignTasksDialogOpen = true;
-					}}
-				>
-					<ClipboardList class="mr-2 h-4 w-4" />
-					Assign Existing Task
-				</Button>
-			</div>
-		</div>
-	</DialogContent>
-</Dialog>
+{#if editingTask}
+	<EditTaskDialog
+		task={editingTask}
+		open={!!editingTask}
+		onOpenChange={(open) => {
+			if (!open) editingTask = null;
+		}}
+		onSuccess={handleEditSuccess}
+	/>
+{/if}
+
+{#if loading}
+	<div class="flex items-center justify-center py-12">
+		<p class="text-muted-foreground">Se încarcă task-urile...</p>
+	</div>
+{:else}
+	<TaskCalendarView
+		tasks={filteredTasksForView}
+		onTaskClick={openTaskFromList}
+		onAddDay={openCreateDialogFromCalendar}
+	/>
+{/if}
+
+<TaskDetailPanel
+	taskId={taskIdPanel.current}
+	onClose={closePanel}
+	{tenantSlug}
+	currentUserId={(page.data as any)?.tenantUser?.userId}
+/>
