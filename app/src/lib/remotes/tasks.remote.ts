@@ -2705,26 +2705,70 @@ export const addAssignee = command(
 	async ({ taskId, userId, role }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		// Block client users from assigning anyone
+		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
-		const [task] = await db.select({ id: table.task.id })
+		const tenantId = event.locals.tenant.id;
+
+		const [task] = await db
+			.select({ id: table.task.id, clientId: table.task.clientId })
 			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
 			.limit(1);
 		if (!task) throw new Error('Task not found');
 
-		const [existing] = await db.select({ taskId: table.taskAssignee.taskId })
+		// Validate the user being assigned. Two acceptable shapes:
+		//  A. Agency user: row in tenant_user for current tenant
+		//  B. Client user: row in client_user for the task's clientId + current tenant
+		const [agencyMembership] = await db
+			.select({ userId: table.tenantUser.userId })
+			.from(table.tenantUser)
+			.where(
+				and(
+					eq(table.tenantUser.userId, userId),
+					eq(table.tenantUser.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!agencyMembership) {
+			// Not an agency user — must be a valid client user for this task's client
+			if (!task.clientId) {
+				throw new Error('User is not a member of this tenant');
+			}
+			const [clientMembership] = await db
+				.select({ userId: table.clientUser.userId })
+				.from(table.clientUser)
+				.where(
+					and(
+						eq(table.clientUser.userId, userId),
+						eq(table.clientUser.clientId, task.clientId),
+						eq(table.clientUser.tenantId, tenantId)
+					)
+				)
+				.limit(1);
+			if (!clientMembership) {
+				throw new Error('User is not associated with this task\'s client');
+			}
+		}
+
+		const [existing] = await db
+			.select({ taskId: table.taskAssignee.taskId })
 			.from(table.taskAssignee)
-			.where(and(
-				eq(table.taskAssignee.taskId, taskId),
-				eq(table.taskAssignee.userId, userId),
-				eq(table.taskAssignee.tenantId, event.locals.tenant.id)
-			))
+			.where(
+				and(
+					eq(table.taskAssignee.taskId, taskId),
+					eq(table.taskAssignee.userId, userId),
+					eq(table.taskAssignee.tenantId, tenantId)
+				)
+			)
 			.limit(1);
 
 		if (!existing) {
 			await db.insert(table.taskAssignee).values({
-				taskId, userId,
-				tenantId: event.locals.tenant.id,
+				taskId,
+				userId,
+				tenantId,
 				role: role ?? null,
 				createdAt: Date.now()
 			});

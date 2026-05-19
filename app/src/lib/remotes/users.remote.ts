@@ -337,3 +337,103 @@ export const getClientUsers = query(v.pipe(v.string(), v.minLength(1)), async (c
 
 	return clientUsers;
 });
+
+/**
+ * Get client users assignable to tasks for a given client.
+ *
+ * Returns:
+ *  - Primary client users (isPrimary=true) — always eligible
+ *  - Secondary client users — only if their clientSecondaryEmail row has
+ *    accessFlags.tasks = true (or legacy notifyTasks fallback)
+ *
+ * Filters keep contacts who have NOT been granted task-portal access invisible
+ * from the assignee picker, avoiding implicit access escalation via assignment.
+ */
+export const getAssignableClientUsers = query(
+	v.pipe(v.string(), v.minLength(1)),
+	async (clientId) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		// Client users cannot use this picker
+		if (event.locals.isClientUser) {
+			throw new Error('Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// All client users for this client+tenant (primary + secondary)
+		const rows = await db
+			.select({
+				userId: table.user.id,
+				email: table.user.email,
+				firstName: table.user.firstName,
+				lastName: table.user.lastName,
+				isPrimary: table.clientUser.isPrimary
+			})
+			.from(table.clientUser)
+			.innerJoin(table.user, eq(table.clientUser.userId, table.user.id))
+			.where(
+				and(
+					eq(table.clientUser.clientId, clientId),
+					eq(table.clientUser.tenantId, tenantId)
+				)
+			);
+
+		if (rows.length === 0) return [];
+
+		// For non-primary users, look up their clientSecondaryEmail row to read accessFlags.
+		// Match by lower(email) since clientSecondaryEmail.email may have casing differences.
+		const nonPrimaryEmails = rows
+			.filter((r) => !r.isPrimary && r.email)
+			.map((r) => r.email.toLowerCase());
+
+		let secondaryAccessByEmail = new Map<string, boolean>();
+		if (nonPrimaryEmails.length > 0) {
+			const cseRows = await db
+				.select({
+					email: table.clientSecondaryEmail.email,
+					accessFlags: table.clientSecondaryEmail.accessFlags,
+					notifyTasks: table.clientSecondaryEmail.notifyTasks
+				})
+				.from(table.clientSecondaryEmail)
+				.where(
+					and(
+						eq(table.clientSecondaryEmail.clientId, clientId),
+						eq(table.clientSecondaryEmail.tenantId, tenantId)
+					)
+				);
+
+			for (const r of cseRows) {
+				let hasTasksAccess = false;
+				if (r.accessFlags) {
+					try {
+						const flags = JSON.parse(r.accessFlags);
+						hasTasksAccess = !!flags.tasks;
+					} catch {
+						// fallthrough to legacy notify column
+					}
+				}
+				// Legacy fallback when accessFlags JSON not yet backfilled
+				if (!hasTasksAccess && r.notifyTasks) {
+					hasTasksAccess = true;
+				}
+				secondaryAccessByEmail.set(r.email.toLowerCase(), hasTasksAccess);
+			}
+		}
+
+		return rows
+			.filter((r) => {
+				if (r.isPrimary) return true;
+				return r.email ? secondaryAccessByEmail.get(r.email.toLowerCase()) === true : false;
+			})
+			.map((r) => ({
+				id: r.userId,
+				email: r.email,
+				firstName: r.firstName,
+				lastName: r.lastName,
+				isPrimary: r.isPrimary
+			}));
+	}
+);

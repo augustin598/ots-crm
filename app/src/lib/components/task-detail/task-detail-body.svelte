@@ -6,7 +6,7 @@
 		unlinkMaterialFromTask
 	} from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
-	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
+	import { getTenantUsers, getClientUsers, getAssignableClientUsers } from '$lib/remotes/users.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import {
 		approveTask,
@@ -276,11 +276,46 @@
 	const subTotal = $derived(subtasks.length);
 	const subPct = $derived(subTotal > 0 ? Math.round((subDone / subTotal) * 100) : 0);
 
-	const assigneeOptions = $derived(
+	// Client users eligible to be assigned (primary + secondary with tasks access flag)
+	const assignableClientUsersQuery = $derived(
+		task?.clientId ? getAssignableClientUsers(task.clientId) : null
+	);
+	const assignableClientUsers = $derived(assignableClientUsersQuery?.current ?? []);
+
+	type AssigneeOption = {
+		value: string;
+		label: string;
+		kind: 'agency' | 'client';
+		email?: string;
+	};
+
+	const agencyAssigneeOptions = $derived<AssigneeOption[]>(
 		users
 			.filter((u) => !assignees.some((a: any) => a.userId === u.id))
-			.map((u) => ({ value: u.id, label: `${u.firstName} ${u.lastName}`.trim() || u.email }))
+			.map((u) => ({
+				value: u.id,
+				label: `${u.firstName} ${u.lastName}`.trim() || u.email,
+				kind: 'agency' as const,
+				email: u.email
+			}))
 	);
+
+	const clientAssigneeOptions = $derived<AssigneeOption[]>(
+		assignableClientUsers
+			.filter((u: any) => !assignees.some((a: any) => a.userId === u.id))
+			.map((u: any) => ({
+				value: u.id,
+				label: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email,
+				kind: 'client' as const,
+				email: u.email
+			}))
+	);
+
+	// Kept for callers that previously read assigneeOptions (combined list)
+	const assigneeOptions = $derived<AssigneeOption[]>([
+		...agencyAssigneeOptions,
+		...clientAssigneeOptions
+	]);
 
 	const isOverdue = $derived(
 		!!(
@@ -853,22 +888,59 @@
 												</button>
 											{/snippet}
 										</Popover.Trigger>
-										<Popover.Content class="w-64 p-2">
-											<div class="max-h-48 space-y-0.5 overflow-y-auto">
-												{#each assigneeOptions as opt}
-													<button
-														type="button"
-														class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-														onclick={() => handleAddAssignee(opt.value)}
-													>
-														<div
-															class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary"
+										<Popover.Content class="w-72 p-2">
+											<div class="max-h-72 space-y-0.5 overflow-y-auto">
+												{#if agencyAssigneeOptions.length > 0}
+													<div class="px-2 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+														Agenție
+													</div>
+													{#each agencyAssigneeOptions as opt (opt.value)}
+														<button
+															type="button"
+															class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+															onclick={() => handleAddAssignee(opt.value)}
 														>
-															{getInitials(opt.label)}
-														</div>
-														{opt.label}
-													</button>
-												{/each}
+															<div
+																class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary"
+															>
+																{getInitials(opt.label)}
+															</div>
+															<span class="truncate">{opt.label}</span>
+														</button>
+													{/each}
+												{/if}
+												{#if clientAssigneeOptions.length > 0}
+													{#if agencyAssigneeOptions.length > 0}
+														<div class="my-1 border-t border-border"></div>
+													{/if}
+													<div class="px-2 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+														Client
+													</div>
+													{#each clientAssigneeOptions as opt (opt.value)}
+														<button
+															type="button"
+															class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+															onclick={() => handleAddAssignee(opt.value)}
+														>
+															<div
+																class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-medium text-emerald-700"
+															>
+																{getInitials(opt.label)}
+															</div>
+															<div class="flex min-w-0 flex-1 flex-col">
+																<span class="truncate">{opt.label}</span>
+																{#if opt.email && opt.email !== opt.label}
+																	<span class="truncate text-[10px] text-muted-foreground">{opt.email}</span>
+																{/if}
+															</div>
+														</button>
+													{/each}
+												{/if}
+												{#if assigneeOptions.length === 0}
+													<div class="px-2 py-3 text-center text-xs text-muted-foreground">
+														Nimeni de adăugat
+													</div>
+												{/if}
 											</div>
 										</Popover.Content>
 									</Popover.Root>
