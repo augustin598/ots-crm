@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { focusTrap } from '$lib/actions/focus-trap';
 	import { scheduleMeet, getTask } from '$lib/remotes/tasks.remote';
+	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
 	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
@@ -34,6 +35,9 @@
 		defaultInviteeIds = [],
 		onClose
 	}: Props = $props();
+
+	const calStatusQuery = $derived(open ? getGoogleCalendarStatus() : null);
+	const calStatus = $derived(calStatusQuery?.current);
 
 	let meetTitle = $state('');
 	let meetDate = $state('');
@@ -142,6 +146,18 @@
 					<XIcon class="h-4 w-4" />
 				</button>
 			</div>
+
+			{#if calStatus}
+				{#if !calStatus.connected}
+					<div class="mx-5 mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+						Google Calendar neconectat. Meeting-ul se programează dar linkul Meet trebuie adăugat manual.
+					</div>
+				{:else}
+					<div class="mx-5 mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+						✓ Linkul Meet va fi generat automat la salvare (cont {calStatus.email}).
+					</div>
+				{/if}
+			{/if}
 
 			<div class="ct-meet-body flex flex-col gap-4 p-5">
 				<div class="ct-meet-field flex flex-col gap-1.5">
