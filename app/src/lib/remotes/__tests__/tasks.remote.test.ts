@@ -22,6 +22,7 @@ function makeChain(rows: unknown[]): any {
 	return Object.assign(p, {
 		from: () => makeChain(rows),
 		innerJoin: () => makeChain(rows),
+		leftJoin: () => makeChain(rows),
 		where: () => makeChain(rows),
 		orderBy: () => makeChain(rows),
 		limit: () => makeChain(rows),
@@ -31,23 +32,6 @@ function makeChain(rows: unknown[]): any {
 		set: () => makeChain(rows)
 	});
 }
-
-mock.module('$lib/server/db', () => ({
-	db: {
-		select: () => makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
-		selectDistinct: () =>
-			makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
-		insert: () => ({ values: () => Promise.resolve() }),
-		update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
-		delete: () => ({ where: () => Promise.resolve() }),
-		transaction: (fn: Function) =>
-			fn({
-				insert: () => ({ values: () => Promise.resolve() }),
-				update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
-				delete: () => ({ where: () => Promise.resolve() })
-			})
-	}
-}));
 
 // ─── Schema mock ──────────────────────────────────────────────────────────────
 
@@ -85,7 +69,27 @@ mock.module('$lib/server/db/schema', () => ({
 	},
 	taskWatcher: { id: col('id'), taskId: col('taskId'), userId: col('userId'), tenantId: col('tenantId'), createdAt: col('createdAt') },
 	taskActivity: { id: col('id'), taskId: col('taskId'), userId: col('userId'), tenantId: col('tenantId'), action: col('action'), field: col('field'), oldValue: col('oldValue'), newValue: col('newValue'), createdAt: col('createdAt') },
-	tenantUser: { tenantId: col('tenantId'), userId: col('userId'), role: col('role') }
+	tenantUser: { tenantId: col('tenantId'), userId: col('userId'), role: col('role') },
+	taskComment: {
+		id: col('id'), taskId: col('taskId'), userId: col('userId'), tenantId: col('tenantId'),
+		parentCommentId: col('parentCommentId'), content: col('content'),
+		attachmentPath: col('attachmentPath'), attachmentMimeType: col('attachmentMimeType'),
+		attachmentFileName: col('attachmentFileName'), attachmentFileSize: col('attachmentFileSize'),
+		createdAt: col('createdAt'), updatedAt: col('updatedAt')
+	},
+	taskCommentAttachment: {
+		id: col('id'), commentId: col('commentId'), path: col('path'),
+		mimeType: col('mimeType'), fileName: col('fileName'), fileSize: col('fileSize'),
+		createdAt: col('createdAt')
+	},
+	taskCommentReaction: {
+		id: col('id'), commentId: col('commentId'), userId: col('userId'),
+		tenantId: col('tenantId'), emoji: col('emoji'), createdAt: col('createdAt')
+	},
+	client: {
+		id: col('id'), tenantId: col('tenantId'), name: col('name'), email: col('email'),
+		slug: col('slug'), createdAt: col('createdAt')
+	}
 }));
 
 // ─── Side-effect mocks ────────────────────────────────────────────────────────
@@ -115,6 +119,54 @@ mock.module('$lib/server/recurring-tasks', () => ({
 	spawnNextRecurringTask: async () => {}
 }));
 
+mock.module('$lib/server/storage', () => ({
+	getDownloadUrl: async () => 'https://example.com/file'
+}));
+
+mock.module('$lib/server/notifications', () => ({
+	createNotification: async () => {}
+}));
+
+mock.module('$lib/server/telegram/task-notifications', () => ({
+	notifyTaskMention: async () => {}
+}));
+
+mock.module('sanitize-html', () => ({
+	default: (html: string) => html
+}));
+
+// ─── deletedRows queue: used by toggleReaction's delete().returning() ──────────
+
+const deletedRowsQueue: Array<unknown[]> = [];
+
+mock.module('$lib/server/db', () => ({
+	db: {
+		select: () => makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
+		selectDistinct: () =>
+			makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
+		insert: () => ({ values: () => Promise.resolve() }),
+		update: () => ({
+			set: () => ({
+				where: () => ({
+					returning: () => Promise.resolve(deletedRowsQueue.length > 0 ? deletedRowsQueue.shift() : [])
+				})
+			})
+		}),
+		delete: () => ({
+			where: () => ({
+				returning: () => Promise.resolve(deletedRowsQueue.length > 0 ? deletedRowsQueue.shift() : [])
+			}),
+			returning: () => Promise.resolve(deletedRowsQueue.length > 0 ? deletedRowsQueue.shift() : [])
+		}),
+		transaction: (fn: Function) =>
+			fn({
+				insert: () => ({ values: () => Promise.resolve() }),
+				update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+				delete: () => ({ where: () => Promise.resolve() })
+			})
+	}
+}));
+
 const {
 	getTask,
 	getTasks,
@@ -122,8 +174,22 @@ const {
 	updateTaskPriority,
 	bulkUpdateTaskStatus,
 	bulkDeleteTasks,
-	bulkDuplicateTasks
+	bulkDuplicateTasks,
+	watchTask,
+	unwatchTask,
+	approveTask,
+	rejectTask,
+	addSubtask,
+	toggleSubtask,
+	deleteSubtask,
+	scheduleMeet
 } = await import('../tasks.remote');
+
+const {
+	getTaskComments,
+	createTaskComment,
+	toggleReaction
+} = await import('../task-comments.remote');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -712,5 +778,392 @@ describe('getTask — client portal cross-client IDOR (P0 regression)', () => {
 
 		const result = await getTask('task-from-client-a') as any;
 		expect(result.id).toBe('task-from-client-a');
+	});
+});
+
+// ─── Group A: getTaskComments ─────────────────────────────────────────────────
+
+describe('getTaskComments', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('returns comments for a task belonging to the current tenant', async () => {
+		queryQueue.push([
+			{
+				id: 'comment-1', taskId: 'task-a1', userId: 'user1', tenantId: 'tenant-a',
+				parentCommentId: null, content: '<p>Salut!</p>', createdAt: 1000, updatedAt: 1000,
+				authorName: 'Ion', authorLastName: 'Popescu', authorEmail: 'ion@example.com',
+				taskClientId: null
+			}
+		]); // comments with JOIN on task (enforces tenantId)
+		queryQueue.push([]); // attachments
+		queryQueue.push([]); // reactions
+
+		const result = await getTaskComments('task-a1') as any[];
+
+		expect(result).toHaveLength(1);
+		expect(result[0].id).toBe('comment-1');
+		expect(result[0].attachments).toHaveLength(0);
+		expect(result[0].reactions).toEqual({});
+	});
+
+	// SECURITY: IDOR regression — client from Client A must not see comments on Client B's tasks
+	test('client user from Client A cannot see comments for Client B tasks (IDOR regression)', async () => {
+		// The query JOINs task and filters by task.clientId for isClientUser.
+		// Simulating the guard: DB returns empty because task.clientId !== client.id
+		queryQueue.push([]); // JOIN returns nothing — cross-client isolation enforced by WHERE
+
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		// getTaskComments returns [] (empty) rather than throwing — the JOIN guard filters at query level
+		const result = await getTaskComments('task-belongs-to-client-b') as any[];
+		expect(result).toHaveLength(0);
+	});
+});
+
+// ─── Group A: toggleReaction ──────────────────────────────────────────────────
+
+describe('toggleReaction', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('adds a reaction when none exists yet (toggle ON)', async () => {
+		// delete().where().returning() → empty (nothing previously existed)
+		deletedRowsQueue.push([]);
+		// SELECT comment tenantId — returns comment belonging to tenant-a
+		queryQueue.push([{ tenantId: 'tenant-a' }]);
+		// insert succeeds
+
+		const result = await toggleReaction({ commentId: 'comment-1', emoji: '👍' });
+		expect((result as any).ok).toBe(true);
+	});
+
+	test('removes a reaction when one already exists (toggle OFF)', async () => {
+		// delete().where().returning() → returns 1 row (reaction was deleted)
+		deletedRowsQueue.push([{ id: 'reaction-1', commentId: 'comment-1', userId: 'user1', emoji: '👍' }]);
+		// No insert needed — branch returns early
+
+		const result = await toggleReaction({ commentId: 'comment-1', emoji: '👍' });
+		expect((result as any).ok).toBe(true);
+	});
+
+	// SECURITY: cross-tenant — tenant B user cannot react to tenant A's comments
+	test('rejects reaction on a comment belonging to a different tenant', async () => {
+		// delete returns nothing (no existing reaction)
+		deletedRowsQueue.push([]);
+		// SELECT comment/task join → empty (comment not in tenant-b)
+		queryQueue.push([]);
+
+		currentEvent = makeEvent('tenant-b');
+
+		// toggleReaction uses SvelteKit's error(404, ...) which throws an HttpError object
+		await expect(
+			toggleReaction({ commentId: 'comment-from-tenant-a', emoji: '🔥' })
+		).rejects.toMatchObject({ status: 404 });
+	});
+});
+
+// ─── Group A: createTaskComment ───────────────────────────────────────────────
+
+describe('createTaskComment — client cross-client isolation', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+	});
+
+	test('internal user can comment on a task', async () => {
+		currentEvent = makeEvent('tenant-a');
+		// task lookup returns task belonging to tenant-a
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', clientId: null, title: 'Campanie Meta' }]);
+		// taskSettings lookup
+		queryQueue.push([{ tenantId: 'tenant-a', clientEmailsEnabled: 0 }]);
+
+		const result = await createTaskComment({
+			taskId: 'task-a1',
+			content: '<p>Comentariu valid</p>'
+		});
+
+		expect((result as any).success).toBe(true);
+	});
+
+	test('client user from Client A cannot comment on Client B task (IDOR)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+		// task lookup returns task belonging to client-b
+		queryQueue.push([{ id: 'task-client-b', tenantId: 'tenant-a', clientId: 'client-b', title: 'Task secret' }]);
+
+		await expect(
+			createTaskComment({ taskId: 'task-client-b', content: '<p>Test</p>' })
+		).rejects.toThrow(/unauthorized/i);
+	});
+});
+
+// ─── Group B: addSubtask ──────────────────────────────────────────────────────
+
+describe('addSubtask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: adds a subtask to a tenant-owned task', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a' }]); // task lookup
+		queryQueue.push([]); // last position query → empty, so position = 0
+
+		const result = await addSubtask({ taskId: 'task-a1', title: 'Pregătire materiale' });
+
+		expect((result as any).success).toBe(true);
+		expect(typeof (result as any).id).toBe('string');
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(
+			addSubtask({ taskId: 'task-a1', title: 'Subtask interzis' })
+		).rejects.toThrow(/unauthorized/i);
+	});
+
+	test('rejects task from a different tenant (cross-tenant)', async () => {
+		// task query returns empty — task doesn't belong to tenant-a
+		queryQueue.push([]);
+
+		await expect(
+			addSubtask({ taskId: 'task-from-tenant-b', title: 'Subtask' })
+		).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group B: toggleSubtask ───────────────────────────────────────────────────
+
+describe('toggleSubtask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: marks a subtask as done', async () => {
+		// toggleSubtask uses update().set().where().returning({id})
+		// Enqueue the updated row into deletedRowsQueue (shared returning queue)
+		deletedRowsQueue.push([{ id: 'sub-a1' }]);
+
+		const result = await toggleSubtask({ subtaskId: 'sub-a1', done: true });
+		expect((result as any).success).toBe(true);
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(
+			toggleSubtask({ subtaskId: 'sub-1', done: true })
+		).rejects.toThrow(/unauthorized/i);
+	});
+});
+
+// ─── Group B: deleteSubtask ───────────────────────────────────────────────────
+
+describe('deleteSubtask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(deleteSubtask('sub-1')).rejects.toThrow(/unauthorized/i);
+	});
+
+	// SECURITY: cross-tenant — subtask not in tenant-a → throws
+	test('rejects subtask belonging to a different tenant (cross-tenant)', async () => {
+		// delete().where().returning() → empty array (subtask not in tenant-b)
+		deletedRowsQueue.push([]);
+
+		currentEvent = makeEvent('tenant-b');
+
+		await expect(deleteSubtask('sub-from-tenant-a')).rejects.toThrow(/not found/i);
+	});
+
+	test('happy path: deletes subtask belonging to current tenant', async () => {
+		// delete().where().returning() → returns the deleted row
+		deletedRowsQueue.push([{ id: 'sub-a1' }]);
+
+		const result = await deleteSubtask('sub-a1');
+		expect((result as any).success).toBe(true);
+	});
+});
+
+// ─── Group C: scheduleMeet ────────────────────────────────────────────────────
+
+describe('scheduleMeet', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: schedules a meet on a tenant-owned task', async () => {
+		queryQueue.push([{ id: 'task-a1' }]); // task lookup
+
+		const result = await scheduleMeet({
+			taskId: 'task-a1',
+			meetTime: '2026-06-01T10:00:00.000Z',
+			meetDurationMinutes: 60
+		});
+
+		expect((result as any).success).toBe(true);
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(
+			scheduleMeet({ taskId: 'task-a1', meetTime: '2026-06-01T10:00:00.000Z' })
+		).rejects.toThrow(/unauthorized/i);
+	});
+
+	// SECURITY: cross-tenant
+	test('rejects task from a different tenant (cross-tenant)', async () => {
+		queryQueue.push([]); // task lookup returns empty — not in tenant-a
+
+		await expect(
+			scheduleMeet({ taskId: 'task-from-tenant-b', meetTime: '2026-06-01T10:00:00.000Z' })
+		).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group C: approveTask ─────────────────────────────────────────────────────
+
+describe('approveTask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: approves a pending-approval task', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'pending-approval' }]);
+		// sendClientNotificationIfEnabled: taskSettings + task + client lookups
+		queryQueue.push([{ tenantId: 'tenant-a', clientEmailsEnabled: 0 }]);
+
+		const result = await approveTask({ taskId: 'task-a1' });
+		expect((result as any).success).toBe(true);
+		expect((result as any).taskId).toBe('task-a1');
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(
+			approveTask({ taskId: 'task-a1' })
+		).rejects.toThrow(/unauthorized/i);
+	});
+
+	// SECURITY: cross-tenant
+	test('rejects task from a different tenant (cross-tenant)', async () => {
+		queryQueue.push([]); // task not found in tenant-a
+
+		await expect(
+			approveTask({ taskId: 'task-from-tenant-b' })
+		).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group C: rejectTask ──────────────────────────────────────────────────────
+
+describe('rejectTask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: rejects a pending-approval task', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a', status: 'pending-approval' }]);
+		// sendClientNotificationIfEnabled
+		queryQueue.push([{ tenantId: 'tenant-a', clientEmailsEnabled: 0 }]);
+
+		const result = await rejectTask('task-a1');
+		expect((result as any).success).toBe(true);
+	});
+
+	test('rejects when isClientUser is true (gate enforced)', async () => {
+		currentEvent = makeClientEvent('tenant-a', 'client-a');
+
+		await expect(rejectTask('task-a1')).rejects.toThrow(/unauthorized/i);
+	});
+
+	// SECURITY: cross-tenant
+	test('rejects task from a different tenant (cross-tenant)', async () => {
+		queryQueue.push([]); // task not found in tenant-a
+
+		await expect(rejectTask('task-from-tenant-b')).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group C: watchTask ───────────────────────────────────────────────────────
+
+describe('watchTask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: watches a task that belongs to the current tenant', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a' }]); // task lookup
+		queryQueue.push([]); // existing watcher check → none
+
+		const result = await watchTask('task-a1');
+		expect((result as any).success).toBe(true);
+	});
+
+	test('returns alreadyWatching=true when user already watches the task', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a' }]); // task lookup
+		queryQueue.push([{ id: 'watcher-1' }]); // existing watcher found
+
+		const result = await watchTask('task-a1') as any;
+		expect(result.success).toBe(true);
+		expect(result.alreadyWatching).toBe(true);
+	});
+
+	// SECURITY: cross-tenant
+	test('rejects watch on task from a different tenant (cross-tenant)', async () => {
+		queryQueue.push([]); // task not found in tenant-a
+
+		await expect(watchTask('task-from-tenant-b')).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group C: unwatchTask ─────────────────────────────────────────────────────
+
+describe('unwatchTask', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		deletedRowsQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('happy path: unwatches a task that belongs to the current tenant', async () => {
+		queryQueue.push([{ id: 'task-a1', tenantId: 'tenant-a' }]); // task lookup
+		// delete fires silently — no return value needed
+
+		const result = await unwatchTask('task-a1');
+		expect((result as any).success).toBe(true);
+	});
+
+	// SECURITY: cross-tenant
+	test('rejects unwatch on task from a different tenant (cross-tenant)', async () => {
+		queryQueue.push([]); // task not found in tenant-a
+
+		await expect(unwatchTask('task-from-tenant-b')).rejects.toThrow(/not found/i);
 	});
 });
