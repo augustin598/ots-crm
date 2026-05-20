@@ -152,10 +152,12 @@
 					<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 pt-1 text-xs text-slate-500 dark:text-slate-400">
 						{#if since}
 							<span>Client din <span class="font-medium text-slate-700 dark:text-slate-200">{since.label}</span></span>
-							{#if since.years > 0}
-								<span>·</span>
-								<span><span class="font-medium text-slate-700 dark:text-slate-200">{since.years} an{since.years === 1 ? '' : 'i'}</span></span>
-							{/if}
+							<span>·</span>
+							<span class="font-medium text-slate-700 dark:text-slate-200">
+								{since.years === 0
+									? 'sub 1 an'
+									: `${since.years} an${since.years === 1 ? '' : 'i'}`}
+							</span>
 						{/if}
 						{#if group.client.ltvCents > 0}
 							{#if since}<span>·</span>{/if}
