@@ -817,11 +817,16 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 				amountCents: 0
 			};
 
+		// Filter out the primary domain in case sync stored it inside additional_domains too.
+		const filteredAddons = (r.additionalDomains ?? []).filter(
+			(d) => d && d.toLowerCase() !== r.domain.toLowerCase()
+		);
+
 		const acc: AccountInGroup = {
 			id: r.id,
 			daUsername: r.daUsername,
 			domain: r.domain,
-			additionalDomains: r.additionalDomains,
+			additionalDomains: filteredAddons.length > 0 ? filteredAddons : null,
 			daPackageName: r.daPackageName,
 			linkedPackageName: r.linkedPackageName,
 			serverName: r.serverName,
@@ -837,7 +842,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		};
 		g.accounts.push(acc);
 		g.totals.count++;
-		g.totals.addonCount += acc.additionalDomains?.length ?? 0;
+		g.totals.addonCount += filteredAddons.length;
 		g.totals.byStatus[r.status] = (g.totals.byStatus[r.status] ?? 0) + 1;
 		if (r.status === 'active' || r.status === 'pending') {
 			g.totals.mrrCents += toMonthlyCentsGrouped(r.recurringAmount, r.billingCycle);

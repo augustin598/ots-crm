@@ -44,6 +44,13 @@
 	const countdown = $derived(countdownLabel(acc.expiresInDays));
 	let rowChecked = $state(false);
 
+	// Filter out the primary domain from additional_domains in case sync stored a duplicate.
+	const addons = $derived(
+		(acc.additionalDomains ?? []).filter(
+			(d) => d && d.toLowerCase() !== acc.domain.toLowerCase()
+		)
+	);
+
 	// Extract PHP version from package name if present (e.g. "Wordpress_PHP82" or via daPackageName)
 	function extractPhp(name: string | null): string {
 		if (!name) return 'PHP 8.2';
@@ -66,25 +73,25 @@
 					href={`/${tenantSlug}/hosting/accounts/${acc.id}`}
 					class="font-medium text-blue-600 hover:underline dark:text-blue-400">{acc.domain}</a
 				>
-				{#if (acc.additionalDomains?.length ?? 0) > 0}
+				{#if addons.length > 0}
 					<details class="group mt-1">
 						<summary class="cursor-pointer list-none">
 							<span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
 								<GlobeIcon class="size-2.5" />
-								+ {acc.additionalDomains!.length} domeni{acc.additionalDomains!.length === 1 ? 'u' : 'i'} adițional{acc.additionalDomains!.length === 1 ? '' : 'e'}
+								+ {addons.length} domeni{addons.length === 1 ? 'u' : 'i'} adițional{addons.length === 1 ? '' : 'e'}
 							</span>
 						</summary>
 						<ul class="mt-1 ml-3 space-y-0.5 border-l border-slate-200 pl-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
-							{#each acc.additionalDomains ?? [] as d (d)}
+							{#each addons as d (d)}
 								<li>{d}</li>
 							{/each}
 						</ul>
 					</details>
 				{/if}
 			{:else if col.key === 'addons'}
-				{#if (acc.additionalDomains?.length ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300" title={acc.additionalDomains!.join('\n')}>
-						<GlobeIcon class="size-2.5" /> + {acc.additionalDomains!.length}
+				{#if addons.length > 0}
+					<span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300" title={addons.join('\n')}>
+						<GlobeIcon class="size-2.5" /> + {addons.length}
 					</span>
 				{:else}
 					<span class="text-slate-300">—</span>
