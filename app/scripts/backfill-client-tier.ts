@@ -12,7 +12,7 @@
  */
 import { createClient } from '@libsql/client';
 
-const VIP_THRESHOLD_CENTS = 5_000_000; // 50.000 RON
+const VIP_THRESHOLD_CENTS = 500_000; // 5.000 RON — calibrated for hosting-specific LTV
 
 const env = process.env;
 if (!env.SQLITE_URI) {
