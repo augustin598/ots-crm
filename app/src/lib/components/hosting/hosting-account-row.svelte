@@ -120,11 +120,13 @@
 				<div class="whitespace-nowrap">
 					<div class="text-slate-700 dark:text-slate-200">{formatDate(acc.nextDueDate)}</div>
 					{#if countdown}
-						<div class="text-[10px] font-medium {acc.expiresInDays !== null && acc.expiresInDays < 0
+						<div class="text-[11px] font-semibold {acc.expiresInDays !== null && acc.expiresInDays < 0
 							? 'text-red-600 dark:text-red-400'
 							: acc.expiresInDays !== null && acc.expiresInDays <= 7
-								? 'text-amber-600 dark:text-amber-400'
-								: 'text-slate-500'}">
+								? 'text-red-600 dark:text-red-400'
+								: acc.expiresInDays !== null && acc.expiresInDays <= 30
+									? 'text-amber-600 dark:text-amber-400'
+									: 'text-slate-500'}">
 							{countdown}
 						</div>
 					{/if}
@@ -165,8 +167,9 @@
 					{STATUS_LABEL[acc.status] ?? acc.status}
 				</span>
 			{:else if col.key === 'suma'}
-				<div class="font-semibold text-slate-900 dark:text-slate-100">{formatRON(acc.recurringAmount, acc.currency ?? 'RON')}</div>
-				<div class="text-[10px] text-slate-400">{CYCLE_LABEL[acc.billingCycle] ?? ''}</div>
+				{@const faded = acc.status === 'terminated' || acc.status === 'cancelled'}
+				<div class="font-semibold {faded ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'}">{formatRON(acc.recurringAmount, acc.currency ?? 'RON')}</div>
+				<div class="text-[10px] {faded ? 'text-slate-300' : 'text-slate-400'}">/{(CYCLE_LABEL[acc.billingCycle] ?? '').toLowerCase().replace('lunar', 'lună').replace('anual', 'an').replace('trimestrial', 'trim').replace('semestrial', '6 luni').replace('bianual', '2 ani').replace('trianual', '3 ani').replace('one-time', 'unic')}</div>
 			{/if}
 		</td>
 	{/each}

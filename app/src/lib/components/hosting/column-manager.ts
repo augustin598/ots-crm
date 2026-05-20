@@ -21,10 +21,15 @@ export function visibleColumnsInOrder<T extends ColumnDef>(
 		.filter((c): c is T => !!c && (c.required === true || config.visible[c.key] === true));
 }
 
-export function buildDefaultConfig(columns: ColumnDef[]): ColumnConfig {
+export function buildDefaultConfig(
+	columns: ColumnDef[],
+	visible?: Record<string, boolean>
+): ColumnConfig {
 	return {
 		order: columns.map((c) => c.key),
-		visible: Object.fromEntries(columns.map((c) => [c.key, true]))
+		visible: visible
+			? Object.fromEntries(columns.map((c) => [c.key, visible[c.key] ?? true]))
+			: Object.fromEntries(columns.map((c) => [c.key, true]))
 	};
 }
 

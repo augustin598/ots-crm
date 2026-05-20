@@ -20,6 +20,7 @@
 	} from '$lib/components/hosting/column-manager';
 	import {
 		HOSTING_ACCOUNT_COLUMNS,
+		HOSTING_ACCOUNT_DEFAULT_VISIBLE,
 		COLUMNS_STORAGE_KEY
 	} from '$lib/components/hosting/columns.default';
 	import { formatRON } from '$lib/components/hosting/hosting-format';
@@ -38,7 +39,7 @@
 	let showOnlyUnassigned = $state(false);
 	let columnDrawerOpen = $state(false);
 
-	const DEFAULT_CONFIG = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS);
+	const DEFAULT_CONFIG = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS, HOSTING_ACCOUNT_DEFAULT_VISIBLE);
 	let columnConfig = $state<ColumnConfig>(
 		loadPersistedColumnConfig(COLUMNS_STORAGE_KEY, DEFAULT_CONFIG)
 	);
@@ -228,7 +229,14 @@
 					{totalClients} client{totalClients === 1 ? '' : 'i'} · {totalAccounts} cont{totalAccounts === 1 ? '' : 'uri'} · {totalAddons} domeni{totalAddons === 1 ? 'u' : 'i'} adițional{totalAddons === 1 ? '' : 'e'}
 				</p>
 			</div>
-			<div class="flex shrink-0 gap-2">
+			<div class="flex shrink-0 flex-wrap items-center gap-2">
+				<button
+					type="button"
+					onclick={() => (columnDrawerOpen = true)}
+					class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+				>
+					<SlidersHorizontalIcon class="size-4" /> Coloane
+				</button>
 				<button
 					type="button"
 					onclick={exportConfig}
@@ -357,13 +365,6 @@
 					<option value="terminated">Terminate</option>
 					<option value="cancelled">Anulate</option>
 				</select>
-				<button
-					type="button"
-					onclick={() => (columnDrawerOpen = true)}
-					class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
-				>
-					<SlidersHorizontalIcon class="size-4" /> Coloane
-				</button>
 			</div>
 			<div class="flex items-center gap-3 text-[11px]">
 				<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-emerald-500"></span> active</span>
@@ -439,7 +440,7 @@
 		<div class="mt-2 flex justify-between text-xs">
 			<button
 				type="button"
-				onclick={() => (columnConfig = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS))}
+				onclick={() => (columnConfig = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS, HOSTING_ACCOUNT_DEFAULT_VISIBLE))}
 				class="text-blue-600 hover:underline"
 			>
 				Resetează la default
