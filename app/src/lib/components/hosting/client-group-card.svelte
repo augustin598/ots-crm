@@ -16,6 +16,9 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import Checkbox from '$lib/components/ui/checkbox/checkbox.svelte';
+
+	let headerChecked = $state(false);
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import HostingAccountRow from './hosting-account-row.svelte';
 
@@ -94,7 +97,7 @@
 		: ''}"
 >
 	<!-- Group header: 4-column grid (identity / stats / financial / actions) -->
-	<div class="grid grid-cols-1 items-start gap-5 border-b border-slate-200 px-5 py-4 dark:border-slate-700 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_minmax(0,1fr)_auto] {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
+	<div class="grid grid-cols-1 items-start gap-6 border-b border-slate-200 px-5 py-4 dark:border-slate-700 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto] {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
 		<!-- Col 1: identity -->
 		<div class="flex min-w-0 items-start gap-3 text-left">
 			<!-- Avatar with chevron -->
@@ -174,7 +177,7 @@
 				{/if}
 			</div>
 			{#if segments.length > 0}
-				<div class="flex h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+				<div class="flex h-2 w-full max-w-[320px] overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
 					{#each segments as s (s.status)}
 						<div class={s.cls} style:width={`${s.pct}%`} title={`${s.status}: ${Math.round(s.pct)}%`}></div>
 					{/each}
@@ -279,7 +282,7 @@
 			<thead>
 				<tr class="border-b border-slate-200 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 dark:border-slate-700 dark:bg-slate-900">
 					<th class="w-10 px-3 py-2.5 text-left">
-						<input type="checkbox" class="size-3.5 rounded border-slate-300" />
+						<Checkbox bind:checked={headerChecked} aria-label="Selectează tot grupul" />
 					</th>
 					{#each visibleColumns as col (col.key)}
 						<th class="px-3 py-2.5 text-left font-medium {col.key === 'suma' ? 'text-right' : ''}"

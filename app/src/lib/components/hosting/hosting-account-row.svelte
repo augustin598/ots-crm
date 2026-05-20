@@ -21,6 +21,7 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import EditIcon from '@lucide/svelte/icons/pencil';
 	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
+	import Checkbox from '$lib/components/ui/checkbox/checkbox.svelte';
 
 	type Props = {
 		acc: AccountInGroup;
@@ -41,6 +42,7 @@
 	}: Props = $props();
 
 	const countdown = $derived(countdownLabel(acc.expiresInDays));
+	let rowChecked = $state(false);
 
 	// Extract PHP version from package name if present (e.g. "Wordpress_PHP82" or via daPackageName)
 	function extractPhp(name: string | null): string {
@@ -53,7 +55,7 @@
 
 <tr class="text-sm hover:bg-slate-50/60 dark:hover:bg-slate-700/40">
 	<td class="px-3 py-2.5 align-middle">
-		<input type="checkbox" class="size-3.5 rounded border-slate-300" />
+		<Checkbox bind:checked={rowChecked} aria-label="Selectează rândul {acc.daUsername}" />
 	</td>
 	{#each visibleColumns as col (col.key)}
 		<td class="px-3 py-2.5 align-middle {col.key === 'suma' ? 'text-right whitespace-nowrap' : ''}">
