@@ -94,9 +94,9 @@
 		: ''}"
 >
 	<!-- Group header: 4-column grid (identity / stats / financial / actions) -->
-	<div class="grid grid-cols-1 items-start gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1fr)_auto] {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
+	<div class="grid grid-cols-1 items-start gap-5 border-b border-slate-200 px-5 py-4 dark:border-slate-700 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_minmax(0,1fr)_auto] {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
 		<!-- Col 1: identity -->
-		<div class="flex min-w-0 items-start gap-3">
+		<div class="flex min-w-0 items-start gap-3 text-left">
 			<!-- Avatar with chevron -->
 			<button
 				type="button"
@@ -165,8 +165,8 @@
 			</div>
 		</div>
 
-		<!-- Col 2: counts + status mix bar -->
-		<div class="min-w-0 space-y-1.5">
+		<!-- Col 2: counts + status mix bar (left-aligned) -->
+		<div class="min-w-0 space-y-1.5 text-left">
 			<div class="text-sm text-slate-700 dark:text-slate-200">
 				<span class="font-semibold">{group.totals.count}</span> conturi hosting
 				{#if group.totals.addonCount > 0}
