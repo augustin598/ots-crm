@@ -123,10 +123,10 @@ export function statusMixSegments(
 	const order = ['active', 'pending', 'suspended', 'terminated', 'cancelled'];
 	const colors: Record<string, string> = {
 		active: 'bg-emerald-500',
-		pending: 'bg-yellow-400',
-		suspended: 'bg-orange-500',
-		terminated: 'bg-red-500',
-		cancelled: 'bg-slate-400'
+		pending: 'bg-amber-400',
+		suspended: 'bg-red-500',
+		terminated: 'bg-slate-500',
+		cancelled: 'bg-slate-300'
 	};
 	const total = Object.values(byStatus).reduce((s, n) => s + n, 0);
 	if (total === 0) return [];
@@ -138,6 +138,15 @@ export function statusMixSegments(
 			cls: colors[s] ?? 'bg-slate-300'
 		}));
 }
+
+/** Color the chip dot for each status — matches statusMixSegments. */
+export const STATUS_DOT: Record<string, string> = {
+	active: 'bg-emerald-500',
+	pending: 'bg-amber-400',
+	suspended: 'bg-red-500',
+	terminated: 'bg-slate-500',
+	cancelled: 'bg-slate-300'
+};
 
 export function isAddonsList(acc: AccountInGroup): string[] {
 	return acc.additionalDomains ?? [];

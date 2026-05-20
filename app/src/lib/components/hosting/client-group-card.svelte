@@ -6,7 +6,8 @@
 		formatRON,
 		groupEdgeColor,
 		statusMixSegments,
-		countdownLabel
+		countdownLabel,
+		STATUS_DOT
 	} from './hosting-format';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import StarIcon from '@lucide/svelte/icons/star';
@@ -14,6 +15,7 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import MoreVerticalIcon from '@lucide/svelte/icons/more-vertical';
+	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import HostingAccountRow from './hosting-account-row.svelte';
 
@@ -178,35 +180,35 @@
 					{/each}
 				</div>
 			{/if}
-			<div class="flex flex-wrap gap-2 pt-0.5">
+			<div class="flex flex-wrap gap-3 pt-0.5">
 				{#if (group.totals.byStatus.active ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-300">
-						<span class="size-1.5 rounded-full bg-emerald-500"></span>
-						{group.totals.byStatus.active} active
+					<span class="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
+						<span class="size-1.5 rounded-full {STATUS_DOT.active}"></span>
+						<span class="font-medium">{group.totals.byStatus.active}</span> active
 					</span>
 				{/if}
 				{#if (group.totals.byStatus.pending ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 text-[11px] text-yellow-700 dark:text-yellow-300">
-						<span class="size-1.5 rounded-full bg-yellow-400"></span>
-						{group.totals.byStatus.pending} în aștept.
+					<span class="inline-flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+						<span class="size-1.5 rounded-full {STATUS_DOT.pending}"></span>
+						<span class="font-medium">{group.totals.byStatus.pending}</span> în aștept.
 					</span>
 				{/if}
 				{#if (group.totals.byStatus.suspended ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 text-[11px] text-orange-700 dark:text-orange-300">
-						<span class="size-1.5 rounded-full bg-orange-500"></span>
-						{group.totals.byStatus.suspended} suspendate
+					<span class="inline-flex items-center gap-1.5 text-[11px] text-red-700 dark:text-red-300">
+						<span class="size-1.5 rounded-full {STATUS_DOT.suspended}"></span>
+						<span class="font-medium">{group.totals.byStatus.suspended}</span> suspendate
 					</span>
 				{/if}
 				{#if (group.totals.byStatus.terminated ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 text-[11px] text-red-700 dark:text-red-300">
-						<span class="size-1.5 rounded-full bg-red-500"></span>
-						{group.totals.byStatus.terminated} terminate
+					<span class="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400">
+						<span class="size-1.5 rounded-full {STATUS_DOT.terminated}"></span>
+						<span class="font-medium">{group.totals.byStatus.terminated}</span> terminate
 					</span>
 				{/if}
 				{#if (group.totals.byStatus.cancelled ?? 0) > 0}
-					<span class="inline-flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-400">
-						<span class="size-1.5 rounded-full bg-slate-400"></span>
-						{group.totals.byStatus.cancelled} anulate
+					<span class="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+						<span class="size-1.5 rounded-full {STATUS_DOT.cancelled}"></span>
+						<span class="font-medium">{group.totals.byStatus.cancelled}</span> anulate
 					</span>
 				{/if}
 			</div>
@@ -230,32 +232,45 @@
 					{group.totals.overdueCount} factur{group.totals.overdueCount === 1 ? 'ă' : 'i'} restant{group.totals.overdueCount === 1 ? 'ă' : 'e'}
 				</div>
 			{/if}
-			{#if group.clientId}
-				<div class="flex items-center justify-end gap-1.5 pt-1">
-					<a
-						href={`/${tenantSlug}/clients/${group.clientId}`}
-						class="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-					>
-						<ExternalLinkIcon class="size-3" /> Vezi clientul
-					</a>
+		</div>
+
+		<!-- Far right: actions column -->
+		{#if group.clientId}
+			<div class="flex shrink-0 flex-col items-end gap-2">
+				<a
+					href={`/${tenantSlug}/clients/${group.clientId}`}
+					class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+				>
+					<ExternalLinkIcon class="size-3.5" /> Vezi clientul
+				</a>
+				<div class="flex items-center gap-1.5">
 					<a
 						href={`/${tenantSlug}/clients/${group.clientId}#emails`}
 						aria-label="Email"
 						title="Email client"
-						class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white p-1.5 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+						class="inline-flex size-7 items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
 					>
 						<MailIcon class="size-3.5 text-slate-600 dark:text-slate-300" />
 					</a>
 					<button
 						type="button"
+						aria-label="Copiază"
+						title="Copiază datele clientului"
+						class="inline-flex size-7 items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+					>
+						<CopyIcon class="size-3.5 text-slate-600 dark:text-slate-300" />
+					</button>
+					<button
+						type="button"
 						aria-label="Mai multe"
-						class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white p-1.5 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+						title="Mai multe acțiuni"
+						class="inline-flex size-7 items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
 					>
 						<MoreVerticalIcon class="size-3.5 text-slate-600 dark:text-slate-300" />
 					</button>
 				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	</div>
 
 	<!-- Accounts table -->
