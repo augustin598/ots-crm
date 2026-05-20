@@ -4,9 +4,12 @@
  * from invoices that contain at least one hosting line item.
  *
  * "Hosting invoice" = at least one of:
- *   - line item description LIKE '%gazduire%'   (Romanian)
+ *   - line item description LIKE '%gazduire%'   (Romanian, no diacritic)
+ *   - line item description LIKE '%găzduire%'   (Romanian, with diacritic)
+ *   - line item description LIKE '%gasduire%'   (common Romanian typo)
+ *   - line item description LIKE '%gaduire%'    (common Romanian typo)
  *   - line item description LIKE '%hosting%'    (English / "Web Hosting")
- *   - line item description LIKE '%wordpress%'  (Wordpress_Standard, Wordpress_Gold, …)
+ *   - line item description LIKE '%wordpress%'  (Wordpress_Standard, Wordpress_Pro, Wordpress_Extreme, …)
  *   - invoice.hosting_account_id IS NOT NULL    (recurring invoice generated for a hosting account)
  *
  * For each client:
@@ -59,6 +62,9 @@ for (const c of clients.rows) {
 			      WHERE li.invoice_id = i.id
 			        AND (
 			          LOWER(li.description) LIKE '%gazduire%'
+			          OR LOWER(li.description) LIKE '%găzduire%'
+			          OR LOWER(li.description) LIKE '%gasduire%'
+			          OR LOWER(li.description) LIKE '%gaduire%'
 			          OR LOWER(li.description) LIKE '%hosting%'
 			          OR LOWER(li.description) LIKE '%wordpress%'
 			        )
@@ -84,6 +90,9 @@ for (const c of clients.rows) {
 			      WHERE li.invoice_id = i.id
 			        AND (
 			          LOWER(li.description) LIKE '%gazduire%'
+			          OR LOWER(li.description) LIKE '%găzduire%'
+			          OR LOWER(li.description) LIKE '%gasduire%'
+			          OR LOWER(li.description) LIKE '%gaduire%'
 			          OR LOWER(li.description) LIKE '%hosting%'
 			          OR LOWER(li.description) LIKE '%wordpress%'
 			        )
