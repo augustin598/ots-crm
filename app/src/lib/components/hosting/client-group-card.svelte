@@ -214,8 +214,8 @@
 			</div>
 		</div>
 
-		<!-- Col 3: MRR/ARR + next expiry + overdue -->
-		<div class="min-w-0 space-y-1.5 text-left text-sm lg:text-right">
+		<!-- Col 3: MRR/ARR + next expiry + overdue (left-aligned) -->
+		<div class="min-w-0 space-y-1.5 text-left text-sm">
 			<div>
 				<div class="text-base font-bold text-slate-900 dark:text-slate-100">{formatRON(group.totals.mrrCents)}<span class="text-xs font-normal text-slate-500">/lună</span></div>
 				<div class="text-[11px] text-slate-500">{formatRON(group.totals.arrCents)}/an</div>
