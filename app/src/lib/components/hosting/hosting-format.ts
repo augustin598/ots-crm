@@ -1,34 +1,65 @@
 import type { AccountInGroup } from '$lib/remotes/hosting-accounts.remote';
 
 export const CYCLE_LABEL: Record<string, string> = {
-	monthly: '/lună',
-	quarterly: '/trim.',
-	semiannually: '/6 luni',
-	biannually: '/6 luni',
-	annually: '/an',
-	biennially: '/2 ani',
-	triennially: '/3 ani',
-	one_time: 'one-time'
+	monthly: 'Lunar',
+	quarterly: 'Trimestrial',
+	semiannually: 'Semestrial',
+	biannually: 'Semestrial',
+	annually: 'Anual',
+	biennially: 'Bianual',
+	triennially: 'Trianual',
+	one_time: 'One-time'
 };
 
-export const STATUS_COLORS: Record<string, string> = {
-	pending: 'bg-yellow-100 text-yellow-700',
-	active: 'bg-green-100 text-green-700',
-	suspended: 'bg-orange-100 text-orange-700',
-	terminated: 'bg-red-100 text-red-700',
-	cancelled: 'bg-slate-100 text-slate-600'
+export const STATUS_LABEL: Record<string, string> = {
+	pending: 'în aștept.',
+	active: 'active',
+	suspended: 'suspended',
+	terminated: 'terminated',
+	cancelled: 'cancelled'
 };
 
-export const INVOICE_STATUS_COLORS: Record<string, string> = {
-	paid: 'bg-emerald-100 text-emerald-700',
-	pending: 'bg-amber-100 text-amber-700',
-	sent: 'bg-amber-100 text-amber-700',
-	overdue: 'bg-red-100 text-red-700',
-	partially_paid: 'bg-blue-100 text-blue-700',
-	draft: 'bg-slate-100 text-slate-600',
-	cancelled: 'bg-slate-100 text-slate-500',
-	'n/a': 'bg-slate-100 text-slate-400'
+export const STATUS_CHIP: Record<string, string> = {
+	pending: 'bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300',
+	active: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+	suspended: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300',
+	terminated: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+	cancelled: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
 };
+
+export const INVOICE_STATUS_CHIP: Record<string, string> = {
+	paid: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+	pending: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+	sent: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+	overdue: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
+	partially_paid: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+	draft: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+	cancelled: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+	'n/a': 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+};
+
+/** Backwards-compat alias (older code imported these). */
+export const STATUS_COLORS = STATUS_CHIP;
+export const INVOICE_STATUS_COLORS = INVOICE_STATUS_CHIP;
+
+/**
+ * Package pill class — tints based on tier hint in the package name.
+ * Class strings are LITERAL so Tailwind JIT picks them up.
+ */
+export function PACKAGE_CHIP(name: string | null | undefined): string {
+	const n = (name ?? '').toLowerCase();
+	if (n.includes('bronz')) return 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-200';
+	if (n.includes('silver') || n.includes('argint')) return 'bg-slate-100 border-slate-300 text-slate-800 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100';
+	if (n.includes('gold') || n.includes('aur')) return 'bg-yellow-50 border-yellow-200 text-yellow-900 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-200';
+	if (n.includes('platin') || n.includes('diamond')) return 'bg-zinc-100 border-zinc-300 text-zinc-900 dark:bg-zinc-800 dark:border-zinc-600 dark:text-zinc-100';
+	if (n.includes('extreme') || n.includes('premium') || n.includes('enterprise') || n.endsWith(' pro') || n === 'pro')
+		return 'bg-purple-50 border-purple-200 text-purple-900 dark:bg-purple-950 dark:border-purple-800 dark:text-purple-200';
+	if (n.includes('demo') || n.includes('trial') || n.includes('free'))
+		return 'bg-sky-50 border-sky-200 text-sky-900 dark:bg-sky-950 dark:border-sky-800 dark:text-sky-200';
+	if (n.includes('standard') || n.includes('basic'))
+		return 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200';
+	return 'bg-indigo-50 border-indigo-200 text-indigo-900 dark:bg-indigo-950 dark:border-indigo-800 dark:text-indigo-200';
+}
 
 export function formatRON(cents: number | null | undefined, currency = 'RON'): string {
 	return new Intl.NumberFormat('ro-RO', { style: 'currency', currency }).format((cents ?? 0) / 100);
@@ -54,10 +85,11 @@ export function formatDate(raw: string | null | undefined): string {
 
 export function countdownLabel(days: number | null | undefined): string | null {
 	if (days === null || days === undefined) return null;
-	if (days < 0) return `expirat acum ${Math.abs(days)} z.`;
+	if (days < 0) return `expirat de ${Math.abs(days)}z`;
 	if (days === 0) return 'expiră azi';
 	if (days === 1) return 'expiră mâine';
 	if (days <= 30) return `în ${days} zile`;
+	if (days <= 365) return `în ${days} zile`;
 	return null;
 }
 
