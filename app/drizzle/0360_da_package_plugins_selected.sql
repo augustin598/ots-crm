@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `plugins_selected` text DEFAULT '[]' NOT NULL;

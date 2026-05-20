@@ -221,6 +221,16 @@ export interface DAVacationConfig {
 	endDate: string | null;
 }
 
+// PackageInput shape & wire-format helpers live in package-serializer.ts so
+// the wrapper itself doesn't drift from the DA admin form layout.
+import {
+	serializeDAPackage,
+	serializeDeletePackageBody,
+	type PackageInput
+} from './package-serializer';
+
+export type { PackageInput };
+
 export interface DAPackageDetails {
 	/** Bandwidth limit in MB, or null for unlimited. */
 	bandwidth: number | null;
@@ -625,6 +635,58 @@ export class DirectAdminClient {
 			language: str('language'),
 			raw: flatRaw
 		};
+	}
+
+	/**
+	 * Create a new user package on the DA server.
+	 *
+	 * Wraps `POST /CMD_API_MANAGE_USER_PACKAGES` with `action=create`. The full
+	 * field set is built by {@link serializeDAPackage} so all wire quirks
+	 * (`unlimited` strings, ON/OFF booleans, snake_case keys) live in one place.
+	 *
+	 * Throws on any DA-reported error — the `request()` helper inspects
+	 * `error=1&text=...` form responses and raises {@link DirectAdminApiError}.
+	 */
+	async createPackage(packageName: string, opts: PackageInput): Promise<void> {
+		const body = serializeDAPackage(packageName, 'create', opts);
+		await this.request<Record<string, string>>(
+			'POST',
+			'/CMD_API_MANAGE_USER_PACKAGES',
+			body,
+			true
+		);
+	}
+
+	/**
+	 * Update an existing user package. Same endpoint as create, but with
+	 * `action=modify`. DA replaces all fields with the values in the body — pass
+	 * the COMPLETE intended state, not a diff.
+	 */
+	async modifyPackage(packageName: string, opts: PackageInput): Promise<void> {
+		const body = serializeDAPackage(packageName, 'modify', opts);
+		await this.request<Record<string, string>>(
+			'POST',
+			'/CMD_API_MANAGE_USER_PACKAGES',
+			body,
+			true
+		);
+	}
+
+	/**
+	 * Delete a user package via DA's bulk-select shape (`select0=<name>`).
+	 *
+	 * DA refuses to delete a package that's currently assigned to live users;
+	 * the caller must reconcile those users (move them to a different package)
+	 * before deletion or DA returns `error=1`.
+	 */
+	async deletePackage(packageName: string): Promise<void> {
+		const body = serializeDeletePackageBody(packageName);
+		await this.request<Record<string, string>>(
+			'POST',
+			'/CMD_API_MANAGE_USER_PACKAGES',
+			body,
+			true
+		);
 	}
 
 	async listDatabases(): Promise<DADatabase[]> {

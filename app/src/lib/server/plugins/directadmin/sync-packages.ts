@@ -125,7 +125,7 @@ export async function syncDAPackagesForServer(
 		};
 
 		const existing = await db
-			.select({ id: table.daPackage.id })
+			.select({ id: table.daPackage.id, createdByTenant: table.daPackage.createdByTenant })
 			.from(table.daPackage)
 			.where(
 				and(
@@ -147,6 +147,20 @@ export async function syncDAPackagesForServer(
 			});
 			synced++;
 			logInfo('directadmin', 'sync.detail_inserted', {
+				tenantId,
+				metadata: { serverId, pkg: pkgName }
+			});
+		} else if (existing[0].createdByTenant) {
+			// CRM owns this package — never clobber its config from a remote sync.
+			// We still bump `lastSyncedAt` so admins can see DA confirmed it exists,
+			// but the limit/flag fields are left alone. Divergence detection
+			// (i.e. someone edited the package directly in DA UI) is v2.
+			await db
+				.update(table.daPackage)
+				.set({ lastSyncedAt: now, isActive: true, updatedAt: new Date() })
+				.where(eq(table.daPackage.id, existing[0].id));
+			updated++;
+			logInfo('directadmin', 'sync.detail_skipped_crm_owned', {
 				tenantId,
 				metadata: { serverId, pkg: pkgName }
 			});

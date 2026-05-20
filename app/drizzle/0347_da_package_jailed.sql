@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `jailed` integer DEFAULT 0 NOT NULL;

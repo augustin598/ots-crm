@@ -856,6 +856,46 @@ export const daPackage = sqliteTable(
 		redis: boolean('redis').notNull().default(false),
 		suspendAtLimit: boolean('suspend_at_limit').notNull().default(false),
 		oversold: boolean('oversold').notNull().default(false),
+		/**
+		 * `true` = user shell is chrooted/jailed (DA `Jailed` flag).
+		 * Recommended security default for shared hosting.
+		 */
+		jailed: boolean('jailed').notNull().default(false),
+		/** Auto-serve `/.well-known/security.txt` per RFC 9116 (DA toggle). */
+		securityTxt: boolean('security_txt').notNull().default(false),
+		// systemd resource caps — null = unlimited. All sent verbatim to DA in
+		// CMD_API_MANAGE_USER_PACKAGES; DA enforces them via cgroups.
+		cpuQuota: integer('cpu_quota'),
+		ioReadBandwidthMax: integer('io_read_bandwidth_max'),
+		iopsReadMax: integer('iops_read_max'),
+		ioWriteBandwidthMax: integer('io_write_bandwidth_max'),
+		iopsWriteMax: integer('iops_write_max'),
+		memoryHigh: integer('memory_high'),
+		memoryMax: integer('memory_max'),
+		tasksMax: integer('tasks_max'),
+		/**
+		 * Feature Sets policy: 'allow_all_commands' (default) or
+		 * 'allow_selected_features'. When the latter, `featureSetsSelected` lists
+		 * the allowed feature-set names.
+		 */
+		featureSetsPolicy: text('feature_sets_policy').notNull().default('allow_all_commands'),
+		featureSetsSelected: jsonb('feature_sets_selected').$type<string[]>().notNull().default([]),
+		/**
+		 * Plugins policy: 'allow_all' (default), 'deny_selected', or
+		 * 'allow_selected'. When restricted, `pluginsSelected` lists the relevant
+		 * plugin names.
+		 */
+		pluginsPolicy: text('plugins_policy').notNull().default('allow_all'),
+		pluginsSelected: jsonb('plugins_selected').$type<string[]>().notNull().default([]),
+		/**
+		 * `true` if this package was created from the CRM (via the products page)
+		 * rather than synced from an externally-managed DA install. The sync cron
+		 * must NOT overwrite rows with `createdByTenant = true` — otherwise CRM-side
+		 * edits would be silently clobbered. See `sync-packages.ts`.
+		 */
+		createdByTenant: boolean('created_by_tenant').notNull().default(false),
+		/** User who created this package via CRM. Null for synced rows. */
+		createdByUserId: text('created_by_user_id').references(() => user.id),
 		skin: text('skin'),
 		language: text('language'),
 		rawData: jsonb('raw_data').$type<Record<string, unknown>>(),

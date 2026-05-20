@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `feature_sets_policy` text DEFAULT 'allow_all_commands' NOT NULL;

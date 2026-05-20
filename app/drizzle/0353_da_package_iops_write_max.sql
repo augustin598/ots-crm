@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `iops_write_max` integer;

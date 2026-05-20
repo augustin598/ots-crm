@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `feature_sets_selected` text DEFAULT '[]' NOT NULL;

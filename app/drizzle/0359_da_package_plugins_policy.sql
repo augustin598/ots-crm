@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `plugins_policy` text DEFAULT 'allow_all' NOT NULL;

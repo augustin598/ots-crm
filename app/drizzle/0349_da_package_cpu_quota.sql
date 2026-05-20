@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `cpu_quota` integer;

@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `created_by_tenant` integer DEFAULT 0 NOT NULL;

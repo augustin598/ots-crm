@@ -7,8 +7,13 @@
 		updateHostingProduct,
 		deleteHostingProduct
 	} from '$lib/remotes/hosting-products.remote';
-	import { getDAServers, getDAPackagesForServer } from '$lib/remotes/da-servers.remote';
+	import {
+		getDAServers,
+		getDAPackagesForServer,
+		deleteDAPackage
+	} from '$lib/remotes/da-servers.remote';
 	import { focusTrap } from '$lib/actions/focus-trap';
+	import PackageModal from './_package-modal.svelte';
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
@@ -52,6 +57,8 @@
 		billingCycle: string;
 		setupFee: number;
 		isActive: boolean;
+		isPublic: boolean;
+		publicSortOrder: number;
 		daServerId: string | null;
 		daPackageId: string | null;
 		serverName: string | null;
@@ -82,6 +89,8 @@
 		billingCycle: BillingCycle;
 		setupFee: number;
 		isActive: boolean;
+		isPublic: boolean;
+		publicSortOrder: number;
 		color: string;
 	};
 
@@ -111,6 +120,20 @@
 	let deleting = $state<ProductRow | null>(null);
 	let openMenuFor = $state<string | null>(null);
 	let submitting = $state(false);
+
+	// Nested package modal state — opened from the product modal when admin
+	// wants to create/edit a DA package inline. Null = closed.
+	type PkgModalState =
+		| { mode: 'new'; daServerId: string }
+		| {
+				mode: 'edit';
+				daServerId: string;
+				packageId: string;
+				daName: string;
+				initial: Record<string, unknown>;
+		  };
+	let packageModal = $state<PkgModalState | null>(null);
+	let deletingPackage = $state<{ id: string; daName: string } | null>(null);
 
 	// Derive the packages query from the currently-selected DA server in the
 	// editing form. Using $derived (not $effect) keeps the reactivity declarative
@@ -146,6 +169,8 @@
 			billingCycle: 'monthly',
 			setupFee: 0,
 			isActive: true,
+			isPublic: true,
+			publicSortOrder: 0,
 			color: PALETTE[1]
 		};
 	}
@@ -273,6 +298,8 @@
 				billingCycle: p.billingCycle as BillingCycle,
 				setupFee: p.setupFee / 100,
 				isActive: p.isActive,
+				isPublic: p.isPublic,
+				publicSortOrder: p.publicSortOrder,
 				color: colorFor(p)
 			}
 		};
@@ -295,6 +322,8 @@
 				billingCycle: p.billingCycle as BillingCycle,
 				setupFee: p.setupFee / 100,
 				isActive: true,
+				isPublic: p.isPublic,
+				publicSortOrder: p.publicSortOrder + 1,
 				color: colorFor(p)
 			}
 		};
@@ -328,7 +357,9 @@
 				currency: f.currency.trim().toUpperCase() || 'RON',
 				billingCycle: f.billingCycle,
 				setupFee: Math.round(f.setupFee * 100),
-				isActive: f.isActive
+				isActive: f.isActive,
+				isPublic: f.isPublic,
+				publicSortOrder: f.publicSortOrder
 			};
 			if (editing.mode === 'edit' && f.id) {
 				await updateHostingProduct({ id: f.id, data: payload });
@@ -406,6 +437,34 @@
 
 	function previewPublic() {
 		window.open('/pachete-hosting', '_blank', 'noopener');
+	}
+
+	async function handlePackageSaved(newPackageId: string) {
+		// Refresh the packages list so the new package shows in the dropdown,
+		// then auto-select it so the admin can immediately save the product.
+		if (editing && editing.form.daServerId) {
+			await getDAPackagesForServer(editing.form.daServerId).refresh();
+			editing.form.daPackageId = newPackageId;
+		}
+		packageModal = null;
+	}
+
+	async function confirmDeletePackage() {
+		if (!deletingPackage) return;
+		try {
+			await deleteDAPackage(deletingPackage.id);
+			toast.success('Pachet DA șters', { description: deletingPackage.daName });
+			// Clear the product's link to it and refresh the dropdown.
+			if (editing && editing.form.daPackageId === deletingPackage.id) {
+				editing.form.daPackageId = '';
+			}
+			if (editing?.form.daServerId) {
+				await getDAPackagesForServer(editing.form.daServerId).refresh();
+			}
+			deletingPackage = null;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare');
+		}
 	}
 
 	// KPI helpers
@@ -1154,13 +1213,110 @@
 										{#each packages as pk (pk.id)}
 											<option value={pk.id}>
 												{pk.daName} ({mbToGb(pk.quota)} disk / {mbToGb(pk.bandwidth)} trafic)
+												{pk.createdByTenant ? '· CRM' : ''}
 											</option>
 										{/each}
 									</select>
 								</div>
 							</div>
+							<div class="hst-pkg-actions">
+								<button
+									type="button"
+									class="btn-secondary sm"
+									disabled={!f.daServerId}
+									title={f.daServerId
+										? 'Creează un pachet nou pe serverul DA'
+										: 'Selectează întâi un server'}
+									onclick={() => {
+										if (f.daServerId) packageModal = { mode: 'new', daServerId: f.daServerId };
+									}}
+								>
+									<PlusIcon size={11} /> Creează pachet nou
+								</button>
+								{#if f.daPackageId}
+									{@const selectedPkg = packages.find((p) => p.id === f.daPackageId)}
+									{#if selectedPkg?.createdByTenant}
+										<button
+											type="button"
+											class="btn-secondary sm"
+											title="Editează pachetul DA"
+											onclick={() => {
+												if (!selectedPkg || !f.daServerId) return;
+												packageModal = {
+													mode: 'edit',
+													daServerId: f.daServerId,
+													packageId: selectedPkg.id,
+													daName: selectedPkg.daName,
+													initial: {
+														bandwidth: selectedPkg.bandwidth,
+														quota: selectedPkg.quota,
+														maxInodes: selectedPkg.maxInodes,
+														maxDomains: selectedPkg.maxDomains,
+														maxSubdomains: selectedPkg.maxSubdomains,
+														maxDomainPointers: selectedPkg.maxDomainPointers,
+														maxEmailAccounts: selectedPkg.maxEmailAccounts,
+														maxEmailForwarders: selectedPkg.maxEmailForwarders,
+														maxMailingLists: selectedPkg.maxMailingLists,
+														maxAutoresponders: selectedPkg.maxAutoresponders,
+														maxDatabases: selectedPkg.maxDatabases,
+														maxFtpAccounts: selectedPkg.maxFtpAccounts,
+														emailDailyLimit: selectedPkg.emailDailyLimit,
+														anonymousFtp: selectedPkg.anonymousFtp,
+														cgi: selectedPkg.cgi,
+														php: selectedPkg.php,
+														ssl: selectedPkg.ssl,
+														ssh: selectedPkg.ssh,
+														dnsControl: selectedPkg.dnsControl,
+														cron: selectedPkg.cron,
+														spam: selectedPkg.spam,
+														clamav: selectedPkg.clamav,
+														wordpress: selectedPkg.wordpress,
+														git: selectedPkg.git,
+														redis: selectedPkg.redis,
+														suspendAtLimit: selectedPkg.suspendAtLimit,
+														oversold: selectedPkg.oversold,
+														jailed: selectedPkg.jailed,
+														securityTxt: selectedPkg.securityTxt,
+														cpuQuota: selectedPkg.cpuQuota,
+														ioReadBandwidthMax: selectedPkg.ioReadBandwidthMax,
+														iopsReadMax: selectedPkg.iopsReadMax,
+														ioWriteBandwidthMax: selectedPkg.ioWriteBandwidthMax,
+														iopsWriteMax: selectedPkg.iopsWriteMax,
+														memoryHigh: selectedPkg.memoryHigh,
+														memoryMax: selectedPkg.memoryMax,
+														tasksMax: selectedPkg.tasksMax,
+														skin: selectedPkg.skin,
+														language: selectedPkg.language,
+														featureSetsPolicy: selectedPkg.featureSetsPolicy,
+														featureSetsSelected: selectedPkg.featureSetsSelected,
+														pluginsPolicy: selectedPkg.pluginsPolicy,
+														pluginsSelected: selectedPkg.pluginsSelected
+													}
+												};
+											}}
+										>
+											<PencilIcon size={11} /> Editează
+										</button>
+										<button
+											type="button"
+											class="btn-secondary sm danger"
+											title="Șterge pachetul DA (numai dacă nu e folosit de conturi)"
+											onclick={() => {
+												if (selectedPkg)
+													deletingPackage = { id: selectedPkg.id, daName: selectedPkg.daName };
+											}}
+										>
+											<Trash2Icon size={11} /> Șterge
+										</button>
+									{/if}
+								{/if}
+							</div>
 							{#if !f.daServerId}
 								<div class="hst-hint">Selectează întâi serverul pentru a vedea pachetele.</div>
+							{:else if packages.length > 0 && !packages.some((p) => p.createdByTenant)}
+								<div class="hst-hint">
+									Pachetele de mai sus sunt importate din DirectAdmin (read-only). Creează unul nou pentru editare din CRM.
+								</div>
 							{/if}
 						</div>
 
@@ -1182,18 +1338,36 @@
 								<label class="hst-check">
 									<input type="checkbox" bind:checked={f.isActive} />
 									<span>
-										<strong>Activ</strong> — apare în catalog și pe pagina publică
+										<strong>Activ</strong> — apare în catalogul intern al CRM-ului
+									</span>
+								</label>
+								<label class="hst-check">
+									<input type="checkbox" bind:checked={f.isPublic} />
+									<span>
+										<strong>Public</strong> — apare pe pagina publică <code>/pachete-hosting</code>
 									</span>
 								</label>
 								<div class="hst-grid-2">
 									<div>
-										<label class="hst-label sm" for="product-sort">Ordine afișare</label>
+										<label class="hst-label sm" for="product-sort">Ordine internă</label>
 										<input
 											id="product-sort"
 											class="hst-input"
 											type="number"
 											min="0"
 											bind:value={f.sortOrder}
+										/>
+									</div>
+									<div>
+										<label class="hst-label sm" for="product-public-sort">
+											Ordine pagina publică
+										</label>
+										<input
+											id="product-public-sort"
+											class="hst-input"
+											type="number"
+											min="0"
+											bind:value={f.publicSortOrder}
 										/>
 									</div>
 								</div>
@@ -1337,6 +1511,90 @@
 					</button>
 					<button type="button" class="btn-danger" onclick={() => confirmDelete('delete')}>
 						<Trash2Icon size={13} /> Șterge pachet
+					</button>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Nested DA package modal (stacks ABOVE the product modal) -->
+		{#if packageModal}
+			{#if packageModal.mode === 'new'}
+				<PackageModal
+					mode="new"
+					daServerId={packageModal.daServerId}
+					onClose={() => (packageModal = null)}
+					onSaved={handlePackageSaved}
+				/>
+			{:else}
+				<PackageModal
+					mode="edit"
+					daServerId={packageModal.daServerId}
+					packageId={packageModal.packageId}
+					existingDaName={packageModal.daName}
+					initial={packageModal.initial}
+					onClose={() => (packageModal = null)}
+					onSaved={handlePackageSaved}
+				/>
+			{/if}
+		{/if}
+
+		<!-- DA package delete confirmation -->
+		{#if deletingPackage}
+			<div
+				class="hst-modal-back"
+				style="z-index: 110;"
+				role="presentation"
+				onclick={() => (deletingPackage = null)}
+			></div>
+			<div
+				class="hst-modal sm"
+				style="z-index: 111;"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="pkg-del-title"
+				use:focusTrap={{ active: true, onEscape: () => (deletingPackage = null) }}
+			>
+				<div class="hst-modal-head">
+					<div
+						class="hst-modal-icon"
+						style="background: linear-gradient(135deg, #ef4444, #b91c1c);"
+					>
+						<AlertTriangleIcon size={18} />
+					</div>
+					<div class="hst-modal-head-text">
+						<div class="hst-modal-title" id="pkg-del-title">
+							Șterge pachetul DA „{deletingPackage.daName}"?
+						</div>
+						<div class="hst-modal-sub">
+							Pachetul va fi șters definitiv de pe DA și marcat inactiv în CRM.
+						</div>
+					</div>
+					<button
+						type="button"
+						class="hst-modal-close"
+						aria-label="Închide"
+						onclick={() => (deletingPackage = null)}
+					>
+						<XIcon size={14} />
+					</button>
+				</div>
+				<div class="hst-modal-body">
+					<div class="hst-warn-box">
+						<strong>Atenție:</strong> dacă vreun cont de hosting folosește acest pachet, DA va respinge
+						ștergerea — mută acele conturi pe alt pachet întâi.
+					</div>
+				</div>
+				<div class="hst-modal-foot">
+					<button
+						type="button"
+						class="btn-secondary"
+						onclick={() => (deletingPackage = null)}
+					>
+						Anulează
+					</button>
+					<div class="hst-modal-foot-spacer"></div>
+					<button type="button" class="btn-danger" onclick={confirmDeletePackage}>
+						<Trash2Icon size={13} /> Șterge pe DA
 					</button>
 				</div>
 			</div>
@@ -1498,6 +1756,25 @@
 	}
 	.btn-danger:hover {
 		background: #dc2626;
+	}
+
+	/* Compact button variant used in the DA package action row inside the
+	 * product modal. Tighter padding + smaller text so the three buttons fit
+	 * on one line under the dropdown row. */
+	.btn-secondary.sm {
+		padding: 5px 10px;
+		font-size: 11.5px;
+	}
+	.btn-secondary.sm.danger:hover {
+		border-color: #ef4444;
+		color: #ef4444;
+	}
+
+	.hst-pkg-actions {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-top: 4px;
 	}
 
 	/* ===== KPIs ===== */

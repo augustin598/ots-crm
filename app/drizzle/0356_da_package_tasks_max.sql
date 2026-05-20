@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `tasks_max` integer;

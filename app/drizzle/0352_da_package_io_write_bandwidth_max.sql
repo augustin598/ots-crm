@@ -1,0 +1,1 @@
+ALTER TABLE `da_package` ADD COLUMN `io_write_bandwidth_max` integer;
