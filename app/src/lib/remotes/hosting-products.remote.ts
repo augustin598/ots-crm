@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNotNull, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -13,12 +13,14 @@ function generateId(): string {
 
 const ProductSchema = v.object({
 	name: v.pipe(v.string(), v.minLength(1, 'Name is required'), v.maxLength(255)),
-	description: v.optional(v.string()),
+	// Nullable so callers can clear a previously-set value via { description: null }.
+	// `undefined` would be dropped by Drizzle's `.set(...)` and the column wouldn't be updated.
+	description: v.optional(v.nullable(v.string())),
 	features: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
-	highlightBadge: v.optional(v.string()),
+	highlightBadge: v.optional(v.nullable(v.string())),
 	sortOrder: v.optional(v.pipe(v.number(), v.integer()), 0),
-	daServerId: v.optional(v.string()),
-	daPackageId: v.optional(v.string()),
+	daServerId: v.optional(v.nullable(v.string())),
+	daPackageId: v.optional(v.nullable(v.string())),
 	price: v.pipe(v.number(), v.integer(), v.minValue(0)),
 	currency: v.optional(v.string(), 'RON'),
 	billingCycle: v.optional(
@@ -96,11 +98,47 @@ export const getHostingProduct = query(IdSchema, async (productId) => {
 	return product;
 });
 
+/**
+ * Verify that the given `daServerId` (and optionally `daPackageId`) belong to
+ * the caller's tenant. Throws on cross-tenant references — without this guard,
+ * a malicious admin could craft a payload that points at another tenant's
+ * server/package and then surface that tenant's metadata (quota, bandwidth,
+ * name) via the leftJoin in `getHostingProducts`.
+ *
+ * `null`/undefined inputs are skipped (the caller is clearing the link).
+ */
+async function assertDARefsBelongToTenant(
+	tenantId: string,
+	daServerId: string | null | undefined,
+	daPackageId: string | null | undefined
+): Promise<void> {
+	if (daServerId) {
+		const [srv] = await db
+			.select({ id: table.daServer.id })
+			.from(table.daServer)
+			.where(and(eq(table.daServer.id, daServerId), eq(table.daServer.tenantId, tenantId)))
+			.limit(1);
+		if (!srv) throw new Error('Server DA invalid sau nu aparține acestui tenant.');
+	}
+	if (daPackageId) {
+		const [pkg] = await db
+			.select({ id: table.daPackage.id })
+			.from(table.daPackage)
+			.where(
+				and(eq(table.daPackage.id, daPackageId), eq(table.daPackage.tenantId, tenantId))
+			)
+			.limit(1);
+		if (!pkg) throw new Error('Pachet DA invalid sau nu aparține acestui tenant.');
+	}
+}
+
 export const createHostingProduct = command(ProductSchema, async (data) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.hosting.manage');
+
+	await assertDARefsBelongToTenant(event.locals.tenant.id, data.daServerId, data.daPackageId);
 
 	const id = generateId();
 	await db.insert(table.hostingProduct).values({
@@ -117,6 +155,14 @@ export const updateHostingProduct = command(UpdateSchema, async (params) => {
 	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.hosting.manage');
+
+	// Only validate FK targets that the caller is actually trying to set —
+	// a partial update that doesn't touch daServerId/daPackageId leaves them as-is.
+	await assertDARefsBelongToTenant(
+		event.locals.tenant.id,
+		params.data.daServerId,
+		params.data.daPackageId
+	);
 
 	await db
 		.update(table.hostingProduct)
@@ -149,4 +195,69 @@ export const deleteHostingProduct = command(IdSchema, async (productId) => {
 		);
 
 	return { success: true };
+});
+
+/**
+ * Returns sold-count and MRR (per-month equivalent, in cents) per hosting product.
+ * Only counts `active` accounts — pending/cancelled/suspended excluded so the
+ * numbers match the "active revenue" framing on the products page.
+ *
+ * Cycle multipliers (account.recurringAmount is per-cycle, in cents):
+ *   monthly      → /1
+ *   quarterly    → /3
+ *   semiannually → /6   (legacy alias)
+ *   biannually   → /6
+ *   annually     → /12
+ *   biennially   → /24
+ *   triennially  → /36
+ *   one_time     → excluded (no recurring revenue)
+ */
+export const getHostingProductStats = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.view');
+
+	// Per-row ROUND inside the SUM matches the JS pattern used elsewhere
+	// (e.g. hosting accounts MRR does `Math.round(amount / months)` per account
+	// then sums). Rounding the SUM instead would yield slightly different totals
+	// for many small accounts on non-monthly cycles.
+	const rows = await db
+		.select({
+			productId: table.hostingAccount.hostingProductId,
+			sold: sql<number>`COUNT(*)`.as('sold'),
+			mrrCents: sql<number>`
+				COALESCE(SUM(ROUND(
+					CASE ${table.hostingAccount.billingCycle}
+						WHEN 'monthly'      THEN ${table.hostingAccount.recurringAmount} * 1.0
+						WHEN 'quarterly'    THEN ${table.hostingAccount.recurringAmount} * 1.0 / 3
+						WHEN 'semiannually' THEN ${table.hostingAccount.recurringAmount} * 1.0 / 6
+						WHEN 'biannually'   THEN ${table.hostingAccount.recurringAmount} * 1.0 / 6
+						WHEN 'annually'     THEN ${table.hostingAccount.recurringAmount} * 1.0 / 12
+						WHEN 'biennially'   THEN ${table.hostingAccount.recurringAmount} * 1.0 / 24
+						WHEN 'triennially'  THEN ${table.hostingAccount.recurringAmount} * 1.0 / 36
+						ELSE 0
+					END
+				)), 0)
+			`.as('mrr_cents')
+		})
+		.from(table.hostingAccount)
+		.where(
+			and(
+				eq(table.hostingAccount.tenantId, event.locals.tenant.id),
+				eq(table.hostingAccount.status, 'active'),
+				isNotNull(table.hostingAccount.hostingProductId)
+			)
+		)
+		.groupBy(table.hostingAccount.hostingProductId);
+
+	const map: Record<string, { sold: number; mrrCents: number }> = {};
+	for (const row of rows) {
+		if (!row.productId) continue;
+		map[row.productId] = {
+			sold: Number(row.sold) || 0,
+			mrrCents: Number(row.mrrCents) || 0
+		};
+	}
+	return map;
 });
