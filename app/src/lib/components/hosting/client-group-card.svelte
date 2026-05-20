@@ -93,10 +93,10 @@
 		? 'border-y-red-200 border-r-red-200'
 		: ''}"
 >
-	<!-- Group header -->
-	<div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700 {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
-		<!-- Left: identity -->
-		<div class="flex min-w-0 flex-1 items-start gap-3">
+	<!-- Group header: 4-column grid (identity / stats / financial / actions) -->
+	<div class="grid grid-cols-1 items-start gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1fr)_auto] {!group.clientId ? 'bg-red-50/40 dark:bg-red-950/30' : ''}">
+		<!-- Col 1: identity -->
+		<div class="flex min-w-0 items-start gap-3">
 			<!-- Avatar with chevron -->
 			<button
 				type="button"
@@ -165,8 +165,8 @@
 			</div>
 		</div>
 
-		<!-- Center: counts + status mix bar -->
-		<div class="min-w-[260px] space-y-1.5">
+		<!-- Col 2: counts + status mix bar -->
+		<div class="min-w-0 space-y-1.5">
 			<div class="text-sm text-slate-700 dark:text-slate-200">
 				<span class="font-semibold">{group.totals.count}</span> conturi hosting
 				{#if group.totals.addonCount > 0}
@@ -214,8 +214,8 @@
 			</div>
 		</div>
 
-		<!-- Right: MRR/ARR + next expiry + overdue + actions -->
-		<div class="shrink-0 space-y-2 text-right text-sm">
+		<!-- Col 3: MRR/ARR + next expiry + overdue -->
+		<div class="min-w-0 space-y-1.5 text-left text-sm lg:text-right">
 			<div>
 				<div class="text-base font-bold text-slate-900 dark:text-slate-100">{formatRON(group.totals.mrrCents)}<span class="text-xs font-normal text-slate-500">/lună</span></div>
 				<div class="text-[11px] text-slate-500">{formatRON(group.totals.arrCents)}/an</div>
@@ -234,9 +234,9 @@
 			{/if}
 		</div>
 
-		<!-- Far right: actions column -->
+		<!-- Col 4: actions -->
 		{#if group.clientId}
-			<div class="flex shrink-0 flex-col items-end gap-2">
+			<div class="flex flex-col items-end gap-2 lg:items-end">
 				<a
 					href={`/${tenantSlug}/clients/${group.clientId}`}
 					class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
