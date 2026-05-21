@@ -2521,6 +2521,62 @@
       "when": 1778593921470500,
       "tag": "0362_da_package_created_by_user_id",
       "breakpoints": true
+    },
+    {
+      "idx": 363,
+      "version": "6",
+      "when": 1779916800000500,
+      "tag": "0363_hosting_inquiry_payment_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 364,
+      "version": "6",
+      "when": 1779916800001500,
+      "tag": "0364_hosting_inquiry_payment_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 365,
+      "version": "6",
+      "when": 1779916800002500,
+      "tag": "0365_hosting_inquiry_paid_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 366,
+      "version": "6",
+      "when": 1779916800003500,
+      "tag": "0366_hosting_inquiry_paid_amount_cents",
+      "breakpoints": true
+    },
+    {
+      "idx": 367,
+      "version": "6",
+      "when": 1779916800004500,
+      "tag": "0367_hosting_inquiry_payment_reference",
+      "breakpoints": true
+    },
+    {
+      "idx": 368,
+      "version": "6",
+      "when": 1779916800005500,
+      "tag": "0368_hosting_inquiry_accepted_by_user_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 369,
+      "version": "6",
+      "when": 1779916800006500,
+      "tag": "0369_hosting_inquiry_accepted_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 370,
+      "version": "6",
+      "when": 1779916800007500,
+      "tag": "0370_hosting_inquiry_hosting_account_id",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { query, command, getRequestEvent } from '$app/server';
 import { error } from '@sveltejs/kit';
+import type Stripe from 'stripe';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -8,7 +9,11 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { env } from '$env/dynamic/private';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { normalizeCui, validateCuiOrReason } from '$lib/server/cui-validator';
-import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
+import {
+	isStripeConfiguredForTenant,
+	getStripeForTenant,
+	getPublishableKeyForTenant
+} from '$lib/server/plugins/stripe/factory';
 import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
 import { getOrCreateStripePrice } from '$lib/server/stripe/price';
 import { createHostingCheckoutSession } from '$lib/server/stripe/checkout';
@@ -683,7 +688,16 @@ const OrderSchema = v.object({
 	// Optional context collected by the inline checkout modal (domain selection,
 	// payment-method preference, additional notes). Stored on `hosting_inquiry.message`
 	// for staff visibility — Stripe itself only handles the payment.
-	notes: v.optional(v.pipe(v.string(), v.maxLength(2000)))
+	notes: v.optional(v.pipe(v.string(), v.maxLength(2000))),
+	// Payment surface:
+	//   'checkout_redirect' (default) → Stripe Checkout hosted page (returns checkoutUrl)
+	//   'payment_intent' → embedded Stripe Elements (returns clientSecret + publishableKey)
+	paymentMode: v.optional(v.picklist(['checkout_redirect', 'payment_intent']), 'checkout_redirect'),
+	// What the customer actually selected on the modal. Distinct from `paymentMode`
+	// (which is the Stripe surface). When customer picks "ordin de plată" we still
+	// route through Stripe Checkout as a fallback, but staff sees the OP intent in
+	// the Comenzi hosting admin page and accepts the bank transfer manually.
+	paymentMethod: v.optional(v.picklist(['card', 'op', 'paypal', 'revolut']), 'card')
 });
 
 /**
@@ -817,7 +831,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				source: 'pachete-hosting-checkout',
 				ipAddress: ip,
 				userAgent,
-				clientId: existingClient.id
+				clientId: existingClient.id,
+				paymentMethod: data.paymentMethod ?? 'card',
+				paymentStatus: 'pending'
 			});
 			return {
 				duplicateCui: true as const,
@@ -903,7 +919,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				source: 'pachete-hosting-checkout',
 				ipAddress: ip,
 				userAgent,
-				clientId: existingByEmail.id
+				clientId: existingByEmail.id,
+				paymentMethod: data.paymentMethod ?? 'card',
+				paymentStatus: 'pending'
 			});
 			return {
 				duplicateCui: true as const,
@@ -979,12 +997,20 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				userAgent,
 				clientId,
 				clientCreated: true,
-				clientCreatedAt: now
+				clientCreatedAt: now,
+				paymentMethod: data.paymentMethod ?? 'card',
+				paymentStatus: 'pending'
 			}),
 		{ tenantId, label: 'public-hosting/insertInquiry' }
 	);
 
-	let checkoutUrl: string;
+	const stripeMetadata = {
+		crmTenantId: tenantId,
+		crmClientId: clientRow.id,
+		crmHostingInquiryId: inquiryId,
+		crmHostingProductId: product.id
+	};
+
 	try {
 		const stripeCustomerId = await getOrCreateStripeCustomer({
 			id: clientRow.id,
@@ -1013,6 +1039,106 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 		});
 
 		const mode = product.billingCycle === 'one_time' ? 'payment' : 'subscription';
+
+		// Branch on paymentMode: embedded Stripe Elements (PaymentIntent / Subscription
+		// with default_incomplete) returns a clientSecret; legacy Checkout redirect
+		// returns a Stripe-hosted URL. Both flows carry the same metadata so the
+		// downstream webhook handlers resolve tenant/client/inquiry identically.
+		if (data.paymentMode === 'payment_intent') {
+			const stripe = await getStripeForTenant(tenantId);
+			const publishableKey = await getPublishableKeyForTenant(tenantId);
+			if (!publishableKey) {
+				throw new Error('Publishable key Stripe lipsă pentru acest tenant.');
+			}
+
+			let clientSecret: string | null = null;
+			let paymentIntentId: string | null = null;
+			let subscriptionId: string | null = null;
+
+			if (mode === 'subscription') {
+				const subscription = await stripe.subscriptions.create({
+					customer: stripeCustomerId,
+					items: [{ price: stripePriceId }],
+					payment_behavior: 'default_incomplete',
+					payment_settings: { save_default_payment_method: 'on_subscription' },
+					expand: ['latest_invoice.payment_intent'],
+					metadata: stripeMetadata
+				});
+				subscriptionId = subscription.id;
+				const latestInvoice = subscription.latest_invoice;
+				if (!latestInvoice || typeof latestInvoice === 'string') {
+					throw new Error('Stripe nu a returnat invoice-ul pentru subscription.');
+				}
+				const pi = (latestInvoice as Stripe.Invoice & { payment_intent: Stripe.PaymentIntent | string | null })
+					.payment_intent;
+				if (!pi || typeof pi === 'string') {
+					throw new Error('Stripe nu a returnat PaymentIntent pentru subscription.');
+				}
+				// Propagate CRM metadata + subscription id onto the PaymentIntent so the
+				// `payment_intent.succeeded` webhook handler can resolve the
+				// tenant/client/inquiry and link the eventual hostingAccount to the
+				// recurring subscription — all without a Subscription roundtrip later.
+				await stripe.paymentIntents.update(pi.id, {
+					metadata: { ...stripeMetadata, crmSubscriptionId: subscription.id }
+				});
+				clientSecret = pi.client_secret;
+				paymentIntentId = pi.id;
+			} else {
+				const intent = await stripe.paymentIntents.create({
+					amount: Math.round(Number(product.price) * 100),
+					currency: product.currency.toLowerCase(),
+					customer: stripeCustomerId,
+					automatic_payment_methods: { enabled: true },
+					metadata: stripeMetadata,
+					description: `Hosting one-time — ${product.name}`
+				});
+				clientSecret = intent.client_secret;
+				paymentIntentId = intent.id;
+			}
+
+			if (!clientSecret || !paymentIntentId) {
+				throw new Error('Stripe nu a returnat clientSecret.');
+			}
+
+			// Persist paymentIntent id on the inquiry for traceability (reuses the
+			// existing `stripeCheckoutSessionId` column — webhook resolves via metadata,
+			// not this column, so the name mismatch is acceptable for now).
+			await withTursoBusyRetry(
+				() =>
+					db
+						.update(table.hostingInquiry)
+						.set({ stripeCheckoutSessionId: paymentIntentId, updatedAt: new Date() })
+						.where(eq(table.hostingInquiry.id, inquiryId)),
+				{ tenantId, label: 'public-hosting/updateInquiryPI' }
+			);
+
+			logInfo('directadmin', 'Stripe PaymentIntent created (embedded)', {
+				tenantId,
+				metadata: {
+					clientId,
+					inquiryId,
+					product: product.name,
+					mode,
+					paymentIntentId,
+					subscriptionId
+				}
+			});
+
+			return {
+				duplicateCui: false as const,
+				clientId,
+				inquiryId,
+				paymentIntent: {
+					clientSecret,
+					publishableKey,
+					paymentIntentId,
+					subscriptionId,
+					mode
+				}
+			};
+		}
+
+		// Default: legacy hosted Stripe Checkout redirect.
 		const session = await createHostingCheckoutSession({
 			tenantId,
 			stripeCustomerId,
@@ -1020,12 +1146,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			mode,
 			successUrl: `${origin}/pachete-hosting/comanda/success`,
 			cancelUrl: `${origin}/pachete-hosting`,
-			metadata: {
-				crmTenantId: tenantId,
-				crmClientId: clientRow.id,
-				crmHostingInquiryId: inquiryId,
-				crmHostingProductId: product.id
-			}
+			metadata: stripeMetadata
 		});
 
 		await withTursoBusyRetry(
@@ -1037,13 +1158,25 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			{ tenantId, label: 'public-hosting/updateInquirySession' }
 		);
 
-		checkoutUrl = session.url ?? '';
+		const checkoutUrl = session.url ?? '';
 		if (!checkoutUrl) throw new Error('Stripe nu a returnat URL de checkout.');
-	} catch (e) {
-		const { message } = serializeError(e);
-		logError('directadmin', `Stripe checkout creation failed: ${message}`, {
+
+		logInfo('directadmin', 'Stripe checkout session created', {
 			tenantId,
 			metadata: { clientId, inquiryId, product: product.name }
+		});
+
+		return {
+			duplicateCui: false as const,
+			clientId,
+			inquiryId,
+			checkoutUrl
+		};
+	} catch (e) {
+		const { message } = serializeError(e);
+		logError('directadmin', `Stripe creation failed: ${message}`, {
+			tenantId,
+			metadata: { clientId, inquiryId, product: product.name, paymentMode: data.paymentMode }
 		});
 		// Mark inquiry as failed for staff visibility (best-effort, nu blocăm pe DB busy).
 		await withTursoBusyRetry(
@@ -1054,24 +1187,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					.where(eq(table.hostingInquiry.id, inquiryId)),
 			{ tenantId, label: 'public-hosting/markInquiryFailed' }
 		).catch(() => {});
-		// Don't leak the raw Stripe message — it can contain customer IDs, API
-		// references and (rarely) framework stack frames. Full text is logged
-		// server-side above; the client gets a generic actionable string.
 		throw error(
 			502,
 			'Plata nu poate fi inițializată acum. Te rugăm să încerci din nou peste câteva minute sau să folosești metoda „Ordin de plată".'
 		);
 	}
-
-	logInfo('directadmin', 'Stripe checkout session created', {
-		tenantId,
-		metadata: { clientId, inquiryId, product: product.name }
-	});
-
-	return {
-		duplicateCui: false as const,
-		clientId,
-		inquiryId,
-		checkoutUrl
-	};
 });

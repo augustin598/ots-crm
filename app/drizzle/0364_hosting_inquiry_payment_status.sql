@@ -1,0 +1,1 @@
+ALTER TABLE `hosting_inquiry` ADD COLUMN `payment_status` text DEFAULT 'pending' NOT NULL;

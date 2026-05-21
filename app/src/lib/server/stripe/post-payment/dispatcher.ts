@@ -199,15 +199,29 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 	}
 
 	// 3. DA provisioning — ultima, poate dura mai mult (apel DA + DB writes).
-	await runStep(ctx, 'da_provision', () =>
-		provisionDirectAdminAccount({
+	await runStep(ctx, 'da_provision', async () => {
+		const result = await provisionDirectAdminAccount({
 			tenantId: ctx.tenantId,
 			clientId: ctx.clientId,
 			productId: ctx.productId,
 			sessionId: ctx.sessionId,
 			stripeSubscriptionId: ctx.stripeSubscriptionId
-		})
-	);
+		});
+		// Link the hosting_account back onto the inquiry so the Comenzi hosting
+		// admin page can show DA status without re-joining post_payment_step.
+		// Idempotent: the call below only writes when hostingAccountId is empty,
+		// matching how the row gets touched both on first run and on retry.
+		await db
+			.update(table.hostingInquiry)
+			.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
+			.where(
+				and(
+					eq(table.hostingInquiry.id, ctx.inquiryId),
+					eq(table.hostingInquiry.tenantId, ctx.tenantId)
+				)
+			);
+		return result;
+	});
 
 	logInfo('directadmin', `post-payment pipeline finished for session ${ctx.sessionId}`, {
 		tenantId: ctx.tenantId,

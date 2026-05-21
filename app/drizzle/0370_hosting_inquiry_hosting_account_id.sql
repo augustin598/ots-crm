@@ -1,0 +1,1 @@
+ALTER TABLE `hosting_inquiry` ADD COLUMN `hosting_account_id` text REFERENCES `hosting_account`(`id`) ON DELETE SET NULL;

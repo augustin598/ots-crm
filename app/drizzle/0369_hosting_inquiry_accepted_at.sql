@@ -1,0 +1,1 @@
+ALTER TABLE `hosting_inquiry` ADD COLUMN `accepted_at` text;

@@ -82,6 +82,11 @@ export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Se
 	// Pe partial failure (DB busy, network drop), Stripe retry-uiește event-ul și
 	// idempotency log-ul previne dublarea — dar dorim să nu lăsăm starea
 	// intermediară (client active dar inquiry needit converted) vizibilă.
+	const paidAmountCents = session.amount_total ?? null;
+	const paymentReference =
+		typeof session.payment_intent === 'string'
+			? session.payment_intent
+			: session.payment_intent?.id ?? session.id;
 	await db.transaction(async (tx) => {
 		await tx
 			.update(table.client)
@@ -93,7 +98,11 @@ export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Se
 			.set({
 				status: 'converted',
 				contactedAt: new Date(),
-				updatedAt: new Date()
+				updatedAt: new Date(),
+				paymentStatus: 'paid',
+				paidAt: new Date().toISOString(),
+				paidAmountCents,
+				paymentReference
 			})
 			.where(
 				and(eq(table.hostingInquiry.id, inquiryId), eq(table.hostingInquiry.tenantId, tenantId))
@@ -297,6 +306,83 @@ export async function handleCheckoutSessionExpired(session: Stripe.Checkout.Sess
 	});
 }
 
+/**
+ * Embedded Stripe Elements flow (PaymentIntent / Subscription default_incomplete)
+ * surfaces success via `payment_intent.succeeded` — NOT via
+ * `checkout.session.completed`. Mirror the checkout completion logic so the
+ * client + inquiry transitions to active and the post-payment pipeline runs.
+ *
+ * Idempotency: `processed_stripe_event` already gates duplicate event delivery;
+ * `post_payment_step` is unique on (stripe_session_id, step). We pass the
+ * PaymentIntent id as `sessionId` — same dispatcher, separate key space from
+ * Checkout Session ids.
+ *
+ * For subscription flow (default_incomplete), `invoice.payment_succeeded` also
+ * fires. The existing `handleInvoicePaid` only logs (no post-payment run), so
+ * there is no double-fire risk.
+ */
+export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent) {
+	const md = intent.metadata ?? {};
+	const tenantId = md.crmTenantId;
+	const clientId = md.crmClientId;
+	const inquiryId = md.crmHostingInquiryId;
+	const productId = md.crmHostingProductId;
+
+	if (!tenantId || !clientId || !inquiryId || !productId) {
+		logWarning('directadmin', 'payment_intent.succeeded fără metadata CRM — ignorat', {
+			metadata: { intentId: intent.id, hasMetadata: !!intent.metadata }
+		});
+		return;
+	}
+
+	logInfo('directadmin', 'payment_intent.succeeded received (embedded flow)', {
+		tenantId,
+		metadata: { intentId: intent.id, clientId, inquiryId, productId }
+	});
+
+	await db.transaction(async (tx) => {
+		await tx
+			.update(table.client)
+			.set({ onboardingStatus: 'active', status: 'active', updatedAt: new Date() })
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
+
+		await tx
+			.update(table.hostingInquiry)
+			.set({
+				status: 'converted',
+				contactedAt: new Date(),
+				updatedAt: new Date(),
+				paymentStatus: 'paid',
+				paidAt: new Date().toISOString(),
+				paidAmountCents: intent.amount ?? null,
+				paymentReference: intent.id
+			})
+			.where(
+				and(eq(table.hostingInquiry.id, inquiryId), eq(table.hostingInquiry.tenantId, tenantId))
+			);
+	});
+
+	// Subscription embedded flow: we stamp `crmSubscriptionId` on the PaymentIntent
+	// metadata server-side so we don't need to expand `invoice` on the event payload
+	// (the property isn't on Stripe's typed PaymentIntent and the alternative is an
+	// extra API round-trip). Provisioning uses it to wire
+	// `hostingAccount.stripeSubscriptionId` for later cancel-on-sub-deleted.
+	const stripeSubscriptionId = md.crmSubscriptionId ?? null;
+
+	await runPostPaymentSteps({
+		tenantId,
+		clientId,
+		inquiryId,
+		productId,
+		sessionId: intent.id,
+		mode: stripeSubscriptionId ? 'subscription' : 'payment',
+		stripeCustomerId:
+			typeof intent.customer === 'string' ? intent.customer : intent.customer?.id ?? null,
+		stripeSubscriptionId,
+		stripePaymentIntentId: intent.id
+	});
+}
+
 export async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
 	const expectedTenantId = intent.metadata?.crmTenantId ?? null;
 	const inquiryId = intent.metadata?.crmHostingInquiryId ?? null;
@@ -318,6 +404,16 @@ export async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
 			failureMessage: intent.last_payment_error?.message ?? null
 		}
 	});
+
+	// Mark the inquiry payment status failed so the Comenzi hosting admin page
+	// can surface it with a "Plată eșuată" pill and offer a manual accept path
+	// (e.g. the customer pays via OP after a card decline).
+	await db
+		.update(table.hostingInquiry)
+		.set({ paymentStatus: 'failed', updatedAt: new Date() })
+		.where(
+			and(eq(table.hostingInquiry.id, inquiryId), eq(table.hostingInquiry.tenantId, expectedTenantId))
+		);
 }
 
 export async function handleChargeRefunded(charge: Stripe.Charge) {
@@ -418,6 +514,9 @@ export async function dispatchStripeEvent(event: Stripe.Event): Promise<string> 
 				return 'handled';
 			case 'invoice.payment_failed':
 				await handlePaymentFailed(event.data.object as Stripe.Invoice);
+				return 'handled';
+			case 'payment_intent.succeeded':
+				await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent);
 				return 'handled';
 			case 'payment_intent.payment_failed':
 				await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent);

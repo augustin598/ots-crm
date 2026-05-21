@@ -1077,6 +1077,26 @@ export const hostingInquiry = sqliteTable(
 		clientCreated: boolean('client_created').notNull().default(false),
 		clientCreatedAt: timestamp('client_created_at', { withTimezone: true, mode: 'date' }),
 		proformaInvoiceId: text('proforma_invoice_id'),
+		// === Hosting Orders (May 2026) ===
+		// `paymentMethod` is what the customer selected on the public checkout
+		// modal ('card' | 'op' | 'paypal' | 'revolut'). For Stripe-paid orders
+		// this matches the Stripe flow; for OP it tells staff "expect a bank
+		// transfer, then accept manually via Comenzi hosting page".
+		paymentMethod: text('payment_method'),
+		// `paymentStatus` is independent from `status` (which is the staff funnel
+		// state). An OP order can sit at status='new' + paymentStatus='pending'
+		// for days until the transfer arrives.
+		paymentStatus: text('payment_status').notNull().default('pending'),
+		paidAt: text('paid_at'),
+		paidAmountCents: integer('paid_amount_cents'),
+		paymentReference: text('payment_reference'),
+		acceptedByUserId: text('accepted_by_user_id').references(() => user.id),
+		acceptedAt: text('accepted_at'),
+		// Set when post-payment provisioning succeeds (Stripe webhook OR manual
+		// retry from the admin page). NULL means "no DA account yet".
+		hostingAccountId: text('hosting_account_id').references(() => hostingAccount.id, {
+			onDelete: 'set null'
+		}),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),

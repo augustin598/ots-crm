@@ -117,7 +117,13 @@ export function validateCuiFormat(value: string): string | null {
 
 // J = comerciant; F = federație/asociație/societate civilă; C = cooperative
 // (registered at ORC); all three legit on ANAF responses.
-const REGCOM_RE = /^[CFJ]\d{1,2}\/\d{1,5}\/\d{4}$/i;
+// Two accepted shapes:
+//   - Slash form (canonical): J33/1520/2018
+//   - Compact numeric form: J2021001800334 (used by ONRC documents + some ANAF
+//     payloads — digits glued together, no separators). Width spans ~10–15
+//     digits across vintages, so we accept that window instead of pinning it.
+const REGCOM_SLASH_RE = /^[CFJ]\d{1,2}\/\d{1,5}\/\d{4}$/i;
+const REGCOM_COMPACT_RE = /^[CFJ]\d{10,15}$/i;
 
 export function normalizeRegCom(raw: string): string {
 	return raw.trim().toUpperCase().replace(/\s+/g, '');
@@ -126,8 +132,8 @@ export function normalizeRegCom(raw: string): string {
 export function validateRegCom(value: string): string | null {
 	const v = normalizeRegCom(value);
 	if (!v) return 'Introdu Reg. Comerțului (ex: J33/1520/2018).';
-	if (!REGCOM_RE.test(v))
-		return 'Format invalid — folosește forma J/F/C ##/####/#### (ex: J33/1520/2018).';
+	if (!REGCOM_SLASH_RE.test(v) && !REGCOM_COMPACT_RE.test(v))
+		return 'Format invalid — folosește J/F/C ##/####/#### (ex: J33/1520/2018) sau forma compactă (ex: J2021001800334).';
 	return null;
 }
 

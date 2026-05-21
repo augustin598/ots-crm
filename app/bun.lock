@@ -8,6 +8,7 @@
         "@libsql/client": "^0.15.15",
         "@lucia-auth/adapter-drizzle": "^1.1.0",
         "@node-rs/argon2": "^2.0.2",
+        "@stripe/stripe-js": "^9.6.0",
         "@sveltejs/enhanced-img": "^0.9.2",
         "@tiptap/core": "^3.20.5",
         "@tiptap/extension-bubble-menu": "^3.20.5",
@@ -67,6 +68,7 @@
         "svelte-adapter-bun": "^1.0.1",
         "svelte-microanimations": "^0.0.3",
         "svelte-sonner": "^1.0.7",
+        "svelte-stripe": "^2.0.0",
         "unpdf": "^1.4.0",
         "valibot": "^1.1.0",
         "xlsx": "^0.18.5",
@@ -656,6 +658,8 @@
     "@smithy/uuid": ["@smithy/uuid@1.1.0", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-4aUIteuyxtBUhVdiQqcDhKFitwfd9hqoSDYY2KRXiWtgoWJ9Bmise+KfEPDiVHWeJepvF8xJO9/9+WDIciMFFw=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
+    "@stripe/stripe-js": ["@stripe/stripe-js@9.6.0", "", {}, "sha512-v5MebYvJbddSRn15fknxTVwypJPzjeIXI1Q2HBxCBrQieWna8PC+RXEVUZ3F4ANAeILEj97HzFlr0r7CXvG7ZA=="],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.8", "", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-esgN+54+q0NjB0Y/4BomT9samII7jGwNy/2a3wNZbT2A2RpmXsXwUt24LvLhx6jUq2gVk4cWEvcRO6MFQbOfNA=="],
 
@@ -1848,6 +1852,8 @@
     "svelte-parse-markup": ["svelte-parse-markup@0.1.5", "", { "peerDependencies": { "svelte": "^3.0.0 || ^4.0.0 || ^5.0.0-next.1" } }, "sha512-T6mqZrySltPCDwfKXWQ6zehipVLk4GWfH1zCMGgRtLlOIFPuw58ZxVYxVvotMJgJaurKi1i14viB2GIRKXeJTQ=="],
 
     "svelte-sonner": ["svelte-sonner@1.0.7", "", { "dependencies": { "runed": "^0.28.0" }, "peerDependencies": { "svelte": "^5.0.0" } }, "sha512-1EUFYmd7q/xfs2qCHwJzGPh9n5VJ3X6QjBN10fof2vxgy8fYE7kVfZ7uGnd7i6fQaWIr5KvXcwYXE/cmTEjk5A=="],
+
+    "svelte-stripe": ["svelte-stripe@2.0.0", "", { "peerDependencies": { "@stripe/stripe-js": ">=5", "svelte": "^5" } }, "sha512-fKIufgE7Gd40j9PJh3RcQnL15XrKpJ544nWiv8CJmIzZwoF5lJjVRC0MJg6RVqJd1BEz+N9Ip731O12x2Y0PJg=="],
 
     "svelte-toolbelt": ["svelte-toolbelt@0.10.6", "", { "dependencies": { "clsx": "^2.1.1", "runed": "^0.35.1", "style-to-object": "^1.0.8" }, "peerDependencies": { "svelte": "^5.30.2" } }, "sha512-YWuX+RE+CnWYx09yseAe4ZVMM7e7GRFZM6OYWpBKOb++s+SQ8RBIMMe+Bs/CznBMc0QPLjr+vDBxTAkozXsFXQ=="],
 

@@ -1,0 +1,1 @@
+ALTER TABLE `hosting_inquiry` ADD COLUMN `accepted_by_user_id` text REFERENCES `user`(`id`);

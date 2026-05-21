@@ -7,7 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { encrypt } from '$lib/server/plugins/stripe/crypto';
-import { clearStripeCache } from '$lib/server/plugins/stripe/factory';
+import { clearStripeCache, getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import Stripe from 'stripe';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 
@@ -193,7 +193,6 @@ export const testStripeConnection = command(async () => {
 	assertCan(actor, 'admin.stripe.manage');
 
 	try {
-		const { getStripeForTenant } = await import('$lib/server/plugins/stripe/factory');
 		const stripe = await getStripeForTenant(tenantId);
 		// `balance.retrieve()` verifică cheia + obține currency default-ul contului
 		const balance = await stripe.balance.retrieve();

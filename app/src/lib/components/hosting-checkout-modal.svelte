@@ -5,6 +5,9 @@
 		checkDomainAvailability,
 		checkEmailKnownToCrm
 	} from '$lib/remotes/public-hosting.remote';
+	import { loadStripe, type Stripe as StripeJS, type StripeElements as StripeElementsT } from '@stripe/stripe-js';
+	import { StripeElements } from '$lib/components/Stripe';
+	import { PaymentElement } from '$lib/components/Stripe/PaymentElement';
 	import {
 		normalizeEmail,
 		validateEmail,
@@ -433,6 +436,18 @@
 	let paymentMethod = $state<'card' | 'op' | 'revolut' | 'paypal'>('card');
 	let orderNotes = $state('');
 
+	// Embedded Stripe Elements state (only used when paymentMethod === 'card').
+	// Stage transitions: 'idle' → 'creating-intent' → 'ready' → 'confirming' → 'paid'
+	// On 'op' (and other non-card methods) we keep the legacy redirect flow.
+	type CardStage = 'idle' | 'creating-intent' | 'ready' | 'confirming' | 'paid';
+	let cardStage = $state<CardStage>('idle');
+	let stripeJs = $state<StripeJS | null>(null);
+	let stripeElements = $state<StripeElementsT | null>(null);
+	let paymentClientSecret = $state<string | null>(null);
+	let paymentPublishableKey = $state<string | null>(null);
+	let paymentIntentId = $state<string | null>(null);
+	let paymentError = $state<string | null>(null);
+
 	// Terms
 	let acceptTerms = $state(false);
 	let acceptMarketing = $state(false);
@@ -620,6 +635,13 @@
 			return;
 		}
 		if (step === 3) {
+			// Card flow: first click creates the PaymentIntent and renders the
+			// inline Stripe Elements form. Second click (after the user has filled
+			// out the card) confirms the payment.
+			if (paymentMethod === 'card' && cardStage === 'ready') {
+				await confirmInlinePayment();
+				return;
+			}
 			await submit();
 		} else if (step === 1) {
 			step = 2;
@@ -630,6 +652,7 @@
 
 	async function submit() {
 		submitError = null;
+		paymentError = null;
 		if (!acceptTerms) {
 			toast.error('Bifează termenii și condițiile.');
 			return;
@@ -650,6 +673,7 @@
 			return;
 		}
 		submitting = true;
+		if (paymentMethod === 'card') cardStage = 'creating-intent';
 		try {
 			const notesParts: string[] = [];
 			if (domainMode === 'buy' && domainName) {
@@ -682,7 +706,9 @@
 				city: city.trim() || undefined,
 				county: county.trim() || undefined,
 				consentTerms: true,
-				notes: notesParts.join(' · ')
+				notes: notesParts.join(' · '),
+				paymentMode: paymentMethod === 'card' ? 'payment_intent' : 'checkout_redirect',
+				paymentMethod
 			});
 
 			if (result.duplicateCui) {
@@ -692,14 +718,31 @@
 				return;
 			}
 
-			if (result.checkoutUrl) {
+			// Card flow → embedded Stripe Elements
+			if ('paymentIntent' in result && result.paymentIntent) {
 				orderId = result.inquiryId ?? null;
-				// Redirect to Stripe Checkout for actual payment collection
+				paymentClientSecret = result.paymentIntent.clientSecret;
+				paymentPublishableKey = result.paymentIntent.publishableKey;
+				paymentIntentId = result.paymentIntent.paymentIntentId;
+				const stripe = await loadStripe(result.paymentIntent.publishableKey);
+				if (!stripe) {
+					throw new Error('Stripe.js nu s-a putut încărca. Verifică conexiunea.');
+				}
+				stripeJs = stripe;
+				cardStage = 'ready';
+				return;
+			}
+
+			// Legacy redirect flow (ordin de plată, future PayPal/Revolut)
+			if ('checkoutUrl' in result && result.checkoutUrl) {
+				orderId = result.inquiryId ?? null;
 				window.location.href = result.checkoutUrl;
 				return;
 			}
-			toast.error('Stripe nu a returnat URL de checkout.');
+			toast.error('Stripe nu a returnat un mod de plată valid.');
+			cardStage = 'idle';
 		} catch (e) {
+			cardStage = 'idle';
 			// SvelteKit HttpError thrown server-side via error(status, msg) lands here
 			// with .body.message. Plain Error has .message directly. Generic fallback
 			// for unexpected throws.
@@ -710,6 +753,54 @@
 				'Eroare la procesare. Te rugăm să încerci din nou.';
 			submitError = msg;
 			toast.error(msg);
+		} finally {
+			submitting = false;
+		}
+	}
+
+	async function confirmInlinePayment() {
+		if (!stripeJs || !stripeElements || !paymentClientSecret) {
+			paymentError = 'Formularul de plată nu este pregătit. Reîncarcă pagina.';
+			return;
+		}
+		paymentError = null;
+		cardStage = 'confirming';
+		submitting = true;
+		try {
+			const returnUrl = `${window.location.origin}/pachete-hosting/comanda/success`;
+			const { error: confirmErr, paymentIntent: confirmedPI } = await stripeJs.confirmPayment({
+				elements: stripeElements,
+				confirmParams: { return_url: returnUrl },
+				redirect: 'if_required'
+			});
+
+			if (confirmErr) {
+				paymentError =
+					confirmErr.message ||
+					'Plata nu a putut fi confirmată. Verifică datele cardului și încearcă din nou.';
+				cardStage = 'ready';
+				toast.error(paymentError);
+				return;
+			}
+
+			// `redirect: 'if_required'` means we get here without redirect on success
+			// or when a 3DS challenge isn't needed.
+			if (confirmedPI?.status === 'succeeded' || confirmedPI?.status === 'processing') {
+				cardStage = 'paid';
+				step = 4;
+				return;
+			}
+			if (confirmedPI?.status === 'requires_action') {
+				// Stripe will redirect via return_url for off-session 3DS.
+				return;
+			}
+			paymentError = `Stare neașteptată: ${confirmedPI?.status ?? 'unknown'}`;
+			cardStage = 'ready';
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : 'Eroare la confirmarea plății.';
+			paymentError = msg;
+			toast.error(msg);
+			cardStage = 'ready';
 		} finally {
 			submitting = false;
 		}
@@ -1456,15 +1547,52 @@
 								după plasarea comenzii. Activăm contul după confirmarea încasării (1-2 zile lucrătoare).
 							</div>
 						</div>
+					{:else if cardStage === 'ready' || cardStage === 'confirming'}
+						<div class="co-card-form">
+							<div class="co-card-form-head">
+								<CreditCardIcon size={16} />
+								<span>Detalii card</span>
+							</div>
+							{#if stripeJs && paymentClientSecret}
+								<StripeElements
+									bind:elements={stripeElements}
+									stripe={stripeJs}
+									clientSecret={paymentClientSecret}
+								>
+									<PaymentElement
+										options={{ layout: 'tabs' }}
+									/>
+								</StripeElements>
+							{/if}
+							{#if paymentError}
+								<div class="co-submit-err" role="alert">
+									<strong>Plata a eșuat:</strong>
+									<span>{paymentError}</span>
+								</div>
+							{/if}
+							<div class="co-info-box co-info-box-compact">
+								<InfoIcon size={14} />
+								<div>
+									Apasă „Plătește {total} {plan.currency}" mai jos după ce completezi datele.
+									Stripe va cere autentificare 3D Secure dacă banca solicită.
+								</div>
+							</div>
+						</div>
+					{:else if cardStage === 'creating-intent'}
+						<div class="co-card-form">
+							<div class="co-card-form-loading">
+								Se inițializează plata securizată…
+							</div>
+						</div>
 					{:else}
 						<div class="co-info-box">
 							<InfoIcon size={16} />
 							<div>
-								<strong>Plata se face în pasul următor, securizat prin Stripe</strong>
+								<strong>Plata se face direct aici, securizat prin Stripe</strong>
 								<div>
-									După ce apeși „Plătește {total} RON", te ducem pe pagina Stripe Checkout —
-									acolo completezi datele cardului (PCI-DSS Level 1). Suportă Visa, Mastercard,
-									Apple Pay, Google Pay și SEPA Direct Debit.
+									După ce apeși „Plătește {total} {plan.currency}", apare formularul de card
+									chiar în acest modal. Datele cardului nu trec niciodată prin serverele
+									noastre (PCI-DSS Level 1). Suportă Visa, Mastercard, Apple Pay, Google Pay.
 								</div>
 							</div>
 						</div>
@@ -1719,10 +1847,16 @@
 					type="button"
 					class="co-btn-primary"
 					onclick={next}
-					disabled={submitting || !!stepMissing}
+					disabled={submitting || !!stepMissing || cardStage === 'creating-intent' || cardStage === 'confirming'}
 				>
 					{#if step === 3}
-						{#if submitting}
+						{#if cardStage === 'creating-intent'}
+							Se inițializează plata…
+						{:else if cardStage === 'confirming'}
+							Se confirmă plata…
+						{:else if cardStage === 'ready'}
+							<LockIcon size={13} /> Confirm plata {total.toLocaleString('ro-RO')} {plan.currency}
+						{:else if submitting}
 							Se procesează…
 						{:else}
 							<LockIcon size={13} /> Plătește {total.toLocaleString('ro-RO')} {plan.currency}
@@ -2424,6 +2558,40 @@
 		color: #0b1220;
 		display: block;
 		margin-bottom: 4px;
+		font-size: 13.5px;
+	}
+	:global(.co-info-box-compact) {
+		padding: 10px 12px;
+		font-size: 12.5px;
+	}
+
+	:global(.co-card-form) {
+		margin-top: 16px;
+		padding: 20px;
+		background: #ffffff;
+		border: 1px solid #e5e9f0;
+		border-radius: 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+	:global(.co-card-form-head) {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-weight: 600;
+		color: #0b1220;
+		font-size: 14px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid #f1f5f9;
+	}
+	:global(.co-card-form-head > svg) {
+		color: #1877f2;
+	}
+	:global(.co-card-form-loading) {
+		text-align: center;
+		padding: 24px 0;
+		color: #64748b;
 		font-size: 13.5px;
 	}
 

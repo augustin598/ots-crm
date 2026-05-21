@@ -123,9 +123,17 @@ describe('validateRegCom', () => {
 		expect(validateRegCom('M40/123/2018')).not.toBeNull();
 		expect(validateRegCom('X40/123/2018')).not.toBeNull();
 	});
+	test('accepts compact numeric form (no slashes)', () => {
+		expect(validateRegCom('J2021001800334')).toBeNull();
+		expect(validateRegCom('F202100180033')).toBeNull();
+		expect(validateRegCom('C202100180033')).toBeNull();
+	});
 	test('rejects malformed', () => {
 		expect(validateRegCom('J40-123-2018')).not.toBeNull();
 		expect(validateRegCom('J40/123')).not.toBeNull();
+		// Compact: too short / too long
+		expect(validateRegCom('J123456789')).not.toBeNull();
+		expect(validateRegCom('J1234567890123456')).not.toBeNull();
 	});
 });
 
