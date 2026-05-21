@@ -59,10 +59,21 @@ export async function createHostingAccountInternal(
 
 	let packageName = 'default';
 	if (payload.daPackageId) {
+		// Defense-in-depth: also pin to the caller's tenant + the chosen DA server.
+		// The caller already authorized the actor for this tenant; this prevents a
+		// crafted payload that references a package id from a foreign tenant or a
+		// different DA server (which would then get applied to this server's user
+		// create with a name that may or may not collide).
 		const [pkg] = await db
 			.select({ daName: table.daPackage.daName })
 			.from(table.daPackage)
-			.where(eq(table.daPackage.id, payload.daPackageId))
+			.where(
+				and(
+					eq(table.daPackage.id, payload.daPackageId),
+					eq(table.daPackage.tenantId, tenantId),
+					eq(table.daPackage.daServerId, payload.daServerId)
+				)
+			)
 			.limit(1);
 		if (pkg) packageName = pkg.daName;
 	}

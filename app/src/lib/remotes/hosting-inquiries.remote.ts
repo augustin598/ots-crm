@@ -9,6 +9,7 @@ import { assertCan } from '$lib/server/access';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { provisionDirectAdminAccount } from '$lib/server/stripe/post-payment/provision-da';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 
 /**
  * Admin-side management of hosting inquiries / orders submitted via the public
@@ -359,14 +360,22 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 			clientId: order.clientId!,
 			productId: order.hostingProductId!,
 			sessionId: `manual_${params.id}`,
-			stripeSubscriptionId: null
+			stripeSubscriptionId: null,
+			inquiryId: params.id
 		});
-		await db
-			.update(table.hostingInquiry)
-			.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
-			.where(
-				and(eq(table.hostingInquiry.id, params.id), eq(table.hostingInquiry.tenantId, tenantId))
-			);
+		await withTursoBusyRetry(
+			() =>
+				db
+					.update(table.hostingInquiry)
+					.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
+					.where(
+						and(
+							eq(table.hostingInquiry.id, params.id),
+							eq(table.hostingInquiry.tenantId, tenantId)
+						)
+					),
+			{ tenantId, label: 'hosting-inquiries/linkAfterAccept' }
+		);
 		return {
 			paymentAccepted: true,
 			provisioned: true as const,
@@ -425,7 +434,8 @@ export const retryDaProvisioning = command(IdSchema, async (id) => {
 			clientId: order.clientId,
 			productId: order.hostingProductId,
 			sessionId: order.paymentReference ?? `manual_${id}`,
-			stripeSubscriptionId: null
+			stripeSubscriptionId: null,
+			inquiryId: id
 		});
 		await db
 			.update(table.hostingInquiry)
@@ -556,16 +566,74 @@ export const provisionFromInquiry = command(ProvisionFromInquirySchema, async (p
 	// Link inquiry → hosting_account. Guarded by `IS NULL` so a concurrent click
 	// from another admin's session can't double-link (the DA-side `withAccountLock`
 	// already serialized the create itself, but the inquiry UPDATE can still race).
-	await db
-		.update(table.hostingInquiry)
-		.set({ hostingAccountId: result.id, updatedAt: new Date() })
-		.where(
-			and(
-				eq(table.hostingInquiry.id, params.inquiryId),
-				eq(table.hostingInquiry.tenantId, tenantId),
-				isNull(table.hostingInquiry.hostingAccountId)
+	// Wrapped in withTursoBusyRetry: the DA account already exists in CRM at this
+	// point — a transient Turso BUSY here would leave the account unlinked and
+	// admins would re-attempt provisioning thinking it failed.
+	const linked = await withTursoBusyRetry(
+		() =>
+			db
+				.update(table.hostingInquiry)
+				.set({ hostingAccountId: result.id, updatedAt: new Date() })
+				.where(
+					and(
+						eq(table.hostingInquiry.id, params.inquiryId),
+						eq(table.hostingInquiry.tenantId, tenantId),
+						isNull(table.hostingInquiry.hostingAccountId)
+					)
+				)
+				.returning({ id: table.hostingInquiry.id }),
+		{ tenantId, label: 'hosting-inquiries/linkAfterProvision' }
+	);
+
+	if (linked.length === 0) {
+		// Race lost: a concurrent path (Stripe webhook or another admin) already
+		// linked the inquiry to a different hosting_account. Roll back the orphan
+		// we just created so it doesn't sit unreferenced in CRM forever. The
+		// DA-side account is left in place — staff can delete it via /hosting/accounts
+		// once they reconcile which copy to keep.
+		await db
+			.delete(table.hostingAccount)
+			.where(
+				and(eq(table.hostingAccount.id, result.id), eq(table.hostingAccount.tenantId, tenantId))
+			);
+		const [existing] = await db
+			.select({
+				id: table.hostingAccount.id,
+				daUsername: table.hostingAccount.daUsername,
+				domain: table.hostingAccount.domain
+			})
+			.from(table.hostingAccount)
+			.innerJoin(
+				table.hostingInquiry,
+				eq(table.hostingAccount.id, table.hostingInquiry.hostingAccountId)
 			)
+			.where(
+				and(
+					eq(table.hostingInquiry.id, params.inquiryId),
+					eq(table.hostingInquiry.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+		logError(
+			'directadmin',
+			`provisionFromInquiry race: inquiry ${params.inquiryId} was linked elsewhere, orphan ${result.id} (DA user ${result.daUsername}) deleted from CRM`,
+			{
+				tenantId,
+				metadata: {
+					inquiryId: params.inquiryId,
+					orphanHostingAccountId: result.id,
+					orphanDaUsername: result.daUsername,
+					winnerHostingAccountId: existing?.id ?? null
+				}
+			}
 		);
+		return {
+			ok: false as const,
+			error: existing
+				? `Comanda a fost provisionată în paralel cu un alt cont (DA user: ${existing.daUsername}). Contul "${result.daUsername}" tocmai creat e orfan în DA — șterge-l manual din panou.`
+				: 'Comanda a fost legată la alt cont între timp. Reîncarcă pagina.'
+		};
+	}
 
 	logInfo('directadmin', `provisionFromInquiry OK for ${params.inquiryId}`, {
 		tenantId,

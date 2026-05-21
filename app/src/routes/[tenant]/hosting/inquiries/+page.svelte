@@ -145,14 +145,22 @@
 	}
 
 	/**
-	 * Open the drawer. Pre-populates the provisioning form when applicable so
-	 * the admin doesn't see stale values from a prior open. All entry points
-	 * (card buttons, table rows) go through this so we only initialize once.
+	 * Open the drawer. Pre-populates the provisioning form when applicable.
+	 * Tracks which order id was last initialized so reopening the SAME order
+	 * (accidental double-click, navigating back) keeps any in-progress edits
+	 * the admin made — domain typed, custom password — instead of clobbering
+	 * them with a fresh `openProvisionForm` call.
 	 */
+	let lastProvisionInitId = $state<string | null>(null);
 	function openDrawer(o: HostingOrderRow) {
 		openOrder = o;
-		if (o.paymentStatus === 'paid' && !o.hostingAccountId) {
+		if (
+			o.paymentStatus === 'paid' &&
+			!o.hostingAccountId &&
+			lastProvisionInitId !== o.id
+		) {
 			openProvisionForm(o);
+			lastProvisionInitId = o.id;
 		}
 	}
 
@@ -167,8 +175,13 @@
 
 	function openAcceptDialog(o: HostingOrderRow) {
 		acceptOpen = true;
-		acceptMethod = (o.paymentMethod as 'op' | 'card' | 'paypal' | 'revolut' | null) ?? 'op';
-		if (acceptMethod === 'card' as string) acceptMethod = 'op';
+		// Default the manual-accept method to whatever the customer selected on
+		// the public form; admin can switch in the dropdown. (Earlier this
+		// silently rewrote 'card' → 'op' which surprised admins doing POS card
+		// captures — removed.)
+		const m = o.paymentMethod;
+		acceptMethod =
+			m === 'op' || m === 'card' || m === 'paypal' || m === 'revolut' ? m : 'op';
 		const guessed = o.productPrice ?? 0;
 		acceptAmount = guessed > 0 ? String(guessed) : '';
 		acceptRef = '';

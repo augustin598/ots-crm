@@ -3,6 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { sendOnboardingMagicLink } from './send-magic-link';
 import { provisionDirectAdminAccount } from './provision-da';
 import { emitKeezFiscalInvoice } from './emit-keez-invoice';
@@ -205,21 +206,28 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 			clientId: ctx.clientId,
 			productId: ctx.productId,
 			sessionId: ctx.sessionId,
-			stripeSubscriptionId: ctx.stripeSubscriptionId
+			stripeSubscriptionId: ctx.stripeSubscriptionId,
+			inquiryId: ctx.inquiryId
 		});
 		// Link the hosting_account back onto the inquiry so the Comenzi hosting
 		// admin page can show DA status without re-joining post_payment_step.
 		// Idempotent: the call below only writes when hostingAccountId is empty,
 		// matching how the row gets touched both on first run and on retry.
-		await db
-			.update(table.hostingInquiry)
-			.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
-			.where(
-				and(
-					eq(table.hostingInquiry.id, ctx.inquiryId),
-					eq(table.hostingInquiry.tenantId, ctx.tenantId)
-				)
-			);
+		// Wrapped in withTursoBusyRetry — a transient BUSY here would leave the
+		// freshly-created DA account unlinked + admin would manually retry.
+		await withTursoBusyRetry(
+			() =>
+				db
+					.update(table.hostingInquiry)
+					.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
+					.where(
+						and(
+							eq(table.hostingInquiry.id, ctx.inquiryId),
+							eq(table.hostingInquiry.tenantId, ctx.tenantId)
+						)
+					),
+			{ tenantId: ctx.tenantId, label: 'dispatcher/linkAfterProvision' }
+		);
 		return result;
 	});
 

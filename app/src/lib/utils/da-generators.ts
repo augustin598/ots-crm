@@ -11,7 +11,10 @@ export function generateDaUsername(seed: string): string {
 	const normalized = seed
 		.toLowerCase()
 		.normalize('NFD')
-		.replace(/[̀-ͯ]/g, '')
+		// Strip Unicode combining diacritical marks (U+0300-U+036F). Using the
+		// numeric escape rather than inline grave-to-tilde literals so the regex
+		// can't silently break if file encoding ever changes.
+		.replace(/[\u0300-\u036F]/g, '')
 		.replace(/[^a-z0-9]/g, '')
 		.slice(0, 10);
 	const prefix = normalized.length > 0 && /^[a-z]/.test(normalized) ? normalized : `ots${normalized}`;
