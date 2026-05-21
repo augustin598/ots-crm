@@ -697,7 +697,12 @@ const OrderSchema = v.object({
 	// (which is the Stripe surface). When customer picks "ordin de plată" we still
 	// route through Stripe Checkout as a fallback, but staff sees the OP intent in
 	// the Comenzi hosting admin page and accepts the bank transfer manually.
-	paymentMethod: v.optional(v.picklist(['card', 'op', 'paypal', 'revolut']), 'card')
+	paymentMethod: v.optional(v.picklist(['card', 'op', 'paypal', 'revolut']), 'card'),
+	// The domain the customer chose on the public form (new registration, existing
+	// domain via DNS update, or transfer). Stored as-is so the Comenzi hosting
+	// admin page can pre-populate the DA provisioning form's "Domeniu primar".
+	// Lightly validated — strict format check happens server-side on provisioning.
+	requestedDomain: v.optional(v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(253)))
 });
 
 /**
@@ -833,7 +838,8 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				userAgent,
 				clientId: existingClient.id,
 				paymentMethod: data.paymentMethod ?? 'card',
-				paymentStatus: 'pending'
+				paymentStatus: 'pending',
+				requestedDomain: data.requestedDomain || null
 			});
 			return {
 				duplicateCui: true as const,
@@ -921,7 +927,8 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				userAgent,
 				clientId: existingByEmail.id,
 				paymentMethod: data.paymentMethod ?? 'card',
-				paymentStatus: 'pending'
+				paymentStatus: 'pending',
+				requestedDomain: data.requestedDomain || null
 			});
 			return {
 				duplicateCui: true as const,
@@ -999,7 +1006,8 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				clientCreated: true,
 				clientCreatedAt: now,
 				paymentMethod: data.paymentMethod ?? 'card',
-				paymentStatus: 'pending'
+				paymentStatus: 'pending',
+				requestedDomain: data.requestedDomain || null
 			}),
 		{ tenantId, label: 'public-hosting/insertInquiry' }
 	);

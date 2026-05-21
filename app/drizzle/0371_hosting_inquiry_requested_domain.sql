@@ -1,0 +1,1 @@
+ALTER TABLE `hosting_inquiry` ADD COLUMN `requested_domain` text;

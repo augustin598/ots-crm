@@ -1097,6 +1097,11 @@ export const hostingInquiry = sqliteTable(
 		hostingAccountId: text('hosting_account_id').references(() => hostingAccount.id, {
 			onDelete: 'set null'
 		}),
+		// Domain the customer picked on /pachete-hosting (one of: new domain to
+		// register, existing domain via DNS update, or domain to transfer). Stored
+		// lowercased without protocol. Admin form on Comenzi hosting reads this
+		// directly into the "Domeniu primar" field for one-click provisioning.
+		requestedDomain: text('requested_domain'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),

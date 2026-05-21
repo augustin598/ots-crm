@@ -676,12 +676,18 @@
 		if (paymentMethod === 'card') cardStage = 'creating-intent';
 		try {
 			const notesParts: string[] = [];
+			// Resolve which domain the client picked into a single canonical value
+			// the CRM can store + pre-fill in the provisioning form.
+			let chosenDomain = '';
 			if (domainMode === 'buy' && domainName) {
-				notesParts.push(`Domeniu nou: ${domainName}${domainTld} (${tldPrice} RON/an)`);
+				chosenDomain = `${domainName}${domainTld}`.toLowerCase();
+				notesParts.push(`Domeniu nou: ${chosenDomain} (${tldPrice} RON/an)`);
 			} else if (domainMode === 'have' && existingDomain) {
-				notesParts.push(`Domeniu existent (DNS update): ${existingDomain}`);
+				chosenDomain = existingDomain.trim().toLowerCase();
+				notesParts.push(`Domeniu existent (DNS update): ${chosenDomain}`);
 			} else if (domainMode === 'transfer' && existingDomain) {
-				notesParts.push(`Transfer domeniu: ${existingDomain}`);
+				chosenDomain = existingDomain.trim().toLowerCase();
+				notesParts.push(`Transfer domeniu: ${chosenDomain}`);
 			}
 			notesParts.push(`Metodă plată preferată: ${paymentMethodLabel(paymentMethod)}`);
 			notesParts.push(`Facturare: ${period === 'yearly' ? 'anuală' : 'lunară'}`);
@@ -708,7 +714,8 @@
 				consentTerms: true,
 				notes: notesParts.join(' · '),
 				paymentMode: paymentMethod === 'card' ? 'payment_intent' : 'checkout_redirect',
-				paymentMethod
+				paymentMethod,
+				requestedDomain: chosenDomain || undefined
 			});
 
 			if (result.duplicateCui) {

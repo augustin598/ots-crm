@@ -86,7 +86,9 @@
 		provPackageId = o.productDaPackageId ?? '';
 		const seed = o.clientBusinessName || o.contactName || o.contactEmail.split('@')[0];
 		provUsername = generateDaUsername(seed);
-		provDomain = '';
+		// Pre-fill from the public form. If the customer didn't enter a domain
+		// (rare — domain step is mandatory on /pachete-hosting), admin types it.
+		provDomain = o.requestedDomain ?? '';
 		provPassword = generateDaPassword();
 		provNotes = '';
 		provPwdCopied = false;

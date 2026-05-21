@@ -131,6 +131,7 @@ export type HostingOrderRow = {
 	clientId: string | null;
 	clientName: string | null;
 	clientBusinessName: string | null;
+	requestedDomain: string | null;
 	paymentMethod: string | null;
 	paymentStatus: string;
 	paidAt: string | null;
@@ -178,6 +179,7 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 			clientId: table.hostingInquiry.clientId,
 			clientName: table.client.name,
 			clientBusinessName: table.client.businessName,
+			requestedDomain: table.hostingInquiry.requestedDomain,
 			paymentMethod: table.hostingInquiry.paymentMethod,
 			paymentStatus: table.hostingInquiry.paymentStatus,
 			paidAt: table.hostingInquiry.paidAt,

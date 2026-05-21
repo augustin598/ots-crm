@@ -2577,6 +2577,13 @@
       "when": 1779916800007500,
       "tag": "0370_hosting_inquiry_hosting_account_id",
       "breakpoints": true
+    },
+    {
+      "idx": 371,
+      "version": "6",
+      "when": 1779916800008500,
+      "tag": "0371_hosting_inquiry_requested_domain",
+      "breakpoints": true
     }
   ]
 }
