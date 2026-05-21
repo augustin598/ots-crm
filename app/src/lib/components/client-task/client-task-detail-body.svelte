@@ -103,7 +103,7 @@
 </script>
 
 {#if task}
-	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
+	<div class="client-shell flex min-h-screen bg-white">
 		<div class="client-main flex flex-1 flex-col">
 			<!-- Topbar with breadcrumbs -->
 			<div
@@ -184,7 +184,7 @@
 		/>
 	{/if}
 {:else}
-	<div class="client-shell flex min-h-screen bg-[#f5f7fa]">
+	<div class="client-shell flex min-h-screen bg-white">
 		<div class="client-main flex flex-1 animate-pulse flex-col">
 			<!-- Breadcrumb skeleton -->
 			<div class="border-b border-[#e5e9f0] bg-white px-7 py-3.5">

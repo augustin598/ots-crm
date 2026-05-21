@@ -409,7 +409,7 @@
 <Dialog bind:open {onOpenChange}>
 	<DialogContent
 		showCloseButton={false}
-		class="flex flex-col gap-0 p-0 sm:max-w-[680px] max-h-[90vh] overflow-hidden"
+		class="flex flex-col gap-0 bg-white p-0 sm:max-w-[820px] max-h-[90vh] overflow-hidden"
 	>
 		<!-- Header -->
 		<div class="flex items-center gap-3 border-b px-5 py-4">

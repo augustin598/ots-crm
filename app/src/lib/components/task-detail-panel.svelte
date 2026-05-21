@@ -35,7 +35,7 @@
 </script>
 
 <Sheet.Root open={!!taskId} onOpenChange={(v) => { if (!v) onClose(); }}>
-	<Sheet.Content side="right" class="w-full overflow-y-auto p-0 sm:max-w-[860px]">
+	<Sheet.Content side="right" class="w-full overflow-y-auto bg-white p-0 sm:max-w-[860px]">
 		<Sheet.Header class="sr-only">
 			<Sheet.Title>{task?.title ?? 'Task Detail'}</Sheet.Title>
 		</Sheet.Header>

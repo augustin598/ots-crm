@@ -25,7 +25,7 @@
 
 {#if task}
 	<Dialog bind:open {onOpenChange}>
-		<DialogContent class="max-h-[90vh] overflow-y-auto sm:max-w-5xl" showCloseButton={false}>
+		<DialogContent class="max-h-[90vh] overflow-y-auto bg-white sm:max-w-5xl" showCloseButton={false}>
 			<DialogHeader class="sr-only">
 				<DialogTitle>{task.title}</DialogTitle>
 			</DialogHeader>
