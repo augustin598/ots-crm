@@ -75,6 +75,7 @@ export async function provisionDirectAdminAccount(params: {
 			and(
 				eq(table.hostingAccount.tenantId, params.tenantId),
 				eq(table.hostingAccount.clientId, params.clientId),
+				eq(table.hostingAccount.hostingProductId, params.productId),
 				eq(table.hostingAccount.stripeSubscriptionId, params.stripeSubscriptionId ?? '__no_sub__')
 			)
 		)

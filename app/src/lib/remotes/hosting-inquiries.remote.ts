@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, ne } from 'drizzle-orm';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -216,7 +216,15 @@ const AcceptPaymentSchema = v.object({
 	id: IdSchema,
 	paymentMethod: v.picklist(['op', 'card', 'paypal', 'revolut', 'other']),
 	paidAmountCents: v.pipe(v.number(), v.integer(), v.minValue(0)),
-	paymentReference: v.optional(v.pipe(v.string(), v.maxLength(200))),
+	// Allowlist for bank-transfer references — keeps audit logs readable and
+	// prevents accidental binary/control-char paste from extras CSV.
+	paymentReference: v.optional(
+		v.pipe(
+			v.string(),
+			v.maxLength(200),
+			v.regex(/^[A-Za-z0-9\-_./()\s]*$/, 'Referința conține caractere invalide.')
+		)
+	),
 	note: v.optional(v.pipe(v.string(), v.maxLength(500))),
 	triggerProvisioning: v.optional(v.boolean(), true)
 });
@@ -234,35 +242,48 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 	assertCan(actor, 'admin.hosting.manage');
 	const userId = event.locals.user!.id;
 
-	const [order] = await db
-		.select({
-			id: table.hostingInquiry.id,
-			tenantId: table.hostingInquiry.tenantId,
-			clientId: table.hostingInquiry.clientId,
-			hostingProductId: table.hostingInquiry.hostingProductId,
-			paymentStatus: table.hostingInquiry.paymentStatus,
-			hostingAccountId: table.hostingInquiry.hostingAccountId,
-			currentMessage: table.hostingInquiry.message,
-			contactName: table.hostingInquiry.contactName
-		})
-		.from(table.hostingInquiry)
-		.where(
-			and(eq(table.hostingInquiry.id, params.id), eq(table.hostingInquiry.tenantId, tenantId))
-		)
-		.limit(1);
-	if (!order) throw error(404, 'Comanda nu există.');
-	if (!order.clientId) throw error(400, 'Comanda nu are client asociat (probabil un lead vechi). Asignează clientul mai întâi.');
-	if (!order.hostingProductId) throw error(400, 'Comanda nu are produs hosting asociat.');
+	const { order, alreadyPaid } = await db.transaction(async (tx) => {
+		const [o] = await tx
+			.select({
+				id: table.hostingInquiry.id,
+				tenantId: table.hostingInquiry.tenantId,
+				clientId: table.hostingInquiry.clientId,
+				hostingProductId: table.hostingInquiry.hostingProductId,
+				paymentStatus: table.hostingInquiry.paymentStatus,
+				hostingAccountId: table.hostingInquiry.hostingAccountId,
+				currentMessage: table.hostingInquiry.message,
+				contactName: table.hostingInquiry.contactName
+			})
+			.from(table.hostingInquiry)
+			.where(
+				and(eq(table.hostingInquiry.id, params.id), eq(table.hostingInquiry.tenantId, tenantId))
+			)
+			.limit(1);
+		if (!o) throw error(404, 'Comanda nu există.');
+		if (!o.clientId)
+			throw error(
+				400,
+				'Comanda nu are client asociat (probabil un lead vechi). Asignează clientul mai întâi.'
+			);
+		if (!o.hostingProductId) throw error(400, 'Comanda nu are produs hosting asociat.');
 
-	const now = new Date();
-	const acceptanceNote = params.note?.trim() || null;
-	const newMessage = acceptanceNote
-		? `${order.currentMessage ? order.currentMessage + '\n' : ''}[Plată acceptată ${now.toISOString()} de ${userId}] ${acceptanceNote}`
-		: order.currentMessage;
+		if (o.paymentStatus === 'paid') {
+			return { order: o, alreadyPaid: true };
+		}
 
-	// 1. Update inquiry — paymentStatus paid + funnel converted.
-	if (order.paymentStatus !== 'paid') {
-		await db
+		const now = new Date();
+		const acceptanceNote = params.note?.trim() || null;
+		const newMessage = acceptanceNote
+			? `${o.currentMessage ? o.currentMessage + '\n' : ''}[Plată acceptată ${now.toISOString()} de ${userId}] ${acceptanceNote}`
+			: o.currentMessage;
+
+		// 1. Update inquiry — paymentStatus paid + funnel converted. The
+		// `ne(paymentStatus, 'paid')` guard makes the UPDATE a no-op for the
+		// second concurrent admin: even if both transactions saw the row as
+		// 'pending' in their SELECT, only one UPDATE flips the row; the other
+		// matches 0 rows and falls through to the idempotent provisioning step
+		// (which short-circuits via hostingAccount lookup).
+		await tx
 			.update(table.hostingInquiry)
 			.set({
 				paymentStatus: 'paid',
@@ -280,16 +301,21 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 			.where(
 				and(
 					eq(table.hostingInquiry.id, params.id),
-					eq(table.hostingInquiry.tenantId, tenantId)
+					eq(table.hostingInquiry.tenantId, tenantId),
+					ne(table.hostingInquiry.paymentStatus, 'paid')
 				)
 			);
 
 		// 2. Activate client (mirror Stripe path).
-		await db
+		await tx
 			.update(table.client)
 			.set({ status: 'active', onboardingStatus: 'active', updatedAt: now })
-			.where(and(eq(table.client.id, order.clientId), eq(table.client.tenantId, tenantId)));
+			.where(and(eq(table.client.id, o.clientId), eq(table.client.tenantId, tenantId)));
 
+		return { order: { ...o, paymentStatus: 'paid' }, alreadyPaid: false };
+	});
+
+	if (!alreadyPaid) {
 		logInfo('directadmin', 'hosting order payment accepted manually', {
 			tenantId,
 			metadata: {
@@ -303,8 +329,8 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 	}
 
 	// 3. Optionally provision DA. The provision helper is idempotent (checks
-	//    hostingAccount by tenant+client+subscription), so calling it twice is
-	//    safe — second call returns { created: false } with existing account.
+	//    hostingAccount by tenant+client+product+subscription), so calling it
+	//    twice is safe — second call returns { created: false } with existing account.
 	if (!params.triggerProvisioning) {
 		return { paymentAccepted: true, provisioned: false as const, reason: 'skipped_by_caller' };
 	}
@@ -321,8 +347,8 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 	try {
 		const result = await provisionDirectAdminAccount({
 			tenantId,
-			clientId: order.clientId,
-			productId: order.hostingProductId,
+			clientId: order.clientId!,
+			productId: order.hostingProductId!,
 			sessionId: `manual_${params.id}`,
 			stripeSubscriptionId: null
 		});

@@ -158,7 +158,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 			},
 			{
 				id: 'hosting-inquiries',
-				label: 'Cereri ofertă',
+				label: 'Comenzi',
 				icon: 'leads',
 				href: '/hosting/inquiries',
 				requiredPlugin: 'directadmin'
