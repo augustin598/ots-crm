@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
+mock.module('$env/dynamic/public', () => ({ env: {} }));
 
 // ─── Request context ──────────────────────────────────────────────────────────
 
