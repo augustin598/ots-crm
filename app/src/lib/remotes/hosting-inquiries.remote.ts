@@ -3,11 +3,12 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, ne } from 'drizzle-orm';
+import { eq, and, desc, ne, isNull } from 'drizzle-orm';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { provisionDirectAdminAccount } from '$lib/server/stripe/post-payment/provision-da';
+import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 
 /**
  * Admin-side management of hosting inquiries / orders submitted via the public
@@ -125,8 +126,11 @@ export type HostingOrderRow = {
 	productPrice: number | null;
 	productCurrency: string | null;
 	productBillingCycle: string | null;
+	productDaServerId: string | null;
+	productDaPackageId: string | null;
 	clientId: string | null;
 	clientName: string | null;
+	clientBusinessName: string | null;
 	paymentMethod: string | null;
 	paymentStatus: string;
 	paidAt: string | null;
@@ -169,8 +173,11 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 			productPrice: table.hostingProduct.price,
 			productCurrency: table.hostingProduct.currency,
 			productBillingCycle: table.hostingProduct.billingCycle,
+			productDaServerId: table.hostingProduct.daServerId,
+			productDaPackageId: table.hostingProduct.daPackageId,
 			clientId: table.hostingInquiry.clientId,
 			clientName: table.client.name,
+			clientBusinessName: table.client.businessName,
 			paymentMethod: table.hostingInquiry.paymentMethod,
 			paymentStatus: table.hostingInquiry.paymentStatus,
 			paidAt: table.hostingInquiry.paidAt,
@@ -445,4 +452,133 @@ export const retryDaProvisioning = command(IdSchema, async (id) => {
 		});
 		return { ok: false as const, error: message };
 	}
+});
+
+// ====================== Manual form-driven provisioning =====================
+//
+// Replaces the auto-gen retryDaProvisioning for staff-driven cases. Admin types
+// the actual domain + username + password in the drawer form, and we call the
+// shared `createHostingAccountInternal` helper (same path used by
+// `/hosting/accounts/new`).
+
+const ProvisionFromInquirySchema = v.object({
+	inquiryId: IdSchema,
+	daServerId: v.pipe(v.string(), v.minLength(1)),
+	daPackageId: v.optional(v.pipe(v.string(), v.minLength(1))),
+	daUsername: v.pipe(
+		v.string(),
+		v.minLength(2, 'Username prea scurt'),
+		v.maxLength(16, 'Username max 16 caractere'),
+		v.regex(/^[a-z][a-z0-9]*$/, 'Doar litere mici + cifre, primul caracter literă')
+	),
+	domain: v.pipe(
+		v.string(),
+		v.minLength(4),
+		v.maxLength(253),
+		v.regex(/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i, 'Domeniu invalid')
+	),
+	password: v.pipe(v.string(), v.minLength(8, 'Parola min 8 caractere'), v.maxLength(64)),
+	notes: v.optional(v.pipe(v.string(), v.maxLength(500)))
+});
+
+export const provisionFromInquiry = command(ProvisionFromInquirySchema, async (params) => {
+	const { event, tenantId } = tenantScope();
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.manage');
+
+	const [order] = await db
+		.select({
+			id: table.hostingInquiry.id,
+			clientId: table.hostingInquiry.clientId,
+			hostingProductId: table.hostingInquiry.hostingProductId,
+			paymentStatus: table.hostingInquiry.paymentStatus,
+			hostingAccountId: table.hostingInquiry.hostingAccountId
+		})
+		.from(table.hostingInquiry)
+		.where(
+			and(
+				eq(table.hostingInquiry.id, params.inquiryId),
+				eq(table.hostingInquiry.tenantId, tenantId)
+			)
+		)
+		.limit(1);
+	if (!order) throw error(404, 'Comanda nu există.');
+	if (!order.clientId) throw error(400, 'Comanda nu are client asociat.');
+	if (!order.hostingProductId) throw error(400, 'Comanda nu are produs hosting asociat.');
+	if (order.paymentStatus !== 'paid')
+		throw error(400, 'Acceptă plata înainte de a rula provisioning.');
+	if (order.hostingAccountId)
+		throw error(409, 'Comanda are deja un cont DirectAdmin asociat.');
+
+	// Read product defaults for the new hostingAccount (recurring amount + cycle).
+	const [product] = await db
+		.select({
+			price: table.hostingProduct.price,
+			currency: table.hostingProduct.currency,
+			billingCycle: table.hostingProduct.billingCycle
+		})
+		.from(table.hostingProduct)
+		.where(
+			and(
+				eq(table.hostingProduct.id, order.hostingProductId),
+				eq(table.hostingProduct.tenantId, tenantId)
+			)
+		)
+		.limit(1);
+
+	let result: { id: string; daUsername: string; domain: string };
+	try {
+		result = await createHostingAccountInternal(tenantId, {
+			clientId: order.clientId,
+			daServerId: params.daServerId,
+			daPackageId: params.daPackageId,
+			hostingProductId: order.hostingProductId,
+			daUsername: params.daUsername,
+			domain: params.domain.toLowerCase(),
+			password: params.password,
+			recurringAmount: product ? Math.round(Number(product.price) * 100) : 0,
+			currency: product?.currency ?? 'RON',
+			billingCycle: product?.billingCycle ?? 'monthly',
+			notes: params.notes,
+			auditTrigger: 'manual'
+		});
+	} catch (err) {
+		const { message } = serializeError(err);
+		logError('directadmin', `provisionFromInquiry failed for ${params.inquiryId}: ${message}`, {
+			tenantId,
+			metadata: { inquiryId: params.inquiryId, daUsername: params.daUsername }
+		});
+		return { ok: false as const, error: message };
+	}
+
+	// Link inquiry → hosting_account. Guarded by `IS NULL` so a concurrent click
+	// from another admin's session can't double-link (the DA-side `withAccountLock`
+	// already serialized the create itself, but the inquiry UPDATE can still race).
+	await db
+		.update(table.hostingInquiry)
+		.set({ hostingAccountId: result.id, updatedAt: new Date() })
+		.where(
+			and(
+				eq(table.hostingInquiry.id, params.inquiryId),
+				eq(table.hostingInquiry.tenantId, tenantId),
+				isNull(table.hostingInquiry.hostingAccountId)
+			)
+		);
+
+	logInfo('directadmin', `provisionFromInquiry OK for ${params.inquiryId}`, {
+		tenantId,
+		metadata: {
+			inquiryId: params.inquiryId,
+			hostingAccountId: result.id,
+			daUsername: result.daUsername,
+			domain: result.domain
+		}
+	});
+
+	return {
+		ok: true as const,
+		hostingAccountId: result.id,
+		daUsername: result.daUsername,
+		domain: result.domain
+	};
 });

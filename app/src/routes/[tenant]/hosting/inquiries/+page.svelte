@@ -4,11 +4,14 @@
 		updateHostingInquiryStatus,
 		deleteHostingInquiry,
 		acceptHostingOrderPayment,
-		retryDaProvisioning,
+		provisionFromInquiry,
 		type HostingOrderRow
 	} from '$lib/remotes/hosting-inquiries.remote';
+	import { getDAServers, getDAServer } from '$lib/remotes/da-servers.remote';
+	import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
 	import { toast } from 'svelte-sonner';
 	import { focusTrap } from '$lib/actions/focus-trap';
+	import { tick } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import DownloadIcon from '@lucide/svelte/icons/download';
@@ -28,7 +31,8 @@
 	import Columns3Icon from '@lucide/svelte/icons/columns-3';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
-	import PlayIcon from '@lucide/svelte/icons/play';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 
 	type FunnelStatus = 'all' | 'new' | 'contacted' | 'converted' | 'discarded' | 'abandoned';
 	type PaymentFilter = 'all' | 'paid' | 'pending' | 'failed';
@@ -57,6 +61,107 @@
 	let acceptMethod = $state<'op' | 'card' | 'paypal' | 'revolut' | 'other'>('op');
 	let acceptProvision = $state(true);
 	let accepting = $state(false);
+
+	// Provisioning form state — pre-populated from order/product, editable.
+	let provServerId = $state('');
+	let provPackageId = $state('');
+	let provUsername = $state('');
+	let provDomain = $state('');
+	let provPassword = $state('');
+	let provNotes = $state('');
+	let provisioning = $state(false);
+	let provPwdCopied = $state(false);
+	let scrollToProvision = $state(false);
+
+	// Lazy server + package lookups for the form dropdowns.
+	let serversPromise = $state<ReturnType<typeof getDAServers> | null>(null);
+	function ensureServersLoaded() {
+		if (!serversPromise) serversPromise = getDAServers();
+	}
+	const selectedServerDetail = $derived(provServerId ? getDAServer(provServerId) : null);
+
+	function openProvisionForm(o: HostingOrderRow) {
+		ensureServersLoaded();
+		provServerId = o.productDaServerId ?? '';
+		provPackageId = o.productDaPackageId ?? '';
+		const seed = o.clientBusinessName || o.contactName || o.contactEmail.split('@')[0];
+		provUsername = generateDaUsername(seed);
+		provDomain = '';
+		provPassword = generateDaPassword();
+		provNotes = '';
+		provPwdCopied = false;
+	}
+
+	function suggestUsername(o: HostingOrderRow) {
+		const seed = o.clientBusinessName || o.contactName || o.contactEmail.split('@')[0];
+		provUsername = generateDaUsername(seed);
+	}
+
+	function regeneratePassword() {
+		provPassword = generateDaPassword();
+		provPwdCopied = false;
+	}
+
+	async function copyPassword() {
+		try {
+			await navigator.clipboard.writeText(provPassword);
+			provPwdCopied = true;
+			setTimeout(() => (provPwdCopied = false), 2000);
+		} catch {
+			toast.error('Nu am putut copia parola');
+		}
+	}
+
+	async function submitProvision(orderId: string) {
+		if (!provServerId || !provUsername || !provDomain || !provPassword) {
+			toast.error('Completează toate câmpurile obligatorii');
+			return;
+		}
+		provisioning = true;
+		try {
+			const r = await provisionFromInquiry({
+				inquiryId: orderId,
+				daServerId: provServerId,
+				daPackageId: provPackageId || undefined,
+				daUsername: provUsername.trim().toLowerCase(),
+				domain: provDomain.trim().toLowerCase(),
+				password: provPassword,
+				notes: provNotes.trim() || undefined
+			});
+			if (r.ok) {
+				toast.success(`Cont DA creat: ${r.daUsername} (${r.domain})`);
+				openOrder = null;
+				await refresh();
+			} else {
+				toast.error(`Provisioning eșuat: ${r.error}`);
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare');
+		} finally {
+			provisioning = false;
+		}
+	}
+
+	/**
+	 * Open the drawer. Pre-populates the provisioning form when applicable so
+	 * the admin doesn't see stale values from a prior open. All entry points
+	 * (card buttons, table rows) go through this so we only initialize once.
+	 */
+	function openDrawer(o: HostingOrderRow) {
+		openOrder = o;
+		if (o.paymentStatus === 'paid' && !o.hostingAccountId) {
+			openProvisionForm(o);
+		}
+	}
+
+	async function openOrderAtProvision(o: HostingOrderRow) {
+		openDrawer(o);
+		scrollToProvision = true;
+		await tick();
+		const el = document.getElementById('drawer-provisioning');
+		if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		scrollToProvision = false;
+	}
 
 	function openAcceptDialog(o: HostingOrderRow) {
 		acceptOpen = true;
@@ -99,27 +204,6 @@
 			toast.error(e instanceof Error ? e.message : 'Eroare');
 		} finally {
 			accepting = false;
-		}
-	}
-
-	async function handleRetry(o: HostingOrderRow) {
-		busyId = o.id;
-		try {
-			const r = await retryDaProvisioning(o.id);
-			if (r.ok) {
-				toast.success(
-					r.created
-						? `Cont DA creat: ${r.daUsername}`
-						: `Cont DA existent: ${r.daUsername}`
-				);
-				await refresh();
-			} else {
-				toast.error(`Provisioning eșuat: ${r.error}`);
-			}
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			busyId = null;
 		}
 	}
 
@@ -550,7 +634,7 @@
 										class="btn-secondary"
 										disabled={busyId === o.id}
 										onclick={() => {
-											openOrder = o;
+											openDrawer(o);
 											openAcceptDialog(o);
 										}}
 									>
@@ -560,12 +644,12 @@
 									<button
 										class="btn-secondary"
 										disabled={busyId === o.id}
-										onclick={() => handleRetry(o)}
+										onclick={() => openOrderAtProvision(o)}
 									>
-										<PlayIcon size={13} /> Provisioning DA
+										<HardDriveIcon size={13} /> Provisioning DA
 									</button>
 								{/if}
-								<button class="btn-ghost" onclick={() => (openOrder = o)}>
+								<button class="btn-ghost" onclick={() => openDrawer(o)}>
 									Detalii
 								</button>
 							</div>
@@ -591,7 +675,7 @@
 					</thead>
 					<tbody>
 						{#each filtered as o (o.id)}
-							<tr onclick={() => (openOrder = o)}>
+							<tr onclick={() => openDrawer(o)}>
 								<td>
 									<div class="hst-host-cell">{fmtRelative(o.createdAt)}</div>
 									<div class="hst-host-sub">{fmtDate(o.createdAt)}</div>
@@ -623,7 +707,7 @@
 								</td>
 								<td>{statusLabel(o.status)}</td>
 								<td>
-									<button class="hst-icon-btn" onclick={(e) => { e.stopPropagation(); openOrder = o; }} title="Detalii">
+									<button class="hst-icon-btn" onclick={(e) => { e.stopPropagation(); openDrawer(o); }} title="Detalii">
 										<ExternalLinkIcon size={12} />
 									</button>
 								</td>
@@ -800,7 +884,7 @@
 			</section>
 
 			<!-- Provisioning -->
-			<section>
+			<section id="drawer-provisioning">
 				<h3>Provisioning DirectAdmin</h3>
 				{#if o.hostingAccountId && o.daUsername}
 					<dl class="hst-kv">
@@ -821,11 +905,137 @@
 				{:else if o.paymentStatus === 'paid'}
 					<p class="hst-warning">
 						<AlertTriangleIcon size={13} />
-						Plata e confirmată, dar contul DirectAdmin n-a fost creat. Re-rulează provisioning-ul.
+						Plata e confirmată. Completează datele de mai jos și creează contul DirectAdmin
+						direct prin API.
 					</p>
-					<button class="btn-primary" disabled={busyId === o.id} onclick={() => handleRetry(o)}>
-						<PlayIcon size={13} /> Rulează provisioning
-					</button>
+					<div class="hst-prov-form">
+						<div class="hst-prov-row">
+							<label>
+								<span>Server DA *</span>
+								{#if serversPromise}
+									{#await serversPromise}
+										<select disabled><option>Se încarcă…</option></select>
+									{:then list}
+										<select bind:value={provServerId} required>
+											<option value="">— alege server —</option>
+											{#each list as s (s.id)}
+												<option value={s.id}>{s.name} ({s.hostname})</option>
+											{/each}
+										</select>
+									{/await}
+								{:else}
+									<select disabled><option>Se încarcă…</option></select>
+								{/if}
+							</label>
+
+							<label>
+								<span>Pachet DA</span>
+								{#if selectedServerDetail}
+									{#await selectedServerDetail then s}
+										<select bind:value={provPackageId}>
+											<option value="">— default —</option>
+											{#each s.packages as p (p.id)}
+												<option value={p.id}>{p.daName}</option>
+											{/each}
+										</select>
+									{/await}
+								{:else}
+									<select disabled><option>— alege server întâi —</option></select>
+								{/if}
+							</label>
+						</div>
+
+						<label>
+							<span>Username DA *</span>
+							<div class="hst-prov-input-with-action">
+								<input
+									type="text"
+									bind:value={provUsername}
+									maxlength="16"
+									pattern="[a-z][a-z0-9]*"
+									placeholder="ex: navitech4xqz"
+									required
+								/>
+								<button
+									type="button"
+									class="btn-secondary small"
+									onclick={() => suggestUsername(o)}
+									title="Sugerează din numele firmei"
+								>
+									<SparklesIcon size={12} /> Sugerează
+								</button>
+							</div>
+							<small>Litere mici + cifre, max 16. Trebuie să înceapă cu literă.</small>
+						</label>
+
+						<label>
+							<span>Domeniu primar *</span>
+							<input
+								type="text"
+								bind:value={provDomain}
+								placeholder="exemplu.ro"
+								required
+							/>
+							<small>Acesta devine domeniul principal al contului DA.</small>
+						</label>
+
+						<label>
+							<span>Parolă *</span>
+							<div class="hst-prov-input-with-action">
+								<input
+									type="text"
+									bind:value={provPassword}
+									minlength="8"
+									maxlength="64"
+									required
+								/>
+								<button
+									type="button"
+									class="btn-secondary small"
+									onclick={regeneratePassword}
+									title="Regenerează parola"
+								>
+									<RefreshCwIcon size={12} />
+								</button>
+								<button
+									type="button"
+									class="btn-secondary small"
+									onclick={copyPassword}
+									title="Copiază parola"
+								>
+									{#if provPwdCopied}
+										<CheckCircle2Icon size={12} />
+									{:else}
+										<CopyIcon size={12} />
+									{/if}
+								</button>
+							</div>
+							<small>
+								Vizibilă intenționat — copiaz-o acum dacă o trimiți clientului separat.
+								Se stochează criptat în CRM.
+							</small>
+						</label>
+
+						<label>
+							<span>Note (opțional)</span>
+							<textarea bind:value={provNotes} rows="2" maxlength="500"></textarea>
+						</label>
+
+						<div class="hst-prov-actions">
+							<button
+								class="btn-primary"
+								disabled={provisioning ||
+									!provServerId ||
+									!provUsername ||
+									!provDomain ||
+									!provPassword}
+								onclick={() => submitProvision(o.id)}
+							>
+								<HardDriveIcon size={13} />
+								{provisioning ? 'Se creează…' : 'Creează cont DA'}
+							</button>
+						</div>
+					</div>
 				{:else}
 					<p class="muted">Provisioning-ul rulează automat după ce plata este confirmată.</p>
 				{/if}
@@ -1603,5 +1813,68 @@
 		display: flex;
 		gap: 8px;
 		justify-content: flex-end;
+	}
+
+	/* Provisioning form — mirrors accept form but with row layout for server/package */
+	.hst-prov-form {
+		background: #f9fafc;
+		border: 1px solid #e5e9f0;
+		border-radius: 10px;
+		padding: 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.hst-prov-form label {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		font-size: 12px;
+		color: #475569;
+		font-weight: 600;
+	}
+	.hst-prov-form small {
+		font-size: 10.5px;
+		font-weight: 500;
+		color: #94a3b8;
+		line-height: 1.4;
+	}
+	.hst-prov-form input[type='text'],
+	.hst-prov-form textarea,
+	.hst-prov-form select {
+		font-family: inherit;
+		font-size: 13px;
+		border: 1px solid #d5dbe5;
+		border-radius: 7px;
+		padding: 8px 10px;
+		background: white;
+		color: #0f172a;
+		outline: none;
+		min-width: 0;
+	}
+	.hst-prov-form input:focus,
+	.hst-prov-form textarea:focus,
+	.hst-prov-form select:focus {
+		border-color: #1877f2;
+		box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.12);
+	}
+	.hst-prov-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 10px;
+	}
+	.hst-prov-input-with-action {
+		display: flex;
+		gap: 6px;
+		align-items: stretch;
+	}
+	.hst-prov-input-with-action input {
+		flex: 1;
+		min-width: 0;
+	}
+	.hst-prov-actions {
+		display: flex;
+		justify-content: flex-end;
+		padding-top: 4px;
 	}
 </style>

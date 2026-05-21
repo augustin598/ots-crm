@@ -10,6 +10,7 @@ import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
+import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -149,70 +150,22 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.hosting.manage');
 
-	const tenantId = event.locals.tenant.id;
-
-	const [server] = await db
-		.select()
-		.from(table.daServer)
-		.where(and(eq(table.daServer.id, data.daServerId), eq(table.daServer.tenantId, tenantId)))
-		.limit(1);
-	if (!server) throw new Error('Server not found');
-
-	let packageName = 'default';
-	if (data.daPackageId) {
-		const [pkg] = await db
-			.select({ daName: table.daPackage.daName })
-			.from(table.daPackage)
-			.where(eq(table.daPackage.id, data.daPackageId))
-			.limit(1);
-		if (pkg) packageName = pkg.daName;
-	}
-
-	const [clientData] = await db
-		.select({ email: table.client.email })
-		.from(table.client)
-		.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, tenantId)))
-		.limit(1);
-	if (!clientData) throw new Error('Client not found');
-
-	const id = generateId();
-	const daClient = createDAClient(tenantId, server);
-
-	await runWithAudit(
-		{ tenantId, hostingAccountId: id, daServerId: data.daServerId, action: 'create', trigger: 'manual' },
-		() =>
-			daClient.createUserAccount({
-				username: data.daUsername,
-				password: data.password,
-				domain: data.domain,
-				email: clientData.email ?? '',
-				package: packageName
-			})
-	);
-
-	const credentialsEncrypted = encrypt(
-		tenantId,
-		JSON.stringify({ username: data.daUsername, password: data.password })
-	);
-
-	await db.insert(table.hostingAccount).values({
-		id,
-		tenantId,
+	const result = await createHostingAccountInternal(event.locals.tenant.id, {
 		clientId: data.clientId,
 		daServerId: data.daServerId,
 		daPackageId: data.daPackageId,
 		hostingProductId: data.hostingProductId,
 		daUsername: data.daUsername,
 		domain: data.domain,
-		status: 'active',
-		daCredentialsEncrypted: credentialsEncrypted,
-		recurringAmount: data.recurringAmount ?? 0,
-		currency: data.currency ?? 'RON',
+		password: data.password,
+		recurringAmount: data.recurringAmount,
+		currency: data.currency,
 		nextDueDate: data.nextDueDate,
-		notes: data.notes
+		notes: data.notes,
+		auditTrigger: 'manual'
 	});
 
-	return { id };
+	return { id: result.id };
 });
 
 export const suspendHostingAccount = command(SuspendSchema, async (params) => {

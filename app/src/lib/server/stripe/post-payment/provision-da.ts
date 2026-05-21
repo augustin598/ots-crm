@@ -6,39 +6,10 @@ import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
 import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { logInfo } from '$lib/server/logger';
+import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-}
-
-/**
- * Generează un username DirectAdmin valid din numele clientului sau email.
- *
- * Reguli DA: lowercase, alfanumeric, max 16 chars, începe cu literă.
- * Strategie: ia prefix din nume normalizat + suffix random 4 chars ca să evităm
- * coliziuni cu username-uri existente (DA refuză duplicat).
- */
-function generateDaUsername(seed: string): string {
-	const normalized = seed
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/[̀-ͯ]/g, '')
-		.replace(/[^a-z0-9]/g, '')
-		.slice(0, 10);
-	const prefix = normalized.length > 0 && /^[a-z]/.test(normalized) ? normalized : `ots${normalized}`;
-	const suffix = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(3))).slice(0, 4);
-	return `${prefix.slice(0, 12)}${suffix}`.slice(0, 16);
-}
-
-/**
- * Generează parolă random 16 chars compatibilă DA (no special chars problematic în URL).
- */
-function generateDaPassword(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(12));
-	const base = encodeBase32LowerCase(bytes).slice(0, 14);
-	// Adăugăm 2 cifre random ca să satisfacem cerințele de complexitate DA.
-	const digits = String(crypto.getRandomValues(new Uint8Array(1))[0] % 100).padStart(2, '0');
-	return `${base}${digits}`;
 }
 
 /**
