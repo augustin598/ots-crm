@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -12,6 +13,8 @@ import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
 import { getOrCreateStripePrice } from '$lib/server/stripe/price';
 import { createHostingCheckoutSession } from '$lib/server/stripe/checkout';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
+import { decrypt } from '$lib/server/plugins/smartbill/crypto';
+import { rateLimit } from '$lib/server/redis';
 
 /**
  * Public hosting pages — accessible without authentication.
@@ -34,23 +37,38 @@ function generateId(): string {
 }
 
 /**
- * Resolve the owner tenant for the public site. Cached per process lifetime
- * (slug doesn't change at runtime).
+ * Resolve the owner tenant for the public site. Cached for 5 minutes — a slug
+ * rename or tenant deletion can't take the public site offline for the full
+ * pod lifetime (Audit MED-8 — previously cached for process lifetime, which
+ * meant any tenant table change required a restart).
  */
+const TENANT_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedTenantId: string | null = null;
+let cachedTenantAt = 0;
+function invalidateTenantCache(): void {
+	cachedTenantId = null;
+	cachedTenantAt = 0;
+}
 async function resolvePublicTenantId(): Promise<string> {
-	if (cachedTenantId) return cachedTenantId;
+	if (cachedTenantId && Date.now() - cachedTenantAt < TENANT_CACHE_TTL_MS) {
+		return cachedTenantId;
+	}
 	const [t] = await db
 		.select({ id: table.tenant.id })
 		.from(table.tenant)
 		.where(eq(table.tenant.slug, PUBLIC_TENANT_SLUG))
 		.limit(1);
 	if (!t) {
+		// Don't poison the cache when the tenant is missing — let the next call
+		// re-attempt (e.g. tenant being created via admin while public site is up).
+		cachedTenantId = null;
+		cachedTenantAt = 0;
 		throw new Error(
 			`PUBLIC_HOSTING_TENANT_SLUG="${PUBLIC_TENANT_SLUG}" not found in tenant table`
 		);
 	}
 	cachedTenantId = t.id;
+	cachedTenantAt = Date.now();
 	return t.id;
 }
 
@@ -68,6 +86,34 @@ export const getPublicHostingPackages = query(async () => {
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
 	const vatRate = settings?.defaultTaxRate ?? 19;
+
+	// Public-safe tenant info for the footer ("Sediu / Telefon / Email / CUI / RegCom").
+	// These fields are publicly listed on invoices and the business registry — exposing
+	// them on the marketing page is intentional, not a leak.
+	const [tenantInfo] = await db
+		.select({
+			name: table.tenant.name,
+			website: table.tenant.website,
+			cui: table.tenant.cui,
+			vatNumber: table.tenant.vatNumber,
+			registrationNumber: table.tenant.registrationNumber,
+			address: table.tenant.address,
+			city: table.tenant.city,
+			county: table.tenant.county,
+			postalCode: table.tenant.postalCode,
+			country: table.tenant.country,
+			phone: table.tenant.phone,
+			email: table.tenant.email,
+			// Bank details exposed for the "Ordin de plată" checkout step. These
+			// are already on invoices and the business registry — publicly listing
+			// them on /pachete-hosting just spares the customer one extra request.
+			bankName: table.tenant.bankName,
+			iban: table.tenant.iban,
+			ibanEuro: table.tenant.ibanEuro
+		})
+		.from(table.tenant)
+		.where(eq(table.tenant.id, tenantId))
+		.limit(1);
 
 	const packages = await db
 		.select({
@@ -104,28 +150,20 @@ export const getPublicHostingPackages = query(async () => {
 		)
 		.orderBy(table.hostingProduct.publicSortOrder, table.hostingProduct.price);
 
-	return { packages, vatRate };
+	return { packages, vatRate, tenantInfo: tenantInfo ?? null };
 });
 
-// ====================== Rate limit (naive, in-memory) ======================
-// Tracks inquiry submissions per IP. Per-process state — multi-node deployments
-// would need Redis. Acceptable for a marketing page with low expected volume.
-const RATE_LIMIT_PER_IP_HOUR = 3;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const ipHits = new Map<string, number[]>();
-
-function checkRateLimit(ip: string): boolean {
-	const now = Date.now();
-	const cutoff = now - RATE_LIMIT_WINDOW_MS;
-	const hits = (ipHits.get(ip) ?? []).filter((t) => t > cutoff);
-	if (hits.length >= RATE_LIMIT_PER_IP_HOUR) {
-		ipHits.set(ip, hits);
-		return false;
-	}
-	hits.push(now);
-	ipHits.set(ip, hits);
-	return true;
-}
+// ====================== Rate limit (Redis-backed, multi-replica safe) ======
+// Each kind of endpoint has its own per-IP-per-hour cap. The implementation
+// lives in `$lib/server/redis.ts#rateLimit` (fixed-window via INCR + EXPIRE).
+// Redis is the same instance BullMQ already uses; if Redis is down we fail
+// OPEN — blocking all submissions on a transient infra blip is worse for
+// revenue than letting a small attacker through during the outage.
+const RATE_LIMIT_PER_IP_HOUR = 20;
+const DOMAIN_CHECKS_PER_IP_HOUR = 30;
+const EMAIL_CHECKS_PER_IP_HOUR = 10;
+const ANAF_LOOKUPS_PER_IP_HOUR = 5;
+const WINDOW_SEC = 60 * 60;
 
 const InquirySchema = v.object({
 	hostingProductId: v.optional(v.pipe(v.string(), v.minLength(1))),
@@ -149,9 +187,12 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 		'unknown';
 	const userAgent = event?.request?.headers.get('user-agent') ?? null;
 
-	if (!checkRateLimit(ip)) {
-		logInfo('directadmin', 'inquiry rate-limited', { metadata: { ip } });
-		throw new Error('Prea multe cereri din această locație. Te rugăm să încerci din nou peste o oră.');
+	{
+		const rl = await rateLimit({ kind: 'inquiry', ip, limit: RATE_LIMIT_PER_IP_HOUR, windowSec: WINDOW_SEC });
+		if (!rl.allowed) {
+			logInfo('directadmin', 'inquiry rate-limited', { metadata: { ip, count: rl.count } });
+			throw error(429, 'Prea multe cereri din această locație. Te rugăm să încerci din nou peste o oră.');
+		}
 	}
 
 	const tenantId = await resolvePublicTenantId();
@@ -206,23 +247,325 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 	return { success: true, inquiryId: id };
 });
 
+// ====================== Domain availability (DirectAdmin) ======================
+// Public-safe check: does this domain already exist on any of our DA servers,
+// either as a primary domain or as an addon/parked domain under another user?
+// If yes — we cannot create a new account with the same hostname.
+//
+// Privacy: we expose only `available: true|false` plus a coarse reason. We do
+// NOT reveal which user owns the conflicting domain.
+
+// Rate-limit constants moved to top-of-file Redis section; concrete checks happen
+// inline at the call sites via `rateLimit(...)`.
+
+// Cached snapshot of all domains hosted across the tenant's DA servers.
+// 60s TTL — DA accounts don't appear/disappear faster than that, and refresh
+// is cheap (one searchUsers + N getUserConfig per server). Keyed by tenantId
+// so multi-tenant operators stay isolated.
+const DA_DOMAIN_CACHE_TTL_MS = 60 * 1000;
+type DomainSnapshot = { ts: number; domains: Set<string> };
+const daDomainCache = new Map<string, DomainSnapshot>();
+const inflight: Map<string, Promise<DomainSnapshot>> = new Map();
+
+/**
+ * Direct DA call: list every domain owned by `username` on this server.
+ * Hits the legacy endpoint because the modern `/api/users/{u}/config` only
+ * returns the primary domain on this DA version (no `domains[]` array).
+ *
+ * Response shape: `domain1.ro=<stats>&domain2.com=<stats>` (form-encoded;
+ * keys are domain names, value is bandwidth/usage tuple we ignore).
+ */
+async function fetchUserDomains(
+	tenantId: string,
+	srv: typeof table.daServer.$inferSelect,
+	username: string
+): Promise<string[]> {
+	const user = decrypt(tenantId, srv.usernameEncrypted);
+	const pass = decrypt(tenantId, srv.passwordEncrypted);
+	const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+	const proto = srv.useHttps !== false ? 'https' : 'http';
+	const port = srv.port ?? 2222;
+	const url = `${proto}://${srv.hostname}:${port}/CMD_API_SHOW_USER_DOMAINS?user=${encodeURIComponent(username)}`;
+	const r = await fetch(url, {
+		method: 'GET',
+		headers: { Authorization: auth, Accept: 'text/plain' },
+		signal: AbortSignal.timeout(8000),
+		// @ts-expect-error Bun extends RequestInit with tls
+		tls: { rejectUnauthorized: false }
+	});
+	if (!r.ok) return [];
+	const body = await r.text();
+	const domains: string[] = [];
+	for (const pair of body.split('&')) {
+		const eq = pair.indexOf('=');
+		if (eq <= 0) continue;
+		const key = decodeURIComponent(pair.slice(0, eq));
+		// DA leaks "error" / "text" rows when something went wrong — skip those.
+		if (!key || key === 'error' || key === 'text' || key === 'details' || key.startsWith('list[')) continue;
+		// Domain keys always contain at least one dot
+		if (key.includes('.')) domains.push(key.toLowerCase().trim());
+	}
+	return domains;
+}
+
+/**
+ * Read the list of usernames on this DA server. `/api/search/users` returns
+ * a plain string array on the OTS DA version (not the `{username, domain}`
+ * object shape some docs suggest), so we just take it as-is.
+ */
+async function fetchUsernames(
+	tenantId: string,
+	srv: typeof table.daServer.$inferSelect
+): Promise<string[]> {
+	const user = decrypt(tenantId, srv.usernameEncrypted);
+	const pass = decrypt(tenantId, srv.passwordEncrypted);
+	const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+	const proto = srv.useHttps !== false ? 'https' : 'http';
+	const port = srv.port ?? 2222;
+	const url = `${proto}://${srv.hostname}:${port}/api/search/users`;
+	const r = await fetch(url, {
+		method: 'GET',
+		headers: { Authorization: auth, Accept: 'application/json' },
+		signal: AbortSignal.timeout(8000),
+		// @ts-expect-error Bun extends RequestInit with tls
+		tls: { rejectUnauthorized: false }
+	});
+	if (!r.ok) return [];
+	const text = await r.text();
+	try {
+		const parsed = JSON.parse(text);
+		if (Array.isArray(parsed)) {
+			if (parsed.length === 0) return [];
+			// Modern shape: ["user1","user2",...]
+			if (typeof parsed[0] === 'string') return parsed as string[];
+			// Object shape: [{username:"user1",...}, ...]
+			if (typeof parsed[0] === 'object' && parsed[0]?.username) {
+				return (parsed as Array<{ username: string }>).map((u) => u.username);
+			}
+		}
+		if (parsed && Array.isArray(parsed.list)) return parsed.list as string[];
+	} catch {
+		// fall through
+	}
+	return [];
+}
+
+async function loadDomainSnapshot(tenantId: string): Promise<DomainSnapshot> {
+	const cached = daDomainCache.get(tenantId);
+	if (cached && Date.now() - cached.ts < DA_DOMAIN_CACHE_TTL_MS) return cached;
+
+	const pending = inflight.get(tenantId);
+	if (pending) return pending;
+
+	const work = (async () => {
+		const servers = await db
+			.select()
+			.from(table.daServer)
+			.where(and(eq(table.daServer.tenantId, tenantId), eq(table.daServer.isActive, true)));
+
+		const all = new Set<string>();
+		for (const srv of servers) {
+			try {
+				const usernames = await fetchUsernames(tenantId, srv);
+				// Parallel-but-bounded per server — DA can handle a handful of concurrent
+				// connections, and we want to keep snapshot wall-time under ~2s for 40-150 users.
+				const CONCURRENCY = 8;
+				let i = 0;
+				async function worker() {
+					while (i < usernames.length) {
+						const idx = i++;
+						const u = usernames[idx];
+						try {
+							const domains = await fetchUserDomains(tenantId, srv, u);
+							for (const d of domains) all.add(d);
+						} catch (err) {
+							logInfo('directadmin', `domain snapshot: SHOW_USER_DOMAINS(${u}) failed`, {
+								tenantId,
+								metadata: { server: srv.hostname, error: serializeError(err).message }
+							});
+						}
+					}
+				}
+				await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+			} catch (err) {
+				logError(
+					'directadmin',
+					`domain snapshot: server ${srv.hostname} unreachable: ${serializeError(err).message}`,
+					{ tenantId, metadata: { serverId: srv.id } }
+				);
+			}
+		}
+
+		const snap = { ts: Date.now(), domains: all };
+		daDomainCache.set(tenantId, snap);
+		logInfo('directadmin', `domain snapshot refreshed: ${all.size} domains`, {
+			tenantId,
+			metadata: { serverCount: servers.length }
+		});
+		return snap;
+	})();
+
+	inflight.set(tenantId, work);
+	try {
+		return await work;
+	} finally {
+		inflight.delete(tenantId);
+	}
+}
+
+const DomainCheckSchema = v.pipe(v.string(), v.minLength(3), v.maxLength(253));
+
+/**
+ * Returns whether `domain` is free to use as the primary domain of a new DA
+ * account on the tenant's servers. Hits a 60s in-memory cache; refreshes via
+ * DA's `/api/search/users` + per-user `/api/users/{u}/config`.
+ *
+ * Public — no auth. Rate-limited per IP.
+ */
+export const checkDomainAvailability = query(DomainCheckSchema, async (raw) => {
+	const event = getRequestEvent();
+	const ip =
+		event?.getClientAddress?.() ??
+		event?.request?.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+		'unknown';
+	const domainRl = await rateLimit({ kind: 'domain', ip, limit: DOMAIN_CHECKS_PER_IP_HOUR, windowSec: WINDOW_SEC });
+	if (!domainRl.allowed) {
+		return {
+			ok: false as const,
+			error: 'Prea multe verificări de domeniu din această locație. Reîncearcă peste o oră.'
+		};
+	}
+
+	const candidate = raw.trim().toLowerCase();
+	if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(candidate) || candidate.startsWith('-') || candidate.endsWith('-')) {
+		return { ok: false as const, error: 'Format invalid.' };
+	}
+
+	const tenantId = await resolvePublicTenantId();
+	try {
+		const snap = await loadDomainSnapshot(tenantId);
+		const taken = snap.domains.has(candidate);
+		return {
+			ok: true as const,
+			available: !taken as boolean,
+			domain: candidate,
+			source: 'directadmin' as const,
+			snapshotAgeMs: Date.now() - snap.ts
+		};
+	} catch (err) {
+		logError('directadmin', `domain availability check failed: ${serializeError(err).message}`, {
+			tenantId,
+			metadata: { domain: candidate, ip }
+		});
+		// When DA is unreachable we return `available: null` (the explicit
+		// "we don't know" state). The UI shows an amber banner instead of green
+		// "available" — a fail-open green misleads users into paying for a
+		// domain that turns out to be taken (Audit MED-6). The hard guard at
+		// submit time still re-checks before account creation.
+		return {
+			ok: true as const,
+			available: null,
+			domain: candidate,
+			source: 'da-unreachable' as const,
+			snapshotAgeMs: 0
+		};
+	}
+});
+
+// ====================== Email-known-to-CRM (anti-enumeration) =================
+// Public lookup the checkout modal calls on email blur. We mirror the
+// duplicate-CUI behaviour: detect silently and (eventually) send a magic
+// link. The response shape is CONSTANT regardless of hit/miss so an attacker
+// can't enumerate registered addresses from this endpoint.
+
+const EmailCheckSchema = v.pipe(
+	v.string(),
+	v.trim(),
+	v.email('Email invalid'),
+	v.maxLength(255)
+);
+
+/**
+ * Returns the same shape whether the email is known or not. When known, we log
+ * a magic-link intent server-side (TODO Sprint 8.1: actually send the email).
+ * Public — no auth. Rate-limited per IP.
+ */
+export const checkEmailKnownToCrm = query(EmailCheckSchema, async (rawEmail) => {
+	const event = getRequestEvent();
+	const ip =
+		event?.getClientAddress?.() ??
+		event?.request?.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+		'unknown';
+	const emailRl = await rateLimit({ kind: 'email-known', ip, limit: EMAIL_CHECKS_PER_IP_HOUR, windowSec: WINDOW_SEC });
+	if (!emailRl.allowed) {
+		return { ok: false as const, error: 'Prea multe verificări. Reîncearcă peste o oră.' };
+	}
+
+	const tenantId = await resolvePublicTenantId();
+	const normalized = rawEmail.trim().toLowerCase();
+
+	// Three tables to check, in order of likelihood for a returning customer:
+	//   1. client.email                 — CRM contact created via prior order
+	//   2. user.email via clientUser   — customer portal login
+	//   3. user.email via tenantUser   — staff member of this tenant (rare,
+	//                                    but if they typo their own email
+	//                                    into the public form we should still
+	//                                    recognize them)
+	// Each lookup is constant-time on its own and we run them in parallel so
+	// the response time is uniform regardless of which (if any) match hits.
+	const [clientHit, portalHit, staffHit] = await Promise.all([
+		db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, tenantId), eq(table.client.email, normalized)))
+			.limit(1),
+		db
+			.select({ userId: table.user.id, clientId: table.clientUser.clientId })
+			.from(table.user)
+			.innerJoin(table.clientUser, eq(table.clientUser.userId, table.user.id))
+			.where(
+				and(eq(table.clientUser.tenantId, tenantId), eq(table.user.email, normalized))
+			)
+			.limit(1),
+		db
+			.select({ userId: table.user.id })
+			.from(table.user)
+			.innerJoin(table.tenantUser, eq(table.tenantUser.userId, table.user.id))
+			.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.user.email, normalized)))
+			.limit(1)
+	]);
+
+	const matched =
+		clientHit[0] ? { kind: 'client' as const, id: clientHit[0].id } :
+		portalHit[0] ? { kind: 'portal' as const, userId: portalHit[0].userId, clientId: portalHit[0].clientId } :
+		staffHit[0] ? { kind: 'staff' as const, userId: staffHit[0].userId } :
+		null;
+
+	if (matched) {
+		// We DO NOT send any email here. Sending email on form input would let
+		// an attacker spam arbitrary inboxes by typing addresses into the form
+		// (a reflected-email relay), and the bounce/delivery timing would also
+		// be a side-channel for enumerating which emails exist. The user is
+		// directed to /login instead and must initiate the magic link manually
+		// from there.
+		logInfo('directadmin', 'checkout: known-email lookup hit (no email sent)', {
+			tenantId,
+			metadata: { kind: matched.kind, email: normalized, ip }
+		});
+		return { ok: true as const, known: true, action: 'login-required' as const };
+	}
+
+	// Constant-shape response — never reveal that the email is NOT in CRM.
+	// All three lookups above run via Promise.all so wall-time stays uniform
+	// regardless of which (if any) branch matched.
+	return { ok: true as const, known: false, action: 'none' as const };
+});
+
 // ====================== Sprint 8: ANAF + Stripe checkout ======================
 
-// Naive throttle: max 5 CUI lookups per IP per hour (anti-abuse ANAF API)
-const ANAF_LOOKUPS_PER_IP_HOUR = 5;
-const anafLookups = new Map<string, number[]>();
-function checkAnafThrottle(ip: string): boolean {
-	const now = Date.now();
-	const cutoff = now - RATE_LIMIT_WINDOW_MS;
-	const hits = (anafLookups.get(ip) ?? []).filter((t) => t > cutoff);
-	if (hits.length >= ANAF_LOOKUPS_PER_IP_HOUR) {
-		anafLookups.set(ip, hits);
-		return false;
-	}
-	hits.push(now);
-	anafLookups.set(ip, hits);
-	return true;
-}
+// ANAF throttle moved to Redis (rateLimit kind='anaf') — see constant
+// `ANAF_LOOKUPS_PER_IP_HOUR` at top-of-file. Per-process Maps reset on each
+// deploy and don't scale across replicas.
 
 /**
  * Validate CUI (check digit) + fetch ANAF company data.
@@ -245,7 +588,8 @@ export const validateCuiAndFetch = query(
 		const reason = validateCuiOrReason(cuiInput);
 		if (reason) return { valid: false as const, error: reason };
 
-		if (!checkAnafThrottle(ip)) {
+		const anafRl = await rateLimit({ kind: 'anaf', ip, limit: ANAF_LOOKUPS_PER_IP_HOUR, windowSec: WINDOW_SEC });
+		if (!anafRl.allowed) {
 			return {
 				valid: false as const,
 				error: 'Prea multe verificări CUI din această locație. Reîncearcă peste o oră.'
@@ -317,18 +661,29 @@ export const validateCuiAndFetch = query(
 
 const OrderSchema = v.object({
 	hostingProductId: v.pipe(v.string(), v.minLength(1)),
-	cui: v.pipe(v.string(), v.minLength(2), v.maxLength(12)),
+	// Person vs. company billing. Defaults to company for backwards compat with
+	// any caller that pre-dates this field.
+	billingType: v.optional(v.picklist(['person', 'company']), 'company'),
 	email: v.pipe(v.string(), v.email(), v.maxLength(255)),
 	phone: v.optional(v.pipe(v.string(), v.maxLength(40))),
-	// Date pre-completate de ANAF (validate de client side, dar re-verificăm CUI)
-	companyName: v.pipe(v.string(), v.minLength(2), v.maxLength(255)),
-	address: v.optional(v.pipe(v.string(), v.maxLength(500))),
+	// Company fields — required when billingType=company, runtime-validated below.
+	cui: v.optional(v.pipe(v.string(), v.maxLength(12))),
+	companyName: v.optional(v.pipe(v.string(), v.maxLength(255))),
 	registrationNumber: v.optional(v.pipe(v.string(), v.maxLength(64))),
+	vatPayer: v.optional(v.boolean(), false),
+	// Person fields — required when billingType=person.
+	firstName: v.optional(v.pipe(v.string(), v.maxLength(120))),
+	lastName: v.optional(v.pipe(v.string(), v.maxLength(120))),
+	// Shared address fields.
+	address: v.optional(v.pipe(v.string(), v.maxLength(500))),
 	postalCode: v.optional(v.pipe(v.string(), v.maxLength(16))),
 	city: v.optional(v.pipe(v.string(), v.maxLength(120))),
 	county: v.optional(v.pipe(v.string(), v.maxLength(120))),
-	vatPayer: v.boolean(),
-	consentTerms: v.literal(true) // GDPR + ToS — must be true
+	consentTerms: v.literal(true), // GDPR + ToS — must be true
+	// Optional context collected by the inline checkout modal (domain selection,
+	// payment-method preference, additional notes). Stored on `hosting_inquiry.message`
+	// for staff visibility — Stripe itself only handles the payment.
+	notes: v.optional(v.pipe(v.string(), v.maxLength(2000)))
 });
 
 /**
@@ -336,19 +691,20 @@ const OrderSchema = v.object({
  *
  * Flow:
  *  1. Validate CUI + payload
- *  2. Check duplicate CUI in CRM → if exists, send magic link silent + return
+ *  2. Check duplicate CUI in CRM → if exists, return login-required message (no email sent)
  *  3. Else: create `client` (pending_email) + `hosting_inquiry` linked
  *  4. Create Stripe Customer (cached after first call)
  *  5. Get/create Stripe Price for the package
  *  6. Create Stripe Checkout Session → return URL for redirect
  *
  * Webhook `checkout.session.completed` will later mark inquiry as paid and trigger
- * magic link email + admin notification.
+ * admin notification (no automated email to the buyer — that would be a spam relay).
  */
 export const submitHostingOrder = command(OrderSchema, async (data) => {
 	const tenantId = await resolvePublicTenantId();
 	if (!(await isStripeConfiguredForTenant(tenantId))) {
-		throw new Error(
+		throw error(
+			503,
 			'Plățile online nu sunt configurate. Contactează administratorul (Stripe lipsește).'
 		);
 	}
@@ -371,16 +727,21 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			? candidateOrigin
 			: env.PUBLIC_APP_URL ?? 'http://localhost:5173';
 
-	if (!checkRateLimit(ip)) {
-		throw new Error('Prea multe cereri din această locație. Reîncearcă peste o oră.');
+	{
+		// Same per-IP-per-hour cap as the inquiry endpoint; both count under
+		// kind='inquiry' so a determined abuser can't double their quota by
+		// mixing the two submit paths.
+		const rl = await rateLimit({ kind: 'inquiry', ip, limit: RATE_LIMIT_PER_IP_HOUR, windowSec: WINDOW_SEC });
+		if (!rl.allowed) {
+			throw error(
+				429,
+				'Prea multe cereri din această locație. Te rugăm să încerci din nou peste o oră.'
+			);
+		}
 	}
 
-	const reason = validateCuiOrReason(data.cui);
-	if (reason) throw new Error(reason);
-	const cleanCui = normalizeCui(data.cui);
-
-	// tenantId rezolvat sus, la verificarea isStripeConfiguredForTenant
 	const normalizedEmail = data.email.trim().toLowerCase();
+	const billingType = data.billingType ?? 'company';
 
 	// Validate product belongs to tenant + is public
 	const [product] = await db
@@ -395,111 +756,209 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			)
 		)
 		.limit(1);
-	if (!product) throw new Error('Pachetul selectat nu mai e disponibil.');
+	if (!product) throw error(404, 'Pachetul selectat nu mai e disponibil.');
 
-	// === Edge case: CUI existent ===
-	// Mesaj transparent + magic link silent (decizia user — Sprint 7 design).
-	const [existingClient] = await db
-		.select()
-		.from(table.client)
-		.where(
-			and(
-				eq(table.client.tenantId, tenantId),
-				or(
-					eq(table.client.cui, cleanCui),
-					eq(table.client.vatNumber, `RO${cleanCui}`),
-					eq(table.client.vatNumber, cleanCui)
-				)
-			)
-		)
-		.limit(1);
-
-	if (existingClient) {
-		logInfo('directadmin', 'CUI duplicat — magic link silent', {
-			tenantId,
-			metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
-		});
-		// TODO Sprint 8.1: send magic link to existing client's email (separate util).
-		// Pentru moment, doar înregistrăm inquiry-ul pentru audit.
-		const inquiryId = generateId();
-		await db.insert(table.hostingInquiry).values({
-			id: inquiryId,
-			tenantId,
-			hostingProductId: product.id,
-			contactName: data.companyName,
-			contactEmail: normalizedEmail,
-			contactPhone: data.phone || null,
-			companyName: data.companyName,
-			vatNumber: cleanCui,
-			message: 'CUI duplicat — clientul există deja în CRM',
-			status: 'discarded',
-			source: 'pachete-hosting-checkout',
-			ipAddress: ip,
-			userAgent,
-			clientId: existingClient.id
-		});
-		return {
-			duplicateCui: true as const,
-			message:
-				'Acest CUI există deja în sistemul nostru. Ți-am trimis pe emailul asociat un link de acces.'
-		};
-	}
-
-	// === Normal flow: create client + inquiry + Stripe checkout ===
 	const clientId = generateId();
 	const inquiryId = generateId();
 	const now = new Date();
 
-	// INSERT cu retry pe Turso busy + .returning() ca să evităm SELECT separat.
-	// Capturăm violations pe UNIQUE (tenant_id, cui) ca să tratăm race-uri
-	// concurente (două submituri paralele cu același CUI înainte ca check-ul
-	// SELECT de mai sus să le vadă).
+	// =====================================================================
+	// Branch on billingType. The two flows diverge on:
+	//   - identity check (CUI for company, email for person)
+	//   - displayName / legalType on the client row
+	//   - which fields the Stripe Customer carries
+	// Everything from "Create inquiry" onwards is shared.
+	// =====================================================================
+
 	let clientRow: typeof table.client.$inferSelect;
-	try {
-		const inserted = await withTursoBusyRetry(
-			() =>
-				db
-					.insert(table.client)
-					.values({
-						id: clientId,
-						tenantId,
-						name: data.companyName,
-						businessName: data.companyName,
-						email: normalizedEmail,
-						phone: data.phone || null,
-						status: 'prospect',
-						cui: cleanCui,
-						vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
-						registrationNumber: data.registrationNumber || null,
-						address: data.address || null,
-						city: data.city || null,
-						county: data.county || null,
-						postalCode: data.postalCode || null,
-						country: 'RO',
-						legalType: 'srl',
-						signupSource: 'public-form',
-						onboardingStatus: 'pending_email'
-					})
-					.returning(),
-			{ tenantId, label: 'public-hosting/insertClient' }
-		);
-		clientRow = inserted[0];
-	} catch (err) {
-		const { message } = serializeError(err);
-		if (message.toLowerCase().includes('unique')) {
-			// Race condition cu un alt submit pentru același CUI → tratăm ca duplicate
-			// (același mesaj transparent ca în check-ul SELECT de mai sus).
-			logInfo('directadmin', 'CUI duplicat detected via UNIQUE constraint race', {
+	let displayName: string; // for inquiry.contactName + Stripe Customer name
+
+	if (billingType === 'company') {
+		const reason = validateCuiOrReason(data.cui ?? '');
+		if (reason) throw error(400, reason);
+		const cleanCui = normalizeCui(data.cui!);
+		if (!data.companyName?.trim())
+			throw error(400, 'Denumirea firmei este obligatorie pentru facturare pe firmă.');
+		const companyName = data.companyName.trim();
+		displayName = companyName;
+
+		// Duplicate-CUI detection — log + transparent login message, no email sent.
+		const [existingClient] = await db
+			.select()
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					or(
+						eq(table.client.cui, cleanCui),
+						eq(table.client.vatNumber, `RO${cleanCui}`),
+						eq(table.client.vatNumber, cleanCui)
+					)
+				)
+			)
+			.limit(1);
+
+		if (existingClient) {
+			logInfo('directadmin', 'CUI duplicat — login redirect (no email sent)', {
 				tenantId,
-				metadata: { cui: cleanCui }
+				metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
+			});
+			await db.insert(table.hostingInquiry).values({
+				id: inquiryId,
+				tenantId,
+				hostingProductId: product.id,
+				contactName: companyName,
+				contactEmail: normalizedEmail,
+				contactPhone: data.phone || null,
+				companyName,
+				vatNumber: cleanCui,
+				message: 'CUI duplicat — clientul există deja în CRM',
+				status: 'discarded',
+				source: 'pachete-hosting-checkout',
+				ipAddress: ip,
+				userAgent,
+				clientId: existingClient.id
 			});
 			return {
 				duplicateCui: true as const,
 				message:
-					'Acest CUI există deja în sistemul nostru. Ți-am trimis pe emailul asociat un link de acces.'
+					'Acest CUI există deja în sistemul nostru. Autentifică-te pe /login cu emailul contului existent pentru a continua comanda.'
 			};
 		}
-		throw err;
+
+		try {
+			const inserted = await withTursoBusyRetry(
+				() =>
+					db
+						.insert(table.client)
+						.values({
+							id: clientId,
+							tenantId,
+							name: companyName,
+							businessName: companyName,
+							email: normalizedEmail,
+							phone: data.phone || null,
+							status: 'prospect',
+							cui: cleanCui,
+							vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
+							registrationNumber: data.registrationNumber || null,
+							address: data.address || null,
+							city: data.city || null,
+							county: data.county || null,
+							postalCode: data.postalCode || null,
+							country: 'RO',
+							legalType: 'srl',
+							signupSource: 'public-form',
+							onboardingStatus: 'pending_email'
+						})
+						.returning(),
+				{ tenantId, label: 'public-hosting/insertClient' }
+			);
+			clientRow = inserted[0];
+		} catch (err) {
+			const { message } = serializeError(err);
+			if (message.toLowerCase().includes('unique')) {
+				logInfo('directadmin', 'CUI duplicat detected via UNIQUE constraint race', {
+					tenantId,
+					metadata: { cui: cleanCui }
+				});
+				return {
+					duplicateCui: true as const,
+					message:
+						'Acest CUI există deja în sistemul nostru. Autentifică-te pe /login cu emailul contului existent pentru a continua comanda.'
+				};
+			}
+			throw err;
+		}
+	} else {
+		// === Person flow ===
+		// No CUI. Identity is just email; we still surface the same "silent magic
+		// link" UX when the email is already attached to an existing client.
+		const firstName = data.firstName?.trim() ?? '';
+		const lastName = data.lastName?.trim() ?? '';
+		if (!firstName || !lastName)
+			throw error(400, 'Prenume și nume sunt obligatorii pentru persoană fizică.');
+		displayName = `${firstName} ${lastName}`;
+
+		const [existingByEmail] = await db
+			.select()
+			.from(table.client)
+			.where(and(eq(table.client.tenantId, tenantId), eq(table.client.email, normalizedEmail)))
+			.limit(1);
+
+		if (existingByEmail) {
+			logInfo('directadmin', 'Email duplicat (persoană fizică) — login redirect (no email sent)', {
+				tenantId,
+				metadata: { clientId: existingByEmail.id, email: normalizedEmail }
+			});
+			await db.insert(table.hostingInquiry).values({
+				id: inquiryId,
+				tenantId,
+				hostingProductId: product.id,
+				contactName: displayName,
+				contactEmail: normalizedEmail,
+				contactPhone: data.phone || null,
+				message: 'Email duplicat (PF) — clientul există deja în CRM',
+				status: 'discarded',
+				source: 'pachete-hosting-checkout',
+				ipAddress: ip,
+				userAgent,
+				clientId: existingByEmail.id
+			});
+			return {
+				duplicateCui: true as const,
+				message:
+					'Acest email există deja în sistemul nostru. Autentifică-te pe /login pentru a continua comanda din contul tău.'
+			};
+		}
+
+		try {
+			const inserted = await withTursoBusyRetry(
+				() =>
+					db
+						.insert(table.client)
+						.values({
+							id: clientId,
+							tenantId,
+							name: displayName,
+							businessName: null,
+							email: normalizedEmail,
+							phone: data.phone || null,
+							status: 'prospect',
+							cui: null,
+							vatNumber: null,
+							registrationNumber: null,
+							address: data.address || null,
+							city: data.city || null,
+							county: data.county || null,
+							postalCode: data.postalCode || null,
+							country: 'RO',
+							legalType: 'pf',
+							signupSource: 'public-form',
+							onboardingStatus: 'pending_email'
+						})
+						.returning(),
+				{ tenantId, label: 'public-hosting/insertClient-person' }
+			);
+			clientRow = inserted[0];
+		} catch (err) {
+			const { message } = serializeError(err);
+			if (message.toLowerCase().includes('unique')) {
+				// Race condition: another PF submit with the same email landed between
+				// our duplicate-email SELECT (above) and this INSERT. Mirror the
+				// company branch behaviour — return the same login-redirect message.
+				logInfo('directadmin', 'PF duplicate email — UNIQUE race', {
+					tenantId,
+					metadata: { email: normalizedEmail }
+				});
+				return {
+					duplicateCui: true as const,
+					message:
+						'Acest email există deja în sistemul nostru. Autentifică-te pe /login pentru a continua comanda din contul tău.'
+				};
+			}
+			throw err;
+		}
 	}
 
 	await withTursoBusyRetry(
@@ -508,11 +967,12 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				id: inquiryId,
 				tenantId,
 				hostingProductId: product.id,
-				contactName: data.companyName,
+				contactName: displayName,
 				contactEmail: normalizedEmail,
 				contactPhone: data.phone || null,
-				companyName: data.companyName,
-				vatNumber: cleanCui,
+				companyName: billingType === 'company' ? data.companyName?.trim() ?? null : null,
+				vatNumber: billingType === 'company' ? normalizeCui(data.cui ?? '') : null,
+				message: data.notes?.trim() || null,
 				status: 'new',
 				source: 'pachete-hosting-checkout',
 				ipAddress: ip,
@@ -594,7 +1054,13 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					.where(eq(table.hostingInquiry.id, inquiryId)),
 			{ tenantId, label: 'public-hosting/markInquiryFailed' }
 		).catch(() => {});
-		throw new Error(`Nu am putut crea sesiunea de plată: ${message}`);
+		// Don't leak the raw Stripe message — it can contain customer IDs, API
+		// references and (rarely) framework stack frames. Full text is logged
+		// server-side above; the client gets a generic actionable string.
+		throw error(
+			502,
+			'Plata nu poate fi inițializată acum. Te rugăm să încerci din nou peste câteva minute sau să folosești metoda „Ordin de plată".'
+		);
 	}
 
 	logInfo('directadmin', 'Stripe checkout session created', {

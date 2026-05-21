@@ -28,7 +28,9 @@ const ProductSchema = v.object({
 		'monthly'
 	),
 	setupFee: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-	isActive: v.optional(v.boolean(), true)
+	isActive: v.optional(v.boolean(), true),
+	isPublic: v.optional(v.boolean(), false),
+	publicSortOrder: v.optional(v.pipe(v.number(), v.integer()), 0)
 });
 
 const UpdateSchema = v.object({
@@ -57,6 +59,8 @@ export const getHostingProducts = query(async () => {
 			billingCycle: table.hostingProduct.billingCycle,
 			setupFee: table.hostingProduct.setupFee,
 			isActive: table.hostingProduct.isActive,
+			isPublic: table.hostingProduct.isPublic,
+			publicSortOrder: table.hostingProduct.publicSortOrder,
 			daServerId: table.hostingProduct.daServerId,
 			daPackageId: table.hostingProduct.daPackageId,
 			serverName: table.daServer.name,
@@ -141,10 +145,28 @@ export const createHostingProduct = command(ProductSchema, async (data) => {
 	await assertDARefsBelongToTenant(event.locals.tenant.id, data.daServerId, data.daPackageId);
 
 	const id = generateId();
+	// Explicit field whitelist (Audit LOW-1). `ProductSchema` is strict today, but
+	// spreading `data` straight into Drizzle relies on the schema staying strict
+	// forever — if someone loosens it to v.looseObject later, this turns into a
+	// mass-assignment vulnerability (e.g. attacker injecting `isPublic: true`
+	// on a product they shouldn't be able to publish, or worse, `tenantId`).
 	await db.insert(table.hostingProduct).values({
 		id,
 		tenantId: event.locals.tenant.id,
-		...data
+		name: data.name,
+		description: data.description ?? null,
+		features: data.features ?? null,
+		highlightBadge: data.highlightBadge ?? null,
+		sortOrder: data.sortOrder,
+		daServerId: data.daServerId ?? null,
+		daPackageId: data.daPackageId ?? null,
+		price: data.price,
+		currency: data.currency,
+		billingCycle: data.billingCycle,
+		setupFee: data.setupFee,
+		isActive: data.isActive,
+		isPublic: data.isPublic,
+		publicSortOrder: data.publicSortOrder
 	});
 
 	return { id };
