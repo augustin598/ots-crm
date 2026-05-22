@@ -2591,6 +2591,55 @@
       "when": 1779916800009500,
       "tag": "0372_hosting_product_keez_item_external_id",
       "breakpoints": true
+    },
+    {
+      "idx": 373,
+      "version": "6",
+      "when": 1779916800010500,
+      "tag": "0373_hosting_email_event_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 374,
+      "version": "6",
+      "when": 1779916800011500,
+      "tag": "0374_hosting_email_event_unique_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 375,
+      "version": "6",
+      "when": 1779916800012500,
+      "tag": "0375_payment_email_event_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 376,
+      "version": "6",
+      "when": 1779916800013500,
+      "tag": "0376_payment_email_event_unique_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 377,
+      "version": "6",
+      "when": 1779916800014500,
+      "tag": "0377_hosting_account_suspended_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 378,
+      "version": "6",
+      "when": 1779916800015500,
+      "tag": "0378_hosting_account_reactivated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 379,
+      "version": "6",
+      "when": 1779916800016500,
+      "tag": "0379_tenant_admin_contact_email",
+      "breakpoints": true
     }
   ]
 }

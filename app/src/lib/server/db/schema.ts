@@ -65,6 +65,7 @@ export const tenant = sqliteTable('tenant', {
 	contractPrefix: text('contract_prefix').default('CTR'),
 	themeColor: text('theme_color'),
 	favicon: text('favicon'),
+	adminContactEmail: text('admin_contact_email'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -1041,6 +1042,8 @@ export const hostingAccount = sqliteTable(
 		/** Whether the contract renews automatically. UI toggle on the "Ciclu" column. */
 		autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(true),
 		lastSyncedAt: text('last_synced_at'),
+		suspendedAt: integer('suspended_at', { mode: 'timestamp' }),
+		reactivatedAt: integer('reactivated_at', { mode: 'timestamp' }),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),
@@ -5662,3 +5665,67 @@ export const userSidebarPin = sqliteTable(
 
 export type UserSidebarPin = typeof userSidebarPin.$inferSelect;
 export type NewUserSidebarPin = typeof userSidebarPin.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Hosting email flow — per-event dedupe registries (2026-05-22)
+// ---------------------------------------------------------------------------
+// `hosting_email_event` and `payment_email_event` track which transactional
+// emails were sent for which entity, so retries / re-deliveries / cron passes
+// don't double-send (welcome twice, reactivated twice, etc.). The unique index
+// on (tenantId, entityId, dedupeKey) is the source of truth: an insert that
+// conflicts means "we already sent this one" and the caller skips.
+//
+// `dedupeKey` shape (informational, not enforced at DB level):
+//   - hosting:  `<event_type>:<scope>` e.g. `welcome:once`, `renewal-reminder:2026-06-15`
+//   - payment:  `<event_type>:<invoice_id_or_intent_id>` e.g. `payment-succeeded:in_123`
+
+export const hostingEmailEvent = sqliteTable(
+	'hosting_email_event',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		hostingAccountId: text('hosting_account_id')
+			.notNull()
+			.references(() => hostingAccount.id, { onDelete: 'cascade' }),
+		eventType: text('event_type').notNull(),
+		dedupeKey: text('dedupe_key').notNull(),
+		emailLogId: text('email_log_id').references(() => emailLog.id),
+		attemptNumber: integer('attempt_number').notNull().default(1),
+		sentAt: integer('sent_at', { mode: 'timestamp' })
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`)
+	},
+	(t) => ({
+		uniq: uniqueIndex('hosting_email_event_unique').on(t.tenantId, t.hostingAccountId, t.dedupeKey)
+	})
+);
+
+export type HostingEmailEvent = typeof hostingEmailEvent.$inferSelect;
+export type NewHostingEmailEvent = typeof hostingEmailEvent.$inferInsert;
+
+export const paymentEmailEvent = sqliteTable(
+	'payment_email_event',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		invoiceId: text('invoice_id')
+			.notNull()
+			.references(() => invoice.id, { onDelete: 'cascade' }),
+		eventType: text('event_type').notNull(),
+		dedupeKey: text('dedupe_key').notNull(),
+		emailLogId: text('email_log_id').references(() => emailLog.id),
+		sentAt: integer('sent_at', { mode: 'timestamp' })
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`)
+	},
+	(t) => ({
+		uniq: uniqueIndex('payment_email_event_unique').on(t.tenantId, t.invoiceId, t.dedupeKey)
+	})
+);
+
+export type PaymentEmailEvent = typeof paymentEmailEvent.$inferSelect;
+export type NewPaymentEmailEvent = typeof paymentEmailEvent.$inferInsert;
