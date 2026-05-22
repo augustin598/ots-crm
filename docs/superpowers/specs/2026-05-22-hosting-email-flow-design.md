@@ -47,13 +47,15 @@ pattern in `src/lib/server/email.ts`.
 |---|---|---|
 | Credential delivery | Plaintext password in welcome email | User decision, MVP speed |
 | Scope | All 8 emails shipped together | User decision, complete flow |
-| Grace period before suspension | 3 days from invoice overdue | Romanian OP bank transfers lag 24-48h |
+| Grace period before suspension | 10 days from invoice overdue | User decision — gives clients enough margin for OP delays, holidays, vacation absences before any service interruption |
 | Renewal cron cadence | Hourly 08-20 EET | Self-healing via dedupe table; survives missed runs |
 | Auto-renewal customers | DO receive reminders (softer copy) | Customers want to know before card is charged |
 | Unsuspend safety | Only if NO other hosting invoice unpaid for this account | Prevents premature reactivation on partial payment |
 | Dedupe sub-1h windows | Rolling `sent_at` timestamp, NOT date buckets | Avoids midnight bucket flip |
 | Orphan account email | Falls back to `inquiry.contactEmail` | Payment OK but client conversion failed |
-| Admin recipient resolution | `tenantUser` role=owner/admin → `tenant.adminContactEmail` → `OPS_FALLBACK_EMAIL` env | 3-level fallback, never silent drop |
+| Admin recipient resolution | `tenantUser` role=owner/admin → `tenant.adminContactEmail` → `OPS_FALLBACK_EMAIL` env | 3-level fallback, never silent drop. `tenant.adminContactEmail` column added in this migration set (Gemini-validated decision) |
+| `payment-succeeded` driver | Dispatcher calls `notifyPaymentSucceeded` directly (Option B); existing `invoice.paid` hook listener disabled | Explicit > implicit for payment-critical email; dedupe write co-located with send call (Gemini-validated decision) |
+| Credential JSON structure | `{username, password}` (confirmed in code: `src/lib/server/hosting/create-account.ts:114-116` uses `encrypt(tenantId, JSON.stringify({username, password}))`) | Tenant-scoped encryption via `encrypt(tenantId, data)` from `src/lib/server/plugins/smartbill/crypto.ts:58` |
 
 ---
 
@@ -156,7 +158,7 @@ async function resolveAdminRecipients(tenantId: string): Promise<string[]> {
     .where(and(eq(tenantUser.tenantId, tenantId), inArray(tenantUser.role, ['owner', 'admin'])));
   if (users.length > 0) return users.map(u => u.email);
 
-  // Level 2: tenant.adminContactEmail (if column exists)
+  // Level 2: tenant.adminContactEmail (column added in migration 0379)
   const t = await db.query.tenant.findFirst({ where: eq(tenant.id, tenantId) });
   if (t?.adminContactEmail) return [t.adminContactEmail];
 
@@ -178,7 +180,7 @@ async function resolveAdminRecipients(tenantId: string): Promise<string[]> {
 | Stripe post-payment dispatcher: `da_provision` step OK | `src/lib/server/stripe/post-payment/provision-da.ts` (after link account) | (no separate call — create-account.ts already fired it) |
 | Stripe post-payment dispatcher: `keez_invoice` step OK | `src/lib/server/stripe/post-payment/dispatcher.ts:200+` | `notifyPaymentSucceeded(tenantId, invoiceId)` |
 | Stripe post-payment dispatcher: complete | `src/lib/server/stripe/post-payment/dispatcher.ts` (end of `runPostPaymentSteps`) | `notifyAdminPaymentReceived(tenantId, invoiceId)` |
-| Invoice overdue + 3d grace → DA suspend OK | `src/lib/server/plugins/directadmin/hooks.ts:158+` | `notifyHostingSuspended(tenantId, accountId, invoiceId)` |
+| Invoice overdue + 10d grace → DA suspend OK | `src/lib/server/plugins/directadmin/hooks.ts:158+` | `notifyHostingSuspended(tenantId, accountId, invoiceId)` |
 | Invoice paid + no other hosting invoice unpaid → DA unsuspend OK | `src/lib/server/plugins/directadmin/hooks.ts` (payment hook) | `notifyHostingReactivated(tenantId, accountId, invoiceId)` |
 | Stripe `invoice.payment_failed` | `src/lib/server/stripe/webhook-handlers.ts` (new handler) | `notifyHostingPaymentFailed(tenantId, accountId, invoiceId)` |
 | Cron daily 08-20 EET, due in {1,7,14}d | `src/lib/server/scheduler/tasks/hosting-renewal-reminder.ts` (NEW) | `notifyHostingRenewalReminder(tenantId, accountId, daysUntilDue)` |
@@ -209,7 +211,7 @@ on error. A failing notification must NOT break the underlying business operatio
 
 | Field | Value |
 |---|---|
-| Trigger | Invoice overdue + 3-day grace + `daClient.suspendUser()` OK |
+| Trigger | Invoice overdue + 10-day grace + `daClient.suspendUser()` OK |
 | Recipient | `resolveCustomerEmail(account)` |
 | Subject | `⚠️ Contul de hosting suspendat — factură neachitată ({domain})` |
 | Content | Domain, "factura {invoiceNumber} restantă din {date}", sumă datorată, **link plată directă** (Stripe Checkout pre-fill), termen reactivare automată după plată, contact support |
@@ -288,7 +290,7 @@ WHERE a.status = 'active'
 | Trigger | Stripe webhook `invoice.payment_failed` (subscription invoice) with `account.stripeSubscriptionId` lookup |
 | Recipient | `resolveCustomerEmail(account)` |
 | Subject | `Plata pentru hosting {domain} a eșuat — acțiune necesară` |
-| Content | Motiv eșec dacă disponibil (card expirat / fonduri insuficiente / etc.), termen până la suspendare (3 zile grație), **link Stripe customer portal** pentru actualizat metodă, link plată manuală OP |
+| Content | Motiv eșec dacă disponibil (card expirat / fonduri insuficiente / etc.), termen până la suspendare (10 zile grație), **link Stripe customer portal** pentru actualizat metodă, link plată manuală OP |
 | Payload | `{ sendFn: 'sendHostingPaymentFailedEmail', args: [tenantId, accountId, invoiceId] }` |
 | Dedupe key | `payment-failed:{invoiceId}` |
 | Window | 48h (Stripe retry storm protection) |
@@ -414,6 +416,13 @@ suspendedAt: integer('suspended_at', { mode: 'timestamp' }),
 reactivatedAt: integer('reactivated_at', { mode: 'timestamp' }),
 ```
 
+### Coloană nouă pe `tenant`
+
+```typescript
+// Adăugare în tenant table:
+adminContactEmail: text('admin_contact_email'),  // NULL default; fallback for ops/admin emails when no owner/admin user is configured
+```
+
 ### Migrații (Drizzle, single-statement per file per Turso rule)
 
 ```
@@ -423,15 +432,17 @@ app/drizzle/0375_payment_email_event_table.sql       → CREATE TABLE payment_em
 app/drizzle/0376_payment_email_event_unique_idx.sql  → CREATE UNIQUE INDEX payment_email_event_unique ON (tenant_id, invoice_id, dedupe_key)
 app/drizzle/0377_hosting_account_suspended_at.sql    → ALTER TABLE hosting_account ADD COLUMN suspended_at
 app/drizzle/0378_hosting_account_reactivated_at.sql  → ALTER TABLE hosting_account ADD COLUMN reactivated_at
+app/drizzle/0379_tenant_admin_contact_email.sql      → ALTER TABLE tenant ADD COLUMN admin_contact_email
 ```
 
-6 fișiere, 6 statement-uri. `_journal.json` updated in same commit.
+7 fișiere, 7 statement-uri. `_journal.json` updated in same commit.
 
 Post-migrate verification on Turso remote:
 ```sql
 PRAGMA table_info(hosting_account);          -- expect suspended_at, reactivated_at
 PRAGMA table_info(hosting_email_event);      -- expect 8 columns
 PRAGMA table_info(payment_email_event);      -- expect 7 columns
+PRAGMA table_info(tenant);                   -- expect admin_contact_email
 PRAGMA index_info(hosting_email_event_unique);
 PRAGMA index_info(payment_email_event_unique);
 ```
@@ -748,22 +759,18 @@ Keep this endpoint forever per memoria `feedback_keep_debug_endpoints.md`.
 
 ---
 
-## Open questions for spec review
+## Resolved questions (decided 2026-05-22 with Gemini)
 
-1. Is `tenant.adminContactEmail` an existing column? If not, do we add it as part of
-   this work, or rely on tenantUser+env fallback only? **Tentative decision**: rely on
-   tenantUser+env for MVP; add the column in a future iteration if real-world support
-   tickets reveal the need.
-2. The `payment-succeeded` event reuses `sendInvoicePaidEmail` from `email.ts:1904` —
-   that function currently writes its OWN row in `email_log` via `sendWithPersistence`.
-   We need to ensure the dispatcher call sites don't double-send if the existing
-   `invoice.paid` event hook also fires. **Tentative decision**: disable the existing
-   `invoice.paid` hook listener in `hooks/email-notifications.ts:19-70` since dispatcher
-   now drives the email, OR keep it as the sole driver and remove the dispatcher hook.
-   Clarify with user.
-3. Where exactly do we read the plaintext password at send-time? `hostingAccount.daCredentialsEncrypted`
-   contains JSON encrypted via existing helper. Verify the field structure
-   (`{username, password}` or `{password}` only) before implementation.
+1. **`tenant.adminContactEmail` column** — **ADDED NOW** as migration `0379_tenant_admin_contact_email.sql`. Cleaner 3-tier fallback, supports non-technical owner case. Migration count: 7 (up from 6).
+
+2. **`payment-succeeded` driver** — **OPTION B**: dispatcher calls `notifyPaymentSucceeded(tenantId, invoiceId)` directly after the `keez_invoice` step. The existing `invoice.paid` hook listener in `src/lib/server/hooks/email-notifications.ts:19-70` will be **disabled** (commented out with TODO + reason) to prevent double-send. Rationale: payment-critical email needs explicit, traceable wiring; dedupe write must be co-located with the send call.
+
+3. **Credential JSON structure** — **CONFIRMED `{username, password}`**. Verified in code:
+   - `src/lib/server/hosting/create-account.ts:114-116` — `encrypt(tenantId, JSON.stringify({username: daUsername, password: daPassword}))`
+   - `src/lib/server/stripe/post-payment/provision-da.ts:200` — same pattern
+   - Encryption helper: `src/lib/server/plugins/smartbill/crypto.ts:58` — `encrypt(tenantId, data)` is tenant-scoped (key derived from tenantId)
+   - Decrypt at send-time: `JSON.parse(decrypt(account.tenantId, account.daCredentialsEncrypted))` → extract `.password` → embed in HTML
+   - No memory-zeroing required (JS limitation, not a real concern for this risk profile)
 
 ---
 
@@ -797,20 +804,21 @@ app/drizzle/0375_payment_email_event_table.sql
 app/drizzle/0376_payment_email_event_unique_idx.sql
 app/drizzle/0377_hosting_account_suspended_at.sql
 app/drizzle/0378_hosting_account_reactivated_at.sql
+app/drizzle/0379_tenant_admin_contact_email.sql
 tests/integration/hosting-notifications.test.ts
 ```
 
 ### Modified files
 ```
-src/lib/server/db/schema.ts                         (+ 2 tables, + 2 columns on hostingAccount)
+src/lib/server/db/schema.ts                         (+ 2 tables, + 2 columns on hostingAccount, + 1 column on tenant)
 src/lib/server/email.ts OR src/lib/server/email-types.ts (+ 8 email types in const array)
 src/lib/server/hosting/create-account.ts            (+ notify hooks on success and failure)
-src/lib/server/plugins/directadmin/hooks.ts         (+ notify hooks + unsuspend safety check)
+src/lib/server/plugins/directadmin/hooks.ts         (+ notify hooks + unsuspend safety check + 10-day grace check)
 src/lib/server/stripe/post-payment/dispatcher.ts    (+ notifyPaymentSucceeded + notifyAdminPaymentReceived)
 src/lib/server/stripe/webhook-handlers.ts           (+ invoice.payment_failed handler)
 src/routes/[tenant]/...inquiry DELETE handler        (+ block delete if account exists)
-src/lib/server/hooks/email-notifications.ts          (possibly disable existing invoice.paid hook — TBD per open question)
-app/drizzle/meta/_journal.json                       (+ 6 entries)
+src/lib/server/hooks/email-notifications.ts          (DISABLE invoice.paid listener — dispatcher is now sole driver per Q2 decision)
+app/drizzle/meta/_journal.json                       (+ 7 entries)
 docs/superpowers/specs/2026-05-22-hosting-email-flow-design.md (this file)
 ```
 
