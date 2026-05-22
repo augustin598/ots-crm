@@ -23,12 +23,42 @@ export function generateDaUsername(seed: string): string {
 }
 
 /**
- * 16-char random password compatible with DA (no special chars that break URL-form
- * encoding). 14 chars base32 + 2 digits at the tail to satisfy DA's complexity check.
+ * 17-char random password that passes DA's hardened `complexity_check=1`:
+ *   - lowercase letter (from base32 body)
+ *   - uppercase letter (1 explicit)
+ *   - digit (2 explicit)
+ *   - punctuation symbol (1 from a DA-safe set — no URL-encoding hazards)
+ *
+ * Previously we returned base32+digits only (all lowercase + digits), which is
+ * rejected on servers with `complexity_check=1` set in `directadmin.conf` with
+ * "Password is not strong enough". The new pattern adds one uppercase and one
+ * symbol at deterministic positions, then shuffles via Fisher–Yates so position
+ * isn't predictable (mitigates any "password starts with lowercase" heuristics).
+ *
+ * Symbol set picked to be safe in:
+ *   - URL form encoding (CMD_API_ACCOUNT_USER body)
+ *   - Bash quoting (admins might copy the password into terminal)
+ *   - Most shell/email-quoting (no backticks, dollar, pipes)
  */
+const SAFE_SYMBOLS = '!@#%*-_=+.?';
+
 export function generateDaPassword(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(12));
-	const base = encodeBase32LowerCase(bytes).slice(0, 14);
-	const digits = String(crypto.getRandomValues(new Uint8Array(1))[0] % 100).padStart(2, '0');
-	return `${base}${digits}`;
+	const base = encodeBase32LowerCase(bytes).slice(0, 14); // 14 lowercase + digits chars
+	const upper = String.fromCharCode(
+		65 + (crypto.getRandomValues(new Uint8Array(1))[0] % 26)
+	); // A-Z
+	const digit = String.fromCharCode(
+		48 + (crypto.getRandomValues(new Uint8Array(1))[0] % 10)
+	); // 0-9
+	const symbol = SAFE_SYMBOLS[crypto.getRandomValues(new Uint8Array(1))[0] % SAFE_SYMBOLS.length];
+
+	// Fisher–Yates shuffle so the mandatory chars don't land in predictable
+	// positions (some DA password heuristics check the LAST few chars).
+	const chars = (base + upper + digit + symbol).split('');
+	for (let i = chars.length - 1; i > 0; i--) {
+		const j = crypto.getRandomValues(new Uint8Array(1))[0] % (i + 1);
+		[chars[i], chars[j]] = [chars[j], chars[i]];
+	}
+	return chars.join('');
 }

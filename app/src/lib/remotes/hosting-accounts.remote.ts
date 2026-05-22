@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull, sql, ne } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -66,7 +66,14 @@ export const getHostingAccounts = query(FiltersSchema, async (filters) => {
 
 	const conditions = [eq(table.hostingAccount.tenantId, event.locals.tenant.id)];
 	if (filters?.clientId) conditions.push(eq(table.hostingAccount.clientId, filters.clientId));
-	if (filters?.status) conditions.push(eq(table.hostingAccount.status, filters.status));
+	if (filters?.status) {
+		conditions.push(eq(table.hostingAccount.status, filters.status));
+	} else {
+		// Hide forensic-preserved failed rows from default lists; surfaceable
+		// via explicit `?status=failed`. See `getHostingAccountsGrouped` for
+		// the same pattern + audit context.
+		conditions.push(ne(table.hostingAccount.status, 'failed'));
+	}
 	if (filters?.serverId) conditions.push(eq(table.hostingAccount.daServerId, filters.serverId));
 
 	return db
@@ -677,7 +684,16 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		.where(
 			and(
 				eq(table.hostingAccount.tenantId, tenantId),
-				filters?.status ? eq(table.hostingAccount.status, filters.status) : undefined,
+				filters?.status
+					? eq(table.hostingAccount.status, filters.status)
+					: // Forensic-preserve from DA-user-create audit (2026-05-22): on
+					  // failed provisioning we keep the hosting_account row as
+					  // `status='failed'` so the audit log FK + per-inquiry history
+					  // stay intact. Those rows are NOT live accounts though —
+					  // exclude them from the default grouped list so they don't
+					  // clutter the "Conturi hosting" view. Surfaceable explicitly
+					  // via `?status=failed` when staff is investigating.
+					  ne(table.hostingAccount.status, 'failed'),
 				filters?.clientId ? eq(table.hostingAccount.clientId, filters.clientId) : undefined,
 				filters?.serverId ? eq(table.hostingAccount.daServerId, filters.serverId) : undefined
 			)

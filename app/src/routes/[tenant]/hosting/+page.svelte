@@ -81,11 +81,12 @@
 			bind:value={statusFilter}
 			class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
 		>
-			<option value="">Toate statusurile</option>
+			<option value="">Toate (fără eșuate)</option>
 			<option value="active">Active</option>
 			<option value="suspended">Suspendate</option>
 			<option value="terminated">Terminate</option>
 			<option value="pending">În așteptare</option>
+			<option value="failed">Eșuate (forensic)</option>
 		</select>
 	</div>
 

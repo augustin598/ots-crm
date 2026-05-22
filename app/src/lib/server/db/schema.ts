@@ -952,6 +952,17 @@ export const hostingProduct = sqliteTable(
 		stripePriceId: text('stripe_price_id'),
 		/** Stripe Product ID — un Product per hostingProduct, mai multe Prices posibile (diferite currencies/cicluri). */
 		stripeProductId: text('stripe_product_id'),
+		/**
+		 * Keez article externalId — cached after first invoice push so subsequent
+		 * invoices for the SAME hosting product reuse the existing Keez article
+		 * instead of creating a fresh one each time. Without this cache, every
+		 * invoice ends up with a unique article like
+		 * `Wordpress Premium · #OTSH-abcd` (Keez requires unique names + we
+		 * append a discriminator suffix). With cache, all hosting invoices for
+		 * the product reference the same article and the PDF shows a single
+		 * clean name.
+		 */
+		keezItemExternalId: text('keez_item_external_id'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),

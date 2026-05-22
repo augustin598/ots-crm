@@ -4,7 +4,11 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock, type DaAuditTrigger } from '$lib/server/plugins/directadmin/audit';
+import { DirectAdminApiError } from '$lib/server/plugins/directadmin/client';
 import { encrypt } from '$lib/server/plugins/smartbill/crypto';
+import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
+import { logWarning } from '$lib/server/logger';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 
 /**
  * Shared "create one DA account" pipeline. Same logic the user-facing
@@ -34,6 +38,14 @@ export interface CreateHostingAccountPayload {
 	stripeSubscriptionId?: string | null | undefined;
 	/** What action attribution to write to da_audit_log. Defaults to 'manual'. */
 	auditTrigger?: DaAuditTrigger;
+	/**
+	 * When provided, auto-regenerate `daUsername` (via `generateDaUsername`) on
+	 * `username_exists` DA error, up to 3 retries. Pass the source seed (business
+	 * name or email local-part) — same input `generateDaUsername` would receive.
+	 * Manual-flow callers (admin typed exact username) omit this so we don't
+	 * silently rewrite their input.
+	 */
+	autoUsernameSeed?: string;
 }
 
 export interface CreateHostingAccountResult {
@@ -88,49 +100,148 @@ export async function createHostingAccountInternal(
 	const id = generateId();
 	const daClient = createDAClient(tenantId, server);
 
-	await withAccountLock(`${tenantId}:${payload.daUsername}`, async () => {
-		await runWithAudit(
-			{
-				tenantId,
-				hostingAccountId: id,
-				daServerId: payload.daServerId,
-				action: 'create',
-				trigger: payload.auditTrigger ?? 'manual'
-			},
-			() =>
-				daClient.createUserAccount({
-					username: payload.daUsername,
-					password: payload.password,
-					domain: payload.domain,
-					email: clientData.email ?? '',
-					package: packageName
-				})
-		);
+	// Username collision retry strategy: caller-provided username gets ONE chance
+	// (admin typed it explicitly), then on `username_exists` we auto-regenerate
+	// from a name seed up to MAX_RETRIES times. Manual-flow callers pass exact
+	// usernames they want; auto-provision passes a `generateDaUsername`-seeded
+	// value that we can safely regenerate. The retry only kicks in when the
+	// payload supplies an `autoUsernameSeed`.
+	let daUsername = payload.daUsername;
+	let daPassword = payload.password;
+	const MAX_RETRIES = payload.autoUsernameSeed ? 3 : 0;
 
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 		const credentialsEncrypted = encrypt(
 			tenantId,
-			JSON.stringify({ username: payload.daUsername, password: payload.password })
+			JSON.stringify({ username: daUsername, password: daPassword })
 		);
 
-		await db.insert(table.hostingAccount).values({
-			id,
-			tenantId,
-			clientId: payload.clientId,
-			daServerId: payload.daServerId,
-			daPackageId: payload.daPackageId,
-			hostingProductId: payload.hostingProductId,
-			daUsername: payload.daUsername,
-			domain: payload.domain,
-			status: 'active',
-			daCredentialsEncrypted: credentialsEncrypted,
-			recurringAmount: payload.recurringAmount ?? 0,
-			currency: payload.currency ?? 'RON',
-			billingCycle: payload.billingCycle ?? 'monthly',
-			nextDueDate: payload.nextDueDate,
-			notes: payload.notes,
-			stripeSubscriptionId: payload.stripeSubscriptionId ?? null
-		});
-	});
+		const insertResult = await withAccountLock(`${tenantId}:${daUsername}`, async () => {
+			// Pre-insert in `pending` so the audit row can satisfy the FK on
+			// `da_audit_log.hosting_account_id` regardless of DA outcome. See
+			// commit notes for the original FK-violation bug.
+			await db.insert(table.hostingAccount).values({
+				id,
+				tenantId,
+				clientId: payload.clientId,
+				daServerId: payload.daServerId,
+				daPackageId: payload.daPackageId,
+				hostingProductId: payload.hostingProductId,
+				daUsername,
+				domain: payload.domain,
+				status: 'pending',
+				daCredentialsEncrypted: credentialsEncrypted,
+				recurringAmount: payload.recurringAmount ?? 0,
+				currency: payload.currency ?? 'RON',
+				billingCycle: payload.billingCycle ?? 'monthly',
+				nextDueDate: payload.nextDueDate,
+				notes: payload.notes,
+				stripeSubscriptionId: payload.stripeSubscriptionId ?? null
+			});
 
-	return { id, daUsername: payload.daUsername, domain: payload.domain };
+			try {
+				await runWithAudit(
+					{
+						tenantId,
+						hostingAccountId: id,
+						daServerId: payload.daServerId,
+						action: 'create',
+						trigger: payload.auditTrigger ?? 'manual'
+					},
+					() =>
+						daClient.createUserAccount({
+							username: daUsername,
+							password: daPassword,
+							domain: payload.domain,
+							email: clientData.email ?? '',
+							package: packageName
+						})
+				);
+
+				// DA accepted — promote pending → active. Wrap in Turso-busy
+				// retry: a write timeout here leaves a zombie (account live on
+				// DA, status='pending' in CRM forever). withTursoBusyRetry tries
+				// up to 5 times with exponential backoff.
+				await withTursoBusyRetry(
+					() =>
+						db
+							.update(table.hostingAccount)
+							.set({ status: 'active', updatedAt: new Date() })
+							.where(eq(table.hostingAccount.id, id)),
+					{ tenantId, label: 'createHostingAccountInternal/promote-active' }
+				).catch((err) => {
+					// All retries exhausted — log the zombie so a reconciliation
+					// job (future) can detect it. Do NOT throw: the account IS
+					// live on DA and the audit log captured success. Best-effort
+					// CRM repair is admin-driven from `/hosting/accounts`.
+					logWarning(
+						'directadmin',
+						`zombie risk: DA account created but CRM status promote failed`,
+						{
+							tenantId,
+							metadata: {
+								hostingAccountId: id,
+								daUsername,
+								daServerId: payload.daServerId,
+								error: err instanceof Error ? err.message : String(err)
+							}
+						}
+					);
+				});
+				return { ok: true as const };
+			} catch (err) {
+				// Forensic preserve: mark the row `failed` instead of DELETE so
+				// the audit log's `hosting_account_id` FK stays valid AND staff
+				// can see "X attempts failed" history on the inquiry. UI filters
+				// out `status='failed'` from the live account list.
+				await db
+					.update(table.hostingAccount)
+					.set({
+						status: 'failed',
+						suspendReason:
+							err instanceof DirectAdminApiError
+								? `da_${err.kind}`
+								: 'da_create_failed',
+						updatedAt: new Date()
+					})
+					.where(eq(table.hostingAccount.id, id))
+					.catch(() => {});
+				return { ok: false as const, error: err };
+			}
+		});
+
+		if (insertResult.ok) {
+			return { id, daUsername, domain: payload.domain };
+		}
+
+		// Classify the failure — retry only on `username_exists` when caller
+		// supplied a regenerable seed.
+		const err = insertResult.error;
+		if (
+			payload.autoUsernameSeed &&
+			err instanceof DirectAdminApiError &&
+			err.kind === 'username_exists' &&
+			attempt < MAX_RETRIES
+		) {
+			daUsername = generateDaUsername(payload.autoUsernameSeed);
+			daPassword = generateDaPassword();
+			logWarning(
+				'directadmin',
+				`DA username collision — retry ${attempt + 1}/${MAX_RETRIES} with new candidate`,
+				{
+					tenantId,
+					metadata: {
+						hostingAccountId: id,
+						oldUsername: payload.daUsername,
+						newUsername: daUsername
+					}
+				}
+			);
+			continue;
+		}
+		throw err;
+	}
+
+	// Unreachable — loop either returns or throws. Type-narrowing aid.
+	throw new Error('createHostingAccountInternal: exhausted retries without resolution');
 }

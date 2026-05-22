@@ -441,6 +441,61 @@
 	// On 'op' (and other non-card methods) we keep the legacy redirect flow.
 	type CardStage = 'idle' | 'creating-intent' | 'ready' | 'confirming' | 'paid';
 	let cardStage = $state<CardStage>('idle');
+
+	// Filter in DevTools console with: `[CHECKOUT]`. Set
+	// localStorage.DEBUG_CHECKOUT=false to silence at runtime.
+	function debugLog(label: string, payload?: unknown) {
+		if (typeof window === 'undefined') return;
+		try {
+			if (window.localStorage.getItem('DEBUG_CHECKOUT') === 'false') return;
+		} catch {
+			/* private mode */
+		}
+		if (payload !== undefined) {
+			// eslint-disable-next-line no-console
+			console.log(`[CHECKOUT] ${label}`, payload);
+		} else {
+			// eslint-disable-next-line no-console
+			console.log(`[CHECKOUT] ${label}`);
+		}
+	}
+
+	/**
+	 * PII-safe redaction for logs. The browser console is dev-only today, but
+	 * Sentry/Axiom forwarders or shared screenshots can leak. Mask anything
+	 * tied to a natural person; keep `inquiryId` + non-identifying booleans/ids
+	 * for correlation.
+	 */
+	function maskEmail(e?: string | null): string {
+		if (!e) return '';
+		const [u, d] = e.split('@');
+		if (!u || !d) return '***';
+		return `${u.slice(0, 2)}***@${d}`;
+	}
+	function maskPhone(p?: string | null): string {
+		if (!p) return '';
+		const digits = p.replace(/\D/g, '');
+		return digits.length > 4 ? `***${digits.slice(-4)}` : '***';
+	}
+	function maskTail(s?: string | null, keep = 4): string {
+		if (!s) return '';
+		return s.length > keep ? `***${s.slice(-keep)}` : '***';
+	}
+
+	$effect(() => {
+		debugLog('modal open', {
+			plan: { id: plan.id, name: plan.name, currency: plan.currency, cycle: plan.billingCycle },
+			period,
+			vatRate,
+			monthlyBilled,
+			yearlyTotal
+		});
+		return () => debugLog('modal closed');
+	});
+
+	$effect(() => {
+		debugLog(`cardStage → ${cardStage}`);
+	});
 	let stripeJs = $state<StripeJS | null>(null);
 	let stripeElements = $state<StripeElementsT | null>(null);
 	let paymentClientSecret = $state<string | null>(null);
@@ -525,12 +580,21 @@
 		anafFilled = false;
 		const raw = cui.trim();
 		if (!raw) {
+			debugLog('ANAF lookup blocked — empty CUI');
 			anafError = 'Introdu CUI-ul firmei mai întâi.';
 			return;
 		}
+		debugLog('ANAF lookup → request', { cuiTail: maskTail(raw, 4) });
+		const tAnaf = performance.now();
 		anafLoading = true;
 		try {
 			const res = await validateCuiAndFetch(raw);
+			debugLog(`ANAF lookup ← response in ${Math.round(performance.now() - tAnaf)}ms`, {
+				valid: res.valid,
+				error: res.valid ? null : res.error,
+				hasCompanyName: res.valid && !!res.data.denumire,
+				platitorTva: res.valid ? res.data.platitorTva : null
+			});
 			if (!res.valid) {
 				anafError = res.error;
 				return;
@@ -560,6 +624,9 @@
 
 			anafFilled = true;
 		} catch (e) {
+			debugLog('ANAF lookup THROWN', {
+				message: e instanceof Error ? e.message : String(e)
+			});
 			anafError = e instanceof Error ? e.message : 'Eroare la verificare ANAF.';
 		} finally {
 			anafLoading = false;
@@ -651,9 +718,23 @@
 	}
 
 	async function submit() {
+		debugLog('submit() start', {
+			step,
+			paymentMethod,
+			billingType,
+			email: maskEmail(email.trim()),
+			cuiTail: maskTail(cui.trim(), 4),
+			hasCompanyName: companyName.trim().length > 0,
+			domainMode,
+			hasNewDomain: !!domainName,
+			hasExistingDomain: !!existingDomain,
+			period,
+			total
+		});
 		submitError = null;
 		paymentError = null;
 		if (!acceptTerms) {
+			debugLog('submit() blocked — terms not accepted');
 			toast.error('Bifează termenii și condițiile.');
 			return;
 		}
@@ -693,6 +774,15 @@
 			notesParts.push(`Facturare: ${period === 'yearly' ? 'anuală' : 'lunară'}`);
 			if (orderNotes.trim()) notesParts.push(`Note client: ${orderNotes.trim()}`);
 
+			debugLog('submitHostingOrder → request', {
+				hostingProductId: plan.id,
+				paymentMode: paymentMethod === 'card' ? 'payment_intent' : 'checkout_redirect',
+				paymentMethod,
+				billingType,
+				email: maskEmail(email.trim()),
+				cuiTail: maskTail(cui.trim(), 4),
+				hasRequestedDomain: !!chosenDomain
+			});
 			const result = await submitHostingOrder({
 				hostingProductId: plan.id,
 				billingType,
@@ -718,7 +808,20 @@
 				requestedDomain: chosenDomain || undefined
 			});
 
+			// Don't dump the whole result object — server might add new fields, and
+			// `paymentIntent.clientSecret` is sensitive (Stripe expects only the
+			// confirming origin to ever see the full secret). Log structural shape.
+			debugLog('submitHostingOrder ← response shape', {
+				duplicateCui: result.duplicateCui ?? false,
+				hasPaymentIntent: 'paymentIntent' in result && !!result.paymentIntent,
+				hasCheckoutUrl: 'checkoutUrl' in result && !!(result as { checkoutUrl?: string }).checkoutUrl,
+				inquiryId: 'inquiryId' in result ? (result as { inquiryId?: string }).inquiryId : null
+			});
+
 			if (result.duplicateCui) {
+				debugLog('result branch: duplicateCui → success step (existing client)', {
+					hasMessage: !!result.message
+				});
 				toast.success(result.message);
 				orderId = 'EXISTING';
 				step = 4;
@@ -727,11 +830,27 @@
 
 			// Card flow → embedded Stripe Elements
 			if ('paymentIntent' in result && result.paymentIntent) {
+				debugLog('result branch: paymentIntent → mount Stripe Elements', {
+					inquiryId: result.inquiryId,
+					paymentIntentId: result.paymentIntent.paymentIntentId,
+					subscriptionId: result.paymentIntent.subscriptionId,
+					mode: result.paymentIntent.mode,
+					// Only log a 6-char tail of the clientSecret (NOT a prefix — the
+					// prefix is the PI id which we already log). Stripe's docs treat
+					// the full secret as bearer-like for its origin/intent pair.
+					clientSecretTail: maskTail(result.paymentIntent.clientSecret, 6),
+					publishableKeyPrefix: result.paymentIntent.publishableKey?.slice(0, 14) + '…'
+				});
 				orderId = result.inquiryId ?? null;
 				paymentClientSecret = result.paymentIntent.clientSecret;
 				paymentPublishableKey = result.paymentIntent.publishableKey;
 				paymentIntentId = result.paymentIntent.paymentIntentId;
+				debugLog('loadStripe() — loading Stripe.js bundle');
+				const tLoad = performance.now();
 				const stripe = await loadStripe(result.paymentIntent.publishableKey);
+				debugLog(`loadStripe() done in ${Math.round(performance.now() - tLoad)}ms`, {
+					ok: !!stripe
+				});
 				if (!stripe) {
 					throw new Error('Stripe.js nu s-a putut încărca. Verifică conexiunea.');
 				}
@@ -742,13 +861,23 @@
 
 			// Legacy redirect flow (ordin de plată, future PayPal/Revolut)
 			if ('checkoutUrl' in result && result.checkoutUrl) {
+				debugLog('result branch: checkoutUrl → redirect', {
+					checkoutUrl: result.checkoutUrl,
+					inquiryId: result.inquiryId
+				});
 				orderId = result.inquiryId ?? null;
 				window.location.href = result.checkoutUrl;
 				return;
 			}
+			debugLog('result branch: ??? unrecognized shape', result);
 			toast.error('Stripe nu a returnat un mod de plată valid.');
 			cardStage = 'idle';
 		} catch (e) {
+			debugLog('submit() ERROR', {
+				name: e instanceof Error ? e.name : typeof e,
+				message: e instanceof Error ? e.message : String(e),
+				body: (e as { body?: unknown })?.body
+			});
 			cardStage = 'idle';
 			// SvelteKit HttpError thrown server-side via error(status, msg) lands here
 			// with .body.message. Plain Error has .message directly. Generic fallback
@@ -766,7 +895,14 @@
 	}
 
 	async function confirmInlinePayment() {
+		debugLog('confirmInlinePayment() start', {
+			stripeReady: !!stripeJs,
+			elementsReady: !!stripeElements,
+			clientSecretPresent: !!paymentClientSecret,
+			paymentIntentId
+		});
 		if (!stripeJs || !stripeElements || !paymentClientSecret) {
+			debugLog('confirmInlinePayment() blocked — form not ready');
 			paymentError = 'Formularul de plată nu este pregătit. Reîncarcă pagina.';
 			return;
 		}
@@ -775,10 +911,26 @@
 		submitting = true;
 		try {
 			const returnUrl = `${window.location.origin}/pachete-hosting/comanda/success`;
+			debugLog('stripe.confirmPayment() → request', { returnUrl, redirect: 'if_required' });
+			const tConfirm = performance.now();
 			const { error: confirmErr, paymentIntent: confirmedPI } = await stripeJs.confirmPayment({
 				elements: stripeElements,
 				confirmParams: { return_url: returnUrl },
 				redirect: 'if_required'
+			});
+			debugLog(`stripe.confirmPayment() done in ${Math.round(performance.now() - tConfirm)}ms`, {
+				error: confirmErr
+					? { type: confirmErr.type, code: confirmErr.code, message: confirmErr.message }
+					: null,
+				paymentIntent: confirmedPI
+					? {
+							id: confirmedPI.id,
+							status: confirmedPI.status,
+							amount: confirmedPI.amount,
+							currency: confirmedPI.currency,
+							nextAction: confirmedPI.next_action?.type ?? null
+						}
+					: null
 			});
 
 			if (confirmErr) {
@@ -793,17 +945,24 @@
 			// `redirect: 'if_required'` means we get here without redirect on success
 			// or when a 3DS challenge isn't needed.
 			if (confirmedPI?.status === 'succeeded' || confirmedPI?.status === 'processing') {
+				debugLog(`payment ${confirmedPI.status} → step 4`);
 				cardStage = 'paid';
 				step = 4;
 				return;
 			}
 			if (confirmedPI?.status === 'requires_action') {
+				debugLog('payment requires_action — Stripe will redirect via return_url');
 				// Stripe will redirect via return_url for off-session 3DS.
 				return;
 			}
+			debugLog('payment unexpected status', { status: confirmedPI?.status });
 			paymentError = `Stare neașteptată: ${confirmedPI?.status ?? 'unknown'}`;
 			cardStage = 'ready';
 		} catch (e) {
+			debugLog('confirmInlinePayment() THROWN ERROR', {
+				name: e instanceof Error ? e.name : typeof e,
+				message: e instanceof Error ? e.message : String(e)
+			});
 			const msg = e instanceof Error ? e.message : 'Eroare la confirmarea plății.';
 			paymentError = msg;
 			toast.error(msg);
@@ -1568,6 +1727,25 @@
 								>
 									<PaymentElement
 										options={{ layout: 'tabs' }}
+										onready={() => debugLog('PaymentElement READY (mounted, accepting input)')}
+										onloaderror={(e) =>
+											debugLog('PaymentElement LOADERROR', {
+												error:
+													e && typeof e === 'object' && 'error' in e
+														? (e as { error: unknown }).error
+														: e
+											})}
+										onchange={(e) =>
+											debugLog('PaymentElement change', {
+												complete:
+													e && typeof e === 'object' && 'complete' in e
+														? (e as { complete: boolean }).complete
+														: undefined,
+												empty:
+													e && typeof e === 'object' && 'empty' in e
+														? (e as { empty: boolean }).empty
+														: undefined
+											})}
 									/>
 								</StripeElements>
 							{/if}

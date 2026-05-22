@@ -109,17 +109,32 @@ export async function runWithAudit<T>(
 /**
  * Per-username mutex to serialize concurrent suspend/unsuspend calls against the same DA account.
  * Prevents two parallel `invoice.status.changed` hooks from racing on the same account.
+ *
+ * SCOPE LIMITATION (intentional, documented as P2 in DA user-create audit
+ * 2026-05-22): this is an in-PROCESS lock. Multi-pod deployments can still
+ * race — pod A and pod B both pre-insert a `pending` hosting_account with the
+ * same daUsername at the same time. DA's own uniqueness enforcement catches
+ * the duplicate on the second `createUserAccount` call; loser pod ends up
+ * with `status='failed'` rather than corrupt data. Acceptable trade-off until
+ * we have evidence of multi-pod contention; a Redis-based distributed lock
+ * (e.g. redlock) is the upgrade path if/when that becomes a hot bug.
  */
 const accountMutexes = new Map<string, Promise<unknown>>();
 
 export async function withAccountLock<T>(daUsername: string, op: () => Promise<T>): Promise<T> {
 	const prev = accountMutexes.get(daUsername) ?? Promise.resolve();
 	const next = prev.then(op, op);
-	accountMutexes.set(
-		daUsername,
-		next.finally(() => {
-			if (accountMutexes.get(daUsername) === next) accountMutexes.delete(daUsername);
-		})
-	);
+	// Store a SEPARATE settled-by-then-cleanup promise so a rejection from `next`
+	// doesn't surface as an unhandled rejection on the stored chain (Bun exits
+	// the process on unhandled rejections by default). The caller still observes
+	// the rejection via `return next` below — that's the only consumer that
+	// needs the original error.
+	const stored = next.then(
+		() => undefined,
+		() => undefined
+	).finally(() => {
+		if (accountMutexes.get(daUsername) === stored) accountMutexes.delete(daUsername);
+	});
+	accountMutexes.set(daUsername, stored);
 	return next;
 }

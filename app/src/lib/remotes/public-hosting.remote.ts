@@ -1048,6 +1048,22 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 
 		const mode = product.billingCycle === 'one_time' ? 'payment' : 'subscription';
 
+		logInfo('directadmin', '[CHECKOUT] Stripe prep', {
+			tenantId,
+			metadata: {
+				inquiryId,
+				clientId,
+				productId: product.id,
+				priceCents: product.price,
+				currency: product.currency,
+				billingCycle: product.billingCycle,
+				mode,
+				paymentMode: data.paymentMode,
+				stripeCustomerId,
+				stripePriceId
+			}
+		});
+
 		// Branch on paymentMode: embedded Stripe Elements (PaymentIntent / Subscription
 		// with default_incomplete) returns a clientSecret; legacy Checkout redirect
 		// returns a Stripe-hosted URL. Both flows carry the same metadata so the
@@ -1069,7 +1085,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					items: [{ price: stripePriceId }],
 					payment_behavior: 'default_incomplete',
 					payment_settings: { save_default_payment_method: 'on_subscription' },
-					expand: ['latest_invoice.payment_intent'],
+					// Stripe API 2026-04-22 (dahlia) moved the PaymentIntent reference
+					// off `latest_invoice.payment_intent` (now absent) onto the new
+					// `latest_invoice.payments.data[].payment.payment_intent` shape.
+					// We can only expand 4 levels deep; the PaymentIntent ID at that
+					// path is a string, so we retrieve the full PI in a second call
+					// to get the client_secret + update metadata. Older API versions
+					// still populate `payment_intent` directly — handle both shapes.
+					expand: ['latest_invoice.payments.data.payment', 'latest_invoice.payment_intent'],
 					metadata: stripeMetadata
 				});
 				subscriptionId = subscription.id;
@@ -1077,23 +1100,41 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				if (!latestInvoice || typeof latestInvoice === 'string') {
 					throw new Error('Stripe nu a returnat invoice-ul pentru subscription.');
 				}
-				const pi = (latestInvoice as Stripe.Invoice & { payment_intent: Stripe.PaymentIntent | string | null })
-					.payment_intent;
-				if (!pi || typeof pi === 'string') {
+
+				// Resolve PI id from either the legacy or new shape.
+				type InvoicePayment = {
+					payment?: { payment_intent?: string | null; type?: string } | null;
+				};
+				type ExtInvoice = Stripe.Invoice & {
+					payment_intent?: Stripe.PaymentIntent | string | null;
+					payments?: { data?: InvoicePayment[] } | null;
+				};
+				const inv = latestInvoice as ExtInvoice;
+				let piRef: Stripe.PaymentIntent | string | null = inv.payment_intent ?? null;
+				if (!piRef) {
+					const inpay = inv.payments?.data?.[0];
+					piRef = inpay?.payment?.payment_intent ?? null;
+				}
+				if (!piRef) {
 					throw new Error('Stripe nu a returnat PaymentIntent pentru subscription.');
 				}
-				// Propagate CRM metadata + subscription id onto the PaymentIntent so the
-				// `payment_intent.succeeded` webhook handler can resolve the
-				// tenant/client/inquiry and link the eventual hostingAccount to the
-				// recurring subscription — all without a Subscription roundtrip later.
-				await stripe.paymentIntents.update(pi.id, {
+				const piId = typeof piRef === 'string' ? piRef : piRef.id;
+				// Retrieve full PI (we need client_secret which isn't on the deep-
+				// expanded shape) and stamp CRM metadata + subscription id so the
+				// webhook handler can resolve everything without a Subscription
+				// roundtrip later.
+				const pi = await stripe.paymentIntents.update(piId, {
 					metadata: { ...stripeMetadata, crmSubscriptionId: subscription.id }
 				});
 				clientSecret = pi.client_secret;
 				paymentIntentId = pi.id;
 			} else {
+				// `product.price` is ALREADY stored in the smallest currency unit
+				// (bani for RON) per `hostingProduct.price` schema annotation. The
+				// earlier `* 100` multiplier here charged 100× the real price
+				// (1.399 RON → 139,900 RON PaymentIntent). Pass through directly.
 				const intent = await stripe.paymentIntents.create({
-					amount: Math.round(Number(product.price) * 100),
+					amount: Number(product.price),
 					currency: product.currency.toLowerCase(),
 					customer: stripeCustomerId,
 					automatic_payment_methods: { enabled: true },
@@ -1120,15 +1161,17 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				{ tenantId, label: 'public-hosting/updateInquiryPI' }
 			);
 
-			logInfo('directadmin', 'Stripe PaymentIntent created (embedded)', {
+			logInfo('directadmin', '[CHECKOUT] Stripe PaymentIntent created (embedded)', {
 				tenantId,
 				metadata: {
 					clientId,
 					inquiryId,
 					product: product.name,
+					priceCents: product.price,
 					mode,
 					paymentIntentId,
-					subscriptionId
+					subscriptionId,
+					clientSecretPrefix: clientSecret?.slice(0, 18) + '…'
 				}
 			});
 

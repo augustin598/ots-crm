@@ -9,6 +9,7 @@
 	} from '$lib/remotes/hosting-inquiries.remote';
 	import { getDAServers, getDAServer } from '$lib/remotes/da-servers.remote';
 	import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
+	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { focusTrap } from '$lib/actions/focus-trap';
 	import { tick } from 'svelte';
@@ -61,6 +62,33 @@
 	let acceptMethod = $state<'op' | 'card' | 'paypal' | 'revolut' | 'other'>('op');
 	let acceptProvision = $state(true);
 	let accepting = $state(false);
+
+	// Dynamic accept-dialog "Referință" labels — bank/OP requires an explicit
+	// transaction id so the printed Keez invoice shows "Bank: <id>" instead of
+	// "Bank: -". Other methods (card POS, PayPal, Revolut) keep it optional.
+	const acceptIsBankMethod = $derived(acceptMethod === 'op');
+	const acceptRefLabel = $derived(
+		acceptIsBankMethod
+			? 'ID tranzacție bancă *'
+			: acceptMethod === 'card'
+				? 'ID tranzacție card / chitanță POS (opțional)'
+				: acceptMethod === 'paypal'
+					? 'PayPal transaction ID (opțional)'
+					: acceptMethod === 'revolut'
+						? 'Revolut transaction ID (opțional)'
+						: 'Referință tranzacție (opțional)'
+	);
+	const acceptRefPlaceholder = $derived(
+		acceptIsBankMethod
+			? 'ex: OP nr. 12345 / Extras BT 21.05.2026 / Ref 4242...'
+			: acceptMethod === 'card'
+				? 'ex: ch_3TZyAw... / chitanță POS 4242'
+				: acceptMethod === 'paypal'
+					? 'ex: 8AB12345CD678901E'
+					: acceptMethod === 'revolut'
+						? 'ex: rvl_xxxxxxxx'
+						: 'Identificator extern al plății'
+	);
 
 	// Provisioning form state — pre-populated from order/product, editable.
 	let provServerId = $state('');
@@ -182,8 +210,13 @@
 		const m = o.paymentMethod;
 		acceptMethod =
 			m === 'op' || m === 'card' || m === 'paypal' || m === 'revolut' ? m : 'op';
-		const guessed = o.productPrice ?? 0;
-		acceptAmount = guessed > 0 ? String(guessed) : '';
+		// productPrice is stored in cents (per hostingProduct.price schema). The
+		// input expects RON (decimal), so divide. Earlier we set the input to the
+		// raw cents value, which caused `Math.round(amt * 100)` in submitAccept to
+		// store 100× the real amount (e.g. 139900 cents → input "139900" → saved
+		// as 13_990_000 = 139,900 RON, when it should have been 1.399 RON).
+		const guessedCents = o.productPrice ?? 0;
+		acceptAmount = guessedCents > 0 ? String(guessedCents / 100) : '';
 		acceptRef = '';
 		acceptNote = '';
 		acceptProvision = !o.hostingAccountId;
@@ -193,6 +226,13 @@
 		const amt = parseFloat(acceptAmount.replace(',', '.'));
 		if (!Number.isFinite(amt) || amt < 0) {
 			toast.error('Suma e invalidă');
+			return;
+		}
+		// Bank/OP requires the transaction id so we can reconcile the payment
+		// against the bank statement + show it on the Keez "Notă Articol".
+		// Without it, the printed invoice would read "Bank: -" which fails audit.
+		if (acceptMethod === 'op' && !acceptRef.trim()) {
+			toast.error('ID-ul tranzacției bancare e obligatoriu pentru Ordin de plată.');
 			return;
 		}
 		accepting = true;
@@ -612,7 +652,7 @@
 								{o.paidAmountCents != null
 									? fmtMoney(o.paidAmountCents, o.productCurrency)
 									: o.productPrice != null
-										? `${o.productPrice} ${o.productCurrency ?? 'RON'}`
+										? fmtMoney(o.productPrice, o.productCurrency)
 										: '—'}
 							</strong>
 							<span>{methodLabel(o.paymentMethod)}</span>
@@ -704,7 +744,7 @@
 									{o.paidAmountCents != null
 										? fmtMoney(o.paidAmountCents, o.productCurrency)
 										: o.productPrice != null
-											? `${o.productPrice} ${o.productCurrency ?? 'RON'}`
+											? fmtMoney(o.productPrice, o.productCurrency)
 											: '—'}
 								</td>
 								<td>{methodLabel(o.paymentMethod)}</td>
@@ -865,13 +905,20 @@
 							/>
 						</label>
 						<label>
-							<span>Referință (opțional)</span>
+							<span>{acceptRefLabel}</span>
 							<input
 								type="text"
 								bind:value={acceptRef}
-								placeholder="OP nr. 12345 / extras 21.05.2026"
+								placeholder={acceptRefPlaceholder}
 								maxlength="200"
+								required={acceptIsBankMethod}
 							/>
+							{#if acceptIsBankMethod}
+								<small class="hst-help">
+									Introdu ID-ul tranzacției din extrasul bancar (numărul OP / ID-ul plății).
+									Apare pe factura fiscală + Notă Articol în Keez pentru reconciliere.
+								</small>
+							{/if}
 						</label>
 						<label>
 							<span>Notă (opțional)</span>
@@ -914,7 +961,10 @@
 						<dt>Domeniu</dt>
 						<dd><code class="hst-mono">{o.daDomain}</code></dd>
 					</dl>
-					<a href="../accounts/{o.hostingAccountId}" class="btn-secondary">
+					<a
+						href="/{page.params.tenant}/hosting/accounts/{o.hostingAccountId}"
+						class="btn-secondary"
+					>
 						<ExternalLinkIcon size={13} /> Vezi contul în CRM
 					</a>
 				{:else if o.paymentStatus === 'paid'}
@@ -1828,6 +1878,13 @@
 		display: flex;
 		gap: 8px;
 		justify-content: flex-end;
+	}
+	.hst-help {
+		display: block;
+		margin-top: 6px;
+		color: #64748b;
+		font-size: 12px;
+		line-height: 1.45;
 	}
 
 	/* Provisioning form — mirrors accept form but with row layout for server/package */

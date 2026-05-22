@@ -287,12 +287,27 @@ export async function mapInvoiceToKeez(
 		return undefined;
 	};
 
+	// Determine `isLegalPerson` from BOTH the legacy `companyType` and the newer
+	// `legalType` fields. Hosting checkout flows (submitHostingOrder) set only
+	// `legalType` (values: 'srl' | 'sa' | 'pf' | …) and leave `companyType` null,
+	// which previously caused Keez to reject the CUI as a CNP for every order
+	// submitted through `/pachete-hosting`. Treat a row as a legal entity when:
+	//   - `companyType` is populated (any non-empty value — preserves old behavior), OR
+	//   - `legalType` is set AND not one of the natural-person values, OR
+	//   - `businessName` is populated (signal that staff intended a company)
+	const legalTypeLower = (client.legalType || '').toString().trim().toLowerCase();
+	const naturalPersonTypes = new Set(['pf', 'pfa', 'ii', 'if']);
+	const isLegalPerson =
+		(client.companyType !== null && client.companyType !== undefined) ||
+		(!!legalTypeLower && !naturalPersonTypes.has(legalTypeLower)) ||
+		(!!client.businessName && legalTypeLower !== 'pf');
+
 	const partner: KeezPartner = {
 		partnerName: client.name || 'Unknown Client', // Required field
 		identificationNumber: client.cui || undefined,
 		taxAttribute: determineTaxAttribute(),
 		registrationNumber: client.registrationNumber || undefined,
-		isLegalPerson: client.companyType !== null && client.companyType !== undefined, // Required field
+		isLegalPerson, // Required field
 		countryCode, // ISO 3166-1 alpha-2 (e.g., RO, CY, DE)
 		countryName: countryName,
 		countyCode: countyCode,

@@ -116,6 +116,7 @@ async function runStep<T>(
 		return true;
 	}
 
+	const stepStart = Date.now();
 	try {
 		const result = await fn();
 		const skipped =
@@ -129,10 +130,11 @@ async function runStep<T>(
 			payload: result,
 			error: null
 		});
-		logInfo('directadmin', `post-payment step "${step}" → ${skipped ? 'skipped' : 'success'}`, {
-			tenantId: ctx.tenantId,
-			metadata: { sessionId: ctx.sessionId, step }
-		});
+		logInfo(
+			'directadmin',
+			`[CHECKOUT][post-payment] step "${step}" → ${skipped ? 'skipped' : 'success'} in ${Date.now() - stepStart}ms`,
+			{ tenantId: ctx.tenantId, metadata: { sessionId: ctx.sessionId, step } }
+		);
 		return true;
 	} catch (err) {
 		const { message } = serializeError(err);
@@ -143,10 +145,11 @@ async function runStep<T>(
 			payload: null,
 			error: message
 		});
-		logError('directadmin', `post-payment step "${step}" → failed: ${message}`, {
-			tenantId: ctx.tenantId,
-			metadata: { sessionId: ctx.sessionId, step }
-		});
+		logError(
+			'directadmin',
+			`[CHECKOUT][post-payment] step "${step}" → FAILED in ${Date.now() - stepStart}ms: ${message}`,
+			{ tenantId: ctx.tenantId, metadata: { sessionId: ctx.sessionId, step } }
+		);
 		return false;
 	}
 }
@@ -160,13 +163,16 @@ async function runStep<T>(
  * via UNIQUE (stripe_session_id, step) + verificare status în getStepStatus.
  */
 export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void> {
-	logInfo('directadmin', `post-payment pipeline starting for session ${ctx.sessionId}`, {
+	const pipelineStart = Date.now();
+	logInfo('directadmin', `[CHECKOUT][post-payment] pipeline starting for session ${ctx.sessionId}`, {
 		tenantId: ctx.tenantId,
 		metadata: {
 			clientId: ctx.clientId,
 			inquiryId: ctx.inquiryId,
 			productId: ctx.productId,
-			mode: ctx.mode
+			mode: ctx.mode,
+			hasSubscriptionId: !!ctx.stripeSubscriptionId,
+			hasPaymentIntentId: !!ctx.stripePaymentIntentId
 		}
 	});
 
@@ -175,29 +181,22 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 		sendOnboardingMagicLink({ tenantId: ctx.tenantId, clientId: ctx.clientId })
 	);
 
-	// 2. Keez fiscal invoice — pentru mode='payment' emitem acum; pentru subscription
-	//    Stripe va emite `invoice.paid` la fiecare renewal și acolo apelăm Keez.
-	if (ctx.mode === 'payment') {
-		await runStep(ctx, 'keez_invoice', () =>
-			emitKeezFiscalInvoice({
-				tenantId: ctx.tenantId,
-				clientId: ctx.clientId,
-				sessionId: ctx.sessionId,
-				stripePaymentIntentId: ctx.stripePaymentIntentId,
-				stripeSubscriptionId: ctx.stripeSubscriptionId,
-				productId: ctx.productId
-			})
-		);
-	} else {
-		// Marchează ca skipped explicit pentru claritate în debug endpoint.
-		await recordStep({
-			ctx,
-			step: 'keez_invoice',
-			status: 'skipped',
-			payload: { reason: 'subscription_mode_keez_emitted_on_invoice_paid' },
-			error: null
-		});
-	}
+	// 2. Keez fiscal invoice — emit a CRM invoice + push to Keez for the FIRST
+	// payment regardless of mode. Subscription RENEWALS go through
+	// `invoice.payment_succeeded` webhook + a separate emitter (TODO Sprint 8.2).
+	// Idempotency is enforced inside emitKeezFiscalInvoice via stripePaymentIntentId
+	// — a webhook retry won't double-invoice.
+	await runStep(ctx, 'keez_invoice', () =>
+		emitKeezFiscalInvoice({
+			tenantId: ctx.tenantId,
+			clientId: ctx.clientId,
+			sessionId: ctx.sessionId,
+			inquiryId: ctx.inquiryId,
+			stripePaymentIntentId: ctx.stripePaymentIntentId,
+			stripeSubscriptionId: ctx.stripeSubscriptionId,
+			productId: ctx.productId
+		})
+	);
 
 	// 3. DA provisioning — ultima, poate dura mai mult (apel DA + DB writes).
 	await runStep(ctx, 'da_provision', async () => {
@@ -231,8 +230,9 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 		return result;
 	});
 
-	logInfo('directadmin', `post-payment pipeline finished for session ${ctx.sessionId}`, {
-		tenantId: ctx.tenantId,
-		metadata: { sessionId: ctx.sessionId }
-	});
+	logInfo(
+		'directadmin',
+		`[CHECKOUT][post-payment] pipeline finished for session ${ctx.sessionId} in ${Date.now() - pipelineStart}ms`,
+		{ tenantId: ctx.tenantId, metadata: { sessionId: ctx.sessionId } }
+	);
 }

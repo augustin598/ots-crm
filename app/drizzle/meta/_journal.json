@@ -2584,6 +2584,13 @@
       "when": 1779916800008500,
       "tag": "0371_hosting_inquiry_requested_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 372,
+      "version": "6",
+      "when": 1779916800009500,
+      "tag": "0372_hosting_product_keez_item_external_id",
+      "breakpoints": true
     }
   ]
 }

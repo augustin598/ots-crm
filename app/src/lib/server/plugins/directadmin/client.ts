@@ -16,7 +16,30 @@ export interface DirectAdminConfig {
 	concurrency?: number;
 }
 
+/**
+ * Stable error categories surfaced by DA's legacy `error=1` responses. Callers
+ * branch on `.kind` to drive retry strategy ("username_exists" → regenerate +
+ * retry; "package_missing" → fail with admin guidance; "password_weak" →
+ * regenerate with stricter complexity).
+ *
+ * `unknown` is the catch-all when DA's `text`/`details` don't match a known
+ * keyword — message is still surfaced for the audit log.
+ */
+export type DaErrorKind =
+	| 'username_exists'
+	| 'username_invalid'
+	| 'domain_exists'
+	| 'domain_invalid'
+	| 'package_missing'
+	| 'ip_unavailable'
+	| 'password_weak'
+	| 'access_denied'
+	| 'license_restricted'
+	| 'unknown';
+
 export class DirectAdminApiError extends Error {
+	public kind: DaErrorKind;
+
 	constructor(
 		message: string,
 		public statusCode: number,
@@ -24,7 +47,35 @@ export class DirectAdminApiError extends Error {
 	) {
 		super(message);
 		this.name = 'DirectAdminApiError';
+		this.kind = classifyDaError(message, daCode);
 	}
+}
+
+/**
+ * Map a DA error message (plus optional daCode) to a stable `DaErrorKind`.
+ * Keyword match is intentionally loose — DA error strings drift across versions
+ * (e.g., "username already exists" vs "That username is taken" vs "Username
+ * 'foo' is in use") so we look for the SHORTEST distinctive substring rather
+ * than full sentence matches.
+ */
+export function classifyDaError(message: string, daCode?: string): DaErrorKind {
+	// Modern `/api/*` errors carry a `daCode` (`apierror.*`) — prefer it.
+	if (daCode === 'apierror.AccessDenied') return 'access_denied';
+	if (daCode === 'apierror.LicenseRestricted') return 'license_restricted';
+	if (daCode === 'apierror.AlreadyExists') return 'username_exists';
+
+	const msg = message.toLowerCase();
+	if (/\b(username|user name).*(exists?|taken|in use)\b/.test(msg)) return 'username_exists';
+	if (/\b(invalid|illegal).*username\b/.test(msg)) return 'username_invalid';
+	if (/\bdomain.*(exists?|taken|in use|already)/.test(msg)) return 'domain_exists';
+	if (/\binvalid.*domain\b/.test(msg)) return 'domain_invalid';
+	if (/\b(no such|cannot find|missing|invalid|unknown).*package\b/.test(msg)) return 'package_missing';
+	if (/\b(no .*package|package .*(not exist|not found))/.test(msg)) return 'package_missing';
+	if (/\b(no .*ip|valid ip|ip.*not (provided|available|allowed))/.test(msg)) return 'ip_unavailable';
+	if (/\b(password|passwd).*(weak|strong|complex|complexity|short)/.test(msg)) return 'password_weak';
+	if (/\baccess denied|permission denied|not authoriz/.test(msg)) return 'access_denied';
+	if (/\blicense\b/.test(msg)) return 'license_restricted';
+	return 'unknown';
 }
 
 export interface DAUserSearchResult {
@@ -275,6 +326,13 @@ export interface CreateUserParams {
 	package: string;
 	ip?: string;
 	notify?: boolean;
+	/**
+	 * Skip the pre-flight `userExists` + `domainExists` checks. Use when the
+	 * caller has just verified existence elsewhere (e.g. a username freshly
+	 * generated for a collision retry, or the caller already called
+	 * `checkDomainAvailability` immediately before this).
+	 */
+	skipPreCheck?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -365,8 +423,25 @@ export class DirectAdminClient {
 				// while DA actually rejected the call → CRM and DA state diverge.
 				const errVal = parsed.error;
 				if (errVal === '1' || (Array.isArray(errVal) && errVal[0] === '1')) {
-					const textVal = parsed.text ?? parsed.details;
-					const errMsg = typeof textVal === 'string' ? textVal : 'DirectAdmin returned error';
+					// DA legacy returns BOTH `text` (short header like "Unable to
+					// Create User") and `details` (the actual reason — "Username
+					// already exists", "Domain already used", "Package not found",
+					// etc). Earlier we only surfaced `text`, so every failure looked
+					// the same and staff couldn't tell why. Combine both, picking
+					// the first string element when DA encodes them as `list[]=`.
+					const pick = (v: unknown): string | undefined => {
+						if (typeof v === 'string') return v.trim();
+						if (Array.isArray(v) && typeof v[0] === 'string') return v[0].trim();
+						return undefined;
+					};
+					const text = pick(parsed.text);
+					const details = pick(parsed.details);
+					// Decode any HTML entities + collapse whitespace so the message
+					// is readable in toasts and audit logs.
+					const clean = (s: string) =>
+						s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+					const parts = [text, details].filter((s): s is string => !!s).map(clean);
+					const errMsg = parts.length > 0 ? parts.join(' — ') : 'DirectAdmin returned error';
 					throw new DirectAdminApiError(errMsg, 200, 'da_legacy_error');
 				}
 				return parsed as T;
@@ -464,7 +539,186 @@ export class DirectAdminClient {
 		return this.request<DAUserUsage>('GET', `/api/users/${encodeURIComponent(username)}/usage`);
 	}
 
+	private cachedUsernames: { ts: number; usernames: Set<string> } | null = null;
+	private cachedDomains: { ts: number; domains: Set<string> } | null = null;
+	private cachedUsernamesInFlight: Promise<Set<string>> | null = null;
+	private cachedDomainsInFlight: Promise<Set<string>> | null = null;
+
+	/**
+	 * Real-world DA endpoint compatibility note (probed against DA Evolution
+	 * v1.701, 2026-05-22):
+	 *   - `/api/search/users?search=foo` → returns ALL usernames as a string
+	 *     array, IGNORING the search param. Cannot be used to test existence.
+	 *   - `/api/users` → HTML SPA (Evolution skin route, not the API).
+	 *   - `/CMD_API_SHOW_USERS` → returns `list[]=user1&list[]=user2&...`
+	 *     reliably (legacy form).
+	 *   - `/CMD_API_SHOW_USER_DOMAINS?user=X` → returns URL-encoded
+	 *     `domain1=stats&domain2=stats&...` (domain names are the KEYS).
+	 *   - `/CMD_API_SHOW_RESELLER_IPS` → returns `list[]=ip1&list[]=ip2&...`
+	 *     (the IPs the admin can assign to new users — what we actually need).
+	 *   - `/CMD_API_SHOW_USER_IPS` and `/CMD_API_ADDITIONAL_IPS` → HTML SPA.
+	 *
+	 * So the wrapper now drives existence checks off the legacy listings and
+	 * caches them per-client (TTL 60s) to keep per-create cost bounded.
+	 */
+	private static readonly LIST_CACHE_TTL_MS = 60_000;
+
+	private async listAllUsernames(): Promise<Set<string>> {
+		const now = Date.now();
+		if (
+			this.cachedUsernames &&
+			now - this.cachedUsernames.ts < DirectAdminClient.LIST_CACHE_TTL_MS
+		) {
+			return this.cachedUsernames.usernames;
+		}
+		if (this.cachedUsernamesInFlight) return this.cachedUsernamesInFlight;
+		this.cachedUsernamesInFlight = (async () => {
+			try {
+				const raw = await this.request<Record<string, unknown>>(
+					'GET',
+					'/CMD_API_SHOW_USERS',
+					undefined,
+					true
+				);
+				const list = raw.list;
+				const arr: string[] = Array.isArray(list)
+					? (list as string[])
+					: typeof list === 'string'
+					? list.split(',')
+					: [];
+				const set = new Set(arr.map((u) => u.trim().toLowerCase()).filter(Boolean));
+				this.cachedUsernames = { ts: now, usernames: set };
+				return set;
+			} finally {
+				this.cachedUsernamesInFlight = null;
+			}
+		})();
+		return this.cachedUsernamesInFlight;
+	}
+
+	private async listAllDomains(): Promise<Set<string>> {
+		const now = Date.now();
+		if (
+			this.cachedDomains &&
+			now - this.cachedDomains.ts < DirectAdminClient.LIST_CACHE_TTL_MS
+		) {
+			return this.cachedDomains.domains;
+		}
+		if (this.cachedDomainsInFlight) return this.cachedDomainsInFlight;
+		this.cachedDomainsInFlight = (async () => {
+			try {
+				const usernames = await this.listAllUsernames();
+				const all = new Set<string>();
+				// Bounded concurrency: 8 parallel SHOW_USER_DOMAINS calls. Tuned to
+				// keep total wall-time under ~2s for typical 30–100 user installs
+				// without overwhelming DA's per-IP rate limiter.
+				const queue = [...usernames];
+				const CONCURRENCY = 8;
+				async function worker(self: DirectAdminClient) {
+					while (queue.length > 0) {
+						const u = queue.shift();
+						if (!u) break;
+						try {
+							const domains = await self.fetchUserDomains(u);
+							for (const d of domains) all.add(d);
+						} catch {
+							// Skip a single bad config; the snapshot is best-effort.
+						}
+					}
+				}
+				await Promise.all(
+					Array.from({ length: Math.min(CONCURRENCY, usernames.size) }, () => worker(this))
+				);
+				this.cachedDomains = { ts: now, domains: all };
+				return all;
+			} finally {
+				this.cachedDomainsInFlight = null;
+			}
+		})();
+		return this.cachedDomainsInFlight;
+	}
+
+	private async fetchUserDomains(username: string): Promise<string[]> {
+		// CMD_API_SHOW_USER_DOMAINS returns URL-encoded `domain1=stats&domain2=stats`.
+		// The KEYS are the domain names (already URL-decoded by `URLSearchParams`
+		// inside `parseLegacyResponse`); the values are bandwidth/usage tuples we
+		// ignore. DA emits an `error=...` row for bad inputs — skip non-domain
+		// keys defensively. Verified against DA Evolution v1.701, 2026-05-22.
+		const url = `/CMD_API_SHOW_USER_DOMAINS?user=${encodeURIComponent(username)}`;
+		try {
+			const parsed = await this.request<Record<string, unknown>>('GET', url, undefined, true);
+			const domains: string[] = [];
+			for (const key of Object.keys(parsed)) {
+				const clean = key.trim().toLowerCase();
+				if (clean === 'error' || clean === 'text' || clean === 'details') continue;
+				if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(clean)) domains.push(clean);
+			}
+			return domains;
+		} catch {
+			return [];
+		}
+	}
+
+	/** Returns true if `username` already exists on this DA admin's pool. */
+	async userExists(username: string): Promise<boolean> {
+		try {
+			const all = await this.listAllUsernames();
+			return all.has(username.trim().toLowerCase());
+		} catch {
+			return false; // fail-open: real create will surface DA's authoritative answer
+		}
+	}
+
+	/**
+	 * Returns true if `domain` is hosted on ANY user (primary, addon, or parked)
+	 * on this DA admin's pool. Builds the index lazily on first call and caches
+	 * for `LIST_CACHE_TTL_MS`. The `deep` flag is preserved for API parity but
+	 * has no effect now — the lookup is always full-domain-coverage.
+	 */
+	async domainExists(domain: string, _opts: { deep?: boolean } = {}): Promise<boolean> {
+		try {
+			const all = await this.listAllDomains();
+			return all.has(domain.trim().toLowerCase());
+		} catch {
+			return false;
+		}
+	}
+
 	async createUserAccount(data: CreateUserParams): Promise<void> {
+		// Pre-flight: short-circuit obvious conflicts with a typed error BEFORE
+		// hitting DA's slower CMD_API_ACCOUNT_USER. Two upsides:
+		//   1. Saves a wasted DA round-trip on duplicate username/domain (DA
+		//      returns the same answer 50–200ms later anyway).
+		//   2. Lets the caller-side retry loop classify the failure WITHOUT
+		//      string-matching DA's error message — they get `DirectAdminApiError
+		//      { kind: 'username_exists' }` directly.
+		// If DA is unreachable for the pre-check, we fail-open and let the real
+		// create call surface the authoritative error. `skipPreCheck=true` lets
+		// callers who have already verified existence (e.g. fresh username from
+		// retry-after-collision) skip the duplicate work.
+		if (!data.skipPreCheck) {
+			if (await this.userExists(data.username)) {
+				throw new DirectAdminApiError(
+					`Username ${data.username} already exists`,
+					200,
+					'da_legacy_error'
+				);
+			}
+			if (await this.domainExists(data.domain)) {
+				throw new DirectAdminApiError(
+					`Domain ${data.domain} already exists`,
+					200,
+					'da_legacy_error'
+				);
+			}
+		}
+
+		// IP handling: many DA admins ship without a `shared` IP pool configured,
+		// so the historical default of `ip: 'shared'` fails with
+		// "Unable to Create User — A valid IP was not provided". When the caller
+		// doesn't pass an IP, fetch the admin's available IPs from DA and use the
+		// first available one. The result is cached per-instance.
+		const ip = data.ip ?? (await this.resolveDefaultIp());
 		await this.request<Record<string, string>>(
 			'POST',
 			'/CMD_API_ACCOUNT_USER',
@@ -477,13 +731,141 @@ export class DirectAdminClient {
 				domain: data.domain,
 				email: data.email,
 				package: data.package,
-				ip: data.ip ?? 'shared',
+				ip,
 				notify: data.notify ? 'yes' : 'no'
 			},
 			true
 		);
 	}
 
+	private cachedDefaultIp: string | null = null;
+	private resolveDefaultIpInFlight: Promise<string> | null = null;
+
+	/**
+	 * Resolve a usable IP for new user creation. Tries in order:
+	 *   1. `CMD_API_ADDITIONAL_IPS` (detailed list with `status=` per IP — when
+	 *      available, prefer entries marked `shared` over `owned`/`assigned` so
+	 *      we don't consume dedicated IPs for shared-hosting users).
+	 *   2. `CMD_API_SHOW_USER_IPS` — the legacy "IPs available for assignment"
+	 *      endpoint that admin/reseller-level accounts can call. Returns
+	 *      `list[]=1.2.3.4&list[]=...` — IPs in the order DA returns them.
+	 *
+	 * Throws `ip_unavailable` if both endpoints return nothing usable.
+	 *
+	 * Concurrency: a single in-flight promise is shared across parallel callers
+	 * so two simultaneous `createUserAccount` requests on a fresh client only
+	 * fire ONE upstream call. Cache lives for the client instance lifetime;
+	 * `clearStripeCache(tenantId)`-style invalidation isn't needed because the
+	 * factory creates a fresh client whenever credentials change.
+	 */
+	async resolveDefaultIp(): Promise<string> {
+		if (this.cachedDefaultIp) return this.cachedDefaultIp;
+		if (this.resolveDefaultIpInFlight) return this.resolveDefaultIpInFlight;
+
+		this.resolveDefaultIpInFlight = (async () => {
+			try {
+				// Prefer the detailed listing — has per-IP `status` field. Some DA
+				// versions only have `CMD_API_SHOW_USER_IPS` (next branch).
+				const shared = await this.tryResolveSharedIp();
+				if (shared) {
+					this.cachedDefaultIp = shared;
+					return shared;
+				}
+				const any = await this.tryResolveAnyIp();
+				if (any) {
+					this.cachedDefaultIp = any;
+					return any;
+				}
+				throw new DirectAdminApiError(
+					'DA admin nu are IP-uri disponibile pentru creare cont. ' +
+						'Adaugă un IP în DirectAdmin (Admin → IP Manager) sau atribuie unul către admin/reseller.',
+					200,
+					'no_ip_available'
+				);
+			} finally {
+				this.resolveDefaultIpInFlight = null;
+			}
+		})();
+
+		return this.resolveDefaultIpInFlight;
+	}
+
+	private async tryResolveSharedIp(): Promise<string | null> {
+		// Live probe against DA Evolution v1.701 (2026-05-22) showed:
+		//   - /CMD_API_ADDITIONAL_IPS → returns HTML SPA (broken legacy route)
+		//   - /CMD_API_SHOW_USER_IPS  → returns HTML SPA
+		//   - /CMD_API_SHOW_RESELLER_IPS → returns `list[]=46.4.159.108` ✓
+		// So we hit SHOW_RESELLER_IPS as the primary source (admin/reseller
+		// session). The endpoint exposes IPs the admin can assign to new users,
+		// which is exactly what we need for `CMD_API_ACCOUNT_USER`.
+		try {
+			const raw = await this.request<Record<string, unknown>>(
+				'GET',
+				'/CMD_API_SHOW_RESELLER_IPS',
+				undefined,
+				true
+			);
+			const candidates: string[] = [];
+			const list = raw.list ?? raw.ip;
+			if (typeof list === 'string') candidates.push(list);
+			else if (Array.isArray(list))
+				for (const v of list) if (typeof v === 'string') candidates.push(v);
+			for (const v of Object.values(raw)) {
+				if (typeof v === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(v.split(':')[0])) {
+					candidates.push(v.split(':')[0]);
+				}
+			}
+			const first = candidates
+				.map((s) => s.trim())
+				.find((s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s));
+			return first ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	private async tryResolveAnyIp(): Promise<string | null> {
+		// Fallback path: try SHOW_USER_IPS (legacy, present on some DA installs)
+		// for resellers that don't have SHOW_RESELLER_IPS visible. If this also
+		// returns HTML / nothing parseable, the caller will throw `ip_unavailable`
+		// with admin guidance.
+		try {
+			const raw = await this.request<Record<string, unknown>>(
+				'GET',
+				'/CMD_API_SHOW_USER_IPS',
+				undefined,
+				true
+			);
+			const candidates: string[] = [];
+			const list = raw.list ?? raw.ip;
+			if (typeof list === 'string') candidates.push(list);
+			else if (Array.isArray(list))
+				for (const v of list) if (typeof v === 'string') candidates.push(v);
+			for (const v of Object.values(raw)) {
+				if (typeof v === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(v)) candidates.push(v);
+			}
+			const first = candidates.find((s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s.trim()))?.trim();
+			return first ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * ⚠ DESTRUCTIVE — DO NOT CALL FROM PRODUCTION CODE PATHS.
+	 *
+	 * Strict policy (memory: feedback_never_delete_da_accounts.md):
+	 * DA account deletion is admin-only manual operation on the DA panel.
+	 * The method is kept on the wrapper ONLY for staging-DA testing with
+	 * throw-away data. No production caller should invoke it — not as a rollback
+	 * compensation, not as a debug endpoint action, not as a "cancel hosting"
+	 * automation. Account deletion removes SSH user, all domains, mailboxes,
+	 * MySQL DBs, files (`/home/{user}`), crons, and logs — irreversibly.
+	 *
+	 * If you find yourself needing this in a production path, STOP and ask
+	 * the user. The CRM-side cleanup pattern is: `db.delete(hostingAccount)`
+	 * only — leave the DA account untouched until admin confirms manual delete.
+	 */
 	async deleteUserAccount(username: string): Promise<void> {
 		await this.request<Record<string, string>>(
 			'POST',

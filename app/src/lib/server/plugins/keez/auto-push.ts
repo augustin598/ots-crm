@@ -136,25 +136,40 @@ export async function pushInvoiceToKeez(
 		for (const lineItem of lineItems) {
 			const desiredName = lineItem.description || 'Item';
 
-			// Strategy: ALWAYS create a fresh Keez article per (invoice, line-item).
-			// We do NOT try to match against existing articles, because:
+			// CACHE PATH (hosting flow + similar caller-cached products): if the
+			// line item already carries a Keez externalId in UUID-ish format, we
+			// REUSE that Keez article instead of creating a fresh one. This is
+			// what keeps the printed invoice clean ("Wordpress Premium" without
+			// `· #OTSH-xxxx` suffix) when emit-keez-invoice.ts pre-populates the
+			// id from `hostingProduct.keezItemExternalId`. We detect cached ids
+			// by the 32-hex format Keez assigns (e.g. "5a420cc5e0ab49788a16de…")
+			// vs the 8-char CRM line-item prefix the fallback path generates.
+			const looksLikeKeezExternalId = (s: string | null | undefined): boolean =>
+				!!s && /^[a-f0-9]{32}$/i.test(s);
+			if (looksLikeKeezExternalId(lineItem.keezItemExternalId)) {
+				const cached = lineItem.keezItemExternalId as string;
+				itemExternalIds.set(lineItem.id, cached);
+				logInfo('keez', `[trace] reusing cached Keez article ${cached} for lineItem ${lineItem.id}`, {
+					tenantId,
+					action: 'whmcs_keez_trace',
+					metadata: { invoiceId, lineItemId: lineItem.id, cachedExternalId: cached }
+				});
+				continue;
+			}
+
+			// FRESH-CREATE PATH: for line items that don't carry a cached Keez
+			// externalId (legacy WHMCS push, ad-hoc manual invoice). Strategy
+			// notes preserved from the original implementation:
 			//   1. Keez `?filter=code eq '...'` is not honored on /items — it
 			//      returns the full nomenclator, so getItemByCode would falsely
-			//      match the first article (typically `#1 - Realizare Film
-			//      Documentar`, externalId `04c73804...`) and the rename branch
-			//      would overwrite that article with the current invoice's
-			//      description. Every WHMCS push was silently rewriting the
-			//      same article. See debug_log filter `whmcs_keez_trace`.
-			//   2. Per Keez Public API docs (https://app.keez.ro/help/api/item.html)
-			//      `name` MUST be unique across all articles — duplicates throw
-			//      HTTP 500. We append the line-item id as a discrete suffix to
-			//      guarantee uniqueness without depending on description being
-			//      unique (e.g. for repeated test descriptions like FIX-TEST-A).
-			//      Branded as `#OTSH-<4>` so it reads as a SKU code in Keez UI
-			//      and on client PDFs instead of a bare random hash.
+			//      match the first article and the rename branch would overwrite
+			//      it with the current invoice's description.
+			//   2. Per Keez Public API docs, `name` MUST be unique across all
+			//      articles — duplicates throw HTTP 500. We append the line-item
+			//      id as a discrete suffix to guarantee uniqueness. Branded as
+			//      `#OTSH-<4>` so it reads as a SKU code in Keez UI.
 			//   3. `code` is also unique per (invoice, line-item) so retries on
-			//      the same logical line resolve to different articles, which is
-			//      acceptable (Keez doesn't bill us per article entry).
+			//      the same logical line resolve to different articles.
 			const itemCode = `CRM_${invoiceId.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
 			const uniqueName = `${desiredName} · #OTSH-${lineItem.id.slice(0, 4)}`;
 
@@ -229,11 +244,22 @@ export async function pushInvoiceToKeez(
 			});
 		}
 
-		// Resolve series + number from settings (Keez-side getNextInvoiceNumber)
+		// Resolve series + number. Priority:
+		//   1. CRM invoice has explicit `invoiceSeries` (e.g. hosting flow already
+		//      reserved "OTSH N" — respect it; don't fall back to the default series).
+		//   2. Otherwise default to `settings.keezSeries` (legacy behavior).
 		let invoiceSeries: string | undefined;
 		let invoiceNumber: string | undefined;
+		const crmSeries = invoice.invoiceSeries?.trim();
 
-		if (settings?.keezSeries) {
+		if (crmSeries) {
+			// Honor the CRM-side reservation. Don't ask Keez for a fresh number
+			// — the emitter already did (and bumped its local counter). Re-asking
+			// Keez here would race + override "OTSH 1" with "OTS 546".
+			invoiceSeries = crmSeries;
+			const match = invoice.invoiceNumber.match(/(\d+)$/);
+			if (match) invoiceNumber = match[1];
+		} else if (settings?.keezSeries) {
 			invoiceSeries = settings.keezSeries.trim();
 			try {
 				const nextNumber = await keezClient.getNextInvoiceNumber(invoiceSeries);
@@ -403,13 +429,23 @@ export async function pushInvoiceToKeez(
 				updateData.invoiceNumber = keezInvoiceNumber;
 			}
 		} else if (keezNumber) {
-			const [invoiceSettings] = await db
-				.select()
-				.from(table.invoiceSettings)
-				.where(eq(table.invoiceSettings.tenantId, tenantId))
-				.limit(1);
-			if (invoiceSettings?.keezSeries) {
-				const keezInvoiceNumber = `${invoiceSettings.keezSeries} ${keezNumber}`;
+			// Keez returned a number but no explicit series. Prefer the CRM
+			// invoice's own `invoiceSeries` (set by the hosting emitter for OTSH)
+			// before falling back to the tenant's default Keez series. Without
+			// this, hosting invoices pushed under OTSH get rewritten as "OTS N"
+			// by the default-series fallback — losing the series designation.
+			const crmSeries = invoice.invoiceSeries?.trim();
+			let resolvedSeries = crmSeries;
+			if (!resolvedSeries) {
+				const [invoiceSettings] = await db
+					.select()
+					.from(table.invoiceSettings)
+					.where(eq(table.invoiceSettings.tenantId, tenantId))
+					.limit(1);
+				resolvedSeries = invoiceSettings?.keezSeries?.trim();
+			}
+			if (resolvedSeries) {
+				const keezInvoiceNumber = `${resolvedSeries} ${keezNumber}`;
 				if (keezInvoiceNumber !== invoice.invoiceNumber) {
 					updateData.invoiceNumber = keezInvoiceNumber;
 				}

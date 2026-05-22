@@ -358,12 +358,13 @@
 					onchange={refresh}
 					class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
 				>
-					<option value="">Toate statusurile</option>
+					<option value="">Toate (fără eșuate)</option>
 					<option value="active">Active</option>
 					<option value="suspended">Suspendate</option>
 					<option value="pending">În așteptare</option>
 					<option value="terminated">Terminate</option>
 					<option value="cancelled">Anulate</option>
+					<option value="failed">Eșuate (forensic)</option>
 				</select>
 			</div>
 			<div class="flex items-center gap-3 text-[11px]">

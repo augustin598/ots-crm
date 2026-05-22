@@ -336,6 +336,45 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 				acceptedBy: userId
 			}
 		});
+
+		// Emit the fiscal Keez invoice for this manual acceptance, mirroring the
+		// Stripe payment_intent.succeeded post-payment dispatcher. Without this,
+		// OP / bank-transfer orders would never get a Keez fiscal invoice — staff
+		// would have to create one manually. The emit-keez step is idempotent
+		// per (sessionId), so a retry on the same inquiry won't double-bill.
+		try {
+			const { emitKeezFiscalInvoice } = await import(
+				'$lib/server/stripe/post-payment/emit-keez-invoice'
+			);
+			const result = await emitKeezFiscalInvoice({
+				tenantId,
+				clientId: order.clientId!,
+				sessionId: `manual_${params.id}`,
+				inquiryId: params.id,
+				stripePaymentIntentId: null, // OP path — no Stripe PI
+				stripeSubscriptionId: null,
+				productId: order.hostingProductId!
+			});
+			if ('invoiceId' in result) {
+				logInfo('directadmin', `manual accept: Keez invoice ${result.invoiceNumber} emitted`, {
+					tenantId,
+					metadata: { inquiryId: params.id, invoiceId: result.invoiceId, invoiceNumber: result.invoiceNumber }
+				});
+			} else {
+				logInfo('directadmin', `manual accept: Keez emit skipped (${result.reason})`, {
+					tenantId,
+					metadata: { inquiryId: params.id, reason: result.reason }
+				});
+			}
+		} catch (err) {
+			const { message } = serializeError(err);
+			logError('directadmin', `manual accept: Keez emit threw: ${message}`, {
+				tenantId,
+				metadata: { inquiryId: params.id }
+			});
+			// Non-fatal — the payment is already marked paid; staff can re-emit
+			// from the invoice page if needed.
+		}
 	}
 
 	// 3. Optionally provision DA. The provision helper is idempotent (checks

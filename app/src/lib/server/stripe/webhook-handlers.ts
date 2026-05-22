@@ -335,9 +335,17 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 		return;
 	}
 
-	logInfo('directadmin', 'payment_intent.succeeded received (embedded flow)', {
+	logInfo('directadmin', '[CHECKOUT][webhook] payment_intent.succeeded received (embedded flow)', {
 		tenantId,
-		metadata: { intentId: intent.id, clientId, inquiryId, productId }
+		metadata: {
+			intentId: intent.id,
+			clientId,
+			inquiryId,
+			productId,
+			amount: intent.amount,
+			currency: intent.currency,
+			subscriptionId: md.crmSubscriptionId ?? null
+		}
 	});
 
 	await db.transaction(async (tx) => {

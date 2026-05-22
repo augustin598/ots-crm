@@ -4,8 +4,10 @@ import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
+import { DirectAdminApiError } from '$lib/server/plugins/directadmin/client';
 import { encrypt } from '$lib/server/plugins/smartbill/crypto';
-import { logInfo } from '$lib/server/logger';
+import { logInfo, logWarning } from '$lib/server/logger';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
 
 function generateId(): string {
@@ -159,63 +161,146 @@ export async function provisionDirectAdminAccount(params: {
 	if (!clientRow.email)
 		throw new Error(`Client ${params.clientId} nu are email — provisioning DA refuzat`);
 
-	// Generează credențiale
+	// Generează credențiale + seed (păstrat pentru retry)
 	const seed = clientRow.businessName || clientRow.name || clientRow.email.split('@')[0];
-	const daUsername = generateDaUsername(seed);
-	const daPassword = generateDaPassword();
-	const domain = `${daUsername}.hosting-temp.ots`; // Placeholder — staff va edita real domain.
+	let daUsername = generateDaUsername(seed);
+	let daPassword = generateDaPassword();
 
-	// Apel DA cu lock + audit
 	const daClient = createDAClient(params.tenantId, server);
 	const accountId = generateId();
+	const MAX_RETRIES = 3;
 
-	await withAccountLock(`${params.tenantId}:${daUsername}`, async () => {
-		await runWithAudit(
-			{
-				tenantId: params.tenantId,
-				hostingAccountId: accountId,
-				daServerId: server.id,
-				action: 'create',
-				trigger: 'hook:invoice.paid'
-			},
-			() =>
-				daClient.createUserAccount({
-					username: daUsername,
-					password: daPassword,
-					domain,
-					email: clientRow.email!,
-					package: packageName,
-					notify: false // Nu trimitem email DA — folosim magic link CRM
-				})
-		);
+	let finalUsername = daUsername;
+	let finalDomain = `${daUsername}.hosting-temp.ots`;
+
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		const domain = `${daUsername}.hosting-temp.ots`; // Placeholder — staff va edita real domain.
+		finalUsername = daUsername;
+		finalDomain = domain;
 
 		const credentialsEncrypted = encrypt(
 			params.tenantId,
 			JSON.stringify({ username: daUsername, password: daPassword })
 		);
 
-		await db.insert(table.hostingAccount).values({
-			id: accountId,
-			tenantId: params.tenantId,
-			clientId: params.clientId,
-			daServerId: server.id,
-			daPackageId: product.daPackageId,
-			hostingProductId: product.id,
-			daUsername,
-			domain,
-			status: 'active',
-			daCredentialsEncrypted: credentialsEncrypted,
-			recurringAmount: product.price ?? 0,
-			currency: product.currency ?? 'RON',
-			billingCycle: product.billingCycle ?? 'monthly',
-			stripeSubscriptionId: params.stripeSubscriptionId
+		const result = await withAccountLock(`${params.tenantId}:${daUsername}`, async () => {
+			// Pre-insert in `pending` so the audit row's FK to hosting_account is
+			// satisfied regardless of DA outcome. See create-account.ts for the
+			// originating FK-violation bug fixed in this branch.
+			await db.insert(table.hostingAccount).values({
+				id: accountId,
+				tenantId: params.tenantId,
+				clientId: params.clientId,
+				daServerId: server.id,
+				daPackageId: product.daPackageId,
+				hostingProductId: product.id,
+				daUsername,
+				domain,
+				status: 'pending',
+				daCredentialsEncrypted: credentialsEncrypted,
+				recurringAmount: product.price ?? 0,
+				currency: product.currency ?? 'RON',
+				billingCycle: product.billingCycle ?? 'monthly',
+				stripeSubscriptionId: params.stripeSubscriptionId
+			});
+
+			try {
+				await runWithAudit(
+					{
+						tenantId: params.tenantId,
+						hostingAccountId: accountId,
+						daServerId: server.id,
+						action: 'create',
+						trigger: 'hook:invoice.paid'
+					},
+					() =>
+						daClient.createUserAccount({
+							username: daUsername,
+							password: daPassword,
+							domain,
+							email: clientRow.email!,
+							package: packageName,
+							notify: false // magic link CRM, nu email DA
+						})
+				);
+
+				// DA accepted — promote to active with Turso-busy retry to avoid
+				// zombies (DA live, CRM stuck on `pending`).
+				await withTursoBusyRetry(
+					() =>
+						db
+							.update(table.hostingAccount)
+							.set({ status: 'active', updatedAt: new Date() })
+							.where(eq(table.hostingAccount.id, accountId)),
+					{ tenantId: params.tenantId, label: 'provisionDA/promote-active' }
+				).catch((err) => {
+					logWarning(
+						'directadmin',
+						`zombie risk: DA account ${daUsername} created but CRM promote failed`,
+						{
+							tenantId: params.tenantId,
+							metadata: {
+								hostingAccountId: accountId,
+								sessionId: params.sessionId,
+								error: err instanceof Error ? err.message : String(err)
+							}
+						}
+					);
+				});
+				return { ok: true as const };
+			} catch (err) {
+				// Forensic preserve: mark `failed`, never DELETE. Audit log keeps
+				// pointing at this row so staff can see the full attempt history
+				// per inquiry. Use the typed DA error kind to make filtering easy.
+				await db
+					.update(table.hostingAccount)
+					.set({
+						status: 'failed',
+						suspendReason:
+							err instanceof DirectAdminApiError
+								? `da_${err.kind}`
+								: 'da_create_failed',
+						updatedAt: new Date()
+					})
+					.where(eq(table.hostingAccount.id, accountId))
+					.catch(() => {});
+				return { ok: false as const, error: err };
+			}
 		});
-	});
 
-	logInfo('directadmin', `Auto-provisioned DA account ${daUsername} for client ${params.clientId}`, {
-		tenantId: params.tenantId,
-		metadata: { hostingAccountId: accountId, sessionId: params.sessionId, daServerId: server.id }
-	});
+		if (result.ok) {
+			logInfo('directadmin', `Auto-provisioned DA account ${daUsername} for client ${params.clientId}`, {
+				tenantId: params.tenantId,
+				metadata: { hostingAccountId: accountId, sessionId: params.sessionId, daServerId: server.id }
+			});
+			return { hostingAccountId: accountId, daUsername, domain, created: true };
+		}
 
-	return { hostingAccountId: accountId, daUsername, domain, created: true };
+		const err = result.error;
+		if (
+			err instanceof DirectAdminApiError &&
+			err.kind === 'username_exists' &&
+			attempt < MAX_RETRIES
+		) {
+			logWarning(
+				'directadmin',
+				`DA username collision auto-provision — retry ${attempt + 1}/${MAX_RETRIES}`,
+				{
+					tenantId: params.tenantId,
+					metadata: {
+						hostingAccountId: accountId,
+						oldUsername: daUsername,
+						sessionId: params.sessionId
+					}
+				}
+			);
+			daUsername = generateDaUsername(seed);
+			daPassword = generateDaPassword();
+			continue;
+		}
+		throw err;
+	}
+
+	// Unreachable safety net — loop returns or throws.
+	throw new Error('provisionDirectAdminAccount: exhausted retries');
 }
