@@ -4,25 +4,40 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { eq } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 
-export type EmailType =
-	| 'invitation'
-	| 'invoice'
-	| 'magic-link'
-	| 'admin-magic-link'
-	| 'password-reset'
-	| 'task-assignment'
-	| 'task-update'
-	| 'task-reminder'
-	| 'task-client-notification'
-	| 'daily-reminder'
-	| 'contract-signing'
-	| 'invoice-paid'
-	| 'invoice-overdue-reminder'
-	| 'notification_alert'
-	| 'report'
-	| 'ad_payment_alert'
-	| 'ad_payment_digest'
-	| 'package-request';
+export const EMAIL_TYPES = [
+	'invitation',
+	'invoice',
+	'magic-link',
+	'admin-magic-link',
+	'password-reset',
+	'task-assignment',
+	'task-update',
+	'task-reminder',
+	'task-client-notification',
+	'daily-reminder',
+	'contract-signing',
+	'invoice-paid',
+	'invoice-overdue-reminder',
+	'notification_alert',
+	'report',
+	'ad_payment_alert',
+	'ad_payment_digest',
+	'package-request',
+	'hosting-account-created',
+	'hosting-suspended',
+	'hosting-reactivated',
+	'hosting-renewal-reminder',
+	'hosting-payment-failed',
+	'hosting-provisioning-failed',
+	'payment-succeeded',
+	'admin-payment-received'
+] as const;
+
+export type EmailType = typeof EMAIL_TYPES[number];
+
+export function isEmailType(value: string): value is EmailType {
+	return (EMAIL_TYPES as readonly string[]).includes(value);
+}
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
