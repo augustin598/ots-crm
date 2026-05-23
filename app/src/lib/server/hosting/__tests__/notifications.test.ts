@@ -284,9 +284,11 @@ describe('notifyHostingAccountCreated', () => {
 		// Account lookup returns nothing (WHERE tenantId=requested AND id=accountId fails)
 		pushSelect([]);
 
-		expect(notifyHostingAccountCreated('t-attacker', 'acc-victim')).rejects.toThrow();
+		await expect(notifyHostingAccountCreated('t-attacker', 'acc-victim')).rejects.toThrow();
 
-		// No insert / email / update should happen
-		// (Allow a microtask for rejects.toThrow to settle, then verify counts)
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		expect(renderCalls.length).toBe(0);
+		expect(updateCalls).toBe(0);
 	});
 });

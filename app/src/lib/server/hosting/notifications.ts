@@ -53,6 +53,10 @@ export async function notifyHostingAccountCreated(
 		throw new Error(msg);
 	}
 
+	if (!account.daCredentialsEncrypted) {
+		throw new Error(`hosting account ${accountId} has no daCredentialsEncrypted`);
+	}
+
 	// 2. Atomic dedupe: insert one row with the unique-key conflict resolving to no-op.
 	const dedupeKey = 'created';
 	const dedupeRowId = generateEventId();
@@ -62,7 +66,7 @@ export async function notifyHostingAccountCreated(
 			id: dedupeRowId,
 			tenantId,
 			hostingAccountId: accountId,
-			eventType: 'account-created',
+			eventType: 'created',
 			dedupeKey
 		})
 		.onConflictDoNothing({
@@ -110,9 +114,6 @@ export async function notifyHostingAccountCreated(
 		}
 
 		// 6. Decrypt DA credentials. Stored as encrypt(tenantId, JSON.stringify({ username, password })).
-		if (!account.daCredentialsEncrypted) {
-			throw new Error(`hosting account ${accountId} has no daCredentialsEncrypted`);
-		}
 		let creds: { username: string; password: string };
 		try {
 			creds = JSON.parse(decrypt(tenantId, account.daCredentialsEncrypted));
