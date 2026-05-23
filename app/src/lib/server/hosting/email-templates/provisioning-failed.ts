@@ -76,7 +76,10 @@ export async function render(
 	const escAttempt = escapeHtml(String(input.attemptNumber));
 	const escUrl = escapeHtml(input.adminCrmUrl);
 
-	const subject = `\u{1F6A8} Provisioning DA eșuat — ${input.domain} (${input.tenantSlug}) — ${input.reason}`;
+	// Subject interpolations escaped to keep parity with the body and to defend
+	// against any downstream consumer (admin CRM email-log viewer, log files
+	// rendered as HTML) that may render the subject in an HTML context.
+	const subject = `\u{1F6A8} Provisioning DA eșuat — ${escDomain} (${escSlug}) — ${escReason}`;
 
 	// Brand fetched ONCE so the body can reuse themeColor for the CTA button
 	// and the shell can skip a second DB read.

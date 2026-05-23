@@ -62,4 +62,10 @@ describe('provisioning-failed template', () => {
 		// Emoji rune `\u{1F6A8}` (🚨)
 		expect(subject.startsWith('\u{1F6A8}')).toBe(true);
 	});
+
+	test('subject escapes HTML special chars in interpolated fields', async () => {
+		const { subject } = await render({ ...fixture, domain: '<x>.evil' });
+		expect(subject).not.toContain('<x>.evil');
+		expect(subject).toContain('&lt;x&gt;.evil');
+	});
 });
