@@ -203,6 +203,10 @@ export const onInvoiceStatusChanged: HookHandler<InvoiceStatusChangedEvent> = as
 										suspendReason,
 										autoSuspendedByInvoiceId: invoiceId,
 										suspendedAt: new Date(),
+										// Clear any prior reactivatedAt so the column reflects
+										// "most recent reactivation" — not stale data from a
+										// previous suspend → reactivate → re-suspend cycle.
+										reactivatedAt: null,
 										updatedAt: new Date()
 									})
 									.where(eq(table.hostingAccount.id, account.id));
