@@ -222,7 +222,21 @@ export async function handlePaymentFailed(invoice: Stripe.Invoice) {
 			)
 		)
 		.limit(1);
-	if (!account) return;
+	if (!account) {
+		// Subscription exists but no hosting account linked — likely a
+		// misconfiguration (subscription created without DA provisioning, or
+		// account row deleted while subscription is still active). Log so ops
+		// can investigate "why didn't this customer get a payment-failed email?"
+		logInfo('directadmin', 'invoice.payment_failed — no hosting account linked to subscription', {
+			tenantId: clientRow.tenantId,
+			metadata: {
+				stripeInvoiceId: invoice.id,
+				subscriptionId,
+				clientId: clientRow.id
+			}
+		});
+		return;
+	}
 
 	// Resolve the CRM-internal invoice id from Stripe metadata. Convention is
 	// `crmInvoiceId` (see post-payment/emit-keez-invoice.ts where we stamp it
