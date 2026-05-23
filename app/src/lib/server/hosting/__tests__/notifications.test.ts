@@ -1,9 +1,13 @@
 import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test';
 
 // Mock SvelteKit virtual modules BEFORE importing the module under test
-// (which transitively imports $lib/server/db → $env/dynamic/private).
+// (which transitively imports $lib/server/db → $env/dynamic/private). We
+// also mock the public env because the eager-capture of $lib/server/email
+// below pulls in `$env/dynamic/public` transitively.
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
+mock.module('$env/dynamic/public', () => ({ env: {} }));
+mock.module('$env/static/public', () => ({}));
 
 // ---------------------------------------------------------------------------
 // SELECT chain mocking (same pattern as notifications-helpers.test.ts)
@@ -100,6 +104,15 @@ mock.module('$lib/server/db', () => ({
 	}
 }));
 
+// CRITICAL: eagerly load the real schema module BEFORE mocking it so
+// downstream test files (e.g. stripe/__tests__/notifications.test.ts) that
+// import schema names this file doesn't mock (e.g. paymentEmailEvent) can
+// still link-resolve. Bun's mock.module() overlays — once the real module
+// is cached, our mock replaces the names we provide and leaves everything
+// else intact. We do not need to use the captured value — the side-effect
+// of loading the module into Bun's cache is what we want.
+await import('$lib/server/db/schema');
+
 mock.module('$lib/server/db/schema', () => ({
 	hostingAccount: {
 		id: 'id',
@@ -151,6 +164,26 @@ mock.module('$lib/server/db/schema', () => ({
 		currency: 'currency'
 	}
 }));
+
+// CRITICAL: eagerly load the REAL $lib/server/email module BEFORE mocking
+// it below. Without this, Bun installs our mock against a never-loaded
+// module — and any other file that does `import { sendInvoicePaidEmail }
+// from '$lib/server/email'` (e.g. stripe/__tests__/notifications.test.ts in
+// the same Bun process) will hit a link-time SyntaxError because the mock's
+// export set doesn't include those names.
+//
+// Once the real module is loaded, our later `mock.module(...)` acts as an
+// OVERLAY — it replaces the names we provide and leaves everything else
+// intact. The afterAll restore then re-overlays with the captured real
+// implementations so downstream files see the original module.
+const realEmailModule = await import('$lib/server/email');
+const capturedEmailModule = {
+	sendWithPersistence: realEmailModule.sendWithPersistence,
+	fetchTenantBrand: realEmailModule.fetchTenantBrand,
+	resolveFromEmail: realEmailModule.resolveFromEmail,
+	renderBrandedEmail: realEmailModule.renderBrandedEmail,
+	renderCtaButton: realEmailModule.renderCtaButton
+};
 
 // Mock collaborators. The mock invokes buildMail() so the assembled message
 // (from / to / subject / html / attachments) is asserted in tests — otherwise
@@ -393,6 +426,10 @@ afterAll(() => {
 	mock.module('../email-templates/renewal-reminder', () => capturedRenewalReminder);
 	mock.module('../email-templates/payment-failed', () => capturedPaymentFailed);
 	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
+	// Restore the real $lib/server/email overlay so downstream files (e.g.
+	// stripe/__tests__/notifications.test.ts) see the original sendWithPersistence
+	// etc. instead of our stubs.
+	mock.module('$lib/server/email', () => capturedEmailModule);
 });
 
 describe('notifyHostingAccountCreated', () => {

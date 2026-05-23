@@ -1,7 +1,11 @@
 import { db } from '$lib/server/db';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { paymentEmailEvent, invoice as invoiceTable } from '$lib/server/db/schema';
+import {
+	paymentEmailEvent,
+	invoice as invoiceTable,
+	invoiceSettings
+} from '$lib/server/db/schema';
 import { sendInvoicePaidEmail, getNotificationRecipients } from '$lib/server/email';
 import { logInfo, logError } from '$lib/server/logger';
 
@@ -41,6 +45,43 @@ export async function notifyPaymentSucceeded(
 	tenantId: string,
 	invoiceId: string
 ): Promise<void> {
+	// 0. Honor tenant opt-out: skip silently if invoice emails are disabled or
+	//    if the per-event "paid confirmation" toggle is off. The legacy
+	//    invoice.paid hook (now disabled — see hooks/email-notifications.ts)
+	//    gated on the same two toggles, so we preserve the behavior — admins
+	//    who turned off paid-confirmation emails in settings must not start
+	//    receiving them again just because the trigger source moved to the
+	//    Stripe post-payment dispatcher. We run this BEFORE the dedupe insert
+	//    so the dedupe slot isn't consumed when the toggle blocks the send;
+	//    a future toggle-flip should then be able to email retroactively if
+	//    the same invoice succeeds payment again (rare but possible via
+	//    Stripe's retry behavior).
+	const [settings] = await db
+		.select({
+			invoiceEmailsEnabled: invoiceSettings.invoiceEmailsEnabled,
+			paidConfirmationEmailEnabled: invoiceSettings.paidConfirmationEmailEnabled
+		})
+		.from(invoiceSettings)
+		.where(eq(invoiceSettings.tenantId, tenantId))
+		.limit(1);
+	const masterEnabled = settings?.invoiceEmailsEnabled ?? true;
+	const paidEnabled = settings?.paidConfirmationEmailEnabled ?? true;
+	if (!masterEnabled || !paidEnabled) {
+		logInfo(
+			'hosting-email',
+			`payment-succeeded suppressed by tenant settings for invoice ${invoiceId}`,
+			{
+				tenantId,
+				metadata: {
+					invoiceId,
+					invoiceEmailsEnabled: masterEnabled,
+					paidConfirmationEmailEnabled: paidEnabled
+				}
+			}
+		);
+		return;
+	}
+
 	// 1. Atomic dedupe — lifetime per invoice. Insert FIRST so a concurrent
 	//    dispatcher retry can't both pass the check and double-send.
 	const dedupeKey = `payment-succeeded:${invoiceId}`;

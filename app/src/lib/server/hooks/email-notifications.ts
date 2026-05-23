@@ -1,4 +1,3 @@
-import { getHooksManager } from '../plugins/hooks';
 import { logInfo } from '$lib/server/logger';
 
 /**
@@ -7,6 +6,12 @@ import { logInfo } from '$lib/server/logger';
  * Idempotent: a globalThis symbol prevents double-registration across HMR or
  * accidental double-calls. Handlers are inline arrow functions (new reference
  * each call), so the hooks manager's Set can't dedupe them — this guard does.
+ *
+ * Currently a no-op (the legacy invoice.paid listener was disabled in Task 13
+ * — see comment block below). Lazy singleton init of the hooks manager is
+ * handled by `notification-hooks.ts` which registers the in-app bell/badge
+ * listener. We keep this function as a registration seam so re-adding an
+ * email listener later doesn't require touching call sites.
  */
 const EMAIL_HOOKS_REGISTERED = Symbol.for('ots_crm_email_notification_hooks_registered');
 const gt = globalThis as unknown as Record<symbol, boolean>;
@@ -14,11 +19,6 @@ const gt = globalThis as unknown as Record<symbol, boolean>;
 export function registerEmailNotificationHooks(): void {
 	if (gt[EMAIL_HOOKS_REGISTERED]) return;
 	gt[EMAIL_HOOKS_REGISTERED] = true;
-
-	// Touch the hooks manager so a future listener registration here doesn't
-	// look out-of-place — and so this function's signature doesn't drift just
-	// because we currently have zero active listeners.
-	void getHooksManager();
 
 	// ─────────────────────────────────────────────────────────────────────────
 	// DISABLED 2026-05-23 (Task 13, hosting-email-flow): payment-succeeded
