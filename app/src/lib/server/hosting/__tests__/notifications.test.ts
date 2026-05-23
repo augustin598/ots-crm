@@ -135,7 +135,16 @@ mock.module('$lib/server/db/schema', () => ({
 	tenantUser: { id: 'id', tenantId: 'tenant_id', userId: 'user_id', role: 'role', status: 'status' },
 	user: { id: 'id', email: 'email' },
 	tenant: { id: 'id', slug: 'slug', adminContactEmail: 'admin_contact_email' },
-	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' }
+	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' },
+	invoice: {
+		id: 'id',
+		tenantId: 'tenant_id',
+		invoiceNumber: 'invoice_number',
+		issueDate: 'issue_date',
+		dueDate: 'due_date',
+		totalAmount: 'total_amount',
+		currency: 'currency'
+	}
 }));
 
 // Mock collaborators. The mock invokes buildMail() so the assembled message
@@ -209,6 +218,8 @@ const realAccountCreated = await import('../email-templates/account-created');
 const capturedAccountCreated = { render: realAccountCreated.render };
 const realProvisioningFailed = await import('../email-templates/provisioning-failed');
 const capturedProvisioningFailed = { render: realProvisioningFailed.render };
+const realSuspended = await import('../email-templates/suspended');
+const capturedSuspended = { render: realSuspended.render };
 const realNotificationsHelpers = await import('../notifications-helpers');
 const capturedNotificationsHelpers = {
 	resolveCustomerEmail: realNotificationsHelpers.resolveCustomerEmail,
@@ -233,6 +244,17 @@ mock.module('../email-templates/provisioning-failed', () => ({
 		return {
 			subject: '🚨 Provisioning DA eșuat — example.ro (ots) — da_username_exists',
 			html: '<p>pf body</p>'
+		};
+	}
+}));
+
+const renderSuspendedCalls: unknown[] = [];
+mock.module('../email-templates/suspended', () => ({
+	render: async (input: unknown) => {
+		renderSuspendedCalls.push(input);
+		return {
+			subject: '\u{26A0}️ Contul de hosting suspendat — factură neachitată (example.ro)',
+			html: '<p>suspended body</p>'
 		};
 	}
 }));
@@ -274,9 +296,8 @@ mock.module('../notifications-helpers', () => {
 });
 
 // Now import the function under test
-const { notifyHostingAccountCreated, notifyHostingProvisioningFailed } = await import(
-	'../notifications'
-);
+const { notifyHostingAccountCreated, notifyHostingProvisioningFailed, notifyHostingSuspended } =
+	await import('../notifications');
 
 function pushSelect(rows: unknown[]) {
 	selectQueue.push({ rows });
@@ -298,6 +319,7 @@ beforeEach(() => {
 	loggerCalls.warning.length = 0;
 	renderCalls.length = 0;
 	renderPFCalls.length = 0;
+	renderSuspendedCalls.length = 0;
 	resolveCustomerEmailReturn = {
 		email: 'client@example.ro',
 		name: 'Acme SRL',
@@ -313,6 +335,7 @@ beforeEach(() => {
 afterAll(() => {
 	mock.module('../email-templates/account-created', () => capturedAccountCreated);
 	mock.module('../email-templates/provisioning-failed', () => capturedProvisioningFailed);
+	mock.module('../email-templates/suspended', () => capturedSuspended);
 	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
 });
 
@@ -629,5 +652,130 @@ describe('notifyHostingProvisioningFailed', () => {
 		expect(sendWithPersistenceCalls.length).toBe(0);
 		// Error logged for ops visibility
 		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// notifyHostingSuspended (per-invoice 24h day-bucket dedupe)
+// ---------------------------------------------------------------------------
+describe('notifyHostingSuspended', () => {
+	test('sends suspension email with invoice details on first call', async () => {
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 2. Invoice lookup
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't-1',
+				invoiceNumber: 'INV-2026-0123',
+				issueDate: new Date('2026-05-15T00:00:00Z'),
+				dueDate: new Date('2026-05-15T00:00:00Z'),
+				totalAmount: 9950,
+				currency: 'RON'
+			}
+		]);
+		// 3. daServer lookup (resolveCustomerEmail is mocked at module level)
+		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
+		// 4. Tenant lookup (for slug → payUrl)
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 5. Atomic dedupe insert → returns row (insert succeeded)
+		pushInsert([{ id: 'evt-susp-1' }]);
+		// 6. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingSuspended('t-1', 'acc-1', 'inv-1');
+
+		// Template rendered once with the right fields
+		expect(renderSuspendedCalls.length).toBe(1);
+		const renderInput = renderSuspendedCalls[0] as Record<string, unknown>;
+		expect(renderInput.tenantId).toBe('t-1');
+		expect(renderInput.domain).toBe('example.ro');
+		expect(renderInput.clientName).toBe('Acme SRL');
+		expect(renderInput.invoiceNumber).toBe('INV-2026-0123');
+		expect(renderInput.amountDue).toBe(9950);
+		expect(renderInput.currency).toBe('RON');
+		expect(renderInput.payUrl).toContain('/ots/invoices/inv-1/pay');
+
+		// One email_log row pre-created
+		expect(logEmailAttemptCalls.length).toBe(1);
+		const attempt = logEmailAttemptCalls[0] as Record<string, unknown>;
+		expect(attempt.tenantId).toBe('t-1');
+		expect(attempt.toEmail).toBe('client@example.ro');
+		expect(attempt.emailType).toBe('hosting-suspended');
+		// Day-bucket dedupe → scheduler replay no-ops → payload: null
+		expect(attempt.payload).toBeNull();
+
+		// Email sent once with _retryOfLogId set
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		const sendCtx = sendWithPersistenceCalls[0].ctx as Record<string, unknown>;
+		expect(sendCtx._retryOfLogId).toBe('log-id-1');
+		expect(sendCtx.toEmail).toBe('client@example.ro');
+		expect(sendCtx.emailType).toBe('hosting-suspended');
+		expect(sendCtx.payload).toBeNull();
+
+		// buildMail() result asserted — `from` must be set
+		const mail = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mail).toBeDefined();
+		expect(mail.from).toBeDefined();
+		expect(mail.from as string).toContain('@');
+		expect(mail.from as string).toContain('OTS');
+		expect(mail.to).toBe('client@example.ro');
+		expect(mail.subject).toBeDefined();
+		expect(mail.html).toBeDefined();
+
+		// Dedupe row updated with the emailLogId
+		expect(updateCalls).toBe(1);
+	});
+
+	test('same-day second call is dedupe no-op', async () => {
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 2. Invoice lookup
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't-1',
+				invoiceNumber: 'INV-2026-0123',
+				issueDate: new Date('2026-05-15T00:00:00Z'),
+				dueDate: new Date('2026-05-15T00:00:00Z'),
+				totalAmount: 9950,
+				currency: 'RON'
+			}
+		]);
+		// 3. daServer lookup
+		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
+		// 4. Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 5. onConflictDoNothing returns [] → dedupe hit
+		pushInsert([]);
+
+		await notifyHostingSuspended('t-1', 'acc-1', 'inv-1');
+
+		// No template render past dedupe, no log, no send, no update
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		expect(updateCalls).toBe(0);
+		// Info log for skip
+		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
 	});
 });

@@ -7,6 +7,7 @@ import { createDAClient } from './factory';
 import { runWithAudit, withAccountLock } from './audit';
 import { DBSyncFailedError } from './errors';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { notifyHostingSuspended } from '$lib/server/hosting/notifications';
 
 const PLUGIN_NAME = 'directadmin';
 
@@ -142,10 +143,23 @@ export const onInvoiceStatusChanged: HookHandler<InvoiceStatusChangedEvent> = as
 
 	if (accounts.length === 0) return;
 
+	// 10-DAY GRACE: a freshly-overdue invoice doesn't suspend immediately.
+	// Customer needs a window to pay; the email reminder cadence carries them.
+	// dueDate is on the invoice event payload — null/invalid is treated as
+	// "no due date set" which means we have no basis to count days → skip.
+	const daysOverdue = computeDaysOverdue(event.invoice.dueDate, new Date());
+	if (daysOverdue < 10) {
+		logInfo('directadmin', `suspend skipped — within 10-day grace`, {
+			tenantId,
+			metadata: { invoiceId, invoiceNumber, daysOverdue }
+		});
+		return;
+	}
+
 	logInfo(
 		'directadmin',
 		`suspending ${accounts.length} account(s) for overdue invoice`,
-		{ tenantId, metadata: { invoiceId, invoiceNumber, clientId, linkedHostingAccountId } }
+		{ tenantId, metadata: { invoiceId, invoiceNumber, clientId, linkedHostingAccountId, daysOverdue } }
 	);
 
 	const suspendReason = `Overdue invoice ${invoiceNumber}`;
@@ -185,6 +199,7 @@ export const onInvoiceStatusChanged: HookHandler<InvoiceStatusChangedEvent> = as
 										status: 'suspended',
 										suspendReason,
 										autoSuspendedByInvoiceId: invoiceId,
+										suspendedAt: new Date(),
 										updatedAt: new Date()
 									})
 									.where(eq(table.hostingAccount.id, account.id));
@@ -198,6 +213,20 @@ export const onInvoiceStatusChanged: HookHandler<InvoiceStatusChangedEvent> = as
 							}
 						}
 					);
+
+					// Fire-and-forget customer notification.
+					// Day-bucket dedupe inside notifyHostingSuspended makes same-day
+					// retries safe; an error here MUST NOT roll back the suspend.
+					notifyHostingSuspended(tenantId, account.id, invoiceId).catch((err) => {
+						logError('hosting-email', 'suspended email dispatch failed', {
+							tenantId,
+							metadata: {
+								hostingAccountId: account.id,
+								invoiceId,
+								error: err instanceof Error ? err.message : String(err)
+							}
+						});
+					});
 				} catch (e) {
 					// runWithAudit already logged + persisted the failure; swallow to keep other accounts processing
 					const { message } = serializeError(e);
@@ -370,3 +399,15 @@ export const onInvoicePaid: HookHandler<InvoicePaidEvent> = async (event) => {
 		)
 	);
 };
+
+/**
+ * Calendar days between `dueDate` and `now`, floored. Returns 0 for null or
+ * invalid dueDate — caller treats `< 10` as "still in grace" so a missing
+ * dueDate conservatively keeps the account active (no basis to count days).
+ */
+function computeDaysOverdue(dueDate: Date | string | null, now: Date): number {
+	if (!dueDate) return 0;
+	const d = typeof dueDate === 'string' ? new Date(dueDate) : dueDate;
+	if (Number.isNaN(d.getTime())) return 0;
+	return Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+}

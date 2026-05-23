@@ -6,7 +6,8 @@ import {
 	hostingEmailEvent,
 	daServer,
 	tenant as tenantTable,
-	emailSettings as emailSettingsTable
+	emailSettings as emailSettingsTable,
+	invoice as invoiceTable
 } from '$lib/server/db/schema';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
@@ -14,10 +15,12 @@ import { logEmailAttempt } from '$lib/server/email-logger';
 import {
 	resolveCustomerEmail,
 	resolveAdminRecipients,
-	NoAdminRecipientError
+	NoAdminRecipientError,
+	dayBucketEET
 } from './notifications-helpers';
 import { render as renderAccountCreated } from './email-templates/account-created';
 import { render as renderProvisioningFailed } from './email-templates/provisioning-failed';
+import { render as renderSuspended } from './email-templates/suspended';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -456,3 +459,248 @@ export async function notifyHostingProvisioningFailed(
 }
 // Re-export for downstream consumers that need to differentiate admin-config bugs.
 export { NoAdminRecipientError };
+
+/**
+ * Format a Date (or ISO string) as `DD.MM.YYYY` (Romanian locale).
+ * Falls back to an em-dash when the input is null or invalid.
+ */
+function formatDateRo(d: Date | string | null): string {
+	if (!d) return '—';
+	const date = typeof d === 'string' ? new Date(d) : d;
+	if (Number.isNaN(date.getTime())) return '—';
+	return date.toLocaleDateString('ro-RO', {
+		day: '2-digit',
+		month: '2-digit',
+		year: 'numeric'
+	});
+}
+
+/**
+ * Customer alert dispatched when a hosting account is auto-suspended for an
+ * unpaid invoice. Once per (invoice, calendar-day) — the 24h day-bucket
+ * dedupe rolls over at local midnight (Europe/Bucharest).
+ *
+ * Dedupe strategy (DIFFERENT from welcome AND provisioning-failed):
+ *   - `dedupeKey = \`suspended:${invoiceId}:${dayBucketEET()}\``
+ *   - Atomic INSERT with onConflictDoNothing on the unique
+ *     (tenantId, hostingAccountId, dedupeKey) index. Same-day second call →
+ *     insert no-ops → early return.
+ *   - Midnight rolls into a new bucket → a new email may fire if the suspend
+ *     hook re-emits. Acceptable per spec (rolling daily reminder cadence).
+ *
+ * Order matters:
+ *   - Recipient + DA server + invoice + tenant resolution happens BEFORE the
+ *     dedupe insert so transient DB errors don't leak a dedupe row (parallel
+ *     to Task 6 review fixes). A leaked row would only block for the rest of
+ *     the day (less critical than account-created's lifetime lock), but we
+ *     keep the pattern consistent.
+ *
+ * Why `payload: null`: the day-bucket dedupe already suppresses any
+ * scheduler replay within the same local day. Mirrors notifyHostingAccountCreated.
+ *
+ * Errors:
+ *   - Missing account or invoice → log + throw (caller decides retry).
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyHostingSuspended(
+	tenantId: string,
+	accountId: string,
+	invoiceId: string
+): Promise<void> {
+	// 1. Tenant-scoped account lookup. Cross-tenant returns 0 rows → throws.
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	// 2. Tenant-scoped invoice lookup. Cross-tenant returns 0 rows → throws.
+	const [invoiceRow] = await db
+		.select({
+			id: invoiceTable.id,
+			tenantId: invoiceTable.tenantId,
+			invoiceNumber: invoiceTable.invoiceNumber,
+			issueDate: invoiceTable.issueDate,
+			dueDate: invoiceTable.dueDate,
+			totalAmount: invoiceTable.totalAmount,
+			currency: invoiceTable.currency
+		})
+		.from(invoiceTable)
+		.where(and(eq(invoiceTable.id, invoiceId), eq(invoiceTable.tenantId, tenantId)))
+		.limit(1);
+
+	if (!invoiceRow) {
+		const msg = `invoice ${invoiceId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId, metadata: { accountId } });
+		throw new Error(msg);
+	}
+
+	try {
+		// 3. Resolve customer recipient (3-tier fallback in helpers).
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		// 4. Load DA server (tenant-scoped) — kept for consistency with siblings
+		//    and to assert existence early so we don't insert a dedupe row on a
+		//    half-resolved tenant.
+		const [server] = await db
+			.select({
+				id: daServer.id,
+				tenantId: daServer.tenantId,
+				hostname: daServer.hostname
+			})
+			.from(daServer)
+			.where(and(eq(daServer.id, account.daServerId), eq(daServer.tenantId, tenantId)))
+			.limit(1);
+
+		if (!server) {
+			throw new Error(
+				`DA server ${account.daServerId} not found for tenant ${tenantId} (account ${accountId})`
+			);
+		}
+
+		// 5. Tenant slug lookup → payUrl construction.
+		const [tenantRow] = await db
+			.select({ id: tenantTable.id, slug: tenantTable.slug })
+			.from(tenantTable)
+			.where(eq(tenantTable.id, tenantId))
+			.limit(1);
+
+		if (!tenantRow) {
+			throw new Error(`tenant ${tenantId} not found`);
+		}
+
+		// 6. Build payUrl + render template.
+		const payUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/invoices/${invoiceId}/pay`;
+		// totalAmount stored in CENTS per schema (`integer('total_amount') // in cents`).
+		// Fall back to 0 when null — the template renders `0.00 RON`.
+		const amountDue = invoiceRow.totalAmount ?? 0;
+		// Currency narrowing — schema is free-form text but our templates only
+		// support these three. Anything else is normalized to RON (consistent
+		// with the rest of the CRM's defaults).
+		const currency = (
+			invoiceRow.currency === 'EUR' || invoiceRow.currency === 'USD' ? invoiceRow.currency : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
+		const { subject, html } = await renderSuspended({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			invoiceNumber: invoiceRow.invoiceNumber,
+			invoiceDate: formatDateRo(invoiceRow.issueDate),
+			amountDue,
+			currency,
+			payUrl,
+			supportEmail: 'support@onetopsolution.ro'
+		});
+
+		// 7. Atomic day-bucket dedupe insert.
+		const dedupeKey = `suspended:${invoiceId}:${dayBucketEET()}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'suspended',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			// 8. Dedupe hit — same invoice already sent today.
+			logInfo(
+				'hosting-email',
+				`dedupe skip suspended for account ${accountId} (invoice ${invoiceId})`,
+				{ tenantId }
+			);
+			return;
+		}
+
+		const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+		// 9. Pre-create email_log row so we know its ID for the dedupe linkage.
+		//    payload: null — scheduler replay would hit the day-bucket dedupe and no-op.
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: customer.email,
+			subject,
+			emailType: 'hosting-suspended',
+			htmlBody: html,
+			payload: null
+		});
+
+		// 10. Send via the outbox; pass _retryOfLogId so it reuses our row.
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-suspended',
+				metadata: { hostingAccountId: accountId, invoiceId },
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
+		);
+
+		// 11. Link the dedupe row to the email_log row for audit trail.
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId })
+			.where(eq(hostingEmailEvent.id, newDedupeId));
+
+		logInfo(
+			'hosting-email',
+			`sent suspended alert for account ${accountId} (invoice ${invoiceId})`,
+			{ tenantId, metadata: { emailLogId, toEmail: customer.email } }
+		);
+	} catch (err) {
+		logError('hosting-email', `notifyHostingSuspended failed for account ${accountId}`, {
+			tenantId,
+			metadata: { invoiceId },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+		throw err;
+	}
+}
