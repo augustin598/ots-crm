@@ -205,7 +205,7 @@ export function renderBrandedEmail(opts: BrandedEmailOptions): string {
 /**
  * CTA button (primary) — uses tenant theme color.
  */
-function renderCtaButton(href: string, label: string, themeColor: string): string {
+export function renderCtaButton(href: string, label: string, themeColor: string): string {
 	return `<div style="text-align: center; margin: 24px 0;">
 		<a href="${href}" style="background-color: ${themeColor}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 14px;">${label}</a>
 	</div>`;

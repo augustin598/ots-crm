@@ -6,11 +6,13 @@ mock.module('$env/static/private', () => ({}));
 mock.module('$lib/server/db', () => ({ db: {} as any }));
 mock.module('$lib/server/db/schema', () => ({}));
 mock.module('$lib/server/email', () => ({
-	renderBrandedEmail: ({ title, bodyHtml }: { title: string; bodyHtml: string }) =>
-		`<html><head><title>${title}</title></head><body>${bodyHtml}</body></html>`,
+	renderBrandedEmail: ({ title, bodyHtml, previewTitle }: { title: string; bodyHtml: string; previewTitle?: string }) =>
+		`<html><head><title>${previewTitle ?? title}</title></head><body>${bodyHtml}</body></html>`,
 	fetchTenantBrand: async () => ({
 		tenantName: 'OTS', themeColor: '#0ea5e9', logoAttachment: null, headerLogoHtml: '',
 	}),
+	renderCtaButton: (href: string, label: string, _themeColor: string) =>
+		`<a href="${href}">${label}</a>`,
 }));
 
 const { render } = await import('../account-created');
@@ -53,5 +55,17 @@ describe('account-created template', () => {
 		expect(html).not.toContain('<script>');
 		expect(html).toContain('&lt;script&gt;');
 		expect(html).toContain('A&amp;B');
+	});
+
+	test('previewTitle escapes domain (XSS via <title> tag)', async () => {
+		const { html } = await render({ ...fixture, domain: '</title><script>alert(1)</script>.ro' });
+		// Extract the <title>...</title> block and verify it has no raw <script>
+		const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/);
+		expect(titleMatch).not.toBeNull();
+		const titleContent = titleMatch![1];
+		expect(titleContent).not.toContain('<script>');
+		expect(titleContent).not.toContain('</title>');
+		// Confirm the dangerous chars got escaped instead
+		expect(titleContent).toContain('&lt;script&gt;');
 	});
 });
