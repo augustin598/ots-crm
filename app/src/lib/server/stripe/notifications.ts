@@ -4,9 +4,22 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import {
 	paymentEmailEvent,
 	invoice as invoiceTable,
-	invoiceSettings
+	invoiceLineItem,
+	invoiceSettings,
+	tenant as tenantTable,
+	client as clientTable,
+	emailSettings as emailSettingsTable
 } from '$lib/server/db/schema';
-import { sendInvoicePaidEmail, getNotificationRecipients } from '$lib/server/email';
+import {
+	sendInvoicePaidEmail,
+	getNotificationRecipients,
+	sendWithPersistence,
+	fetchTenantBrand,
+	resolveFromEmail
+} from '$lib/server/email';
+import { logEmailAttempt } from '$lib/server/email-logger';
+import { resolveAdminRecipients } from '$lib/server/hosting/notifications-helpers';
+import { render as renderAdminPaymentReceived } from './email-templates/admin-payment-received';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -150,6 +163,258 @@ export async function notifyPaymentSucceeded(
 		});
 	} catch (err) {
 		logError('hosting-email', `notifyPaymentSucceeded failed for invoice ${invoiceId}`, {
+			tenantId,
+			metadata: {
+				invoiceId,
+				error: err instanceof Error ? err.message : String(err)
+			}
+		});
+		throw err;
+	}
+}
+
+/**
+ * Step status used by the admin-payment-received template + dispatcher hook.
+ *
+ * Free-form string (the schema stores `postPaymentStep.status` as TEXT), but
+ * the production code only writes the four values below. The notify path is
+ * permissive on input: an unrecognized status falls through the template's
+ * color map to gray, matching the "skipped" tone.
+ */
+type AdminStepStatus = 'success' | 'failed' | 'skipped' | 'pending';
+
+/**
+ * Admin alert dispatched at the END of the Stripe post-payment pipeline. Lists
+ * the per-step statuses (magic_link / keez_invoice / da_provision) color-coded
+ * so the on-call admin sees at a glance whether each step succeeded.
+ *
+ * Dedupe strategy (LIFETIME per CRM invoice):
+ *   - `dedupeKey = \`admin-payment-received:${invoiceId}\``
+ *   - Atomic INSERT with onConflictDoNothing on the unique
+ *     (tenantId, invoiceId, dedupeKey) index on `payment_email_event`.
+ *   - Second call for the same invoice (e.g. Stripe webhook retry → dispatcher
+ *     re-runs) → insert no-ops → early return.
+ *   - Different invoice (e.g. next billing cycle for the same client) →
+ *     different dedupeKey → fresh email.
+ *
+ * Multi-recipient send (mirrors notifyHostingProvisioningFailed from Task 8):
+ *   - Loops over every admin/owner email from `resolveAdminRecipients`. Each
+ *     send gets its own `email_log` row so audit covers every attempt.
+ *   - Single dedupe row's `emailLogId` is "last writer wins" — acceptable for
+ *     internal alerts where the audit trail lives on `email_log` rows keyed
+ *     by `metadata.invoiceId`.
+ *
+ * Order matters:
+ *   - Resolution (invoice, tenant slug, line items, client) happens BEFORE the
+ *     dedupe insert so transient DB errors don't leak a dedupe row that would
+ *     forever block this lifetime-keyed event for this invoice (parallel to
+ *     Task 6/8/9/10/11/12 review fixes).
+ *
+ * Why `payload: null` (both logEmailAttempt and sendWithPersistence ctx): the
+ * lifetime dedupe already suppresses any scheduler replay for this invoice.
+ * If a scheduler replay fired this notifier with the same args, it would hit
+ * the dedupe row and no-op anyway. Mirrors the multi-recipient hosting siblings.
+ *
+ * Errors:
+ *   - Missing invoice → log + throw (caller decides retry).
+ *   - `NoAdminRecipientError` (admin config bug) bubbles up — the dispatcher
+ *     wrapper catches and logs without unwinding the broader pipeline.
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyAdminPaymentReceived(
+	tenantId: string,
+	invoiceId: string,
+	stepStatuses: Record<string, string>
+): Promise<void> {
+	// 1. Tenant-scoped invoice lookup. Cross-tenant returns 0 rows → throws.
+	const [inv] = await db
+		.select({
+			id: invoiceTable.id,
+			tenantId: invoiceTable.tenantId,
+			clientId: invoiceTable.clientId,
+			invoiceNumber: invoiceTable.invoiceNumber,
+			totalAmount: invoiceTable.totalAmount,
+			currency: invoiceTable.currency
+		})
+		.from(invoiceTable)
+		.where(and(eq(invoiceTable.id, invoiceId), eq(invoiceTable.tenantId, tenantId)))
+		.limit(1);
+
+	if (!inv) {
+		const msg = `invoice ${invoiceId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	try {
+		// 2. Tenant slug lookup → crmInvoiceUrl construction.
+		const [tenantRow] = await db
+			.select({ id: tenantTable.id, slug: tenantTable.slug })
+			.from(tenantTable)
+			.where(eq(tenantTable.id, tenantId))
+			.limit(1);
+
+		if (!tenantRow) {
+			throw new Error(`tenant ${tenantId} not found`);
+		}
+
+		// 3. Invoice line items → product descriptions list. Tenant scoping is
+		//    transitively enforced via the invoiceId filter (line items belong
+		//    to the invoice we already tenant-checked above).
+		const lineItems = await db
+			.select({ description: invoiceLineItem.description })
+			.from(invoiceLineItem)
+			.where(eq(invoiceLineItem.invoiceId, invoiceId));
+		const productDescriptions = lineItems.map((li) => li.description);
+
+		// 4. Client name resolution: businessName ?? name ?? email. The client
+		//    table's name field is the editable display name (always present),
+		//    businessName comes from Keez/ANAF (preferred when available),
+		//    email is the last-resort fallback when both are empty.
+		const [clientRow] = await db
+			.select({
+				id: clientTable.id,
+				businessName: clientTable.businessName,
+				name: clientTable.name,
+				email: clientTable.email
+			})
+			.from(clientTable)
+			.where(and(eq(clientTable.id, inv.clientId), eq(clientTable.tenantId, tenantId)))
+			.limit(1);
+
+		const clientName =
+			clientRow?.businessName?.trim() ||
+			clientRow?.name?.trim() ||
+			clientRow?.email ||
+			'(client necunoscut)';
+
+		// 5. Currency narrowing — schema is free-form text but our templates only
+		//    support these three. Anything else is normalized to RON.
+		const currency = (
+			inv.currency === 'EUR' || inv.currency === 'USD' ? inv.currency : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
+		// 6. totalAmount stored in CENTS per schema. Null falls back to 0.
+		const amount = inv.totalAmount ?? 0;
+
+		// 7. Resolve admin recipients (owner/admin users → tenant.adminContactEmail → OPS env).
+		const recipients = await resolveAdminRecipients(tenantId);
+
+		// 8. Build CRM URL + render template ONCE (reused across all recipients).
+		const crmInvoiceUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/invoices/${invoiceId}`;
+		const { subject, html } = await renderAdminPaymentReceived({
+			tenantId,
+			tenantSlug: tenantRow.slug,
+			clientName,
+			amount,
+			currency,
+			invoiceNumber: inv.invoiceNumber,
+			productDescriptions,
+			crmInvoiceUrl,
+			stepStatuses: stepStatuses as Record<string, AdminStepStatus>
+		});
+
+		// 9. Atomic lifetime dedupe insert (per invoice).
+		const dedupeKey = `admin-payment-received:${invoiceId}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(paymentEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				invoiceId,
+				eventType: 'admin-payment-received',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [paymentEmailEvent.tenantId, paymentEmailEvent.invoiceId, paymentEmailEvent.dedupeKey]
+			})
+			.returning({ id: paymentEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			// Dedupe hit — already sent for this invoice (lifetime).
+			logInfo('hosting-email', `dedupe skip admin-payment-received for invoice ${invoiceId}`, {
+				tenantId,
+				metadata: { invoiceId }
+			});
+			return;
+		}
+
+		const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+		// 10. Fetch brand once so every buildMail call reuses the same `from`-prefix
+		//     and logo attachment — avoids 1 DB read per recipient.
+		const brand = await fetchTenantBrand(tenantId);
+
+		// 11. Send to each recipient. Per-recipient email_log row so audit covers
+		//     every attempt. Partial-failure tradeoff: dedupe row is inserted
+		//     BEFORE the loop, so if recipient #1 sends successfully but #2 fails,
+		//     the lifetime dedupe blocks any subsequent fire for this invoice.
+		//     Acceptable because most tenants have ≤2 admins, recipient #1
+		//     already received the alert, and admin can re-send manually if
+		//     needed. Audit trail is preserved per recipient via the
+		//     per-recipient email_log rows.
+		let lastEmailLogId: string | undefined;
+		for (const email of recipients) {
+			// Pre-create email_log row so we know its ID for the audit linkage.
+			// payload: null — scheduler replay would hit the lifetime dedupe and no-op.
+			const emailLogId = await logEmailAttempt({
+				tenantId,
+				toEmail: email,
+				subject,
+				emailType: 'admin-payment-received',
+				htmlBody: html,
+				payload: null
+			});
+			lastEmailLogId = emailLogId;
+
+			await sendWithPersistence(
+				{
+					tenantId,
+					toEmail: email,
+					subject,
+					emailType: 'admin-payment-received',
+					metadata: { invoiceId, recipientType: 'admin' },
+					htmlBody: html,
+					payload: null,
+					_retryOfLogId: emailLogId
+				},
+				async () => {
+					const [settings] = await db
+						.select()
+						.from(emailSettingsTable)
+						.where(eq(emailSettingsTable.tenantId, tenantId))
+						.limit(1);
+					const fromEmail = resolveFromEmail(settings ?? null);
+					return {
+						from: `"${brand.tenantName}" <${fromEmail}>`,
+						to: email,
+						subject,
+						html,
+						...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+					};
+				}
+			);
+		}
+
+		// 12. Link the dedupe row to the LAST recipient's email_log row (last-writer-wins).
+		if (lastEmailLogId) {
+			await db
+				.update(paymentEmailEvent)
+				.set({ emailLogId: lastEmailLogId })
+				.where(eq(paymentEmailEvent.id, newDedupeId));
+		}
+
+		logInfo('hosting-email', `sent admin-payment-received for invoice ${invoiceId}`, {
+			tenantId,
+			metadata: {
+				invoiceId,
+				invoiceNumber: inv.invoiceNumber,
+				recipients: recipients.length
+			}
+		});
+	} catch (err) {
+		logError('hosting-email', `notifyAdminPaymentReceived failed for invoice ${invoiceId}`, {
 			tenantId,
 			metadata: {
 				invoiceId,

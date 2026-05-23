@@ -7,7 +7,7 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { sendOnboardingMagicLink } from './send-magic-link';
 import { provisionDirectAdminAccount } from './provision-da';
 import { emitKeezFiscalInvoice } from './emit-keez-invoice';
-import { notifyPaymentSucceeded } from '../notifications';
+import { notifyPaymentSucceeded, notifyAdminPaymentReceived } from '../notifications';
 
 type StepName = 'magic_link' | 'keez_invoice' | 'da_provision';
 type StepStatus = 'pending' | 'success' | 'failed' | 'skipped';
@@ -269,6 +269,71 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 		);
 		return result;
 	});
+
+	// 4. Admin alert with step statuses — best-effort, doesn't block the pipeline.
+	//    Reads from post_payment_step table (status was persisted by each runStep
+	//    call above) to capture the actual final statuses including any skipped/
+	//    failed steps. Fire-and-forget pattern matches notifyPaymentSucceeded
+	//    above — a notify failure must not mark the webhook event as `failed`
+	//    and trigger a Stripe retry storm.
+	//
+	//    invoiceId resolution: prefer the keez step's payload (where
+	//    emitKeezFiscalInvoice persisted invoiceId on success). When the keez
+	//    step was skipped (e.g. pre-condition failed like product_missing) or
+	//    failed, fall back to looking up the invoice by stripePaymentIntentId.
+	//    On a totally absent invoice (no Keez emission + no fallback hit), we
+	//    skip the admin notify with an info log — there's nothing to link to.
+	const stepStatusRows = await db
+		.select({ step: table.postPaymentStep.step, status: table.postPaymentStep.status })
+		.from(table.postPaymentStep)
+		.where(eq(table.postPaymentStep.stripeSessionId, ctx.sessionId));
+	const stepStatuses: Record<string, string> = {};
+	for (const row of stepStatusRows) {
+		stepStatuses[row.step] = row.status;
+	}
+
+	let invoiceIdForAdmin: string | null = null;
+	if (
+		keezResult &&
+		typeof keezResult === 'object' &&
+		'invoiceId' in keezResult &&
+		!('skipped' in keezResult)
+	) {
+		invoiceIdForAdmin = keezResult.invoiceId;
+	}
+	// Fallback: lookup by stripePaymentIntentId when the keez step skipped or
+	// failed but a prior pipeline run already emitted the invoice.
+	if (!invoiceIdForAdmin && ctx.stripePaymentIntentId) {
+		const [inv] = await db
+			.select({ id: table.invoice.id })
+			.from(table.invoice)
+			.where(
+				and(
+					eq(table.invoice.tenantId, ctx.tenantId),
+					eq(table.invoice.stripePaymentIntentId, ctx.stripePaymentIntentId)
+				)
+			)
+			.limit(1);
+		invoiceIdForAdmin = inv?.id ?? null;
+	}
+
+	if (invoiceIdForAdmin) {
+		notifyAdminPaymentReceived(ctx.tenantId, invoiceIdForAdmin, stepStatuses).catch((err) => {
+			logError('hosting-email', 'admin-payment-received notify failed', {
+				tenantId: ctx.tenantId,
+				metadata: {
+					sessionId: ctx.sessionId,
+					invoiceId: invoiceIdForAdmin,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		});
+	} else {
+		logInfo('hosting-email', 'skip admin-payment-received: no invoice found for session', {
+			tenantId: ctx.tenantId,
+			metadata: { sessionId: ctx.sessionId }
+		});
+	}
 
 	logInfo(
 		'directadmin',
