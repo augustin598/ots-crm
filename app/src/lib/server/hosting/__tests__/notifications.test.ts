@@ -229,6 +229,8 @@ const realReactivated = await import('../email-templates/reactivated');
 const capturedReactivated = { render: realReactivated.render };
 const realRenewalReminder = await import('../email-templates/renewal-reminder');
 const capturedRenewalReminder = { render: realRenewalReminder.render };
+const realPaymentFailed = await import('../email-templates/payment-failed');
+const capturedPaymentFailed = { render: realPaymentFailed.render };
 const realNotificationsHelpers = await import('../notifications-helpers');
 const capturedNotificationsHelpers = {
 	resolveCustomerEmail: realNotificationsHelpers.resolveCustomerEmail,
@@ -290,6 +292,17 @@ mock.module('../email-templates/renewal-reminder', () => ({
 	}
 }));
 
+const renderPaymentFailedCalls: unknown[] = [];
+mock.module('../email-templates/payment-failed', () => ({
+	render: async (input: unknown) => {
+		renderPaymentFailedCalls.push(input);
+		return {
+			subject: 'Plata pentru hosting example.ro a eșuat — acțiune necesară',
+			html: '<p>payment-failed body</p>'
+		};
+	}
+}));
+
 // resolveCustomerEmail + resolveAdminRecipients mocked at module level so tests
 // can inject return values directly instead of threading admin-resolver SQL
 // (innerJoin on tenant_user) through the chain queue.
@@ -332,7 +345,8 @@ const {
 	notifyHostingProvisioningFailed,
 	notifyHostingSuspended,
 	notifyHostingReactivated,
-	notifyHostingRenewalReminder
+	notifyHostingRenewalReminder,
+	notifyHostingPaymentFailed
 } = await import('../notifications');
 
 function pushSelect(rows: unknown[]) {
@@ -358,6 +372,7 @@ beforeEach(() => {
 	renderSuspendedCalls.length = 0;
 	renderReactivatedCalls.length = 0;
 	renderRenewalReminderCalls.length = 0;
+	renderPaymentFailedCalls.length = 0;
 	resolveCustomerEmailReturn = {
 		email: 'client@example.ro',
 		name: 'Acme SRL',
@@ -376,6 +391,7 @@ afterAll(() => {
 	mock.module('../email-templates/suspended', () => capturedSuspended);
 	mock.module('../email-templates/reactivated', () => capturedReactivated);
 	mock.module('../email-templates/renewal-reminder', () => capturedRenewalReminder);
+	mock.module('../email-templates/payment-failed', () => capturedPaymentFailed);
 	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
 });
 
@@ -1053,5 +1069,142 @@ describe('notifyHostingRenewalReminder', () => {
 		expect(updateCalls).toBe(0);
 		// Error logged for ops visibility
 		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// notifyHostingPaymentFailed (per-invoice LIFETIME dedupe — Stripe may retry
+// charge attempts multiple times; one customer email per invoice forever).
+// ---------------------------------------------------------------------------
+describe('notifyHostingPaymentFailed', () => {
+	test('sends payment-failed email with failure reason on first call', async () => {
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 2. Invoice lookup
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't-1',
+				invoiceNumber: 'INV-2026-0123',
+				issueDate: new Date('2026-05-15T00:00:00Z'),
+				dueDate: new Date('2026-05-15T00:00:00Z'),
+				totalAmount: 9950,
+				currency: 'RON'
+			}
+		]);
+		// 3. Tenant lookup (for slug → manualPayUrl)
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 4. Atomic dedupe insert → returns row (insert succeeded)
+		pushInsert([{ id: 'evt-pf-1' }]);
+		// 5. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingPaymentFailed(
+			't-1',
+			'acc-1',
+			'inv-1',
+			'Card expired',
+			'https://invoice.stripe.com/i/acct/pi'
+		);
+
+		// Template rendered once with the right fields
+		expect(renderPaymentFailedCalls.length).toBe(1);
+		const renderInput = renderPaymentFailedCalls[0] as Record<string, unknown>;
+		expect(renderInput.tenantId).toBe('t-1');
+		expect(renderInput.domain).toBe('example.ro');
+		expect(renderInput.clientName).toBe('Acme SRL');
+		expect(renderInput.invoiceNumber).toBe('INV-2026-0123');
+		expect(renderInput.amountDue).toBe(9950);
+		expect(renderInput.currency).toBe('RON');
+		expect(renderInput.failureReason).toBe('Card expired');
+		// updateMethodUrl uses the Stripe hosted URL passed in
+		expect(renderInput.updateMethodUrl).toBe('https://invoice.stripe.com/i/acct/pi');
+		// manualPayUrl points to the CRM invoice pay page
+		expect(renderInput.manualPayUrl).toContain('/ots/invoices/inv-1/pay');
+		// 10-day suspension grace surfaced
+		expect(renderInput.daysUntilSuspend).toBe(10);
+
+		// One email_log row pre-created
+		expect(logEmailAttemptCalls.length).toBe(1);
+		const attempt = logEmailAttemptCalls[0] as Record<string, unknown>;
+		expect(attempt.tenantId).toBe('t-1');
+		expect(attempt.toEmail).toBe('client@example.ro');
+		expect(attempt.emailType).toBe('hosting-payment-failed');
+		// Lifetime dedupe per invoice → scheduler replay no-ops → payload: null
+		expect(attempt.payload).toBeNull();
+
+		// Email sent once with _retryOfLogId set
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		const sendCtx = sendWithPersistenceCalls[0].ctx as Record<string, unknown>;
+		expect(sendCtx._retryOfLogId).toBe('log-id-1');
+		expect(sendCtx.toEmail).toBe('client@example.ro');
+		expect(sendCtx.emailType).toBe('hosting-payment-failed');
+		expect(sendCtx.payload).toBeNull();
+
+		// buildMail() result asserted — `from` must be set
+		const mail = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mail).toBeDefined();
+		expect(mail.from).toBeDefined();
+		expect(mail.from as string).toContain('@');
+		expect(mail.from as string).toContain('OTS');
+		expect(mail.to).toBe('client@example.ro');
+		expect(mail.subject).toBeDefined();
+		expect(mail.html).toBeDefined();
+
+		// Dedupe row updated with the emailLogId
+		expect(updateCalls).toBe(1);
+	});
+
+	test('same-invoice second call is dedupe no-op (lifetime)', async () => {
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 2. Invoice lookup
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't-1',
+				invoiceNumber: 'INV-2026-0123',
+				issueDate: new Date('2026-05-15T00:00:00Z'),
+				dueDate: new Date('2026-05-15T00:00:00Z'),
+				totalAmount: 9950,
+				currency: 'RON'
+			}
+		]);
+		// 3. Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 4. onConflictDoNothing returns [] → dedupe hit (lifetime per invoice)
+		pushInsert([]);
+
+		await notifyHostingPaymentFailed('t-1', 'acc-1', 'inv-1', 'Insufficient funds');
+
+		// Template was rendered before the dedupe insert (expensive-work-first
+		// pattern — see comment in notifications.ts about resolve-then-dedupe)
+		expect(renderPaymentFailedCalls.length).toBe(1);
+		// But NO email_log row created, NO send, NO update
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		expect(updateCalls).toBe(0);
+		// Info log for skip
+		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
 	});
 });

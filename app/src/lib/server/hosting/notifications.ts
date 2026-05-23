@@ -23,6 +23,7 @@ import { render as renderProvisioningFailed } from './email-templates/provisioni
 import { render as renderSuspended } from './email-templates/suspended';
 import { render as renderReactivated } from './email-templates/reactivated';
 import { render as renderRenewalReminder } from './email-templates/renewal-reminder';
+import { render as renderPaymentFailed } from './email-templates/payment-failed';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -1177,6 +1178,237 @@ export async function notifyHostingRenewalReminder(
 		logError('hosting-email', `notifyHostingRenewalReminder failed for account ${accountId}`, {
 			tenantId,
 			metadata: { daysUntilDue },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+		throw err;
+	}
+}
+
+/**
+ * Customer alert dispatched when Stripe reports a recurring payment failure
+ * (`invoice.payment_failed` webhook). Sends a single notification per CRM
+ * invoice for the lifetime of that invoice — Stripe retries each declined
+ * charge multiple times over the smart-retry window (typically 4 attempts
+ * spread over a week), and we don't want to spam the customer with the same
+ * "update your card" reminder on every retry. The CRM `invoiceId` keys the
+ * dedupe so a brand-new failing invoice on the next billing cycle still
+ * triggers a fresh email.
+ *
+ * Dedupe strategy (LIFETIME per CRM invoice):
+ *   - `dedupeKey = \`payment-failed:${invoiceId}\`` — one email per CRM
+ *     invoice, forever.
+ *   - Atomic INSERT with onConflictDoNothing on the unique
+ *     (tenantId, hostingAccountId, dedupeKey) index. Second call for the same
+ *     invoice → insert no-ops → early return.
+ *   - Different invoice (next billing cycle, fresh failure) → different
+ *     dedupeKey → fresh email.
+ *
+ * Order matters:
+ *   - Resolution + template render happen BEFORE the dedupe insert so
+ *     transient DB errors don't leak a dedupe row (parallel to Task 6/9/10/11
+ *     review fixes). A leaked row here would suppress the customer's only
+ *     heads-up for this billing cycle.
+ *
+ * Why `payload: null`: the lifetime dedupe already suppresses any scheduler
+ * replay for the same invoice. Mirrors notifyHostingReactivated (also lifetime
+ * per invoice).
+ *
+ * Errors:
+ *   - Missing account or invoice → log + throw (caller decides retry).
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyHostingPaymentFailed(
+	tenantId: string,
+	accountId: string,
+	invoiceId: string,
+	failureReason: string,
+	updateMethodUrl?: string
+): Promise<void> {
+	// 1. Tenant-scoped account lookup. Cross-tenant returns 0 rows → throws.
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	// 2. Tenant-scoped invoice lookup. Cross-tenant returns 0 rows → throws.
+	const [invoiceRow] = await db
+		.select({
+			id: invoiceTable.id,
+			tenantId: invoiceTable.tenantId,
+			invoiceNumber: invoiceTable.invoiceNumber,
+			issueDate: invoiceTable.issueDate,
+			dueDate: invoiceTable.dueDate,
+			totalAmount: invoiceTable.totalAmount,
+			currency: invoiceTable.currency
+		})
+		.from(invoiceTable)
+		.where(and(eq(invoiceTable.id, invoiceId), eq(invoiceTable.tenantId, tenantId)))
+		.limit(1);
+
+	if (!invoiceRow) {
+		const msg = `invoice ${invoiceId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId, metadata: { accountId } });
+		throw new Error(msg);
+	}
+
+	try {
+		// 3. Resolve customer recipient (3-tier fallback in helpers).
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		// 4. Tenant slug lookup → manualPayUrl construction.
+		const [tenantRow] = await db
+			.select({ id: tenantTable.id, slug: tenantTable.slug })
+			.from(tenantTable)
+			.where(eq(tenantTable.id, tenantId))
+			.limit(1);
+
+		if (!tenantRow) {
+			throw new Error(`tenant ${tenantId} not found`);
+		}
+
+		// 5. Build URLs + currency normalization.
+		const manualPayUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/invoices/${invoiceId}/pay`;
+		// Stripe billing portal URL (caller passes invoice.hosted_invoice_url when
+		// available). Falls back to the same CRM pay URL when the caller has no
+		// portal URL — keeps the dual-CTA template happy.
+		const resolvedUpdateMethodUrl = updateMethodUrl ?? manualPayUrl;
+
+		// totalAmount stored in CENTS per schema. Fall back to 0 when null — the
+		// template renders `0.00 RON`.
+		const amountDue = invoiceRow.totalAmount ?? 0;
+		// Currency narrowing — schema is free-form text but our templates only
+		// support these three. Anything else is normalized to RON (consistent
+		// with the rest of the CRM's defaults).
+		const currency = (
+			invoiceRow.currency === 'EUR' || invoiceRow.currency === 'USD' ? invoiceRow.currency : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
+		// Hard-coded 10-day suspension grace per the email-flow spec. Centralized
+		// here so a future copy update in only one place stays consistent with the
+		// scheduled auto-suspend window (handled elsewhere).
+		const daysUntilSuspend = 10;
+
+		// 6. Render template (resolve-then-dedupe — same pattern as siblings).
+		const { subject, html } = await renderPaymentFailed({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			invoiceNumber: invoiceRow.invoiceNumber,
+			amountDue,
+			currency,
+			failureReason,
+			updateMethodUrl: resolvedUpdateMethodUrl,
+			manualPayUrl,
+			daysUntilSuspend
+		});
+
+		// 7. Atomic lifetime dedupe insert (per CRM invoice).
+		const dedupeKey = `payment-failed:${invoiceId}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'payment-failed',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			// 8. Dedupe hit — already sent for this invoice (lifetime).
+			logInfo(
+				'hosting-email',
+				`dedupe skip payment-failed for account ${accountId} (invoice ${invoiceId})`,
+				{ tenantId }
+			);
+			return;
+		}
+
+		const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+		// 9. Pre-create email_log row so we know its ID for the dedupe linkage.
+		//    payload: null — scheduler replay would hit the lifetime dedupe and no-op.
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: customer.email,
+			subject,
+			emailType: 'hosting-payment-failed',
+			htmlBody: html,
+			payload: null
+		});
+
+		// 10. Send via the outbox; pass _retryOfLogId so it reuses our row.
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-payment-failed',
+				metadata: { hostingAccountId: accountId, invoiceId, failureReason },
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
+		);
+
+		// 11. Link the dedupe row to the email_log row for audit trail.
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId })
+			.where(eq(hostingEmailEvent.id, newDedupeId));
+
+		logInfo(
+			'hosting-email',
+			`sent payment-failed alert for account ${accountId} (invoice ${invoiceId})`,
+			{ tenantId, metadata: { emailLogId, toEmail: customer.email, failureReason } }
+		);
+	} catch (err) {
+		logError('hosting-email', `notifyHostingPaymentFailed failed for account ${accountId}`, {
+			tenantId,
+			metadata: { invoiceId, failureReason },
 			stackTrace: err instanceof Error ? err.stack : undefined
 		});
 		throw err;

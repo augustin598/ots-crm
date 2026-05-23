@@ -1,9 +1,11 @@
 import type Stripe from 'stripe';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+import { hostingAccount } from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { runPostPaymentSteps } from './post-payment/dispatcher';
+import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
 
 /**
  * Webhook event handlers — separate per event type, idempotent.
@@ -178,6 +180,9 @@ export async function handlePaymentFailed(invoice: Stripe.Invoice) {
 	});
 	if (!clientRow) return;
 
+	// Keep the existing admin/ops log line — it serves a different audience than
+	// the customer email (the staff observability channel). Customer email is
+	// dispatched separately below via notifyHostingPaymentFailed.
 	logError('directadmin', 'invoice.payment_failed — staff intervention needed', {
 		tenantId: clientRow.tenantId,
 		metadata: {
@@ -187,8 +192,82 @@ export async function handlePaymentFailed(invoice: Stripe.Invoice) {
 			nextRetryAt: invoice.next_payment_attempt
 		}
 	});
-	// TODO: trigger email staff + email client cu Hosted Invoice Page URL
-	// (invoice.hosted_invoice_url) pentru a actualiza metoda de plată.
+
+	// Resolve subscription id from the failing invoice. One-off invoices have no
+	// subscription — nothing to notify about (no hosting account is linked).
+	//
+	// Stripe API ≥2025 moved the subscription link onto `invoice.parent.
+	// subscription_details.subscription` (the legacy top-level `invoice.subscription`
+	// is gone from the SDK types). We check both shapes defensively so the handler
+	// also works against older test fixtures or backwards-compat webhook payloads.
+	const legacy = (invoice as unknown as { subscription?: string | { id: string } | null })
+		.subscription;
+	const subRaw =
+		invoice.parent?.subscription_details?.subscription ?? legacy ?? null;
+	const subscriptionId =
+		typeof subRaw === 'string' ? subRaw : subRaw?.id ?? null;
+	if (!subscriptionId) return;
+
+	// Find the hosting account linked to this subscription. Tenant-scoped to
+	// stop a Stripe customer from accidentally addressing another tenant's
+	// account if `metadata.crmTenantId` is ever absent (defense-in-depth — the
+	// resolveClientByStripeCustomer check above already covers the happy path).
+	const [account] = await db
+		.select({ id: hostingAccount.id, tenantId: hostingAccount.tenantId })
+		.from(hostingAccount)
+		.where(
+			and(
+				eq(hostingAccount.tenantId, clientRow.tenantId),
+				eq(hostingAccount.stripeSubscriptionId, subscriptionId)
+			)
+		)
+		.limit(1);
+	if (!account) return;
+
+	// Resolve the CRM-internal invoice id from Stripe metadata. Convention is
+	// `crmInvoiceId` (see post-payment/emit-keez-invoice.ts where we stamp it
+	// onto the Stripe invoice metadata at creation time). Without it we can't
+	// build the customer's pay URL or look up the invoice row in our schema.
+	const internalInvoiceId = invoice.metadata?.crmInvoiceId ?? null;
+	if (!internalInvoiceId) {
+		logWarning('directadmin', 'invoice.payment_failed — missing crmInvoiceId metadata', {
+			tenantId: clientRow.tenantId,
+			metadata: { stripeInvoiceId: invoice.id, subscriptionId, clientId: clientRow.id }
+		});
+		return;
+	}
+
+	// Compute a human-readable failure reason. Stripe surfaces this in several
+	// places depending on whether it's a card decline (charges[].failure_message)
+	// or a SCA / 3DS / finalization issue (last_finalization_error.message).
+	// Fall back to a generic Romanian phrase so the template never renders blank.
+	const failureReason =
+		invoice.last_finalization_error?.message ??
+		(invoice as unknown as { charges?: { data?: Array<{ failure_message?: string | null }> } })
+			.charges?.data?.[0]?.failure_message ??
+		'plată eșuată';
+
+	// Fire the customer notify. Errors are caught + logged here so a notify
+	// failure doesn't bubble up and mark the webhook event as `failed` (the
+	// existing admin log already surfaces the underlying Stripe failure for
+	// staff intervention). `hosted_invoice_url` from Stripe is the canonical
+	// "update card / pay invoice" portal link.
+	await notifyHostingPaymentFailed(
+		clientRow.tenantId,
+		account.id,
+		internalInvoiceId,
+		failureReason,
+		invoice.hosted_invoice_url ?? undefined
+	).catch((err) => {
+		logError('hosting-email', 'payment-failed notify failed', {
+			tenantId: clientRow.tenantId,
+			metadata: {
+				stripeInvoiceId: invoice.id,
+				internalInvoiceId,
+				error: err instanceof Error ? err.message : String(err)
+			}
+		});
+	});
 }
 
 export async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
