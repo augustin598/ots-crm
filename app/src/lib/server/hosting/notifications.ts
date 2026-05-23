@@ -22,6 +22,7 @@ import { render as renderAccountCreated } from './email-templates/account-create
 import { render as renderProvisioningFailed } from './email-templates/provisioning-failed';
 import { render as renderSuspended } from './email-templates/suspended';
 import { render as renderReactivated } from './email-templates/reactivated';
+import { render as renderRenewalReminder } from './email-templates/renewal-reminder';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -950,6 +951,232 @@ export async function notifyHostingReactivated(
 		logError('hosting-email', `notifyHostingReactivated failed for account ${accountId}`, {
 			tenantId,
 			metadata: { invoiceId },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+		throw err;
+	}
+}
+
+/**
+ * Format a YYYY-MM-DD text date (the `next_due_date` schema convention) as
+ * `DD.MM.YYYY` (Romanian locale). Throws if the input isn't parseable — the
+ * caller already verified the value is non-null, so an invalid format is a
+ * programming/data bug worth surfacing rather than silently falling back.
+ */
+function formatTextDateRo(textDate: string): string {
+	const date = new Date(textDate);
+	if (Number.isNaN(date.getTime())) {
+		throw new Error(`invalid nextDueDate format: ${textDate}`);
+	}
+	return date.toLocaleDateString('ro-RO', {
+		day: '2-digit',
+		month: '2-digit',
+		year: 'numeric'
+	});
+}
+
+/**
+ * Customer reminder dispatched in advance of a hosting account's renewal date.
+ * Three windows fire over the renewal cycle: 14 / 7 / 1 days before due. Each
+ * window sends at most once per (account, dueDate, window) tuple — the dedupe
+ * key encodes the due date so a renewed account (new nextDueDate) starts a
+ * fresh reminder cycle.
+ *
+ * Dedupe strategy:
+ *   - `dedupeKey = \`renewal-reminder:${dueDateIso}:${daysUntilDue}d\``
+ *   - Atomic INSERT with onConflictDoNothing on the unique
+ *     (tenantId, hostingAccountId, dedupeKey) index. Second call for the same
+ *     (dueDate, window) → insert no-ops → early return.
+ *   - When the cycle renews and nextDueDate moves forward, the new dueDateIso
+ *     produces a different dedupeKey → reminders fire again for the new cycle.
+ *
+ * Order matters:
+ *   - Resolution + template render happen BEFORE the dedupe insert so
+ *     transient DB errors don't leak a dedupe row (parallel to Task 6/9/10
+ *     review fixes). A leaked row would block the entire window for this due
+ *     date, missing the customer's heads-up.
+ *
+ * Why `payload: null`: the scheduler task re-runs hourly (08-20 RO) and the
+ * dedupe blocks duplicates, so replay via the email outbox would just be
+ * redundant DB churn. Mirrors the other hosting notifiers.
+ *
+ * Errors:
+ *   - Missing account or null nextDueDate → log + throw (caller decides retry).
+ *     For the scheduler the catch surfaces in the task's per-account loop
+ *     (skipped++) so one bad account never breaks the whole run.
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyHostingRenewalReminder(
+	tenantId: string,
+	accountId: string,
+	daysUntilDue: 1 | 7 | 14
+): Promise<void> {
+	// 1. Tenant-scoped account lookup. Cross-tenant returns 0 rows → throws.
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain,
+			nextDueDate: hostingAccount.nextDueDate,
+			recurringAmount: hostingAccount.recurringAmount,
+			currency: hostingAccount.currency,
+			autoRenew: hostingAccount.autoRenew
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	if (!account.nextDueDate) {
+		const msg = `hosting account ${accountId} has no nextDueDate — cannot send renewal reminder`;
+		logError('hosting-email', msg, { tenantId, metadata: { accountId } });
+		throw new Error(msg);
+	}
+
+	try {
+		// 2. Resolve customer recipient (3-tier fallback in helpers).
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		// 3. Tenant slug lookup → payUrl construction.
+		const [tenantRow] = await db
+			.select({ id: tenantTable.id, slug: tenantTable.slug })
+			.from(tenantTable)
+			.where(eq(tenantTable.id, tenantId))
+			.limit(1);
+
+		if (!tenantRow) {
+			throw new Error(`tenant ${tenantId} not found`);
+		}
+
+		// 4. Format Romanian date + build payUrl.
+		const dueDateIso = account.nextDueDate; // 'YYYY-MM-DD'
+		const dueDateRo = formatTextDateRo(dueDateIso);
+		const payUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
+
+		// 5. Currency narrowing — schema is free-form text but our templates only
+		//    support these three. Anything else is normalized to RON (consistent
+		//    with the rest of the CRM's defaults).
+		const currency = (
+			account.currency === 'EUR' || account.currency === 'USD' ? account.currency : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
+		// 6. Render template with all inputs.
+		const { subject, html } = await renderRenewalReminder({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			dueDate: dueDateRo,
+			amountDue: account.recurringAmount,
+			currency,
+			daysUntilDue,
+			autoRenew: account.autoRenew,
+			payUrl
+		});
+
+		// 7. Atomic dedupe insert keyed on (dueDateIso, window).
+		const dedupeKey = `renewal-reminder:${dueDateIso}:${daysUntilDue}d`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'renewal-reminder',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			// 8. Dedupe hit — already sent for this (dueDate, window).
+			logInfo(
+				'hosting-email',
+				`dedupe skip renewal-reminder for account ${accountId} (${dueDateIso} / ${daysUntilDue}d)`,
+				{ tenantId }
+			);
+			return;
+		}
+
+		const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+		// 9. Pre-create email_log row so we know its ID for the dedupe linkage.
+		//    payload: null — scheduler replay would hit the (dueDate, window) dedupe and no-op.
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: customer.email,
+			subject,
+			emailType: 'hosting-renewal-reminder',
+			htmlBody: html,
+			payload: null
+		});
+
+		// 10. Send via the outbox; pass _retryOfLogId so it reuses our row.
+		//     Note: emailType is NOT in TRANSACTIONAL_TYPES (see email.ts:876-879)
+		//     so sendWithPersistence automatically adds RFC 8058 List-Unsubscribe
+		//     headers — no flag needed on the ctx.
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-renewal-reminder',
+				metadata: { hostingAccountId: accountId, dueDate: dueDateIso, daysUntilDue },
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
+		);
+
+		// 11. Link the dedupe row to the email_log row for audit trail.
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId })
+			.where(eq(hostingEmailEvent.id, newDedupeId));
+
+		logInfo(
+			'hosting-email',
+			`sent renewal-reminder for account ${accountId} (${dueDateIso} / ${daysUntilDue}d)`,
+			{ tenantId, metadata: { emailLogId, toEmail: customer.email } }
+		);
+	} catch (err) {
+		logError('hosting-email', `notifyHostingRenewalReminder failed for account ${accountId}`, {
+			tenantId,
+			metadata: { daysUntilDue },
 			stackTrace: err instanceof Error ? err.stack : undefined
 		});
 		throw err;

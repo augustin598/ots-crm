@@ -41,6 +41,7 @@ import { processPersonalopsHeartbeatMonitor } from './tasks/personalops-heartbea
 import { processMetaTokenExpirationMonitor } from './tasks/meta-token-expiration-monitor';
 import { processDirectAdminSyncAccounts } from './tasks/directadmin-sync-accounts';
 import { processDirectAdminSyncPackages } from './tasks/directadmin-sync-packages';
+import { processHostingRenewalReminder } from './tasks/hosting-renewal-reminder';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -155,7 +156,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	wordpress_updates_check: processWordpressUpdatesCheck,
 	wordpress_connector_auto_update: processWordpressConnectorAutoUpdate,
 	directadmin_sync_accounts: processDirectAdminSyncAccounts,
-	directadmin_sync_packages: processDirectAdminSyncPackages
+	directadmin_sync_packages: processDirectAdminSyncPackages,
+	hosting_renewal_reminder: processHostingRenewalReminder
 };
 
 /**
@@ -273,7 +275,7 @@ export const startScheduler = async () => {
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
 		'meta-ads-invoice-sync', 'tiktok-ads-spending-sync', 'ads-status-monitor',
 		'ads-performance-monitor', 'ads-snapshot-retention', 'meta-ads-leads-sync',
-		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'token-cleanup',
+		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'stripe-event-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
@@ -281,7 +283,8 @@ export const startScheduler = async () => {
 		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
 		'ads-optimizer-outcome-evaluator',
 		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
-		'directadmin-sync-accounts', 'directadmin-sync-packages'
+		'directadmin-sync-accounts', 'directadmin-sync-packages',
+		'hosting-renewal-reminder'
 	]);
 
 	try {
@@ -667,6 +670,24 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Stripe event cleanup — daily at 2:15 AM
+	// Prune `processed_stripe_event` rows: completed/failed >90d, stuck 'processing' >1h.
+	// Fără asta, tabelul crește unbounded + rows 'processing' stuck blochează retry-uri.
+	await schedulerQueue.add(
+		'stripe-event-cleanup',
+		{
+			type: 'stripe_event_cleanup',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '15 2 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'stripe-event-cleanup'
+		}
+	);
+
 	// Token cleanup — daily at 3:00 AM (delete tokens expired > 7 days ago)
 	await schedulerQueue.add(
 		'token-cleanup',
@@ -935,6 +956,20 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] directadmin-sync-packages registered (0 3 * * * Europe/Bucharest)');
 
+	// Hosting renewal reminder — hourly 08-20 Europe/Bucharest. Scans active hosting
+	// accounts whose nextDueDate is in 14/7/1 days and dispatches customer reminders.
+	// Per-(account, dueDate, window) dedupe inside the notifier keeps each window
+	// firing exactly once per cycle even with hourly cadence.
+	await schedulerQueue.add(
+		'hosting-renewal-reminder',
+		{ type: 'hosting_renewal_reminder', params: {} },
+		{
+			repeat: { pattern: '0 8-20 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'hosting-renewal-reminder'
+		}
+	);
+	logInfo('scheduler', '[scheduler] hosting-renewal-reminder registered (0 8-20 * * * Europe/Bucharest)');
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -983,7 +1018,8 @@ export const JOB_LABELS: Record<string, string> = {
 	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
 	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)',
 	personalops_heartbeat_monitor: 'Monitor Heartbeat PersonalOPS (alertă instanțe tăcute)',
-	meta_token_expiration_monitor: 'Monitor Expirare Token Meta Ads (alertă <14z)'
+	meta_token_expiration_monitor: 'Monitor Expirare Token Meta Ads (alertă <14z)',
+	hosting_renewal_reminder: 'Reminder Reînnoire Hosting (14/7/1z înainte)'
 };
 
 /** Default params for jobs that need specific parameters */

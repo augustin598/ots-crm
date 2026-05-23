@@ -108,7 +108,12 @@ mock.module('$lib/server/db/schema', () => ({
 		daServerId: 'da_server_id',
 		daUsername: 'da_username',
 		domain: 'domain',
-		daCredentialsEncrypted: 'da_credentials_encrypted'
+		daCredentialsEncrypted: 'da_credentials_encrypted',
+		status: 'status',
+		nextDueDate: 'next_due_date',
+		recurringAmount: 'recurring_amount',
+		currency: 'currency',
+		autoRenew: 'auto_renew'
 	},
 	hostingEmailEvent: {
 		id: 'id',
@@ -222,6 +227,8 @@ const realSuspended = await import('../email-templates/suspended');
 const capturedSuspended = { render: realSuspended.render };
 const realReactivated = await import('../email-templates/reactivated');
 const capturedReactivated = { render: realReactivated.render };
+const realRenewalReminder = await import('../email-templates/renewal-reminder');
+const capturedRenewalReminder = { render: realRenewalReminder.render };
 const realNotificationsHelpers = await import('../notifications-helpers');
 const capturedNotificationsHelpers = {
 	resolveCustomerEmail: realNotificationsHelpers.resolveCustomerEmail,
@@ -272,6 +279,17 @@ mock.module('../email-templates/reactivated', () => ({
 	}
 }));
 
+const renderRenewalReminderCalls: unknown[] = [];
+mock.module('../email-templates/renewal-reminder', () => ({
+	render: async (input: unknown) => {
+		renderRenewalReminderCalls.push(input);
+		return {
+			subject: 'Hosting example.ro expiră în 7 zile',
+			html: '<p>renewal body</p>'
+		};
+	}
+}));
+
 // resolveCustomerEmail + resolveAdminRecipients mocked at module level so tests
 // can inject return values directly instead of threading admin-resolver SQL
 // (innerJoin on tenant_user) through the chain queue.
@@ -313,7 +331,8 @@ const {
 	notifyHostingAccountCreated,
 	notifyHostingProvisioningFailed,
 	notifyHostingSuspended,
-	notifyHostingReactivated
+	notifyHostingReactivated,
+	notifyHostingRenewalReminder
 } = await import('../notifications');
 
 function pushSelect(rows: unknown[]) {
@@ -338,6 +357,7 @@ beforeEach(() => {
 	renderPFCalls.length = 0;
 	renderSuspendedCalls.length = 0;
 	renderReactivatedCalls.length = 0;
+	renderRenewalReminderCalls.length = 0;
 	resolveCustomerEmailReturn = {
 		email: 'client@example.ro',
 		name: 'Acme SRL',
@@ -355,6 +375,7 @@ afterAll(() => {
 	mock.module('../email-templates/provisioning-failed', () => capturedProvisioningFailed);
 	mock.module('../email-templates/suspended', () => capturedSuspended);
 	mock.module('../email-templates/reactivated', () => capturedReactivated);
+	mock.module('../email-templates/renewal-reminder', () => capturedRenewalReminder);
 	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
 });
 
@@ -894,5 +915,143 @@ describe('notifyHostingReactivated', () => {
 		expect(updateCalls).toBe(0);
 		// Info log for skip
 		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// notifyHostingRenewalReminder (per-(dueDate, window) dedupe — multiple windows
+// fire over the renewal cycle but each window only sends once per due date)
+// ---------------------------------------------------------------------------
+describe('notifyHostingRenewalReminder', () => {
+	test('sends once per (dueDate, window); second call deduplicates', async () => {
+		// ----- First call: full happy-path queue -----
+		// 1. Account lookup (must include nextDueDate, autoRenew, recurringAmount, currency)
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: '2026-06-01',
+				recurringAmount: 9950,
+				currency: 'RON',
+				autoRenew: true
+			}
+		]);
+		// 2. Tenant lookup (for slug → payUrl)
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 3. Atomic dedupe insert → returns row (insert succeeded)
+		pushInsert([{ id: 'evt-rr-1' }]);
+		// 4. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		// Template rendered once with the right fields
+		expect(renderRenewalReminderCalls.length).toBe(1);
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.tenantId).toBe('t-1');
+		expect(renderInput.domain).toBe('example.ro');
+		expect(renderInput.clientName).toBe('Acme SRL');
+		expect(renderInput.daysUntilDue).toBe(7);
+		expect(renderInput.autoRenew).toBe(true);
+		expect(renderInput.amountDue).toBe(9950);
+		expect(renderInput.currency).toBe('RON');
+		expect(renderInput.payUrl).toContain('/ots/hosting/accounts/acc-1/renew');
+		// Romanian formatted due date 2026-06-01 → 01.06.2026
+		expect(renderInput.dueDate).toBe('01.06.2026');
+
+		// One email_log row pre-created
+		expect(logEmailAttemptCalls.length).toBe(1);
+		const attempt = logEmailAttemptCalls[0] as Record<string, unknown>;
+		expect(attempt.tenantId).toBe('t-1');
+		expect(attempt.toEmail).toBe('client@example.ro');
+		expect(attempt.emailType).toBe('hosting-renewal-reminder');
+		// Per-(dueDate, window) dedupe → scheduler replay no-ops → payload: null
+		expect(attempt.payload).toBeNull();
+
+		// Email sent once with _retryOfLogId set
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		const sendCtx = sendWithPersistenceCalls[0].ctx as Record<string, unknown>;
+		expect(sendCtx._retryOfLogId).toBe('log-id-1');
+		expect(sendCtx.toEmail).toBe('client@example.ro');
+		expect(sendCtx.emailType).toBe('hosting-renewal-reminder');
+		expect(sendCtx.payload).toBeNull();
+
+		// buildMail() result asserted — `from` must be set
+		const mail = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mail).toBeDefined();
+		expect(mail.from).toBeDefined();
+		expect(mail.from as string).toContain('@');
+		expect(mail.from as string).toContain('OTS');
+		expect(mail.to).toBe('client@example.ro');
+		expect(mail.subject).toBeDefined();
+		expect(mail.html).toBeDefined();
+
+		// Dedupe row updated with the emailLogId
+		expect(updateCalls).toBe(1);
+
+		// ----- Second call: same (dueDate, window) — onConflictDoNothing returns [] → skip -----
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: '2026-06-01',
+				recurringAmount: 9950,
+				currency: 'RON',
+				autoRenew: true
+			}
+		]);
+		// 2. Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 3. onConflictDoNothing returns [] → dedupe hit
+		pushInsert([]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		// Template rendered for the second call (before dedupe insert — order matters,
+		// expensive work runs first to avoid leaking a dedupe row on transient errors)
+		expect(renderRenewalReminderCalls.length).toBe(2);
+		// But NO new email_log row, NO new send, NO new update
+		expect(logEmailAttemptCalls.length).toBe(1);
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		expect(updateCalls).toBe(1);
+		// Info log for skip
+		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test('throws when account.nextDueDate is null', async () => {
+		// Account lookup returns row with nextDueDate=null
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: null,
+				recurringAmount: 9950,
+				currency: 'RON',
+				autoRenew: true
+			}
+		]);
+
+		await expect(notifyHostingRenewalReminder('t-1', 'acc-1', 14)).rejects.toThrow();
+
+		// No template render, no log, no send
+		expect(renderRenewalReminderCalls.length).toBe(0);
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		expect(updateCalls).toBe(0);
+		// Error logged for ops visibility
+		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
 	});
 });
