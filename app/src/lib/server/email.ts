@@ -89,7 +89,7 @@ export function safeGreetingName(
  * Resolve the "from" email for a tenant or the global default.
  * Logs a warning if falling back to noreply@example.com (emails will be rejected).
  */
-function resolveFromEmail(emailSettings?: { smtpFrom?: string | null; smtpUser?: string | null } | null): string {
+export function resolveFromEmail(emailSettings?: { smtpFrom?: string | null; smtpUser?: string | null } | null): string {
 	const resolved =
 		emailSettings?.smtpFrom ||
 		emailSettings?.smtpUser ||

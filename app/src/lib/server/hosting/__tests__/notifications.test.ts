@@ -133,15 +133,34 @@ mock.module('$lib/server/db/schema', () => ({
 	},
 	tenantUser: { id: 'id', tenantId: 'tenant_id', userId: 'user_id', role: 'role', status: 'status' },
 	user: { id: 'id', email: 'email' },
-	tenant: { id: 'id', adminContactEmail: 'admin_contact_email' }
+	tenant: { id: 'id', adminContactEmail: 'admin_contact_email' },
+	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' }
 }));
 
-// Mock collaborators
-const sendWithPersistenceCalls: Array<{ ctx: unknown }> = [];
+// Mock collaborators. The mock invokes buildMail() so the assembled message
+// (from / to / subject / html / attachments) is asserted in tests — otherwise
+// a missing `from` would slip past silently and only break in production.
+const sendWithPersistenceCalls: Array<{ ctx: unknown; mail: unknown; mailError?: unknown }> = [];
+let sendWithPersistenceImpl: (ctx: unknown, mail: unknown) => Promise<void> = async () => {};
 mock.module('$lib/server/email', () => ({
-	sendWithPersistence: async (ctx: unknown) => {
-		sendWithPersistenceCalls.push({ ctx });
-	}
+	sendWithPersistence: async (ctx: unknown, buildMail: () => Promise<unknown>) => {
+		let mail: unknown = undefined;
+		let mailError: unknown = undefined;
+		try {
+			mail = await buildMail();
+		} catch (e) {
+			mailError = e;
+		}
+		sendWithPersistenceCalls.push({ ctx, mail, mailError });
+		await sendWithPersistenceImpl(ctx, mail);
+	},
+	fetchTenantBrand: async (_tenantId: string) => ({
+		tenantName: 'OTS',
+		themeColor: '#0ea5e9',
+		headerLogoHtml: '',
+		logoAttachment: null
+	}),
+	resolveFromEmail: () => 'noreply@example.ro'
 }));
 
 const logEmailAttemptCalls: Array<unknown> = [];
@@ -191,6 +210,7 @@ beforeEach(() => {
 	updateQueue = [];
 	updateCalls = 0;
 	sendWithPersistenceCalls.length = 0;
+	sendWithPersistenceImpl = async () => {};
 	logEmailAttemptCalls.length = 0;
 	loggerCalls.info.length = 0;
 	loggerCalls.error.length = 0;
@@ -220,6 +240,8 @@ describe('notifyHostingAccountCreated', () => {
 		]);
 		// 4. daServer lookup
 		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
+		// 5. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
 
 		await notifyHostingAccountCreated('t-1', 'acc-1');
 
@@ -229,6 +251,8 @@ describe('notifyHostingAccountCreated', () => {
 		expect(attempt.tenantId).toBe('t-1');
 		expect(attempt.toEmail).toBe('client@example.ro');
 		expect(attempt.emailType).toBe('hosting-account-created');
+		// One-shot welcome — not replay-eligible (no sendFn registry entry).
+		expect(attempt.payload).toBeNull();
 
 		// Email sent once with _retryOfLogId set
 		expect(sendWithPersistenceCalls.length).toBe(1);
@@ -236,6 +260,23 @@ describe('notifyHostingAccountCreated', () => {
 		expect(sendCtx._retryOfLogId).toBe('log-id-1');
 		expect(sendCtx.toEmail).toBe('client@example.ro');
 		expect(sendCtx.emailType).toBe('hosting-account-created');
+		// payload: null mirrors sendDailyWorkReminderEmail — scheduler must not replay
+		// (welcome is dedupe-blocked at the lifetime grain).
+		expect(sendCtx.payload).toBeNull();
+
+		// buildMail() invoked — assert the assembled nodemailer message has the
+		// fields nodemailer actually needs (`from` was previously omitted; real
+		// sends would have failed with "from: required" or fallen back to a
+		// hostname like "user@localhost").
+		const mail = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mail).toBeDefined();
+		expect(mail.from).toBeDefined();
+		expect(mail.from as string).toContain('@');
+		expect(mail.from as string).toContain('OTS');
+		expect(mail.from as string).toContain('noreply@example.ro');
+		expect(mail.to).toBe('client@example.ro');
+		expect(mail.subject).toBeDefined();
+		expect(mail.html).toBeDefined();
 
 		// Template was rendered with the right input
 		expect(renderCalls.length).toBe(1);
@@ -290,5 +331,54 @@ describe('notifyHostingAccountCreated', () => {
 		expect(sendWithPersistenceCalls.length).toBe(0);
 		expect(renderCalls.length).toBe(0);
 		expect(updateCalls).toBe(0);
+	});
+
+	test('throws and leaves dedupe row unlinked if sendWithPersistence fails', async () => {
+		// Setup the same happy-path queue (account → dedupe insert → client lookup
+		// → daServer lookup → emailSettings lookup inside buildMail), but make
+		// sendWithPersistence itself throw AFTER buildMail has run.
+		// This proves: when SMTP send fails, the dedupe row is NOT backfilled
+		// with an emailLogId — leaving it as a "stuck" sentinel an admin can
+		// spot (or a retry tool can pick up by querying for emailLogId IS NULL).
+		sendWithPersistenceImpl = async () => {
+			throw new Error('SMTP transport error');
+		};
+
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: 'encrypted-blob'
+			}
+		]);
+		// 2. Atomic dedupe insert → returning a row (insert succeeded)
+		pushInsert([{ id: 'evt-1' }]);
+		// 3. resolveCustomerEmail → client lookup
+		pushSelect([
+			{ email: 'client@example.ro', name: 'Display', businessName: 'Acme SRL' }
+		]);
+		// 4. daServer lookup
+		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
+		// 5. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await expect(notifyHostingAccountCreated('t-1', 'acc-1')).rejects.toThrow(
+			'SMTP transport error'
+		);
+
+		// Pre-create email_log row DID happen (we want the audit trail).
+		expect(logEmailAttemptCalls.length).toBe(1);
+		// sendWithPersistence was called (and threw).
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		// CRITICAL: no emailLogId backfill on send failure — the dedupe row stays
+		// unlinked so it surfaces as a stuck welcome.
+		expect(updateCalls).toBe(0);
+		// Error logged for ops visibility.
+		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
 	});
 });

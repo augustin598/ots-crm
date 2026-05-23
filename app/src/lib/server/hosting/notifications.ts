@@ -1,9 +1,14 @@
 import { db } from '$lib/server/db';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { hostingAccount, hostingEmailEvent, daServer } from '$lib/server/db/schema';
+import {
+	hostingAccount,
+	hostingEmailEvent,
+	daServer,
+	emailSettings as emailSettingsTable
+} from '$lib/server/db/schema';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
-import { sendWithPersistence } from '$lib/server/email';
+import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
 import { logEmailAttempt } from '$lib/server/email-logger';
 import { resolveCustomerEmail } from './notifications-helpers';
 import { render as renderAccountCreated } from './email-templates/account-created';
@@ -18,15 +23,23 @@ function generateEventId(): string {
  *
  * Dedupe strategy:
  *   1. Look up the account (tenant-scoped — cross-tenant returns 0 rows → throws).
- *   2. Atomic INSERT into `hosting_email_event` with onConflictDoNothing on the
+ *   2. Null-check the encrypted credentials blob.
+ *   3. Decrypt + JSON.parse credentials BEFORE the dedupe insert so transient
+ *      decrypt failures (Turso ciphertext truncation) don't leak a dedupe row
+ *      that would silently block all future replays of this lifetime-keyed event.
+ *   4. Atomic INSERT into `hosting_email_event` with onConflictDoNothing on the
  *      unique (tenant_id, hosting_account_id, dedupe_key) index. `dedupeKey` is
  *      the literal `'created'` → one welcome email per account, lifetime.
- *   3. Insert no-op (empty returning) → another caller already sent → skip.
- *   4. Insert succeeded → resolve recipient, decrypt DA credentials, render
- *      template, pre-create email_log row, call sendWithPersistence with
- *      `_retryOfLogId`, then patch the dedupe row with the resulting log id.
+ *   5. Insert no-op (empty returning) → another caller already sent → skip.
+ *   6. Insert succeeded → resolve recipient, load daServer, render template,
+ *      pre-create email_log row, call sendWithPersistence with `_retryOfLogId`,
+ *      then patch the dedupe row with the resulting log id.
  *
  * Errors bubble to the caller after a structured log line — they decide retry.
+ *
+ * Note on `payload: null`: the dedupe key is per-account lifetime, so a
+ * scheduled email-retry replay would hit the dedupe row and no-op anyway.
+ * Mirroring the pattern used by sendDailyWorkReminderEmail (also payload: null).
  */
 export async function notifyHostingAccountCreated(
 	tenantId: string,
@@ -57,7 +70,23 @@ export async function notifyHostingAccountCreated(
 		throw new Error(`hosting account ${accountId} has no daCredentialsEncrypted`);
 	}
 
-	// 2. Atomic dedupe: insert one row with the unique-key conflict resolving to no-op.
+	// 2. Decrypt DA credentials BEFORE the dedupe insert so transient
+	//    decrypt failures (Turso ciphertext truncation) don't leak a dedupe row.
+	//    Stored as encrypt(tenantId, JSON.stringify({ username, password })).
+	//    Concurrency note: duplicate decrypts under parallel calls are fine —
+	//    only one onConflictDoNothing insert below will win, and decrypt is
+	//    cheap + idempotent.
+	let creds: { username: string; password: string };
+	try {
+		creds = JSON.parse(decrypt(tenantId, account.daCredentialsEncrypted));
+	} catch (err) {
+		logError('hosting-email', `decrypt credentials failed for account ${accountId}`, {
+			tenantId
+		});
+		throw err;
+	}
+
+	// 3. Atomic dedupe: insert one row with the unique-key conflict resolving to no-op.
 	const dedupeKey = 'created';
 	const dedupeRowId = generateEventId();
 	const insertedRows = await db
@@ -79,7 +108,7 @@ export async function notifyHostingAccountCreated(
 		.returning({ id: hostingEmailEvent.id });
 
 	if (insertedRows.length === 0) {
-		// 3. Dedupe hit — another caller already sent the welcome email.
+		// 4. Dedupe hit — another caller already sent the welcome email.
 		logInfo('hosting-email', `dedupe skip account-created for account ${accountId}`, {
 			tenantId
 		});
@@ -89,14 +118,14 @@ export async function notifyHostingAccountCreated(
 	const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
 
 	try {
-		// 4. Resolve recipient via Task 4 helper (3-tier fallback).
+		// 5. Resolve recipient via Task 4 helper (3-tier fallback).
 		const customer = await resolveCustomerEmail({
 			id: account.id,
 			tenantId: account.tenantId,
 			clientId: account.clientId
 		});
 
-		// 5. Load DA server (tenant-scoped) for hostname display in template.
+		// 6. Load DA server (tenant-scoped) for hostname display in template.
 		const [server] = await db
 			.select({
 				id: daServer.id,
@@ -113,17 +142,6 @@ export async function notifyHostingAccountCreated(
 			);
 		}
 
-		// 6. Decrypt DA credentials. Stored as encrypt(tenantId, JSON.stringify({ username, password })).
-		let creds: { username: string; password: string };
-		try {
-			creds = JSON.parse(decrypt(tenantId, account.daCredentialsEncrypted));
-		} catch (err) {
-			logError('hosting-email', `decrypt credentials failed for account ${accountId}`, {
-				tenantId
-			});
-			throw err;
-		}
-
 		// 7. Render the welcome template.
 		const { subject, html } = await renderAccountCreated({
 			tenantId,
@@ -137,16 +155,18 @@ export async function notifyHostingAccountCreated(
 		});
 
 		// 8. Pre-create the email_log row so we know its ID for the dedupe linkage.
+		//    payload: null — scheduler replay would hit the dedupe row and no-op anyway.
 		const emailLogId = await logEmailAttempt({
 			tenantId,
 			toEmail: customer.email,
 			subject,
 			emailType: 'hosting-account-created',
 			htmlBody: html,
-			payload: { sendFn: 'notifyHostingAccountCreated', args: [tenantId, accountId] }
+			payload: null
 		});
 
 		// 9. Send via the outbox; pass _retryOfLogId so it reuses our row.
+		//    payload: null mirrors sendDailyWorkReminderEmail — not replay-able.
 		await sendWithPersistence(
 			{
 				tenantId,
@@ -155,14 +175,25 @@ export async function notifyHostingAccountCreated(
 				emailType: 'hosting-account-created',
 				metadata: {},
 				htmlBody: html,
-				payload: { sendFn: 'notifyHostingAccountCreated', args: [tenantId, accountId] },
+				payload: null,
 				_retryOfLogId: emailLogId
 			},
-			async () => ({
-				to: customer.email,
-				subject,
-				html
-			})
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
 		);
 
 		// 10. Link the dedupe row to the email_log row for audit trail.
