@@ -45,7 +45,8 @@ export type LogSource =
 	| 'packages'
 	| 'telegram'
 	| 'ads-monitor'
-	| 'google-calendar';
+	| 'google-calendar'
+	| 'hosting-email';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
