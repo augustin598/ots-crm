@@ -7,7 +7,10 @@ import { createDAClient } from './factory';
 import { runWithAudit, withAccountLock } from './audit';
 import { DBSyncFailedError } from './errors';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
-import { notifyHostingSuspended } from '$lib/server/hosting/notifications';
+import {
+	notifyHostingSuspended,
+	notifyHostingReactivated
+} from '$lib/server/hosting/notifications';
 
 const PLUGIN_NAME = 'directadmin';
 
@@ -360,6 +363,7 @@ export const onInvoicePaid: HookHandler<InvoicePaidEvent> = async (event) => {
 										status: 'active',
 										suspendReason: null,
 										autoSuspendedByInvoiceId: null,
+										reactivatedAt: new Date(),
 										updatedAt: new Date()
 									})
 									.where(eq(table.hostingAccount.id, account.id));
@@ -373,6 +377,22 @@ export const onInvoicePaid: HookHandler<InvoicePaidEvent> = async (event) => {
 							}
 						}
 					);
+
+					// Fire-and-forget customer reactivation notification.
+					// Lifetime dedupe per invoice inside notifyHostingReactivated makes
+					// replays safe; an error here MUST NOT roll back the unsuspend.
+					// The notify function also performs its own multi-invoice safety
+					// check (defense-in-depth — this hook already guarded above).
+					notifyHostingReactivated(tenantId, account.id, invoiceId).catch((err) => {
+						logError('hosting-email', 'reactivated email dispatch failed', {
+							tenantId,
+							metadata: {
+								hostingAccountId: account.id,
+								invoiceId,
+								error: err instanceof Error ? err.message : String(err)
+							}
+						});
+					});
 				} catch (e) {
 					const { message } = serializeError(e);
 					if (e instanceof DBSyncFailedError) {

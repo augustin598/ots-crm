@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { eq, and, gt, like } from 'drizzle-orm';
+import { eq, and, gt, like, ne, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import {
 	hostingAccount,
@@ -21,6 +21,7 @@ import {
 import { render as renderAccountCreated } from './email-templates/account-created';
 import { render as renderProvisioningFailed } from './email-templates/provisioning-failed';
 import { render as renderSuspended } from './email-templates/suspended';
+import { render as renderReactivated } from './email-templates/reactivated';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -699,6 +700,254 @@ export async function notifyHostingSuspended(
 		);
 	} catch (err) {
 		logError('hosting-email', `notifyHostingSuspended failed for account ${accountId}`, {
+			tenantId,
+			metadata: { invoiceId },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+		throw err;
+	}
+}
+
+/**
+ * Customer confirmation dispatched when a hosting account is unsuspended after
+ * an invoice payment. Sends a single positive-confirmation email per invoice
+ * (lifetime dedupe — once per invoice, ever).
+ *
+ * Dedupe strategy (DIFFERENT from siblings):
+ *   - `dedupeKey = \`reactivated:${invoiceId}\`` — lifetime dedupe per invoice.
+ *   - Atomic INSERT with onConflictDoNothing on the unique
+ *     (tenantId, hostingAccountId, dedupeKey) index. Second call for the same
+ *     invoice → insert no-ops → early return.
+ *   - Different invoice (e.g. customer pays a NEXT cycle invoice for the same
+ *     account) → different dedupeKey → email sends again.
+ *
+ * Multi-invoice safety (defense-in-depth):
+ *   - BEFORE any expensive work, check if any OTHER unpaid hosting invoice
+ *     remains for THIS hosting account. If yes → skip (no reactivation email).
+ *   - The hook in directadmin/hooks.ts already enforces this guard before
+ *     calling us (lines 286-305), so this is a second line of defense — a
+ *     direct caller of `notifyHostingReactivated` (e.g. manual replay) won't
+ *     accidentally send a "reactivated" email while other invoices are unpaid.
+ *
+ * Order matters:
+ *   - Safety check runs FIRST — quick exit path before any DB chain or
+ *     decrypt work. Mirrors the resolve-then-dedupe ordering of Tasks 6/8/9
+ *     (do expensive work BEFORE the dedupe insert so transient failures
+ *     don't leak a dedupe row).
+ *
+ * Why `payload: null`: the lifetime dedupe already suppresses any scheduler
+ * replay for the same invoice. Mirrors notifyHostingSuspended.
+ *
+ * Errors:
+ *   - Missing account or invoice → log + throw (caller decides retry).
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyHostingReactivated(
+	tenantId: string,
+	accountId: string,
+	invoiceId: string
+): Promise<void> {
+	// 1. Multi-invoice safety check (defense-in-depth) — query any OTHER unpaid
+	//    hosting invoice for this account, tenant-scoped. Uses invoice.hostingAccountId
+	//    directly (mirrors hooks.ts:286-305) — the schema propagates this from
+	//    recurringInvoice when the scheduler generates hosting invoices.
+	const otherUnpaid = await db
+		.select({ id: invoiceTable.id })
+		.from(invoiceTable)
+		.where(
+			and(
+				eq(invoiceTable.tenantId, tenantId),
+				eq(invoiceTable.hostingAccountId, accountId),
+				inArray(invoiceTable.status, ['overdue', 'sent']),
+				ne(invoiceTable.id, invoiceId)
+			)
+		)
+		.limit(1);
+
+	if (otherUnpaid.length > 0) {
+		logInfo(
+			'hosting-email',
+			`reactivated email skipped — other unpaid invoice exists for account ${accountId}`,
+			{ tenantId, metadata: { invoiceId, otherInvoiceId: otherUnpaid[0]?.id } }
+		);
+		return;
+	}
+
+	// 2. Tenant-scoped account lookup. Cross-tenant returns 0 rows → throws.
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	// 3. Tenant-scoped invoice lookup. Cross-tenant returns 0 rows → throws.
+	const [invoiceRow] = await db
+		.select({
+			id: invoiceTable.id,
+			tenantId: invoiceTable.tenantId,
+			invoiceNumber: invoiceTable.invoiceNumber,
+			issueDate: invoiceTable.issueDate,
+			dueDate: invoiceTable.dueDate,
+			totalAmount: invoiceTable.totalAmount,
+			currency: invoiceTable.currency
+		})
+		.from(invoiceTable)
+		.where(and(eq(invoiceTable.id, invoiceId), eq(invoiceTable.tenantId, tenantId)))
+		.limit(1);
+
+	if (!invoiceRow) {
+		const msg = `invoice ${invoiceId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId, metadata: { accountId } });
+		throw new Error(msg);
+	}
+
+	try {
+		// 4. Resolve customer recipient (3-tier fallback in helpers).
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		// 5. Load DA server (tenant-scoped) for hostname → daPanelUrl.
+		const [server] = await db
+			.select({
+				id: daServer.id,
+				tenantId: daServer.tenantId,
+				hostname: daServer.hostname
+			})
+			.from(daServer)
+			.where(and(eq(daServer.id, account.daServerId), eq(daServer.tenantId, tenantId)))
+			.limit(1);
+
+		if (!server) {
+			throw new Error(
+				`DA server ${account.daServerId} not found for tenant ${tenantId} (account ${accountId})`
+			);
+		}
+
+		// 6. Build daPanelUrl + render template.
+		const daPanelUrl = `https://${server.hostname}:2222`;
+		// totalAmount stored in CENTS per schema. Fall back to 0 when null — the
+		// template renders `0.00 RON`.
+		const amountPaid = invoiceRow.totalAmount ?? 0;
+		// Currency narrowing — schema is free-form text but our templates only
+		// support these three. Anything else is normalized to RON (consistent
+		// with the rest of the CRM's defaults).
+		const currency = (
+			invoiceRow.currency === 'EUR' || invoiceRow.currency === 'USD' ? invoiceRow.currency : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
+		const { subject, html } = await renderReactivated({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			invoiceNumber: invoiceRow.invoiceNumber,
+			amountPaid,
+			currency,
+			daPanelUrl
+		});
+
+		// 7. Atomic lifetime dedupe insert (per invoice).
+		const dedupeKey = `reactivated:${invoiceId}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'reactivated',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			// 8. Dedupe hit — already sent for this invoice.
+			logInfo(
+				'hosting-email',
+				`dedupe skip reactivated for account ${accountId} (invoice ${invoiceId})`,
+				{ tenantId }
+			);
+			return;
+		}
+
+		const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+		// 9. Pre-create email_log row so we know its ID for the dedupe linkage.
+		//    payload: null — scheduler replay would hit the lifetime dedupe and no-op.
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: customer.email,
+			subject,
+			emailType: 'hosting-reactivated',
+			htmlBody: html,
+			payload: null
+		});
+
+		// 10. Send via the outbox; pass _retryOfLogId so it reuses our row.
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-reactivated',
+				metadata: { hostingAccountId: accountId, invoiceId },
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
+		);
+
+		// 11. Link the dedupe row to the email_log row for audit trail.
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId })
+			.where(eq(hostingEmailEvent.id, newDedupeId));
+
+		logInfo(
+			'hosting-email',
+			`sent reactivated alert for account ${accountId} (invoice ${invoiceId})`,
+			{ tenantId, metadata: { emailLogId, toEmail: customer.email } }
+		);
+	} catch (err) {
+		logError('hosting-email', `notifyHostingReactivated failed for account ${accountId}`, {
 			tenantId,
 			metadata: { invoiceId },
 			stackTrace: err instanceof Error ? err.stack : undefined

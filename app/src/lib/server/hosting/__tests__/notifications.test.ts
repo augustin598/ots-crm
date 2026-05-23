@@ -220,6 +220,8 @@ const realProvisioningFailed = await import('../email-templates/provisioning-fai
 const capturedProvisioningFailed = { render: realProvisioningFailed.render };
 const realSuspended = await import('../email-templates/suspended');
 const capturedSuspended = { render: realSuspended.render };
+const realReactivated = await import('../email-templates/reactivated');
+const capturedReactivated = { render: realReactivated.render };
 const realNotificationsHelpers = await import('../notifications-helpers');
 const capturedNotificationsHelpers = {
 	resolveCustomerEmail: realNotificationsHelpers.resolveCustomerEmail,
@@ -255,6 +257,17 @@ mock.module('../email-templates/suspended', () => ({
 		return {
 			subject: '\u{26A0}️ Contul de hosting suspendat — factură neachitată (example.ro)',
 			html: '<p>suspended body</p>'
+		};
+	}
+}));
+
+const renderReactivatedCalls: unknown[] = [];
+mock.module('../email-templates/reactivated', () => ({
+	render: async (input: unknown) => {
+		renderReactivatedCalls.push(input);
+		return {
+			subject: '\u{2705} Hosting reactivat — example.ro',
+			html: '<p>reactivated body</p>'
 		};
 	}
 }));
@@ -296,8 +309,12 @@ mock.module('../notifications-helpers', () => {
 });
 
 // Now import the function under test
-const { notifyHostingAccountCreated, notifyHostingProvisioningFailed, notifyHostingSuspended } =
-	await import('../notifications');
+const {
+	notifyHostingAccountCreated,
+	notifyHostingProvisioningFailed,
+	notifyHostingSuspended,
+	notifyHostingReactivated
+} = await import('../notifications');
 
 function pushSelect(rows: unknown[]) {
 	selectQueue.push({ rows });
@@ -320,6 +337,7 @@ beforeEach(() => {
 	renderCalls.length = 0;
 	renderPFCalls.length = 0;
 	renderSuspendedCalls.length = 0;
+	renderReactivatedCalls.length = 0;
 	resolveCustomerEmailReturn = {
 		email: 'client@example.ro',
 		name: 'Acme SRL',
@@ -336,6 +354,7 @@ afterAll(() => {
 	mock.module('../email-templates/account-created', () => capturedAccountCreated);
 	mock.module('../email-templates/provisioning-failed', () => capturedProvisioningFailed);
 	mock.module('../email-templates/suspended', () => capturedSuspended);
+	mock.module('../email-templates/reactivated', () => capturedReactivated);
 	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
 });
 
@@ -772,6 +791,104 @@ describe('notifyHostingSuspended', () => {
 		await notifyHostingSuspended('t-1', 'acc-1', 'inv-1');
 
 		// No template render past dedupe, no log, no send, no update
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		expect(updateCalls).toBe(0);
+		// Info log for skip
+		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// notifyHostingReactivated (per-invoice lifetime dedupe + multi-invoice safety)
+// ---------------------------------------------------------------------------
+describe('notifyHostingReactivated', () => {
+	test('sends reactivation email with payment details on first call', async () => {
+		// 1. Multi-invoice safety check → no other unpaid invoices for this account
+		pushSelect([]);
+		// 2. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 3. Invoice lookup
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't-1',
+				invoiceNumber: 'INV-2026-0123',
+				issueDate: new Date('2026-05-15T00:00:00Z'),
+				dueDate: new Date('2026-05-15T00:00:00Z'),
+				totalAmount: 9950,
+				currency: 'RON'
+			}
+		]);
+		// 4. daServer lookup (resolveCustomerEmail is mocked at module level)
+		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
+		// 5. Atomic dedupe insert → returns row (insert succeeded)
+		pushInsert([{ id: 'evt-react-1' }]);
+		// 6. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingReactivated('t-1', 'acc-1', 'inv-1');
+
+		// Template rendered once with the right fields
+		expect(renderReactivatedCalls.length).toBe(1);
+		const renderInput = renderReactivatedCalls[0] as Record<string, unknown>;
+		expect(renderInput.tenantId).toBe('t-1');
+		expect(renderInput.domain).toBe('example.ro');
+		expect(renderInput.clientName).toBe('Acme SRL');
+		expect(renderInput.invoiceNumber).toBe('INV-2026-0123');
+		expect(renderInput.amountPaid).toBe(9950);
+		expect(renderInput.currency).toBe('RON');
+		expect(renderInput.daPanelUrl).toBe('https://srv1.example.com:2222');
+
+		// One email_log row pre-created
+		expect(logEmailAttemptCalls.length).toBe(1);
+		const attempt = logEmailAttemptCalls[0] as Record<string, unknown>;
+		expect(attempt.tenantId).toBe('t-1');
+		expect(attempt.toEmail).toBe('client@example.ro');
+		expect(attempt.emailType).toBe('hosting-reactivated');
+		// Lifetime dedupe per invoice → scheduler replay no-ops → payload: null
+		expect(attempt.payload).toBeNull();
+
+		// Email sent once with _retryOfLogId set
+		expect(sendWithPersistenceCalls.length).toBe(1);
+		const sendCtx = sendWithPersistenceCalls[0].ctx as Record<string, unknown>;
+		expect(sendCtx._retryOfLogId).toBe('log-id-1');
+		expect(sendCtx.toEmail).toBe('client@example.ro');
+		expect(sendCtx.emailType).toBe('hosting-reactivated');
+		expect(sendCtx.payload).toBeNull();
+
+		// buildMail() result asserted — `from` must be set
+		const mail = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mail).toBeDefined();
+		expect(mail.from).toBeDefined();
+		expect(mail.from as string).toContain('@');
+		expect(mail.from as string).toContain('OTS');
+		expect(mail.to).toBe('client@example.ro');
+		expect(mail.subject).toBeDefined();
+		expect(mail.html).toBeDefined();
+
+		// Dedupe row updated with the emailLogId
+		expect(updateCalls).toBe(1);
+	});
+
+	test('skips email when another hosting invoice is still unpaid (safety check)', async () => {
+		// 1. Multi-invoice safety check → another unpaid invoice exists → skip
+		pushSelect([{ id: 'other-inv' }]);
+
+		await notifyHostingReactivated('t-1', 'acc-1', 'inv-1');
+
+		// No template render, no email_log, no send, no update
+		expect(renderReactivatedCalls.length).toBe(0);
 		expect(logEmailAttemptCalls.length).toBe(0);
 		expect(sendWithPersistenceCalls.length).toBe(0);
 		expect(updateCalls).toBe(0);
