@@ -149,7 +149,7 @@ function buildHeaderLogoHtml(logoAttachment: { cid: string } | null): string {
 		: '';
 }
 
-interface BrandedEmailOptions {
+export interface BrandedEmailOptions {
 	themeColor: string;
 	headerLogoHtml: string;
 	title: string;         // already-escaped or trusted string
@@ -159,7 +159,7 @@ interface BrandedEmailOptions {
 	previewTitle?: string; // <title> tag content
 }
 
-function renderBrandedEmail(opts: BrandedEmailOptions): string {
+export function renderBrandedEmail(opts: BrandedEmailOptions): string {
 	const subtitle = opts.subtitle ?? BRAND_MOTTO;
 	const footer =
 		opts.footerHtml ??
@@ -215,7 +215,7 @@ function renderCtaButton(href: string, label: string, themeColor: string): strin
  * Fetch tenant brand bundle: name, themeColor, logo attachment, header logo HTML.
  * Reuses existing invoiceSettings + tenant rows so callers can skip duplicate reads.
  */
-async function fetchTenantBrand(tenantId: string): Promise<{
+export async function fetchTenantBrand(tenantId: string): Promise<{
 	tenantName: string;
 	themeColor: string;
 	logoAttachment: ReturnType<typeof prepareLogoAttachment>['logoAttachment'];
