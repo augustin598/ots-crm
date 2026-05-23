@@ -116,7 +116,8 @@ mock.module('$lib/server/db/schema', () => ({
 		hostingAccountId: 'hosting_account_id',
 		dedupeKey: 'dedupe_key',
 		eventType: 'event_type',
-		emailLogId: 'email_log_id'
+		emailLogId: 'email_log_id',
+		sentAt: 'sent_at'
 	},
 	daServer: {
 		id: 'id',
@@ -133,7 +134,7 @@ mock.module('$lib/server/db/schema', () => ({
 	},
 	tenantUser: { id: 'id', tenantId: 'tenant_id', userId: 'user_id', role: 'role', status: 'status' },
 	user: { id: 'id', email: 'email' },
-	tenant: { id: 'id', adminContactEmail: 'admin_contact_email' },
+	tenant: { id: 'id', slug: 'slug', adminContactEmail: 'admin_contact_email' },
 	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' }
 }));
 
@@ -194,8 +195,57 @@ mock.module('../email-templates/account-created', () => ({
 	}
 }));
 
+const renderPFCalls: unknown[] = [];
+mock.module('../email-templates/provisioning-failed', () => ({
+	render: async (input: unknown) => {
+		renderPFCalls.push(input);
+		return {
+			subject: '🚨 Provisioning DA eșuat — example.ro (ots) — da_username_exists',
+			html: '<p>pf body</p>'
+		};
+	}
+}));
+
+// resolveCustomerEmail + resolveAdminRecipients mocked at module level so tests
+// can inject return values directly instead of threading admin-resolver SQL
+// (innerJoin on tenant_user) through the chain queue.
+let resolveCustomerEmailReturn: { email: string; name: string; source: string } = {
+	email: 'client@example.ro',
+	name: 'Acme SRL',
+	source: 'client'
+};
+let resolveAdminRecipientsReturn: string[] | Error = ['admin@example.ro'];
+mock.module('../notifications-helpers', () => {
+	class NoAdminRecipientError extends Error {
+		constructor(public readonly tenantId: string) {
+			super(`no admin recipient resolvable for tenant ${tenantId}`);
+			this.name = 'NoAdminRecipientError';
+		}
+	}
+	class OrphanAccountError extends Error {
+		constructor(public readonly accountId: string) {
+			super(`hosting account ${accountId} has no client and no inquiry`);
+			this.name = 'OrphanAccountError';
+		}
+	}
+	return {
+		resolveCustomerEmail: async () => resolveCustomerEmailReturn,
+		resolveAdminRecipients: async () => {
+			if (resolveAdminRecipientsReturn instanceof Error) {
+				throw resolveAdminRecipientsReturn;
+			}
+			return resolveAdminRecipientsReturn;
+		},
+		NoAdminRecipientError,
+		OrphanAccountError,
+		dayBucketEET: () => '2026-05-23'
+	};
+});
+
 // Now import the function under test
-const { notifyHostingAccountCreated } = await import('../notifications');
+const { notifyHostingAccountCreated, notifyHostingProvisioningFailed } = await import(
+	'../notifications'
+);
 
 function pushSelect(rows: unknown[]) {
 	selectQueue.push({ rows });
@@ -216,6 +266,13 @@ beforeEach(() => {
 	loggerCalls.error.length = 0;
 	loggerCalls.warning.length = 0;
 	renderCalls.length = 0;
+	renderPFCalls.length = 0;
+	resolveCustomerEmailReturn = {
+		email: 'client@example.ro',
+		name: 'Acme SRL',
+		source: 'client'
+	};
+	resolveAdminRecipientsReturn = ['admin@example.ro'];
 });
 
 describe('notifyHostingAccountCreated', () => {
@@ -234,13 +291,9 @@ describe('notifyHostingAccountCreated', () => {
 		]);
 		// 2. Atomic dedupe insert → returning a row (insert succeeded)
 		pushInsert([{ id: 'evt-1' }]);
-		// 3. resolveCustomerEmail → client lookup
-		pushSelect([
-			{ email: 'client@example.ro', name: 'Display', businessName: 'Acme SRL' }
-		]);
-		// 4. daServer lookup
+		// 3. daServer lookup (resolveCustomerEmail is mocked at module level)
 		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
-		// 5. emailSettings lookup inside buildMail
+		// 4. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
 
 		await notifyHostingAccountCreated('t-1', 'acc-1');
@@ -358,13 +411,9 @@ describe('notifyHostingAccountCreated', () => {
 		]);
 		// 2. Atomic dedupe insert → returning a row (insert succeeded)
 		pushInsert([{ id: 'evt-1' }]);
-		// 3. resolveCustomerEmail → client lookup
-		pushSelect([
-			{ email: 'client@example.ro', name: 'Display', businessName: 'Acme SRL' }
-		]);
-		// 4. daServer lookup
+		// 3. daServer lookup (resolveCustomerEmail is mocked at module level)
 		pushSelect([{ id: 'da-1', tenantId: 't-1', hostname: 'srv1.example.com' }]);
-		// 5. emailSettings lookup inside buildMail
+		// 4. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
 
 		await expect(notifyHostingAccountCreated('t-1', 'acc-1')).rejects.toThrow(
@@ -379,6 +428,165 @@ describe('notifyHostingAccountCreated', () => {
 		// unlinked so it surfaces as a stuck welcome.
 		expect(updateCalls).toBe(0);
 		// Error logged for ops visibility.
+		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// notifyHostingProvisioningFailed (admin alert with 5-min rolling dedupe)
+// ---------------------------------------------------------------------------
+describe('notifyHostingProvisioningFailed', () => {
+	test('sends to all owner/admin users (multi-recipient send)', async () => {
+		resolveAdminRecipientsReturn = ['a@example.ro', 'b@example.ro'];
+
+		// 1. Rolling dedupe query → no prior alerts in 5-min window
+		pushSelect([]);
+		// 2. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// 3. Tenant lookup (for slug)
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 4. Dedupe row insert (rolling — straight INSERT, returns row)
+		pushInsert([{ id: 'evt-pf-1' }]);
+		// 5+6. emailSettings lookup inside each buildMail (2 sends)
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingProvisioningFailed('t-1', 'acc-1', 'da_username_exists', 2);
+
+		// Template rendered ONCE (reused across recipients)
+		expect(renderPFCalls.length).toBe(1);
+		const renderInput = renderPFCalls[0] as Record<string, unknown>;
+		expect(renderInput.tenantId).toBe('t-1');
+		expect(renderInput.tenantSlug).toBe('ots');
+		expect(renderInput.accountId).toBe('acc-1');
+		expect(renderInput.reason).toBe('da_username_exists');
+		expect(renderInput.attemptNumber).toBe(2);
+		expect(renderInput.adminCrmUrl).toContain('/ots/hosting/accounts/acc-1');
+
+		// Two email_log rows pre-created (one per recipient)
+		expect(logEmailAttemptCalls.length).toBe(2);
+		const first = logEmailAttemptCalls[0] as Record<string, unknown>;
+		expect(first.toEmail).toBe('a@example.ro');
+		expect(first.emailType).toBe('hosting-provisioning-failed');
+		expect(first.payload).toBeNull();
+		const second = logEmailAttemptCalls[1] as Record<string, unknown>;
+		expect(second.toEmail).toBe('b@example.ro');
+
+		// Two sends with _retryOfLogId
+		expect(sendWithPersistenceCalls.length).toBe(2);
+		const sendCtxA = sendWithPersistenceCalls[0].ctx as Record<string, unknown>;
+		expect(sendCtxA._retryOfLogId).toBe('log-id-1');
+		expect(sendCtxA.payload).toBeNull();
+		const mailA = sendWithPersistenceCalls[0].mail as Record<string, unknown>;
+		expect(mailA.from).toBeDefined();
+		expect(mailA.from as string).toContain('@');
+		expect(mailA.to).toBe('a@example.ro');
+		const mailB = sendWithPersistenceCalls[1].mail as Record<string, unknown>;
+		expect(mailB.to).toBe('b@example.ro');
+	});
+
+	test('rolling 5-min dedupe blocks same reason within window', async () => {
+		// Rolling dedupe query returns a prior alert → early return
+		pushSelect([{ id: 'existing-evt' }]);
+
+		await notifyHostingProvisioningFailed('t-1', 'acc-1', 'da_create_failed', 1);
+
+		// No template render, no email_log creation, no send
+		expect(renderPFCalls.length).toBe(0);
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		// Info log for skip
+		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test('different reasons within 5-min window both send (dedupe key differs)', async () => {
+		resolveAdminRecipientsReturn = ['admin@example.ro'];
+
+		// FIRST CALL (reason A)
+		pushSelect([]); // rolling dedupe → empty
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushInsert([{ id: 'evt-A' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingProvisioningFailed('t-1', 'acc-1', 'da_username_exists', 1);
+
+		// SECOND CALL (reason B) within the same 5-min window — dedupe LIKE clause
+		// scopes by reason, so this also queries empty and sends.
+		pushSelect([]);
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushInsert([{ id: 'evt-B' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingProvisioningFailed('t-1', 'acc-1', 'da_unreachable', 1);
+
+		// Both calls rendered + sent
+		expect(renderPFCalls.length).toBe(2);
+		expect(logEmailAttemptCalls.length).toBe(2);
+		expect(sendWithPersistenceCalls.length).toBe(2);
+	});
+
+	test('throws and propagates when resolveAdminRecipients fails', async () => {
+		const { NoAdminRecipientError } = await import('../notifications-helpers');
+		resolveAdminRecipientsReturn = new NoAdminRecipientError('t-1');
+
+		// Rolling dedupe query → empty (we go past it)
+		pushSelect([]);
+		// Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				daCredentialsEncrypted: null
+			}
+		]);
+		// Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+
+		await expect(
+			notifyHostingProvisioningFailed('t-1', 'acc-1', 'da_create_failed', 1)
+		).rejects.toBeInstanceOf(NoAdminRecipientError);
+
+		// No template render, no log, no send
+		expect(renderPFCalls.length).toBe(0);
+		expect(logEmailAttemptCalls.length).toBe(0);
+		expect(sendWithPersistenceCalls.length).toBe(0);
+		// Error logged for ops visibility
 		expect(loggerCalls.error.length).toBeGreaterThanOrEqual(1);
 	});
 });

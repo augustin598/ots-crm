@@ -1,17 +1,23 @@
 import { db } from '$lib/server/db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gt, like } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import {
 	hostingAccount,
 	hostingEmailEvent,
 	daServer,
+	tenant as tenantTable,
 	emailSettings as emailSettingsTable
 } from '$lib/server/db/schema';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
 import { logEmailAttempt } from '$lib/server/email-logger';
-import { resolveCustomerEmail } from './notifications-helpers';
+import {
+	resolveCustomerEmail,
+	resolveAdminRecipients,
+	NoAdminRecipientError
+} from './notifications-helpers';
 import { render as renderAccountCreated } from './email-templates/account-created';
+import { render as renderProvisioningFailed } from './email-templates/provisioning-failed';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -214,3 +220,229 @@ export async function notifyHostingAccountCreated(
 		throw err;
 	}
 }
+
+/**
+ * Admin alert dispatched when DA provisioning for a hosting account fails.
+ *
+ * Dedupe strategy (DIFFERENT from welcome — this is rolling-window, not lifetime):
+ *   - The same `reason` for the same `accountId` is suppressed for 5 minutes.
+ *   - Different reasons (e.g. `da_username_exists` then `da_unreachable`) within
+ *     5 minutes both send: the `dedupeKey` encodes both reason and a timestamp
+ *     so the LIKE prefix scan `provisioning-failed:${reason}:%` matches only
+ *     the same reason class.
+ *   - We deliberately do NOT use `onConflictDoNothing` here because multiple
+ *     rows per account+reason ARE expected over the account's lifetime — the
+ *     rolling window is the suppression mechanism, the unique index would
+ *     hard-block forever.
+ *
+ * Multi-recipient send:
+ *   - Loops over every admin/owner email from `resolveAdminRecipients`. Each
+ *     send gets its own `email_log` row so audit covers every attempt.
+ *   - The single dedupe row's `emailLogId` is "last writer wins" — acceptable
+ *     for internal alerts where the audit trail lives on `email_log` rows
+ *     keyed by `metadata.hostingAccountId`.
+ *
+ * Why `payload: null`: the dedupe row already suppresses retries within the
+ * window. If a scheduler replay fired this notifier with the same args, it
+ * would hit the rolling-dedupe SELECT and no-op. Mirrors the welcome notifier.
+ *
+ * Errors:
+ *   - `NoAdminRecipientError` (admin config bug) is logged and rethrown so
+ *     ops sees it — caller decides whether to alert another way.
+ *   - SMTP/build errors bubble up after a structured error log.
+ */
+export async function notifyHostingProvisioningFailed(
+	tenantId: string,
+	accountId: string,
+	reason: string,
+	attemptNumber: number
+): Promise<void> {
+	const windowStart = new Date(Date.now() - 5 * 60 * 1000);
+	const dedupeKeyPrefix = `provisioning-failed:${reason}:`;
+
+	// 1. Rolling 5-min dedupe check. Same reason within window → no-op.
+	const existing = await db
+		.select({ id: hostingEmailEvent.id })
+		.from(hostingEmailEvent)
+		.where(
+			and(
+				eq(hostingEmailEvent.hostingAccountId, accountId),
+				eq(hostingEmailEvent.eventType, 'provisioning-failed'),
+				like(hostingEmailEvent.dedupeKey, `${dedupeKeyPrefix}%`),
+				gt(hostingEmailEvent.sentAt, windowStart)
+			)
+		)
+		.limit(1);
+
+	if (existing.length > 0) {
+		logInfo(
+			'hosting-email',
+			`rolling-dedupe skip provisioning-failed (${reason}) for account ${accountId}`,
+			{ tenantId, metadata: { reason, attemptNumber } }
+		);
+		return;
+	}
+
+	// 2. Tenant-scoped account lookup.
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	// 3. Tenant lookup for slug (used in CRM deep link).
+	const [tenantRow] = await db
+		.select({ id: tenantTable.id, slug: tenantTable.slug })
+		.from(tenantTable)
+		.where(eq(tenantTable.id, tenantId))
+		.limit(1);
+
+	if (!tenantRow) {
+		const msg = `tenant ${tenantId} not found`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	// 4. Resolve admin recipients (owner/admin users → tenant.adminContactEmail → OPS env).
+	let recipients: string[];
+	try {
+		recipients = await resolveAdminRecipients(tenantId);
+	} catch (err) {
+		logError(
+			'hosting-email',
+			`resolveAdminRecipients failed for tenant ${tenantId} — provisioning-failed alert blocked`,
+			{
+				tenantId,
+				metadata: { accountId, reason, attemptNumber },
+				stackTrace: err instanceof Error ? err.stack : undefined
+			}
+		);
+		throw err;
+	}
+
+	const adminCrmUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/hosting/accounts/${accountId}`;
+
+	// 5. Render the alert template ONCE (reused across all recipients).
+	const { subject, html } = await renderProvisioningFailed({
+		tenantId,
+		tenantSlug: tenantRow.slug,
+		accountId,
+		domain: account.domain,
+		reason,
+		attemptNumber,
+		adminCrmUrl
+	});
+
+	// 6. Fetch brand once so every buildMail call reuses the same `from`-prefix
+	//    and logo attachment — avoids 1 DB read per recipient.
+	const brand = await fetchTenantBrand(tenantId);
+
+	// 7. Insert one rolling-dedupe row (no onConflictDoNothing — multiple rows
+	//    per account+reason over time are expected; the rolling SELECT above
+	//    is the suppression mechanism, not the unique index).
+	//    Use timestamp suffix to keep `dedupeKey` unique under the table's
+	//    unique(tenantId, hostingAccountId, dedupeKey) index even when many
+	//    alerts fire over the account's lifetime.
+	const dedupeRowId = generateEventId();
+	const dedupeKey = `${dedupeKeyPrefix}${Date.now()}`;
+	await db.insert(hostingEmailEvent).values({
+		id: dedupeRowId,
+		tenantId,
+		hostingAccountId: accountId,
+		eventType: 'provisioning-failed',
+		dedupeKey,
+		attemptNumber
+	});
+
+	// 8. Send to each recipient. Per-recipient email_log row so audit covers
+	//    every attempt. Wrapped in try/catch so a partial failure (e.g.
+	//    recipient #2 SMTP error) is logged and rethrown but doesn't leak as
+	//    an unhandled rejection from the caller's catch block.
+	try {
+		let lastEmailLogId: string | undefined;
+		for (const email of recipients) {
+			// Pre-create email_log row so we know its ID for the audit linkage.
+			// payload: null — scheduler replay would hit the rolling-dedupe SELECT and no-op.
+			const emailLogId = await logEmailAttempt({
+				tenantId,
+				toEmail: email,
+				subject,
+				emailType: 'hosting-provisioning-failed',
+				htmlBody: html,
+				payload: null
+			});
+			lastEmailLogId = emailLogId;
+
+			await sendWithPersistence(
+				{
+					tenantId,
+					toEmail: email,
+					subject,
+					emailType: 'hosting-provisioning-failed',
+					metadata: { hostingAccountId: accountId, reason, attemptNumber },
+					htmlBody: html,
+					payload: null,
+					_retryOfLogId: emailLogId
+				},
+				async () => {
+					const [settings] = await db
+						.select()
+						.from(emailSettingsTable)
+						.where(eq(emailSettingsTable.tenantId, tenantId))
+						.limit(1);
+					const fromEmail = resolveFromEmail(settings ?? null);
+					return {
+						from: `"${brand.tenantName}" <${fromEmail}>`,
+						to: email,
+						subject,
+						html,
+						...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+					};
+				}
+			);
+		}
+
+		// 9. Link the dedupe row to the LAST recipient's email_log row (last-writer-wins).
+		if (lastEmailLogId) {
+			await db
+				.update(hostingEmailEvent)
+				.set({ emailLogId: lastEmailLogId })
+				.where(eq(hostingEmailEvent.id, dedupeRowId));
+		}
+
+		logInfo(
+			'hosting-email',
+			`sent provisioning-failed alert for account ${accountId} (${reason})`,
+			{
+				tenantId,
+				metadata: { reason, attemptNumber, recipients: recipients.length }
+			}
+		);
+	} catch (err) {
+		logError(
+			'hosting-email',
+			`notifyHostingProvisioningFailed failed for account ${accountId} (${reason})`,
+			{
+				tenantId,
+				metadata: { reason, attemptNumber },
+				stackTrace: err instanceof Error ? err.stack : undefined
+			}
+		);
+		throw err;
+	}
+}
+// Re-export for downstream consumers that need to differentiate admin-config bugs.
+export { NoAdminRecipientError };

@@ -9,7 +9,10 @@ import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
 import { logWarning, logError } from '$lib/server/logger';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
-import { notifyHostingAccountCreated } from './notifications';
+import {
+	notifyHostingAccountCreated,
+	notifyHostingProvisioningFailed
+} from './notifications';
 
 /**
  * Shared "create one DA account" pipeline. Same logic the user-facing
@@ -220,6 +223,27 @@ export async function createHostingAccountInternal(
 					})
 					.where(eq(table.hostingAccount.id, id))
 					.catch(() => {});
+				// Fire-and-forget admin alert. Rolling 5-min dedupe inside the
+				// notifier prevents spam during username_exists retries (same
+				// reason within window = dedupe hit). `attempt + 1` converts
+				// the 0-indexed loop counter to the 1-indexed "Încercarea N"
+				// shown in the admin UI / email body.
+				const reason =
+					err instanceof DirectAdminApiError ? `da_${err.kind}` : 'da_create_failed';
+				notifyHostingProvisioningFailed(tenantId, id, reason, attempt + 1).catch(
+					(notifyErr) => {
+						logError('hosting-email', 'provisioning-failed alert dispatch failed', {
+							tenantId,
+							metadata: {
+								hostingAccountId: id,
+								reason,
+								attemptNumber: attempt + 1,
+								error:
+									notifyErr instanceof Error ? notifyErr.message : String(notifyErr)
+							}
+						});
+					}
+				);
 				return { ok: false as const, error: err };
 			}
 		});
