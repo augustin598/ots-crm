@@ -607,6 +607,8 @@ export async function notifyHostingSuspended(
 			amountDue,
 			currency,
 			payUrl,
+			// TODO: pull from tenant.supportEmail when that column is added to the
+			// tenant schema (tenant.adminContactEmail is admin-only, not customer-facing).
 			supportEmail: 'support@onetopsolution.ro'
 		});
 
