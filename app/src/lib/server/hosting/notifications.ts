@@ -371,6 +371,16 @@ export async function notifyHostingProvisioningFailed(
 	//    every attempt. Wrapped in try/catch so a partial failure (e.g.
 	//    recipient #2 SMTP error) is logged and rethrown but doesn't leak as
 	//    an unhandled rejection from the caller's catch block.
+	//
+	//    Partial-failure tradeoff: dedupe row is inserted BEFORE the loop, so
+	//    if recipient #1 sends successfully but #2 fails, the rolling 5-min
+	//    window blocks any subsequent fire for the same account+reason. The
+	//    failed recipient may miss this specific window — they will get
+	//    re-notified when (a) the 5-min window expires AND (b) the same root
+	//    cause re-fires. Acceptable because most tenants have ≤2 admins,
+	//    recipient #1 already received the alert, and the underlying root
+	//    cause typically retries anyway. Audit trail is preserved per
+	//    recipient via the per-recipient email_log rows.
 	try {
 		let lastEmailLogId: string | undefined;
 		for (const email of recipients) {
