@@ -7,6 +7,7 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { sendOnboardingMagicLink } from './send-magic-link';
 import { provisionDirectAdminAccount } from './provision-da';
 import { emitKeezFiscalInvoice } from './emit-keez-invoice';
+import { notifyPaymentSucceeded } from '../notifications';
 
 type StepName = 'magic_link' | 'keez_invoice' | 'da_provision';
 type StepStatus = 'pending' | 'success' | 'failed' | 'skipped';
@@ -100,20 +101,32 @@ async function recordStep(params: {
 
 /**
  * Rulează un pas cu try/catch — nu propagă eroarea, doar o înregistrează.
- * Returns: true dacă pasul a reușit (sau era deja success/skipped).
+ * Returns: the step's inner result on success (so callers can chain follow-up
+ * work like firing a customer email), or `undefined` on already-done / skipped
+ * / failed. The boolean "success?" signal is preserved as `result !== undefined`
+ * for the (very few) callers that only care about pass/fail.
+ *
+ * Why the signature change: Task 13 needs the keez_invoice step's payload
+ * (the freshly-emitted invoiceId) to fire `notifyPaymentSucceeded`. The
+ * alternative (re-query `invoice` after the step) duplicates Stripe's
+ * idempotency key resolution and adds DB chatter. Returning the result is the
+ * narrower change — none of the 3 existing callers used the prior boolean.
  */
 async function runStep<T>(
 	ctx: PostPaymentContext,
 	step: StepName,
 	fn: () => Promise<T | { skipped: true; reason: string }>
-): Promise<boolean> {
+): Promise<T | { skipped: true; reason: string } | undefined> {
 	const existing = await getStepStatus(ctx.sessionId, step);
 	if (existing?.status === 'success' || existing?.status === 'skipped') {
 		logInfo('directadmin', `post-payment step "${step}" deja ${existing.status}, skip`, {
 			tenantId: ctx.tenantId,
 			metadata: { sessionId: ctx.sessionId, step }
 		});
-		return true;
+		// Already-done — no fresh result to return. Follow-up work (like
+		// payment-succeeded email) already ran on the original attempt; its own
+		// dedupe row will block a re-fire here even if we tried.
+		return undefined;
 	}
 
 	const stepStart = Date.now();
@@ -135,7 +148,7 @@ async function runStep<T>(
 			`[CHECKOUT][post-payment] step "${step}" → ${skipped ? 'skipped' : 'success'} in ${Date.now() - stepStart}ms`,
 			{ tenantId: ctx.tenantId, metadata: { sessionId: ctx.sessionId, step } }
 		);
-		return true;
+		return result;
 	} catch (err) {
 		const { message } = serializeError(err);
 		await recordStep({
@@ -150,7 +163,7 @@ async function runStep<T>(
 			`[CHECKOUT][post-payment] step "${step}" → FAILED in ${Date.now() - stepStart}ms: ${message}`,
 			{ tenantId: ctx.tenantId, metadata: { sessionId: ctx.sessionId, step } }
 		);
-		return false;
+		return undefined;
 	}
 }
 
@@ -186,7 +199,7 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 	// `invoice.payment_succeeded` webhook + a separate emitter (TODO Sprint 8.2).
 	// Idempotency is enforced inside emitKeezFiscalInvoice via stripePaymentIntentId
 	// — a webhook retry won't double-invoice.
-	await runStep(ctx, 'keez_invoice', () =>
+	const keezResult = await runStep(ctx, 'keez_invoice', () =>
 		emitKeezFiscalInvoice({
 			tenantId: ctx.tenantId,
 			clientId: ctx.clientId,
@@ -197,6 +210,33 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 			productId: ctx.productId
 		})
 	);
+
+	// 2b. Customer payment-succeeded email — best-effort, never blocks the
+	// pipeline. Fired only when the keez step actually wrote/found an invoice
+	// (skipped pre-conditions like `product_missing` leave nothing to email
+	// about). `notifyPaymentSucceeded` has its own lifetime dedupe per invoice,
+	// so a Stripe webhook retry that re-fires the dispatcher will no-op safely
+	// here even though the keez step itself returned the cached invoiceId on
+	// the second pass. Errors are caught + logged so a notify failure cannot
+	// mark the webhook event as `failed` and trigger a Stripe retry storm.
+	if (
+		keezResult &&
+		typeof keezResult === 'object' &&
+		'invoiceId' in keezResult &&
+		!('skipped' in keezResult)
+	) {
+		const invoiceId = keezResult.invoiceId;
+		notifyPaymentSucceeded(ctx.tenantId, invoiceId).catch((err) => {
+			logError('hosting-email', 'payment-succeeded notify failed', {
+				tenantId: ctx.tenantId,
+				metadata: {
+					sessionId: ctx.sessionId,
+					invoiceId,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		});
+	}
 
 	// 3. DA provisioning — ultima, poate dura mai mult (apel DA + DB writes).
 	await runStep(ctx, 'da_provision', async () => {
