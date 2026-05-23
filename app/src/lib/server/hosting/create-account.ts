@@ -7,8 +7,9 @@ import { runWithAudit, withAccountLock, type DaAuditTrigger } from '$lib/server/
 import { DirectAdminApiError } from '$lib/server/plugins/directadmin/client';
 import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
-import { logWarning } from '$lib/server/logger';
+import { logWarning, logError } from '$lib/server/logger';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
+import { notifyHostingAccountCreated } from './notifications';
 
 /**
  * Shared "create one DA account" pipeline. Same logic the user-facing
@@ -187,6 +188,19 @@ export async function createHostingAccountInternal(
 							}
 						}
 					);
+				});
+				// Fire welcome email — best-effort, never block the provisioning return value.
+				// Failure is logged (and dedupe-tracked inside the notifier) so it can be
+				// surfaced via the admin UI without retrying forever.
+				notifyHostingAccountCreated(tenantId, id).catch((err) => {
+					logError('hosting-email', `welcome email dispatch failed`, {
+						tenantId,
+						metadata: {
+							hostingAccountId: id,
+							daUsername,
+							error: err instanceof Error ? err.message : String(err)
+						}
+					});
 				});
 				return { ok: true as const };
 			} catch (err) {
