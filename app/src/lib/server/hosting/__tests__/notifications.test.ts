@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test';
 
 // Mock SvelteKit virtual modules BEFORE importing the module under test
 // (which transitively imports $lib/server/db → $env/dynamic/private).
@@ -161,7 +161,13 @@ mock.module('$lib/server/email', () => ({
 		headerLogoHtml: '',
 		logoAttachment: null
 	}),
-	resolveFromEmail: () => 'noreply@example.ro'
+	resolveFromEmail: () => 'noreply@example.ro',
+	// Needed so the real email-templates can link (we capture them below for
+	// per-file restore; the templates use these via their transitive deps).
+	// Templates themselves are mocked with canned data in this file, so these
+	// stubs never actually run from inside notifications.test.ts.
+	renderBrandedEmail: (_input: unknown) => '',
+	renderCtaButton: (_href: string, _label: string, _themeColor: string) => ''
 }));
 
 const logEmailAttemptCalls: Array<unknown> = [];
@@ -186,6 +192,31 @@ mock.module('$lib/server/logger', () => ({
 	logWarning: (source: string, message: string, opts?: unknown) =>
 		loggerCalls.warning.push({ source, message, opts })
 }));
+
+// ---------------------------------------------------------------------------
+// Capture real exports of the three modules we're about to mock so we can
+// restore them in afterAll. Without this, the mocks set below leak across
+// test files in the same Bun process — notifications-helpers.test.ts,
+// account-created.test.ts, and provisioning-failed.test.ts all see the
+// canned values from THIS file's mocks instead of their real implementations.
+//
+// We capture function values via destructuring (not the namespace object) so
+// the captured references survive the later mock.module(...) calls that mutate
+// the module namespaces. Restore happens via mock.module() in afterAll —
+// `mock.restore()` does NOT undo mock.module() in Bun 1.3.x.
+// ---------------------------------------------------------------------------
+const realAccountCreated = await import('../email-templates/account-created');
+const capturedAccountCreated = { render: realAccountCreated.render };
+const realProvisioningFailed = await import('../email-templates/provisioning-failed');
+const capturedProvisioningFailed = { render: realProvisioningFailed.render };
+const realNotificationsHelpers = await import('../notifications-helpers');
+const capturedNotificationsHelpers = {
+	resolveCustomerEmail: realNotificationsHelpers.resolveCustomerEmail,
+	resolveAdminRecipients: realNotificationsHelpers.resolveAdminRecipients,
+	NoAdminRecipientError: realNotificationsHelpers.NoAdminRecipientError,
+	OrphanAccountError: realNotificationsHelpers.OrphanAccountError,
+	dayBucketEET: realNotificationsHelpers.dayBucketEET
+};
 
 const renderCalls: unknown[] = [];
 mock.module('../email-templates/account-created', () => ({
@@ -273,6 +304,16 @@ beforeEach(() => {
 		source: 'client'
 	};
 	resolveAdminRecipientsReturn = ['admin@example.ro'];
+});
+
+// Restore the modules we replaced via mock.module() so the next test file
+// (which loads in the same Bun process) doesn't see our canned values. Bun
+// runs test files sequentially in one process — without this, the leak
+// breaks notifications-helpers.test.ts and the email-templates test suite.
+afterAll(() => {
+	mock.module('../email-templates/account-created', () => capturedAccountCreated);
+	mock.module('../email-templates/provisioning-failed', () => capturedProvisioningFailed);
+	mock.module('../notifications-helpers', () => capturedNotificationsHelpers);
 });
 
 describe('notifyHostingAccountCreated', () => {
