@@ -98,6 +98,29 @@ export const deleteHostingInquiry = command(IdSchema, async (id) => {
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.hosting.manage');
 
+	// Safety guard: refuse delete if the inquiry has been converted to a hosting
+	// account. The inquiry IS the conversion-history record for that account —
+	// admins must use the cancel/archive path instead (or delete the account
+	// first if it's truly defunct).
+	const [inquiry] = await db
+		.select({ hostingAccountId: table.hostingInquiry.hostingAccountId })
+		.from(table.hostingInquiry)
+		.where(
+			and(eq(table.hostingInquiry.id, id), eq(table.hostingInquiry.tenantId, tenantId))
+		)
+		.limit(1);
+
+	if (!inquiry) {
+		throw error(404, 'Inquiry-ul nu a fost găsit.');
+	}
+
+	if (inquiry.hostingAccountId !== null) {
+		throw error(
+			409,
+			'Nu poți șterge un inquiry care a fost convertit într-un cont de hosting. Șterge mai întâi contul de hosting.'
+		);
+	}
+
 	await db
 		.delete(table.hostingInquiry)
 		.where(

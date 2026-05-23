@@ -35,6 +35,19 @@ function makeChain(rows: unknown[]): any {
 }
 
 // ─── Schema mock ──────────────────────────────────────────────────────────────
+//
+// CRITICAL: eagerly load the REAL schema module BEFORE mocking. Bun's
+// mock.module() registers in a global registry that persists across test files
+// in the same process — and once the module is cached, subsequent mock.module()
+// calls in OTHER test files are no-ops. By loading the real module first, we
+// guarantee the cached shape includes every column the real codebase exposes
+// (so neighbor test files like hosting-inquiries-delete-safety.test.ts that
+// rely on `table.hostingInquiry.*` won't hit "undefined is not an object" when
+// they share this Bun process). This also rescues this file's own
+// `table.userWhatsappLink.phoneE164` / `table.clientUser.userId` references in
+// task-comments.remote.ts, which were broken by the partial mock below.
+// Pattern mirrors the Pre-Task 9 fix in app/src/lib/server/hosting/__tests__/notifications.test.ts.
+await import('$lib/server/db/schema');
 
 const col = (n: string) => n;
 
