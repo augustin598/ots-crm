@@ -25,11 +25,21 @@ function escapeHtml(s: string): string {
 	);
 }
 
+// 692.00 RON net + 21% VAT (RO 2025+) = 145.32 RON VAT + 837.32 RON total.
+// Realistic fixture matching what tenant 'ots' actually bills.
+const SUBTOTAL_CENTS = 69200;
+const VAT_RATE = 21;
+const VAT_AMOUNT_CENTS = Math.round((SUBTOTAL_CENTS * VAT_RATE) / 100);
+const TOTAL_CENTS = SUBTOTAL_CENTS + VAT_AMOUNT_CENTS;
+
 const baseFixture = {
 	domain: 'example.ro',
 	clientName: 'Ion Popescu',
 	dueDate: '01.06.2026',
-	amountDue: 9950, // in cents → 99.50
+	subtotal: SUBTOTAL_CENTS,
+	vatRate: VAT_RATE,
+	vatAmount: VAT_AMOUNT_CENTS,
+	totalAmount: TOTAL_CENTS,
 	currency: 'RON',
 	payUrl: 'https://clients.onetopsolution.ro/ots/hosting/accounts/acc-1/renew'
 };
@@ -40,7 +50,9 @@ const title = 'Reminder reînnoire hosting';
 function renderVariant(daysUntilDue: 1 | 7 | 14, autoRenew: boolean): string {
 	const dayWord = daysUntilDue === 1 ? '1 zi' : `${daysUntilDue} zile`;
 	const subject = `Hosting ${baseFixture.domain} expiră în ${dayWord}`;
-	const amountMajor = (baseFixture.amountDue / 100).toFixed(2);
+	const subtotalMajor = (baseFixture.subtotal / 100).toFixed(2);
+	const vatMajor = (baseFixture.vatAmount / 100).toFixed(2);
+	const totalMajor = (baseFixture.totalAmount / 100).toFixed(2);
 
 	const autoRenewBlock = autoRenew
 		? `<p>
@@ -63,8 +75,10 @@ function renderVariant(daysUntilDue: 1 | 7 | 14, autoRenew: boolean): string {
 
 		<h3 style="margin-top:24px;">Detalii reînnoire</h3>
 		<table style="border-collapse:collapse;width:100%;max-width:480px;">
-			<tr><td style="padding:6px 0;color:#666;">Data scadenței</td><td style="padding:6px 0;"><strong>${escapeHtml(baseFixture.dueDate)}</strong></td></tr>
-			<tr><td style="padding:6px 0;color:#666;">Sumă reînnoire</td><td style="padding:6px 0;"><strong>${escapeHtml(amountMajor)} ${escapeHtml(baseFixture.currency)}</strong></td></tr>
+			<tr><td style="padding:6px 0;color:#666;">Data scadenței</td><td style="padding:6px 0;text-align:right;"><strong>${escapeHtml(baseFixture.dueDate)}</strong></td></tr>
+			<tr><td style="padding:6px 0;color:#666;">Sumă fără TVA</td><td style="padding:6px 0;text-align:right;">${escapeHtml(subtotalMajor)} ${escapeHtml(baseFixture.currency)}</td></tr>
+			<tr><td style="padding:6px 0;color:#666;">TVA ${baseFixture.vatRate}%</td><td style="padding:6px 0;text-align:right;">${escapeHtml(vatMajor)} ${escapeHtml(baseFixture.currency)}</td></tr>
+			<tr><td style="padding:10px 0 6px 0;color:#111827;border-top:1px solid #e5e7eb;"><strong>Total de plată</strong></td><td style="padding:10px 0 6px 0;text-align:right;border-top:1px solid #e5e7eb;"><strong>${escapeHtml(totalMajor)} ${escapeHtml(baseFixture.currency)}</strong></td></tr>
 		</table>
 
 		${autoRenewBlock}

@@ -33,7 +33,11 @@ describe('renewal-reminder template', () => {
 		domain: 'example.ro',
 		clientName: 'Ion Popescu',
 		dueDate: '01.06.2026',
-		amountDue: 9950, // in cents → 99.50
+		// 99.50 RON net + 21% VAT = 20.90 RON VAT + 120.40 RON total
+		subtotal: 9950,
+		vatRate: 21,
+		vatAmount: 2090,
+		totalAmount: 12040,
 		currency: 'RON' as const,
 		payUrl: 'https://clients.onetopsolution.ro/ots/hosting/accounts/acc-1/renew'
 	};
@@ -84,5 +88,24 @@ describe('renewal-reminder template', () => {
 		expect(html).toContain('Plătește acum');
 		// Should NOT use the auto-renew CTA
 		expect(html).not.toContain('Vezi detalii plată');
+	});
+
+	test('html shows subtotal, VAT line with rate, and total breakdown', async () => {
+		const { html } = await render({
+			...baseFixture,
+			// 692.00 RON net + 21% VAT = 145.32 RON VAT + 837.32 RON total
+			subtotal: 69200,
+			vatRate: 21,
+			vatAmount: 14532,
+			totalAmount: 83732,
+			daysUntilDue: 7,
+			autoRenew: true
+		});
+		expect(html).toContain('Sumă fără TVA');
+		expect(html).toContain('692.00');
+		expect(html).toContain('TVA 21%');
+		expect(html).toContain('145.32');
+		expect(html).toContain('Total de plată');
+		expect(html).toContain('837.32');
 	});
 });

@@ -7,7 +7,8 @@ import {
 	daServer,
 	tenant as tenantTable,
 	emailSettings as emailSettingsTable,
-	invoice as invoiceTable
+	invoice as invoiceTable,
+	invoiceSettings as invoiceSettingsTable
 } from '$lib/server/db/schema';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
@@ -1073,13 +1074,34 @@ export async function notifyHostingRenewalReminder(
 			account.currency === 'EUR' || account.currency === 'USD' ? account.currency : 'RON'
 		) as 'RON' | 'EUR' | 'USD';
 
+		// 5b. Resolve VAT rate from tenant invoiceSettings. Per
+		//     feedback_no_hardcode.md — Romania changed 19% → 21% in 2025/2026,
+		//     never hardcode. Fallback 21 matches recurring-template.ts:270 which
+		//     uses the same default at invoice generation, so the email always
+		//     reflects what the customer will actually be charged.
+		const [vatRow] = await db
+			.select({ defaultTaxRate: invoiceSettingsTable.defaultTaxRate })
+			.from(invoiceSettingsTable)
+			.where(eq(invoiceSettingsTable.tenantId, tenantId))
+			.limit(1);
+		const vatRate = vatRow?.defaultTaxRate ?? 21;
+
+		// 5c. Compute breakdown. recurringAmount is NET — recurring-template.ts
+		//     treats it as `rate` (pre-tax line item) at invoice generation.
+		const subtotal = Number(account.recurringAmount ?? 0);
+		const vatAmount = Math.round((subtotal * vatRate) / 100);
+		const totalAmount = subtotal + vatAmount;
+
 		// 6. Render template with all inputs.
 		const { subject, html } = await renderRenewalReminder({
 			tenantId,
 			domain: account.domain,
 			clientName: customer.name,
 			dueDate: dueDateRo,
-			amountDue: account.recurringAmount,
+			subtotal,
+			vatRate,
+			vatAmount,
+			totalAmount,
 			currency,
 			daysUntilDue,
 			autoRenew: account.autoRenew,

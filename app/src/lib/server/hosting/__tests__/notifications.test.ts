@@ -154,6 +154,7 @@ mock.module('$lib/server/db/schema', () => ({
 	user: { id: 'id', email: 'email' },
 	tenant: { id: 'id', slug: 'slug', adminContactEmail: 'admin_contact_email' },
 	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' },
+	invoiceSettings: { id: 'id', tenantId: 'tenant_id', defaultTaxRate: 'default_tax_rate' },
 	invoice: {
 		id: 'id',
 		tenantId: 'tenant_id',
@@ -995,9 +996,11 @@ describe('notifyHostingRenewalReminder', () => {
 		]);
 		// 2. Tenant lookup (for slug → payUrl)
 		pushSelect([{ id: 't-1', slug: 'ots' }]);
-		// 3. Atomic dedupe insert → returns row (insert succeeded)
+		// 3. invoiceSettings lookup → VAT rate (21% RO default)
+		pushSelect([{ defaultTaxRate: 21 }]);
+		// 4. Atomic dedupe insert → returns row (insert succeeded)
 		pushInsert([{ id: 'evt-rr-1' }]);
-		// 4. emailSettings lookup inside buildMail
+		// 5. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
 
 		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
@@ -1010,7 +1013,11 @@ describe('notifyHostingRenewalReminder', () => {
 		expect(renderInput.clientName).toBe('Acme SRL');
 		expect(renderInput.daysUntilDue).toBe(7);
 		expect(renderInput.autoRenew).toBe(true);
-		expect(renderInput.amountDue).toBe(9950);
+		// VAT breakdown: 9950 cents net × 21% = 2090 cents VAT + 12040 cents total
+		expect(renderInput.subtotal).toBe(9950);
+		expect(renderInput.vatRate).toBe(21);
+		expect(renderInput.vatAmount).toBe(2090);
+		expect(renderInput.totalAmount).toBe(12040);
 		expect(renderInput.currency).toBe('RON');
 		expect(renderInput.payUrl).toContain('/ots/hosting/accounts/acc-1/renew');
 		// Romanian formatted due date 2026-06-01 → 01.06.2026
@@ -1064,7 +1071,9 @@ describe('notifyHostingRenewalReminder', () => {
 		]);
 		// 2. Tenant lookup
 		pushSelect([{ id: 't-1', slug: 'ots' }]);
-		// 3. onConflictDoNothing returns [] → dedupe hit
+		// 3. invoiceSettings lookup → VAT rate
+		pushSelect([{ defaultTaxRate: 21 }]);
+		// 4. onConflictDoNothing returns [] → dedupe hit
 		pushInsert([]);
 
 		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);

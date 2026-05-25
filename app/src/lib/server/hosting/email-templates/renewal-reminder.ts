@@ -8,8 +8,16 @@ export interface RenewalReminderInput {
 	clientName: string;
 	/** Formatted Romanian date (DD.MM.YYYY) — formatted by the caller. */
 	dueDate: string;
-	/** Amount in cents (per hostingAccount.recurringAmount schema convention). */
-	amountDue: number;
+	/** NET amount (pre-VAT) in cents — matches hostingAccount.recurringAmount which
+	 * recurring-template.ts:270 treats as `rate` (pre-tax line item). */
+	subtotal: number;
+	/** VAT rate as integer percent (e.g., 21 for Romania 2025+). Pulled from
+	 * invoiceSettings.defaultTaxRate by the caller — never hardcoded. */
+	vatRate: number;
+	/** VAT amount in cents: round(subtotal × vatRate / 100). */
+	vatAmount: number;
+	/** Total in cents: subtotal + vatAmount. This is what the client actually pays. */
+	totalAmount: number;
 	currency: 'RON' | 'EUR' | 'USD';
 	/** 14 / 7 / 1 — which renewal reminder window this is. */
 	daysUntilDue: 1 | 7 | 14;
@@ -34,7 +42,10 @@ export async function render(input: RenewalReminderInput): Promise<{ subject: st
 	const escDueDate = escapeHtml(input.dueDate);
 	const escCurrency = escapeHtml(input.currency);
 	const escPayUrl = escapeHtml(input.payUrl);
-	const escAmount = escapeHtml(formatCentsToMajor(input.amountDue));
+	const escSubtotal = escapeHtml(formatCentsToMajor(input.subtotal));
+	const escVatAmount = escapeHtml(formatCentsToMajor(input.vatAmount));
+	const escTotalAmount = escapeHtml(formatCentsToMajor(input.totalAmount));
+	const escVatRate = escapeHtml(String(input.vatRate));
 
 	// Singular vs plural Romanian: "1 zi" / "N zile". The subject + body both use
 	// `dayWord` so the cadence reads naturally regardless of window.
@@ -76,8 +87,10 @@ export async function render(input: RenewalReminderInput): Promise<{ subject: st
 
 		<h3 style="margin-top:24px;">Detalii reînnoire</h3>
 		<table style="border-collapse:collapse;width:100%;max-width:480px;">
-			<tr><td style="padding:6px 0;color:#666;">Data scadenței</td><td style="padding:6px 0;"><strong>${escDueDate}</strong></td></tr>
-			<tr><td style="padding:6px 0;color:#666;">Sumă reînnoire</td><td style="padding:6px 0;"><strong>${escAmount} ${escCurrency}</strong></td></tr>
+			<tr><td style="padding:6px 0;color:#666;">Data scadenței</td><td style="padding:6px 0;text-align:right;"><strong>${escDueDate}</strong></td></tr>
+			<tr><td style="padding:6px 0;color:#666;">Sumă fără TVA</td><td style="padding:6px 0;text-align:right;">${escSubtotal} ${escCurrency}</td></tr>
+			<tr><td style="padding:6px 0;color:#666;">TVA ${escVatRate}%</td><td style="padding:6px 0;text-align:right;">${escVatAmount} ${escCurrency}</td></tr>
+			<tr><td style="padding:10px 0 6px 0;color:#111827;border-top:1px solid #e5e7eb;"><strong>Total de plată</strong></td><td style="padding:10px 0 6px 0;text-align:right;border-top:1px solid #e5e7eb;"><strong>${escTotalAmount} ${escCurrency}</strong></td></tr>
 		</table>
 
 		${autoRenewBlock}
