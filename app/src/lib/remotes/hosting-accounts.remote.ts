@@ -2,7 +2,11 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+<<<<<<< Updated upstream
 import { eq, and, desc, inArray, isNotNull, sql, ne } from 'drizzle-orm';
+=======
+import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
+>>>>>>> Stashed changes
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -10,7 +14,16 @@ import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
+<<<<<<< Updated upstream
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
+=======
+import { upsertRecurringInvoiceForHostingAccount } from '$lib/server/hosting/recurring-template';
+import { logWarning } from '$lib/server/logger';
+>>>>>>> Stashed changes
+// Imports below sit OUTSIDE the pre-existing merge conflict block so the
+// compiler can see them. Do NOT move them inside the markers.
+import { logError } from '$lib/server/logger';
+import { notifyHostingSuspended } from '$lib/server/hosting/notifications';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -47,7 +60,14 @@ const CreateAccountSchema = v.object({
 
 const SuspendSchema = v.object({
 	id: v.pipe(v.string(), v.minLength(1)),
-	reason: v.optional(v.string())
+	reason: v.optional(v.string()),
+	/**
+	 * Optional invoice id. When provided, admin is enforcing an unpaid invoice
+	 * → mark autoSuspendedByInvoiceId so the invoice-driven unsuspend hook can
+	 * auto-clear on payment, and fire notifyHostingSuspended (the customer
+	 * email template needs invoice context to render).
+	 */
+	invoiceId: v.optional(v.string())
 });
 
 const UpdateClientSchema = v.object({
@@ -172,7 +192,66 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 		auditTrigger: 'manual'
 	});
 
+<<<<<<< Updated upstream
 	return { id: result.id };
+=======
+	// Auto-create recurring invoice template so the daily scheduler picks this account
+	// up and bills the client on the configured billing cycle. Idempotent (keyed by
+	// hostingAccountId) — re-running is safe. Skips silently when amount=0 (free trial,
+	// internal) or clientId missing. Best-effort: a failure here must NOT roll back the
+	// hostingAccount creation since DA already provisioned the user upstream.
+	try {
+		// Read billing cycle from the linked hostingProduct (catalog), defaulting to
+		// 'monthly' when no product is linked. The hostingAccount column itself defaults
+		// to 'monthly' too, so this stays consistent.
+		let billingCycle: string = 'monthly';
+		if (data.hostingProductId) {
+			const [product] = await db
+				.select({ billingCycle: table.hostingProduct.billingCycle })
+				.from(table.hostingProduct)
+				.where(
+					and(
+						eq(table.hostingProduct.id, data.hostingProductId),
+						eq(table.hostingProduct.tenantId, tenantId)
+					)
+				)
+				.limit(1);
+			if (product?.billingCycle) billingCycle = product.billingCycle;
+		}
+
+		const result = await upsertRecurringInvoiceForHostingAccount({
+			tenantId,
+			userId: event.locals.user.id,
+			hostingAccountId: id,
+			clientId: data.clientId,
+			domain: data.domain,
+			daPackageName: packageName,
+			recurringAmount: data.recurringAmount ?? 0,
+			currency: data.currency ?? 'RON',
+			billingCycle,
+			nextDueDate: data.nextDueDate ?? null,
+			status: 'active'
+		});
+		logWarning(
+			'directadmin',
+			`Recurring template ${result} for hosting account ${id}`,
+			{ tenantId, metadata: { hostingAccountId: id, billingCycle, result } }
+		);
+	} catch (err) {
+		// Non-fatal — operator can run /api/_debug-sync-hosting-recurring later to recover.
+		logWarning(
+			'directadmin',
+			`Failed to auto-create recurring template for hosting account ${id}; account created OK, template skipped`,
+			{
+				tenantId,
+				metadata: { hostingAccountId: id },
+				stackTrace: err instanceof Error ? err.stack : undefined
+			}
+		);
+	}
+
+	return { id };
+>>>>>>> Stashed changes
 });
 
 export const suspendHostingAccount = command(SuspendSchema, async (params) => {
@@ -214,14 +293,49 @@ export const suspendHostingAccount = command(SuspendSchema, async (params) => {
 			.set({
 				status: 'suspended',
 				suspendReason: params.reason ?? null,
+				suspendedAt: new Date(),
+				// Clear stale reactivatedAt so the column reflects current state.
+				reactivatedAt: null,
+				// If linked to a specific invoice, mark it so the unsuspend hook can
+				// auto-clear on payment. Otherwise null (manual = not invoice-tied).
+				autoSuspendedByInvoiceId: params.invoiceId ?? null,
 				updatedAt: new Date()
 			})
 			.where(eq(table.hostingAccount.id, params.id));
 	});
 
+	// Fire customer notification email only when admin tied this suspend to a
+	// specific invoice (the template needs invoice context to render).
+	// Best-effort — DA suspend has already committed; email failure must not
+	// roll back or fail the admin's action.
+	if (params.invoiceId) {
+		const invoiceId = params.invoiceId;
+		notifyHostingSuspended(tenantId, params.id, invoiceId).catch((err) => {
+			logError('hosting-email', 'manual suspend notify failed', {
+				tenantId,
+				metadata: {
+					hostingAccountId: params.id,
+					invoiceId,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		});
+	}
+
 	return { success: true };
 });
 
+/**
+ * Manual unsuspend by admin. Updates DA + DB but does NOT fire a customer
+ * notification email — the reactivated template needs invoice context
+ * (invoiceNumber, amountPaid) that this manual signature doesn't carry.
+ * The invoice-driven hook (`directadmin/hooks.ts onInvoiceStatusChanged`)
+ * IS the email-driving path; manual button is for admin recovery scenarios
+ * where the customer was already notified out-of-band.
+ *
+ * To wire email here: change the signature to accept invoiceId, update the UI
+ * to pass it, and add a fire-and-forget notifyHostingReactivated call.
+ */
 export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
@@ -258,7 +372,15 @@ export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 		}
 		await db
 			.update(table.hostingAccount)
-			.set({ status: 'active', suspendReason: null, updatedAt: new Date() })
+			.set({
+				status: 'active',
+				suspendReason: null,
+				// Clear marker so the next invoice-driven suspension is correctly
+				// attributed and a future automatic unsuspend hook isn't confused.
+				autoSuspendedByInvoiceId: null,
+				reactivatedAt: new Date(),
+				updatedAt: new Date()
+			})
 			.where(eq(table.hostingAccount.id, accountId));
 	});
 
@@ -482,7 +604,11 @@ export const syncAllHostingAccounts = command(BulkSyncSchema, async (params) => 
 
 	// Sync active AND pending accounts (pending = just-provisioned, sync confirms real DA state).
 	// Skip terminated/cancelled — no point hitting DA for accounts that shouldn't exist there.
+<<<<<<< Updated upstream
 	// Require daUsername to be non-null otherwise the DA API call has nothing to look up.
+=======
+	// Also require daUsername to be set, otherwise the DA API call has nothing to look up.
+>>>>>>> Stashed changes
 	const conditions = [
 		eq(table.hostingAccount.tenantId, tenantId),
 		inArray(table.hostingAccount.status, ['active', 'pending']),
