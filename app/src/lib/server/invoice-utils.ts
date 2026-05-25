@@ -743,10 +743,12 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		? 'none'
 		: ((invoiceFields.taxApplicationType as 'apply' | 'none' | 'reverse' | undefined) || 'apply');
 
-	// Derive series tag from the resolved invoiceNumber prefix (Keez format
-	// "<SERIES> <NUM>"). For hosting templates this lands as "OTSH" which the
-	// Keez auto-push hook uses to keep the fiscal number in the hosting series.
-	// Falls back to invoiceFields metadata (operator-set), then null for
+	// Derive the series tag for the `invoice.invoiceSeries` column from the actual
+	// invoice number we just resolved. Format is "<SERIES> <NUMBER>" per
+	// generateKeezInvoiceNumber. For hosting invoices this lands as "OTSH" (matching
+	// the prefix on the number), so the Keez auto-push hook + UI filters can identify
+	// hosting invoices without re-parsing the number. Falls back to the explicit
+	// metadata series (operator-set on the template) when present, else null for
 	// synthetic numbers like "INV-1234567890".
 	const seriesParts = invoiceNumber.split(' ');
 	const derivedSeries =

@@ -2,11 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-<<<<<<< Updated upstream
 import { eq, and, desc, inArray, isNotNull, sql, ne } from 'drizzle-orm';
-=======
-import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
->>>>>>> Stashed changes
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -14,12 +10,9 @@ import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
-<<<<<<< Updated upstream
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
-=======
 import { upsertRecurringInvoiceForHostingAccount } from '$lib/server/hosting/recurring-template';
 import { logWarning } from '$lib/server/logger';
->>>>>>> Stashed changes
 // Imports below sit OUTSIDE the pre-existing merge conflict block so the
 // compiler can see them. Do NOT move them inside the markers.
 import { logError } from '$lib/server/logger';
@@ -177,7 +170,8 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.hosting.manage');
 
-	const result = await createHostingAccountInternal(event.locals.tenant.id, {
+	const tenantId = event.locals.tenant.id;
+	const { id } = await createHostingAccountInternal(tenantId, {
 		clientId: data.clientId,
 		daServerId: data.daServerId,
 		daPackageId: data.daPackageId,
@@ -192,9 +186,7 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 		auditTrigger: 'manual'
 	});
 
-<<<<<<< Updated upstream
-	return { id: result.id };
-=======
+
 	// Auto-create recurring invoice template so the daily scheduler picks this account
 	// up and bills the client on the configured billing cycle. Idempotent (keyed by
 	// hostingAccountId) — re-running is safe. Skips silently when amount=0 (free trial,
@@ -225,7 +217,10 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 			hostingAccountId: id,
 			clientId: data.clientId,
 			domain: data.domain,
-			daPackageName: packageName,
+			// Let the upsert helper resolve daPackageName from the
+			// hostingAccount row it just inserted (recurring-template.ts:253-260
+			// queries hostingAccount.daPackageName when this arg is null).
+			daPackageName: null,
 			recurringAmount: data.recurringAmount ?? 0,
 			currency: data.currency ?? 'RON',
 			billingCycle,
@@ -251,7 +246,6 @@ export const createHostingAccount = command(CreateAccountSchema, async (data) =>
 	}
 
 	return { id };
->>>>>>> Stashed changes
 });
 
 export const suspendHostingAccount = command(SuspendSchema, async (params) => {
@@ -604,11 +598,7 @@ export const syncAllHostingAccounts = command(BulkSyncSchema, async (params) => 
 
 	// Sync active AND pending accounts (pending = just-provisioned, sync confirms real DA state).
 	// Skip terminated/cancelled — no point hitting DA for accounts that shouldn't exist there.
-<<<<<<< Updated upstream
 	// Require daUsername to be non-null otherwise the DA API call has nothing to look up.
-=======
-	// Also require daUsername to be set, otherwise the DA API call has nothing to look up.
->>>>>>> Stashed changes
 	const conditions = [
 		eq(table.hostingAccount.tenantId, tenantId),
 		inArray(table.hostingAccount.status, ['active', 'pending']),

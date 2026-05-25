@@ -230,7 +230,7 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		invoiceSeries = invoice.invoiceSeries.trim();
 		// Extract number from invoiceNumber if it contains the series
 		if (invoice.invoiceNumber) {
-			// Remove series from invoiceNumber to get just the number (e.g., "OTS 520" -> "520")
+			// Remove series from invoiceNumber to get just the number (e.g., "OTSH 520" -> "520")
 			const seriesPattern = invoiceSeries.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 			const match = invoice.invoiceNumber.match(new RegExp(`${seriesPattern}\\s*(\\d+)`, 'i'));
 			if (match) {
