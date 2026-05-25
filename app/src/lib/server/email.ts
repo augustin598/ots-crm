@@ -20,6 +20,15 @@ import { createGmailTransporter, isGmailOAuthError, isGmailRateLimitError } from
 import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
+import { renderInvoicePaidEmailHtml } from './email-templates/invoice-paid';
+
+// Re-export so existing callers can import the helper from `$lib/server/email`
+// alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
+// other zero-DB consumers should import directly from
+// `$lib/server/email-templates/invoice-paid` to avoid pulling SvelteKit virtual
+// modules into their dep graph.
+export { renderInvoicePaidEmailHtml };
+export type { InvoicePaidRenderInput } from './email-templates/invoice-paid';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1962,60 +1971,26 @@ export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: strin
 			const { logoAttachment } = prepareLogoAttachment(invoiceSettings?.invoiceLogo);
 			const paidHeaderLogoHtml = buildHeaderLogoHtml(logoAttachment);
 
-			const formatAmount = (cents: number | null | undefined, currency: string) => {
-				if (cents === null || cents === undefined) return 'N/A';
-				const amount = (cents / 100).toFixed(2);
-				return `${amount} ${currency}`;
-			};
-
-			const safeClientName = escapeHtml(client?.name || 'Client');
-			const bodyHtml = `
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Stimate/Stimată ${safeClientName},</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Am primit plata pentru următoarea factură:</p>
-				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f0fdf4; border-left: 3px solid #10b981; border-radius: 8px; margin: 0 0 20px 0;">
-					<tr>
-						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
-							<div><span style="color: #6b7280;">Număr factură</span> &nbsp;·&nbsp; <strong>${invoice.invoiceNumber}</strong></div>
-							<div><span style="color: #6b7280;">Suma plătită</span> &nbsp;·&nbsp; <strong>${formatAmount(invoice.totalAmount, invoice.currency)}</strong></div>
-							${invoice.paidDate ? `<div><span style="color: #6b7280;">Data plății</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.paidDate)}</strong></div>` : ''}
-							${invoice.issueDate ? `<div><span style="color: #6b7280;">Data emitere</span> &nbsp;·&nbsp; <strong>${formatDateRo(invoice.issueDate)}</strong></div>` : ''}
-						</td>
-					</tr>
-				</table>
-				<p style="color: #15803d; font-weight: 600; font-size: 15px; margin: 0 0 20px 0;">Vă mulțumim pentru plată!</p>
-				${renderCtaButton(invoiceUrl, 'Vezi factura', themeColor)}
-			`;
+			const rendered = renderInvoicePaidEmailHtml({
+				tenantName,
+				themeColor,
+				headerLogoHtml: paidHeaderLogoHtml,
+				clientName: client?.name ?? '',
+				invoiceNumber: invoice.invoiceNumber,
+				totalAmount: invoice.totalAmount,
+				currency: invoice.currency,
+				paidDate: invoice.paidDate,
+				issueDate: invoice.issueDate,
+				invoiceUrl
+			});
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
-				subject: `Plata primita: Factura ${invoice.invoiceNumber}`,
+				subject: rendered.subject,
 				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-				html: renderBrandedEmail({
-					themeColor,
-					headerLogoHtml: paidHeaderLogoHtml,
-					title: 'Plată primită',
-					bodyHtml,
-					previewTitle: `Plata primita: Factura ${invoice.invoiceNumber}`
-				}),
-				text: trimPlainText(`
-			Plata primita
-
-			Stimate/Stimata ${client?.name || 'Client'},
-
-			Am primit plata pentru urmatoarea factura:
-
-			Numar factura: ${invoice.invoiceNumber}
-			Suma platita: ${formatAmount(invoice.totalAmount, invoice.currency)}
-			${invoice.paidDate ? `Data plata: ${formatDateRo(invoice.paidDate)}\n` : ''}
-			${invoice.issueDate ? `Data emitere: ${formatDateRo(invoice.issueDate)}\n` : ''}
-
-			Va multumim pentru plata!
-
-			Vezi factura: ${invoiceUrl}
-
-			Pentru intrebari, nu ezitati sa ne contactati.
-		`)
+				html: rendered.html,
+				text: rendered.text
 			};
 		}
 	);
