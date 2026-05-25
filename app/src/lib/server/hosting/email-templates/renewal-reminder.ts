@@ -62,12 +62,13 @@ export async function render(input: RenewalReminderInput): Promise<{ subject: st
 	// (informational reminder, not danger — fits the tenant's identity).
 	const brand = await fetchTenantBrand(input.tenantId);
 
-	// Conditional copy block: auto-renew customers see a "card on file" reassurance,
+	// Conditional copy block: auto-renew customers get a neutral renewal notice
+	// (no assumption about payment method — Stripe handles the charge automatically);
 	// manual-pay customers see a suspension warning. Both stress the same day window.
 	const autoRenewBlock = input.autoRenew
 		? `<p>
-				Vei fi taxat automat prin cardul salvat în ${escDayWord}. Verifică
-				detaliile de plată dacă vrei să eviți surprize.
+				Reînnoirea va fi procesată automat în ${escDayWord}. Dacă dorești să
+				modifici metoda de plată, te rugăm să o actualizezi înainte de data scadenței.
 			</p>`
 		: `<p>
 				Plata manuală expiră în ${escDayWord}. După această dată, hostingul

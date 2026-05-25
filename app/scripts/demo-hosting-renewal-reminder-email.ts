@@ -56,8 +56,8 @@ function renderVariant(daysUntilDue: 1 | 7 | 14, autoRenew: boolean): string {
 
 	const autoRenewBlock = autoRenew
 		? `<p>
-				Vei fi taxat automat prin cardul salvat în ${escapeHtml(dayWord)}. Verifică
-				detaliile de plată dacă vrei să eviți surprize.
+				Reînnoirea va fi procesată automat în ${escapeHtml(dayWord)}. Dacă dorești să
+				modifici metoda de plată, te rugăm să o actualizezi înainte de data scadenței.
 			</p>`
 		: `<p>
 				Plata manuală expiră în ${escapeHtml(dayWord)}. După această dată, hostingul

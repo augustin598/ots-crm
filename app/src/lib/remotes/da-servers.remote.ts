@@ -9,6 +9,7 @@ import { assertCan, can } from '$lib/server/access';
 import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit } from '$lib/server/plugins/directadmin/audit';
+import { syncDAPackagesForServer } from '$lib/server/plugins/directadmin/sync-packages';
 import {
 	assertHostnameSafe,
 	HostnameNotAllowedError
@@ -568,175 +569,14 @@ export const syncDAPackages = command(IdSchema, async (serverId) => {
 	assertCan(actor, 'admin.hosting.servers.manage');
 
 	const tenantId = event.locals.tenant.id;
-	const [server] = await db
-		.select()
-		.from(table.daServer)
-		.where(and(eq(table.daServer.id, serverId), eq(table.daServer.tenantId, tenantId)))
-		.limit(1);
-	if (!server) throw new Error('Server not found');
-
-	logInfo('directadmin', 'sync.start', {
-		tenantId,
-		metadata: { serverId, serverName: server.name, hostname: server.hostname }
-	});
-
-	const daClient = createDAClient(tenantId, server);
-
-	let packageNames: string[];
-	try {
-		packageNames = await runWithAudit(
-			{ tenantId, daServerId: serverId, action: 'sync', trigger: 'manual' },
-			() => daClient.listUserPackages()
-		);
-	} catch (e) {
-		const { message } = serializeError(e);
-		logError('directadmin', `sync.list_failed: ${message}`, {
-			tenantId,
-			metadata: { serverId }
-		});
-		throw new Error(`Nu am putut lista pachetele de pe DA: ${message}`);
-	}
-
-	logInfo('directadmin', 'sync.list_ok', {
-		tenantId,
-		metadata: { serverId, packageCount: packageNames.length, packages: packageNames }
-	});
-
-	const now = new Date().toISOString();
-	let synced = 0;
-	let updated = 0;
-	const failures: { pkg: string; error: string }[] = [];
-	const seenPackages = new Set(packageNames);
-
-	for (const pkgName of packageNames) {
-		// Fetch full limits — DA returns "unlimited" for unbounded, parsed to null.
-		let details;
-		try {
-			details = await daClient.getPackageDetails(pkgName);
-		} catch (e) {
-			const errMsg = e instanceof Error ? e.message : String(e);
-			failures.push({ pkg: pkgName, error: errMsg });
-			logError('directadmin', `sync.detail_failed: ${errMsg}`, {
-				tenantId,
-				metadata: { serverId, pkg: pkgName }
-			});
-			continue;
-		}
-
-		// All 1:1 fields from DA Edit Package UI. Limits = nullable integer
-		// (null = unlimited), flags = boolean, skin/language = nullable text.
-		const limitFields = {
-			bandwidth: details.bandwidth,
-			quota: details.quota,
-			maxEmailAccounts: details.maxEmailAccounts,
-			maxEmailForwarders: details.maxEmailForwarders,
-			maxMailingLists: details.maxMailingLists,
-			maxAutoresponders: details.maxAutoresponders,
-			maxDatabases: details.maxDatabases,
-			maxFtpAccounts: details.maxFtpAccounts,
-			maxDomains: details.maxDomains,
-			maxSubdomains: details.maxSubdomains,
-			maxDomainPointers: details.maxDomainPointers,
-			maxInodes: details.maxInodes,
-			emailDailyLimit: details.emailDailyLimit,
-			anonymousFtp: details.anonymousFtp,
-			cgi: details.cgi,
-			php: details.php,
-			ssl: details.ssl,
-			ssh: details.ssh,
-			dnsControl: details.dnsControl,
-			cron: details.cron,
-			spam: details.spam,
-			clamav: details.clamav,
-			wordpress: details.wordpress,
-			git: details.git,
-			redis: details.redis,
-			suspendAtLimit: details.suspendAtLimit,
-			oversold: details.oversold,
-			skin: details.skin,
-			language: details.language,
-			rawData: details.raw as unknown as Record<string, unknown>,
-			isActive: true,
-			lastSyncedAt: now
-		};
-
-		const existing = await db
-			.select({ id: table.daPackage.id })
-			.from(table.daPackage)
-			.where(
-				and(
-					eq(table.daPackage.daServerId, serverId),
-					eq(table.daPackage.daName, pkgName),
-					eq(table.daPackage.tenantId, tenantId)
-				)
-			)
-			.limit(1);
-
-		if (existing.length === 0) {
-			await db.insert(table.daPackage).values({
-				id: generateId(),
-				tenantId,
-				daServerId: serverId,
-				daName: pkgName,
-				type: 'user',
-				...limitFields
-			});
-			synced++;
-			logInfo('directadmin', 'sync.detail_inserted', {
-				tenantId,
-				metadata: { serverId, pkg: pkgName }
-			});
-		} else {
-			await db
-				.update(table.daPackage)
-				.set({ ...limitFields, updatedAt: new Date() })
-				.where(eq(table.daPackage.id, existing[0].id));
-			updated++;
-			logInfo('directadmin', 'sync.detail_updated', {
-				tenantId,
-				metadata: { serverId, pkg: pkgName }
-			});
-		}
-	}
-
-	// Soft-delete stale packages: those present in DB but absent from DA now.
-	// Hard delete would break hostingProduct.daPackageId / hostingAccount.daPackageId FKs.
-	const allDbPackages = await db
-		.select({ id: table.daPackage.id, daName: table.daPackage.daName })
-		.from(table.daPackage)
-		.where(
-			and(eq(table.daPackage.daServerId, serverId), eq(table.daPackage.tenantId, tenantId))
-		);
-	let deactivated = 0;
-	for (const dbPkg of allDbPackages) {
-		if (!seenPackages.has(dbPkg.daName)) {
-			await db
-				.update(table.daPackage)
-				.set({ isActive: false, updatedAt: new Date() })
-				.where(eq(table.daPackage.id, dbPkg.id));
-			deactivated++;
-		}
-	}
-
-	const result = {
-		ranAt: now,
-		packageCount: packageNames.length,
-		synced,
-		updated,
-		deactivated,
-		failures
+	const result = await syncDAPackagesForServer(tenantId, serverId, 'manual');
+	return {
+		synced: result.synced,
+		updated: result.updated,
+		deactivated: result.deactivated,
+		total: result.packageCount,
+		failures: result.failures
 	};
-
-	// Persist sync summary on the server row so admins can see status without
-	// tailing logs. Doubles as a record of the last-known package set.
-	await db
-		.update(table.daServer)
-		.set({ lastSyncResult: result, updatedAt: new Date() })
-		.where(eq(table.daServer.id, serverId));
-
-	logInfo('directadmin', 'sync.complete', { tenantId, metadata: { serverId, ...result } });
-
-	return { synced, updated, deactivated, total: packageNames.length, failures };
 });
 
 /**

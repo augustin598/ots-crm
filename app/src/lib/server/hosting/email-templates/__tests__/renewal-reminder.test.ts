@@ -62,13 +62,13 @@ describe('renewal-reminder template', () => {
 		expect(r14.subject).toContain('14 zile');
 	});
 
-	test("autoRenew=true copy mentions automatic charge ('taxat automat')", async () => {
+	test("autoRenew=true copy mentions automatic renewal ('procesată automat')", async () => {
 		const { html } = await render({
 			...baseFixture,
 			daysUntilDue: 7,
 			autoRenew: true
 		});
-		expect(html).toContain('taxat automat');
+		expect(html).toContain('procesată automat');
 		// CTA for autoRenew=true uses "Vezi detalii plată"
 		expect(html).toContain('Vezi detalii plată');
 		// Should NOT use the manual-payment CTA
