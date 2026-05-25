@@ -486,11 +486,24 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 		}
 	}
 
-	// Get the latest invoice number from Keez for this series
+	// Resolve series + number. Priority (mirrors auto-push.ts:247-288):
+	//   1. CRM invoice has explicit `invoiceSeries` (e.g. hosting flow already
+	//      reserved "OTSH N" — respect it; don't fall back to the default series).
+	//      Without this branch, manual syncs of OTSH invoices land under the
+	//      default OTS series in Keez, losing the hosting designation.
+	//   2. Otherwise default to `settings.keezSeries` (legacy behavior).
 	let invoiceSeries: string | undefined;
 	let invoiceNumber: string | undefined;
-	
-	if (settings?.keezSeries) {
+	const crmSeries = invoice.invoiceSeries?.trim();
+
+	if (crmSeries) {
+		// Honor the CRM-side reservation. Don't ask Keez for a fresh number
+		// — the emitter already did (and bumped its local counter). Re-asking
+		// Keez here would race + override "OTSH 2" with "OTS 547".
+		invoiceSeries = crmSeries;
+		const match = invoice.invoiceNumber.match(/(\d+)$/);
+		if (match) invoiceNumber = match[1];
+	} else if (settings?.keezSeries) {
 		invoiceSeries = settings.keezSeries.trim();
 		try {
 			const nextNumber = await keezClient.getNextInvoiceNumber(invoiceSeries);
