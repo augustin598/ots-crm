@@ -333,12 +333,20 @@ export const GET: RequestHandler = async (event) => {
 				| 1
 				| 7
 				| 14;
+			// Use tenant invoiceSettings.defaultTaxRate when available; fall back
+			// to 21 (Romania 2025+ standard rate) for the preview.
+			const previewSubtotal = account.recurringAmount || 4990;
+			const previewVatRate = 21;
+			const previewVatAmount = Math.round((previewSubtotal * previewVatRate) / 100);
 			rendered = await renderRenewalReminder({
 				tenantId,
 				domain: account.domain,
 				clientName,
 				dueDate: '15.06.2026',
-				amountDue: account.recurringAmount || 4990,
+				subtotal: previewSubtotal,
+				vatRate: previewVatRate,
+				vatAmount: previewVatAmount,
+				totalAmount: previewSubtotal + previewVatAmount,
 				currency: narrowCurrency(account.currency),
 				daysUntilDue: days,
 				autoRenew: account.autoRenew,
