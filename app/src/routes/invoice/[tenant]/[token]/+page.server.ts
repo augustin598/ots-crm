@@ -37,6 +37,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			status: invoice.status,
 			issueDate: invoice.issueDate?.toISOString() ?? null,
 			dueDate: invoice.dueDate?.toISOString() ?? null,
+			amount: invoice.amount,
+			taxAmount: invoice.taxAmount,
 			totalAmount: invoice.totalAmount,
 			currency: invoice.currency,
 			taxApplicationType: invoice.taxApplicationType,
