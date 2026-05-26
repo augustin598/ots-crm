@@ -998,7 +998,10 @@
 				notes: notesParts.join(' · '),
 				paymentMode: paymentMethod === 'card' ? 'payment_intent' : 'checkout_redirect',
 				paymentMethod,
-				requestedDomain: chosenDomain || undefined
+				requestedDomain: chosenDomain || undefined,
+				domainName: (domainName + domainTld).toLowerCase(),
+				domainMode,
+				domainCostCents: domainMode === 'buy' ? Math.round(tldPrice * 100) : 0
 			});
 
 			// Don't dump the whole result object — server might add new fields, and
