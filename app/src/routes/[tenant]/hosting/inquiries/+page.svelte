@@ -5,16 +5,19 @@
 		deleteHostingInquiry,
 		acceptHostingOrderPayment,
 		provisionFromInquiry,
-		type HostingOrderRow
+		type HostingOrderRow,
+		type HostingOrderItemRow
 	} from '$lib/remotes/hosting-inquiries.remote';
 	import { getDAServers, getDAServer } from '$lib/remotes/da-servers.remote';
 	import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
+	import { displayOrderId } from '$lib/utils/hosting-order-id';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { focusTrap } from '$lib/actions/focus-trap';
 	import { tick } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
@@ -34,10 +37,9 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 
-	type FunnelStatus = 'all' | 'new' | 'contacted' | 'converted' | 'discarded' | 'abandoned';
-	type PaymentFilter = 'all' | 'paid' | 'pending' | 'failed';
-	type MethodFilter = 'all' | 'card' | 'op' | 'paypal' | 'revolut';
+	type ActiveTab = 'all' | 'activity' | 'pending' | 'failed' | 'refunded';
 
 	let ordersPromise = $state(getHostingOrders());
 
@@ -46,10 +48,9 @@
 	}
 
 	// ----- view state -----
-	let view = $state<'grid' | 'table'>('grid');
-	let funnel = $state<FunnelStatus>('all');
-	let payment = $state<PaymentFilter>('all');
-	let method = $state<MethodFilter>('all');
+	let activeTab = $state<ActiveTab>('all');
+	let filterPackage = $state<string>(''); // hostingProductId or ''
+	let filterMethod = $state<'all' | 'card' | 'op' | 'paypal' | 'revolut'>('all');
 	let search = $state('');
 	let openOrder = $state<HostingOrderRow | null>(null);
 	let busyId = $state<string | null>(null);
@@ -379,13 +380,28 @@
 	}
 
 	function applyFilters(list: HostingOrderRow[]): HostingOrderRow[] {
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
 		return list.filter((o) => {
-			if (funnel !== 'all' && o.status !== funnel) return false;
-			if (payment !== 'all' && o.paymentStatus !== payment) return false;
-			if (method !== 'all' && o.paymentMethod !== method) return false;
+			// Tab filter
+			if (activeTab === 'pending' && o.paymentStatus !== 'pending') return false;
+			if (activeTab === 'failed' && o.paymentStatus !== 'failed') return false;
+			if (activeTab === 'refunded' && o.paymentStatus !== 'refunded') return false;
+			if (activeTab === 'activity') {
+				const touched =
+					(o.createdAt && new Date(o.createdAt).getTime() >= today.getTime()) ||
+					(o.paidAt && new Date(o.paidAt).getTime() >= today.getTime()) ||
+					(o.acceptedAt && new Date(o.acceptedAt).getTime() >= today.getTime());
+				if (!touched) return false;
+			}
+			// Dropdown filters
+			if (filterPackage && o.hostingProductId !== filterPackage) return false;
+			if (filterMethod !== 'all' && o.paymentMethod !== filterMethod) return false;
+			// Search
 			if (search) {
 				const q = search.toLowerCase();
 				const hay = [
+					displayOrderId(o.orderNumber, o.id),
 					o.contactName,
 					o.contactEmail,
 					o.companyName ?? '',
@@ -393,35 +409,188 @@
 					o.productName ?? '',
 					o.daDomain ?? '',
 					o.daUsername ?? ''
-				].join(' ').toLowerCase();
+				]
+					.join(' ')
+					.toLowerCase();
 				if (!hay.includes(q)) return false;
 			}
 			return true;
 		});
 	}
 
+	type HistoryEntry = {
+		kind: 'placed' | 'paid' | 'failed' | 'provisioning' | 'provisioned' | 'refunded';
+		at: Date | string | null;
+		label: string;
+		meta: string;
+	};
+
+	function buildHistory(o: HostingOrderRow, daServerName: string | null): HistoryEntry[] {
+		const out: HistoryEntry[] = [];
+		out.push({
+			kind: 'placed',
+			at: o.createdAt,
+			label: 'Comandă plasată',
+			meta: `de pe /${o.source}`
+		});
+		if (o.paymentStatus === 'paid') {
+			out.push({
+				kind: 'paid',
+				at: o.paidAt ?? o.acceptedAt ?? o.createdAt,
+				label: 'Plată confirmată',
+				meta: `${methodLabel(o.paymentMethod)} · ${fmtMoney(o.paidAmountCents, o.productCurrency)}`
+			});
+		}
+		if (o.paymentStatus === 'failed') {
+			out.push({
+				kind: 'failed',
+				at: o.createdAt,
+				label: 'Plată eșuată',
+				meta: 'Card refuzat de bancă'
+			});
+		}
+		if (o.paymentStatus === 'refunded') {
+			out.push({
+				kind: 'refunded',
+				at: o.acceptedAt ?? o.createdAt,
+				label: 'Refundat',
+				meta: 'Sumă returnată'
+			});
+		}
+		if (o.hostingAccountId && o.daUsername) {
+			out.push({
+				kind: 'provisioned',
+				at: o.paidAt ?? o.createdAt,
+				label: 'Cont DirectAdmin creat',
+				meta: `Server ${daServerName ?? '—'} · credențiale trimise pe ${o.contactEmail}`
+			});
+		} else if (o.paymentStatus === 'paid' && !o.hostingAccountId) {
+			out.push({
+				kind: 'provisioning',
+				at: o.paidAt ?? o.createdAt,
+				label: 'Cont în provisionare',
+				meta: 'în curs · Server auto-alocat · credențiale în max 5 minute'
+			});
+		}
+		return out;
+	}
+
+	/** Sum of all items × quantity, TTC. */
+	function lineTotalCents(items: HostingOrderItemRow[]): number {
+		return items.reduce((a, it) => a + it.unitPriceCents * it.quantity, 0);
+	}
+
+	/** Derived TVA — sum of each item's TVA portion at its own vat_rate. */
+	function lineTvaCents(items: HostingOrderItemRow[]): number {
+		return items.reduce((a, it) => {
+			const lineTtc = it.unitPriceCents * it.quantity;
+			return a + Math.round((lineTtc * it.vatRate) / (100 + it.vatRate));
+		}, 0);
+	}
+
+	/** Visible (non-zero) items — hide "Domeniu X (existent)" lines that have 0 cost. */
+	function visibleItems(items: HostingOrderItemRow[]): HostingOrderItemRow[] {
+		return items.filter((it) => it.unitPriceCents > 0);
+	}
+
+	function billingCycleLabel(cycle: string | null): string {
+		if (cycle === 'yearly') return 'Anual';
+		if (cycle === 'monthly') return 'Lunar';
+		return '—';
+	}
+
+	function domainModeLabel(mode: string | null): string {
+		if (mode === 'buy') return 'Cumpărat nou';
+		if (mode === 'transfer') return 'Transfer';
+		if (mode === 'have') return 'Existent';
+		return '—';
+	}
+
+	function accountStatusLabel(o: HostingOrderRow): {
+		text: string;
+		tone: 'ok' | 'warn' | 'bad' | 'neutral';
+	} {
+		if (o.hostingAccountId && o.daAccountStatus === 'active') return { text: 'Activ', tone: 'ok' };
+		if (o.paymentStatus === 'paid' && !o.hostingAccountId)
+			return { text: 'Se creează', tone: 'warn' };
+		if (o.paymentStatus === 'failed') return { text: 'Anulat', tone: 'neutral' };
+		if (o.paymentStatus === 'refunded') return { text: 'Refundat', tone: 'neutral' };
+		return { text: 'Așteaptă plată', tone: 'warn' };
+	}
+
+	function fmtTime(d: Date | string | null): string {
+		if (!d) return '';
+		try {
+			return new Date(d).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+		} catch {
+			return '';
+		}
+	}
+
+	function paymentTone(s: string): 'ok' | 'warn' | 'bad' | 'neutral' {
+		if (s === 'paid') return 'ok';
+		if (s === 'pending') return 'warn';
+		if (s === 'failed') return 'bad';
+		if (s === 'refunded') return 'neutral';
+		return 'neutral';
+	}
+
 	function counts(list: HostingOrderRow[]) {
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 		const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-		const paidToday = list.filter(
-			(o) => o.paidAt && new Date(o.paidAt).getTime() >= today.getTime()
-		).length;
-		const revenueMonth = list
+		const startOfPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+		const endOfPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
+
+		const paidThisMonth = list
 			.filter((o) => o.paidAt && new Date(o.paidAt).getTime() >= startOfMonth.getTime())
 			.reduce((a, o) => a + (o.paidAmountCents ?? 0), 0);
-		const pendingPayment = list.filter((o) => o.paymentStatus === 'pending').length;
-		const failedPayment = list.filter((o) => o.paymentStatus === 'failed').length;
-		const provisioningPending = list.filter(
-			(o) => o.paymentStatus === 'paid' && !o.hostingAccountId
+		const paidPrevMonth = list
+			.filter((o) => {
+				if (!o.paidAt) return false;
+				const t = new Date(o.paidAt).getTime();
+				return t >= startOfPrevMonth.getTime() && t <= endOfPrevMonth.getTime();
+			})
+			.reduce((a, o) => a + (o.paidAmountCents ?? 0), 0);
+		const revenueDeltaPct =
+			paidPrevMonth > 0 ? ((paidThisMonth - paidPrevMonth) / paidPrevMonth) * 100 : null;
+
+		const pending = list.filter((o) => o.paymentStatus === 'pending');
+		const failed = list.filter((o) => o.paymentStatus === 'failed');
+		const refunded = list.filter((o) => o.paymentStatus === 'refunded');
+		const pendingAmount = pending.reduce((a, o) => a + (o.productPrice ?? 0), 0);
+		const failedAmount = failed.reduce((a, o) => a + (o.productPrice ?? 0), 0);
+
+		const createdToday = list.filter(
+			(o) => o.createdAt && new Date(o.createdAt).getTime() >= today.getTime()
 		).length;
+		const yesterday = new Date(today);
+		yesterday.setDate(today.getDate() - 1);
+		const createdYesterday = list.filter((o) => {
+			if (!o.createdAt) return false;
+			const t = new Date(o.createdAt).getTime();
+			return t >= yesterday.getTime() && t < today.getTime();
+		}).length;
+
+		const activityToday = list.filter((o) => {
+			const c = o.createdAt && new Date(o.createdAt).getTime() >= today.getTime();
+			const p = o.paidAt && new Date(o.paidAt).getTime() >= today.getTime();
+			const a = o.acceptedAt && new Date(o.acceptedAt).getTime() >= today.getTime();
+			return c || p || a;
+		}).length;
+
 		return {
 			total: list.length,
-			paidToday,
-			revenueMonth,
-			pendingPayment,
-			failedPayment,
-			provisioningPending
+			createdToday,
+			createdYesterday,
+			activityToday,
+			pendingCount: pending.length,
+			pendingAmount,
+			failedCount: failed.length,
+			failedAmount,
+			refundedCount: refunded.length,
+			paidThisMonth,
+			revenueDeltaPct
 		};
 	}
 
