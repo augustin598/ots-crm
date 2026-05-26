@@ -709,7 +709,14 @@ const OrderSchema = v.object({
 	// domain via DNS update, or transfer). Stored as-is so the Comenzi hosting
 	// admin page can pre-populate the DA provisioning form's "Domeniu primar".
 	// Lightly validated — strict format check happens server-side on provisioning.
-	requestedDomain: v.optional(v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(253)))
+	requestedDomain: v.optional(v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(253))),
+	// Domain breakdown — captured from the checkout modal so the admin
+	// drawer + future invoice can show a real line for the domain. `buy` =
+	// new registration (cost paid now). `have`/`transfer` = no cost (the
+	// row exists for audit but unit_price_cents stays 0).
+	domainName: v.optional(v.pipe(v.string(), v.maxLength(253))),
+	domainMode: v.optional(v.picklist(['buy', 'have', 'transfer'])),
+	domainCostCents: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)))
 });
 
 /**
