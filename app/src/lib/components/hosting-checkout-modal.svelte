@@ -71,6 +71,7 @@
 		monthlyBilled,
 		yearlyTotal,
 		bankInfo,
+		preloadedPublishableKey = null,
 		onClose
 	}: {
 		plan: Plan;
@@ -79,6 +80,13 @@
 		monthlyBilled: number;
 		yearlyTotal: number;
 		bankInfo?: BankInfo;
+		// Per-tenant Stripe publishable key surfaced by the parent page. When set,
+		// we kick off loadStripe() on mount so the ~200KB bundle is downloading
+		// (and the Stripe instance is initialised) while the user is still on
+		// steps 1 + 2. The submitHostingOrder response still carries its own
+		// publishable key — we trust that one as authoritative, but the preload
+		// hits the same key so the network cache is already warm.
+		preloadedPublishableKey?: string | null;
 		onClose: () => void;
 	} = $props();
 
@@ -102,6 +110,13 @@
 
 	let step = $state<1 | 2 | 3 | 4>(1);
 	let orderId = $state<string | null>(null);
+	// Track separately whether the success step is being shown because the
+	// customer already exists (duplicateCui/email). Previously the `'EXISTING'`
+	// magic string was overloaded into `orderId` itself, which prevented us from
+	// surfacing the real inquiry id alongside the "you're already a customer"
+	// messaging. Now `orderId` always carries the inquiry reference (or null in
+	// the rare UNIQUE-race edge case).
+	let isExistingClient = $state(false);
 
 	// Domain — only "have" mode is exposed publicly for now. The buy/transfer
 	// branches are still rendered behind a feature flag so the registrar
@@ -442,6 +457,47 @@
 	type CardStage = 'idle' | 'creating-intent' | 'ready' | 'confirming' | 'paid';
 	let cardStage = $state<CardStage>('idle');
 
+	// Eager-init for Stripe PaymentElement at step 3: an $effect below auto-calls
+	// submit() the moment the user lands on step 3 with `paymentMethod === 'card'`,
+	// so the inline card form appears without a manual click. cardInitTriggered
+	// guards against double-firing; cardInitError holds the message shown next to
+	// the retry button when the eager init fails.
+	let cardInitTriggered = $state(false);
+	let cardInitError = $state<string | null>(null);
+
+	/**
+	 * Canonical representation of all fields that affect the PaymentIntent payload.
+	 * If any of these change while we have an active PaymentIntent, we must
+	 * invalidate it and re-run submit() to ensure Stripe Customer / amount / metadata
+	 * reflect the current form state.
+	 */
+	const step2PayloadHash = $derived.by(() => {
+		return JSON.stringify({
+			email: email.trim().toLowerCase(),
+			billingType,
+			firstName: firstName.trim(),
+			lastName: lastName.trim(),
+			companyName: companyName.trim(),
+			cui: cui.trim(),
+			regCom: regCom.trim(),
+			address: address.trim(),
+			city: city.trim(),
+			county,
+			postalCode: postalCode.trim(),
+			phone: phone.trim(),
+			vatPayer,
+			domainMode,
+			domainName,
+			domainTld,
+			existingDomain,
+			period,
+			planId: plan.id,
+			orderNotes: orderNotes.trim(),
+			paymentMethod // Method change (card vs op) also invalidates PI
+		});
+	});
+	let lastSubmittedHash = $state<string | null>(null);
+
 	// Filter in DevTools console with: `[CHECKOUT]`. Set
 	// localStorage.DEBUG_CHECKOUT=false to silence at runtime.
 	function debugLog(label: string, payload?: unknown) {
@@ -496,12 +552,94 @@
 	$effect(() => {
 		debugLog(`cardStage → ${cardStage}`);
 	});
+
+	// Auto-init Stripe PaymentIntent the moment the user reaches step 3 with the
+	// card method selected. Without this, the customer had to click "Plătește"
+	// once just to mint the intent, watch the form appear, then click again to
+	// confirm — confusing UX. We do NOT gate on acceptTerms here; the terms
+	// checkbox is enforced at confirmInlinePayment() time instead.
+	$effect(() => {
+		if (
+			step === 3 &&
+			paymentMethod === 'card' &&
+			cardStage === 'idle' &&
+			!cardInitTriggered &&
+			!cardInitError &&
+			!submitting &&
+			step2PayloadHash !== lastSubmittedHash
+		) {
+			cardInitTriggered = true;
+			debugLog('auto-init → entering step 3 with card method, creating PaymentIntent');
+			void tryAutoInitStripe();
+		}
+	});
+
+	// Invalidation logic: if the user goes back and changes any field that affects
+	// the order payload, we reset the Stripe state so the next entry to Step 3
+	// re-mints a fresh PaymentIntent with the correct data.
+	$effect(() => {
+		if (
+			lastSubmittedHash &&
+			step2PayloadHash !== lastSubmittedHash &&
+			cardStage !== 'paid' &&
+			cardStage !== 'confirming'
+		) {
+			debugLog('Step 2 data changed — invalidating existing PaymentIntent');
+			cardStage = 'idle';
+			cardInitTriggered = false;
+			cardInitError = null;
+			paymentClientSecret = null;
+			paymentIntentId = null;
+			// Clear the snapshot so this effect doesn't re-fire on every subsequent
+			// cardStage transition while the next tryAutoInitStripe() is in flight
+			// (the in-flight submit would otherwise be torn down mid-creation and
+			// the user would see a stale duplicateCui response from a half-cancelled
+			// request). The next successful init will capture a fresh hash.
+			lastSubmittedHash = null;
+			// Keep stripeJs and stripeElements as-is; they'll be re-used/re-mounted
+			// once the next tryAutoInitStripe() returns a new secret.
+		}
+	});
+
+	// Clear the trigger flag when the user navigates away from step 3 OR switches
+	// payment method. We deliberately do NOT reset cardStage / paymentClientSecret
+	// — the PaymentIntent from Stripe is valid for 24h, so coming back to step 3
+	// without form-data changes should keep the existing card form mounted.
+	$effect(() => {
+		if (step !== 3 || paymentMethod !== 'card') {
+			cardInitTriggered = false;
+			cardInitError = null;
+		}
+	});
+
 	let stripeJs = $state<StripeJS | null>(null);
 	let stripeElements = $state<StripeElementsT | null>(null);
 	let paymentClientSecret = $state<string | null>(null);
 	let paymentPublishableKey = $state<string | null>(null);
 	let paymentIntentId = $state<string | null>(null);
 	let paymentError = $state<string | null>(null);
+
+	// Preload Stripe.js as soon as the modal mounts. The publishable key is
+	// surfaced by the parent page (via getPublicHostingPackages → page props),
+	// so we don't need to wait for submitHostingOrder to round-trip before
+	// starting the bundle download. By the time the user finishes step 2 and
+	// hits Continuă, `stripeJs` is already populated and only the PaymentIntent
+	// roundtrip blocks the form from rendering.
+	$effect(() => {
+		if (!preloadedPublishableKey || stripeJs) return;
+		const tPreload = performance.now();
+		debugLog('preload Stripe.js — starting bundle download', {
+			publishableKeyPrefix: preloadedPublishableKey.slice(0, 14) + '…'
+		});
+		void loadStripe(preloadedPublishableKey).then((stripe) => {
+			debugLog(`preload Stripe.js — done in ${Math.round(performance.now() - tPreload)}ms`, {
+				ok: !!stripe
+			});
+			if (stripe && !stripeJs) {
+				stripeJs = stripe;
+			}
+		});
+	});
 
 	// Terms
 	let acceptTerms = $state(false);
@@ -702,26 +840,81 @@
 			return;
 		}
 		if (step === 3) {
-			// Card flow: first click creates the PaymentIntent and renders the
-			// inline Stripe Elements form. Second click (after the user has filled
-			// out the card) confirms the payment.
-			if (paymentMethod === 'card' && cardStage === 'ready') {
-				await confirmInlinePayment();
+			// Card flow: PaymentIntent is created eagerly by the auto-init $effect
+			// when the user lands on step 3, so the inline form is already mounted.
+			// The "Plătește" button here is single-purpose: confirm the payment.
+			if (paymentMethod === 'card') {
+				if (cardStage === 'ready') {
+					await confirmInlinePayment();
+				}
+				// idle/creating-intent/confirming: button is either disabled or the
+				// auto-init is still in flight — no-op.
 				return;
 			}
+			// Non-card (Ordin de plată, future Revolut/PayPal): submit the order
+			// which redirects to a hosted checkout page (or completes the OP flow).
 			await submit();
 		} else if (step === 1) {
 			step = 2;
 		} else if (step === 2) {
+			// Kick off the Stripe init in parallel with the step transition. The
+			// server roundtrip + PaymentIntent creation is the slow part (~1-3s);
+			// firing it here overlaps that latency with the step-change animation
+			// and gives the user a much shorter wait at step 3. The $effect below
+			// still acts as a safety net if cardStage somehow stays idle on step 3
+			// (HMR, future routing, etc.).
+			if (
+				paymentMethod === 'card' &&
+				cardStage === 'idle' &&
+				!cardInitTriggered &&
+				!cardInitError
+			) {
+				cardInitTriggered = true;
+				debugLog('eager-init at step 2 → step 3 transition (parallelize with step animation)');
+				void tryAutoInitStripe();
+			}
 			step = 3;
 		}
 	}
 
-	async function submit() {
+	// Wrapper used by the auto-init $effect. submit() handles its own errors and
+	// sets submitError on failure; we lift the same message into cardInitError so
+	// the card-form area can render an inline retry button instead of stranding
+	// the user on the bottom-of-modal error banner.
+	async function tryAutoInitStripe() {
+		// Capture the form fingerprint BEFORE submitting so we have a stable
+		// "this is what the PaymentIntent was created with" reference, even if
+		// the user starts editing while the server roundtrip is in flight.
+		const hashAtInit = step2PayloadHash;
+		await submit({ requireTerms: false });
+		if (cardStage === 'ready') {
+			// Success — snapshot the fingerprint so the invalidation $effect can
+			// detect future edits to email / billing identity / amount / etc. and
+			// tear down the stale PaymentIntent.
+			lastSubmittedHash = hashAtInit;
+			debugLog('lastSubmittedHash captured after successful PaymentIntent creation');
+		}
+		if (cardStage === 'idle' && submitError) {
+			cardInitError = submitError;
+			submitError = null;
+		}
+	}
+
+	function retryCardInit() {
+		debugLog('retryCardInit() — user-triggered retry after init error');
+		cardInitTriggered = false;
+		cardInitError = null;
+		submitError = null;
+		// $effect picks this up on the next microtask and re-runs tryAutoInitStripe().
+	}
+
+	async function submit(opts: { requireTerms?: boolean } = {}) {
+		const requireTerms = opts.requireTerms ?? true;
 		debugLog('submit() start', {
 			step,
 			paymentMethod,
 			billingType,
+			requireTerms,
 			email: maskEmail(email.trim()),
 			cuiTail: maskTail(cui.trim(), 4),
 			hasCompanyName: companyName.trim().length > 0,
@@ -733,7 +926,7 @@
 		});
 		submitError = null;
 		paymentError = null;
-		if (!acceptTerms) {
+		if (requireTerms && !acceptTerms) {
 			debugLog('submit() blocked — terms not accepted');
 			toast.error('Bifează termenii și condițiile.');
 			return;
@@ -820,10 +1013,12 @@
 
 			if (result.duplicateCui) {
 				debugLog('result branch: duplicateCui → success step (existing client)', {
-					hasMessage: !!result.message
+					hasMessage: !!result.message,
+					inquiryId: result.inquiryId
 				});
 				toast.success(result.message);
-				orderId = 'EXISTING';
+				orderId = result.inquiryId ?? null;
+				isExistingClient = true;
 				step = 4;
 				return;
 			}
@@ -899,8 +1094,17 @@
 			stripeReady: !!stripeJs,
 			elementsReady: !!stripeElements,
 			clientSecretPresent: !!paymentClientSecret,
-			paymentIntentId
+			paymentIntentId,
+			acceptTerms
 		});
+		// Terms check moved here — submit() no longer requires acceptTerms because
+		// the auto-init path creates the PaymentIntent before the user has had a
+		// chance to tick the box. The actual contract is formed at confirm time.
+		if (!acceptTerms) {
+			debugLog('confirmInlinePayment() blocked — terms not accepted');
+			toast.error('Bifează termenii și condițiile.');
+			return;
+		}
 		if (!stripeJs || !stripeElements || !paymentClientSecret) {
 			debugLog('confirmInlinePayment() blocked — form not ready');
 			paymentError = 'Formularul de plată nu este pregătit. Reîncarcă pagina.';
@@ -1758,8 +1962,8 @@
 							<div class="co-info-box co-info-box-compact">
 								<InfoIcon size={14} />
 								<div>
-									Apasă „Plătește {total} {plan.currency}" mai jos după ce completezi datele.
-									Stripe va cere autentificare 3D Secure dacă banca solicită.
+									Completează datele cardului, bifează termenii, apoi apasă „Confirm plata"
+									mai jos. Stripe va cere autentificare 3D Secure dacă banca solicită.
 								</div>
 							</div>
 						</div>
@@ -1769,15 +1973,33 @@
 								Se inițializează plata securizată…
 							</div>
 						</div>
+					{:else if paymentMethod === 'card' && cardInitError}
+						<div class="co-card-form">
+							<div class="co-submit-err" role="alert">
+								<strong>Nu am putut inițializa plata cu cardul:</strong>
+								<span>{cardInitError}</span>
+							</div>
+							<button
+								type="button"
+								class="co-btn-ghost co-card-retry"
+								onclick={retryCardInit}
+							>
+								Încearcă din nou
+							</button>
+						</div>
+					{:else if paymentMethod === 'card'}
+						<div class="co-card-form">
+							<div class="co-card-form-loading">
+								Se pregătește plata securizată…
+							</div>
+						</div>
 					{:else}
 						<div class="co-info-box">
 							<InfoIcon size={16} />
 							<div>
 								<strong>Plata se face direct aici, securizat prin Stripe</strong>
 								<div>
-									După ce apeși „Plătește {total} {plan.currency}", apare formularul de card
-									chiar în acest modal. Datele cardului nu trec niciodată prin serverele
-									noastre (PCI-DSS Level 1). Suportă Visa, Mastercard, Apple Pay, Google Pay.
+									Selectează o metodă de plată mai sus pentru a continua.
 								</div>
 							</div>
 						</div>
@@ -1829,16 +2051,16 @@
 							<CheckIcon size={28} />
 						</div>
 						<h2 class="co-h2" style="text-align: center;">
-							{#if orderId === 'EXISTING' && billingType === 'company'}
+							{#if isExistingClient && billingType === 'company'}
 								Acest CUI există deja în sistemul nostru.
-							{:else if orderId === 'EXISTING'}
+							{:else if isExistingClient}
 								Acest email există deja în sistemul nostru.
 							{:else}
 								Mulțumim! Comanda este în curs de procesare.
 							{/if}
 						</h2>
 						<p class="co-sub" style="text-align: center; max-width: 520px; margin: 0 auto 28px;">
-							{#if orderId === 'EXISTING'}
+							{#if isExistingClient}
 								Cererea ta este vizibilă la noi pentru contul existent asociat cu
 								<strong>{email}</strong>. Autentifică-te pe <a href="/login?email={encodeURIComponent(email)}" target="_blank" rel="noopener">/login</a>
 								sau așteaptă să te contacteze echipa OTS pentru continuare.
@@ -1852,6 +2074,14 @@
 								<PackageIcon size={16} />
 								<span>Detalii comandă</span>
 							</div>
+							{#if orderId}
+								<div class="co-success-detail">
+									<span>ID comandă</span>
+									<strong class="co-order-id" title="Referință unică pentru această cerere — folosește-o la suport.">
+										#{orderId}
+									</strong>
+								</div>
+							{/if}
 							<div class="co-success-detail">
 								<span>Pachet</span>
 								<strong>Hosting {plan.name}</strong>
@@ -2032,7 +2262,12 @@
 					type="button"
 					class="co-btn-primary"
 					onclick={next}
-					disabled={submitting || !!stepMissing || cardStage === 'creating-intent' || cardStage === 'confirming'}
+					disabled={submitting ||
+						!!stepMissing ||
+						cardStage === 'creating-intent' ||
+						cardStage === 'confirming' ||
+						(step === 3 && paymentMethod === 'card' && !!cardInitError) ||
+						(step === 3 && paymentMethod === 'card' && cardStage === 'idle')}
 				>
 					{#if step === 3}
 						{#if cardStage === 'creating-intent'}
@@ -2779,6 +3014,10 @@
 		color: #64748b;
 		font-size: 13.5px;
 	}
+	:global(.co-card-retry) {
+		margin-top: 12px;
+		align-self: center;
+	}
 
 	:global(.co-form-section) {
 		padding: 20px;
@@ -3113,6 +3352,15 @@
 	}
 	:global(.co-success-detail strong) {
 		color: #0b1220;
+	}
+	:global(.co-order-id) {
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 13px;
+		letter-spacing: 0.02em;
+		background: #f1f5f9;
+		padding: 2px 8px;
+		border-radius: 6px;
+		user-select: all;
 	}
 	:global(.co-success-next h3) {
 		font-size: 14px;

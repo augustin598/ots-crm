@@ -42,6 +42,9 @@
 	const packages = $derived<Pkg[]>((packagesQuery.current?.packages ?? []) as Pkg[]);
 	const vatRate = $derived(packagesQuery.current?.vatRate ?? 21);
 	const tenantInfo = $derived(packagesQuery.current?.tenantInfo ?? null);
+	// Surfaced so the checkout modal can preload Stripe.js as soon as it
+	// opens — well before submitHostingOrder returns the per-intent key.
+	const stripePublishableKey = $derived(packagesQuery.current?.publishableKey ?? null);
 	const loading = $derived(packagesQuery.loading && !packagesQuery.current);
 	const currentYear = 2026;
 
@@ -864,6 +867,7 @@
 			phone: tenantInfo?.phone ?? null,
 			email: tenantInfo?.email ?? null
 		}}
+		preloadedPublishableKey={stripePublishableKey}
 		onClose={closeCheckout}
 	/>
 {/if}
