@@ -11,6 +11,7 @@
 	import type { Option } from '$lib/components/ui/combobox/combobox-types';
 	import ColumnManager from '$lib/components/hosting/column-manager.svelte';
 	import ClientGroupCard from '$lib/components/hosting/client-group-card.svelte';
+	import HostingAccountEditDialog from '$lib/components/hosting/hosting-account-edit-dialog.svelte';
 	import {
 		loadPersistedColumnConfig,
 		savePersistedColumnConfig,
@@ -38,6 +39,7 @@
 	let groupByClient = $state(true);
 	let showOnlyUnassigned = $state(false);
 	let columnDrawerOpen = $state(false);
+	let editingAccountId = $state<string | null>(null);
 
 	const DEFAULT_CONFIG = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS, HOSTING_ACCOUNT_DEFAULT_VISIBLE);
 	let columnConfig = $state<ColumnConfig>(
@@ -400,6 +402,7 @@
 							{tenantSlug}
 							{clientOptions}
 							onassignClient={assignClient}
+							oneditAccount={(id) => (editingAccountId = id)}
 						/>
 					{/each}
 				</div>
@@ -407,6 +410,14 @@
 		{/await}
 	{/await}
 </div>
+
+{#if editingAccountId}
+	<HostingAccountEditDialog
+		accountId={editingAccountId}
+		onClose={() => (editingAccountId = null)}
+		onSaved={refresh}
+	/>
+{/if}
 
 {#if columnDrawerOpen}
 	<button

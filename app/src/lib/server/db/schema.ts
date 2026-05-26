@@ -1032,6 +1032,11 @@ export const hostingAccount = sqliteTable(
 		 */
 		additionalDomains: jsonb('additional_domains').$type<string[]>(),
 		notes: text('notes'),
+		/**
+		 * Free-form tag chips (e.g. "VIP", "Migrare", "Datornic", "WooCommerce", "High-traffic", "Custom-deal").
+		 * Stored as JSON string array. Editable from the Note tab of the edit form.
+		 */
+		tags: jsonb('tags').$type<string[]>(),
 		whmcsServiceId: integer('whmcs_service_id'),
 		/**
 		 * Stripe Subscription id (sub_...) când contul DA e creat pe baza unei

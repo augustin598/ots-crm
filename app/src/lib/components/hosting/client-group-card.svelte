@@ -27,6 +27,7 @@
 		visibleColumns: ColumnDef[];
 		tenantSlug: string;
 		onassignClient?: (accountId: string, clientId: string | null) => void;
+		oneditAccount?: (accountId: string) => void;
 		clientOptions?: Option[];
 	};
 
@@ -35,6 +36,7 @@
 		visibleColumns,
 		tenantSlug,
 		onassignClient,
+		oneditAccount,
 		clientOptions = []
 	}: Props = $props();
 
@@ -306,6 +308,7 @@
 						showMatchPicker={!group.clientId}
 						{clientOptions}
 						{onassignClient}
+						{oneditAccount}
 					/>
 				{/each}
 			</tbody>

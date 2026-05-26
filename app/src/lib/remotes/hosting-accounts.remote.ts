@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, isNotNull, sql, ne } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull, isNull, sql, ne, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
@@ -646,11 +646,438 @@ export const syncAllHostingAccounts = command(BulkSyncSchema, async (params) => 
 });
 
 // =============================================================================
+//  Hosting invoice → account attribution helper
+// =============================================================================
+
+type AccountForAttribution = {
+	id: string;
+	domain: string;
+	startDate: string | null;
+	recurringAmount: number;
+	billingCycle: string;
+};
+
+const HOSTING_KEYWORD_REGEX = /gazduire|găzduire|gasduire|gaduire|hosting|wordpress/i;
+
+const CYCLE_MONTHS_ATTR: Record<string, number> = {
+	monthly: 1,
+	quarterly: 3,
+	semiannually: 6,
+	biannually: 6,
+	annually: 12,
+	biennially: 24,
+	triennially: 36,
+	one_time: 0
+};
+
+/**
+ * Attribute a hosting invoice (no FK) to one of the client's accounts.
+ *
+ * Strategy (in order):
+ *   1. If any line item description contains an account's full domain → that account.
+ *   2. Else, filter accounts to those that existed at the invoice's issueDate
+ *      (`startDate <= issueDate`, accepting null startDate as "unknown, allow").
+ *   3. If only one existed at the time → use it.
+ *   4. Else pick the one whose monthly-normalised price is closest to the
+ *      invoice's monthly-normalised amount (rough heuristic — prices change but
+ *      it's better than random).
+ *   5. Else (no candidates left) → null.
+ *
+ * Returns `{ accountId, matchedVia }` or null if no attribution possible.
+ */
+function attributeHostingInvoice(
+	invoice: {
+		issueDate: Date | string | null;
+		totalAmount: number | null;
+		descriptions: string[];
+	},
+	accounts: AccountForAttribution[]
+): { accountId: string; matchedVia: 'domain' | 'fallback' } | null {
+	if (accounts.length === 0) return null;
+
+	// 1. Specific domain match in any line item description
+	const lowerDescs = invoice.descriptions.map((d) => d.toLowerCase());
+	for (const a of accounts) {
+		const dl = a.domain.toLowerCase();
+		if (dl && lowerDescs.some((desc) => desc.includes(dl))) {
+			return { accountId: a.id, matchedVia: 'domain' };
+		}
+	}
+
+	// 2. Filter to accounts that existed at the invoice's issueDate
+	const issueISO = invoice.issueDate
+		? new Date(invoice.issueDate).toISOString().slice(0, 10)
+		: null;
+	const existed = accounts.filter((a) => {
+		if (!a.startDate) return true; // unknown, allow
+		if (!issueISO) return true; // can't compare, allow
+		return a.startDate <= issueISO;
+	});
+	if (existed.length === 0) return null;
+
+	// 3. Single account at the time → unambiguous
+	if (existed.length === 1) {
+		return { accountId: existed[0].id, matchedVia: 'fallback' };
+	}
+
+	// 4. Multiple — pick by closest monthly-normalised amount
+	if (invoice.totalAmount !== null && invoice.totalAmount > 0) {
+		const scored = existed
+			.map((a) => {
+				const months = CYCLE_MONTHS_ATTR[a.billingCycle] ?? 1;
+				const monthly = months > 0 ? a.recurringAmount / months : a.recurringAmount;
+				// Invoice cycle is unknown; assume annual as a reasonable default.
+				const invMonthly = (invoice.totalAmount ?? 0) / 12;
+				return { id: a.id, diff: Math.abs(monthly - invMonthly), startDate: a.startDate ?? '' };
+			})
+			.sort((x, y) => x.diff - y.diff || y.startDate.localeCompare(x.startDate));
+		return { accountId: scored[0].id, matchedVia: 'fallback' };
+	}
+
+	// 5. Fall back to oldest existing account
+	const oldest = [...existed].sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? ''));
+	return { accountId: oldest[0].id, matchedVia: 'fallback' };
+}
+
+// =============================================================================
+//  Generic update (CRM-side fields only) — powers the EditAccountModal save.
+// =============================================================================
+
+/**
+ * Whitelist of safely-writable CRM fields. Excluded by design:
+ *   - status (gestionat separat prin suspend/unsuspend/terminate; apel imediat din UI)
+ *   - daUsername (rename DA = operațiune grea, separat)
+ *   - daServerId (migrare DA = workflow distinct)
+ *
+ * Domain este editabil dar — atenție — schimbă doar metadata CRM, nu mută DA user-ul.
+ */
+const UpdateAccountSchema = v.object({
+	id: v.pipe(v.string(), v.minLength(1)),
+	clientId: v.optional(v.nullable(v.string())),
+	daPackageId: v.optional(v.nullable(v.string())),
+	hostingProductId: v.optional(v.nullable(v.string())),
+	domain: v.optional(v.pipe(v.string(), v.minLength(1))),
+	startDate: v.optional(v.nullable(v.string())),
+	nextDueDate: v.optional(v.nullable(v.string())),
+	recurringAmount: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+	currency: v.optional(v.picklist(['RON', 'EUR', 'USD'])),
+	billingCycle: v.optional(
+		v.picklist([
+			'monthly',
+			'quarterly',
+			'semiannually',
+			'biannually',
+			'annually',
+			'biennially',
+			'triennially',
+			'one_time'
+		])
+	),
+	additionalDomains: v.optional(v.nullable(v.array(v.string()))),
+	autoRenew: v.optional(v.boolean()),
+	notes: v.optional(v.nullable(v.string())),
+	tags: v.optional(v.nullable(v.array(v.string())))
+});
+
+export const updateHostingAccount = command(UpdateAccountSchema, async (data) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.manage');
+
+	const tenantId = event.locals.tenant.id;
+
+	const [account] = await db
+		.select({
+			id: table.hostingAccount.id,
+			daServerId: table.hostingAccount.daServerId,
+			clientId: table.hostingAccount.clientId,
+			daPackageId: table.hostingAccount.daPackageId,
+			hostingProductId: table.hostingAccount.hostingProductId,
+			domain: table.hostingAccount.domain,
+			startDate: table.hostingAccount.startDate,
+			nextDueDate: table.hostingAccount.nextDueDate,
+			recurringAmount: table.hostingAccount.recurringAmount,
+			currency: table.hostingAccount.currency,
+			billingCycle: table.hostingAccount.billingCycle,
+			autoRenew: table.hostingAccount.autoRenew
+		})
+		.from(table.hostingAccount)
+		.where(
+			and(eq(table.hostingAccount.id, data.id), eq(table.hostingAccount.tenantId, tenantId))
+		)
+		.limit(1);
+	if (!account) throw new Error('Hosting account not found');
+
+	// Validate clientId belongs to tenant when provided.
+	if (data.clientId) {
+		const [c] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!c) throw new Error('Client not found in this tenant');
+	}
+
+	// Validate daPackageId belongs to the account's current DA server + tenant (whitelist).
+	if (data.daPackageId) {
+		const [pkg] = await db
+			.select({ id: table.daPackage.id })
+			.from(table.daPackage)
+			.where(
+				and(
+					eq(table.daPackage.id, data.daPackageId),
+					eq(table.daPackage.daServerId, account.daServerId),
+					eq(table.daPackage.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+		if (!pkg)
+			throw new Error('Pachetul nu există sau nu aparține serverului curent al contului');
+	}
+
+	// Validate hostingProductId scoped to tenant.
+	if (data.hostingProductId) {
+		const [p] = await db
+			.select({ id: table.hostingProduct.id })
+			.from(table.hostingProduct)
+			.where(
+				and(
+					eq(table.hostingProduct.id, data.hostingProductId),
+					eq(table.hostingProduct.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+		if (!p) throw new Error('Produsul de hosting nu există în acest tenant');
+	}
+
+	const updates: Record<string, unknown> = { updatedAt: new Date() };
+	if (data.clientId !== undefined) updates.clientId = data.clientId;
+	if (data.daPackageId !== undefined) updates.daPackageId = data.daPackageId;
+	if (data.hostingProductId !== undefined) updates.hostingProductId = data.hostingProductId;
+	if (data.domain !== undefined) updates.domain = data.domain;
+	if (data.startDate !== undefined) updates.startDate = data.startDate;
+	if (data.nextDueDate !== undefined) updates.nextDueDate = data.nextDueDate;
+	if (data.recurringAmount !== undefined) updates.recurringAmount = data.recurringAmount;
+	if (data.currency !== undefined) updates.currency = data.currency;
+	if (data.billingCycle !== undefined) updates.billingCycle = data.billingCycle;
+	if (data.additionalDomains !== undefined) updates.additionalDomains = data.additionalDomains;
+	if (data.autoRenew !== undefined) updates.autoRenew = data.autoRenew;
+	if (data.notes !== undefined) updates.notes = data.notes;
+	if (data.tags !== undefined) updates.tags = data.tags;
+
+	await db
+		.update(table.hostingAccount)
+		.set(updates)
+		.where(and(eq(table.hostingAccount.id, data.id), eq(table.hostingAccount.tenantId, tenantId)));
+
+	// Best-effort audit (don't fail the save if audit insert hiccups).
+	try {
+		await db.insert(table.daAuditLog).values({
+			id: generateId(),
+			tenantId,
+			hostingAccountId: data.id,
+			daServerId: account.daServerId,
+			action: 'package-change',
+			trigger: 'manual',
+			success: true,
+			errorMessage: `edit form: ${Object.keys(updates).filter((k) => k !== 'updatedAt').join(', ')}`
+		});
+	} catch (e) {
+		logWarning('directadmin', 'updateHostingAccount audit insert failed', {
+			metadata: { err: e instanceof Error ? e.message : String(e), accountId: data.id }
+		});
+	}
+
+	return { success: true };
+});
+
+// =============================================================================
+//  Payment history for the "Plată & Factură" tab (read-only).
+// =============================================================================
+
+export type AccountPaymentHistoryRow = {
+	id: string;
+	invoiceNumber: string;
+	status: string;
+	totalAmount: number | null;
+	currency: string;
+	issueDate: string | null;
+	paidDate: string | null;
+	paymentMethod: string | null;
+	stripePaymentIntentId: string | null;
+	externalTransactionId: string | null;
+};
+
+export const getAccountPaymentHistory = query(IdSchema, async (accountId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.view');
+
+	const tenantId = event.locals.tenant.id;
+
+	// Confirm account belongs to this tenant. We need every sibling-account for
+	// this client so the attribution heuristic can disambiguate when the line
+	// item description is generic ("Web Hosting -" without a domain).
+	const [account] = await db
+		.select({
+			id: table.hostingAccount.id,
+			clientId: table.hostingAccount.clientId,
+			domain: table.hostingAccount.domain
+		})
+		.from(table.hostingAccount)
+		.where(
+			and(eq(table.hostingAccount.id, accountId), eq(table.hostingAccount.tenantId, tenantId))
+		)
+		.limit(1);
+	if (!account) throw new Error('Hosting account not found');
+
+	// --- Pass A: invoices with FK directly set to this account ---
+	const fkRows = await db
+		.select({
+			id: table.invoice.id,
+			invoiceNumber: table.invoice.invoiceNumber,
+			status: table.invoice.status,
+			totalAmount: table.invoice.totalAmount,
+			currency: table.invoice.currency,
+			issueDate: sql<string | null>`${table.invoice.issueDate}`,
+			paidDate: sql<string | null>`${table.invoice.paidDate}`,
+			paymentMethod: table.invoice.paymentMethod,
+			stripePaymentIntentId: table.invoice.stripePaymentIntentId,
+			externalTransactionId: table.invoice.externalTransactionId
+		})
+		.from(table.invoice)
+		.where(
+			and(
+				eq(table.invoice.tenantId, tenantId),
+				eq(table.invoice.hostingAccountId, accountId)
+			)
+		)
+		.orderBy(desc(table.invoice.issueDate))
+		.limit(20);
+
+	// --- Pass B: candidates for the same client without FK, with hosting keyword ---
+	type RawRow = (typeof fkRows)[number] & {
+		clientId: string | null;
+		lineDescription: string | null;
+	};
+	let candidateRows: RawRow[] = [];
+	let siblings: AccountForAttribution[] = [];
+	if (account.clientId) {
+		candidateRows = (await db
+			.select({
+				id: table.invoice.id,
+				invoiceNumber: table.invoice.invoiceNumber,
+				status: table.invoice.status,
+				totalAmount: table.invoice.totalAmount,
+				currency: table.invoice.currency,
+				issueDate: sql<string | null>`${table.invoice.issueDate}`,
+				paidDate: sql<string | null>`${table.invoice.paidDate}`,
+				paymentMethod: table.invoice.paymentMethod,
+				stripePaymentIntentId: table.invoice.stripePaymentIntentId,
+				externalTransactionId: table.invoice.externalTransactionId,
+				clientId: table.invoice.clientId,
+				lineDescription: table.invoiceLineItem.description
+			})
+			.from(table.invoice)
+			.innerJoin(
+				table.invoiceLineItem,
+				eq(table.invoiceLineItem.invoiceId, table.invoice.id)
+			)
+			.where(
+				and(
+					eq(table.invoice.tenantId, tenantId),
+					eq(table.invoice.clientId, account.clientId),
+					isNull(table.invoice.hostingAccountId),
+					or(
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gazduire%'`,
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%găzduire%'`,
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gasduire%'`,
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gaduire%'`,
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%hosting%'`,
+						sql`LOWER(${table.invoiceLineItem.description}) LIKE '%wordpress%'`
+					)
+				)
+			)
+			.orderBy(desc(table.invoice.issueDate))) as RawRow[];
+
+		const siblingRows = await db
+			.select({
+				id: table.hostingAccount.id,
+				domain: table.hostingAccount.domain,
+				startDate: table.hostingAccount.startDate,
+				recurringAmount: table.hostingAccount.recurringAmount,
+				billingCycle: table.hostingAccount.billingCycle
+			})
+			.from(table.hostingAccount)
+			.where(
+				and(
+					eq(table.hostingAccount.tenantId, tenantId),
+					eq(table.hostingAccount.clientId, account.clientId)
+				)
+			);
+		siblings = siblingRows;
+	}
+
+	// Group candidate rows by invoice id, collecting all line item descriptions.
+	type CandidateInv = Omit<RawRow, 'clientId' | 'lineDescription'> & { descriptions: string[] };
+	const byId = new Map<string, CandidateInv>();
+	const order: string[] = [];
+	for (const row of candidateRows) {
+		let entry = byId.get(row.id);
+		if (!entry) {
+			const { clientId: _cid, lineDescription: _ld, ...invFields } = row;
+			void _cid;
+			void _ld;
+			entry = { ...invFields, descriptions: [] };
+			byId.set(row.id, entry);
+			order.push(row.id);
+		}
+		if (row.lineDescription) entry.descriptions.push(row.lineDescription);
+	}
+
+	// Attribute each candidate; keep only the ones attributed to this account.
+	const attributedRows: AccountPaymentHistoryRow[] = [];
+	for (const id of order) {
+		const inv = byId.get(id);
+		if (!inv) continue;
+		const attribution = attributeHostingInvoice(
+			{ issueDate: inv.issueDate, totalAmount: inv.totalAmount, descriptions: inv.descriptions },
+			siblings
+		);
+		if (attribution?.accountId === accountId) {
+			const { descriptions: _d, ...rest } = inv;
+			void _d;
+			attributedRows.push(rest);
+		}
+	}
+
+	// Merge FK rows + attributed rows, dedupe by id, sort by issueDate desc.
+	const merged = [...fkRows, ...attributedRows];
+	const seen = new Set<string>();
+	const unique = merged.filter((r) => {
+		if (seen.has(r.id)) return false;
+		seen.add(r.id);
+		return true;
+	});
+	unique.sort((a, b) => {
+		const da = a.issueDate ? new Date(a.issueDate).getTime() : 0;
+		const db_ = b.issueDate ? new Date(b.issueDate).getTime() : 0;
+		return db_ - da;
+	});
+
+	return unique.slice(0, 10) satisfies AccountPaymentHistoryRow[];
+});
+
+// =============================================================================
 //  Grouped-by-client query (HOST design pack — /[tenant]/hosting/accounts)
 // =============================================================================
 
 export type LastInvoiceLite = {
 	id: string;
+	/** Invoice number string (e.g. "OTS 545", "OTSH 1") — empty when status === 'n/a'. */
+	invoiceNumber: string;
 	status:
 		| 'paid'
 		| 'pending'
@@ -663,6 +1090,8 @@ export type LastInvoiceLite = {
 	date: string | null;
 	amountCents: number;
 	daysOverdue?: number;
+	/** 'fk' = invoice.hosting_account_id matches; 'domain' = matched via line item description containing the account's domain. */
+	matchedVia?: 'fk' | 'domain' | 'fallback';
 };
 
 export type AccountInGroup = {
@@ -818,10 +1247,67 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 
 	const accountIds = rows.map((r) => r.id);
 
-	const invRows = accountIds.length
+	// Build per-client account index so we can attribute keyword-only invoices
+	// (no `hosting_account_id` FK) to a specific account. Many legacy / pre-FK
+	// invoices reference the domain only inside the line item description (e.g.
+	// "Wordpress Standard - forumvideochat.ro (...)"), and some are even more
+	// generic ("Web Hosting -") so we also need a temporal + amount fallback.
+	const accountsByClient = new Map<string, AccountForAttribution[]>();
+	for (const r of rows) {
+		if (!r.clientId) continue;
+		const arr = accountsByClient.get(r.clientId) ?? [];
+		arr.push({
+			id: r.id,
+			domain: r.domain,
+			startDate: r.startDate,
+			recurringAmount: r.recurringAmount,
+			billingCycle: r.billingCycle
+		});
+		accountsByClient.set(r.clientId, arr);
+	}
+	const clientIdsWithAccounts = Array.from(accountsByClient.keys());
+
+	const todayISO = new Date().toISOString().slice(0, 10);
+	const lastInvoiceByAccount = new Map<string, LastInvoiceLite>();
+
+	function applyCandidate(
+		accountId: string,
+		inv: {
+			id: string;
+			invoiceNumber: string;
+			status: string;
+			dueDate: Date | string | null;
+			issueDate: Date | string | null;
+			totalAmount: number | null;
+		},
+		matchedVia: LastInvoiceLite['matchedVia']
+	): void {
+		if (lastInvoiceByAccount.has(accountId)) return; // earlier insertion wins (we sort by date desc)
+		const dateISO = inv.issueDate ? new Date(inv.issueDate).toISOString().slice(0, 10) : null;
+		const dueISO = inv.dueDate ? new Date(inv.dueDate).toISOString().slice(0, 10) : null;
+		let mapped: LastInvoiceLite['status'] = inv.status as LastInvoiceLite['status'];
+		if (inv.status !== 'paid' && inv.status !== 'cancelled' && dueISO && dueISO < todayISO) {
+			mapped = 'overdue';
+		}
+		const daysOverdue =
+			mapped === 'overdue' && dueISO ? Math.max(0, daysDiff(dueISO, todayISO) ?? 0) : undefined;
+		lastInvoiceByAccount.set(accountId, {
+			id: inv.id,
+			invoiceNumber: inv.invoiceNumber,
+			status: mapped,
+			date: dateISO,
+			amountCents: Number(inv.totalAmount ?? 0),
+			daysOverdue,
+			matchedVia
+		});
+	}
+
+	// === Pass A: invoices with the hosting_account_id FK directly set. ===
+	const fkInvoices = accountIds.length
 		? await db
 				.select({
 					id: table.invoice.id,
+					invoiceNumber: table.invoice.invoiceNumber,
 					hostingAccountId: table.invoice.hostingAccountId,
 					status: table.invoice.status,
 					dueDate: table.invoice.dueDate,
@@ -838,26 +1324,97 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 				.orderBy(desc(table.invoice.issueDate))
 		: [];
 
-	const todayISO = new Date().toISOString().slice(0, 10);
-	const lastInvoiceByAccount = new Map<string, LastInvoiceLite>();
-	for (const inv of invRows) {
+	for (const inv of fkInvoices) {
 		if (!inv.hostingAccountId) continue;
-		if (lastInvoiceByAccount.has(inv.hostingAccountId)) continue;
-		const dateISO = inv.issueDate ? new Date(inv.issueDate).toISOString().slice(0, 10) : null;
-		const dueISO = inv.dueDate ? new Date(inv.dueDate).toISOString().slice(0, 10) : null;
-		let mapped: LastInvoiceLite['status'] = inv.status as LastInvoiceLite['status'];
-		if (inv.status !== 'paid' && inv.status !== 'cancelled' && dueISO && dueISO < todayISO) {
-			mapped = 'overdue';
+		applyCandidate(inv.hostingAccountId, inv, 'fk');
+	}
+
+	// === Pass B: invoices for the clients of these accounts, without FK, but
+	// whose line items mention "gazduire"/"hosting"/"wordpress" (the same
+	// classifier used by `scripts/backfill-hosting-ltv-and-since.ts`). The JS
+	// pass then attributes each candidate to a specific account by matching the
+	// account's domain inside any of its line item descriptions. If we still
+	// can't disambiguate and the client has exactly one hosting account, we
+	// fall back to that single account. ===
+	const candidateRows = clientIdsWithAccounts.length
+		? await db
+				.select({
+					id: table.invoice.id,
+					invoiceNumber: table.invoice.invoiceNumber,
+					clientId: table.invoice.clientId,
+					status: table.invoice.status,
+					dueDate: table.invoice.dueDate,
+					issueDate: table.invoice.issueDate,
+					totalAmount: table.invoice.totalAmount,
+					lineDescription: table.invoiceLineItem.description
+				})
+				.from(table.invoice)
+				.innerJoin(
+					table.invoiceLineItem,
+					eq(table.invoiceLineItem.invoiceId, table.invoice.id)
+				)
+				.where(
+					and(
+						eq(table.invoice.tenantId, tenantId),
+						inArray(table.invoice.clientId, clientIdsWithAccounts),
+						isNull(table.invoice.hostingAccountId),
+						or(
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gazduire%'`,
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%găzduire%'`,
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gasduire%'`,
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gaduire%'`,
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%hosting%'`,
+							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%wordpress%'`
+						)
+					)
+				)
+				.orderBy(desc(table.invoice.issueDate))
+		: [];
+
+	// Group candidate rows by invoice id (an invoice can have multiple line items
+	// that all matched the keyword filter).
+	type CandidateInvoice = {
+		id: string;
+		invoiceNumber: string;
+		clientId: string;
+		status: string;
+		dueDate: Date | string | null;
+		issueDate: Date | string | null;
+		totalAmount: number | null;
+		descriptions: string[];
+	};
+	const candidatesById = new Map<string, CandidateInvoice>();
+	const candidateOrder: string[] = []; // preserve insertion order = issueDate desc
+	for (const row of candidateRows) {
+		if (!row.clientId) continue;
+		let entry = candidatesById.get(row.id);
+		if (!entry) {
+			entry = {
+				id: row.id,
+				invoiceNumber: row.invoiceNumber,
+				clientId: row.clientId,
+				status: row.status,
+				dueDate: row.dueDate,
+				issueDate: row.issueDate,
+				totalAmount: row.totalAmount,
+				descriptions: []
+			};
+			candidatesById.set(row.id, entry);
+			candidateOrder.push(row.id);
 		}
-		const daysOverdue =
-			mapped === 'overdue' && dueISO ? Math.max(0, daysDiff(dueISO, todayISO) ?? 0) : undefined;
-		lastInvoiceByAccount.set(inv.hostingAccountId, {
-			id: inv.id,
-			status: mapped,
-			date: dateISO,
-			amountCents: Number(inv.totalAmount ?? 0),
-			daysOverdue
-		});
+		if (row.lineDescription) entry.descriptions.push(row.lineDescription);
+	}
+
+	for (const invoiceId of candidateOrder) {
+		const inv = candidatesById.get(invoiceId);
+		if (!inv) continue;
+		const candidates = accountsByClient.get(inv.clientId);
+		if (!candidates) continue;
+		const attribution = attributeHostingInvoice(
+			{ issueDate: inv.issueDate, totalAmount: inv.totalAmount, descriptions: inv.descriptions },
+			candidates
+		);
+		if (attribution) applyCandidate(attribution.accountId, inv, attribution.matchedVia);
 	}
 
 	const groups = new Map<string, ClientGroup>();
@@ -897,6 +1454,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		const lastInv: LastInvoiceLite =
 			lastInvoiceByAccount.get(r.id) ?? {
 				id: '',
+				invoiceNumber: '',
 				status: 'n/a',
 				date: null,
 				amountCents: 0

@@ -22,6 +22,7 @@
 	import EditIcon from '@lucide/svelte/icons/pencil';
 	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
 	import Checkbox from '$lib/components/ui/checkbox/checkbox.svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	type Props = {
 		acc: AccountInGroup;
@@ -30,6 +31,7 @@
 		showMatchPicker: boolean;
 		clientOptions: Option[];
 		onassignClient?: (accountId: string, clientId: string | null) => void;
+		oneditAccount?: (accountId: string) => void;
 	};
 
 	let {
@@ -38,7 +40,8 @@
 		tenantSlug,
 		showMatchPicker,
 		clientOptions,
-		onassignClient
+		onassignClient,
+		oneditAccount
 	}: Props = $props();
 
 	const countdown = $derived(countdownLabel(acc.expiresInDays));
@@ -143,33 +146,43 @@
 			{:else if col.key === 'plata'}
 				{#if acc.lastInvoice.status === 'n/a'}
 					<span class="text-slate-300">—</span>
-				{:else if acc.lastInvoice.status === 'paid'}
-					<div>
-						<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium {INVOICE_STATUS_CHIP[acc.lastInvoice.status]}">
-							<CheckCircle2Icon class="size-2.5" /> Plătit
-						</span>
-						{#if acc.lastInvoice.date}
-							<div class="mt-0.5 text-[10px] text-slate-400">{formatDate(acc.lastInvoice.date)}</div>
-						{/if}
-					</div>
-				{:else if acc.lastInvoice.status === 'overdue'}
-					<div>
-						<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium {INVOICE_STATUS_CHIP[acc.lastInvoice.status]}">
-							<AlertTriangleIcon class="size-2.5" /> Restant{#if acc.lastInvoice.daysOverdue !== undefined}ă{/if}
-						</span>
-						{#if acc.lastInvoice.daysOverdue !== undefined}
-							<div class="mt-0.5 text-[10px] text-red-500">restant de {acc.lastInvoice.daysOverdue} z</div>
-						{/if}
-					</div>
 				{:else}
-					<div>
-						<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium {INVOICE_STATUS_CHIP[acc.lastInvoice.status] ?? 'bg-slate-100 text-slate-600'}">
-							{acc.lastInvoice.status}
-						</span>
-						{#if acc.lastInvoice.date}
-							<div class="mt-0.5 text-[10px] text-slate-400">{formatDate(acc.lastInvoice.date)}</div>
-						{/if}
-					</div>
+					{@const inv = acc.lastInvoice}
+					{@const statusChipCls = INVOICE_STATUS_CHIP[inv.status] ?? 'bg-slate-100 text-slate-600'}
+					{@const statusLabel = inv.status === 'paid' ? 'Plătit' : inv.status === 'overdue' ? 'Restantă' : inv.status === 'sent' ? 'Trimisă' : inv.status === 'pending' ? 'În așteptare' : inv.status === 'draft' ? 'Ciornă' : inv.status === 'cancelled' ? 'Anulată' : inv.status === 'partially_paid' ? 'Parțial' : inv.status}
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<span class="inline-flex cursor-default items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium {statusChipCls}">
+								{#if inv.status === 'paid'}
+									<CheckCircle2Icon class="size-2.5" />
+								{:else if inv.status === 'overdue'}
+									<AlertTriangleIcon class="size-2.5" />
+								{/if}
+								{statusLabel}
+							</span>
+						</Tooltip.Trigger>
+						<Tooltip.Content side="top" sideOffset={6} class="max-w-xs">
+							<div class="space-y-1 text-[11px] leading-snug">
+								{#if inv.invoiceNumber}
+									<div class="font-mono text-[12px] font-semibold text-white">{inv.invoiceNumber}</div>
+								{/if}
+								{#if inv.date}
+									<div class="text-slate-300">Emisă <span class="text-white">{formatDate(inv.date)}</span></div>
+								{/if}
+								{#if inv.amountCents}
+									<div class="text-slate-300">Sumă <span class="text-white tabular-nums">{formatRON(inv.amountCents, acc.currency ?? 'RON')}</span></div>
+								{/if}
+								{#if inv.status === 'overdue' && inv.daysOverdue !== undefined}
+									<div class="text-red-300">Restant de {inv.daysOverdue} zile</div>
+								{/if}
+								{#if inv.matchedVia === 'fallback'}
+									<div class="border-t border-slate-700 pt-1 text-[10px] italic text-amber-300">Asociere aproximativă (sumă + dată)</div>
+								{:else if inv.matchedVia === 'domain'}
+									<div class="border-t border-slate-700 pt-1 text-[10px] italic text-slate-400">Asociat după domeniu în descriere</div>
+								{/if}
+							</div>
+						</Tooltip.Content>
+					</Tooltip.Root>
 				{/if}
 			{:else if col.key === 'status'}
 				<span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium {STATUS_CHIP[acc.status] ?? 'bg-slate-100 text-slate-600'}">
@@ -206,14 +219,15 @@
 			>
 				<ExternalLinkIcon class="size-3.5" />
 			</a>
-			<a
-				href={`/${tenantSlug}/hosting/accounts/${acc.id}`}
+			<button
+				type="button"
+				onclick={() => oneditAccount?.(acc.id)}
 				aria-label="Editează"
 				title="Editează"
 				class="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
 			>
 				<EditIcon class="size-3.5" />
-			</a>
+			</button>
 			<button
 				type="button"
 				aria-label="Mai multe"
