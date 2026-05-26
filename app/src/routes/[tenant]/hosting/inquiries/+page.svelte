@@ -1186,7 +1186,67 @@
 			{#if o.paymentStatus === 'paid' && !o.hostingAccountId && lastProvisionInitId === o.id}
 				<section class="hod-section" id="drawer-provisioning">
 					<div class="hod-section-label">PROVISIONING DA</div>
-					<!-- placeholder — Task 17 fills this in -->
+
+					{#if serversPromise}
+						{#await serversPromise then servers}
+							<div class="hod-grid-2">
+								<label class="hod-input-block">
+									<span>SERVER</span>
+									<select bind:value={provServerId}>
+										<option value="">— alege —</option>
+										{#each servers as srv (srv.id)}
+											<option value={srv.id}>{srv.name}</option>
+										{/each}
+									</select>
+								</label>
+								<label class="hod-input-block">
+									<span>PACHET DA (OPȚIONAL)</span>
+									<input type="text" bind:value={provPackageId} placeholder="ex: standard" />
+								</label>
+								<label class="hod-input-block">
+									<span>USERNAME DA</span>
+									<input type="text" bind:value={provUsername} placeholder="ex: andreim" />
+								</label>
+								<label class="hod-input-block">
+									<span>DOMENIU PRIMAR</span>
+									<input type="text" bind:value={provDomain} placeholder="ex: domeniu.ro" />
+								</label>
+								<label class="hod-input-block">
+									<span>PAROLĂ</span>
+									<div class="hod-pwd-row">
+										<input type="text" bind:value={provPassword} />
+										<button
+											type="button"
+											class="hod-btn hod-btn-ghost"
+											onclick={regeneratePassword}
+										>
+											<SparklesIcon size={12} /> Regen
+										</button>
+										<button type="button" class="hod-btn hod-btn-ghost" onclick={copyPassword}>
+											<CopyIcon size={12} /> {provPwdCopied ? 'Copiat' : 'Copiază'}
+										</button>
+									</div>
+								</label>
+								<label class="hod-input-block hod-grid-span-2">
+									<span>NOTE INTERNE (OPȚIONAL)</span>
+									<textarea rows="2" bind:value={provNotes} maxlength="500"></textarea>
+								</label>
+							</div>
+
+							<div class="hod-accept-foot">
+								<button class="hod-btn hod-btn-ghost" onclick={() => (openOrder = null)}>
+									Anulează
+								</button>
+								<button
+									class="hod-btn hod-btn-primary"
+									disabled={provisioning}
+									onclick={() => submitProvision(o.id)}
+								>
+									<HardDriveIcon size={14} /> Provisionează
+								</button>
+							</div>
+						{/await}
+					{/if}
 				</section>
 			{/if}
 		</div>
