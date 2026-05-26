@@ -108,6 +108,9 @@
 		if (!serversPromise) serversPromise = getDAServers();
 	}
 	const selectedServerDetail = $derived(provServerId ? getDAServer(provServerId) : null);
+	const drawerDaServer = $derived(
+		openOrder?.productDaServerId ? getDAServer(openOrder.productDaServerId) : null
+	);
 
 	function openProvisionForm(o: HostingOrderRow) {
 		ensureServersLoaded();
@@ -892,7 +895,6 @@
 	{@const tvaCents = lineTvaCents(items)}
 	{@const acctStatus = accountStatusLabel(o)}
 	{@const domainItem = items.find((it) => it.kind === 'domain') ?? null}
-	{@const daServer = o.productDaServerId ? getDAServer(o.productDaServerId) : null}
 
 	<button
 		class="hod-drawer-back"
@@ -1096,8 +1098,8 @@
 					<div class="hod-input-block hod-readonly">
 						<span>SERVER</span>
 						<div class="hod-value hod-mono">
-							{#if daServer}
-								{#await daServer then srv}
+							{#if drawerDaServer}
+								{#await drawerDaServer then srv}
 									{srv?.name ?? '—'}
 								{/await}
 							{:else if o.paymentStatus === 'paid'}
