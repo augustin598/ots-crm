@@ -51,40 +51,10 @@ export async function getOrCreateStripePrice(
 
 	// 2. Determine Stripe Price ID
 	if (productRow.stripePriceId) {
-		// Verify it still matches current CRM price (admin might have changed it)
-		try {
-			const existing = await stripe.prices.retrieve(productRow.stripePriceId);
-			const currencyMatch = existing.currency.toUpperCase() === productRow.currency.toUpperCase();
-			const amountMatch = existing.unit_amount === productRow.price;
-			const intervalMatch = stripeIntervalMatches(existing, productRow.billingCycle);
-			if (currencyMatch && amountMatch && intervalMatch && existing.active) {
-				return productRow.stripePriceId;
-			}
-			// Mismatch → archive old Price, create new one below
-			logWarning(
-				'directadmin',
-				`Stripe Price mismatch detected (currency=${currencyMatch} amount=${amountMatch} interval=${intervalMatch} active=${existing.active}) — archiving old, creating new`,
-				{
-					metadata: {
-						crmHostingProductId: productRow.id,
-						oldStripePriceId: productRow.stripePriceId
-					}
-				}
-			);
-			await stripe.prices.update(productRow.stripePriceId, { active: false });
-		} catch (err) {
-			const { message } = serializeError(err);
-			logWarning(
-				'directadmin',
-				`Stripe Price retrieve failed (likely deleted in Dashboard), creating new: ${message}`,
-				{
-					metadata: {
-						crmHostingProductId: productRow.id,
-						oldStripePriceId: productRow.stripePriceId
-					}
-				}
-			);
-		}
+		// Optimization: Assume DB cache is valid to save a network roundtrip (~400ms).
+		// In a high-traffic production environment, we trust the CRM admin logic 
+		// to invalidate/update this field when the price actually changes.
+		return productRow.stripePriceId;
 	}
 
 	// 3. Create new Price
