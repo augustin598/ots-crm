@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, ne, isNull } from 'drizzle-orm';
+import { eq, and, desc, ne, isNull, inArray } from 'drizzle-orm';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -132,6 +132,17 @@ export const deleteHostingInquiry = command(IdSchema, async (id) => {
 
 // ====================== New: full orders view + payment + provisioning ======
 
+export type HostingOrderItemRow = {
+	id: string;
+	kind: string;
+	label: string;
+	unitPriceCents: number;
+	quantity: number;
+	vatRate: number;
+	domainName: string | null;
+	domainMode: string | null;
+};
+
 export type HostingOrderRow = {
 	id: string;
 	hostingProductId: string | null;
@@ -168,6 +179,8 @@ export type HostingOrderRow = {
 	daDomain: string | null;
 	daAccountStatus: string | null;
 	stripeCheckoutSessionId: string | null;
+	orderNumber: number | null;
+	items: HostingOrderItemRow[];
 };
 
 /**
@@ -182,6 +195,7 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 	const rows = await db
 		.select({
 			id: table.hostingInquiry.id,
+			orderNumber: table.hostingInquiry.orderNumber,
 			hostingProductId: table.hostingInquiry.hostingProductId,
 			contactName: table.hostingInquiry.contactName,
 			contactEmail: table.hostingInquiry.contactEmail,
@@ -242,7 +256,46 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 		.where(eq(table.hostingInquiry.tenantId, tenantId))
 		.orderBy(desc(table.hostingInquiry.createdAt));
 
-	return rows as HostingOrderRow[];
+	if (rows.length === 0) return [];
+
+	const inquiryIds = rows.map((r) => r.id);
+	const itemRows = await db
+		.select({
+			id: table.hostingInquiryItem.id,
+			inquiryId: table.hostingInquiryItem.inquiryId,
+			kind: table.hostingInquiryItem.kind,
+			label: table.hostingInquiryItem.label,
+			unitPriceCents: table.hostingInquiryItem.unitPriceCents,
+			quantity: table.hostingInquiryItem.quantity,
+			vatRate: table.hostingInquiryItem.vatRate,
+			domainName: table.hostingInquiryItem.domainName,
+			domainMode: table.hostingInquiryItem.domainMode
+		})
+		.from(table.hostingInquiryItem)
+		.where(
+			and(
+				eq(table.hostingInquiryItem.tenantId, tenantId),
+				inArray(table.hostingInquiryItem.inquiryId, inquiryIds)
+			)
+		);
+
+	const byInquiry = new Map<string, HostingOrderItemRow[]>();
+	for (const it of itemRows) {
+		const arr = byInquiry.get(it.inquiryId) ?? [];
+		arr.push({
+			id: it.id,
+			kind: it.kind,
+			label: it.label,
+			unitPriceCents: it.unitPriceCents,
+			quantity: it.quantity,
+			vatRate: it.vatRate,
+			domainName: it.domainName,
+			domainMode: it.domainMode
+		});
+		byInquiry.set(it.inquiryId, arr);
+	}
+
+	return rows.map((r) => ({ ...r, items: byInquiry.get(r.id) ?? [] })) as HostingOrderRow[];
 });
 
 const AcceptPaymentSchema = v.object({
