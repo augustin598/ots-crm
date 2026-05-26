@@ -4,7 +4,7 @@ import type Stripe from 'stripe';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { env } from '$env/dynamic/private';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -39,6 +39,69 @@ const PUBLIC_TENANT_SLUG = env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
+
+/**
+ * Insert line items for a fresh hosting inquiry. Centralized to avoid
+ * duplicating this logic across the 6 inquiry-insert call sites.
+ */
+async function insertInquiryItems(args: {
+	inquiryId: string;
+	tenantId: string;
+	product: { id: string; name: string; price: number; billingCycle: string | null } | null;
+	domainName: string | undefined;
+	domainMode: 'buy' | 'have' | 'transfer' | undefined;
+	domainCostCents: number | undefined;
+}): Promise<void> {
+	const items: (typeof table.hostingInquiryItem.$inferInsert)[] = [];
+
+	if (args.product) {
+		const period = args.product.billingCycle === 'yearly' ? 'anual' : 'lunar';
+		items.push({
+			id: generateId(),
+			inquiryId: args.inquiryId,
+			tenantId: args.tenantId,
+			kind: 'hosting',
+			label: `${args.product.name} (${period})`,
+			hostingProductId: args.product.id,
+			unitPriceCents: args.product.price,
+			quantity: 1,
+			vatRate: 19
+		});
+	}
+
+	if (args.domainName) {
+		if (args.domainMode === 'buy' && (args.domainCostCents ?? 0) > 0) {
+			items.push({
+				id: generateId(),
+				inquiryId: args.inquiryId,
+				tenantId: args.tenantId,
+				kind: 'domain',
+				label: `Domeniu ${args.domainName}`,
+				unitPriceCents: args.domainCostCents!,
+				quantity: 1,
+				vatRate: 19,
+				domainName: args.domainName,
+				domainMode: 'buy'
+			});
+		} else if (args.domainMode === 'have' || args.domainMode === 'transfer') {
+			const modeLabel = args.domainMode === 'have' ? 'existent' : 'transfer';
+			items.push({
+				id: generateId(),
+				inquiryId: args.inquiryId,
+				tenantId: args.tenantId,
+				kind: 'domain',
+				label: `Domeniu ${args.domainName} (${modeLabel})`,
+				unitPriceCents: 0,
+				quantity: 1,
+				vatRate: 19,
+				domainName: args.domainName,
+				domainMode: args.domainMode
+			});
+		}
+	}
+
+	if (items.length) await db.insert(table.hostingInquiryItem).values(items);
 }
 
 /**
@@ -233,6 +296,7 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 		await db.insert(table.hostingInquiry).values({
 			id,
 			tenantId,
+			orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 			hostingProductId: data.hostingProductId ?? null,
 			contactName: data.contactName.trim(),
 			contactEmail: data.contactEmail.trim().toLowerCase(),
@@ -242,6 +306,14 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 			message: data.message?.trim() || null,
 			ipAddress: ip,
 			userAgent
+		});
+		await insertInquiryItems({
+			inquiryId: id,
+			tenantId,
+			product: null,
+			domainName: undefined,
+			domainMode: undefined,
+			domainCostCents: undefined
 		});
 		logInfo('directadmin', 'new inquiry created', {
 			tenantId,
@@ -839,6 +911,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			await db.insert(table.hostingInquiry).values({
 				id: inquiryId,
 				tenantId,
+				orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 				hostingProductId: product.id,
 				contactName: companyName,
 				contactEmail: normalizedEmail,
@@ -854,6 +927,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				paymentMethod: data.paymentMethod ?? 'card',
 				paymentStatus: 'pending',
 				requestedDomain: data.requestedDomain || null
+			});
+			await insertInquiryItems({
+				inquiryId,
+				tenantId,
+				product,
+				domainName: data.domainName,
+				domainMode: data.domainMode,
+				domainCostCents: data.domainCostCents
 			});
 			return {
 				duplicateCui: true as const,
@@ -912,6 +993,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					await db.insert(table.hostingInquiry).values({
 						id: inquiryId,
 						tenantId,
+						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 						hostingProductId: product.id,
 						contactName: companyName,
 						contactEmail: normalizedEmail,
@@ -927,6 +1009,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						paymentMethod: data.paymentMethod ?? 'card',
 						paymentStatus: 'pending',
 						requestedDomain: data.requestedDomain || null
+					});
+					await insertInquiryItems({
+						inquiryId,
+						tenantId,
+						product,
+						domainName: data.domainName,
+						domainMode: data.domainMode,
+						domainCostCents: data.domainCostCents
 					});
 				}
 				return {
@@ -962,6 +1052,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			await db.insert(table.hostingInquiry).values({
 				id: inquiryId,
 				tenantId,
+				orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 				hostingProductId: product.id,
 				contactName: displayName,
 				contactEmail: normalizedEmail,
@@ -975,6 +1066,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				paymentMethod: data.paymentMethod ?? 'card',
 				paymentStatus: 'pending',
 				requestedDomain: data.requestedDomain || null
+			});
+			await insertInquiryItems({
+				inquiryId,
+				tenantId,
+				product,
+				domainName: data.domainName,
+				domainMode: data.domainMode,
+				domainCostCents: data.domainCostCents
 			});
 			return {
 				duplicateCui: true as const,
@@ -1037,6 +1136,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					await db.insert(table.hostingInquiry).values({
 						id: inquiryId,
 						tenantId,
+						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 						hostingProductId: product.id,
 						contactName: displayName,
 						contactEmail: normalizedEmail,
@@ -1050,6 +1150,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						paymentMethod: data.paymentMethod ?? 'card',
 						paymentStatus: 'pending',
 						requestedDomain: data.requestedDomain || null
+					});
+					await insertInquiryItems({
+						inquiryId,
+						tenantId,
+						product,
+						domainName: data.domainName,
+						domainMode: data.domainMode,
+						domainCostCents: data.domainCostCents
 					});
 				}
 				return {
@@ -1104,6 +1212,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					db.insert(table.hostingInquiry).values({
 						id: inquiryId,
 						tenantId,
+						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 						hostingProductId: product.id,
 						contactName: displayName,
 						contactEmail: normalizedEmail,
@@ -1125,6 +1234,15 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				{ tenantId, label: 'public-hosting/insertInquiry' }
 			)
 		]);
+
+		await insertInquiryItems({
+			inquiryId,
+			tenantId,
+			product,
+			domainName: data.domainName,
+			domainMode: data.domainMode,
+			domainCostCents: data.domainCostCents
+		});
 
 		const mode = product.billingCycle === 'one_time' ? 'payment' : 'subscription';
 
