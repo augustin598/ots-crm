@@ -1,0 +1,1 @@
+CREATE INDEX hosting_inquiry_item_tenant_idx ON hosting_inquiry_item(tenant_id);
