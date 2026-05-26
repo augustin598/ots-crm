@@ -638,302 +638,237 @@
 	}
 </script>
 
-<div class="hst-page">
+<div class="hod-page">
 	{#await ordersPromise}
-		<div class="hst-loading">Se încarcă comenzile…</div>
+		<div class="hod-loading">Se încarcă comenzile…</div>
 	{:then orders}
 		{@const c = counts(orders)}
 		{@const filtered = applyFilters(orders)}
+		{@const productOptions = Array.from(
+			new Map(
+				orders
+					.filter((o) => o.hostingProductId && o.productName)
+					.map((o) => [o.hostingProductId as string, o.productName as string])
+			).entries()
+		)}
 
-		<div class="hst-hero">
+		<!-- Hero -->
+		<div class="hod-hero">
 			<div>
 				<h1>Comenzi hosting</h1>
 				<p>
-					{c.total} comenzi · {c.pendingPayment} așteaptă plată · {c.provisioningPending} așteaptă provisioning
+					Comenzile primite de pe pagina publică /pachete-hosting · {c.total} total · {c.createdToday}
+					azi · {fmtMoney(c.paidThisMonth, 'RON')} achitați
 				</p>
 			</div>
-			<div class="hst-hero-actions">
-				<button class="btn-secondary" onclick={() => refresh()}>
-					<RefreshCwIcon size={13} /> Refresh
+			<div class="hod-hero-actions">
+				<button class="hod-btn hod-btn-ghost" onclick={() => refresh()}>
+					<RefreshCwIcon size={14} /> Refresh
 				</button>
-				<button class="btn-secondary" onclick={() => exportCsv(filtered)} disabled={filtered.length === 0}>
-					<DownloadIcon size={13} /> Export CSV
+				<button
+					class="hod-btn hod-btn-ghost"
+					onclick={() => exportCsv(filtered)}
+					disabled={filtered.length === 0}
+				>
+					<DownloadIcon size={14} /> Export CSV
 				</button>
-				<a href="/pachete-hosting" target="_blank" class="btn-secondary">
-					<ExternalLinkIcon size={13} /> Pagina publică
+				<a href="/pachete-hosting" target="_blank" rel="noopener" class="hod-btn hod-btn-ghost">
+					<ExternalLinkIcon size={14} /> Pagina publică
 				</a>
 			</div>
 		</div>
 
-		<div class="hst-kpis">
-			<div class="dash-kpi primary">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(24,119,242,.12); color:#1877F2;">
-						<ShoppingCartIcon size={13} />
+		<!-- KPI strip -->
+		<div class="hod-kpis">
+			<div class="hod-kpi" data-tone="info">
+				<div class="hod-kpi-stripe"></div>
+				<div class="hod-kpi-body">
+					<div class="hod-kpi-head">
+						<ShoppingCartIcon size={14} />
+						<span>COMENZI TOTAL</span>
 					</div>
-					<span class="dash-kpi-label">Total comenzi</span>
+					<div class="hod-kpi-value">{c.total}</div>
+					<div class="hod-kpi-foot">+{c.createdToday} azi · {c.createdYesterday} ieri</div>
 				</div>
-				<div class="dash-kpi-value">{c.total}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">toate sursele</span></div>
 			</div>
 
-			<div class="dash-kpi warn">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(245,158,11,.12); color:#f59e0b;">
-						<ClockIcon size={13} />
+			<div class="hod-kpi" data-tone="ok">
+				<div class="hod-kpi-stripe"></div>
+				<div class="hod-kpi-body">
+					<div class="hod-kpi-head">
+						<TrendingUpIcon size={14} />
+						<span>REVENUE ACHITAT</span>
 					</div>
-					<span class="dash-kpi-label">Așteaptă plată</span>
+					<div class="hod-kpi-value">{fmtMoney(c.paidThisMonth, 'RON')}</div>
+					<div class="hod-kpi-foot">
+						{#if c.revenueDeltaPct == null}
+							luna curentă
+						{:else}
+							{c.revenueDeltaPct >= 0 ? '+' : ''}{c.revenueDeltaPct.toFixed(1)}% vs luna trecută
+						{/if}
+					</div>
 				</div>
-				<div class="dash-kpi-value">{c.pendingPayment}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">incl. ordin de plată</span></div>
 			</div>
 
-			<div class="dash-kpi success">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(16,185,129,.12); color:#10b981;">
-						<CheckCircle2Icon size={13} />
+			<div class="hod-kpi" data-tone="warn">
+				<div class="hod-kpi-stripe"></div>
+				<div class="hod-kpi-body">
+					<div class="hod-kpi-head">
+						<ClockIcon size={14} />
+						<span>PLĂȚI ÎN AȘTEPTARE</span>
 					</div>
-					<span class="dash-kpi-label">Plătite azi</span>
+					<div class="hod-kpi-value">{fmtMoney(c.pendingAmount, 'RON')}</div>
+					<div class="hod-kpi-foot">{c.pendingCount} comenzi pending</div>
 				</div>
-				<div class="dash-kpi-value">{c.paidToday}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">de la ora 00:00</span></div>
 			</div>
 
-			<div class="dash-kpi info">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(99,102,241,.12); color:#6366f1;">
-						<TrendingUpIcon size={13} />
+			<div class="hod-kpi" data-tone="bad">
+				<div class="hod-kpi-stripe"></div>
+				<div class="hod-kpi-body">
+					<div class="hod-kpi-head">
+						<AlertTriangleIcon size={14} />
+						<span>PLĂȚI EȘUATE</span>
 					</div>
-					<span class="dash-kpi-label">Venit luna asta</span>
+					<div class="hod-kpi-value">{fmtMoney(c.failedAmount, 'RON')}</div>
+					<div class="hod-kpi-foot">{c.failedCount} comenzi de recuperat</div>
 				</div>
-				<div class="dash-kpi-value">{fmtMoney(c.revenueMonth, 'RON')}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">comenzi confirmate</span></div>
 			</div>
 
-			<div class="dash-kpi danger">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(239,68,68,.12); color:#ef4444;">
-						<AlertTriangleIcon size={13} />
+			<div class="hod-kpi" data-tone="neutral">
+				<div class="hod-kpi-stripe"></div>
+				<div class="hod-kpi-body">
+					<div class="hod-kpi-head">
+						<RotateCcwIcon size={14} />
+						<span>REFUNDATE</span>
 					</div>
-					<span class="dash-kpi-label">Plăți eșuate</span>
+					<div class="hod-kpi-value">{c.refundedCount}</div>
+					<div class="hod-kpi-foot">istoric tenant</div>
 				</div>
-				<div class="dash-kpi-value">{c.failedPayment}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">necesită intervenție</span></div>
-			</div>
-
-			<div class="dash-kpi warn">
-				<div class="dash-kpi-head">
-					<div class="dash-kpi-icon" style="background:rgba(245,158,11,.12); color:#f59e0b;">
-						<HardDriveIcon size={13} />
-					</div>
-					<span class="dash-kpi-label">Fără cont DA</span>
-				</div>
-				<div class="dash-kpi-value">{c.provisioningPending}</div>
-				<div class="dash-kpi-foot"><span class="dash-kpi-sub">plătite, neaprovizionate</span></div>
 			</div>
 		</div>
 
-		<div class="hst-toolbar">
-			<div class="hst-search">
-				<SearchIcon size={13} />
-				<input placeholder="Caută nume, email, CUI, domeniu…" bind:value={search} />
+		<!-- Tabs -->
+		<div class="hod-tabs" role="tablist">
+			<button
+				role="tab"
+				aria-selected={activeTab === 'all'}
+				class:active={activeTab === 'all'}
+				onclick={() => (activeTab = 'all')}
+			>
+				Toate <span class="hod-tab-count">{c.total}</span>
+			</button>
+			<button
+				role="tab"
+				aria-selected={activeTab === 'activity'}
+				class:active={activeTab === 'activity'}
+				onclick={() => (activeTab = 'activity')}
+			>
+				Activitate <span class="hod-tab-count">{c.activityToday}</span>
+			</button>
+			<button
+				role="tab"
+				aria-selected={activeTab === 'pending'}
+				class:active={activeTab === 'pending'}
+				onclick={() => (activeTab = 'pending')}
+			>
+				În așteptare <span class="hod-tab-count">{c.pendingCount}</span>
+			</button>
+			<button
+				role="tab"
+				aria-selected={activeTab === 'failed'}
+				class:active={activeTab === 'failed'}
+				onclick={() => (activeTab = 'failed')}
+			>
+				Eșuate <span class="hod-tab-count">{c.failedCount}</span>
+			</button>
+			<button
+				role="tab"
+				aria-selected={activeTab === 'refunded'}
+				class:active={activeTab === 'refunded'}
+				onclick={() => (activeTab = 'refunded')}
+			>
+				Refundate <span class="hod-tab-count">{c.refundedCount}</span>
+			</button>
+		</div>
+
+		<!-- Filter row -->
+		<div class="hod-filters">
+			<div class="hod-search">
+				<SearchIcon size={14} />
+				<input placeholder="Caută ID, nume, email, domeniu…" bind:value={search} />
 			</div>
-
-			<button class="hst-filter-chip" class:active={funnel === 'all'} onclick={() => (funnel = 'all')}>
-				Toate
-			</button>
-			<button class="hst-filter-chip" class:active={funnel === 'new'} onclick={() => (funnel = 'new')}>
-				Noi
-			</button>
-			<button class="hst-filter-chip" class:active={funnel === 'contacted'} onclick={() => (funnel = 'contacted')}>
-				Contactate
-			</button>
-			<button class="hst-filter-chip" class:active={funnel === 'converted'} onclick={() => (funnel = 'converted')}>
-				Convertite
-			</button>
-			<button class="hst-filter-chip" class:active={funnel === 'discarded'} onclick={() => (funnel = 'discarded')}>
-				Respinse
-			</button>
-
-			<span class="hst-toolbar-sep"></span>
-
-			<button class="hst-filter-chip" class:active={payment === 'pending'} onclick={() => (payment = payment === 'pending' ? 'all' : 'pending')}>
-				<ClockIcon size={11} /> Așteaptă plată
-			</button>
-			<button class="hst-filter-chip" class:active={payment === 'paid'} onclick={() => (payment = payment === 'paid' ? 'all' : 'paid')}>
-				<CheckCircle2Icon size={11} /> Plătite
-			</button>
-			<button class="hst-filter-chip" class:active={payment === 'failed'} onclick={() => (payment = payment === 'failed' ? 'all' : 'failed')}>
-				<AlertTriangleIcon size={11} /> Eșuate
-			</button>
-
-			<span class="hst-toolbar-sep"></span>
-
-			<button class="hst-filter-chip" class:active={method === 'card'} onclick={() => (method = method === 'card' ? 'all' : 'card')}>
-				<CreditCardIcon size={11} /> Card
-			</button>
-			<button class="hst-filter-chip" class:active={method === 'op'} onclick={() => (method = method === 'op' ? 'all' : 'op')}>
-				<BanknoteIcon size={11} /> OP
-			</button>
-
-			<div class="hst-toolbar-spacer"></div>
-
-			<div class="hst-view-toggle">
-				<button class:active={view === 'grid'} onclick={() => (view = 'grid')} title="Carduri">
-					<Columns3Icon size={13} />
-				</button>
-				<button class:active={view === 'table'} onclick={() => (view = 'table')} title="Tabel">
-					<ListIcon size={13} />
-				</button>
-			</div>
+			<select class="hod-filter-select" bind:value={filterPackage}>
+				<option value="">📦 Pachet — toate</option>
+				{#each productOptions as [id, name] (id)}
+					<option value={id}>{name}</option>
+				{/each}
+			</select>
+			<select class="hod-filter-select" bind:value={filterMethod}>
+				<option value="all">💳 Metodă — toate</option>
+				<option value="card">Card</option>
+				<option value="op">Ordin de plată</option>
+				<option value="paypal">PayPal</option>
+				<option value="revolut">Revolut</option>
+			</select>
+			<select class="hod-filter-select" disabled title="În curând">
+				<option>📅 Perioadă</option>
+			</select>
+			<select class="hod-filter-select" disabled title="În curând">
+				<option>📆 Data</option>
+			</select>
 		</div>
 
 		{#if filtered.length === 0}
-			<div class="hst-empty">
-				<ShoppingCartIcon size={36} />
+			<div class="hod-empty">
+				<ShoppingCartIcon size={40} />
 				<p>Nicio comandă pentru filtrele curente.</p>
 			</div>
-		{:else if view === 'grid'}
-			<div class="hst-order-grid">
-				{#each filtered as o (o.id)}
-					{@const MIcon = methodIcon(o.paymentMethod)}
-					<div class="hst-order-card" class:warning={o.paymentStatus === 'failed'} class:success={o.paymentStatus === 'paid' && o.hostingAccountId} class:pending={o.paymentStatus === 'pending'}>
-						<div class="hst-order-card-head">
-							<div class="hst-order-card-icon" data-payment={o.paymentStatus}>
-								<MIcon size={16} />
-							</div>
-							<div class="hst-order-card-text">
-								<div class="hst-order-card-name">{o.contactName}</div>
-								<div class="hst-order-card-meta">
-									<span>{fmtRelative(o.createdAt)}</span>
-									<span>·</span>
-									<span>{o.productName ?? 'Produs necunoscut'}</span>
-								</div>
-							</div>
-							<span class="hst-status-pill" data-status={o.paymentStatus}>
-								<span class="dot"></span>
-								{paymentLabel(o.paymentStatus)}
-							</span>
-						</div>
-
-						<div class="hst-order-amount">
-							<strong>
-								{o.paidAmountCents != null
-									? fmtMoney(o.paidAmountCents, o.productCurrency)
-									: o.productPrice != null
-										? fmtMoney(o.productPrice, o.productCurrency)
-										: '—'}
-							</strong>
-							<span>{methodLabel(o.paymentMethod)}</span>
-						</div>
-
-						<div class="hst-pipeline">
-							<div class="hst-pipeline-step" class:done={o.paymentStatus === 'paid'} class:failed={o.paymentStatus === 'failed'}>
-								<span class="hst-pipeline-dot"></span>
-								<span>Plată</span>
-							</div>
-							<div class="hst-pipeline-arrow"></div>
-							<div class="hst-pipeline-step" class:done={!!o.hostingAccountId} class:waiting={o.paymentStatus === 'paid' && !o.hostingAccountId}>
-								<span class="hst-pipeline-dot"></span>
-								<span>Cont DA</span>
-							</div>
-							<div class="hst-pipeline-arrow"></div>
-							<div class="hst-pipeline-step" class:done={o.status === 'converted'}>
-								<span class="hst-pipeline-dot"></span>
-								<span>Convertit</span>
-							</div>
-						</div>
-
-						<div class="hst-order-foot">
-							<div class="hst-order-foot-info">
-								{#if o.daDomain}
-									<code>{o.daDomain}</code>
-								{:else}
-									<span class="muted">Fără cont DA încă</span>
-								{/if}
-							</div>
-							<div class="hst-order-actions">
-								{#if o.paymentStatus !== 'paid'}
-									<button
-										class="btn-secondary"
-										disabled={busyId === o.id}
-										onclick={() => {
-											openDrawer(o);
-											openAcceptDialog(o);
-										}}
-									>
-										<CheckCircle2Icon size={13} /> Acceptă plată
-									</button>
-								{:else if !o.hostingAccountId}
-									<button
-										class="btn-secondary"
-										disabled={busyId === o.id}
-										onclick={() => openOrderAtProvision(o)}
-									>
-										<HardDriveIcon size={13} /> Provisioning DA
-									</button>
-								{/if}
-								<button class="btn-ghost" onclick={() => openDrawer(o)}>
-									Detalii
-								</button>
-							</div>
-						</div>
-					</div>
-				{/each}
-			</div>
 		{:else}
-			<div class="hst-table-wrap">
-				<table class="hst-table">
+			<div class="hod-table-wrap">
+				<table class="hod-table">
 					<thead>
 						<tr>
-							<th>Data</th>
-							<th>Client</th>
-							<th>Pachet</th>
-							<th class="num">Sumă</th>
-							<th>Metodă</th>
-							<th>Status plată</th>
-							<th>Cont DA</th>
-							<th>Funnel</th>
-							<th></th>
+							<th>COMANDĂ</th>
+							<th>CLIENT</th>
+							<th>PACHET</th>
+							<th>METODĂ</th>
+							<th class="num">SUMĂ</th>
+							<th>STATUS</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each filtered as o (o.id)}
 							<tr onclick={() => openDrawer(o)}>
 								<td>
-									<div class="hst-host-cell">{fmtRelative(o.createdAt)}</div>
-									<div class="hst-host-sub">{fmtDate(o.createdAt)}</div>
+									<div class="hod-cell-strong">{displayOrderId(o.orderNumber, o.id)}</div>
+									<div class="hod-cell-muted">{fmtRelative(o.createdAt)}</div>
+									<div class="hod-cell-faint">📄 /{o.source}</div>
 								</td>
 								<td>
-									<div class="hst-host-cell">{o.contactName}</div>
-									<div class="hst-host-sub">{o.contactEmail}</div>
+									<div class="hod-cell-strong">{o.contactName}</div>
+									<div class="hod-cell-muted">{o.contactEmail}</div>
 								</td>
-								<td>{o.productName ?? '—'}</td>
+								<td>
+									<div class="hod-cell-strong">{o.productName ?? '—'}</div>
+									<div class="hod-cell-muted">{billingCycleLabel(o.productBillingCycle)}</div>
+								</td>
+								<td>
+									<div class="hod-cell-strong">{methodLabel(o.paymentMethod)}</div>
+								</td>
 								<td class="num">
-									{o.paidAmountCents != null
-										? fmtMoney(o.paidAmountCents, o.productCurrency)
-										: o.productPrice != null
-											? fmtMoney(o.productPrice, o.productCurrency)
-											: '—'}
+									<div class="hod-cell-strong">
+										{o.paidAmountCents != null
+											? fmtMoney(o.paidAmountCents, o.productCurrency)
+											: o.productPrice != null
+												? fmtMoney(o.productPrice, o.productCurrency)
+												: '—'}
+									</div>
+									<div class="hod-cell-faint">incl. TVA 19%</div>
 								</td>
-								<td>{methodLabel(o.paymentMethod)}</td>
 								<td>
-									<span class="hst-status-pill" data-status={o.paymentStatus}>
-										<span class="dot"></span>{paymentLabel(o.paymentStatus)}
+									<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
+										<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
 									</span>
-								</td>
-								<td>
-									{#if o.daUsername}
-										<code class="hst-mono">{o.daUsername}</code>
-									{:else}
-										<span class="muted">—</span>
-									{/if}
-								</td>
-								<td>{statusLabel(o.status)}</td>
-								<td>
-									<button class="hst-icon-btn" onclick={(e) => { e.stopPropagation(); openDrawer(o); }} title="Detalii">
-										<ExternalLinkIcon size={12} />
-									</button>
 								</td>
 							</tr>
 						{/each}
@@ -942,8 +877,8 @@
 			</div>
 		{/if}
 	{:catch err}
-		<div class="hst-empty">
-			<AlertTriangleIcon size={36} />
+		<div class="hod-empty">
+			<AlertTriangleIcon size={40} />
 			<p>Eroare la încărcare: {err instanceof Error ? err.message : String(err)}</p>
 		</div>
 	{/await}
@@ -951,357 +886,364 @@
 
 {#if openOrder}
 	{@const o = openOrder}
+	{@const items = o.items ?? []}
+	{@const visItems = visibleItems(items)}
+	{@const totalCents = o.paidAmountCents ?? lineTotalCents(items)}
+	{@const tvaCents = lineTvaCents(items)}
+	{@const acctStatus = accountStatusLabel(o)}
+	{@const domainItem = items.find((it) => it.kind === 'domain') ?? null}
+	{@const daServer = o.productDaServerId ? getDAServer(o.productDaServerId) : null}
+
 	<button
-		class="hst-drawer-back"
+		class="hod-drawer-back"
 		aria-label="Închide"
 		onclick={() => {
 			openOrder = null;
 			acceptOpen = false;
 		}}
 	></button>
+
 	<div
-		class="hst-drawer"
+		class="hod-drawer"
 		role="dialog"
 		aria-modal="true"
-		aria-labelledby="order-drawer-title"
-		use:focusTrap={{ initialFocus: '.hst-drawer-close' }}
+		aria-labelledby="hod-drawer-title"
+		use:focusTrap={{ initialFocus: '.hod-drawer-close' }}
 	>
-		<header class="hst-drawer-head">
-			<div class="hst-drawer-title" id="order-drawer-title">{o.contactName}</div>
-			<span class="hst-status-pill" data-status={o.paymentStatus}>
-				<span class="dot"></span>{paymentLabel(o.paymentStatus)}
+		<!-- Header -->
+		<header class="hod-drawer-head">
+			<div class="hod-drawer-head-icon">
+				<ShoppingCartIcon size={18} />
+			</div>
+			<div class="hod-drawer-head-text">
+				<div class="hod-drawer-title" id="hod-drawer-title">
+					{displayOrderId(o.orderNumber, o.id)}
+				</div>
+				<div class="hod-drawer-subtitle">
+					{fmtRelative(o.createdAt)}, {fmtTime(o.createdAt)} · de pe /{o.source}
+				</div>
+			</div>
+			<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
+				<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
 			</span>
 			<button
-				class="hst-drawer-close"
+				class="hod-drawer-close"
 				aria-label="Închide"
 				onclick={() => {
 					openOrder = null;
 					acceptOpen = false;
 				}}
 			>
-				<XIcon size={16} />
+				<XIcon size={18} />
 			</button>
 		</header>
 
-		<div class="hst-drawer-body">
-			<!-- Contact + firmă -->
-			<section>
-				<h3>Date contact</h3>
-				<dl class="hst-kv">
-					<dt><MailIcon size={12} /> Email</dt>
-					<dd><a href="mailto:{o.contactEmail}">{o.contactEmail}</a></dd>
-					{#if o.contactPhone}
-						<dt><PhoneIcon size={12} /> Telefon</dt>
-						<dd><a href="tel:{o.contactPhone}">{o.contactPhone}</a></dd>
+		<!-- Body -->
+		<div class="hod-drawer-body">
+			<!-- Failed-payment banner -->
+			{#if o.paymentStatus === 'failed'}
+				<div class="hod-banner hod-banner-bad">
+					<div>
+						<strong>Plata a eșuat</strong>
+						<div>Card refuzat de bancă · cod 51 (fonduri insuficiente)</div>
+					</div>
+					<button class="hod-btn hod-btn-bad" onclick={() => openAcceptDialog(o)}>
+						<RotateCcwIcon size={14} /> Retry
+					</button>
+				</div>
+			{/if}
+
+			<!-- Accept payment subform (renders inline above sections when triggered) -->
+			{#if acceptOpen}
+				<section class="hod-accept">
+					<div class="hod-accept-head">
+						<h3>Confirmă încasarea</h3>
+						<span class="hod-pill" data-tone="warn">
+							<span class="hod-dot"></span>ÎN AȘTEPTARE
+						</span>
+					</div>
+
+					<div class="hod-tab-group" role="tablist">
+						<button
+							role="tab"
+							aria-selected={acceptMethod === 'card'}
+							class:active={acceptMethod === 'card'}
+							onclick={() => (acceptMethod = 'card')}
+						>
+							<CreditCardIcon size={14} /> Card (offline / POS)
+						</button>
+						<button
+							role="tab"
+							aria-selected={acceptMethod === 'op'}
+							class:active={acceptMethod === 'op'}
+							onclick={() => (acceptMethod = 'op')}
+						>
+							<BanknoteIcon size={14} /> Transfer bancar / OP
+						</button>
+						<button
+							role="tab"
+							aria-selected={acceptMethod === 'other'}
+							class:active={acceptMethod === 'other'}
+							onclick={() => (acceptMethod = 'other')}
+						>
+							Cash
+						</button>
+					</div>
+
+					<label class="hod-input-block">
+						<span>SUMĂ ({o.productCurrency ?? 'RON'})</span>
+						<input
+							type="text"
+							inputmode="decimal"
+							bind:value={acceptAmount}
+							placeholder="123.45"
+						/>
+					</label>
+
+					<label class="hod-input-block">
+						<span>{acceptRefLabel.toUpperCase()}</span>
+						<input
+							type="text"
+							bind:value={acceptRef}
+							placeholder={acceptRefPlaceholder}
+							maxlength="200"
+							required={acceptIsBankMethod}
+						/>
+					</label>
+
+					<label class="hod-input-block">
+						<span>NOTĂ (OPȚIONAL)</span>
+						<textarea
+							bind:value={acceptNote}
+							maxlength="500"
+							rows="2"
+							placeholder="Detalii pentru audit intern"
+						></textarea>
+					</label>
+
+					<label class="hod-check">
+						<input type="checkbox" bind:checked={acceptProvision} />
+						<span> Declanșează provisioning DirectAdmin imediat după confirmare </span>
+					</label>
+
+					<div class="hod-accept-foot">
+						<div class="hod-accept-context">
+							Pachet <strong>{o.productName ?? '—'}</strong> · {o.requestedDomain ?? '—'}
+						</div>
+						<button class="hod-btn hod-btn-ghost" onclick={() => (acceptOpen = false)}>
+							Anulează
+						</button>
+						<button
+							class="hod-btn hod-btn-primary"
+							disabled={accepting}
+							onclick={() => submitAccept(o.id)}
+						>
+							<CheckCircle2Icon size={14} /> Confirmă
+						</button>
+					</div>
+				</section>
+			{/if}
+
+			<!-- CLIENT -->
+			<section class="hod-section">
+				<div class="hod-section-label">CLIENT</div>
+				<div class="hod-grid-2">
+					<div class="hod-input-block hod-readonly">
+						<span>NUME</span>
+						<div class="hod-value">{o.contactName}</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>EMAIL</span>
+						<div class="hod-value">{o.contactEmail}</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>TIP</span>
+						<div class="hod-value">
+							{o.companyName ? 'Persoană juridică' : 'Persoană fizică'}
+						</div>
+					</div>
+					{#if o.vatNumber}
+						<div class="hod-input-block hod-readonly">
+							<span>CUI</span>
+							<div class="hod-value">{o.vatNumber}</div>
+						</div>
 					{/if}
-					{#if o.companyName}
-						<dt><Building2Icon size={12} /> Firmă</dt>
-						<dd>{o.companyName}{o.vatNumber ? ` (${o.vatNumber})` : ''}</dd>
-					{/if}
-					<dt>Creată</dt>
-					<dd>{fmtDate(o.createdAt)}</dd>
-					{#if o.ipAddress}
-						<dt>IP</dt>
-						<dd><code>{o.ipAddress}</code></dd>
-					{/if}
-				</dl>
+				</div>
 			</section>
 
-			<!-- Plată -->
-			<section>
-				<h3>Plată</h3>
-				<dl class="hst-kv">
-					<dt>Pachet</dt>
-					<dd>{o.productName ?? '—'}</dd>
-					<dt>Metodă</dt>
-					<dd>{methodLabel(o.paymentMethod)}</dd>
-					<dt>Status</dt>
-					<dd>
-						<span class="hst-status-pill" data-status={o.paymentStatus}>
-							<span class="dot"></span>{paymentLabel(o.paymentStatus)}
-						</span>
-					</dd>
-					<dt>Sumă</dt>
-					<dd>
-						{o.paidAmountCents != null
-							? fmtMoney(o.paidAmountCents, o.productCurrency)
-							: '—'}
-					</dd>
-					{#if o.paidAt}
-						<dt>Plătită</dt>
-						<dd>{fmtDate(o.paidAt)}</dd>
-					{/if}
-					{#if o.paymentReference}
-						<dt>Referință</dt>
-						<dd><code class="hst-mono">{o.paymentReference}</code></dd>
-					{/if}
-					{#if o.stripeCheckoutSessionId}
-						<dt>Stripe Session</dt>
-						<dd><code class="hst-mono">{o.stripeCheckoutSessionId}</code></dd>
-					{/if}
-					{#if o.acceptedAt}
-						<dt>Acceptat manual</dt>
-						<dd>{fmtDate(o.acceptedAt)}</dd>
-					{/if}
-				</dl>
+			<!-- DETALII COMANDĂ -->
+			<section class="hod-section">
+				<div class="hod-section-label">DETALII COMANDĂ</div>
+				<div class="hod-grid-2">
+					<div class="hod-input-block hod-readonly">
+						<span>PACHET</span>
+						<div class="hod-value hod-link">{o.productName ?? '—'}</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>FACTURARE</span>
+						<div class="hod-value">{billingCycleLabel(o.productBillingCycle)}</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>DOMENIU</span>
+						<div class="hod-value">
+							{domainItem?.domainName ?? o.requestedDomain ?? '—'}
+						</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>MOD DOMENIU</span>
+						<div class="hod-value">{domainModeLabel(domainItem?.domainMode ?? null)}</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>SERVER</span>
+						<div class="hod-value hod-mono">
+							{#if daServer}
+								{#await daServer then srv}
+									{srv?.name ?? '—'}
+								{/await}
+							{:else if o.paymentStatus === 'paid'}
+								Auto-alocare în curs
+							{:else}
+								—
+							{/if}
+						</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>STATUS CONT</span>
+						<div class="hod-value">
+							<span class="hod-pill hod-pill-sm" data-tone={acctStatus.tone}>
+								<span class="hod-dot"></span>{acctStatus.text}
+							</span>
+						</div>
+					</div>
+				</div>
+			</section>
 
-				{#if o.paymentStatus !== 'paid' && !acceptOpen}
-					<button class="btn-primary" onclick={() => openAcceptDialog(o)}>
-						<CheckCircle2Icon size={13} /> Acceptă plată manual
+			<!-- PLATĂ -->
+			<section class="hod-section">
+				<div class="hod-section-label">PLATĂ</div>
+				<div class="hod-grid-2">
+					<div class="hod-input-block hod-readonly">
+						<span>METODĂ</span>
+						<div class="hod-value">
+							<CreditCardIcon size={14} />
+							{methodLabel(o.paymentMethod)}
+						</div>
+					</div>
+					<div class="hod-input-block hod-readonly">
+						<span>STATUS</span>
+						<div class="hod-value">
+							<span class="hod-pill hod-pill-sm" data-tone={paymentTone(o.paymentStatus)}>
+								<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
+							</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Line items box -->
+				<div class="hod-items">
+					{#each visItems as it (it.id)}
+						<div class="hod-item-row">
+							<span class="hod-item-label">{it.label}</span>
+							<span class="hod-item-value"
+								>{fmtMoney(it.unitPriceCents * it.quantity, o.productCurrency)}</span
+							>
+						</div>
+					{/each}
+					{#if visItems.length > 0}
+						<div class="hod-item-row">
+							<span class="hod-item-label">TVA 19%</span>
+							<span class="hod-item-value">{fmtMoney(tvaCents, o.productCurrency)}</span>
+						</div>
+					{/if}
+					<div class="hod-item-row hod-item-total">
+						<span class="hod-item-label">
+							{o.paymentStatus === 'paid' ? 'Total achitat' : 'Total de plată'}
+						</span>
+						<span class="hod-item-value">{fmtMoney(totalCents, o.productCurrency)}</span>
+					</div>
+				</div>
+			</section>
+
+			<!-- ISTORIC -->
+			<section class="hod-section">
+				<div class="hod-section-label">ISTORIC</div>
+				<ol class="hod-timeline">
+					{#each buildHistory(o, null) as h, idx (idx)}
+						<li class="hod-timeline-step" data-kind={h.kind}>
+							<span class="hod-timeline-dot"></span>
+							<div class="hod-timeline-body">
+								<div class="hod-timeline-title">{h.label}</div>
+								<div class="hod-timeline-meta">
+									{fmtRelative(h.at)}{h.meta ? ` · ${h.meta}` : ''}
+								</div>
+							</div>
+						</li>
+					{/each}
+				</ol>
+			</section>
+
+			<!-- Provisioning form (only when openProvisionForm was called) -->
+			{#if o.paymentStatus === 'paid' && !o.hostingAccountId && lastProvisionInitId === o.id}
+				<section class="hod-section" id="drawer-provisioning">
+					<div class="hod-section-label">PROVISIONING DA</div>
+					<!-- placeholder — Task 17 fills this in -->
+				</section>
+			{/if}
+		</div>
+
+		<!-- Sticky footer action bar -->
+		<footer class="hod-drawer-foot">
+			{#if o.paymentStatus === 'pending'}
+				<a
+					class="hod-btn hod-btn-ghost"
+					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
+				>
+					<MailIcon size={14} /> Email client
+				</a>
+				<button class="hod-btn hod-btn-primary" onclick={() => openAcceptDialog(o)}>
+					<CheckCircle2Icon size={14} /> Marchează plătit
+				</button>
+			{:else if o.paymentStatus === 'failed'}
+				<a
+					class="hod-btn hod-btn-ghost"
+					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
+				>
+					<MailIcon size={14} /> Email client
+				</a>
+			{:else}
+				<!-- Paid or refunded -->
+				<a
+					class="hod-btn hod-btn-ghost"
+					href={`/${page.params.tenant}/invoices?clientEmail=${encodeURIComponent(o.contactEmail)}`}
+				>
+					<FileTextIcon size={14} /> Factură fiscală
+				</a>
+				<button
+					class="hod-btn hod-btn-ghost"
+					onclick={() => toast.info('Refund prin Stripe — funcție în curând')}
+				>
+					<RotateCcwIcon size={14} /> Refund
+				</button>
+				<a
+					class="hod-btn hod-btn-ghost"
+					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
+				>
+					<MailIcon size={14} /> Email client
+				</a>
+				{#if o.hostingAccountId}
+					<a
+						class="hod-btn hod-btn-primary"
+						href={`/${page.params.tenant}/hosting/accounts/${o.hostingAccountId}`}
+					>
+						<ExternalLinkIcon size={14} /> Vezi cont
+					</a>
+				{:else}
+					<button class="hod-btn hod-btn-primary" onclick={() => openOrderAtProvision(o)}>
+						<SparklesIcon size={14} /> Forțează provisionare
 					</button>
 				{/if}
-
-				{#if acceptOpen}
-					<div class="hst-accept-form">
-						<h4>Confirmă încasarea</h4>
-						<label>
-							<span>Metodă</span>
-							<select bind:value={acceptMethod}>
-								<option value="op">Ordin de plată</option>
-								<option value="card">Card (offline / POS)</option>
-								<option value="paypal">PayPal</option>
-								<option value="revolut">Revolut</option>
-								<option value="other">Altă metodă</option>
-							</select>
-						</label>
-						<label>
-							<span>Sumă ({o.productCurrency ?? 'RON'})</span>
-							<input
-								type="text"
-								inputmode="decimal"
-								bind:value={acceptAmount}
-								placeholder="123.45"
-							/>
-						</label>
-						<label>
-							<span>{acceptRefLabel}</span>
-							<input
-								type="text"
-								bind:value={acceptRef}
-								placeholder={acceptRefPlaceholder}
-								maxlength="200"
-								required={acceptIsBankMethod}
-							/>
-							{#if acceptIsBankMethod}
-								<small class="hst-help">
-									Introdu ID-ul tranzacției din extrasul bancar (numărul OP / ID-ul plății).
-									Apare pe factura fiscală + Notă Articol în Keez pentru reconciliere.
-								</small>
-							{/if}
-						</label>
-						<label>
-							<span>Notă (opțional)</span>
-							<textarea
-								bind:value={acceptNote}
-								rows="2"
-								maxlength="500"
-								placeholder="Detalii pentru audit intern"
-							></textarea>
-						</label>
-						<label class="hst-accept-check">
-							<input type="checkbox" bind:checked={acceptProvision} />
-							<span>Declanșează provisioning DirectAdmin</span>
-						</label>
-						<div class="hst-accept-actions">
-							<button class="btn-ghost" onclick={() => (acceptOpen = false)} disabled={accepting}>
-								Anulează
-							</button>
-							<button class="btn-primary" onclick={() => submitAccept(o.id)} disabled={accepting}>
-								{accepting ? 'Se acceptă…' : 'Confirmă'}
-							</button>
-						</div>
-					</div>
-				{/if}
-			</section>
-
-			<!-- Provisioning -->
-			<section id="drawer-provisioning">
-				<h3>Provisioning DirectAdmin</h3>
-				{#if o.hostingAccountId && o.daUsername}
-					<dl class="hst-kv">
-						<dt>Status</dt>
-						<dd>
-							<span class="hst-status-pill" data-status="paid">
-								<span class="dot"></span>{o.daAccountStatus === 'suspended' ? 'Suspendat' : 'Activ'}
-							</span>
-						</dd>
-						<dt>Username</dt>
-						<dd><code class="hst-mono">{o.daUsername}</code></dd>
-						<dt>Domeniu</dt>
-						<dd><code class="hst-mono">{o.daDomain}</code></dd>
-					</dl>
-					<a
-						href="/{page.params.tenant}/hosting/accounts/{o.hostingAccountId}"
-						class="btn-secondary"
-					>
-						<ExternalLinkIcon size={13} /> Vezi contul în CRM
-					</a>
-				{:else if o.paymentStatus === 'paid'}
-					<p class="hst-warning">
-						<AlertTriangleIcon size={13} />
-						Plata e confirmată. Completează datele de mai jos și creează contul DirectAdmin
-						direct prin API.
-					</p>
-					<div class="hst-prov-form">
-						<div class="hst-prov-row">
-							<label>
-								<span>Server DA *</span>
-								{#if serversPromise}
-									{#await serversPromise}
-										<select disabled><option>Se încarcă…</option></select>
-									{:then list}
-										<select bind:value={provServerId} required>
-											<option value="">— alege server —</option>
-											{#each list as s (s.id)}
-												<option value={s.id}>{s.name} ({s.hostname})</option>
-											{/each}
-										</select>
-									{/await}
-								{:else}
-									<select disabled><option>Se încarcă…</option></select>
-								{/if}
-							</label>
-
-							<label>
-								<span>Pachet DA</span>
-								{#if selectedServerDetail}
-									{#await selectedServerDetail then s}
-										<select bind:value={provPackageId}>
-											<option value="">— default —</option>
-											{#each s.packages as p (p.id)}
-												<option value={p.id}>{p.daName}</option>
-											{/each}
-										</select>
-									{/await}
-								{:else}
-									<select disabled><option>— alege server întâi —</option></select>
-								{/if}
-							</label>
-						</div>
-
-						<label>
-							<span>Username DA *</span>
-							<div class="hst-prov-input-with-action">
-								<input
-									type="text"
-									bind:value={provUsername}
-									maxlength="16"
-									pattern="[a-z][a-z0-9]*"
-									placeholder="ex: navitech4xqz"
-									required
-								/>
-								<button
-									type="button"
-									class="btn-secondary small"
-									onclick={() => suggestUsername(o)}
-									title="Sugerează din numele firmei"
-								>
-									<SparklesIcon size={12} /> Sugerează
-								</button>
-							</div>
-							<small>Litere mici + cifre, max 16. Trebuie să înceapă cu literă.</small>
-						</label>
-
-						<label>
-							<span>Domeniu primar *</span>
-							<input
-								type="text"
-								bind:value={provDomain}
-								placeholder="exemplu.ro"
-								required
-							/>
-							<small>Acesta devine domeniul principal al contului DA.</small>
-						</label>
-
-						<label>
-							<span>Parolă *</span>
-							<div class="hst-prov-input-with-action">
-								<input
-									type="text"
-									bind:value={provPassword}
-									minlength="8"
-									maxlength="64"
-									required
-								/>
-								<button
-									type="button"
-									class="btn-secondary small"
-									onclick={regeneratePassword}
-									title="Regenerează parola"
-								>
-									<RefreshCwIcon size={12} />
-								</button>
-								<button
-									type="button"
-									class="btn-secondary small"
-									onclick={copyPassword}
-									title="Copiază parola"
-								>
-									{#if provPwdCopied}
-										<CheckCircle2Icon size={12} />
-									{:else}
-										<CopyIcon size={12} />
-									{/if}
-								</button>
-							</div>
-							<small>
-								Vizibilă intenționat — copiaz-o acum dacă o trimiți clientului separat.
-								Se stochează criptat în CRM.
-							</small>
-						</label>
-
-						<label>
-							<span>Note (opțional)</span>
-							<textarea bind:value={provNotes} rows="2" maxlength="500"></textarea>
-						</label>
-
-						<div class="hst-prov-actions">
-							<button
-								class="btn-primary"
-								disabled={provisioning ||
-									!provServerId ||
-									!provUsername ||
-									!provDomain ||
-									!provPassword}
-								onclick={() => submitProvision(o.id)}
-							>
-								<HardDriveIcon size={13} />
-								{provisioning ? 'Se creează…' : 'Creează cont DA'}
-							</button>
-						</div>
-					</div>
-				{:else}
-					<p class="muted">Provisioning-ul rulează automat după ce plata este confirmată.</p>
-				{/if}
-			</section>
-
-			<!-- Notes & funnel -->
-			<section>
-				<h3>Note &amp; funnel</h3>
-				{#if o.message}
-					<pre class="hst-message">{o.message}</pre>
-				{:else}
-					<p class="muted">Fără note.</p>
-				{/if}
-				<div class="hst-funnel-actions">
-					<span>Status funnel:</span>
-					{#each ['new', 'contacted', 'converted', 'discarded'] as s (s)}
-						{#if s !== o.status}
-							<button
-								class="btn-secondary small"
-								disabled={busyId === o.id}
-								onclick={() => setStatus(o.id, s as 'new' | 'contacted' | 'converted' | 'discarded')}
-							>
-								→ {statusLabel(s)}
-							</button>
-						{/if}
-					{/each}
-				</div>
-				<button class="btn-ghost danger" disabled={busyId === o.id} onclick={() => handleDelete(o)}>
-					<Trash2Icon size={13} /> Șterge comanda
-				</button>
-			</section>
-		</div>
+			{/if}
+		</footer>
 	</div>
 {/if}
 
