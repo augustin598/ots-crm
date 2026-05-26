@@ -1121,6 +1121,12 @@ export const hostingInquiry = sqliteTable(
 		// lowercased without protocol. Admin form on Comenzi hosting reads this
 		// directly into the "Domeniu primar" field for one-click provisioning.
 		requestedDomain: text('requested_domain'),
+		// Sequential per-tenant order counter (NOT a legal invoice number — Keez
+		// issues those independently). Assigned at INSERT time using
+		// `(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ?)`.
+		// libSQL single-writer serialization makes the subquery race-free; the
+		// `hosting_inquiry_tenant_order_idx` UNIQUE index is the safety guard.
+		orderNumber: integer('order_number'),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),
@@ -1133,6 +1139,43 @@ export const hostingInquiry = sqliteTable(
 		index('hosting_inquiry_tenant_idx').on(t.tenantId),
 		index('hosting_inquiry_status_idx').on(t.status),
 		index('hosting_inquiry_created_idx').on(t.createdAt)
+	]
+);
+
+/**
+ * Line items for a hosting inquiry — one row per cart line at order time.
+ * Today: one 'hosting' row (always) + optional 'domain' row. Future: 'ssl',
+ * 'backup', etc. Prices are TTC snapshots — immune to future product/TLD
+ * price changes. Used by the admin Comenzi hosting page (line items section
+ * in the drawer) and the Keez invoice emitter.
+ */
+export const hostingInquiryItem = sqliteTable(
+	'hosting_inquiry_item',
+	{
+		id: text('id').primaryKey(),
+		inquiryId: text('inquiry_id')
+			.notNull()
+			.references(() => hostingInquiry.id, { onDelete: 'cascade' }),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		kind: text('kind').notNull(), // 'hosting' | 'domain' | 'ssl' | 'backup' (future)
+		label: text('label').notNull(), // 'Hosting Pro (anual)', 'Domeniu andreimarinescu.ro'
+		hostingProductId: text('hosting_product_id').references(() => hostingProduct.id, {
+			onDelete: 'set null'
+		}),
+		unitPriceCents: integer('unit_price_cents').notNull(), // TTC at order time
+		quantity: integer('quantity').notNull().default(1),
+		vatRate: integer('vat_rate').notNull().default(19), // percent; 19 for RO standard
+		domainName: text('domain_name'), // nullable for non-domain items
+		domainMode: text('domain_mode'), // 'buy' | 'have' | 'transfer'; nullable
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [
+		index('hosting_inquiry_item_inquiry_idx').on(t.inquiryId),
+		index('hosting_inquiry_item_tenant_idx').on(t.tenantId)
 	]
 );
 
