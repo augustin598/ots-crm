@@ -10,6 +10,7 @@ import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { provisionDirectAdminAccount } from '$lib/server/stripe/post-payment/provision-da';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
+import { insertHostingOrder } from '$lib/server/hosting/insert-order';
 
 /**
  * Admin-side management of hosting inquiries / orders submitted via the public
@@ -163,6 +164,9 @@ export type HostingOrderRow = {
 	productBillingCycle: string | null;
 	productDaServerId: string | null;
 	productDaPackageId: string | null;
+	/** Plan-themed hex color from hosting_product.color. Used in the admin
+	 * Comenzi hosting drawer header + KPI tiles for plan-themed accents. */
+	productColor: string | null;
 	clientId: string | null;
 	clientName: string | null;
 	clientBusinessName: string | null;
@@ -172,6 +176,13 @@ export type HostingOrderRow = {
 	paidAt: string | null;
 	paidAmountCents: number | null;
 	paymentReference: string | null;
+	/** Stripe last 4 digits of the card used. Populated by the
+	 * payment_intent.succeeded webhook handler from latest_charge. */
+	cardLast4: string | null;
+	/** Stripe decline_code / error code from payment_intent.payment_failed. */
+	paymentErrorCode: string | null;
+	/** Romanian-translated error message (via translateDeclineCode). */
+	paymentErrorMessage: string | null;
 	acceptedByUserId: string | null;
 	acceptedAt: string | null;
 	hostingAccountId: string | null;
@@ -214,6 +225,7 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 			productBillingCycle: table.hostingProduct.billingCycle,
 			productDaServerId: table.hostingProduct.daServerId,
 			productDaPackageId: table.hostingProduct.daPackageId,
+			productColor: table.hostingProduct.color,
 			clientId: table.hostingInquiry.clientId,
 			clientName: table.client.name,
 			clientBusinessName: table.client.businessName,
@@ -223,6 +235,9 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 			paidAt: table.hostingInquiry.paidAt,
 			paidAmountCents: table.hostingInquiry.paidAmountCents,
 			paymentReference: table.hostingInquiry.paymentReference,
+			cardLast4: table.hostingInquiry.cardLast4,
+			paymentErrorCode: table.hostingInquiry.paymentErrorCode,
+			paymentErrorMessage: table.hostingInquiry.paymentErrorMessage,
 			acceptedByUserId: table.hostingInquiry.acceptedByUserId,
 			acceptedAt: table.hostingInquiry.acceptedAt,
 			hostingAccountId: table.hostingInquiry.hostingAccountId,
@@ -767,3 +782,126 @@ export const provisionFromInquiry = command(ProvisionFromInquirySchema, async (p
 		domain: result.domain
 	};
 });
+
+// ====================== Manual order creation (admin-only) ==================
+
+const ManualOrderSchema = v.object({
+	contactName: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+	contactEmail: v.pipe(v.string(), v.email()),
+	type: v.picklist(['person', 'company']),
+	companyName: v.optional(v.pipe(v.string(), v.maxLength(200))),
+	vatNumber: v.optional(v.pipe(v.string(), v.maxLength(40))),
+	hostingProductId: v.pipe(v.string(), v.minLength(1)),
+	period: v.picklist(['monthly', 'yearly']),
+	domainName: v.pipe(v.string(), v.minLength(1), v.maxLength(253)),
+	domainMode: v.picklist(['buy', 'have', 'transfer']),
+	paymentMethod: v.picklist(['card', 'op', 'revolut', 'paypal', 'cash']),
+	initialStatus: v.picklist(['paid', 'pending', 'processing']),
+	// 'auto' lets the server pick the cheapest available DA server (matches the
+	// existing post-payment provisioning policy); a specific DA server id pins
+	// the account to that server.
+	server: v.optional(v.pipe(v.string(), v.maxLength(60)))
+});
+
+/**
+ * Admin-only "+ Comandă manuală" command — creates a hosting_inquiry row
+ * with the same shape as a public submit, but marked source='manual' and
+ * with paymentStatus / status / acceptedAt set per the admin's choice.
+ *
+ * Uses the same `insertHostingOrder` helper as the public path, so the
+ * row + items + order_number subquery semantics stay in lock-step.
+ */
+export const createManualHostingOrder = command(
+	ManualOrderSchema,
+	async (data): Promise<{ id: string; orderNumber: number | null }> => {
+		const { event, tenantId } = tenantScope();
+		const actor = await getActor(event);
+		assertCan(actor, 'admin.hosting.manage');
+
+		// Look up product to derive amount + currency. hosting_product has a
+		// single `price` column (no separate monthly/yearly); the chosen `period`
+		// is informational for the line label only.
+		const [product] = await db
+			.select({
+				id: table.hostingProduct.id,
+				name: table.hostingProduct.name,
+				price: table.hostingProduct.price,
+				billingCycle: table.hostingProduct.billingCycle,
+				currency: table.hostingProduct.currency
+			})
+			.from(table.hostingProduct)
+			.where(
+				and(
+					eq(table.hostingProduct.id, data.hostingProductId),
+					eq(table.hostingProduct.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+		if (!product) throw error(404, 'Pachet hosting inexistent');
+
+		// Domain cost — defaults to 49 RON for 'buy' (matches the existing public
+		// form's flat-rate stub). Future iteration: per-TLD pricing from a
+		// domain_tld_price table. 'have'/'transfer' carry no cost.
+		const domainCostCents = data.domainMode === 'buy' ? 4900 : 0;
+		const paymentStatus = data.initialStatus;
+		const paid = paymentStatus === 'paid';
+		const grossCents = product.price + domainCostCents;
+		const paidAmountCents = paid
+			? grossCents + Math.round(grossCents * 0.19)
+			: null;
+
+		// For the items insert: the helper builds the hosting line from the
+		// product object and computes the period suffix from billingCycle. We
+		// override billingCycle to match the admin's selected `period` so the
+		// label reads correctly even if the product is configured monthly but
+		// the manual order is yearly (or vice-versa).
+		const productForItem = {
+			id: product.id,
+			name: product.name,
+			price: product.price,
+			billingCycle: data.period === 'yearly' ? 'yearly' : 'monthly'
+		};
+
+		const now = new Date();
+		const { id } = await insertHostingOrder(tenantId, {
+			contactName: data.contactName,
+			contactEmail: data.contactEmail,
+			companyName: data.type === 'company' ? data.companyName ?? null : null,
+			vatNumber: data.type === 'company' ? data.vatNumber ?? null : null,
+			hostingProductId: data.hostingProductId,
+			product: productForItem,
+			source: 'manual',
+			paymentMethod: data.paymentMethod,
+			paymentStatus,
+			paidAmountCents,
+			paidAt: paid ? now : null,
+			acceptedByUserId: paid && actor.kind === 'tenant' ? actor.userId : null,
+			acceptedAt: paid ? now : null,
+			requestedDomain: data.domainName,
+			domainName: data.domainName,
+			domainMode: data.domainMode,
+			domainCostCents,
+			status: paid ? 'converted' : 'new'
+		});
+
+		const [row] = await db
+			.select({ orderNumber: table.hostingInquiry.orderNumber })
+			.from(table.hostingInquiry)
+			.where(eq(table.hostingInquiry.id, id))
+			.limit(1);
+
+		logInfo('directadmin', 'manual hosting order created', {
+			tenantId,
+			metadata: {
+				inquiryId: id,
+				orderNumber: row?.orderNumber ?? null,
+				hostingProductId: data.hostingProductId,
+				paymentMethod: data.paymentMethod,
+				initialStatus: data.initialStatus,
+				createdBy: actor.kind === 'tenant' ? actor.userId : null
+			}
+		});
+
+		return { id, orderNumber: row?.orderNumber ?? null };
+	}
+);
