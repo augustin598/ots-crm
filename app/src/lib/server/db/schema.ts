@@ -1048,6 +1048,14 @@ export const hostingAccount = sqliteTable(
 		stripeSubscriptionId: text('stripe_subscription_id'),
 		/** Whether the contract renews automatically. UI toggle on the "Ciclu" column. */
 		autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(true),
+		/**
+		 * Default payment method for recurring invoices on this account.
+		 * - 'op' (transfer bancar): Keez emits the fiscal invoice as usual (default).
+		 * - 'card': Keez emits the fiscal invoice (collected via Stripe/POS).
+		 * - 'cash': Keez emits NO fiscal invoice (offline receipt is the fiscal document).
+		 * Editable from the "Plată & Factură" tab in the account edit dialog.
+		 */
+		paymentMethod: text('payment_method').notNull().default('op'),
 		lastSyncedAt: text('last_synced_at'),
 		suspendedAt: integer('suspended_at', { mode: 'timestamp' }),
 		reactivatedAt: integer('reactivated_at', { mode: 'timestamp' }),
