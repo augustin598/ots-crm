@@ -41,6 +41,8 @@
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
+	import EyeIcon from '@lucide/svelte/icons/eye';
+	import CheckIcon from '@lucide/svelte/icons/check';
 
 	type ActiveTab = 'all' | 'activity' | 'pending' | 'failed' | 'refunded';
 
@@ -852,6 +854,7 @@
 							<th>METODĂ</th>
 							<th class="num">SUMĂ</th>
 							<th>STATUS</th>
+							<th class="hod-actions-th"></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -889,6 +892,69 @@
 									<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
 										<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
 									</span>
+								</td>
+								<td class="hod-actions-cell">
+									<div class="hod-row-actions" onclick={(e) => e.stopPropagation()} role="presentation">
+										<button
+											class="hod-icon-btn"
+											title="Detalii"
+											aria-label="Detalii"
+											onclick={() => openDrawer(o)}
+										>
+											<EyeIcon size={14} />
+										</button>
+										{#if o.paymentStatus === 'pending'}
+											<button
+												class="hod-icon-btn"
+												title="Marchează plătit"
+												aria-label="Marchează plătit"
+												onclick={() => {
+													openDrawer(o);
+													openAcceptDialog(o);
+												}}
+											>
+												<CheckIcon size={14} />
+											</button>
+										{:else if o.paymentStatus === 'failed'}
+											<button
+												class="hod-icon-btn"
+												title="Retry"
+												aria-label="Retry"
+												onclick={() => {
+													openDrawer(o);
+													openAcceptDialog(o);
+												}}
+											>
+												<RotateCcwIcon size={14} />
+											</button>
+										{:else if o.paymentStatus === 'paid' && !o.hostingAccountId}
+											<button
+												class="hod-icon-btn"
+												title="Forțează provisionare"
+												aria-label="Forțează provisionare"
+												onclick={() => openOrderAtProvision(o)}
+											>
+												<SparklesIcon size={14} />
+											</button>
+										{:else if o.paymentStatus === 'paid' && o.hostingAccountId}
+											<a
+												class="hod-icon-btn"
+												title="Factură fiscală"
+												aria-label="Factură fiscală"
+												href={`/${page.params.tenant}/invoices?clientEmail=${encodeURIComponent(o.contactEmail)}`}
+											>
+												<DownloadIcon size={14} />
+											</a>
+										{/if}
+										<a
+											class="hod-icon-btn"
+											title="Email client"
+											aria-label="Email client"
+											href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
+										>
+											<MailIcon size={14} />
+										</a>
+									</div>
 								</td>
 							</tr>
 						{/each}
@@ -1595,6 +1661,45 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
+	}
+
+	/* ===== Row actions ===== */
+	.hod-actions-th {
+		width: 1px; /* shrink-to-fit; the cell content drives the width */
+	}
+	.hod-actions-cell {
+		white-space: nowrap;
+	}
+	.hod-row-actions {
+		display: inline-flex;
+		gap: 4px;
+		justify-content: flex-end;
+	}
+	.hod-icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border-radius: var(--hod-radius-sm);
+		border: 1px solid var(--hod-border);
+		background: var(--hod-bg);
+		color: var(--hod-text-muted);
+		cursor: pointer;
+		text-decoration: none;
+		transition:
+			background 0.12s,
+			color 0.12s,
+			border-color 0.12s;
+	}
+	.hod-icon-btn:hover {
+		background: var(--hod-bg-soft);
+		color: var(--hod-text);
+		border-color: var(--hod-border-strong);
+	}
+	.hod-icon-btn:focus-visible {
+		outline: 2px solid var(--hod-accent);
+		outline-offset: 1px;
 	}
 
 	/* ===== Table ===== */
