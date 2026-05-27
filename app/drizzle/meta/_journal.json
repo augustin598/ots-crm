@@ -2682,6 +2682,34 @@
 			"when": 1779916800022500,
 			"tag": "0385_hosting_inquiry_item_tenant_idx",
 			"breakpoints": true
+		},
+		{
+			"idx": 386,
+			"version": "6",
+			"when": 1779916800023500,
+			"tag": "0386_hosting_product_color",
+			"breakpoints": true
+		},
+		{
+			"idx": 387,
+			"version": "6",
+			"when": 1779916800024500,
+			"tag": "0387_hosting_inquiry_card_last4",
+			"breakpoints": true
+		},
+		{
+			"idx": 388,
+			"version": "6",
+			"when": 1779916800025500,
+			"tag": "0388_hosting_inquiry_payment_error_code",
+			"breakpoints": true
+		},
+		{
+			"idx": 389,
+			"version": "6",
+			"when": 1779916800026500,
+			"tag": "0389_hosting_inquiry_payment_error_message",
+			"breakpoints": true
 		}
 	]
 }
