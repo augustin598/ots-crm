@@ -115,6 +115,7 @@ export const getHostingAccounts = query(FiltersSchema, async (filters) => {
 			linkedPackageName: table.daPackage.daName,
 			billingCycle: table.hostingAccount.billingCycle,
 			additionalDomains: table.hostingAccount.additionalDomains,
+			paymentMethod: table.hostingAccount.paymentMethod,
 			startDate: table.hostingAccount.startDate,
 			createdAt: table.hostingAccount.createdAt,
 			lastSyncedAt: table.hostingAccount.lastSyncedAt
@@ -775,6 +776,7 @@ const UpdateAccountSchema = v.object({
 	),
 	additionalDomains: v.optional(v.nullable(v.array(v.string()))),
 	autoRenew: v.optional(v.boolean()),
+	paymentMethod: v.optional(v.picklist(['card', 'op', 'cash'])),
 	notes: v.optional(v.nullable(v.string())),
 	tags: v.optional(v.nullable(v.array(v.string())))
 });
@@ -863,6 +865,7 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 	if (data.billingCycle !== undefined) updates.billingCycle = data.billingCycle;
 	if (data.additionalDomains !== undefined) updates.additionalDomains = data.additionalDomains;
 	if (data.autoRenew !== undefined) updates.autoRenew = data.autoRenew;
+	if (data.paymentMethod !== undefined) updates.paymentMethod = data.paymentMethod;
 	if (data.notes !== undefined) updates.notes = data.notes;
 	if (data.tags !== undefined) updates.tags = data.tags;
 
@@ -1190,6 +1193,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 			status: table.hostingAccount.status,
 			billingCycle: table.hostingAccount.billingCycle,
 			autoRenew: table.hostingAccount.autoRenew,
+			paymentMethod: table.hostingAccount.paymentMethod,
 			startDate: table.hostingAccount.startDate,
 			nextDueDate: table.hostingAccount.nextDueDate,
 			recurringAmount: table.hostingAccount.recurringAmount,
