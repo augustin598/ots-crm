@@ -6,6 +6,8 @@ import { eq, and } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { runPostPaymentSteps } from './post-payment/dispatcher';
 import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
+import { translateDeclineCode } from './decline-codes';
+import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 
 /**
  * Webhook event handlers — separate per event type, idempotent.
@@ -441,6 +443,29 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 		}
 	});
 
+	// Extract card last4 from the latest charge. Stripe sends `latest_charge` as a
+	// string ID on PaymentIntent webhook payloads by default; if expanded (e.g.
+	// from a manual sync via paymentIntents.retrieve), it can be an object. We
+	// handle both shapes and fall back to a one-shot retrieve when only an id is
+	// present so we capture last4 on the first webhook delivery.
+	let cardLast4: string | null = null;
+	try {
+		if (intent.latest_charge && typeof intent.latest_charge === 'object') {
+			cardLast4 =
+				(intent.latest_charge as Stripe.Charge).payment_method_details?.card?.last4 ?? null;
+		} else if (typeof intent.latest_charge === 'string') {
+			const stripe = await getStripeForTenant(tenantId);
+			const ch = await stripe.charges.retrieve(intent.latest_charge);
+			cardLast4 = ch.payment_method_details?.card?.last4 ?? null;
+		}
+	} catch (err) {
+		// Non-fatal — we still mark the inquiry paid even if last4 lookup fails.
+		logWarning('directadmin', 'payment_intent.succeeded — could not extract card last4', {
+			tenantId,
+			metadata: { intentId: intent.id, error: serializeError(err) }
+		});
+	}
+
 	await db.transaction(async (tx) => {
 		await tx
 			.update(table.client)
@@ -456,7 +481,8 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 				paymentStatus: 'paid',
 				paidAt: new Date().toISOString(),
 				paidAmountCents: intent.amount ?? null,
-				paymentReference: intent.id
+				paymentReference: intent.id,
+				cardLast4
 			})
 			.where(
 				and(eq(table.hostingInquiry.id, inquiryId), eq(table.hostingInquiry.tenantId, tenantId))
@@ -506,12 +532,24 @@ export async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
 		}
 	});
 
+	// Persist decline code + Romanian-translated message so the admin Comenzi
+	// hosting drawer can render a friendly red banner ("Card refuzat de bancă ·
+	// cod 51") instead of forcing staff to translate Stripe's English error.
+	const err = intent.last_payment_error;
+	const code = err?.decline_code ?? err?.code ?? null;
+	const message = translateDeclineCode(code, err?.message ?? null);
+
 	// Mark the inquiry payment status failed so the Comenzi hosting admin page
 	// can surface it with a "Plată eșuată" pill and offer a manual accept path
 	// (e.g. the customer pays via OP after a card decline).
 	await db
 		.update(table.hostingInquiry)
-		.set({ paymentStatus: 'failed', updatedAt: new Date() })
+		.set({
+			paymentStatus: 'failed',
+			paymentErrorCode: code,
+			paymentErrorMessage: message,
+			updatedAt: new Date()
+		})
 		.where(
 			and(eq(table.hostingInquiry.id, inquiryId), eq(table.hostingInquiry.tenantId, expectedTenantId))
 		);
