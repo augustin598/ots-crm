@@ -4,7 +4,7 @@ import type Stripe from 'stripe';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, sql } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { env } from '$env/dynamic/private';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -20,6 +20,7 @@ import { createHostingCheckoutSession } from '$lib/server/stripe/checkout';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { rateLimit } from '$lib/server/redis';
+import { insertHostingOrder } from '$lib/server/hosting/insert-order';
 
 /**
  * Public hosting pages — accessible without authentication.
@@ -39,69 +40,6 @@ const PUBLIC_TENANT_SLUG = env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-}
-
-/**
- * Insert line items for a fresh hosting inquiry. Centralized to avoid
- * duplicating this logic across the 6 inquiry-insert call sites.
- */
-async function insertInquiryItems(args: {
-	inquiryId: string;
-	tenantId: string;
-	product: { id: string; name: string; price: number; billingCycle: string | null } | null;
-	domainName: string | undefined;
-	domainMode: 'buy' | 'have' | 'transfer' | undefined;
-	domainCostCents: number | undefined;
-}): Promise<void> {
-	const items: (typeof table.hostingInquiryItem.$inferInsert)[] = [];
-
-	if (args.product) {
-		const period = args.product.billingCycle === 'yearly' ? 'anual' : 'lunar';
-		items.push({
-			id: generateId(),
-			inquiryId: args.inquiryId,
-			tenantId: args.tenantId,
-			kind: 'hosting',
-			label: `${args.product.name} (${period})`,
-			hostingProductId: args.product.id,
-			unitPriceCents: args.product.price,
-			quantity: 1,
-			vatRate: 19
-		});
-	}
-
-	if (args.domainName) {
-		if (args.domainMode === 'buy' && (args.domainCostCents ?? 0) > 0) {
-			items.push({
-				id: generateId(),
-				inquiryId: args.inquiryId,
-				tenantId: args.tenantId,
-				kind: 'domain',
-				label: `Domeniu ${args.domainName}`,
-				unitPriceCents: args.domainCostCents!,
-				quantity: 1,
-				vatRate: 19,
-				domainName: args.domainName,
-				domainMode: 'buy'
-			});
-		} else if (args.domainMode === 'have' || args.domainMode === 'transfer') {
-			const modeLabel = args.domainMode === 'have' ? 'existent' : 'transfer';
-			items.push({
-				id: generateId(),
-				inquiryId: args.inquiryId,
-				tenantId: args.tenantId,
-				kind: 'domain',
-				label: `Domeniu ${args.domainName} (${modeLabel})`,
-				unitPriceCents: 0,
-				quantity: 1,
-				vatRate: 19,
-				domainName: args.domainName,
-				domainMode: args.domainMode
-			});
-		}
-	}
-
-	if (items.length) await db.insert(table.hostingInquiryItem).values(items);
 }
 
 /**
@@ -293,10 +231,8 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 
 	const id = generateId();
 	try {
-		await db.insert(table.hostingInquiry).values({
+		await insertHostingOrder(tenantId, {
 			id,
-			tenantId,
-			orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
 			hostingProductId: data.hostingProductId ?? null,
 			contactName: data.contactName.trim(),
 			contactEmail: data.contactEmail.trim().toLowerCase(),
@@ -304,16 +240,13 @@ export const submitHostingInquiry = command(InquirySchema, async (data) => {
 			companyName: data.companyName?.trim() || null,
 			vatNumber: data.vatNumber?.trim() || null,
 			message: data.message?.trim() || null,
+			source: 'pachete-hosting',
 			ipAddress: ip,
-			userAgent
-		});
-		await insertInquiryItems({
-			inquiryId: id,
-			tenantId,
-			product: null,
-			domainName: undefined,
-			domainMode: undefined,
-			domainCostCents: undefined
+			userAgent,
+			// `submitHostingInquiry` is the lightweight "Cere ofertă" form — no
+			// product/domain breakdown, so we deliberately skip the items
+			// insert by passing product=null (helper handles that).
+			product: null
 		});
 		logInfo('directadmin', 'new inquiry created', {
 			tenantId,
@@ -908,10 +841,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				tenantId,
 				metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
 			});
-			await db.insert(table.hostingInquiry).values({
+			await insertHostingOrder(tenantId, {
 				id: inquiryId,
-				tenantId,
-				orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
+				product,
 				hostingProductId: product.id,
 				contactName: companyName,
 				contactEmail: normalizedEmail,
@@ -926,15 +858,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				clientId: existingClient.id,
 				paymentMethod: data.paymentMethod ?? 'card',
 				paymentStatus: 'pending',
-				requestedDomain: data.requestedDomain || null
-			});
-			await insertInquiryItems({
-				inquiryId,
-				tenantId,
-				product,
-				domainName: data.domainName,
-				domainMode: data.domainMode,
-				domainCostCents: data.domainCostCents
+				requestedDomain: data.requestedDomain || null,
+				domainName: data.domainName ?? null,
+				domainMode: data.domainMode ?? null,
+				domainCostCents: data.domainCostCents ?? null
 			});
 			return {
 				duplicateCui: true as const,
@@ -990,10 +917,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cleanCui)))
 					.limit(1);
 				if (raceClient) {
-					await db.insert(table.hostingInquiry).values({
+					await insertHostingOrder(tenantId, {
 						id: inquiryId,
-						tenantId,
-						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
+						product,
 						hostingProductId: product.id,
 						contactName: companyName,
 						contactEmail: normalizedEmail,
@@ -1008,15 +934,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						clientId: raceClient.id,
 						paymentMethod: data.paymentMethod ?? 'card',
 						paymentStatus: 'pending',
-						requestedDomain: data.requestedDomain || null
-					});
-					await insertInquiryItems({
-						inquiryId,
-						tenantId,
-						product,
-						domainName: data.domainName,
-						domainMode: data.domainMode,
-						domainCostCents: data.domainCostCents
+						requestedDomain: data.requestedDomain || null,
+						domainName: data.domainName ?? null,
+						domainMode: data.domainMode ?? null,
+						domainCostCents: data.domainCostCents ?? null
 					});
 				}
 				return {
@@ -1049,10 +970,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				tenantId,
 				metadata: { clientId: existingByEmail.id, email: normalizedEmail }
 			});
-			await db.insert(table.hostingInquiry).values({
+			await insertHostingOrder(tenantId, {
 				id: inquiryId,
-				tenantId,
-				orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
+				product,
 				hostingProductId: product.id,
 				contactName: displayName,
 				contactEmail: normalizedEmail,
@@ -1065,15 +985,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				clientId: existingByEmail.id,
 				paymentMethod: data.paymentMethod ?? 'card',
 				paymentStatus: 'pending',
-				requestedDomain: data.requestedDomain || null
-			});
-			await insertInquiryItems({
-				inquiryId,
-				tenantId,
-				product,
-				domainName: data.domainName,
-				domainMode: data.domainMode,
-				domainCostCents: data.domainCostCents
+				requestedDomain: data.requestedDomain || null,
+				domainName: data.domainName ?? null,
+				domainMode: data.domainMode ?? null,
+				domainCostCents: data.domainCostCents ?? null
 			});
 			return {
 				duplicateCui: true as const,
@@ -1133,10 +1048,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 					)
 					.limit(1);
 				if (raceClientPf) {
-					await db.insert(table.hostingInquiry).values({
+					await insertHostingOrder(tenantId, {
 						id: inquiryId,
-						tenantId,
-						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
+						product,
 						hostingProductId: product.id,
 						contactName: displayName,
 						contactEmail: normalizedEmail,
@@ -1149,15 +1063,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						clientId: raceClientPf.id,
 						paymentMethod: data.paymentMethod ?? 'card',
 						paymentStatus: 'pending',
-						requestedDomain: data.requestedDomain || null
-					});
-					await insertInquiryItems({
-						inquiryId,
-						tenantId,
-						product,
-						domainName: data.domainName,
-						domainMode: data.domainMode,
-						domainCostCents: data.domainCostCents
+						requestedDomain: data.requestedDomain || null,
+						domainName: data.domainName ?? null,
+						domainMode: data.domainMode ?? null,
+						domainCostCents: data.domainCostCents ?? null
 					});
 				}
 				return {
@@ -1209,10 +1118,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			}),
 			withTursoBusyRetry(
 				() =>
-					db.insert(table.hostingInquiry).values({
+					insertHostingOrder(tenantId, {
 						id: inquiryId,
-						tenantId,
-						orderNumber: sql`(SELECT COALESCE(MAX(order_number), 0) + 1 FROM hosting_inquiry WHERE tenant_id = ${tenantId})`,
+						product,
 						hostingProductId: product.id,
 						contactName: displayName,
 						contactEmail: normalizedEmail,
@@ -1229,20 +1137,14 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						clientCreatedAt: now,
 						paymentMethod: data.paymentMethod ?? 'card',
 						paymentStatus: 'pending',
-						requestedDomain: data.requestedDomain || null
+						requestedDomain: data.requestedDomain || null,
+						domainName: data.domainName ?? null,
+						domainMode: data.domainMode ?? null,
+						domainCostCents: data.domainCostCents ?? null
 					}),
 				{ tenantId, label: 'public-hosting/insertInquiry' }
 			)
 		]);
-
-		await insertInquiryItems({
-			inquiryId,
-			tenantId,
-			product,
-			domainName: data.domainName,
-			domainMode: data.domainMode,
-			domainCostCents: data.domainCostCents
-		});
 
 		const mode = product.billingCycle === 'one_time' ? 'payment' : 'subscription';
 
