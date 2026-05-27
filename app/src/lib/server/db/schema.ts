@@ -941,6 +941,8 @@ export const hostingProduct = sqliteTable(
 		publicSortOrder: integer('public_sort_order').notNull().default(0),
 		price: integer('price').notNull().default(0), // cents
 		currency: text('currency').notNull().default('RON'),
+		/** Hex color (e.g. #1877F2) — used for plan-themed accents in admin Comenzi hosting drawer + KPI tiles. */
+		color: text('color').notNull().default('#1877F2'),
 		billingCycle: text('billing_cycle').notNull().default('monthly'), // monthly|quarterly|annually|biannually|triennially|one_time
 		setupFee: integer('setup_fee').notNull().default(0),
 		isActive: boolean('is_active').notNull().default(true),
@@ -1109,6 +1111,19 @@ export const hostingInquiry = sqliteTable(
 		paidAt: text('paid_at'),
 		paidAmountCents: integer('paid_amount_cents'),
 		paymentReference: text('payment_reference'),
+		// Last 4 digits of the card used (Stripe). Populated by the
+		// payment_intent.succeeded webhook handler from
+		// `latest_charge.payment_method_details.card.last4`. Shown in the admin
+		// Comenzi hosting drawer ("Card •••• 4242") and in the Keez invoice notes.
+		cardLast4: text('card_last4'),
+		// Stripe decline_code (or top-level error code if decline_code is null).
+		// Populated on payment_intent.payment_failed / payment_failed events.
+		// E.g. 'insufficient_funds', 'expired_card', 'card_declined'.
+		paymentErrorCode: text('payment_error_code'),
+		// Romanian-translated message (via translateDeclineCode). Shown directly
+		// in the admin drawer red banner so staff doesn't need to translate.
+		// Falls back to Stripe's English `error.message` then generic Romanian.
+		paymentErrorMessage: text('payment_error_message'),
 		acceptedByUserId: text('accepted_by_user_id').references(() => user.id),
 		acceptedAt: text('accepted_at'),
 		// Set when post-payment provisioning succeeds (Stripe webhook OR manual
