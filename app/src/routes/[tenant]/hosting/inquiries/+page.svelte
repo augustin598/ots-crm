@@ -37,6 +37,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
+	import PaymentMethodPicker from '$lib/components/payment-method-picker.svelte';
 
 	// ---- Constant lookups -----------------------------------------------------
 
@@ -144,7 +145,7 @@
 	let confirmOpen = $state(false);
 
 	// Confirm-payment panel local state
-	let confirmMethod = $state<'card-pos' | 'transfer' | 'cash'>('transfer');
+	let confirmMethod = $state<'card' | 'op' | 'cash'>('op');
 	let confirmAmount = $state('');
 	let confirmTxId = $state('');
 	let confirmNote = $state('');
@@ -489,7 +490,7 @@
 		// Reset confirm-panel form state to defaults from row.
 		const ttc = totalCents(o);
 		confirmAmount = ttc > 0 ? String(ttc / 100) : '';
-		confirmMethod = o.paymentMethod === 'card' ? 'card-pos' : o.paymentMethod === 'op' ? 'transfer' : 'transfer';
+		confirmMethod = o.paymentMethod === 'card' ? 'card' : o.paymentMethod === 'cash' ? 'cash' : 'op';
 		confirmTxId = '';
 		confirmNote = '';
 		confirmProvision = !o.hostingAccountId;
@@ -506,12 +507,11 @@
 			toast.error('Suma e invalidă');
 			return;
 		}
-		const methodMap = { 'card-pos': 'card', transfer: 'op', cash: 'cash' } as const;
 		confirmBusy = true;
 		try {
 			const r = await acceptHostingOrderPayment({
 				id: o.id,
-				paymentMethod: methodMap[confirmMethod],
+				paymentMethod: confirmMethod,
 				paidAmountCents: Math.round(amt * 100),
 				paymentReference: confirmTxId.trim() || undefined,
 				note: confirmNote.trim() || undefined,
@@ -1258,42 +1258,8 @@
 					</div>
 
 					<div class="ord-confirm-row">
-						<label for="confirm-method">Metodă</label>
-						<div class="ord-confirm-method-grid" id="confirm-method" role="radiogroup">
-							<button
-								class="ord-confirm-method"
-								class:active={confirmMethod === 'card-pos'}
-								onclick={() => (confirmMethod = 'card-pos')}
-								type="button"
-								role="radio"
-								aria-checked={confirmMethod === 'card-pos'}
-							>
-								<span class="ic"><CreditCardIcon size={12} /></span>
-								<span class="ord-confirm-method-label">Card (offline / POS)</span>
-							</button>
-							<button
-								class="ord-confirm-method"
-								class:active={confirmMethod === 'transfer'}
-								onclick={() => (confirmMethod = 'transfer')}
-								type="button"
-								role="radio"
-								aria-checked={confirmMethod === 'transfer'}
-							>
-								<span class="ic"><BuildingIcon size={12} /></span>
-								<span class="ord-confirm-method-label">Transfer bancar / OP</span>
-							</button>
-							<button
-								class="ord-confirm-method"
-								class:active={confirmMethod === 'cash'}
-								onclick={() => (confirmMethod = 'cash')}
-								type="button"
-								role="radio"
-								aria-checked={confirmMethod === 'cash'}
-							>
-								<span class="ic"><DollarSignIcon size={12} /></span>
-								<span class="ord-confirm-method-label">Cash</span>
-							</button>
-						</div>
+						<span class="ord-confirm-label">Metodă</span>
+						<PaymentMethodPicker bind:value={confirmMethod} size="sm" />
 					</div>
 
 					<div class="ord-confirm-row">
@@ -1312,9 +1278,9 @@
 
 					<div class="ord-confirm-row">
 						<label for="confirm-tx">
-							{confirmMethod === 'card-pos'
+							{confirmMethod === 'card'
 								? 'ID tranzacție card / chitanță POS (opțional)'
-								: confirmMethod === 'transfer'
+								: confirmMethod === 'op'
 									? 'Referință OP / extras (opțional)'
 									: 'Nr. chitanță numerar (opțional)'}
 						</label>
@@ -1322,9 +1288,9 @@
 							id="confirm-tx"
 							type="text"
 							class="mono"
-							placeholder={confirmMethod === 'card-pos'
+							placeholder={confirmMethod === 'card'
 								? 'ex: ch_3TZyAw… / chitanță POS 4242'
-								: confirmMethod === 'transfer'
+								: confirmMethod === 'op'
 									? 'ex: OP nr. 481 / extras BCR 26.05'
 									: 'ex: chitanță numerar nr. 0042'}
 							bind:value={confirmTxId}
@@ -2699,7 +2665,8 @@
 		flex-direction: column;
 		gap: 5px;
 	}
-	.ord-confirm-row > label {
+	.ord-confirm-row > label,
+	.ord-confirm-row > .ord-confirm-label {
 		font-size: 12px;
 		font-weight: 600;
 		color: #475569;
@@ -2723,53 +2690,6 @@
 		resize: vertical;
 		min-height: 60px;
 		font-family: inherit;
-	}
-	.ord-confirm-method-grid {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 6px;
-	}
-	.ord-confirm-method {
-		border: 1.5px solid #e5e9f0;
-		background: white;
-		border-radius: 9px;
-		padding: 9px 10px;
-		display: flex;
-		align-items: center;
-		gap: 7px;
-		cursor: pointer;
-		font-size: 12px;
-		font-weight: 600;
-		color: #475569;
-		text-align: left;
-		font-family: inherit;
-	}
-	.ord-confirm-method.active {
-		border-color: #1877f2;
-		background: rgba(24, 119, 242, 0.06);
-		color: #0f172a;
-	}
-	.ord-confirm-method .ic {
-		width: 22px;
-		height: 22px;
-		border-radius: 6px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: #f1f5f9;
-		color: #475569;
-		flex-shrink: 0;
-	}
-	.ord-confirm-method.active .ic {
-		background: rgba(24, 119, 242, 0.14);
-		color: #1877f2;
-	}
-	.ord-confirm-method-label {
-		flex: 1;
-		min-width: 0;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 	.ord-confirm-check {
 		display: flex;
