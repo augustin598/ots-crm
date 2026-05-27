@@ -1135,7 +1135,7 @@
 
 		<!-- Pagination -->
 		<div class="ord-pagination">
-			<span>Afișează {filtered.length} din {filteredAll.length} comenzi</span>
+			<span>Afișează {filtered.length} din {orders.length} comenzi</span>
 			<div class="ord-pagination-spacer"></div>
 			<div class="ord-pagination-buttons">
 				<button
