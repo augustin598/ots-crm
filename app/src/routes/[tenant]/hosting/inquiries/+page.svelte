@@ -2282,6 +2282,19 @@
 		border-radius: 50%;
 		background: currentColor;
 	}
+	/* Animated dot on the in-flight processing pill — design line 29-30 */
+	.ord-pay-badge.processing .dot {
+		animation: ord-dot-pulse 1.4s infinite;
+	}
+	@keyframes ord-dot-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
+		}
+	}
 
 	/* Account badge */
 	.ord-acc-badge {
