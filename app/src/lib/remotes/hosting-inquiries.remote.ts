@@ -315,7 +315,7 @@ export const getHostingOrders = query(async (): Promise<HostingOrderRow[]> => {
 
 const AcceptPaymentSchema = v.object({
 	id: IdSchema,
-	paymentMethod: v.picklist(['op', 'card', 'paypal', 'revolut', 'other']),
+	paymentMethod: v.picklist(['op', 'card', 'paypal', 'revolut', 'cash', 'other']),
 	paidAmountCents: v.pipe(v.number(), v.integer(), v.minValue(0)),
 	// Allowlist for bank-transfer references — keeps audit logs readable and
 	// prevents accidental binary/control-char paste from extras CSV.
@@ -428,12 +428,26 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 			}
 		});
 
+		// Cash payments don't trigger a Keez fiscal invoice. The cash receipt
+		// (chitanță numerar / bon fiscal de casă) is the legal justifying document
+		// and is issued offline at the moment of cash handover — emitting a
+		// duplicate Keez invoice on top would create a double-accounting risk.
+		// (Stripe-paid orders go through this same function only via the
+		// post-payment dispatcher, not through here.)
+		const skipFiscalInvoice = params.paymentMethod === 'cash';
+
 		// Emit the fiscal Keez invoice for this manual acceptance, mirroring the
 		// Stripe payment_intent.succeeded post-payment dispatcher. Without this,
 		// OP / bank-transfer orders would never get a Keez fiscal invoice — staff
 		// would have to create one manually. The emit-keez step is idempotent
 		// per (sessionId), so a retry on the same inquiry won't double-bill.
-		try {
+		if (skipFiscalInvoice) {
+			logInfo(
+				'directadmin',
+				'manual accept: cash payment — Keez fiscal invoice skipped (offline cash receipt is the legal document)',
+				{ tenantId, metadata: { inquiryId: params.id } }
+			);
+		} else try {
 			const { emitKeezFiscalInvoice } = await import(
 				'$lib/server/stripe/post-payment/emit-keez-invoice'
 			);

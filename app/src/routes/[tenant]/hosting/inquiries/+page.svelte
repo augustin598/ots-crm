@@ -506,7 +506,7 @@
 			toast.error('Suma e invalidă');
 			return;
 		}
-		const methodMap = { 'card-pos': 'card', transfer: 'op', cash: 'other' } as const;
+		const methodMap = { 'card-pos': 'card', transfer: 'op', cash: 'cash' } as const;
 		confirmBusy = true;
 		try {
 			const r = await acceptHostingOrderPayment({
