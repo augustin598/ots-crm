@@ -893,6 +893,29 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		.where(eq(table.invoice.id, invoiceId))
 		.limit(1);
 
+	// Cash-payment skip: if the linked hosting account's `paymentMethod` is 'cash',
+	// the offline cash receipt is the fiscal document — emitting a Keez fiscal
+	// invoice would double the accounting record. We still keep the CRM invoice
+	// row (MRR/ARR + history) and still advance nextRunDate via the regular
+	// scheduler flow; we just skip the `invoice.created` hook so Keez doesn't pick
+	// it up.
+	const skipKeezForCash = hostingAccount?.paymentMethod === 'cash';
+	if (skipKeezForCash) {
+		logInfo(
+			'scheduler',
+			`Recurring invoice ${invoiceId}: Keez skipped (cash account)`,
+			{
+				tenantId: recurringInvoice.tenantId,
+				metadata: {
+					recurringInvoiceId,
+					hostingAccountId: hostingAccountId,
+					invoiceId
+				}
+			}
+		);
+		return { success: true, invoiceId, keezSkipped: 'cash' as const };
+	}
+
 	// Emit invoice.created hook (after database insert)
 	// If hook fails, rollback by deleting the invoice and reverting recurring invoice update
 	const hooks = getHooksManager();
