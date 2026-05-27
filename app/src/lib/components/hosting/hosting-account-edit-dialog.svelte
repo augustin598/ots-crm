@@ -80,6 +80,7 @@
 			billingCycle: a.billingCycle,
 			additionalDomains: a.additionalDomains ?? null,
 			autoRenew: a.autoRenew,
+			paymentMethod: (a.paymentMethod === 'card' || a.paymentMethod === 'cash' ? a.paymentMethod : 'op'),
 			notes: a.notes,
 			tags: (a as { tags?: string[] | null }).tags ?? null
 		};

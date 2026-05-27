@@ -16,6 +16,7 @@
 		billingCycle: string;
 		additionalDomains: string[] | null;
 		autoRenew: boolean;
+		paymentMethod: 'card' | 'op' | 'cash';
 		notes: string | null;
 		tags: string[] | null;
 	};
@@ -45,6 +46,7 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
+	import PaymentMethodPicker from '$lib/components/payment-method-picker.svelte';
 
 	type Props = {
 		account: EditableAccount;
@@ -68,6 +70,7 @@
 		billingCycle: string;
 		additionalDomains: string[];
 		autoRenew: boolean;
+		paymentMethod: 'card' | 'op' | 'cash';
 		notes: string;
 		tags: string[];
 	};
@@ -86,6 +89,7 @@
 			billingCycle: a.billingCycle,
 			additionalDomains: a.additionalDomains ?? [],
 			autoRenew: a.autoRenew,
+			paymentMethod: a.paymentMethod ?? 'op',
 			notes: a.notes ?? '',
 			tags: a.tags ?? []
 		};
@@ -322,6 +326,7 @@
 					| 'one_time',
 				additionalDomains: draft.additionalDomains,
 				autoRenew: draft.autoRenew,
+				paymentMethod: draft.paymentMethod,
 				notes: draft.notes || null,
 				tags: draft.tags
 			});
@@ -711,8 +716,16 @@
 				</label>
 			</section>
 		{:else if activeTab === 'payment'}
-			<!-- ===================== PLATĂ & FACTURĂ (read-only) ===================== -->
+			<!-- ===================== PLATĂ & FACTURĂ ===================== -->
 			<section class="space-y-2">
+				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Metodă de plată</div>
+				<p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+					Stabilește cum se procesează facturile recurente pentru acest cont.
+					<strong>Cash</strong> = chitanță emisă offline, Keez nu generează factură fiscală.
+				</p>
+				<PaymentMethodPicker bind:value={draft.paymentMethod} size="sm" />
+			</section>
+			<section class="space-y-2 pt-3">
 				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ultimele facturi pentru acest cont</div>
 				{#if paymentLoading}
 					<div class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800">
