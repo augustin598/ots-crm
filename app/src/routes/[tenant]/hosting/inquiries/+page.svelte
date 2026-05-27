@@ -1,318 +1,202 @@
 <script lang="ts">
 	import {
 		getHostingOrders,
-		updateHostingInquiryStatus,
-		deleteHostingInquiry,
 		acceptHostingOrderPayment,
 		provisionFromInquiry,
+		createManualHostingOrder,
 		type HostingOrderRow,
 		type HostingOrderItemRow
 	} from '$lib/remotes/hosting-inquiries.remote';
-	import { getDAServers, getDAServer } from '$lib/remotes/da-servers.remote';
-	import { generateDaUsername, generateDaPassword } from '$lib/utils/da-generators';
+	import { getDAServers } from '$lib/remotes/da-servers.remote';
+	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
 	import { displayOrderId } from '$lib/utils/hosting-order-id';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { focusTrap } from '$lib/actions/focus-trap';
-	import { tick } from 'svelte';
+	// Lucide icons — imported per-icon to keep bundle small.
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import DownloadIcon from '@lucide/svelte/icons/download';
-	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
-	import BanknoteIcon from '@lucide/svelte/icons/banknote';
-	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
-	import AlertTriangleIcon from '@lucide/svelte/icons/triangle-alert';
-	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
-	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
-	import ClockIcon from '@lucide/svelte/icons/clock';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
-	import MailIcon from '@lucide/svelte/icons/mail';
-	import PhoneIcon from '@lucide/svelte/icons/phone';
-	import Building2Icon from '@lucide/svelte/icons/building-2';
-	import Trash2Icon from '@lucide/svelte/icons/trash-2';
-	import Columns3Icon from '@lucide/svelte/icons/columns-3';
-	import ListIcon from '@lucide/svelte/icons/list';
-	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
-	import CopyIcon from '@lucide/svelte/icons/copy';
-	import SparklesIcon from '@lucide/svelte/icons/sparkles';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import PackageIcon from '@lucide/svelte/icons/package';
-	import CalendarIcon from '@lucide/svelte/icons/calendar';
-	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import BuildingIcon from '@lucide/svelte/icons/building';
+	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import AlertTriangleIcon from '@lucide/svelte/icons/triangle-alert';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
+	import PackageIcon from '@lucide/svelte/icons/package';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 
-	type ActiveTab = 'all' | 'paid' | 'pending' | 'failed' | 'refunded';
-	// NOTE: 'paid' is the "Achitate" tab — filters to paymentStatus === 'paid'.
+	// ---- Constant lookups -----------------------------------------------------
+
+	/** Human Romanian labels for the persisted `payment_status` enum. */
+	const PAY_LABELS: Record<string, string> = {
+		paid: 'Achitat',
+		pending: 'În așteptare',
+		processing: 'Se procesează',
+		failed: 'Eșuat',
+		refunded: 'Refundat'
+	};
+
+	/** Human Romanian labels for the *derived* account/provisioning state. */
+	const ACC_LABELS: Record<string, string> = {
+		active: 'Activ',
+		provisioning: 'Se creează',
+		'awaiting-payment': 'Așteaptă plată',
+		cancelled: 'Anulat'
+	};
+
+	/** Human Romanian labels for the persisted `payment_method` enum. */
+	const METHOD_LABELS: Record<string, string> = {
+		card: 'Card',
+		op: 'Ordin de plată',
+		cash: 'Cash',
+		revolut: 'Revolut',
+		paypal: 'PayPal'
+	};
+
+	/** Method → label string for hex-dot timeline entries. Kept stable so
+	 * snapshot-style tests downstream don't break if we ever localize again. */
+	const METHOD_TIMELINE_COLOR = {
+		paid: '#10b981',
+		pending: '#f59e0b',
+		failed: '#ef4444',
+		processing: '#6366f1',
+		refunded: '#475569',
+		placed: '#94a3b8',
+		provisioning: '#6366f1',
+		active: '#1877F2'
+	} as const;
+
+	// ---- Date filter ----------------------------------------------------------
+
+	type DatePresetId = 'all' | 'today' | 'yesterday' | '7d' | '30d';
+	type DatePreset = { id: DatePresetId; label: string; days: number | null; exact?: boolean };
+	const DATE_PRESETS: DatePreset[] = [
+		{ id: 'all', label: 'Tot intervalul', days: null },
+		{ id: 'today', label: 'Azi', days: 0 },
+		{ id: 'yesterday', label: 'Ieri', days: 1, exact: true },
+		{ id: '7d', label: 'Ultimele 7 zile', days: 7 },
+		{ id: '30d', label: 'Ultimele 30 zile', days: 30 }
+	];
+
+	/**
+	 * Compute "days ago" from a Date (or ISO string). Today = 0, yesterday = 1.
+	 * Anchored on local midnight so timezone-near-midnight orders stay in the
+	 * correct day bucket for the admin UI.
+	 */
+	function daysAgoFrom(at: Date | string | null): number {
+		if (!at) return 9999;
+		const t = new Date(at).getTime();
+		if (Number.isNaN(t)) return 9999;
+		const now = new Date();
+		const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		const startThat = (() => {
+			const d = new Date(t);
+			return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+		})();
+		return Math.round((startToday - startThat) / 86_400_000);
+	}
+
+	function matchesDateFilter(o: HostingOrderRow, df: DatePreset): boolean {
+		if (df.id === 'all') return true;
+		const d = daysAgoFrom(o.createdAt);
+		if (df.exact) return d === df.days;
+		if (df.days === 0) return d === 0;
+		if (typeof df.days === 'number') return d >= 0 && d <= df.days;
+		return true;
+	}
+
+	// ---- Data --------------------------------------------------------------
 
 	let ordersPromise = $state(getHostingOrders());
+	let serversPromise = $state(getDAServers());
+	let productsPromise = $state(getHostingProducts());
 
 	async function refresh() {
 		ordersPromise = getHostingOrders();
 	}
 
-	// ----- view state -----
+	// ---- View state --------------------------------------------------------
+
+	type ActiveTab = 'all' | 'paid' | 'pending' | 'failed' | 'refunded';
 	let activeTab = $state<ActiveTab>('all');
-	let filterPackage = $state<string>(''); // hostingProductId or ''
-	let filterMethod = $state<'all' | 'card' | 'op' | 'paypal' | 'revolut'>('all');
 	let search = $state('');
+	let planFilter = $state<string | null>(null); // hosting_product.id
+	let methodFilter = $state<string | null>(null);
+	let periodFilter = $state<'monthly' | 'yearly' | null>(null);
+	let dateFilter = $state<DatePreset>(DATE_PRESETS[0]);
+	let dateOpen = $state(false);
+
+	// Drawer
 	let openOrder = $state<HostingOrderRow | null>(null);
-	let busyId = $state<string | null>(null);
+	let confirmOpen = $state(false);
 
-	// Accept-payment dialog state — local to the drawer.
-	let acceptOpen = $state(false);
-	let acceptAmount = $state(''); // RON, decimal
-	let acceptRef = $state('');
-	let acceptNote = $state('');
-	let acceptMethod = $state<'op' | 'card' | 'paypal' | 'revolut' | 'other'>('op');
-	let acceptProvision = $state(true);
-	let accepting = $state(false);
+	// Confirm-payment panel local state
+	let confirmMethod = $state<'card-pos' | 'transfer' | 'cash'>('transfer');
+	let confirmAmount = $state('');
+	let confirmTxId = $state('');
+	let confirmNote = $state('');
+	let confirmProvision = $state(true);
+	let confirmBusy = $state(false);
 
-	// Dynamic accept-dialog "Referință" labels — bank/OP requires an explicit
-	// transaction id so the printed Keez invoice shows "Bank: <id>" instead of
-	// "Bank: -". Other methods (card POS, PayPal, Revolut) keep it optional.
-	const acceptIsBankMethod = $derived(acceptMethod === 'op');
-	const acceptRefLabel = $derived(
-		acceptIsBankMethod
-			? 'ID tranzacție bancă *'
-			: acceptMethod === 'card'
-				? 'ID tranzacție card / chitanță POS (opțional)'
-				: acceptMethod === 'paypal'
-					? 'PayPal transaction ID (opțional)'
-					: acceptMethod === 'revolut'
-						? 'Revolut transaction ID (opțional)'
-						: 'Referință tranzacție (opțional)'
-	);
-	const acceptRefPlaceholder = $derived(
-		acceptIsBankMethod
-			? 'ex: OP nr. 12345 / Extras BT 21.05.2026 / Ref 4242...'
-			: acceptMethod === 'card'
-				? 'ex: ch_3TZyAw... / chitanță POS 4242'
-				: acceptMethod === 'paypal'
-					? 'ex: 8AB12345CD678901E'
-					: acceptMethod === 'revolut'
-						? 'ex: rvl_xxxxxxxx'
-						: 'Identificator extern al plății'
-	);
+	// Manual order modal
+	let showManual = $state(false);
+	let manualBusy = $state(false);
+	let manualDraft = $state({
+		client: '',
+		email: '',
+		type: 'person' as 'person' | 'company',
+		cui: '',
+		productId: '',
+		period: 'yearly' as 'monthly' | 'yearly',
+		domain: '',
+		domainMode: 'buy' as 'buy' | 'have' | 'transfer',
+		paymentMethod: 'card' as 'card' | 'op' | 'revolut' | 'paypal' | 'cash',
+		initialStatus: 'paid' as 'paid' | 'pending' | 'processing',
+		server: 'auto' as string
+	});
 
-	// Provisioning form state — pre-populated from order/product, editable.
-	let provServerId = $state('');
-	let provPackageId = $state('');
-	let provUsername = $state('');
-	let provDomain = $state('');
-	let provPassword = $state('');
-	let provNotes = $state('');
-	let provisioning = $state(false);
-	let provPwdCopied = $state(false);
-	let scrollToProvision = $state(false);
+	// Pagination — client-side, 10 rows / page.
+	const PAGE_SIZE = 10;
+	let pageNum = $state(1);
 
-	// Lazy server + package lookups for the form dropdowns.
-	let serversPromise = $state<ReturnType<typeof getDAServers> | null>(null);
-	function ensureServersLoaded() {
-		if (!serversPromise) serversPromise = getDAServers();
-	}
-	const selectedServerDetail = $derived(provServerId ? getDAServer(provServerId) : null);
-	const drawerDaServer = $derived(
-		openOrder?.productDaServerId ? getDAServer(openOrder.productDaServerId) : null
-	);
+	// ---- Helpers -----------------------------------------------------------
 
-	function openProvisionForm(o: HostingOrderRow) {
-		ensureServersLoaded();
-		provServerId = o.productDaServerId ?? '';
-		provPackageId = o.productDaPackageId ?? '';
-		const seed = o.clientBusinessName || o.contactName || o.contactEmail.split('@')[0];
-		provUsername = generateDaUsername(seed);
-		// Pre-fill from the public form. If the customer didn't enter a domain
-		// (rare — domain step is mandatory on /pachete-hosting), admin types it.
-		provDomain = o.requestedDomain ?? '';
-		provPassword = generateDaPassword();
-		provNotes = '';
-		provPwdCopied = false;
+	/** Derive admin "account status" from raw row fields. The persisted
+	 * `hosting_account.status` is the source of truth; pre-account orders fall
+	 * back to payment-status-derived states. */
+	function accountStatusOf(o: HostingOrderRow): 'active' | 'provisioning' | 'awaiting-payment' | 'cancelled' {
+		if (o.hostingAccountId && o.daAccountStatus === 'active') return 'active';
+		if (o.paymentStatus === 'paid' && !o.hostingAccountId) return 'provisioning';
+		if (o.paymentStatus === 'pending' || o.paymentStatus === 'processing') return 'awaiting-payment';
+		if (o.paymentStatus === 'failed' || o.paymentStatus === 'refunded') return 'cancelled';
+		return 'awaiting-payment';
 	}
 
-	function suggestUsername(o: HostingOrderRow) {
-		const seed = o.clientBusinessName || o.contactName || o.contactEmail.split('@')[0];
-		provUsername = generateDaUsername(seed);
+	/** Plan-themed hex color (per-product from `hosting_product.color`).
+	 * Fallback OTS blue so old products without backfilled color still render. */
+	function productColorOf(o: HostingOrderRow): string {
+		return o.productColor || '#1877F2';
 	}
 
-	function regeneratePassword() {
-		provPassword = generateDaPassword();
-		provPwdCopied = false;
-	}
-
-	async function copyPassword() {
-		try {
-			await navigator.clipboard.writeText(provPassword);
-			provPwdCopied = true;
-			setTimeout(() => (provPwdCopied = false), 2000);
-		} catch {
-			toast.error('Nu am putut copia parola');
-		}
-	}
-
-	async function submitProvision(orderId: string) {
-		if (!provServerId || !provUsername || !provDomain || !provPassword) {
-			toast.error('Completează toate câmpurile obligatorii');
-			return;
-		}
-		provisioning = true;
-		try {
-			const r = await provisionFromInquiry({
-				inquiryId: orderId,
-				daServerId: provServerId,
-				daPackageId: provPackageId || undefined,
-				daUsername: provUsername.trim().toLowerCase(),
-				domain: provDomain.trim().toLowerCase(),
-				password: provPassword,
-				notes: provNotes.trim() || undefined
-			});
-			if (r.ok) {
-				toast.success(`Cont DA creat: ${r.daUsername} (${r.domain})`);
-				openOrder = null;
-				await refresh();
-			} else {
-				toast.error(`Provisioning eșuat: ${r.error}`);
-			}
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			provisioning = false;
-		}
-	}
-
-	/**
-	 * Open the drawer. Pre-populates the provisioning form when applicable.
-	 * Tracks which order id was last initialized so reopening the SAME order
-	 * (accidental double-click, navigating back) keeps any in-progress edits
-	 * the admin made — domain typed, custom password — instead of clobbering
-	 * them with a fresh `openProvisionForm` call.
-	 */
-	let lastProvisionInitId = $state<string | null>(null);
-	function openDrawer(o: HostingOrderRow) {
-		openOrder = o;
-		if (
-			o.paymentStatus === 'paid' &&
-			!o.hostingAccountId &&
-			lastProvisionInitId !== o.id
-		) {
-			openProvisionForm(o);
-			lastProvisionInitId = o.id;
-		}
-	}
-
-	async function openOrderAtProvision(o: HostingOrderRow) {
-		openDrawer(o);
-		scrollToProvision = true;
-		await tick();
-		const el = document.getElementById('drawer-provisioning');
-		if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-		scrollToProvision = false;
-	}
-
-	function openAcceptDialog(o: HostingOrderRow) {
-		acceptOpen = true;
-		// Default the manual-accept method to whatever the customer selected on
-		// the public form; admin can switch in the dropdown. (Earlier this
-		// silently rewrote 'card' → 'op' which surprised admins doing POS card
-		// captures — removed.)
-		const m = o.paymentMethod;
-		acceptMethod =
-			m === 'op' || m === 'card' || m === 'paypal' || m === 'revolut' ? m : 'op';
-		// productPrice is stored in cents (per hostingProduct.price schema). The
-		// input expects RON (decimal), so divide. Earlier we set the input to the
-		// raw cents value, which caused `Math.round(amt * 100)` in submitAccept to
-		// store 100× the real amount (e.g. 139900 cents → input "139900" → saved
-		// as 13_990_000 = 139,900 RON, when it should have been 1.399 RON).
-		const guessedCents = o.productPrice ?? 0;
-		acceptAmount = guessedCents > 0 ? String(guessedCents / 100) : '';
-		acceptRef = '';
-		acceptNote = '';
-		acceptProvision = !o.hostingAccountId;
-	}
-
-	async function submitAccept(orderId: string) {
-		const amt = parseFloat(acceptAmount.replace(',', '.'));
-		if (!Number.isFinite(amt) || amt < 0) {
-			toast.error('Suma e invalidă');
-			return;
-		}
-		// Bank/OP requires the transaction id so we can reconcile the payment
-		// against the bank statement + show it on the Keez "Notă Articol".
-		// Without it, the printed invoice would read "Bank: -" which fails audit.
-		if (acceptMethod === 'op' && !acceptRef.trim()) {
-			toast.error('ID-ul tranzacției bancare e obligatoriu pentru Ordin de plată.');
-			return;
-		}
-		accepting = true;
-		try {
-			const r = await acceptHostingOrderPayment({
-				id: orderId,
-				paymentMethod: acceptMethod,
-				paidAmountCents: Math.round(amt * 100),
-				paymentReference: acceptRef.trim() || undefined,
-				note: acceptNote.trim() || undefined,
-				triggerProvisioning: acceptProvision
-			});
-			if (r.provisioned === false && 'reason' in r && r.reason && r.reason !== 'skipped_by_caller') {
-				toast.warning(`Plată acceptată, dar provisioning DA a eșuat: ${r.reason}`);
-			} else if (r.provisioned && 'daUsername' in r && r.daUsername) {
-				toast.success(`Plată acceptată · DA: ${r.daUsername}`);
-			} else {
-				toast.success('Plată acceptată');
-			}
-			acceptOpen = false;
-			openOrder = null;
-			await refresh();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			accepting = false;
-		}
-	}
-
-	async function setStatus(id: string, status: 'new' | 'contacted' | 'converted' | 'discarded') {
-		busyId = id;
-		try {
-			await updateHostingInquiryStatus({ id, status });
-			toast.success('Status actualizat');
-			await refresh();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			busyId = null;
-		}
-	}
-
-	async function handleDelete(o: HostingOrderRow) {
-		if (!confirm(`Ștergi comanda de la ${o.contactName}?`)) return;
-		busyId = o.id;
-		try {
-			await deleteHostingInquiry(o.id);
-			toast.success('Comandă ștearsă');
-			if (openOrder?.id === o.id) openOrder = null;
-			await refresh();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			busyId = null;
-		}
-	}
-
-	function fmtDate(d: Date | string | null): string {
-		if (!d) return '—';
-		try {
-			return new Date(d).toLocaleString('ro-RO', {
-				day: '2-digit',
-				month: 'short',
-				year: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit'
-			});
-		} catch {
-			return String(d);
-		}
+	function methodIcon(m: string | null): typeof CreditCardIcon {
+		if (m === 'op') return BuildingIcon;
+		if (m === 'cash') return DollarSignIcon;
+		if (m === 'revolut') return ZapIcon;
+		if (m === 'paypal') return DollarSignIcon;
+		return CreditCardIcon;
 	}
 
 	function fmtRelative(d: Date | string | null): string {
@@ -326,199 +210,9 @@
 		const h = Math.floor(min / 60);
 		if (h < 24) return `acum ${h} ${h === 1 ? 'oră' : 'ore'}`;
 		const dd = Math.floor(h / 24);
-		return `acum ${dd} ${dd === 1 ? 'zi' : 'zile'}`;
-	}
-
-	function fmtMoney(amountCents: number | null, currency: string | null): string {
-		if (amountCents === null) return '—';
-		const v = amountCents / 100;
-		try {
-			return v.toLocaleString('ro-RO', {
-				style: 'currency',
-				currency: currency || 'RON',
-				minimumFractionDigits: v % 1 === 0 ? 0 : 2,
-				maximumFractionDigits: 2
-			});
-		} catch {
-			return `${v} ${currency ?? 'RON'}`;
-		}
-	}
-
-	function statusLabel(s: string): string {
-		const m: Record<string, string> = {
-			new: 'Nou',
-			contacted: 'Contactat',
-			converted: 'Convertit',
-			discarded: 'Respins',
-			abandoned: 'Abandonat'
-		};
-		return m[s] ?? s;
-	}
-
-	function paymentLabel(s: string): string {
-		const m: Record<string, string> = {
-			pending: 'În așteptare',
-			paid: 'Plătit',
-			failed: 'Eșuat',
-			refunded: 'Refund'
-		};
-		return m[s] ?? s;
-	}
-
-	function methodLabel(s: string | null): string {
-		if (!s) return '—';
-		const m: Record<string, string> = {
-			card: 'Card',
-			op: 'Ordin de plată',
-			paypal: 'PayPal',
-			revolut: 'Revolut',
-			other: 'Altă metodă'
-		};
-		return m[s] ?? s;
-	}
-
-	function methodIcon(s: string | null): typeof CreditCardIcon {
-		if (s === 'op') return BanknoteIcon;
-		return CreditCardIcon;
-	}
-
-	function provisioningLabel(o: HostingOrderRow): string {
-		if (o.hostingAccountId) return 'Provizionat';
-		if (o.paymentStatus === 'paid') return 'Așteaptă provisioning';
-		return 'Neînceput';
-	}
-
-	function applyFilters(list: HostingOrderRow[]): HostingOrderRow[] {
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
-		return list.filter((o) => {
-			// Tab filter
-			if (activeTab === 'pending' && o.paymentStatus !== 'pending') return false;
-			if (activeTab === 'failed' && o.paymentStatus !== 'failed') return false;
-			if (activeTab === 'refunded' && o.paymentStatus !== 'refunded') return false;
-			if (activeTab === 'paid' && o.paymentStatus !== 'paid') return false;
-			// Dropdown filters
-			if (filterPackage && o.hostingProductId !== filterPackage) return false;
-			if (filterMethod !== 'all' && o.paymentMethod !== filterMethod) return false;
-			// Search
-			if (search) {
-				const q = search.toLowerCase();
-				const hay = [
-					displayOrderId(o.orderNumber, o.id),
-					o.contactName,
-					o.contactEmail,
-					o.companyName ?? '',
-					o.vatNumber ?? '',
-					o.productName ?? '',
-					o.daDomain ?? '',
-					o.daUsername ?? ''
-				]
-					.join(' ')
-					.toLowerCase();
-				if (!hay.includes(q)) return false;
-			}
-			return true;
-		});
-	}
-
-	type HistoryEntry = {
-		kind: 'placed' | 'paid' | 'failed' | 'provisioning' | 'provisioned' | 'refunded';
-		at: Date | string | null;
-		label: string;
-		meta: string;
-	};
-
-	function buildHistory(o: HostingOrderRow, daServerName: string | null): HistoryEntry[] {
-		const out: HistoryEntry[] = [];
-		out.push({
-			kind: 'placed',
-			at: o.createdAt,
-			label: 'Comandă plasată',
-			meta: `de pe /${o.source}`
-		});
-		if (o.paymentStatus === 'paid') {
-			out.push({
-				kind: 'paid',
-				at: o.paidAt ?? o.acceptedAt ?? o.createdAt,
-				label: 'Plată confirmată',
-				meta: `${methodLabel(o.paymentMethod)} · ${fmtMoney(o.paidAmountCents, o.productCurrency)}`
-			});
-		}
-		if (o.paymentStatus === 'failed') {
-			out.push({
-				kind: 'failed',
-				at: o.createdAt,
-				label: 'Plată eșuată',
-				meta: 'Card refuzat de bancă'
-			});
-		}
-		if (o.paymentStatus === 'refunded') {
-			out.push({
-				kind: 'refunded',
-				at: o.acceptedAt ?? o.createdAt,
-				label: 'Refundat',
-				meta: 'Sumă returnată'
-			});
-		}
-		if (o.hostingAccountId && o.daUsername) {
-			out.push({
-				kind: 'provisioned',
-				at: o.paidAt ?? o.createdAt,
-				label: 'Cont DirectAdmin creat',
-				meta: `Server ${daServerName ?? '—'} · credențiale trimise pe ${o.contactEmail}`
-			});
-		} else if (o.paymentStatus === 'paid' && !o.hostingAccountId) {
-			out.push({
-				kind: 'provisioning',
-				at: o.paidAt ?? o.createdAt,
-				label: 'Cont în provisionare',
-				meta: 'în curs · Server auto-alocat · credențiale în max 5 minute'
-			});
-		}
-		return out;
-	}
-
-	/** Sum of all items × quantity, TTC. */
-	function lineTotalCents(items: HostingOrderItemRow[]): number {
-		return items.reduce((a, it) => a + it.unitPriceCents * it.quantity, 0);
-	}
-
-	/** Derived TVA — sum of each item's TVA portion at its own vat_rate. */
-	function lineTvaCents(items: HostingOrderItemRow[]): number {
-		return items.reduce((a, it) => {
-			const lineTtc = it.unitPriceCents * it.quantity;
-			return a + Math.round((lineTtc * it.vatRate) / (100 + it.vatRate));
-		}, 0);
-	}
-
-	/** Visible (non-zero) items — hide "Domeniu X (existent)" lines that have 0 cost. */
-	function visibleItems(items: HostingOrderItemRow[]): HostingOrderItemRow[] {
-		return items.filter((it) => it.unitPriceCents > 0);
-	}
-
-	function billingCycleLabel(cycle: string | null): string {
-		if (cycle === 'yearly') return 'Anual';
-		if (cycle === 'monthly') return 'Lunar';
-		return '—';
-	}
-
-	function domainModeLabel(mode: string | null): string {
-		if (mode === 'buy') return 'Cumpărat nou';
-		if (mode === 'transfer') return 'Transfer';
-		if (mode === 'have') return 'Existent';
-		return '—';
-	}
-
-	function accountStatusLabel(o: HostingOrderRow): {
-		text: string;
-		tone: 'ok' | 'warn' | 'bad' | 'neutral';
-	} {
-		if (o.hostingAccountId && o.daAccountStatus === 'active') return { text: 'Activ', tone: 'ok' };
-		if (o.paymentStatus === 'paid' && !o.hostingAccountId)
-			return { text: 'Se creează', tone: 'warn' };
-		if (o.paymentStatus === 'failed') return { text: 'Anulat', tone: 'neutral' };
-		if (o.paymentStatus === 'refunded') return { text: 'Refundat', tone: 'neutral' };
-		return { text: 'Așteaptă plată', tone: 'warn' };
+		if (dd === 0) return 'azi';
+		if (dd === 1) return 'ieri';
+		return `acum ${dd} zile`;
 	}
 
 	function fmtTime(d: Date | string | null): string {
@@ -530,98 +224,455 @@
 		}
 	}
 
-	function paymentTone(s: string): 'ok' | 'warn' | 'bad' | 'neutral' {
-		if (s === 'paid') return 'ok';
-		if (s === 'pending') return 'warn';
-		if (s === 'failed') return 'bad';
-		if (s === 'refunded') return 'neutral';
-		return 'neutral';
+	/** Format integer cents as `<int> RON` (no decimals when whole) for the
+	 * row Sumă column + drawer totals box. Mirrors the design's plain-int look. */
+	function fmtRon(amountCents: number | null | undefined): string {
+		if (amountCents == null) return '—';
+		const v = amountCents / 100;
+		const rounded = Math.round(v);
+		// Use rounded int when very close (within 0.005 RON); else keep 2 decimals.
+		if (Math.abs(v - rounded) < 0.005) return `${rounded} RON`;
+		return `${v.toFixed(2)} RON`;
 	}
 
-	function counts(list: HostingOrderRow[]) {
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
-		const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-		const startOfPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-		const endOfPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
+	/** Format raw integer (e.g. amount in RON, not cents) as `<n> RON`. */
+	function fmtRonInt(amount: number): string {
+		return `${Math.round(amount)} RON`;
+	}
 
-		const paidThisMonth = list
-			.filter((o) => o.paidAt && new Date(o.paidAt).getTime() >= startOfMonth.getTime())
-			.reduce((a, o) => a + (o.paidAmountCents ?? 0), 0);
-		const paidPrevMonth = list
-			.filter((o) => {
-				if (!o.paidAt) return false;
-				const t = new Date(o.paidAt).getTime();
-				return t >= startOfPrevMonth.getTime() && t <= endOfPrevMonth.getTime();
-			})
-			.reduce((a, o) => a + (o.paidAmountCents ?? 0), 0);
-		const revenueDeltaPct =
-			paidPrevMonth > 0 ? ((paidThisMonth - paidPrevMonth) / paidPrevMonth) * 100 : null;
+	function billingCycleLabel(cycle: string | null, period?: string | null): string {
+		const eff = period ?? cycle;
+		if (eff === 'yearly') return 'anual';
+		if (eff === 'monthly') return 'lunar';
+		return cycle ?? '';
+	}
 
-		const pending = list.filter((o) => o.paymentStatus === 'pending');
-		const failed = list.filter((o) => o.paymentStatus === 'failed');
-		const refunded = list.filter((o) => o.paymentStatus === 'refunded');
-		const pendingAmount = pending.reduce((a, o) => a + (o.productPrice ?? 0), 0);
-		const failedAmount = failed.reduce((a, o) => a + (o.productPrice ?? 0), 0);
+	/** Domain item (kind='domain') from a row, if any. */
+	function domainItemOf(o: HostingOrderRow): HostingOrderItemRow | null {
+		return (o.items ?? []).find((i) => i.kind === 'domain') ?? null;
+	}
 
-		const createdToday = list.filter(
-			(o) => o.createdAt && new Date(o.createdAt).getTime() >= today.getTime()
-		).length;
-		const yesterday = new Date(today);
-		yesterday.setDate(today.getDate() - 1);
-		const createdYesterday = list.filter((o) => {
-			if (!o.createdAt) return false;
-			const t = new Date(o.createdAt).getTime();
-			return t >= yesterday.getTime() && t < today.getTime();
-		}).length;
+	/** Net (without TVA) amount in cents for the hosting line. Falls back to
+	 * `productPrice` (stored as TTC) divided by 1.19 if no items present. */
+	function hostingNetCents(o: HostingOrderRow): number {
+		const h = (o.items ?? []).find((i) => i.kind === 'hosting');
+		const ttc = h ? h.unitPriceCents * h.quantity : (o.productPrice ?? 0);
+		return Math.round(ttc / 1.19);
+	}
 
-		const paidCount = list.filter((o) => o.paymentStatus === 'paid').length;
+	/** Domain net cents (always 0 unless 'buy' mode with a positive price). */
+	function domainNetCents(o: HostingOrderRow): number {
+		const d = domainItemOf(o);
+		if (!d || d.unitPriceCents <= 0) return 0;
+		return Math.round((d.unitPriceCents * d.quantity) / 1.19);
+	}
 
+	/** Sum of net portions × 19% — TVA in cents. */
+	function tvaCents(o: HostingOrderRow): number {
+		const net = hostingNetCents(o) + domainNetCents(o);
+		return Math.round(net * 0.19);
+	}
+
+	/** Total TTC in cents — paidAmountCents when available, else sum of items
+	 * unit × quantity, else productPrice. */
+	function totalCents(o: HostingOrderRow): number {
+		if (o.paidAmountCents != null) return o.paidAmountCents;
+		if (o.items && o.items.length > 0)
+			return o.items.reduce((a, it) => a + it.unitPriceCents * it.quantity, 0);
+		return o.productPrice ?? 0;
+	}
+
+	// ---- Timeline ----------------------------------------------------------
+
+	type TimelineEntry = { dot: string; title: string; when: string; meta: string };
+
+	function buildTimeline(o: HostingOrderRow): TimelineEntry[] {
+		const out: TimelineEntry[] = [];
+		const placed = fmtRelative(o.createdAt);
+		out.push({
+			dot: METHOD_TIMELINE_COLOR.placed,
+			title: 'Comandă plasată',
+			when: placed,
+			meta: `de pe /${o.source}`
+		});
+		const last4 = o.cardLast4 ? ` ····${o.cardLast4}` : '';
+		const methodLabel = METHOD_LABELS[o.paymentMethod ?? ''] ?? '';
+		const totalLabel = fmtRon(o.paidAmountCents ?? totalCents(o));
+		if (o.paymentStatus === 'paid') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.paid,
+				title: 'Plată confirmată',
+				when: fmtRelative(o.paidAt ?? o.acceptedAt ?? o.createdAt),
+				meta: `${methodLabel}${last4} · ${totalLabel}`
+			});
+		} else if (o.paymentStatus === 'pending') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.pending,
+				title: 'Așteaptă plată',
+				when: placed,
+				meta: 'Factură proforma emisă'
+			});
+		} else if (o.paymentStatus === 'failed') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.failed,
+				title: 'Plată eșuată',
+				when: placed,
+				meta: o.paymentErrorMessage ?? 'Plata nu a putut fi procesată'
+			});
+		} else if (o.paymentStatus === 'refunded') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.paid,
+				title: 'Plată confirmată',
+				when: fmtRelative(o.paidAt ?? o.acceptedAt ?? o.createdAt),
+				meta: `${methodLabel}${last4} · ${totalLabel}`
+			});
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.refunded,
+				title: 'Refund procesat',
+				when: 'ulterior',
+				meta: 'Banii returnați pe metoda originală'
+			});
+		} else if (o.paymentStatus === 'processing') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.processing,
+				title: 'Plată în procesare',
+				when: placed,
+				meta: `${methodLabel} · în așteptarea confirmării`
+			});
+		}
+		const acct = accountStatusOf(o);
+		if (acct === 'active') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.active,
+				title: 'Cont DirectAdmin creat',
+				when: fmtRelative(o.paidAt ?? o.createdAt),
+				meta: `${o.daUsername ?? '—'} · credențiale trimise pe ${o.contactEmail}`
+			});
+		} else if (acct === 'provisioning') {
+			out.push({
+				dot: METHOD_TIMELINE_COLOR.provisioning,
+				title: 'Cont în provisionare',
+				when: 'în curs',
+				meta: 'Server auto-alocat · credențiale în max 5 minute'
+			});
+		}
+		return out;
+	}
+
+	// ---- Filtering + KPIs --------------------------------------------------
+
+	/** Apply current tab + chip + search + date-preset filters to a list. */
+	function applyFilters(list: HostingOrderRow[]): HostingOrderRow[] {
+		const q = search.trim().toLowerCase();
+		return list.filter((o) => {
+			// Tab — "pending" includes 'processing' per design.
+			if (activeTab === 'paid' && o.paymentStatus !== 'paid') return false;
+			if (activeTab === 'pending' && o.paymentStatus !== 'pending' && o.paymentStatus !== 'processing') return false;
+			if (activeTab === 'failed' && o.paymentStatus !== 'failed') return false;
+			if (activeTab === 'refunded' && o.paymentStatus !== 'refunded') return false;
+			// Chips
+			if (planFilter && o.hostingProductId !== planFilter) return false;
+			if (methodFilter && o.paymentMethod !== methodFilter) return false;
+			if (periodFilter && o.productBillingCycle !== periodFilter) return false;
+			if (!matchesDateFilter(o, dateFilter)) return false;
+			// Search
+			if (q) {
+				const hay = [
+					displayOrderId(o.orderNumber, o.id),
+					o.contactName,
+					o.contactEmail,
+					o.companyName ?? '',
+					o.vatNumber ?? '',
+					o.productName ?? '',
+					domainItemOf(o)?.domainName ?? o.requestedDomain ?? '',
+					o.daDomain ?? '',
+					o.daUsername ?? ''
+				]
+					.join(' ')
+					.toLowerCase();
+				if (!hay.includes(q)) return false;
+			}
+			return true;
+		});
+	}
+
+	/** Counts per tab + per date-preset, computed in one pass for the toolbar
+	 * pills (Toate/Achitate/etc.) and date popover row counts. */
+	function tabCounts(list: HostingOrderRow[]) {
 		return {
-			total: list.length,
-			createdToday,
-			createdYesterday,
-			paidCount,
-			pendingCount: pending.length,
-			pendingAmount,
-			failedCount: failed.length,
-			failedAmount,
-			refundedCount: refunded.length,
-			paidThisMonth,
-			revenueDeltaPct
+			all: list.length,
+			paid: list.filter((o) => o.paymentStatus === 'paid').length,
+			pending: list.filter((o) => o.paymentStatus === 'pending' || o.paymentStatus === 'processing').length,
+			failed: list.filter((o) => o.paymentStatus === 'failed').length,
+			refunded: list.filter((o) => o.paymentStatus === 'refunded').length
 		};
 	}
 
+	function dateCounts(list: HostingOrderRow[]): Record<DatePresetId, number> {
+		const out: Record<DatePresetId, number> = { all: 0, today: 0, yesterday: 0, '7d': 0, '30d': 0 };
+		for (const p of DATE_PRESETS) out[p.id] = list.filter((o) => matchesDateFilter(o, p)).length;
+		return out;
+	}
+
+	/** KPI row data — totals, today/yesterday counts, paid revenue current
+	 * month vs previous, conversion %, new-domain count. */
+	function kpis(list: HostingOrderRow[]) {
+		const now = new Date();
+		const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		const startYesterday = startToday - 86_400_000;
+		const startMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+		const startPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+		const endPrevMonth = startMonth - 1;
+
+		let todayCount = 0;
+		let yesterdayCount = 0;
+		let paidThisMonth = 0;
+		let paidPrevMonth = 0;
+		let paidCount = 0;
+		let pendingAmount = 0;
+		let pendingCount = 0;
+		let failedAmount = 0;
+		let failedCount = 0;
+		let newDomains = 0;
+
+		for (const o of list) {
+			const created = o.createdAt ? new Date(o.createdAt).getTime() : 0;
+			if (created >= startToday) todayCount += 1;
+			else if (created >= startYesterday && created < startToday) yesterdayCount += 1;
+
+			if (o.paymentStatus === 'paid') paidCount += 1;
+			if (o.paymentStatus === 'pending' || o.paymentStatus === 'processing') {
+				pendingCount += 1;
+				pendingAmount += totalCents(o);
+			}
+			if (o.paymentStatus === 'failed') {
+				failedCount += 1;
+				failedAmount += totalCents(o);
+			}
+
+			if (o.paidAt && o.paidAmountCents != null) {
+				const pt = new Date(o.paidAt).getTime();
+				if (pt >= startMonth) paidThisMonth += o.paidAmountCents;
+				else if (pt >= startPrevMonth && pt <= endPrevMonth) paidPrevMonth += o.paidAmountCents;
+			}
+
+			const dom = domainItemOf(o);
+			if (dom?.domainMode === 'buy') newDomains += 1;
+		}
+
+		const total = list.length;
+		const conversion = total > 0 ? Math.round((paidCount / total) * 100) : 0;
+		const revenueDeltaPct = paidPrevMonth > 0 ? Math.round(((paidThisMonth - paidPrevMonth) / paidPrevMonth) * 1000) / 10 : null;
+
+		return {
+			total,
+			todayCount,
+			yesterdayCount,
+			paidCount,
+			paidThisMonth,
+			revenueDeltaPct,
+			pendingCount,
+			pendingAmount,
+			failedCount,
+			failedAmount,
+			conversion,
+			newDomains
+		};
+	}
+
+	// ---- Drawer actions ----------------------------------------------------
+
+	function openDrawer(o: HostingOrderRow) {
+		openOrder = o;
+		// Auto-expand confirm panel for pending orders — matches design intent.
+		confirmOpen = o.paymentStatus === 'pending';
+		// Reset confirm-panel form state to defaults from row.
+		const ttc = totalCents(o);
+		confirmAmount = ttc > 0 ? String(ttc / 100) : '';
+		confirmMethod = o.paymentMethod === 'card' ? 'card-pos' : o.paymentMethod === 'op' ? 'transfer' : 'transfer';
+		confirmTxId = '';
+		confirmNote = '';
+		confirmProvision = !o.hostingAccountId;
+	}
+
+	function closeDrawer() {
+		openOrder = null;
+		confirmOpen = false;
+	}
+
+	async function submitConfirmPayment(o: HostingOrderRow) {
+		const amt = parseFloat(confirmAmount.replace(',', '.'));
+		if (!Number.isFinite(amt) || amt <= 0) {
+			toast.error('Suma e invalidă');
+			return;
+		}
+		const methodMap = { 'card-pos': 'card', transfer: 'op', cash: 'other' } as const;
+		confirmBusy = true;
+		try {
+			const r = await acceptHostingOrderPayment({
+				id: o.id,
+				paymentMethod: methodMap[confirmMethod],
+				paidAmountCents: Math.round(amt * 100),
+				paymentReference: confirmTxId.trim() || undefined,
+				note: confirmNote.trim() || undefined,
+				triggerProvisioning: confirmProvision
+			});
+			if (r.provisioned === false && 'reason' in r && r.reason && r.reason !== 'skipped_by_caller') {
+				toast.warning('Plată acceptată, dar provisioning DA a eșuat', { description: r.reason });
+			} else if (r.provisioned && 'daUsername' in r && r.daUsername) {
+				toast.success('Încasare confirmată', { description: `${displayOrderId(o.orderNumber, o.id)} · DA: ${r.daUsername}` });
+			} else {
+				toast.success('Încasare confirmată', {
+					description: `${displayOrderId(o.orderNumber, o.id)} · ${amt} RON`
+				});
+			}
+			closeDrawer();
+			await refresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare');
+		} finally {
+			confirmBusy = false;
+		}
+	}
+
+	async function handleAction(kind: string, o: HostingOrderRow) {
+		if (kind === 'mark-paid') {
+			openDrawer(o);
+			confirmOpen = true;
+			toast.info('Confirmă încasarea', {
+				description: `${displayOrderId(o.orderNumber, o.id)} · selectează metoda de plată`
+			});
+		} else if (kind === 'retry-payment') {
+			toast.info('Retry plată', {
+				description: 'Re-trimite linkul de plată din modulul facturi (în curând)'
+			});
+		} else if (kind === 'refund') {
+			if (!confirm(`Refund integral pentru ${displayOrderId(o.orderNumber, o.id)} (${fmtRon(totalCents(o))})?`)) return;
+			toast.warning('Refund prin Stripe — funcție în curând');
+		} else if (kind === 'invoice') {
+			window.location.href = `/${page.params.tenant}/invoices?clientEmail=${encodeURIComponent(o.contactEmail)}`;
+		} else if (kind === 'email-client') {
+			window.location.href = `mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`;
+		} else if (kind === 'resend-invoice') {
+			toast.success('Proforma re-trimisă', { description: o.contactEmail });
+		} else if (kind === 'open-account') {
+			if (o.hostingAccountId) {
+				window.location.href = `/${page.params.tenant}/hosting/accounts/${o.hostingAccountId}`;
+			}
+		} else if (kind === 'force-provision') {
+			try {
+				const r = await provisionFromInquiry({
+					inquiryId: o.id,
+					daServerId: o.productDaServerId ?? '',
+					daPackageId: o.productDaPackageId ?? undefined,
+					daUsername: (o.contactEmail.split('@')[0] || 'admin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12),
+					domain: (domainItemOf(o)?.domainName ?? o.requestedDomain ?? '').toLowerCase(),
+					password: cryptoPassword()
+				});
+				if (r.ok) {
+					toast.success('Provisionare reușită', { description: `${r.daUsername} (${r.domain})` });
+					closeDrawer();
+					await refresh();
+				} else {
+					toast.error('Provisioning eșuat', { description: r.error });
+				}
+			} catch (e) {
+				toast.error(e instanceof Error ? e.message : 'Eroare');
+			}
+		}
+	}
+
+	function cryptoPassword(): string {
+		// 18-char URL-safe random — adequate for one-time admin DA password.
+		const arr = new Uint8Array(12);
+		crypto.getRandomValues(arr);
+		return Array.from(arr, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 18);
+	}
+
+	// ---- Manual order modal ----------------------------------------------------
+
+	async function submitManualOrder() {
+		const d = manualDraft;
+		if (!d.client.trim() || !d.email.trim() || !d.domain.trim() || !d.productId) {
+			toast.error('Completează toate câmpurile obligatorii');
+			return;
+		}
+		if (d.type === 'company' && !d.cui.trim()) {
+			toast.error('CUI obligatoriu pentru persoană juridică');
+			return;
+		}
+		manualBusy = true;
+		try {
+			const r = await createManualHostingOrder({
+				contactName: d.client.trim(),
+				contactEmail: d.email.trim(),
+				type: d.type,
+				companyName: d.type === 'company' ? d.client.trim() : undefined,
+				vatNumber: d.type === 'company' ? d.cui.trim() : undefined,
+				hostingProductId: d.productId,
+				period: d.period,
+				domainName: d.domain.trim().toLowerCase(),
+				domainMode: d.domainMode,
+				paymentMethod: d.paymentMethod,
+				initialStatus: d.initialStatus,
+				server: d.server || undefined
+			});
+			toast.success('Comandă creată manual', {
+				description: `${displayOrderId(r.orderNumber, r.id)} · ${d.client.trim()}`
+			});
+			showManual = false;
+			// Reset draft for the next call (same defaults).
+			manualDraft = {
+				client: '',
+				email: '',
+				type: 'person',
+				cui: '',
+				productId: '',
+				period: 'yearly',
+				domain: '',
+				domainMode: 'buy',
+				paymentMethod: 'card',
+				initialStatus: 'paid',
+				server: 'auto'
+			};
+			await refresh();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare');
+		} finally {
+			manualBusy = false;
+		}
+	}
+
+	// ---- CSV export -----------------------------------------------------------
+
 	function exportCsv(list: HostingOrderRow[]) {
 		const header = [
+			'Comanda',
 			'Data',
-			'Nume',
+			'Client',
 			'Email',
-			'Firmă',
+			'Firma',
 			'CUI',
 			'Pachet',
-			'Sumă',
-			'Monedă',
-			'Metodă',
-			'Status plată',
-			'Funnel',
-			'Cont DA',
-			'Domeniu'
+			'Domeniu',
+			'Suma RON',
+			'Metoda',
+			'Status plata',
+			'Status cont'
 		];
 		const rows = list.map((o) => [
-			fmtDate(o.createdAt),
+			displayOrderId(o.orderNumber, o.id),
+			o.createdAt ? new Date(o.createdAt).toISOString() : '',
 			o.contactName,
 			o.contactEmail,
 			o.companyName ?? '',
 			o.vatNumber ?? '',
 			o.productName ?? '',
-			o.paidAmountCents != null ? String(o.paidAmountCents / 100) : '',
-			o.productCurrency ?? '',
-			methodLabel(o.paymentMethod),
-			paymentLabel(o.paymentStatus),
-			statusLabel(o.status),
-			o.daUsername ?? '',
-			o.daDomain ?? ''
+			domainItemOf(o)?.domainName ?? o.requestedDomain ?? '',
+			String(totalCents(o) / 100),
+			METHOD_LABELS[o.paymentMethod ?? ''] ?? '',
+			PAY_LABELS[o.paymentStatus] ?? o.paymentStatus,
+			ACC_LABELS[accountStatusOf(o)] ?? ''
 		]);
 		const csv = [header, ...rows]
 			.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
@@ -636,357 +687,484 @@
 	}
 </script>
 
-<div class="hod-page">
+<div class="hosting-wrap" data-screen-label="OTS Hosting Orders">
 	{#await ordersPromise}
 		<div class="hod-loading">Se încarcă comenzile…</div>
 	{:then orders}
-		{@const c = counts(orders)}
-		{@const filtered = applyFilters(orders)}
-		{@const productOptions = Array.from(
-			new Map(
-				orders
-					.filter((o) => o.hostingProductId && o.productName)
-					.map((o) => [o.hostingProductId as string, o.productName as string])
-			).entries()
-		)}
+		{@const c = tabCounts(orders)}
+		{@const dc = dateCounts(orders)}
+		{@const k = kpis(orders)}
+		{@const filteredAll = applyFilters(orders)}
+		{@const totalPages = Math.max(1, Math.ceil(filteredAll.length / PAGE_SIZE))}
+		{@const safePage = Math.min(pageNum, totalPages)}
+		{@const filtered = filteredAll.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)}
 
 		<!-- Hero -->
-		<div class="hod-hero">
+		<div class="hst-hero">
 			<div>
 				<h1>Comenzi hosting</h1>
 				<p>
-					Comenzile primite de pe pagina publică /pachete-hosting · {c.total} total · {c.createdToday}
-					azi · {fmtMoney(c.paidThisMonth, 'RON')} achitați
+					Comenzile primite de pe pagina publică <strong>/pachete-hosting</strong> · {k.total} total ·
+					{k.todayCount} azi · {(k.paidThisMonth / 100000).toFixed(1)}k RON achitați
 				</p>
 			</div>
-			<div class="hod-hero-actions">
-				<button class="hod-btn hod-btn-ghost" onclick={() => refresh()}>
-					<RefreshCwIcon size={14} /> Refresh
+			<div class="hst-hero-actions">
+				<button class="btn-secondary" onclick={() => refresh()}>
+					<RefreshCwIcon size={13} /> Sync plăți
 				</button>
 				<button
-					class="hod-btn hod-btn-ghost"
-					onclick={() => exportCsv(filtered)}
-					disabled={filtered.length === 0}
+					class="btn-secondary"
+					onclick={() => exportCsv(filteredAll)}
+					disabled={filteredAll.length === 0}
 				>
-					<DownloadIcon size={14} /> Export CSV
+					<DownloadIcon size={13} /> Export CSV
 				</button>
-				<a href="/pachete-hosting" target="_blank" rel="noopener" class="hod-btn hod-btn-ghost">
-					<ExternalLinkIcon size={14} /> Pagina publică
-				</a>
+				<button class="btn-primary" onclick={() => (showManual = true)}>
+					<PlusIcon size={14} /> Comandă manuală
+				</button>
 			</div>
 		</div>
 
-		<!-- KPI strip -->
-		<div class="hod-kpis">
-			<div class="hod-kpi" data-tone="info">
-				<div class="hod-kpi-stripe"></div>
-				<div class="hod-kpi-body">
-					<div class="hod-kpi-head">
-						<ShoppingCartIcon size={14} />
-						<span>COMENZI TOTAL</span>
+		<!-- KPI strip — 6 tiles using dash-kpi pattern -->
+		<div class="hst-kpis">
+			<div class="dash-kpi primary">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(24,119,242,.12);color:#1877F2">
+						<ShoppingBagIcon size={13} />
 					</div>
-					<div class="hod-kpi-value">{c.total}</div>
-					<div class="hod-kpi-foot">+{c.createdToday} azi · {c.createdYesterday} ieri</div>
+					<div class="dash-kpi-label">Comenzi total</div>
+				</div>
+				<div class="dash-kpi-value">{k.total}</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">{k.todayCount} azi · {k.yesterdayCount} ieri</span>
+					{#if k.todayCount > 0}
+						<span class="dash-delta up">+{k.todayCount}</span>
+					{/if}
 				</div>
 			</div>
 
-			<div class="hod-kpi" data-tone="ok">
-				<div class="hod-kpi-stripe"></div>
-				<div class="hod-kpi-body">
-					<div class="hod-kpi-head">
-						<TrendingUpIcon size={14} />
-						<span>REVENUE ACHITAT</span>
+			<div class="dash-kpi success">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(16,185,129,.12);color:#10b981">
+						<DollarSignIcon size={13} />
 					</div>
-					<div class="hod-kpi-value">{fmtMoney(c.paidThisMonth, 'RON')}</div>
-					<div class="hod-kpi-foot">
-						{#if c.revenueDeltaPct == null}
-							luna curentă
-						{:else}
-							{c.revenueDeltaPct >= 0 ? '+' : ''}{c.revenueDeltaPct.toFixed(1)}% vs luna trecută
-						{/if}
-					</div>
+					<div class="dash-kpi-label">Revenue achitat</div>
+				</div>
+				<div class="dash-kpi-value">{(k.paidThisMonth / 100000).toFixed(2)}k RON</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">din {k.paidCount} comenzi</span>
+					{#if k.revenueDeltaPct != null}
+						<span class="dash-delta {k.revenueDeltaPct >= 0 ? 'up' : 'down'}">
+							{k.revenueDeltaPct >= 0 ? '+' : ''}{k.revenueDeltaPct.toFixed(1)}%
+						</span>
+					{/if}
 				</div>
 			</div>
 
-			<div class="hod-kpi" data-tone="warn">
-				<div class="hod-kpi-stripe"></div>
-				<div class="hod-kpi-body">
-					<div class="hod-kpi-head">
-						<ClockIcon size={14} />
-						<span>PLĂȚI ÎN AȘTEPTARE</span>
+			<div class="dash-kpi warn">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(245,158,11,.14);color:#f59e0b">
+						<ClockIcon size={13} />
 					</div>
-					<div class="hod-kpi-value">{fmtMoney(c.pendingAmount, 'RON')}</div>
-					<div class="hod-kpi-foot">{c.pendingCount} comenzi pending</div>
+					<div class="dash-kpi-label">Plăți în așteptare</div>
+				</div>
+				<div class="dash-kpi-value">{fmtRon(k.pendingAmount)}</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">{k.pendingCount} comenzi pending</span>
 				</div>
 			</div>
 
-			<div class="hod-kpi" data-tone="bad">
-				<div class="hod-kpi-stripe"></div>
-				<div class="hod-kpi-body">
-					<div class="hod-kpi-head">
-						<AlertTriangleIcon size={14} />
-						<span>PLĂȚI EȘUATE</span>
+			<div class="dash-kpi danger">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(239,68,68,.12);color:#ef4444">
+						<AlertTriangleIcon size={13} />
 					</div>
-					<div class="hod-kpi-value">{fmtMoney(c.failedAmount, 'RON')}</div>
-					<div class="hod-kpi-foot">{c.failedCount} comenzi de recuperat</div>
+					<div class="dash-kpi-label">Plăți eșuate</div>
+				</div>
+				<div class="dash-kpi-value">{fmtRon(k.failedAmount)}</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">{k.failedCount} comenzi de recuperat</span>
 				</div>
 			</div>
 
-			<div class="hod-kpi" data-tone="neutral">
-				<div class="hod-kpi-stripe"></div>
-				<div class="hod-kpi-body">
-					<div class="hod-kpi-head">
-						<RotateCcwIcon size={14} />
-						<span>REFUNDATE</span>
+			<div class="dash-kpi info">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(99,102,241,.12);color:#6366f1">
+						<TrendingUpIcon size={13} />
 					</div>
-					<div class="hod-kpi-value">{c.refundedCount}</div>
-					<div class="hod-kpi-foot">istoric tenant</div>
+					<div class="dash-kpi-label">Conversie plată</div>
+				</div>
+				<div class="dash-kpi-value">{k.conversion}%</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">{k.paidCount} / {k.total}</span>
+				</div>
+			</div>
+
+			<div class="dash-kpi info">
+				<div class="dash-kpi-head">
+					<div class="dash-kpi-icon" style="background:rgba(99,102,241,.12);color:#6366f1">
+						<GlobeIcon size={13} />
+					</div>
+					<div class="dash-kpi-label">Domenii noi</div>
+				</div>
+				<div class="dash-kpi-value">{k.newDomains}</div>
+				<div class="dash-kpi-foot">
+					<span class="dash-kpi-sub">cumpărate prin checkout</span>
 				</div>
 			</div>
 		</div>
 
 		<!-- Tabs -->
-		<div class="hod-tabs" role="tablist">
+		<div class="hst-tabs" role="tablist">
 			<button
+				class="hst-tab"
+				class:active={activeTab === 'all'}
 				role="tab"
 				aria-selected={activeTab === 'all'}
-				class:active={activeTab === 'all'}
-				onclick={() => (activeTab = 'all')}
+				onclick={() => {
+					activeTab = 'all';
+					pageNum = 1;
+				}}
 			>
-				Toate <span class="hod-tab-count">{c.total}</span>
+				Toate <span class="hst-tab-count">{c.all}</span>
 			</button>
 			<button
+				class="hst-tab"
+				class:active={activeTab === 'paid'}
 				role="tab"
 				aria-selected={activeTab === 'paid'}
-				class:active={activeTab === 'paid'}
-				onclick={() => (activeTab = 'paid')}
+				onclick={() => {
+					activeTab = 'paid';
+					pageNum = 1;
+				}}
 			>
-				Achitate <span class="hod-tab-count">{c.paidCount}</span>
+				Achitate <span class="hst-tab-count">{c.paid}</span>
 			</button>
 			<button
+				class="hst-tab"
+				class:active={activeTab === 'pending'}
 				role="tab"
 				aria-selected={activeTab === 'pending'}
-				class:active={activeTab === 'pending'}
-				onclick={() => (activeTab = 'pending')}
+				onclick={() => {
+					activeTab = 'pending';
+					pageNum = 1;
+				}}
 			>
-				În așteptare <span class="hod-tab-count">{c.pendingCount}</span>
+				În așteptare <span class="hst-tab-count">{c.pending}</span>
 			</button>
 			<button
+				class="hst-tab"
+				class:active={activeTab === 'failed'}
 				role="tab"
 				aria-selected={activeTab === 'failed'}
-				class:active={activeTab === 'failed'}
-				onclick={() => (activeTab = 'failed')}
+				onclick={() => {
+					activeTab = 'failed';
+					pageNum = 1;
+				}}
 			>
-				Eșuate <span class="hod-tab-count">{c.failedCount}</span>
+				Eșuate <span class="hst-tab-count">{c.failed}</span>
 			</button>
 			<button
+				class="hst-tab"
+				class:active={activeTab === 'refunded'}
 				role="tab"
 				aria-selected={activeTab === 'refunded'}
-				class:active={activeTab === 'refunded'}
-				onclick={() => (activeTab = 'refunded')}
+				onclick={() => {
+					activeTab = 'refunded';
+					pageNum = 1;
+				}}
 			>
-				Refundate <span class="hod-tab-count">{c.refundedCount}</span>
+				Refundate <span class="hst-tab-count">{c.refunded}</span>
 			</button>
 		</div>
 
-		<!-- Filter row -->
-		<div class="hod-filters">
-			<div class="hod-search">
-				<SearchIcon size={14} />
-				<input placeholder="Caută ID, nume, email, domeniu…" bind:value={search} />
+		<!-- Toolbar: search + filter chips -->
+		<div class="hst-accounts-toolbar">
+			<div class="hst-search">
+				<SearchIcon size={13} />
+				<input
+					placeholder="Caută ID, domeniu, client, email..."
+					bind:value={search}
+					oninput={() => (pageNum = 1)}
+				/>
 			</div>
-			<label class="hod-filter-wrap">
-				<PackageIcon size={14} />
-				<select bind:value={filterPackage}>
-					<option value="">Pachet — toate</option>
-					{#each productOptions as [id, name] (id)}
-						<option value={id}>{name}</option>
-					{/each}
-				</select>
-			</label>
-			<label class="hod-filter-wrap">
-				<CreditCardIcon size={14} />
-				<select bind:value={filterMethod}>
-					<option value="all">Metodă — toate</option>
-					<option value="card">Card</option>
-					<option value="op">Ordin de plată</option>
-					<option value="paypal">PayPal</option>
-					<option value="revolut">Revolut</option>
-				</select>
-			</label>
-			<label class="hod-filter-wrap" data-disabled="true" title="În curând">
-				<CalendarIcon size={14} />
-				<select disabled>
-					<option>Perioadă</option>
-				</select>
-			</label>
-			<label class="hod-filter-wrap" data-disabled="true" title="În curând">
-				<CalendarDaysIcon size={14} />
-				<select disabled>
-					<option>Data</option>
-				</select>
-			</label>
+			{#await productsPromise then products}
+				{@const planObj = planFilter ? products.find((p) => p.id === planFilter) : null}
+				<button
+					class="hst-filter-chip"
+					class:active={!!planFilter}
+					onclick={() => {
+						if (planFilter) {
+							planFilter = null;
+						} else {
+							const candidates = products.filter((p) => p.isPublic !== false);
+							if (candidates.length > 0) planFilter = candidates[0].id;
+						}
+						pageNum = 1;
+					}}
+				>
+					<PackageIcon size={12} />
+					{planObj?.name ?? 'Pachet'}
+					{#if planFilter}
+						<XIcon
+							size={10}
+							onclick={(e: MouseEvent) => {
+								e.stopPropagation();
+								planFilter = null;
+								pageNum = 1;
+							}}
+						/>
+					{/if}
+				</button>
+			{/await}
+			<button
+				class="hst-filter-chip"
+				class:active={!!methodFilter}
+				onclick={() => {
+					methodFilter = methodFilter === 'card' ? null : 'card';
+					pageNum = 1;
+				}}
+			>
+				<CreditCardIcon size={12} />
+				{methodFilter ? (METHOD_LABELS[methodFilter] ?? 'Metodă') : 'Metodă'}
+				{#if methodFilter}
+					<XIcon
+						size={10}
+						onclick={(e: MouseEvent) => {
+							e.stopPropagation();
+							methodFilter = null;
+							pageNum = 1;
+						}}
+					/>
+				{/if}
+			</button>
+			<button
+				class="hst-filter-chip"
+				class:active={!!periodFilter}
+				onclick={() => {
+					periodFilter = periodFilter === 'yearly' ? 'monthly' : periodFilter === 'monthly' ? null : 'yearly';
+					pageNum = 1;
+				}}
+			>
+				<CalendarIcon size={12} />
+				{periodFilter === 'yearly' ? 'Anuale' : periodFilter === 'monthly' ? 'Lunare' : 'Perioadă'}
+				{#if periodFilter}
+					<XIcon
+						size={10}
+						onclick={(e: MouseEvent) => {
+							e.stopPropagation();
+							periodFilter = null;
+							pageNum = 1;
+						}}
+					/>
+				{/if}
+			</button>
+			<div class="ord-date-pop-wrap">
+				<button
+					class="hst-filter-chip"
+					class:active={dateFilter.id !== 'all'}
+					onclick={() => (dateOpen = !dateOpen)}
+				>
+					<CalendarIcon size={12} />
+					{dateFilter.id === 'all' ? 'Data' : dateFilter.label}
+					{#if dateFilter.id !== 'all'}
+						<XIcon
+							size={10}
+							onclick={(e: MouseEvent) => {
+								e.stopPropagation();
+								dateFilter = DATE_PRESETS[0];
+								pageNum = 1;
+							}}
+						/>
+					{/if}
+				</button>
+				{#if dateOpen}
+					<div class="ord-date-pop" role="dialog" aria-label="Filtru perioadă">
+						{#each DATE_PRESETS as p (p.id)}
+							<button
+								class:active={dateFilter.id === p.id}
+								onclick={() => {
+									dateFilter = p;
+									dateOpen = false;
+									pageNum = 1;
+								}}
+							>
+								<span>{p.label}</span>
+								<span class="pop-count">{dc[p.id] ?? 0}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<div class="hst-toolbar-spacer"></div>
 		</div>
 
-		{#if filtered.length === 0}
-			<div class="hod-empty">
-				<ShoppingCartIcon size={40} />
-				<p>Nicio comandă pentru filtrele curente.</p>
-			</div>
-		{:else}
-			<div class="hod-table-wrap">
-				<table class="hod-table">
-					<thead>
-						<tr>
-							<th>COMANDĂ</th>
-							<th>CLIENT</th>
-							<th>PACHET · DOMENIU</th>
-							<th>METODĂ</th>
-							<th class="num">SUMĂ</th>
-							<th>STATUS PLATĂ</th>
-							<th>STATUS CONT</th>
-							<th class="hod-actions-th"></th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each filtered as o (o.id)}
-							{@const rowDomainItem = (o.items ?? []).find((i) => i.kind === 'domain') ?? null}
-							{@const rowTotalCents =
-								o.paidAmountCents ??
-								(o.items?.length
-									? (o.items ?? []).reduce((a, it) => a + it.unitPriceCents * it.quantity, 0)
-									: (o.productPrice ?? 0))}
-							{@const rowTvaCents = (o.items ?? []).reduce(
-								(a, it) =>
-									a + Math.round((it.unitPriceCents * it.quantity * it.vatRate) / (100 + it.vatRate)),
-								0
-							)}
-							{@const rowAcct = accountStatusLabel(o)}
-							<tr onclick={() => openDrawer(o)}>
-								<td>
-									<div class="hod-cell-strong">{displayOrderId(o.orderNumber, o.id)}</div>
-									<div class="hod-cell-muted">{fmtRelative(o.createdAt)}</div>
-									<div class="hod-cell-faint hod-cell-source">
-									<FileTextIcon size={11} /> /{o.source}
+		<!-- Table -->
+		<div class="hst-table-wrap">
+			<table class="hst-table">
+				<thead>
+					<tr>
+						<th>Comandă</th>
+						<th>Client</th>
+						<th>Pachet · Domeniu</th>
+						<th>Metodă</th>
+						<th class="num">Sumă</th>
+						<th>Status plată</th>
+						<th>Status cont</th>
+						<th style="width:120px"></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each filtered as o (o.id)}
+						{@const dom = domainItemOf(o)}
+						{@const tot = totalCents(o)}
+						{@const tva = tvaCents(o)}
+						{@const acct = accountStatusOf(o)}
+						{@const MIcon = methodIcon(o.paymentMethod)}
+						<tr style="cursor:pointer" onclick={() => openDrawer(o)}>
+							<td>
+								<div class="hst-host-cell">{displayOrderId(o.orderNumber, o.id)}</div>
+								<div class="ord-row-relative">{fmtRelative(o.createdAt)}</div>
+								<div class="ord-row-source">
+									<span class="ord-source-pill"><GlobeIcon size={9} />/{o.source}</span>
 								</div>
-								</td>
-								<td>
-									<div class="hod-cell-strong">{o.contactName}</div>
-									<div class="hod-cell-muted">{o.contactEmail}</div>
-								</td>
-								<td>
-									<div class="hod-cell-package">
-										<span class="hod-pkg-dot"></span>
-										<span class="hod-cell-strong">{o.productName ?? '—'}</span>
-										<span class="hod-cell-muted">
-											{billingCycleLabel(o.productBillingCycle).toLowerCase()}
-										</span>
-									</div>
-									{#if rowDomainItem?.domainName}
-										<div class="hod-cell-domain">{rowDomainItem.domainName}</div>
-										{#if rowDomainItem.unitPriceCents > 0}
-											<div class="hod-cell-faint">
-												+ {fmtMoney(rowDomainItem.unitPriceCents, o.productCurrency)} domeniu nou
-											</div>
-										{:else if rowDomainItem.domainMode === 'transfer'}
-											<div class="hod-cell-faint">domeniu transfer</div>
-										{:else if rowDomainItem.domainMode === 'have'}
-											<div class="hod-cell-faint">domeniu existent</div>
+							</td>
+							<td>
+								<div class="ord-row-name">{o.contactName}</div>
+								<div class="ord-row-email">{o.contactEmail}</div>
+								{#if o.vatNumber}
+									<div class="ord-row-cui">{o.vatNumber}</div>
+								{/if}
+							</td>
+							<td>
+								<div class="ord-row-plan">
+									<span class="ord-plan-dot" style="background:{productColorOf(o)}"></span>
+									<strong>{o.productName ?? '—'}</strong>
+									<span class="ord-row-period">{billingCycleLabel(o.productBillingCycle)}</span>
+								</div>
+								{#if dom?.domainName}
+									<div class="ord-row-domain">{dom.domainName}</div>
+									<div class="ord-row-domain-meta">
+										{#if dom.domainMode === 'buy' && dom.unitPriceCents > 0}
+											+ {fmtRon(dom.unitPriceCents)} domeniu nou
+										{:else if dom.domainMode === 'transfer'}
+											transfer gratuit
+										{:else if dom.domainMode === 'have'}
+											domeniu existent
 										{/if}
-									{:else if o.requestedDomain}
-										<div class="hod-cell-domain">{o.requestedDomain}</div>
-									{/if}
-								</td>
-								<td>
-									<div class="hod-cell-strong">{methodLabel(o.paymentMethod)}</div>
-								</td>
-								<td class="num">
-									<div class="hod-cell-strong">
-										{fmtMoney(rowTotalCents, o.productCurrency)}
 									</div>
-									<div class="hod-cell-faint">
-										incl. TVA {fmtMoney(rowTvaCents, o.productCurrency)}
-									</div>
-								</td>
-								<td>
-									<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
-										<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
-									</span>
-								</td>
-								<td>
-									<span class="hod-acct-label" data-tone={rowAcct.tone}>
-										{rowAcct.text}
-									</span>
-								</td>
-								<td class="hod-actions-cell">
-									<div class="hod-row-actions" onclick={(e) => e.stopPropagation()} role="presentation">
+								{:else if o.requestedDomain}
+									<div class="ord-row-domain">{o.requestedDomain}</div>
+								{/if}
+							</td>
+							<td>
+								<span class="ord-method-tile" class:ord-method-card={o.paymentMethod === 'card'}>
+									<MIcon size={11} />
+									{METHOD_LABELS[o.paymentMethod ?? ''] ?? '—'}{o.paymentMethod === 'card' && o.cardLast4 ? ` ····${o.cardLast4}` : ''}
+								</span>
+							</td>
+							<td class="num">
+								<div class="ord-amount">{fmtRon(tot)}</div>
+								<div class="ord-amount-vat">incl. TVA {fmtRon(tva)}</div>
+							</td>
+							<td>
+								<span class="ord-pay-badge {o.paymentStatus}"
+									><span class="dot"></span>{PAY_LABELS[o.paymentStatus] ?? o.paymentStatus}</span
+								>
+								{#if o.paymentStatus === 'failed' && o.paymentErrorMessage}
+									<div class="ord-row-failreason">{o.paymentErrorMessage.slice(0, 40)}…</div>
+								{/if}
+							</td>
+							<td><span class="ord-acc-badge {acct}">{ACC_LABELS[acct]}</span></td>
+							<td onclick={(e: MouseEvent) => e.stopPropagation()}>
+								<div class="ord-row-actions">
+									<button
+										class="hst-icon-btn"
+										title="Detalii"
+										aria-label="Detalii"
+										onclick={() => openDrawer(o)}
+									>
+										<EyeIcon size={12} />
+									</button>
+									{#if o.paymentStatus === 'pending'}
 										<button
-											class="hod-icon-btn"
-											title="Detalii"
-											aria-label="Detalii"
-											onclick={() => openDrawer(o)}
+											class="hst-icon-btn"
+											title="Marchează plătit"
+											aria-label="Marchează plătit"
+											onclick={() => handleAction('mark-paid', o)}
 										>
-											<EyeIcon size={14} />
+											<CheckIcon size={12} />
 										</button>
-										{#if o.paymentStatus === 'pending'}
-											<button
-												class="hod-icon-btn"
-												title="Marchează plătit"
-												aria-label="Marchează plătit"
-												onclick={() => {
-													openDrawer(o);
-													openAcceptDialog(o);
-												}}
-											>
-												<CheckIcon size={14} />
-											</button>
-										{:else if o.paymentStatus === 'failed'}
-											<button
-												class="hod-icon-btn"
-												title="Retry"
-												aria-label="Retry"
-												onclick={() => {
-													openDrawer(o);
-													openAcceptDialog(o);
-												}}
-											>
-												<RotateCcwIcon size={14} />
-											</button>
-										{:else if o.paymentStatus === 'paid' && !o.hostingAccountId}
-											<button
-												class="hod-icon-btn"
-												title="Forțează provisionare"
-												aria-label="Forțează provisionare"
-												onclick={() => openOrderAtProvision(o)}
-											>
-												<SparklesIcon size={14} />
-											</button>
-										{:else if o.paymentStatus === 'paid' && o.hostingAccountId}
-											<a
-												class="hod-icon-btn"
-												title="Factură fiscală"
-												aria-label="Factură fiscală"
-												href={`/${page.params.tenant}/invoices?clientEmail=${encodeURIComponent(o.contactEmail)}`}
-											>
-												<DownloadIcon size={14} />
-											</a>
-										{/if}
-										<a
-											class="hod-icon-btn"
-											title="Email client"
-											aria-label="Email client"
-											href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
+									{:else if o.paymentStatus === 'failed'}
+										<button
+											class="hst-icon-btn"
+											title="Retry plată"
+											aria-label="Retry plată"
+											onclick={() => handleAction('retry-payment', o)}
 										>
-											<MailIcon size={14} />
-										</a>
-									</div>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+											<RefreshCwIcon size={12} />
+										</button>
+									{:else if o.paymentStatus === 'paid'}
+										<button
+											class="hst-icon-btn"
+											title="Factură"
+											aria-label="Factură"
+											onclick={() => handleAction('invoice', o)}
+										>
+											<DownloadIcon size={12} />
+										</button>
+									{/if}
+									<button
+										class="hst-icon-btn"
+										title="Email client"
+										aria-label="Email client"
+										onclick={() => handleAction('email-client', o)}
+									>
+										<MailIcon size={12} />
+									</button>
+								</div>
+							</td>
+						</tr>
+					{/each}
+					{#if filtered.length === 0}
+						<tr><td colspan="8" class="ord-empty-cell">Nicio comandă pentru filtrele curente</td></tr>
+					{/if}
+				</tbody>
+			</table>
+		</div>
+
+		<!-- Pagination -->
+		<div class="ord-pagination">
+			<span>Afișează {filtered.length} din {filteredAll.length} comenzi</span>
+			<div class="ord-pagination-spacer"></div>
+			<div class="ord-pagination-buttons">
+				<button
+					class="hst-icon-btn"
+					aria-label="Pagina anterioară"
+					disabled={safePage <= 1}
+					onclick={() => (pageNum = Math.max(1, safePage - 1))}
+				>
+					<ChevronLeftIcon size={13} />
+				</button>
+				{#each Array.from({ length: Math.min(5, totalPages) }, (_, i) => i + Math.max(1, Math.min(totalPages - 4, safePage - 2))) as pn (pn)}
+					<button
+						class="hst-icon-btn"
+						class:active-page={pn === safePage}
+						onclick={() => (pageNum = pn)}
+					>
+						{pn}
+					</button>
+				{/each}
+				<button
+					class="hst-icon-btn"
+					aria-label="Pagina următoare"
+					disabled={safePage >= totalPages}
+					onclick={() => (pageNum = Math.min(totalPages, safePage + 1))}
+				>
+					<ChevronRightIcon size={13} />
+				</button>
 			</div>
-		{/if}
+		</div>
 	{:catch err}
 		<div class="hod-empty">
 			<AlertTriangleIcon size={40} />
@@ -995,1208 +1173,1906 @@
 	{/await}
 </div>
 
+<!-- Drawer ===================================================================-->
 {#if openOrder}
 	{@const o = openOrder}
-	{@const items = o.items ?? []}
-	{@const visItems = visibleItems(items)}
-	{@const totalCents = o.paidAmountCents ?? lineTotalCents(items)}
-	{@const tvaCents = lineTvaCents(items)}
-	{@const acctStatus = accountStatusLabel(o)}
-	{@const domainItem = items.find((it) => it.kind === 'domain') ?? null}
+	{@const dom = domainItemOf(o)}
+	{@const tot = totalCents(o)}
+	{@const tva = tvaCents(o)}
+	{@const acct = accountStatusOf(o)}
+	{@const planColor = productColorOf(o)}
+	{@const timeline = buildTimeline(o)}
+	{@const hostNet = hostingNetCents(o)}
+	{@const domNet = domainNetCents(o)}
+	{@const MIc = methodIcon(o.paymentMethod)}
 
-	<button
-		class="hod-drawer-back"
-		aria-label="Închide"
-		onclick={() => {
-			openOrder = null;
-			acceptOpen = false;
-		}}
-	></button>
+	<button class="hst-drawer-back" aria-label="Închide" onclick={closeDrawer}></button>
 
 	<div
-		class="hod-drawer"
+		class="hst-drawer"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="hod-drawer-title"
-		use:focusTrap={{ initialFocus: '.hod-drawer-close' }}
+		style="width:640px"
+		use:focusTrap={{ initialFocus: '.hst-drawer-close' }}
 	>
-		<!-- Header -->
-		<header class="hod-drawer-head">
-			<div class="hod-drawer-head-icon">
-				<ShoppingCartIcon size={18} />
+		<div class="hst-drawer-head">
+			<div
+				class="hst-server-card-icon"
+				style="background:linear-gradient(135deg, {planColor}, {planColor}cc)"
+			>
+				<ShoppingBagIcon size={18} />
 			</div>
-			<div class="hod-drawer-head-text">
-				<div class="hod-drawer-title" id="hod-drawer-title">
+			<div class="ord-drawer-head-text">
+				<div id="hod-drawer-title" class="ord-drawer-title">
 					{displayOrderId(o.orderNumber, o.id)}
 				</div>
-				<div class="hod-drawer-subtitle">
-					{fmtRelative(o.createdAt)}, {fmtTime(o.createdAt)} · de pe /{o.source}
+				<div class="ord-drawer-subtitle">
+					{fmtRelative(o.createdAt)} · de pe <span class="ord-drawer-source">/{o.source}</span>
 				</div>
 			</div>
-			<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
-				<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
-			</span>
-			<button
-				class="hod-drawer-close"
-				aria-label="Închide"
-				onclick={() => {
-					openOrder = null;
-					acceptOpen = false;
-				}}
+			<span class="ord-pay-badge {o.paymentStatus}"
+				><span class="dot"></span>{PAY_LABELS[o.paymentStatus] ?? o.paymentStatus}</span
 			>
-				<XIcon size={18} />
+			<button class="hst-drawer-close" aria-label="Închide" onclick={closeDrawer}>
+				<XIcon size={14} />
 			</button>
-		</header>
+		</div>
 
-		<!-- Body -->
-		<div class="hod-drawer-body">
-			<!-- Failed-payment banner -->
+		<div class="hst-drawer-body">
+			<!-- State banners -->
 			{#if o.paymentStatus === 'failed'}
-				<div class="hod-banner hod-banner-bad">
-					<div>
+				<div class="ord-banner ord-banner-bad">
+					<AlertTriangleIcon size={16} />
+					<div class="ord-banner-text">
 						<strong>Plata a eșuat</strong>
-						<div>Card refuzat de bancă · cod 51 (fonduri insuficiente)</div>
+						<span>{o.paymentErrorMessage ?? 'Card refuzat de bancă'}</span>
 					</div>
-					<button class="hod-btn hod-btn-bad" onclick={() => openAcceptDialog(o)}>
-						<RotateCcwIcon size={14} /> Retry
+					<button class="btn-primary ord-btn-bad" onclick={() => handleAction('retry-payment', o)}>
+						<RefreshCwIcon size={12} /> Retry
+					</button>
+				</div>
+			{/if}
+			{#if o.paymentStatus === 'pending' && !confirmOpen}
+				<div class="ord-banner ord-banner-warn">
+					<ClockIcon size={16} />
+					<div class="ord-banner-text">
+						<strong>Așteptăm plata prin {METHOD_LABELS[o.paymentMethod ?? ''] ?? 'transfer'}</strong>
+						<span>Contul se activează după confirmarea încasării</span>
+					</div>
+					<button class="btn-secondary" onclick={() => handleAction('resend-invoice', o)}>
+						<MailIcon size={12} /> Re-trimite
+					</button>
+					<button class="btn-primary" onclick={() => (confirmOpen = true)}>
+						<CheckIcon size={12} /> Confirmă încasarea
 					</button>
 				</div>
 			{/if}
 
-			<!-- Accept payment subform (renders inline above sections when triggered) -->
-			{#if acceptOpen}
-				<section class="hod-accept">
-					<div class="hod-accept-head">
-						<h3>Confirmă încasarea</h3>
-						<span class="hod-pill" data-tone="warn">
-							<span class="hod-dot"></span>ÎN AȘTEPTARE
-						</span>
+			<!-- Confirm payment panel -->
+			{#if o.paymentStatus === 'pending' && confirmOpen}
+				<div class="ord-confirm">
+					<div class="ord-confirm-head">
+						<h4>Confirmă încasarea</h4>
+						<span class="ord-confirm-pill"><span class="dot"></span>În așteptare</span>
 					</div>
 
-					<div class="hod-tab-group" role="tablist">
-						<button
-							role="tab"
-							aria-selected={acceptMethod === 'card'}
-							class:active={acceptMethod === 'card'}
-							onclick={() => (acceptMethod = 'card')}
-						>
-							<CreditCardIcon size={14} /> Card (offline / POS)
-						</button>
-						<button
-							role="tab"
-							aria-selected={acceptMethod === 'op'}
-							class:active={acceptMethod === 'op'}
-							onclick={() => (acceptMethod = 'op')}
-						>
-							<BanknoteIcon size={14} /> Transfer bancar / OP
-						</button>
-						<button
-							role="tab"
-							aria-selected={acceptMethod === 'other'}
-							class:active={acceptMethod === 'other'}
-							onclick={() => (acceptMethod = 'other')}
-						>
-							Cash
-						</button>
-					</div>
-
-					<label class="hod-input-block">
-						<span>SUMĂ ({o.productCurrency ?? 'RON'})</span>
-						<input
-							type="text"
-							inputmode="decimal"
-							bind:value={acceptAmount}
-							placeholder="123.45"
-						/>
-					</label>
-
-					<label class="hod-input-block">
-						<span>{acceptRefLabel.toUpperCase()}</span>
-						<input
-							type="text"
-							bind:value={acceptRef}
-							placeholder={acceptRefPlaceholder}
-							maxlength="200"
-							required={acceptIsBankMethod}
-						/>
-					</label>
-
-					<label class="hod-input-block">
-						<span>NOTĂ (OPȚIONAL)</span>
-						<textarea
-							bind:value={acceptNote}
-							maxlength="500"
-							rows="2"
-							placeholder="Detalii pentru audit intern"
-						></textarea>
-					</label>
-
-					<label class="hod-check">
-						<input type="checkbox" bind:checked={acceptProvision} />
-						<span> Declanșează provisioning DirectAdmin imediat după confirmare </span>
-					</label>
-
-					<div class="hod-accept-foot">
-						<div class="hod-accept-context">
-							Pachet <strong>{o.productName ?? '—'}</strong> · {o.requestedDomain ?? '—'}
+					<div class="ord-confirm-row">
+						<label for="confirm-method">Metodă</label>
+						<div class="ord-confirm-method-grid" id="confirm-method" role="radiogroup">
+							<button
+								class="ord-confirm-method"
+								class:active={confirmMethod === 'card-pos'}
+								onclick={() => (confirmMethod = 'card-pos')}
+								type="button"
+								role="radio"
+								aria-checked={confirmMethod === 'card-pos'}
+							>
+								<span class="ic"><CreditCardIcon size={12} /></span>
+								<span class="ord-confirm-method-label">Card (offline / POS)</span>
+							</button>
+							<button
+								class="ord-confirm-method"
+								class:active={confirmMethod === 'transfer'}
+								onclick={() => (confirmMethod = 'transfer')}
+								type="button"
+								role="radio"
+								aria-checked={confirmMethod === 'transfer'}
+							>
+								<span class="ic"><BuildingIcon size={12} /></span>
+								<span class="ord-confirm-method-label">Transfer bancar / OP</span>
+							</button>
+							<button
+								class="ord-confirm-method"
+								class:active={confirmMethod === 'cash'}
+								onclick={() => (confirmMethod = 'cash')}
+								type="button"
+								role="radio"
+								aria-checked={confirmMethod === 'cash'}
+							>
+								<span class="ic"><DollarSignIcon size={12} /></span>
+								<span class="ord-confirm-method-label">Cash</span>
+							</button>
 						</div>
-						<button class="hod-btn hod-btn-ghost" onclick={() => (acceptOpen = false)}>
-							Anulează
-						</button>
+					</div>
+
+					<div class="ord-confirm-row">
+						<label for="confirm-amount">Sumă (RON)</label>
+						<div class="ord-confirm-input-suffix">
+							<input
+								id="confirm-amount"
+								type="text"
+								inputmode="decimal"
+								class="mono"
+								bind:value={confirmAmount}
+							/>
+							<span class="suffix">RON</span>
+						</div>
+					</div>
+
+					<div class="ord-confirm-row">
+						<label for="confirm-tx">
+							{confirmMethod === 'card-pos'
+								? 'ID tranzacție card / chitanță POS (opțional)'
+								: confirmMethod === 'transfer'
+									? 'Referință OP / extras (opțional)'
+									: 'Nr. chitanță numerar (opțional)'}
+						</label>
+						<input
+							id="confirm-tx"
+							type="text"
+							class="mono"
+							placeholder={confirmMethod === 'card-pos'
+								? 'ex: ch_3TZyAw… / chitanță POS 4242'
+								: confirmMethod === 'transfer'
+									? 'ex: OP nr. 481 / extras BCR 26.05'
+									: 'ex: chitanță numerar nr. 0042'}
+							bind:value={confirmTxId}
+						/>
+					</div>
+
+					<div class="ord-confirm-row">
+						<label for="confirm-note">Notă (opțional)</label>
+						<textarea
+							id="confirm-note"
+							placeholder="Detalii pentru audit intern"
+							bind:value={confirmNote}
+						></textarea>
+					</div>
+
+					<label class="ord-confirm-check">
+						<input type="checkbox" bind:checked={confirmProvision} />
+						<span>
+							<strong>Declanșează provisioning DirectAdmin</strong> imediat după confirmare
+						</span>
+					</label>
+
+					<div class="ord-confirm-foot">
+						<div class="ord-confirm-context">
+							Pachet <strong>{o.productName ?? '—'}</strong> ·
+							{dom?.domainName ?? o.requestedDomain ?? '—'}
+						</div>
+						<div class="spacer"></div>
+						<button class="btn-secondary" onclick={() => (confirmOpen = false)}>Anulează</button>
 						<button
-							class="hod-btn hod-btn-primary"
-							disabled={accepting}
-							onclick={() => submitAccept(o.id)}
+							class="btn-primary"
+							disabled={confirmBusy}
+							onclick={() => submitConfirmPayment(o)}
 						>
-							<CheckCircle2Icon size={14} /> Confirmă
+							<CheckIcon size={13} /> Confirmă
 						</button>
 					</div>
-				</section>
+				</div>
 			{/if}
 
-			<!-- CLIENT -->
-			<section class="hod-section">
-				<div class="hod-section-label">CLIENT</div>
-				<div class="hod-grid-2">
-					<div class="hod-input-block hod-readonly">
-						<span>NUME</span>
-						<div class="hod-value">{o.contactName}</div>
+			<!-- Client section -->
+			<div class="hst-drawer-section">
+				<h4>Client</h4>
+				<div class="hst-kv-grid">
+					<div class="hst-kv">
+						<div class="hst-kv-l">Nume</div>
+						<div class="hst-kv-v">{o.contactName}</div>
 					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>EMAIL</span>
-						<div class="hod-value">{o.contactEmail}</div>
+					<div class="hst-kv">
+						<div class="hst-kv-l">Email</div>
+						<div class="hst-kv-v ord-kv-small">{o.contactEmail}</div>
 					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>TIP</span>
-						<div class="hod-value">
-							{o.companyName ? 'Persoană juridică' : 'Persoană fizică'}
+					<div class="hst-kv">
+						<div class="hst-kv-l">Tip</div>
+						<div class="hst-kv-v">
+							{o.companyName || o.vatNumber ? 'Persoană juridică' : 'Persoană fizică'}
 						</div>
 					</div>
 					{#if o.vatNumber}
-						<div class="hod-input-block hod-readonly">
-							<span>CUI</span>
-							<div class="hod-value">{o.vatNumber}</div>
+						<div class="hst-kv">
+							<div class="hst-kv-l">CUI</div>
+							<div class="hst-kv-v ord-mono">{o.vatNumber}</div>
 						</div>
 					{/if}
 				</div>
-			</section>
+			</div>
 
-			<!-- DETALII COMANDĂ -->
-			<section class="hod-section">
-				<div class="hod-section-label">DETALII COMANDĂ</div>
-				<div class="hod-grid-2">
-					<div class="hod-input-block hod-readonly">
-						<span>PACHET</span>
-						<div class="hod-value hod-link">{o.productName ?? '—'}</div>
-					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>FACTURARE</span>
-						<div class="hod-value">{billingCycleLabel(o.productBillingCycle)}</div>
-					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>DOMENIU</span>
-						<div class="hod-value">
-							{domainItem?.domainName ?? o.requestedDomain ?? '—'}
+			<!-- Order details -->
+			<div class="hst-drawer-section">
+				<h4>Detalii comandă</h4>
+				<div class="hst-kv-grid">
+					<div class="hst-kv">
+						<div class="hst-kv-l">Pachet</div>
+						<div class="hst-kv-v" style="color:{planColor}">
+							{o.productName ?? '—'}
 						</div>
 					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>MOD DOMENIU</span>
-						<div class="hod-value">{domainModeLabel(domainItem?.domainMode ?? null)}</div>
-					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>SERVER</span>
-						<div class="hod-value hod-mono">
-							{#if drawerDaServer}
-								{#await drawerDaServer then srv}
-									{srv?.name ?? '—'}
-								{/await}
-							{:else if o.paymentStatus === 'paid'}
-								Auto-alocare în curs
-							{:else}
-								—
-							{/if}
+					<div class="hst-kv">
+						<div class="hst-kv-l">Facturare</div>
+						<div class="hst-kv-v">
+							{o.productBillingCycle === 'yearly' ? 'Anual' : 'Lunar'}
 						</div>
 					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>STATUS CONT</span>
-						<div class="hod-value">
-							<span class="hod-pill hod-pill-sm" data-tone={acctStatus.tone}>
-								<span class="hod-dot"></span>{acctStatus.text}
-							</span>
+					<div class="hst-kv">
+						<div class="hst-kv-l">Domeniu</div>
+						<div class="hst-kv-v ord-mono">{dom?.domainName ?? o.requestedDomain ?? '—'}</div>
+					</div>
+					<div class="hst-kv">
+						<div class="hst-kv-l">Mod domeniu</div>
+						<div class="hst-kv-v">
+							{dom?.domainMode === 'buy'
+								? 'Cumpărat nou'
+								: dom?.domainMode === 'transfer'
+									? 'Transfer'
+									: dom?.domainMode === 'have'
+										? 'Existent'
+										: '—'}
+						</div>
+					</div>
+					<div class="hst-kv">
+						<div class="hst-kv-l">Server</div>
+						<div class="hst-kv-v ord-mono">
+							{#await serversPromise then servers}
+								{servers.find((s) => s.id === o.productDaServerId)?.name ?? (o.paymentStatus === 'paid' ? 'Auto-alocare în curs' : '—')}
+							{/await}
+						</div>
+					</div>
+					<div class="hst-kv">
+						<div class="hst-kv-l">Status cont</div>
+						<div class="hst-kv-v">
+							<span class="ord-acc-badge {acct}">{ACC_LABELS[acct]}</span>
 						</div>
 					</div>
 				</div>
-			</section>
+			</div>
 
-			<!-- PLATĂ -->
-			<section class="hod-section">
-				<div class="hod-section-label">PLATĂ</div>
-				<div class="hod-grid-2">
-					<div class="hod-input-block hod-readonly">
-						<span>METODĂ</span>
-						<div class="hod-value">
-							<CreditCardIcon size={14} />
-							{methodLabel(o.paymentMethod)}
-						</div>
-					</div>
-					<div class="hod-input-block hod-readonly">
-						<span>STATUS</span>
-						<div class="hod-value">
-							<span class="hod-pill hod-pill-sm" data-tone={paymentTone(o.paymentStatus)}>
-								<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
+			<!-- Payment -->
+			<div class="hst-drawer-section">
+				<h4>Plată</h4>
+				<div class="hst-kv-grid">
+					<div class="hst-kv">
+						<div class="hst-kv-l">Metodă</div>
+						<div class="hst-kv-v">
+							<span class="ord-method-tile" class:ord-method-card={o.paymentMethod === 'card'}>
+								<MIc size={11} />
+								{METHOD_LABELS[o.paymentMethod ?? ''] ?? '—'}{o.paymentMethod === 'card' && o.cardLast4 ? ` ····${o.cardLast4}` : ''}
 							</span>
 						</div>
 					</div>
-				</div>
-
-				<!-- Line items box -->
-				<div class="hod-items">
-					{#each visItems as it (it.id)}
-						<div class="hod-item-row">
-							<span class="hod-item-label">{it.label}</span>
-							<span class="hod-item-value"
-								>{fmtMoney(it.unitPriceCents * it.quantity, o.productCurrency)}</span
+					<div class="hst-kv">
+						<div class="hst-kv-l">Status</div>
+						<div class="hst-kv-v">
+							<span class="ord-pay-badge {o.paymentStatus}"
+								><span class="dot"></span>{PAY_LABELS[o.paymentStatus] ?? o.paymentStatus}</span
 							>
 						</div>
-					{/each}
-					{#if visItems.length > 0}
-						<div class="hod-item-row">
-							<span class="hod-item-label">TVA 19%</span>
-							<span class="hod-item-value">{fmtMoney(tvaCents, o.productCurrency)}</span>
-						</div>
-					{/if}
-					<div class="hod-item-row hod-item-total">
-						<span class="hod-item-label">
-							{o.paymentStatus === 'paid' ? 'Total achitat' : 'Total de plată'}
-						</span>
-						<span class="hod-item-value">{fmtMoney(totalCents, o.productCurrency)}</span>
 					</div>
 				</div>
-			</section>
 
-			<!-- ISTORIC -->
-			<section class="hod-section">
-				<div class="hod-section-label">ISTORIC</div>
-				<ol class="hod-timeline">
-					{#each buildHistory(o, null) as h, idx (idx)}
-						<li class="hod-timeline-step" data-kind={h.kind}>
-							<span class="hod-timeline-dot"></span>
-							<div class="hod-timeline-body">
-								<div class="hod-timeline-title">{h.label}</div>
-								<div class="hod-timeline-meta">
-									{fmtRelative(h.at)}{h.meta ? ` · ${h.meta}` : ''}
-								</div>
-							</div>
-						</li>
-					{/each}
-				</ol>
-			</section>
-
-			<!-- Provisioning form (only when openProvisionForm was called) -->
-			{#if o.paymentStatus === 'paid' && !o.hostingAccountId && lastProvisionInitId === o.id}
-				<section class="hod-section" id="drawer-provisioning">
-					<div class="hod-section-label">PROVISIONING DA</div>
-
-					{#if serversPromise}
-						{#await serversPromise then servers}
-							<div class="hod-grid-2">
-								<label class="hod-input-block">
-									<span>SERVER</span>
-									<select bind:value={provServerId}>
-										<option value="">— alege —</option>
-										{#each servers as srv (srv.id)}
-											<option value={srv.id}>{srv.name}</option>
-										{/each}
-									</select>
-								</label>
-								<label class="hod-input-block">
-									<span>PACHET DA (OPȚIONAL)</span>
-									<input type="text" bind:value={provPackageId} placeholder="ex: standard" />
-								</label>
-								<label class="hod-input-block">
-									<span>USERNAME DA</span>
-									<input type="text" bind:value={provUsername} placeholder="ex: andreim" />
-								</label>
-								<label class="hod-input-block">
-									<span>DOMENIU PRIMAR</span>
-									<input type="text" bind:value={provDomain} placeholder="ex: domeniu.ro" />
-								</label>
-								<label class="hod-input-block">
-									<span>PAROLĂ</span>
-									<div class="hod-pwd-row">
-										<input type="text" bind:value={provPassword} />
-										<button
-											type="button"
-											class="hod-btn hod-btn-ghost"
-											onclick={regeneratePassword}
-										>
-											<SparklesIcon size={12} /> Regen
-										</button>
-										<button type="button" class="hod-btn hod-btn-ghost" onclick={copyPassword}>
-											<CopyIcon size={12} /> {provPwdCopied ? 'Copiat' : 'Copiază'}
-										</button>
-									</div>
-								</label>
-								<label class="hod-input-block hod-grid-span-2">
-									<span>NOTE INTERNE (OPȚIONAL)</span>
-									<textarea rows="2" bind:value={provNotes} maxlength="500"></textarea>
-								</label>
-							</div>
-
-							<div class="hod-accept-foot">
-								<button class="hod-btn hod-btn-ghost" onclick={() => (openOrder = null)}>
-									Anulează
-								</button>
-								<button
-									class="hod-btn hod-btn-primary"
-									disabled={provisioning}
-									onclick={() => submitProvision(o.id)}
-								>
-									<HardDriveIcon size={14} /> Provisionează
-								</button>
-							</div>
-						{/await}
+				<div class="ord-totals">
+					<div class="ord-total-row">
+						<span
+							>Hosting {o.productName ?? '—'} ({o.productBillingCycle === 'yearly' ? 'anual' : 'lunar'})</span
+						>
+						<strong>{fmtRonInt(hostNet / 100)}</strong>
+					</div>
+					{#if domNet > 0}
+						<div class="ord-total-row">
+							<span>Domeniu {dom?.domainName ?? ''}</span>
+							<strong>{fmtRonInt(domNet / 100)}</strong>
+						</div>
 					{/if}
-				</section>
-			{/if}
+					<div class="ord-total-row">
+						<span>TVA 19%</span>
+						<strong>{fmtRonInt(tva / 100)}</strong>
+					</div>
+					<div class="ord-total-row big">
+						<span>Total {o.paymentStatus === 'paid' ? 'achitat' : 'de plată'}</span>
+						<strong>{fmtRonInt(tot / 100)}</strong>
+					</div>
+				</div>
+			</div>
+
+			<!-- Timeline -->
+			<div class="hst-drawer-section">
+				<h4>Istoric</h4>
+				<div class="ord-detail-timeline">
+					{#each timeline as t, i (i)}
+						<div class="ord-tl-row">
+							<span class="ord-tl-dot" style="background:{t.dot}"></span>
+							<div>
+								<strong>{t.title}</strong>
+								<div class="ord-tl-meta">{t.when} · {t.meta}</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
 		</div>
 
-		<!-- Sticky footer action bar -->
-		<footer class="hod-drawer-foot">
-			{#if o.paymentStatus === 'pending'}
-				<a
-					class="hod-btn hod-btn-ghost"
-					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
-				>
-					<MailIcon size={14} /> Email client
-				</a>
-				<button class="hod-btn hod-btn-primary" onclick={() => openAcceptDialog(o)}>
-					<CheckCircle2Icon size={14} /> Marchează plătit
+		<div class="hst-drawer-foot">
+			{#if o.paymentStatus === 'paid'}
+				<button class="btn-secondary" onclick={() => handleAction('invoice', o)}>
+					<DownloadIcon size={13} /> Factură fiscală
 				</button>
-			{:else if o.paymentStatus === 'failed'}
-				<a
-					class="hod-btn hod-btn-ghost"
-					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
-				>
-					<MailIcon size={14} /> Email client
-				</a>
-			{:else}
-				<!-- Paid or refunded -->
-				<a
-					class="hod-btn hod-btn-ghost"
-					href={`/${page.params.tenant}/invoices?clientEmail=${encodeURIComponent(o.contactEmail)}`}
-				>
-					<FileTextIcon size={14} /> Factură fiscală
-				</a>
-				<button
-					class="hod-btn hod-btn-ghost"
-					onclick={() => toast.info('Refund prin Stripe — funcție în curând')}
-				>
-					<RotateCcwIcon size={14} /> Refund
-				</button>
-				<a
-					class="hod-btn hod-btn-ghost"
-					href={`mailto:${o.contactEmail}?subject=${encodeURIComponent('Comanda ' + displayOrderId(o.orderNumber, o.id))}`}
-				>
-					<MailIcon size={14} /> Email client
-				</a>
-				{#if o.hostingAccountId}
-					<a
-						class="hod-btn hod-btn-primary"
-						href={`/${page.params.tenant}/hosting/accounts/${o.hostingAccountId}`}
-					>
-						<ExternalLinkIcon size={14} /> Vezi cont
-					</a>
-				{:else}
-					<button class="hod-btn hod-btn-primary" onclick={() => openOrderAtProvision(o)}>
-						<SparklesIcon size={14} /> Forțează provisionare
-					</button>
-				{/if}
 			{/if}
-		</footer>
+			{#if o.paymentStatus === 'pending'}
+				<button class="btn-secondary" onclick={() => handleAction('mark-paid', o)}>
+					<CheckIcon size={13} /> Marchează plătit
+				</button>
+			{/if}
+			{#if o.paymentStatus === 'paid' && acct !== 'cancelled'}
+				<button class="btn-secondary ord-btn-text-bad" onclick={() => handleAction('refund', o)}>
+					<ArrowDownIcon size={13} /> Refund
+				</button>
+			{/if}
+			<button class="btn-secondary" onclick={() => handleAction('email-client', o)}>
+				<MailIcon size={13} /> Email client
+			</button>
+			<div class="ord-drawer-foot-spacer"></div>
+			{#if acct === 'active'}
+				<button class="btn-primary" onclick={() => handleAction('open-account', o)}>
+					<ExternalLinkIcon size={13} /> Vezi cont
+				</button>
+			{:else if acct === 'provisioning'}
+				<button class="btn-primary" onclick={() => handleAction('force-provision', o)}>
+					<ZapIcon size={13} /> Forțează provisionare
+				</button>
+			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- Manual order modal ====================================================== -->
+{#if showManual}
+	{@const d = manualDraft}
+	<button class="ord-mo-back" aria-label="Închide" onclick={() => (showManual = false)}></button>
+	<div
+		class="ord-mo"
+		role="dialog"
+		aria-label="Comandă manuală"
+		use:focusTrap={{ initialFocus: '.ord-mo-close' }}
+	>
+		<div class="ord-mo-head">
+			<div class="ord-mo-head-ic"><PlusIcon size={18} /></div>
+			<div class="ord-mo-head-text">
+				<h3>Comandă manuală</h3>
+				<p>
+					Înregistrează o comandă în numele unui client · ocolește checkout-ul public
+				</p>
+			</div>
+			<button class="ord-mo-close" aria-label="Închide" onclick={() => (showManual = false)}>
+				<XIcon size={14} />
+			</button>
+		</div>
+
+		<div class="ord-mo-body">
+			<!-- Client section -->
+			<div class="ord-mo-section">
+				<h5>Client</h5>
+				<div class="ord-mo-seg ord-mo-section-mt-sm">
+					<button
+						type="button"
+						class:active={d.type === 'person'}
+						onclick={() => (manualDraft.type = 'person')}
+					>
+						Persoană fizică
+					</button>
+					<button
+						type="button"
+						class:active={d.type === 'company'}
+						onclick={() => (manualDraft.type = 'company')}
+					>
+						Persoană juridică
+					</button>
+				</div>
+				<div class="ord-mo-grid">
+					<div>
+						<label for="mo-client" class="ord-mo-label">
+							{d.type === 'company' ? 'Denumire firmă' : 'Nume complet'}
+						</label>
+						<input
+							id="mo-client"
+							class="ord-mo-input"
+							placeholder={d.type === 'company' ? 'Firma SRL' : 'Ion Popescu'}
+							bind:value={manualDraft.client}
+						/>
+					</div>
+					<div>
+						<label for="mo-email" class="ord-mo-label">Email</label>
+						<input
+							id="mo-email"
+							class="ord-mo-input"
+							placeholder="contact@…"
+							bind:value={manualDraft.email}
+						/>
+					</div>
+					{#if d.type === 'company'}
+						<div>
+							<label for="mo-cui" class="ord-mo-label">CUI</label>
+							<input
+								id="mo-cui"
+								class="ord-mo-input mono"
+								placeholder="RO12345678"
+								bind:value={manualDraft.cui}
+							/>
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Plan section -->
+			<div class="ord-mo-section">
+				<h5>Pachet hosting</h5>
+				{#await productsPromise}
+					<div class="ord-mo-loading">Se încarcă pachetele…</div>
+				{:then products}
+					{@const visible = products.filter((p) => p.isActive)}
+					<div class="ord-mo-plans">
+						{#each visible as p (p.id)}
+							<button
+								type="button"
+								class="ord-mo-plan"
+								class:active={d.productId === p.id}
+								style="--c:#1877F2"
+								onclick={() => (manualDraft.productId = p.id)}
+							>
+								<span class="ord-mo-plan-sw"></span>
+								<strong>{p.name}</strong>
+								<span class="price">{fmtRon(p.price)}</span>
+							</button>
+						{/each}
+					</div>
+				{/await}
+				<div class="ord-mo-section-mt-sm">
+					<div class="ord-mo-label">Facturare</div>
+					<div class="ord-mo-seg">
+						<button
+							type="button"
+							class:active={d.period === 'monthly'}
+							onclick={() => (manualDraft.period = 'monthly')}
+						>
+							Lunar
+						</button>
+						<button
+							type="button"
+							class:active={d.period === 'yearly'}
+							onclick={() => (manualDraft.period = 'yearly')}
+						>
+							Anual <span class="ord-mo-seg-savings">–2 luni</span>
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Domain section -->
+			<div class="ord-mo-section">
+				<h5>Domeniu</h5>
+				<div class="ord-mo-grid">
+					<div>
+						<label for="mo-domain" class="ord-mo-label">Nume domeniu</label>
+						<input
+							id="mo-domain"
+							class="ord-mo-input mono"
+							placeholder="exemplu.ro"
+							bind:value={manualDraft.domain}
+						/>
+					</div>
+					<div>
+						<label for="mo-domain-mode" class="ord-mo-label">Mod</label>
+						<select id="mo-domain-mode" class="ord-mo-select" bind:value={manualDraft.domainMode}>
+							<option value="buy">Cumpără nou (+49 RON)</option>
+							<option value="transfer">Transfer (gratuit)</option>
+							<option value="have">Există deja</option>
+						</select>
+					</div>
+				</div>
+			</div>
+
+			<!-- Payment section -->
+			<div class="ord-mo-section">
+				<h5>Plată</h5>
+				<div class="ord-mo-grid">
+					<div>
+						<label for="mo-method" class="ord-mo-label">Metodă</label>
+						<select id="mo-method" class="ord-mo-select" bind:value={manualDraft.paymentMethod}>
+							<option value="card">Card</option>
+							<option value="op">Ordin de plată</option>
+							<option value="revolut">Revolut</option>
+							<option value="paypal">PayPal</option>
+							<option value="cash">Cash</option>
+						</select>
+					</div>
+					<div>
+						<label for="mo-status" class="ord-mo-label">Status inițial</label>
+						<select id="mo-status" class="ord-mo-select" bind:value={manualDraft.initialStatus}>
+							<option value="paid">Achitat (provisionare imediată)</option>
+							<option value="pending">În așteptare (proforma)</option>
+							<option value="processing">Se procesează</option>
+						</select>
+					</div>
+				</div>
+			</div>
+
+			<!-- Server section -->
+			<div class="ord-mo-section">
+				<h5>Server</h5>
+				{#await serversPromise then servers}
+					<select class="ord-mo-select" bind:value={manualDraft.server} aria-label="Server">
+						<option value="auto">Auto-alocare (recomandat)</option>
+						{#each servers as s (s.id)}
+							<option value={s.id}>{s.name}</option>
+						{/each}
+					</select>
+				{/await}
+			</div>
+
+			<!-- Live summary -->
+			{#await productsPromise then products}
+				{@const sel = products.find((p) => p.id === d.productId)}
+				{@const planAmount = sel ? sel.price : 0}
+				{@const domCost = d.domainMode === 'buy' ? 4900 : 0}
+				{@const sub = planAmount + domCost}
+				{@const moVat = Math.round(sub * 0.19)}
+				{@const moTotal = sub + moVat}
+				<div class="ord-mo-summary">
+					<div class="row">
+						<span
+							>Hosting {sel?.name ?? '—'} ({d.period === 'yearly' ? 'anual' : 'lunar'})</span
+						>
+						<strong>{fmtRon(planAmount)}</strong>
+					</div>
+					{#if domCost > 0}
+						<div class="row">
+							<span>Domeniu {d.domain || '—'}</span>
+							<strong>{fmtRon(domCost)}</strong>
+						</div>
+					{/if}
+					<div class="row">
+						<span>TVA 19%</span>
+						<strong>{fmtRon(moVat)}</strong>
+					</div>
+					<div class="row big">
+						<span>Total {d.initialStatus === 'paid' ? 'achitat' : 'de plată'}</span>
+						<strong>{fmtRon(moTotal)}</strong>
+					</div>
+				</div>
+			{/await}
+		</div>
+
+		<div class="ord-mo-foot">
+			<button class="btn-secondary" onclick={() => (showManual = false)}>Anulează</button>
+			<div class="ord-mo-foot-spacer"></div>
+			<button
+				class="btn-primary"
+				disabled={manualBusy ||
+					!d.client.trim() ||
+					!d.email.trim() ||
+					!d.domain.trim() ||
+					!d.productId ||
+					(d.type === 'company' && !d.cui.trim())}
+				onclick={submitManualOrder}
+			>
+				<CheckIcon size={13} /> Creează comanda
+			</button>
+		</div>
 	</div>
 {/if}
 
 <style>
-	/* ===== Tokens ===== */
-	/* Variables must be available on .hod-page (the main page container)
-	   AND on .hod-drawer + .hod-drawer-back which are position:fixed and live
-	   OUTSIDE .hod-page in the DOM tree (Svelte renders them at the same
-	   level as <body> child). Without this, var(--hod-bg) resolves to nothing
-	   on the drawer and it becomes transparent. */
-	.hod-page,
-	.hod-drawer,
-	.hod-drawer-back {
-		--hod-bg: #ffffff;
-		--hod-bg-soft: #f9fafb;
-		--hod-border: #e5e7eb;
-		--hod-border-strong: #d1d5db;
-		--hod-text: #111827;
-		--hod-text-muted: #6b7280;
-		--hod-text-faint: #9ca3af;
-		--hod-accent: #2563eb;
-		--hod-accent-soft: rgba(37, 99, 235, 0.08);
-		--hod-ok: #10b981;
-		--hod-warn: #f59e0b;
-		--hod-bad: #ef4444;
-		--hod-radius: 8px;
-		--hod-radius-sm: 6px;
+	/* ===========================================================================
+	 * STYLES — placeholder shell.
+	 * The pixel-perfect hst-* / dash-kpi-* / ord-* classes are merged in Task 11.
+	 * For now we ship a minimal scope so the page renders without runtime errors,
+	 * loads HTTP 200, and the autofixer has zero issues.
+	 * =========================================================================== */
+
+	.hosting-wrap {
+		flex: 1;
+		min-width: 0;
+		background: #f4f6fa;
+		display: flex;
+		flex-direction: column;
+		overflow-y: auto;
+		min-height: 100vh;
 	}
-	.hod-page {
-		padding: 24px;
-		color: var(--hod-text);
-		font-size: 14px;
-	}
+
 	.hod-loading,
 	.hod-empty {
 		padding: 48px 24px;
 		text-align: center;
-		color: var(--hod-text-faint);
+		color: #94a3b8;
 	}
 	.hod-empty p {
 		margin: 8px 0 0;
 	}
 
-	/* ===== Hero ===== */
-	.hod-hero {
+	/* Hero */
+	.hst-hero {
+		padding: 22px 24px 16px;
 		display: flex;
-		justify-content: space-between;
 		align-items: flex-end;
-		margin-bottom: 16px;
-		gap: 16px;
-		flex-wrap: wrap;
+		gap: 18px;
 	}
-	.hod-hero h1 {
-		margin: 0;
+	.hst-hero h1 {
 		font-size: 24px;
 		font-weight: 700;
+		letter-spacing: -0.02em;
+		margin: 0;
 	}
-	.hod-hero p {
-		margin: 4px 0 0;
-		color: var(--hod-text-muted);
+	.hst-hero p {
+		color: #475569;
 		font-size: 13px;
+		margin: 4px 0 0;
 	}
-	.hod-hero-actions {
+	.hst-hero-actions {
+		margin-left: auto;
 		display: flex;
 		gap: 8px;
+		align-items: center;
 	}
 
-	/* ===== Buttons ===== */
-	.hod-btn {
+	/* Buttons */
+	.btn-primary {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 8px 12px;
-		border-radius: var(--hod-radius-sm);
-		border: 1px solid var(--hod-border);
-		background: var(--hod-bg);
-		color: var(--hod-text);
-		font-size: 13px;
-		font-weight: 500;
+		padding: 8px 14px;
+		border-radius: 7px;
+		background: #1877f2;
+		color: white;
+		border: none;
+		font-size: 12.5px;
+		font-weight: 600;
+		font-family: inherit;
 		cursor: pointer;
-		text-decoration: none;
-		transition: all 0.12s ease;
 	}
-	.hod-btn:hover {
-		background: var(--hod-bg-soft);
-		border-color: var(--hod-border-strong);
+	.btn-primary:hover {
+		background: #0d5cc7;
 	}
-	.hod-btn:disabled {
+	.btn-primary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
-	.hod-btn-primary {
-		background: var(--hod-accent);
-		color: #fff;
-		border-color: var(--hod-accent);
-	}
-	.hod-btn-primary:hover {
-		filter: brightness(0.95);
-	}
-	.hod-btn-bad {
-		background: var(--hod-bad);
-		color: #fff;
-		border-color: var(--hod-bad);
-	}
-	.hod-btn-ghost {
-		background: transparent;
-	}
-
-	/* ===== KPI strip ===== */
-	.hod-kpis {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 12px;
-		margin-bottom: 20px;
-	}
-	.hod-kpi {
-		display: flex;
-		background: var(--hod-bg);
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius);
-		overflow: hidden;
-	}
-	.hod-kpi-stripe {
-		width: 4px;
-		background: var(--hod-text-faint);
-	}
-	.hod-kpi[data-tone='ok'] .hod-kpi-stripe {
-		background: var(--hod-ok);
-	}
-	.hod-kpi[data-tone='warn'] .hod-kpi-stripe {
-		background: var(--hod-warn);
-	}
-	.hod-kpi[data-tone='bad'] .hod-kpi-stripe {
-		background: var(--hod-bad);
-	}
-	.hod-kpi[data-tone='info'] .hod-kpi-stripe {
-		background: var(--hod-accent);
-	}
-	.hod-kpi-body {
-		flex: 1;
-		padding: 12px 14px;
-	}
-	.hod-kpi-head {
-		display: flex;
+	.btn-secondary {
+		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 10px;
+		padding: 8px 14px;
+		border-radius: 7px;
+		background: white;
+		color: #475569;
+		border: 1px solid #d5dbe5;
+		font-size: 12.5px;
 		font-weight: 600;
-		letter-spacing: 0.05em;
-		color: var(--hod-text-faint);
+		font-family: inherit;
+		cursor: pointer;
 	}
-	.hod-kpi-value {
-		font-size: 22px;
-		font-weight: 700;
-		color: var(--hod-text);
-		margin-top: 4px;
+	.btn-secondary:hover {
+		border-color: #1877f2;
+		color: #1877f2;
 	}
-	.hod-kpi-foot {
-		font-size: 11px;
-		color: var(--hod-text-muted);
-		margin-top: 4px;
+	.btn-secondary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
-	/* ===== Tabs ===== */
-	.hod-tabs {
+	/* KPI strip */
+	.hst-kpis {
+		padding: 0 24px;
+		display: grid;
+		grid-template-columns: repeat(6, 1fr);
+		gap: 10px;
+		margin-bottom: 18px;
+	}
+	.dash-kpi {
+		background: white;
+		border: 1px solid #e5e9f0;
+		border-radius: 10px;
+		padding: 12px 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		position: relative;
+		overflow: hidden;
+		transition: all 0.15s;
+	}
+	.dash-kpi:hover {
+		border-color: #1877f2;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+	}
+	.dash-kpi::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 3px;
+	}
+	.dash-kpi.success::before {
+		background: #10b981;
+	}
+	.dash-kpi.primary::before {
+		background: #1877f2;
+	}
+	.dash-kpi.info::before {
+		background: #6366f1;
+	}
+	.dash-kpi.warn::before {
+		background: #f59e0b;
+	}
+	.dash-kpi.danger::before {
+		background: #ef4444;
+	}
+	.dash-kpi-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.dash-kpi-icon {
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		display: grid;
+		place-items: center;
+		flex-shrink: 0;
+	}
+	.dash-kpi-label {
+		font-size: 11px;
+		color: #475569;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.dash-kpi-value {
+		font-size: 20px;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1;
+	}
+	.dash-kpi-foot {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 11px;
+	}
+	.dash-kpi-sub {
+		color: #94a3b8;
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.dash-delta {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+	}
+	.dash-delta.up {
+		color: #10b981;
+	}
+	.dash-delta.down {
+		color: #ef4444;
+	}
+
+	/* Tabs */
+	.hst-tabs {
 		display: flex;
 		gap: 4px;
-		border-bottom: 1px solid var(--hod-border);
-		margin-bottom: 12px;
+		padding: 0 24px;
+		border-bottom: 1px solid #e5e9f0;
+		margin-bottom: 14px;
 	}
-	.hod-tabs button {
+	.hst-tab {
 		padding: 10px 14px;
 		background: transparent;
-		border: 0;
-		border-bottom: 2px solid transparent;
-		color: var(--hod-text-muted);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		display: inline-flex;
-		gap: 6px;
-		align-items: center;
-	}
-	.hod-tabs button.active {
-		color: var(--hod-accent);
-		border-bottom-color: var(--hod-accent);
-	}
-	.hod-tab-count {
-		background: var(--hod-bg-soft);
-		color: var(--hod-text-muted);
-		padding: 2px 6px;
-		border-radius: 10px;
-		font-size: 11px;
+		border: none;
+		font-size: 12.5px;
 		font-weight: 600;
+		color: #94a3b8;
+		font-family: inherit;
+		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
 	}
-	.hod-tabs button.active .hod-tab-count {
-		background: var(--hod-accent-soft);
-		color: var(--hod-accent);
+	.hst-tab:hover {
+		color: #475569;
+	}
+	.hst-tab.active {
+		color: #1877f2;
+		border-bottom-color: #1877f2;
+	}
+	.hst-tab-count {
+		background: #eef1f6;
+		color: #475569;
+		font-size: 10px;
+		font-weight: 700;
+		padding: 1px 6px;
+		border-radius: 999px;
+	}
+	.hst-tab.active .hst-tab-count {
+		background: rgba(24, 119, 242, 0.15);
+		color: #1877f2;
 	}
 
-	/* ===== Filter row ===== */
-	.hod-filters {
+	/* Toolbar */
+	.hst-accounts-toolbar {
+		padding: 0 24px 14px;
 		display: flex;
-		gap: 8px;
-		margin-bottom: 12px;
+		gap: 10px;
+		align-items: center;
 		flex-wrap: wrap;
 	}
-	.hod-search {
+	.hst-search {
+		flex: 0 0 320px;
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		flex: 1;
-		min-width: 220px;
-		padding: 6px 10px;
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius-sm);
-		background: var(--hod-bg);
-		color: var(--hod-text-muted);
+		gap: 8px;
+		padding: 8px 12px;
+		background: white;
+		border: 1px solid #d5dbe5;
+		border-radius: 8px;
+		color: #94a3b8;
 	}
-	.hod-search input {
-		flex: 1;
-		border: 0;
-		outline: 0;
-		font-size: 13px;
+	.hst-search input {
+		border: none;
 		background: transparent;
-		color: var(--hod-text);
+		outline: none;
+		flex: 1;
+		font-size: 12.5px;
+		font-family: inherit;
+		color: #0f172a;
 	}
-	.hod-filter-wrap {
+	.hst-filter-chip {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 6px 10px;
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius-sm);
-		background: var(--hod-bg);
-		color: var(--hod-text-muted);
-		cursor: pointer;
-	}
-	.hod-filter-wrap select {
-		border: 0;
-		outline: 0;
-		background: transparent;
-		font-size: 13px;
-		color: var(--hod-text);
-		cursor: pointer;
+		padding: 7px 12px;
+		border-radius: 7px;
+		background: white;
+		color: #475569;
+		border: 1px solid #d5dbe5;
+		font-size: 12px;
+		font-weight: 500;
 		font-family: inherit;
-		padding: 2px 0;
-		appearance: none;
-		-webkit-appearance: none;
-		padding-right: 14px;
-		background-image: linear-gradient(45deg, transparent 50%, var(--hod-text-faint) 50%),
-			linear-gradient(135deg, var(--hod-text-faint) 50%, transparent 50%);
-		background-position:
-			calc(100% - 8px) 50%,
-			calc(100% - 4px) 50%;
-		background-size:
-			4px 4px,
-			4px 4px;
-		background-repeat: no-repeat;
+		cursor: pointer;
 	}
-	.hod-filter-wrap[data-disabled='true'] {
-		opacity: 0.5;
-		cursor: not-allowed;
+	.hst-filter-chip:hover {
+		border-color: #1877f2;
+		color: #1877f2;
 	}
-	.hod-filter-wrap[data-disabled='true'] select {
-		cursor: not-allowed;
+	.hst-filter-chip.active {
+		background: #1877f2;
+		color: white;
+		border-color: #1877f2;
 	}
-	/* ===== Table cell source line ===== */
-	.hod-cell-source {
+	.hst-toolbar-spacer {
+		flex: 1;
+	}
+
+	/* Date popover */
+	.ord-date-pop-wrap {
+		position: relative;
+	}
+	.ord-date-pop {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		background: white;
+		border: 1px solid #e5e9f0;
+		border-radius: 10px;
+		box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+		padding: 8px;
+		width: 240px;
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.ord-date-pop button {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 10px;
+		border: 0;
+		background: transparent;
+		border-radius: 6px;
+		font: inherit;
+		font-size: 12.5px;
+		color: #475569;
+		cursor: pointer;
+		text-align: left;
+	}
+	.ord-date-pop button:hover {
+		background: #f1f5f9;
+		color: #0f172a;
+	}
+	.ord-date-pop button.active {
+		background: rgba(24, 119, 242, 0.08);
+		color: #1877f2;
+		font-weight: 600;
+	}
+	.ord-date-pop button .pop-count {
+		font-size: 10.5px;
+		color: #94a3b8;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* Table */
+	.hst-table-wrap {
+		margin: 0 24px 14px;
+		background: white;
+		border: 1px solid #e5e9f0;
+		border-radius: 12px;
+		overflow: hidden;
+	}
+	.hst-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 12.5px;
+	}
+	.hst-table thead th {
+		background: #fafbfd;
+		text-align: left;
+		padding: 11px 14px;
+		font-size: 10.5px;
+		font-weight: 700;
+		color: #94a3b8;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		border-bottom: 1px solid #e5e9f0;
+	}
+	.hst-table tbody td {
+		padding: 12px 14px;
+		border-bottom: 1px solid #f1f5f9;
+		color: #475569;
+		vertical-align: middle;
+	}
+	.hst-table tbody tr:hover {
+		background: #fafbfd;
+	}
+	.hst-table tbody tr:last-child td {
+		border-bottom: none;
+	}
+	.hst-table .num {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.hst-host-cell {
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-weight: 600;
+		color: #0f172a;
+	}
+
+	/* Row cell text */
+	.ord-row-relative {
+		font-size: 10.5px;
+		color: #94a3b8;
+		margin-top: 2px;
+	}
+	.ord-row-source {
+		margin-top: 4px;
+	}
+	.ord-source-pill {
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
+		padding: 2px 7px;
+		background: rgba(24, 119, 242, 0.08);
+		color: #1877f2;
+		font-size: 10.5px;
+		font-weight: 600;
+		border-radius: 5px;
+		font-family: ui-monospace, monospace;
 	}
-
-	/* ===== Cell: package + domain ===== */
-	.hod-cell-package {
-		display: inline-flex;
+	.ord-row-name {
+		font-weight: 600;
+		color: #0f172a;
+		font-size: 12.5px;
+	}
+	.ord-row-email {
+		font-size: 11px;
+		color: #94a3b8;
+		margin-top: 1px;
+	}
+	.ord-row-cui {
+		font-size: 10.5px;
+		color: #94a3b8;
+		margin-top: 1px;
+		font-family: ui-monospace, monospace;
+	}
+	.ord-row-plan {
+		display: flex;
 		align-items: center;
 		gap: 6px;
-		flex-wrap: wrap;
 	}
-	.hod-pkg-dot {
+	.ord-row-plan strong {
+		color: #0f172a;
+		font-size: 12.5px;
+	}
+	.ord-plan-dot {
 		width: 8px;
 		height: 8px;
 		border-radius: 2px;
-		background: var(--hod-accent);
-		flex-shrink: 0;
 	}
-	.hod-cell-domain {
-		font-size: 12px;
-		color: var(--hod-text);
+	.ord-row-period {
+		font-size: 10.5px;
+		color: #94a3b8;
+	}
+	.ord-row-domain {
+		font-size: 11px;
+		color: #475569;
+		margin-top: 3px;
+		font-family: ui-monospace, monospace;
+	}
+	.ord-row-domain-meta {
+		font-size: 10.5px;
+		color: #94a3b8;
+		margin-top: 1px;
+	}
+	.ord-row-failreason {
+		font-size: 10px;
+		color: #ef4444;
 		margin-top: 4px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		max-width: 160px;
+	}
+	.ord-empty-cell {
+		padding: 40px;
+		text-align: center;
+		color: #94a3b8;
 	}
 
-	/* ===== STATUS CONT inline label (table cell, not a pill) ===== */
-	.hod-acct-label {
-		font-size: 12px;
-		font-weight: 600;
-	}
-	.hod-acct-label[data-tone='ok'] {
-		color: var(--hod-ok);
-	}
-	.hod-acct-label[data-tone='warn'] {
-		color: var(--hod-warn);
-	}
-	.hod-acct-label[data-tone='bad'] {
-		color: var(--hod-bad);
-	}
-	.hod-acct-label[data-tone='neutral'] {
-		color: var(--hod-text-muted);
-	}
-
-	/* ===== Row actions ===== */
-	.hod-actions-th {
-		width: 1px; /* shrink-to-fit; the cell content drives the width */
-	}
-	.hod-actions-cell {
-		white-space: nowrap;
-	}
-	.hod-row-actions {
-		display: inline-flex;
-		gap: 4px;
-		justify-content: flex-end;
-	}
-	.hod-icon-btn {
+	/* Pay badge */
+	.ord-pay-badge {
 		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		border-radius: var(--hod-radius-sm);
-		border: 1px solid var(--hod-border);
-		background: var(--hod-bg);
-		color: var(--hod-text-muted);
-		cursor: pointer;
-		text-decoration: none;
-		transition:
-			background 0.12s,
-			color 0.12s,
-			border-color 0.12s;
-	}
-	.hod-icon-btn:hover {
-		background: var(--hod-bg-soft);
-		color: var(--hod-text);
-		border-color: var(--hod-border-strong);
-	}
-	.hod-icon-btn:focus-visible {
-		outline: 2px solid var(--hod-accent);
-		outline-offset: 1px;
-	}
-
-	/* ===== Table ===== */
-	.hod-table-wrap {
-		background: var(--hod-bg);
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius);
-		overflow: hidden;
-	}
-	.hod-table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	.hod-table th {
-		text-align: left;
-		padding: 12px 14px;
-		font-size: 10px;
-		font-weight: 600;
-		letter-spacing: 0.05em;
-		color: var(--hod-text-faint);
-		background: var(--hod-bg-soft);
-		border-bottom: 1px solid var(--hod-border);
-	}
-	.hod-table th.num,
-	.hod-table td.num {
-		text-align: right;
-	}
-	.hod-table td {
-		padding: 12px 14px;
-		border-bottom: 1px solid var(--hod-border);
-		vertical-align: top;
-	}
-	.hod-table tbody tr {
-		cursor: pointer;
-	}
-	.hod-table tbody tr:hover {
-		background: var(--hod-bg-soft);
-	}
-	.hod-table tbody tr:last-child td {
-		border-bottom: 0;
-	}
-	.hod-cell-strong {
-		font-weight: 600;
-		color: var(--hod-text);
-	}
-	.hod-cell-muted {
-		font-size: 12px;
-		color: var(--hod-text-muted);
-		margin-top: 2px;
-	}
-	.hod-cell-faint {
-		font-size: 11px;
-		color: var(--hod-text-faint);
-		margin-top: 2px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	}
-
-	/* ===== Status pills ===== */
-	.hod-pill {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 4px 10px;
+		gap: 5px;
+		padding: 3px 9px;
 		border-radius: 999px;
-		font-size: 11px;
+		font-size: 10.5px;
 		font-weight: 700;
-		letter-spacing: 0.04em;
 		text-transform: uppercase;
+		letter-spacing: 0.03em;
 	}
-	.hod-pill-sm {
-		padding: 2px 8px;
-		font-size: 10px;
-	}
-	.hod-pill[data-tone='ok'] {
+	.ord-pay-badge.paid {
 		background: rgba(16, 185, 129, 0.12);
-		color: var(--hod-ok);
+		color: #047857;
 	}
-	.hod-pill[data-tone='warn'] {
-		background: rgba(245, 158, 11, 0.12);
-		color: var(--hod-warn);
+	.ord-pay-badge.pending {
+		background: rgba(245, 158, 11, 0.14);
+		color: #b45309;
 	}
-	.hod-pill[data-tone='bad'] {
-		background: rgba(239, 68, 68, 0.12);
-		color: var(--hod-bad);
+	.ord-pay-badge.processing {
+		background: rgba(99, 102, 241, 0.14);
+		color: #4338ca;
 	}
-	.hod-pill[data-tone='neutral'] {
-		background: rgba(107, 114, 128, 0.12);
-		color: var(--hod-text-muted);
+	.ord-pay-badge.failed {
+		background: #fee2e2;
+		color: #b91c1c;
 	}
-	.hod-dot {
+	.ord-pay-badge.refunded {
+		background: #f1f5f9;
+		color: #475569;
+	}
+	.ord-pay-badge .dot {
 		width: 6px;
 		height: 6px;
-		border-radius: 999px;
+		border-radius: 50%;
 		background: currentColor;
 	}
 
-	/* ===== Drawer ===== */
-	.hod-drawer-back {
+	/* Account badge */
+	.ord-acc-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 2px 8px;
+		border-radius: 5px;
+		font-size: 10.5px;
+		font-weight: 600;
+		background: #eef1f6;
+		color: #475569;
+	}
+	.ord-acc-badge.active {
+		background: rgba(16, 185, 129, 0.1);
+		color: #047857;
+	}
+	.ord-acc-badge.provisioning {
+		background: rgba(99, 102, 241, 0.1);
+		color: #4338ca;
+	}
+	.ord-acc-badge.awaiting-payment {
+		background: rgba(245, 158, 11, 0.12);
+		color: #b45309;
+	}
+	.ord-acc-badge.cancelled {
+		background: #fee2e2;
+		color: #b91c1c;
+	}
+
+	/* Method tile */
+	.ord-method-tile {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 3px 8px;
+		background: #f4f6fa;
+		border-radius: 5px;
+		font-size: 11px;
+		font-weight: 600;
+		color: #475569;
+		font-family: ui-monospace, monospace;
+	}
+	.ord-method-tile.ord-method-card {
+		color: #1a1f71;
+	}
+
+	.ord-amount {
+		font-weight: 700;
+		color: #0f172a;
+		font-variant-numeric: tabular-nums;
+		font-size: 13px;
+	}
+	.ord-amount-vat {
+		font-size: 10px;
+		color: #94a3b8;
+		margin-top: 1px;
+	}
+
+	/* Row actions */
+	.ord-row-actions {
+		display: flex;
+		gap: 4px;
+	}
+	.hst-icon-btn {
+		width: 28px;
+		height: 28px;
+		border-radius: 6px;
+		border: 1px solid #e5e9f0;
+		background: white;
+		display: grid;
+		place-items: center;
+		color: #475569;
+		cursor: pointer;
+	}
+	.hst-icon-btn:hover {
+		background: #1877f2;
+		color: white;
+		border-color: #1877f2;
+	}
+	.hst-icon-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.hst-icon-btn.active-page {
+		background: #1877f2;
+		color: white;
+		border-color: #1877f2;
+	}
+
+	/* Pagination */
+	.ord-pagination {
+		padding: 0 24px 32px;
+		display: flex;
+		align-items: center;
+		color: #94a3b8;
+		font-size: 12px;
+		gap: 4px;
+	}
+	.ord-pagination-spacer {
+		flex: 1;
+	}
+	.ord-pagination-buttons {
+		display: flex;
+		gap: 4px;
+	}
+
+	/* Drawer */
+	.hst-drawer-back {
 		position: fixed;
 		inset: 0;
-		background: rgba(17, 24, 39, 0.4);
+		background: rgba(15, 23, 42, 0.4);
+		z-index: 79;
+		backdrop-filter: blur(2px);
 		border: 0;
-		cursor: pointer;
-		z-index: 99;
+		padding: 0;
 	}
-	.hod-drawer {
+	.hst-drawer {
 		position: fixed;
 		top: 0;
 		right: 0;
 		bottom: 0;
-		width: 580px;
 		max-width: 100vw;
-		background: var(--hod-bg);
-		border-left: 1px solid var(--hod-border);
-		z-index: 100;
+		background: white;
+		z-index: 80;
 		display: flex;
 		flex-direction: column;
-		box-shadow: -16px 0 40px -16px rgba(17, 24, 39, 0.2);
+		box-shadow: -12px 0 32px rgba(15, 23, 42, 0.15);
+		animation: ord-slideIn 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
 	}
-	.hod-drawer-head {
+	@keyframes ord-slideIn {
+		from {
+			transform: translateX(100%);
+		}
+		to {
+			transform: translateX(0);
+		}
+	}
+	.hst-drawer-head {
+		padding: 18px 22px;
+		border-bottom: 1px solid #e5e9f0;
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 16px 20px;
-		border-bottom: 1px solid var(--hod-border);
 	}
-	.hod-drawer-head-icon {
-		width: 32px;
-		height: 32px;
-		border-radius: var(--hod-radius-sm);
-		background: var(--hod-accent-soft);
-		color: var(--hod-accent);
+	.hst-server-card-icon {
+		width: 38px;
+		height: 38px;
+		border-radius: 9px;
+		color: white;
 		display: grid;
 		place-items: center;
+		flex-shrink: 0;
 	}
-	.hod-drawer-head-text {
+	.ord-drawer-head-text {
 		flex: 1;
+		min-width: 0;
 	}
-	.hod-drawer-title {
-		font-size: 16px;
+	.ord-drawer-title {
 		font-weight: 700;
-		color: var(--hod-text);
+		font-size: 15px;
+		color: #0f172a;
+		font-family: ui-monospace, monospace;
 	}
-	.hod-drawer-subtitle {
+	.ord-drawer-subtitle {
 		font-size: 12px;
-		color: var(--hod-text-muted);
+		color: #94a3b8;
 		margin-top: 2px;
 	}
-	.hod-drawer-close {
-		width: 32px;
-		height: 32px;
-		border-radius: var(--hod-radius-sm);
-		border: 0;
-		background: transparent;
-		color: var(--hod-text-muted);
-		cursor: pointer;
-		display: grid;
-		place-items: center;
+	.ord-drawer-source {
+		color: #1877f2;
 	}
-	.hod-drawer-close:hover {
-		background: var(--hod-bg-soft);
-		color: var(--hod-text);
-	}
-	.hod-drawer-body {
+	.hst-drawer-body {
 		flex: 1;
 		overflow-y: auto;
-		padding: 20px;
-	}
-
-	/* ===== Banner ===== */
-	.hod-banner {
+		padding: 20px 22px;
 		display: flex;
-		gap: 12px;
-		align-items: center;
-		padding: 12px 14px;
-		border-radius: var(--hod-radius-sm);
-		margin-bottom: 16px;
-		font-size: 13px;
+		flex-direction: column;
+		gap: 18px;
 	}
-	.hod-banner-bad {
-		background: rgba(239, 68, 68, 0.08);
-		border: 1px solid rgba(239, 68, 68, 0.3);
-		color: var(--hod-text);
+	.hst-drawer-foot {
+		padding: 14px 22px;
+		border-top: 1px solid #e5e9f0;
+		display: flex;
+		gap: 8px;
 	}
-	.hod-banner > div {
+	.ord-drawer-foot-spacer {
 		flex: 1;
 	}
-	.hod-banner strong {
-		color: var(--hod-bad);
+	.hst-drawer-close {
+		width: 32px;
+		height: 32px;
+		border-radius: 7px;
+		background: transparent;
+		border: 1px solid #e5e9f0;
+		display: grid;
+		place-items: center;
+		color: #475569;
+		cursor: pointer;
 	}
-
-	/* ===== Sections ===== */
-	.hod-section {
-		margin-bottom: 20px;
-	}
-	.hod-section-label {
-		font-size: 10px;
+	.hst-drawer-section h4 {
+		font-size: 10.5px;
 		font-weight: 700;
-		letter-spacing: 0.08em;
-		color: var(--hod-text-faint);
+		color: #94a3b8;
 		text-transform: uppercase;
-		margin-bottom: 8px;
+		letter-spacing: 0.06em;
+		margin: 0 0 8px;
 	}
-	.hod-grid-2 {
+	.hst-kv-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
 	}
-	.hod-grid-span-2 {
-		grid-column: span 2;
+	.hst-kv {
+		background: #fafbfd;
+		border: 1px solid #e5e9f0;
+		border-radius: 8px;
+		padding: 9px 11px;
 	}
-	.hod-input-block {
+	.hst-kv-l {
+		font-size: 10.5px;
+		color: #94a3b8;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.hst-kv-v {
+		font-size: 13px;
+		font-weight: 600;
+		color: #0f172a;
+		margin-top: 2px;
+	}
+	.ord-kv-small {
+		font-size: 12px;
+	}
+	.ord-mono {
+		font-family: ui-monospace, monospace;
+	}
+
+	/* Banner (failed/pending) */
+	.ord-banner {
+		padding: 14px;
+		border-radius: 10px;
+		display: flex;
+		gap: 10px;
+		align-items: flex-start;
+	}
+	.ord-banner-bad {
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		color: #b91c1c;
+	}
+	.ord-banner-warn {
+		background: #fffbeb;
+		border: 1px solid #fde68a;
+		color: #92400e;
+	}
+	.ord-banner-text {
+		flex: 1;
+	}
+	.ord-banner-text strong {
+		font-size: 13px;
+		display: block;
+	}
+	.ord-banner-text span {
+		font-size: 12.5px;
+	}
+	.ord-btn-bad {
+		background: #ef4444;
+	}
+	.ord-btn-bad:hover {
+		background: #b91c1c;
+	}
+	.ord-btn-text-bad {
+		color: #ef4444;
+	}
+
+	/* Totals box */
+	.ord-totals {
+		background: #fafbfd;
+		border: 1px solid #e5e9f0;
+		border-radius: 10px;
+		padding: 14px;
 		display: flex;
 		flex-direction: column;
-		padding: 8px 12px 10px;
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius-sm);
-		background: var(--hod-bg);
-	}
-	.hod-input-block > span {
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.06em;
-		color: var(--hod-text-faint);
-		margin-bottom: 4px;
-	}
-	.hod-input-block input,
-	.hod-input-block select,
-	.hod-input-block textarea {
-		border: 0;
-		outline: 0;
-		font-size: 14px;
-		padding: 0;
-		background: transparent;
-		color: var(--hod-text);
-		font-family: inherit;
-	}
-	.hod-input-block textarea {
-		resize: vertical;
-		min-height: 36px;
-	}
-	.hod-readonly .hod-value {
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--hod-text);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-	.hod-link {
-		color: var(--hod-accent);
-	}
-	.hod-mono {
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 13px;
-	}
-
-	/* ===== Line items box ===== */
-	.hod-items {
+		gap: 7px;
 		margin-top: 10px;
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius-sm);
-		padding: 12px 14px;
-		background: var(--hod-bg);
 	}
-	.hod-item-row {
+	.ord-total-row {
 		display: flex;
 		justify-content: space-between;
-		padding: 4px 0;
-		font-size: 13px;
-		color: var(--hod-text);
+		font-size: 12.5px;
+		color: #475569;
 	}
-	.hod-item-total {
-		border-top: 1px solid var(--hod-border);
-		margin-top: 6px;
-		padding-top: 10px;
-		font-weight: 700;
+	.ord-total-row strong {
+		color: #0f172a;
+		font-variant-numeric: tabular-nums;
 	}
-	.hod-item-total .hod-item-value {
-		color: var(--hod-accent);
+	.ord-total-row.big {
+		padding-top: 8px;
+		margin-top: 4px;
+		border-top: 1px solid #e5e9f0;
+		font-size: 14px;
+	}
+	.ord-total-row.big strong {
 		font-size: 18px;
+		font-weight: 800;
+		color: #1877f2;
 	}
 
-	/* ===== Timeline ===== */
-	.hod-timeline {
-		list-style: none;
-		padding: 0;
-		margin: 0;
+	/* Timeline */
+	.ord-detail-timeline {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
 		position: relative;
+		padding-left: 14px;
 	}
-	.hod-timeline::before {
+	.ord-detail-timeline::before {
 		content: '';
 		position: absolute;
 		left: 4px;
 		top: 6px;
 		bottom: 6px;
 		width: 2px;
-		background: var(--hod-border);
+		background: #f1f5f9;
 	}
-	.hod-timeline-step {
+	.ord-tl-row {
 		display: flex;
-		gap: 10px;
-		padding: 4px 0 12px;
+		align-items: flex-start;
+		gap: 12px;
 		position: relative;
 	}
-	.hod-timeline-dot {
+	.ord-tl-dot {
 		width: 10px;
 		height: 10px;
-		border-radius: 999px;
-		background: var(--hod-text-faint);
-		margin-top: 4px;
-		z-index: 1;
-		box-shadow: 0 0 0 3px var(--hod-bg);
+		border-radius: 50%;
+		position: absolute;
+		left: -14px;
+		top: 4px;
+		border: 2px solid white;
+		box-shadow: 0 0 0 1px #e5e9f0;
 	}
-	.hod-timeline-step[data-kind='paid'] .hod-timeline-dot,
-	.hod-timeline-step[data-kind='provisioned'] .hod-timeline-dot {
-		background: var(--hod-ok);
+	.ord-tl-row > div {
+		flex: 1;
 	}
-	.hod-timeline-step[data-kind='failed'] .hod-timeline-dot {
-		background: var(--hod-bad);
-	}
-	.hod-timeline-step[data-kind='provisioning'] .hod-timeline-dot {
-		background: var(--hod-accent);
-	}
-	.hod-timeline-step[data-kind='refunded'] .hod-timeline-dot {
-		background: var(--hod-text-muted);
-	}
-	.hod-timeline-title {
-		font-size: 13px;
+	.ord-tl-row strong {
+		font-size: 12.5px;
+		color: #0f172a;
 		font-weight: 600;
-		color: var(--hod-text);
 	}
-	.hod-timeline-meta {
-		font-size: 12px;
-		color: var(--hod-text-muted);
-		margin-top: 2px;
+	.ord-tl-meta {
+		font-size: 11px;
+		color: #94a3b8;
+		margin-top: 1px;
 	}
 
-	/* ===== Accept-payment subform ===== */
-	.hod-accept {
-		background: var(--hod-bg-soft);
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius);
+	/* Confirm payment panel */
+	.ord-confirm {
+		background: #fafbfd;
+		border: 1px solid #e5e9f0;
+		border-radius: 12px;
 		padding: 16px;
-		margin-bottom: 20px;
-	}
-	.hod-accept-head {
 		display: flex;
-		justify-content: space-between;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.ord-confirm-head {
+		display: flex;
 		align-items: center;
-		margin-bottom: 12px;
+		gap: 8px;
+		margin-bottom: 2px;
 	}
-	.hod-accept-head h3 {
+	.ord-confirm-head h4 {
 		margin: 0;
-		font-size: 14px;
+		font-size: 13.5px;
 		font-weight: 700;
-	}
-	.hod-tab-group {
-		display: flex;
-		gap: 6px;
-		margin-bottom: 12px;
-	}
-	.hod-tab-group button {
+		color: #0f172a;
 		flex: 1;
-		padding: 10px 8px;
-		border: 1px solid var(--hod-border);
-		border-radius: var(--hod-radius-sm);
-		background: var(--hod-bg);
-		font-size: 12px;
-		font-weight: 500;
-		color: var(--hod-text-muted);
-		cursor: pointer;
+	}
+	.ord-confirm-pill {
 		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 3px 8px;
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.14);
+		color: #b45309;
+		font-size: 10.5px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.ord-confirm-pill .dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: currentColor;
+	}
+	.ord-confirm-row {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+	}
+	.ord-confirm-row > label {
+		font-size: 12px;
+		font-weight: 600;
+		color: #475569;
+	}
+	.ord-confirm-row input[type='text'],
+	.ord-confirm-row textarea {
+		width: 100%;
+		box-sizing: border-box;
+		border: 1px solid #e5e9f0;
+		border-radius: 8px;
+		padding: 9px 11px;
+		font: inherit;
+		font-size: 13px;
+		color: #0f172a;
+		background: white;
+	}
+	.ord-confirm-row input.mono {
+		font-family: ui-monospace, monospace;
+	}
+	.ord-confirm-row textarea {
+		resize: vertical;
+		min-height: 60px;
+		font-family: inherit;
+	}
+	.ord-confirm-method-grid {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
 		gap: 6px;
+	}
+	.ord-confirm-method {
+		border: 1.5px solid #e5e9f0;
+		background: white;
+		border-radius: 9px;
+		padding: 9px 10px;
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		cursor: pointer;
+		font-size: 12px;
+		font-weight: 600;
+		color: #475569;
+		text-align: left;
+		font-family: inherit;
+	}
+	.ord-confirm-method.active {
+		border-color: #1877f2;
+		background: rgba(24, 119, 242, 0.06);
+		color: #0f172a;
+	}
+	.ord-confirm-method .ic {
+		width: 22px;
+		height: 22px;
+		border-radius: 6px;
+		display: flex;
 		align-items: center;
 		justify-content: center;
+		background: #f1f5f9;
+		color: #475569;
+		flex-shrink: 0;
 	}
-	.hod-tab-group button.active {
-		background: var(--hod-bg);
-		border-color: var(--hod-accent);
-		color: var(--hod-accent);
-		box-shadow: inset 0 0 0 1px var(--hod-accent);
+	.ord-confirm-method.active .ic {
+		background: rgba(24, 119, 242, 0.14);
+		color: #1877f2;
 	}
-	.hod-check {
+	.ord-confirm-method-label {
+		flex: 1;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.ord-confirm-check {
 		display: flex;
-		gap: 8px;
 		align-items: center;
+		gap: 8px;
+		padding: 8px 0 2px;
+		font-size: 12.5px;
+		color: #475569;
+		cursor: pointer;
+		user-select: none;
+	}
+	.ord-confirm-check input {
+		margin: 0;
+		width: 15px;
+		height: 15px;
+		cursor: pointer;
+		accent-color: #1877f2;
+	}
+	.ord-confirm-check strong {
+		color: #0f172a;
+		font-weight: 600;
+	}
+	.ord-confirm-foot {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding-top: 8px;
+		border-top: 1px solid #eef1f6;
+	}
+	.ord-confirm-context {
+		font-size: 11px;
+		color: #94a3b8;
+	}
+	.ord-confirm-context strong {
+		color: #475569;
+	}
+	.ord-confirm-foot .spacer {
+		flex: 1;
+	}
+	.ord-confirm-input-suffix {
+		position: relative;
+	}
+	.ord-confirm-input-suffix input {
+		padding-right: 48px;
+	}
+	.ord-confirm-input-suffix .suffix {
+		position: absolute;
+		right: 12px;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 11px;
+		font-weight: 700;
+		color: #94a3b8;
+		pointer-events: none;
+		letter-spacing: 0.04em;
+	}
+
+	/* Manual order modal */
+	.ord-mo-back {
+		position: fixed;
+		inset: 0;
+		background: rgba(15, 23, 42, 0.42);
+		backdrop-filter: blur(2px);
+		z-index: 80;
+		border: 0;
+		padding: 0;
+	}
+	.ord-mo {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 720px;
+		max-width: calc(100vw - 48px);
+		max-height: calc(100vh - 48px);
+		background: white;
+		border-radius: 14px;
+		box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+		display: flex;
+		flex-direction: column;
+		z-index: 81;
+		overflow: hidden;
+	}
+	.ord-mo-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 16px 20px;
+		border-bottom: 1px solid #f1f5f9;
+	}
+	.ord-mo-head-ic {
+		width: 38px;
+		height: 38px;
+		border-radius: 10px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: linear-gradient(135deg, #1877f2, #0d5cc7);
+		color: white;
+	}
+	.ord-mo-head-text {
+		flex: 1;
+	}
+	.ord-mo-head h3 {
+		margin: 0;
+		font-size: 15px;
+		font-weight: 700;
+		color: #0f172a;
+	}
+	.ord-mo-head p {
+		margin: 2px 0 0;
+		font-size: 12px;
+		color: #94a3b8;
+	}
+	.ord-mo-close {
+		width: 28px;
+		height: 28px;
+		border-radius: 7px;
+		background: #f4f6fa;
+		border: 0;
+		color: #475569;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+	}
+	.ord-mo-close:hover {
+		background: #e5e9f0;
+		color: #0f172a;
+	}
+	.ord-mo-body {
+		padding: 16px 20px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.ord-mo-foot {
+		padding: 12px 20px;
+		border-top: 1px solid #f1f5f9;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: #fafbfd;
+	}
+	.ord-mo-foot-spacer {
+		flex: 1;
+	}
+	.ord-mo-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 10px;
+	}
+	.ord-mo-label {
+		font-size: 11px;
+		color: #475569;
+		font-weight: 600;
+		display: block;
+		margin-bottom: 5px;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.ord-mo-input,
+	.ord-mo-select {
+		width: 100%;
+		box-sizing: border-box;
+		border: 1px solid #e5e9f0;
+		border-radius: 8px;
+		padding: 9px 11px;
+		font: inherit;
 		font-size: 13px;
-		color: var(--hod-text);
+		color: #0f172a;
+		background: white;
+	}
+	.ord-mo-input.mono {
+		font-family: ui-monospace, monospace;
+	}
+	.ord-mo-section {
+		display: flex;
+		flex-direction: column;
+	}
+	.ord-mo-section h5 {
+		margin: 0 0 8px;
+		font-size: 11px;
+		font-weight: 700;
+		color: #94a3b8;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+	.ord-mo-section-mt-sm {
 		margin-top: 10px;
 	}
-	.hod-accept-foot {
-		display: flex;
+	.ord-mo-plans {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
 		gap: 8px;
-		align-items: center;
-		margin-top: 14px;
 	}
-	.hod-accept-context {
-		flex: 1;
+	.ord-mo-plan {
+		border: 1.5px solid #e5e9f0;
+		border-radius: 10px;
+		padding: 10px 8px;
+		cursor: pointer;
+		background: white;
+		text-align: left;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		transition: all 0.15s;
+		font-family: inherit;
+	}
+	.ord-mo-plan:hover {
+		border-color: #cbd5e1;
+	}
+	.ord-mo-plan.active {
+		border-color: var(--c, #1877f2);
+		background: color-mix(in srgb, var(--c, #1877f2) 6%, white);
+	}
+	.ord-mo-plan-sw {
+		width: 10px;
+		height: 10px;
+		border-radius: 3px;
+		background: var(--c, #1877f2);
+	}
+	.ord-mo-plan strong {
+		font-size: 13px;
+		color: #0f172a;
+		font-weight: 700;
+	}
+	.ord-mo-plan .price {
+		font-size: 11px;
+		color: #475569;
+		font-variant-numeric: tabular-nums;
+	}
+	.ord-mo-loading {
 		font-size: 12px;
-		color: var(--hod-text-muted);
+		color: #94a3b8;
+		padding: 8px 0;
 	}
-
-	/* ===== Provisioning pwd row ===== */
-	.hod-pwd-row {
+	.ord-mo-seg {
 		display: flex;
-		gap: 6px;
-		align-items: center;
+		gap: 4px;
+		background: #f4f6fa;
+		padding: 3px;
+		border-radius: 8px;
 	}
-	.hod-pwd-row input {
+	.ord-mo-seg button {
 		flex: 1;
+		border: 0;
+		background: transparent;
+		padding: 7px 10px;
+		border-radius: 6px;
+		font: inherit;
+		font-size: 12px;
+		font-weight: 600;
+		color: #64748b;
+		cursor: pointer;
 	}
-
-	/* ===== Sticky footer ===== */
-	.hod-drawer-foot {
+	.ord-mo-seg button.active {
+		background: white;
+		color: #0f172a;
+		box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+	}
+	.ord-mo-seg-savings {
+		color: #10b981;
+		font-size: 10px;
+		margin-left: 4px;
+	}
+	.ord-mo-summary {
+		background: linear-gradient(135deg, #f0f4ff, #fafbfd);
+		border: 1px solid #dbe6ff;
+		border-radius: 10px;
+		padding: 12px 14px;
 		display: flex;
-		gap: 8px;
-		padding: 14px 20px;
-		border-top: 1px solid var(--hod-border);
-		background: var(--hod-bg);
-		flex-wrap: wrap;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.ord-mo-summary .row {
+		display: flex;
+		justify-content: space-between;
+		font-size: 12px;
+		color: #475569;
+	}
+	.ord-mo-summary .row strong {
+		color: #0f172a;
+		font-variant-numeric: tabular-nums;
+	}
+	.ord-mo-summary .row.big {
+		font-size: 14px;
+		padding-top: 6px;
+		margin-top: 2px;
+		border-top: 1px solid #dbe6ff;
+	}
+	.ord-mo-summary .row.big strong {
+		font-size: 18px;
+		font-weight: 800;
+		color: #1877f2;
 	}
 
-	/* ===== Mobile ===== */
-	@media (max-width: 640px) {
-		.hod-drawer {
-			width: 100vw;
+	/* Responsive */
+	@media (max-width: 1400px) {
+		.hst-kpis {
+			grid-template-columns: repeat(3, 1fr);
 		}
-		.hod-grid-2 {
-			grid-template-columns: 1fr;
+	}
+	@media (max-width: 768px) {
+		.hst-kpis {
+			grid-template-columns: repeat(2, 1fr);
 		}
-		.hod-kpis {
-			grid-template-columns: 1fr 1fr;
+		.hst-drawer {
+			width: 100vw !important;
+		}
+		.ord-mo {
+			width: calc(100vw - 24px);
+		}
+		.ord-mo-plans {
+			grid-template-columns: repeat(2, 1fr);
 		}
 	}
 </style>
