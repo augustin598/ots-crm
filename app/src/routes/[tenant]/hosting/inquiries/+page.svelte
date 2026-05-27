@@ -850,6 +850,18 @@
 					</thead>
 					<tbody>
 						{#each filtered as o (o.id)}
+							{@const rowDomainItem = (o.items ?? []).find((i) => i.kind === 'domain') ?? null}
+							{@const rowTotalCents =
+								o.paidAmountCents ??
+								(o.items?.length
+									? (o.items ?? []).reduce((a, it) => a + it.unitPriceCents * it.quantity, 0)
+									: (o.productPrice ?? 0))}
+							{@const rowTvaCents = (o.items ?? []).reduce(
+								(a, it) =>
+									a + Math.round((it.unitPriceCents * it.quantity * it.vatRate) / (100 + it.vatRate)),
+								0
+							)}
+							{@const rowAcct = accountStatusLabel(o)}
 							<tr onclick={() => openDrawer(o)}>
 								<td>
 									<div class="hod-cell-strong">{displayOrderId(o.orderNumber, o.id)}</div>
@@ -862,18 +874,6 @@
 									<div class="hod-cell-strong">{o.contactName}</div>
 									<div class="hod-cell-muted">{o.contactEmail}</div>
 								</td>
-								{@const rowDomainItem = (o.items ?? []).find((i) => i.kind === 'domain') ?? null}
-								{@const rowTotalCents =
-									o.paidAmountCents ??
-									(o.items?.length
-										? (o.items ?? []).reduce((a, it) => a + it.unitPriceCents * it.quantity, 0)
-										: (o.productPrice ?? 0))}
-								{@const rowTvaCents = (o.items ?? []).reduce(
-									(a, it) =>
-										a + Math.round((it.unitPriceCents * it.quantity * it.vatRate) / (100 + it.vatRate)),
-									0
-								)}
-								{@const rowAcct = accountStatusLabel(o)}
 								<td>
 									<div class="hod-cell-package">
 										<span class="hod-pkg-dot"></span>
