@@ -38,6 +38,9 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import PackageIcon from '@lucide/svelte/icons/package';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 
 	type ActiveTab = 'all' | 'activity' | 'pending' | 'failed' | 'refunded';
 
@@ -800,25 +803,37 @@
 				<SearchIcon size={14} />
 				<input placeholder="Caută ID, nume, email, domeniu…" bind:value={search} />
 			</div>
-			<select class="hod-filter-select" bind:value={filterPackage}>
-				<option value="">📦 Pachet — toate</option>
-				{#each productOptions as [id, name] (id)}
-					<option value={id}>{name}</option>
-				{/each}
-			</select>
-			<select class="hod-filter-select" bind:value={filterMethod}>
-				<option value="all">💳 Metodă — toate</option>
-				<option value="card">Card</option>
-				<option value="op">Ordin de plată</option>
-				<option value="paypal">PayPal</option>
-				<option value="revolut">Revolut</option>
-			</select>
-			<select class="hod-filter-select" disabled title="În curând">
-				<option>📅 Perioadă</option>
-			</select>
-			<select class="hod-filter-select" disabled title="În curând">
-				<option>📆 Data</option>
-			</select>
+			<label class="hod-filter-wrap">
+				<PackageIcon size={14} />
+				<select bind:value={filterPackage}>
+					<option value="">Pachet — toate</option>
+					{#each productOptions as [id, name] (id)}
+						<option value={id}>{name}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="hod-filter-wrap">
+				<CreditCardIcon size={14} />
+				<select bind:value={filterMethod}>
+					<option value="all">Metodă — toate</option>
+					<option value="card">Card</option>
+					<option value="op">Ordin de plată</option>
+					<option value="paypal">PayPal</option>
+					<option value="revolut">Revolut</option>
+				</select>
+			</label>
+			<label class="hod-filter-wrap" data-disabled="true" title="În curând">
+				<CalendarIcon size={14} />
+				<select disabled>
+					<option>Perioadă</option>
+				</select>
+			</label>
+			<label class="hod-filter-wrap" data-disabled="true" title="În curând">
+				<CalendarDaysIcon size={14} />
+				<select disabled>
+					<option>Data</option>
+				</select>
+			</label>
 		</div>
 
 		{#if filtered.length === 0}
@@ -845,7 +860,9 @@
 								<td>
 									<div class="hod-cell-strong">{displayOrderId(o.orderNumber, o.id)}</div>
 									<div class="hod-cell-muted">{fmtRelative(o.createdAt)}</div>
-									<div class="hod-cell-faint">📄 /{o.source}</div>
+									<div class="hod-cell-faint hod-cell-source">
+									<FileTextIcon size={11} /> /{o.source}
+								</div>
 								</td>
 								<td>
 									<div class="hod-cell-strong">{o.contactName}</div>
@@ -1311,7 +1328,14 @@
 
 <style>
 	/* ===== Tokens ===== */
-	.hod-page {
+	/* Variables must be available on .hod-page (the main page container)
+	   AND on .hod-drawer + .hod-drawer-back which are position:fixed and live
+	   OUTSIDE .hod-page in the DOM tree (Svelte renders them at the same
+	   level as <body> child). Without this, var(--hod-bg) resolves to nothing
+	   on the drawer and it becomes transparent. */
+	.hod-page,
+	.hod-drawer,
+	.hod-drawer-back {
 		--hod-bg: #ffffff;
 		--hod-bg-soft: #f9fafb;
 		--hod-border: #e5e7eb;
@@ -1326,6 +1350,8 @@
 		--hod-bad: #ef4444;
 		--hod-radius: 8px;
 		--hod-radius-sm: 6px;
+	}
+	.hod-page {
 		padding: 24px;
 		color: var(--hod-text);
 		font-size: 14px;
@@ -1524,18 +1550,51 @@
 		background: transparent;
 		color: var(--hod-text);
 	}
-	.hod-filter-select {
-		padding: 8px 10px;
+	.hod-filter-wrap {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 10px;
 		border: 1px solid var(--hod-border);
 		border-radius: var(--hod-radius-sm);
 		background: var(--hod-bg);
+		color: var(--hod-text-muted);
+		cursor: pointer;
+	}
+	.hod-filter-wrap select {
+		border: 0;
+		outline: 0;
+		background: transparent;
 		font-size: 13px;
 		color: var(--hod-text);
 		cursor: pointer;
+		font-family: inherit;
+		padding: 2px 0;
+		appearance: none;
+		-webkit-appearance: none;
+		padding-right: 14px;
+		background-image: linear-gradient(45deg, transparent 50%, var(--hod-text-faint) 50%),
+			linear-gradient(135deg, var(--hod-text-faint) 50%, transparent 50%);
+		background-position:
+			calc(100% - 8px) 50%,
+			calc(100% - 4px) 50%;
+		background-size:
+			4px 4px,
+			4px 4px;
+		background-repeat: no-repeat;
 	}
-	.hod-filter-select:disabled {
+	.hod-filter-wrap[data-disabled='true'] {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.hod-filter-wrap[data-disabled='true'] select {
+		cursor: not-allowed;
+	}
+	/* ===== Table cell source line ===== */
+	.hod-cell-source {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 	}
 
 	/* ===== Table ===== */
