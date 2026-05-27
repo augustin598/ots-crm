@@ -1,0 +1,1 @@
+ALTER TABLE hosting_product ADD COLUMN color TEXT NOT NULL DEFAULT '#1877F2';
