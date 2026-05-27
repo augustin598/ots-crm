@@ -13,6 +13,39 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import Building2Icon from '@lucide/svelte/icons/building-2';
+	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
+
+	type PaymentMethodValue = 'card' | 'op' | 'cash';
+
+	const PAYMENT_METHOD_META: Record<
+		PaymentMethodValue,
+		{ label: string; pillClass: string; Icon: typeof CreditCardIcon }
+	> = {
+		card: {
+			label: 'Card',
+			pillClass:
+				'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+			Icon: CreditCardIcon
+		},
+		op: {
+			label: 'Transfer / OP',
+			pillClass:
+				'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+			Icon: Building2Icon
+		},
+		cash: {
+			label: 'Cash',
+			pillClass:
+				'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+			Icon: DollarSignIcon
+		}
+	};
+
+	function paymentMethodOf(raw: unknown): PaymentMethodValue {
+		return raw === 'card' || raw === 'cash' ? raw : 'op';
+	}
 
 	const tenantSlug = $derived(page.params.tenant);
 	const accountId = $derived(page.params.accountId as string);
@@ -124,6 +157,7 @@
 			Se încarcă contul…
 		</div>
 	{:then a}
+		{@const pm = PAYMENT_METHOD_META[paymentMethodOf(a.paymentMethod)]}
 		<!-- Header -->
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div class="min-w-0">
@@ -135,6 +169,13 @@
 					<span class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {statusBadgeClass(a.status)}">
 						<span class="size-1.5 rounded-full bg-current"></span>
 						{statusLabel(a.status)}
+					</span>
+					<span
+						class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {pm.pillClass}"
+						title="Metodă plată implicită pentru facturile recurente"
+					>
+						<pm.Icon class="size-3" />
+						Metodă plată: {pm.label}
 					</span>
 					{#if a.suspendReason}
 						<span class="text-[11px] text-amber-700">{a.suspendReason}</span>
