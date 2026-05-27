@@ -44,7 +44,8 @@
 	import EyeIcon from '@lucide/svelte/icons/eye';
 	import CheckIcon from '@lucide/svelte/icons/check';
 
-	type ActiveTab = 'all' | 'activity' | 'pending' | 'failed' | 'refunded';
+	type ActiveTab = 'all' | 'paid' | 'pending' | 'failed' | 'refunded';
+	// NOTE: 'paid' is the "Achitate" tab — filters to paymentStatus === 'paid'.
 
 	let ordersPromise = $state(getHostingOrders());
 
@@ -395,13 +396,7 @@
 			if (activeTab === 'pending' && o.paymentStatus !== 'pending') return false;
 			if (activeTab === 'failed' && o.paymentStatus !== 'failed') return false;
 			if (activeTab === 'refunded' && o.paymentStatus !== 'refunded') return false;
-			if (activeTab === 'activity') {
-				const touched =
-					(o.createdAt && new Date(o.createdAt).getTime() >= today.getTime()) ||
-					(o.paidAt && new Date(o.paidAt).getTime() >= today.getTime()) ||
-					(o.acceptedAt && new Date(o.acceptedAt).getTime() >= today.getTime());
-				if (!touched) return false;
-			}
+			if (activeTab === 'paid' && o.paymentStatus !== 'paid') return false;
 			// Dropdown filters
 			if (filterPackage && o.hostingProductId !== filterPackage) return false;
 			if (filterMethod !== 'all' && o.paymentMethod !== filterMethod) return false;
@@ -580,18 +575,13 @@
 			return t >= yesterday.getTime() && t < today.getTime();
 		}).length;
 
-		const activityToday = list.filter((o) => {
-			const c = o.createdAt && new Date(o.createdAt).getTime() >= today.getTime();
-			const p = o.paidAt && new Date(o.paidAt).getTime() >= today.getTime();
-			const a = o.acceptedAt && new Date(o.acceptedAt).getTime() >= today.getTime();
-			return c || p || a;
-		}).length;
+		const paidCount = list.filter((o) => o.paymentStatus === 'paid').length;
 
 		return {
 			total: list.length,
 			createdToday,
 			createdYesterday,
-			activityToday,
+			paidCount,
 			pendingCount: pending.length,
 			pendingAmount,
 			failedCount: failed.length,
@@ -767,11 +757,11 @@
 			</button>
 			<button
 				role="tab"
-				aria-selected={activeTab === 'activity'}
-				class:active={activeTab === 'activity'}
-				onclick={() => (activeTab = 'activity')}
+				aria-selected={activeTab === 'paid'}
+				class:active={activeTab === 'paid'}
+				onclick={() => (activeTab = 'paid')}
 			>
-				Activitate <span class="hod-tab-count">{c.activityToday}</span>
+				Achitate <span class="hod-tab-count">{c.paidCount}</span>
 			</button>
 			<button
 				role="tab"
@@ -850,10 +840,11 @@
 						<tr>
 							<th>COMANDĂ</th>
 							<th>CLIENT</th>
-							<th>PACHET</th>
+							<th>PACHET · DOMENIU</th>
 							<th>METODĂ</th>
 							<th class="num">SUMĂ</th>
-							<th>STATUS</th>
+							<th>STATUS PLATĂ</th>
+							<th>STATUS CONT</th>
 							<th class="hod-actions-th"></th>
 						</tr>
 					</thead>
@@ -871,26 +862,60 @@
 									<div class="hod-cell-strong">{o.contactName}</div>
 									<div class="hod-cell-muted">{o.contactEmail}</div>
 								</td>
+								{@const rowDomainItem = (o.items ?? []).find((i) => i.kind === 'domain') ?? null}
+								{@const rowTotalCents =
+									o.paidAmountCents ??
+									(o.items?.length
+										? (o.items ?? []).reduce((a, it) => a + it.unitPriceCents * it.quantity, 0)
+										: (o.productPrice ?? 0))}
+								{@const rowTvaCents = (o.items ?? []).reduce(
+									(a, it) =>
+										a + Math.round((it.unitPriceCents * it.quantity * it.vatRate) / (100 + it.vatRate)),
+									0
+								)}
+								{@const rowAcct = accountStatusLabel(o)}
 								<td>
-									<div class="hod-cell-strong">{o.productName ?? '—'}</div>
-									<div class="hod-cell-muted">{billingCycleLabel(o.productBillingCycle)}</div>
+									<div class="hod-cell-package">
+										<span class="hod-pkg-dot"></span>
+										<span class="hod-cell-strong">{o.productName ?? '—'}</span>
+										<span class="hod-cell-muted">
+											{billingCycleLabel(o.productBillingCycle).toLowerCase()}
+										</span>
+									</div>
+									{#if rowDomainItem?.domainName}
+										<div class="hod-cell-domain">{rowDomainItem.domainName}</div>
+										{#if rowDomainItem.unitPriceCents > 0}
+											<div class="hod-cell-faint">
+												+ {fmtMoney(rowDomainItem.unitPriceCents, o.productCurrency)} domeniu nou
+											</div>
+										{:else if rowDomainItem.domainMode === 'transfer'}
+											<div class="hod-cell-faint">domeniu transfer</div>
+										{:else if rowDomainItem.domainMode === 'have'}
+											<div class="hod-cell-faint">domeniu existent</div>
+										{/if}
+									{:else if o.requestedDomain}
+										<div class="hod-cell-domain">{o.requestedDomain}</div>
+									{/if}
 								</td>
 								<td>
 									<div class="hod-cell-strong">{methodLabel(o.paymentMethod)}</div>
 								</td>
 								<td class="num">
 									<div class="hod-cell-strong">
-										{o.paidAmountCents != null
-											? fmtMoney(o.paidAmountCents, o.productCurrency)
-											: o.productPrice != null
-												? fmtMoney(o.productPrice, o.productCurrency)
-												: '—'}
+										{fmtMoney(rowTotalCents, o.productCurrency)}
 									</div>
-									<div class="hod-cell-faint">incl. TVA 19%</div>
+									<div class="hod-cell-faint">
+										incl. TVA {fmtMoney(rowTvaCents, o.productCurrency)}
+									</div>
 								</td>
 								<td>
 									<span class="hod-pill" data-tone={paymentTone(o.paymentStatus)}>
 										<span class="hod-dot"></span>{paymentLabel(o.paymentStatus).toUpperCase()}
+									</span>
+								</td>
+								<td>
+									<span class="hod-acct-label" data-tone={rowAcct.tone}>
+										{rowAcct.text}
 									</span>
 								</td>
 								<td class="hod-actions-cell">
@@ -1661,6 +1686,45 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
+	}
+
+	/* ===== Cell: package + domain ===== */
+	.hod-cell-package {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.hod-pkg-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 2px;
+		background: var(--hod-accent);
+		flex-shrink: 0;
+	}
+	.hod-cell-domain {
+		font-size: 12px;
+		color: var(--hod-text);
+		margin-top: 4px;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	/* ===== STATUS CONT inline label (table cell, not a pill) ===== */
+	.hod-acct-label {
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.hod-acct-label[data-tone='ok'] {
+		color: var(--hod-ok);
+	}
+	.hod-acct-label[data-tone='warn'] {
+		color: var(--hod-warn);
+	}
+	.hod-acct-label[data-tone='bad'] {
+		color: var(--hod-bad);
+	}
+	.hod-acct-label[data-tone='neutral'] {
+		color: var(--hod-text-muted);
 	}
 
 	/* ===== Row actions ===== */
