@@ -1131,13 +1131,17 @@ export const getDaServersForFilter = query(async () => {
  *
  *  SAFETY: ÎNAINTE să arătăm modal-ul de delete, verificăm DA-ul pentru a
  *  confirma că contul NU există acolo. Permite delete DOAR pentru conturi
- *  orphan (CRM listează, dar DA returnează 404).
+ *  orphan (CRM listează, dar DA returnează 404). Statusul CRM (active/
+ *  suspended/pending vs failed/terminated/cancelled) NU contează — sursa
+ *  unică de adevăr e răspunsul DA-ului. Asta acoperă cazul în care DA a
+ *  fost șters manual din panou (per policy) dar CRM încă listează contul
+ *  ca active — toate operațiile DA pică cu 404 și admin-ul are nevoie de
+ *  o cale să reconcilieze starea.
  *
  *  Returnează:
  *    - `safe: true` — DA confirmă 404, putem șterge CRM-row
  *    - `safe: false, reason: 'exists-on-da'` — DA ARE contul, NU permitem delete
  *    - `safe: false, reason: 'da-unreachable'` — DA n-a răspuns (refuz precaut)
- *    - `safe: false, reason: 'status-protected'` — status active/suspended (nu testăm)
  * ============================================================ */
 
 export const checkOrphanForDelete = command(AccountIdSchema, async ({ id }) => {
@@ -1153,18 +1157,6 @@ export const checkOrphanForDelete = command(AccountIdSchema, async ({ id }) => {
 		.where(and(eq(table.hostingAccount.id, id), eq(table.hostingAccount.tenantId, tenantId)))
 		.limit(1);
 	if (!account) throw new Error('Cont inexistent');
-
-	// Protejăm conturile vii: niciodată nu ștergem ceva ce e CRM-active sau
-	// CRM-suspended fără audit manual al admin-ului. Doar conturile failed,
-	// terminated sau cancelled (suspect-orphan) merg pe path-ul de delete.
-	if (account.status === 'active' || account.status === 'suspended' || account.status === 'pending') {
-		return {
-			safe: false as const,
-			reason: 'status-protected' as const,
-			crmStatus: account.status,
-			message: `Contul are status "${account.status}" în CRM. Marchează-l terminated/failed înainte de a-l șterge.`
-		};
-	}
 
 	// Verifică DA: dacă există acolo, NU permitem delete (ar lăsa cont orfan pe DA).
 	const [server] = await db
@@ -1241,9 +1233,9 @@ export const deleteOrphanHostingAccount = command(AccountIdSchema, async ({ id }
 
 	// Re-verificare DA imediat înainte de delete (TOCTOU protection — admin
 	// putea avea modal deschis 30s timp în care contul a fost re-creat pe DA).
-	if (account.status === 'active' || account.status === 'suspended' || account.status === 'pending') {
-		throw new Error(`Status "${account.status}" — nu pot șterge un cont activ/în coadă.`);
-	}
+	// NOTĂ: statusul CRM (active/suspended/pending) NU mai blochează — DA-check
+	// e sursa unică de adevăr. Dacă DA confirmă 404, contul e orphan indiferent
+	// ce listează CRM-ul.
 
 	const [server] = await db
 		.select()

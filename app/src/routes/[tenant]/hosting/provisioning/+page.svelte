@@ -131,6 +131,21 @@
 	// Toate folosesc single-flight .updates(...) ca server-ul să refresh-uie
 	// query-urile relevante în aceeași rundă HTTP — nu mai apelăm load* manual.
 
+	/**
+	 * Detectează un 404-from-DA în mesajul de eroare și întoarce un hint
+	 * acționabil pentru admin. Cazul de bază: CRM listează contul ca activ,
+	 * dar DA-ul a fost șters manual din panou (per policy) — toate operațiile
+	 * pică cu "DirectAdmin API error: 404 Not Found". Trimitem admin-ul direct
+	 * la butonul "Șterge din CRM (orphan)" pentru reconciliere.
+	 */
+	function formatActionError(err: unknown): string {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (/404|not found|user.*not.*exist/i.test(msg)) {
+			return `${msg}\n\nContul nu mai există pe DA. Deschide menu-ul ··· → "Șterge din CRM (orphan)" — DA-check va confirma 404 și poți curăța rândul.`;
+		}
+		return msg;
+	}
+
 	async function rowResetPassword(row: ProvisioningRow) {
 		if (
 			!confirm(
@@ -146,7 +161,7 @@
 		} catch (err) {
 			toast.error('Reset eșuat', {
 				id,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		}
 	}
@@ -160,7 +175,7 @@
 		} catch (err) {
 			toast.error('Retrimitere eșuată', {
 				id,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		}
 	}
@@ -179,7 +194,7 @@
 		} catch (err) {
 			toast.error('Retry eșuat', {
 				id,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		}
 	}
@@ -194,7 +209,7 @@
 		} catch (err) {
 			toast.error('Suspendare eșuată', {
 				id,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		}
 	}
@@ -207,7 +222,7 @@
 		} catch (err) {
 			toast.error('Reactivare eșuată', {
 				id,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		}
 	}
@@ -300,17 +315,19 @@
 		} catch (err) {
 			toast.error('Ștergere eșuată', {
 				id: toastId,
-				description: err instanceof Error ? err.message : String(err)
+				description: formatActionError(err)
 			});
 		} finally {
 			deleteBusy = false;
 		}
 	}
 
-	// Status-uri pentru care butonul de delete e vizibil (potențial orphan).
-	// Pentru active/suspended/pending — buton ascuns, server-ul refuză oricum.
-	const canShowDeleteButton = (status: string) =>
-		status === 'failed' || status === 'terminated' || status === 'cancelled';
+	// Butonul de delete e vizibil pentru ORICE status. Server-ul (checkOrphanForDelete)
+	// verifică DA-ul și refuză dacă contul există acolo — sursa unică de adevăr e
+	// răspunsul DA-ului, nu statusul CRM. Asta acoperă cazul când DA a fost șters
+	// manual din panou și CRM-ul încă arată "Activ" — toate operațiile DA pică
+	// cu 404 și admin-ul are nevoie de o cale să reconcilieze.
+	const canShowDeleteButton = (_status: string) => true;
 
 	function exportCsv() {
 		// Generează CSV client-side din rândurile filtrate
@@ -526,7 +543,7 @@
 							} catch (err) {
 								toast.error('Retry eșuat', {
 									id,
-									description: err instanceof Error ? err.message : String(err)
+									description: formatActionError(err)
 								});
 							}
 						}
