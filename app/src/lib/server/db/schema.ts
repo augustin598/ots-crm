@@ -1057,6 +1057,23 @@ export const hostingAccount = sqliteTable(
 		 */
 		paymentMethod: text('payment_method').notNull().default('op'),
 		lastSyncedAt: text('last_synced_at'),
+		/**
+		 * DA reconcile status — set by `reconcileHostingWithDA` command on the
+		 * Provisioning page. NULL = niciodată verificat. Valori:
+		 *  - 'ok'                 → DA și CRM aliniate
+		 *  - 'orphan'             → CRM zice că există, DA returnează 404 (sau username nu apare în lista DA)
+		 *  - 'suspended_on_da'    → DA = suspended, CRM = active
+		 *  - 'active_on_da'       → DA = active, CRM = suspended
+		 *  - 'package_mismatch'   → DA package ≠ CRM `da_package_name`
+		 *  - 'server_error'       → DA inaccesibil / eroare la fetch (nu putem decide)
+		 * Folosit pentru badge inline în tabel și pentru filtrul „desync".
+		 */
+		daSyncStatus: text('da_sync_status'),
+		/**
+		 * Detaliu liber pentru `daSyncStatus` (ex: „Package DA: business, CRM: starter").
+		 * Afișat în tooltip-ul badge-ului și în modalul de reconcile.
+		 */
+		daSyncIssue: text('da_sync_issue'),
 		suspendedAt: integer('suspended_at', { mode: 'timestamp' }),
 		reactivatedAt: integer('reactivated_at', { mode: 'timestamp' }),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })

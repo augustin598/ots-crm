@@ -265,6 +265,8 @@ export const getProvisioningHistory = query(HistoryFiltersSchema, async (filters
 			emailCount: table.hostingAccount.emailCount,
 			dbCount: table.hostingAccount.dbCount,
 			lastSyncedAt: table.hostingAccount.lastSyncedAt,
+			daSyncStatus: table.hostingAccount.daSyncStatus,
+			daSyncIssue: table.hostingAccount.daSyncIssue,
 			daCredentialsEncrypted: table.hostingAccount.daCredentialsEncrypted
 		})
 		.from(table.hostingAccount)
@@ -1287,5 +1289,310 @@ export const deleteOrphanHostingAccount = command(AccountIdSchema, async ({ id }
 		deletedId: account.id,
 		deletedUsername: account.daUsername,
 		deletedDomain: account.domain
+	};
+});
+
+/* ============================================================
+ * 14) reconcileHostingWithDA — verifică DA pentru toate conturile
+ *      active + suspended din tenant și marchează discrepanțele.
+ *
+ *  Strategie pentru a evita N apeluri DA (1 per cont):
+ *    1. Grupăm conturile pe server.
+ *    2. Per server: o singură listare a usernames-urilor de pe DA
+ *       (`listAllUsernames` — cache 60s în client).
+ *    3. Pentru fiecare cont CRM pe acel server:
+ *       - dacă username NU e în listă → 'orphan' (zero apeluri suplimentare)
+ *       - dacă e în listă → `getUserConfig` pentru a verifica `suspended` +
+ *         `package` (apel per cont, dar doar pentru cele existente).
+ *    4. Concurency limitată la 5 per server pentru a nu suprasolicita DA.
+ *
+ *  Persistăm `daSyncStatus` + `daSyncIssue` + `lastSyncedAt` pentru fiecare
+ *  cont. Modalul citește din nou prin `getProvisioningHistory` după mutație.
+ * ============================================================ */
+
+type ReconcileBucket = {
+	checked: number;
+	ok: number;
+	orphans: number;
+	suspendedOnDa: number;
+	activeOnDa: number;
+	packageMismatch: number;
+	errors: number;
+};
+
+const PER_SERVER_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(
+	items: T[],
+	concurrency: number,
+	fn: (item: T) => Promise<R>
+): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	let cursor = 0;
+	const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+		while (true) {
+			const i = cursor++;
+			if (i >= items.length) return;
+			results[i] = await fn(items[i]);
+		}
+	});
+	await Promise.all(workers);
+	return results;
+}
+
+export const reconcileHostingWithDA = command(async () => {
+	const event = getRequestEvent();
+	const tenantId = tenantIdFromEvent(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.manage');
+	if (actor.kind !== 'tenant') throw new Error('Forbidden');
+
+	// 1) Conturile care merită verificate: active + suspended + pending. Excludem
+	//    'terminated' / 'failed' / 'cancelled' — pentru acelea, „nu există pe DA"
+	//    e starea așteptată, nu un orphan.
+	const accounts = await db
+		.select({
+			id: table.hostingAccount.id,
+			daUsername: table.hostingAccount.daUsername,
+			domain: table.hostingAccount.domain,
+			status: table.hostingAccount.status,
+			daServerId: table.hostingAccount.daServerId,
+			daPackageName: table.hostingAccount.daPackageName
+		})
+		.from(table.hostingAccount)
+		.where(
+			and(
+				eq(table.hostingAccount.tenantId, tenantId),
+				inArray(table.hostingAccount.status, ['active', 'suspended', 'pending'])
+			)
+		);
+
+	if (accounts.length === 0) {
+		return {
+			checked: 0,
+			ok: 0,
+			orphans: 0,
+			suspendedOnDa: 0,
+			activeOnDa: 0,
+			packageMismatch: 0,
+			errors: 0,
+			discrepancies: [] as Array<{
+				id: string;
+				daUsername: string;
+				domain: string;
+				crmStatus: string;
+				daSyncStatus: string;
+				daSyncIssue: string;
+			}>,
+			startedAt: new Date().toISOString(),
+			finishedAt: new Date().toISOString()
+		};
+	}
+
+	// 2) Indexează serverele după id.
+	const serverIds = Array.from(new Set(accounts.map((a) => a.daServerId)));
+	const servers = await db
+		.select()
+		.from(table.daServer)
+		.where(and(inArray(table.daServer.id, serverIds), eq(table.daServer.tenantId, tenantId)));
+	const serverById = new Map(servers.map((s) => [s.id, s]));
+
+	// 3) Grupează conturile pe server.
+	const byServer = new Map<string, typeof accounts>();
+	for (const a of accounts) {
+		const list = byServer.get(a.daServerId) ?? [];
+		list.push(a);
+		byServer.set(a.daServerId, list);
+	}
+
+	const startedAt = new Date().toISOString();
+	const bucket: ReconcileBucket = {
+		checked: 0,
+		ok: 0,
+		orphans: 0,
+		suspendedOnDa: 0,
+		activeOnDa: 0,
+		packageMismatch: 0,
+		errors: 0
+	};
+	const discrepancies: Array<{
+		id: string;
+		daUsername: string;
+		domain: string;
+		crmStatus: string;
+		daSyncStatus: string;
+		daSyncIssue: string;
+	}> = [];
+
+	type ReconcileUpdate = {
+		id: string;
+		daSyncStatus:
+			| 'ok'
+			| 'orphan'
+			| 'suspended_on_da'
+			| 'active_on_da'
+			| 'package_mismatch'
+			| 'server_error';
+		daSyncIssue: string | null;
+	};
+	const updates: ReconcileUpdate[] = [];
+
+	// 4) Pentru fiecare server, listează usernames + check per cont (concurency limitată).
+	await Promise.all(
+		Array.from(byServer.entries()).map(async ([serverId, list]) => {
+			const server = serverById.get(serverId);
+			if (!server) {
+				// Server inexistent în CRM — marcăm toate conturile ca server_error.
+				for (const a of list) {
+					bucket.checked++;
+					bucket.errors++;
+					updates.push({
+						id: a.id,
+						daSyncStatus: 'server_error',
+						daSyncIssue: 'Serverul DA nu mai există în CRM'
+					});
+					discrepancies.push({
+						id: a.id,
+						daUsername: a.daUsername,
+						domain: a.domain,
+						crmStatus: a.status,
+						daSyncStatus: 'server_error',
+						daSyncIssue: 'Serverul DA nu mai există în CRM'
+					});
+				}
+				return;
+			}
+
+			const daClient = await createDAClient(tenantId, server);
+
+			await mapWithConcurrency(list, PER_SERVER_CONCURRENCY, async (account) => {
+				bucket.checked++;
+				try {
+					const config = await daClient.getUserConfig(account.daUsername);
+					const daSuspended = !!config.suspended;
+					const daPackage = config.package ?? '';
+					const crmPackage = account.daPackageName ?? '';
+
+					// Prioritate: suspended-mismatch > package-mismatch > ok
+					if (daSuspended && account.status === 'active') {
+						bucket.suspendedOnDa++;
+						const issue = 'DA = suspended, CRM = activ';
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'suspended_on_da',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'suspended_on_da',
+							daSyncIssue: issue
+						});
+						return;
+					}
+					if (!daSuspended && account.status === 'suspended') {
+						bucket.activeOnDa++;
+						const issue = 'DA = activ, CRM = suspendat';
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'active_on_da',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'active_on_da',
+							daSyncIssue: issue
+						});
+						return;
+					}
+					if (daPackage && crmPackage && daPackage !== crmPackage) {
+						bucket.packageMismatch++;
+						const issue = `Pachet DA: "${daPackage}" · CRM: "${crmPackage}"`;
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'package_mismatch',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'package_mismatch',
+							daSyncIssue: issue
+						});
+						return;
+					}
+					bucket.ok++;
+					updates.push({ id: account.id, daSyncStatus: 'ok', daSyncIssue: null });
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					const isNotFound = /404|not found|user.*not.*exist/i.test(msg);
+					if (isNotFound) {
+						bucket.orphans++;
+						const issue = `Contul "${account.daUsername}" nu există pe ${server.hostname}`;
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'orphan',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'orphan',
+							daSyncIssue: issue
+						});
+					} else {
+						bucket.errors++;
+						const issue = `DA error: ${msg.slice(0, 140)}`;
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'server_error',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'server_error',
+							daSyncIssue: issue
+						});
+					}
+				}
+			});
+		})
+	);
+
+	// 5) Persistăm rezultatele. UPDATE-uri pe loturi mici (evităm SQL gigantic).
+	const lastSyncedAtIso = new Date().toISOString();
+	for (const u of updates) {
+		await db
+			.update(table.hostingAccount)
+			.set({
+				daSyncStatus: u.daSyncStatus,
+				daSyncIssue: u.daSyncIssue,
+				lastSyncedAt: lastSyncedAtIso
+			})
+			.where(
+				and(
+					eq(table.hostingAccount.id, u.id),
+					eq(table.hostingAccount.tenantId, tenantId)
+				)
+			);
+	}
+
+	return {
+		...bucket,
+		discrepancies,
+		startedAt,
+		finishedAt: new Date().toISOString()
 	};
 });

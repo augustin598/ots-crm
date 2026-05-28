@@ -23,15 +23,18 @@
 	import XIcon from '@lucide/svelte/icons/x';
 
 	import StatusBadge from '$lib/components/hosting/provisioning/StatusBadge.svelte';
+	import SyncStatusBadge from '$lib/components/hosting/provisioning/SyncStatusBadge.svelte';
 	import TriggerChip from '$lib/components/hosting/provisioning/TriggerChip.svelte';
 	import KpiCard from '$lib/components/hosting/provisioning/KpiCard.svelte';
 	import CriticalAlert from '$lib/components/hosting/provisioning/CriticalAlert.svelte';
 	import ProvisioningDrawer from '$lib/components/hosting/provisioning/ProvisioningDrawer.svelte';
+	import ReconcileModal from '$lib/components/hosting/provisioning/ReconcileModal.svelte';
 	import { fmtDuration, fmtRelative } from '$lib/components/hosting/provisioning/format';
 	import type {
 		ProvisioningRow,
 		CriticalItem,
-		ServerOption
+		ServerOption,
+		DaSyncStatus
 	} from '$lib/components/hosting/provisioning/types';
 
 	import {
@@ -45,7 +48,8 @@
 		suspendProvisionedAccount,
 		unsuspendProvisionedAccount,
 		checkOrphanForDelete,
-		deleteOrphanHostingAccount
+		deleteOrphanHostingAccount,
+		reconcileHostingWithDA
 	} from '$lib/remotes/hosting-provisioning.remote';
 
 	// === Filtre ===
@@ -107,13 +111,90 @@
 	});
 
 	// === Refresh manual (buton) — re-fetch toate query-urile active ===
+	// NU verifică DA. Pentru asta există butonul „Verifică pe DA" separat
+	// care declanșează reconcileHostingWithDA.
+	let isRefreshing = $state(false);
 	async function refreshAll() {
-		await Promise.all([
-			getProvisioningStats().refresh(),
-			getProvisioningHistory(historyArgs).refresh(),
-			getCriticalProvisionings().refresh(),
-			getDaServersForFilter().refresh()
-		]);
+		if (isRefreshing) return;
+		isRefreshing = true;
+		const toastId = toast.loading('Reîncarc datele CRM...');
+		try {
+			await Promise.all([
+				getProvisioningStats().refresh(),
+				getProvisioningHistory(historyArgs).refresh(),
+				getCriticalProvisionings().refresh(),
+				getDaServersForFilter().refresh()
+			]);
+			toast.success('Date reîncărcate', { id: toastId });
+		} catch (err) {
+			toast.error('Refresh eșuat', {
+				id: toastId,
+				description: err instanceof Error ? err.message : String(err)
+			});
+		} finally {
+			isRefreshing = false;
+		}
+	}
+
+	// === Reconcile (Verifică pe DA) — chemă reconcileHostingWithDA și deschide modal ===
+	type ReconcileState =
+		| { kind: 'idle' }
+		| { kind: 'running' }
+		| {
+				kind: 'done';
+				result: {
+					checked: number;
+					ok: number;
+					orphans: number;
+					suspendedOnDa: number;
+					activeOnDa: number;
+					packageMismatch: number;
+					errors: number;
+					discrepancies: Array<{
+						id: string;
+						daUsername: string;
+						domain: string;
+						crmStatus: string;
+						daSyncStatus: string;
+						daSyncIssue: string;
+					}>;
+					startedAt: string;
+					finishedAt: string;
+				};
+		  }
+		| { kind: 'error'; message: string };
+
+	let reconcileState = $state<ReconcileState>({ kind: 'idle' });
+	let reconcileOpen = $state(false);
+
+	async function runReconcile() {
+		if (reconcileState.kind === 'running') return;
+		reconcileState = { kind: 'running' };
+		reconcileOpen = true;
+		const toastId = toast.loading('Reconciliere DA pornită...');
+		try {
+			// Reconcilierea actualizează daSyncStatus + lastSyncedAt → history se schimbă.
+			const result = await reconcileHostingWithDA().updates(
+				getProvisioningHistory(historyArgs)
+			);
+			reconcileState = { kind: 'done', result };
+			const disc = result.discrepancies.length;
+			if (disc === 0) {
+				toast.success(`DA aliniat — ${result.checked} conturi verificate`, { id: toastId });
+			} else {
+				toast.warning(`${disc} discrepanțe găsite din ${result.checked} verificate`, {
+					id: toastId
+				});
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			reconcileState = { kind: 'error', message };
+			toast.error('Reconciliere eșuată', { id: toastId, description: message });
+		}
+	}
+
+	function closeReconcile() {
+		reconcileOpen = false;
 	}
 
 	// === Click outside pentru menu ===
@@ -413,10 +494,22 @@
 		<div class="flex gap-2">
 			<button
 				type="button"
-				class="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+				class="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
 				onclick={refreshAll}
+				disabled={isRefreshing}
+				title="Reîncarcă datele din CRM (fără apel către DA)"
 			>
-				<RefreshCwIcon class="h-3 w-3" /> Refresh
+				<RefreshCwIcon class="h-3 w-3 {isRefreshing ? 'animate-spin' : ''}" /> Refresh
+			</button>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-[12.5px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+				onclick={runReconcile}
+				disabled={reconcileState.kind === 'running'}
+				title="Verifică pe DA toate conturile active + suspendate și marchează discrepanțele"
+			>
+				<ShieldCheckIcon class="h-3 w-3 {reconcileState.kind === 'running' ? 'animate-spin' : ''}" />
+				{reconcileState.kind === 'running' ? 'Verific DA...' : 'Verifică pe DA'}
 			</button>
 			<button
 				type="button"
@@ -778,7 +871,16 @@
 										</span>
 									</td>
 									<td class="px-3.5 py-3 align-middle">
-										<StatusBadge status={r.status} />
+										<div class="flex flex-col items-start gap-1">
+											<StatusBadge status={r.status} />
+											{#if r.daSyncStatus && r.daSyncStatus !== 'ok'}
+												<SyncStatusBadge
+													status={r.daSyncStatus as DaSyncStatus}
+													issue={r.daSyncIssue}
+													compact
+												/>
+											{/if}
+										</div>
 									</td>
 									<td class="px-3.5 py-3 align-middle">
 										<TriggerChip trigger={r.trigger} />
@@ -972,6 +1074,13 @@
 			getCriticalProvisionings().refresh();
 		}}
 	/>
+{/if}
+
+<!-- ===========================================================================
+   RECONCILE MODAL — sumar discrepanțe DA vs CRM după Verifică pe DA
+   =========================================================================== -->
+{#if reconcileOpen}
+	<ReconcileModal view={reconcileState} onClose={closeReconcile} />
 {/if}
 
 <!-- ===========================================================================

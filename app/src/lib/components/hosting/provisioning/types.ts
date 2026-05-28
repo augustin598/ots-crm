@@ -2,6 +2,26 @@
 
 export type ProvisioningStatus = 'active' | 'pending' | 'failed' | 'suspended' | 'terminated';
 
+/**
+ * Setat de `reconcileHostingWithDA` — vezi schema `hostingAccount.daSyncStatus`.
+ */
+export type DaSyncStatus =
+	| 'ok'
+	| 'orphan'
+	| 'suspended_on_da'
+	| 'active_on_da'
+	| 'package_mismatch'
+	| 'server_error';
+
+export const DA_SYNC_LABELS: Record<DaSyncStatus, string> = {
+	ok: 'Sincronizat',
+	orphan: 'Orfan — nu există pe DA',
+	suspended_on_da: 'Suspendat pe DA',
+	active_on_da: 'Activ pe DA',
+	package_mismatch: 'Pachet diferit pe DA',
+	server_error: 'DA inaccesibil'
+};
+
 export type ProvisioningTrigger =
 	| 'stripe-webhook'
 	| 'manual'
@@ -52,6 +72,8 @@ export interface ProvisioningRow {
 	emailCount: number | null;
 	dbCount: number | null;
 	lastSyncedAt: string | null;
+	daSyncStatus: DaSyncStatus | null;
+	daSyncIssue: string | null;
 	trigger: ProvisioningTrigger | string;
 	durationMs: number | null;
 	invoiceId: string | null;
