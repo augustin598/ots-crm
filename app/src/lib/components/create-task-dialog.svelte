@@ -219,6 +219,15 @@
 		}))
 	);
 
+	// Lookup for the summary on step 3 — must cover BOTH agency and client team,
+	// otherwise client-side assignees fall through to raw IDs.
+	const assigneeNameById = $derived(
+		new Map<string, string>([
+			...agencyAssigneeOptions.map((o) => [o.value, o.label] as [string, string]),
+			...clientAssigneeOptions.map((o) => [o.value, o.label] as [string, string])
+		])
+	);
+
 	const isMeet = $derived(draft.type === 'meeting');
 
 	const calStatusQuery = $derived(isMeet ? getGoogleCalendarStatus() : null);
@@ -340,10 +349,6 @@
 		for (let i = 0; i < userId.length; i++)
 			hash = (hash * 31 + userId.charCodeAt(i)) & 0xffffffff;
 		return palette[Math.abs(hash) % palette.length];
-	}
-
-	function getUserName(user: { firstName: string; lastName: string; email: string }): string {
-		return `${user.firstName} ${user.lastName}`.trim() || user.email;
 	}
 
 	const clientName = $derived(clients.find((c) => c.id === draft.clientId)?.name || '—');
@@ -1016,10 +1021,7 @@
 								<strong class="truncate text-slate-900">
 									{draft.assigneeIds.length > 0
 										? draft.assigneeIds
-												.map((id) => {
-													const u = users.find((x: any) => x.id === id);
-													return u ? getUserName(u) : id;
-												})
+												.map((id) => assigneeNameById.get(id) ?? id)
 												.join(', ')
 										: '—'}
 								</strong>
