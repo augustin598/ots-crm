@@ -110,11 +110,9 @@
 				consentTerms: true
 			});
 
-			if (result.duplicateCui) {
-				toast.success(result.message);
-				step = 4; // success message variant
-				return;
-			}
+			// Anti-enumeration: duplicate CUI now flows through the same path as
+			// new clients (attach order to existing client, return checkoutUrl).
+			// No distinguishable response for the attacker.
 
 			// Redirect to Stripe Checkout
 			if (result.checkoutUrl) {

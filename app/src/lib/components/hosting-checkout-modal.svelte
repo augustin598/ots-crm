@@ -325,9 +325,14 @@
 	let firstNameTouched = $state(false);
 	let lastNameTouched = $state(false);
 
-	// Email-known-in-CRM lookup (constant-time anti-enumeration).
+	// ANTI-ENUMERATION: ce era "Email-known-in-CRM lookup" a fost golit. Server-ul
+	// nu mai răspunde cu `known: true/false` (vezi checkEmailKnownToCrm în
+	// public-hosting.remote.ts) ca să nu permită unui atacator să enumere emailuri.
+	// Apelul rămâne pentru rate-limit + telemetrie server-side, dar nu mai
+	// modifică nimic vizibil în UI. State-urile sunt păstrate ca stub-uri NO-OP
+	// pentru ca template-ul existent să nu se rupă (rezoluție markup deferred).
 	let emailKnownLoading = $state(false);
-	let emailKnownFor = $state<string | null>(null); // email proven known (existing CRM account)
+	const emailKnownFor: string | null = null; // mereu null — UI-ul nu mai distinge match vs nu
 	let emailLastChecked = $state<string | null>(null);
 	let emailCheckSeq = 0;
 
@@ -340,17 +345,34 @@
 		const seq = ++emailCheckSeq;
 		emailKnownLoading = true;
 		try {
-			const res = await checkEmailKnownToCrm(norm);
-			if (seq !== emailCheckSeq) return;
-			if (res.ok && res.known) emailKnownFor = norm;
-			else if (emailKnownFor === norm) emailKnownFor = null;
+			// Apel păstrat pentru server-side rate-limit + audit. Răspunsul nu mai
+			// conține `known` — îl ignorăm.
+			await checkEmailKnownToCrm(norm);
 		} catch {
 			// Soft-fail: server-side check at submit is the hard guard.
-			if (seq === emailCheckSeq) emailKnownFor = null;
 		} finally {
 			if (seq === emailCheckSeq) emailKnownLoading = false;
 		}
 	}
+
+	// Account
+	let email = $state('');
+	// password state removed — account is provisioned silently post-payment.
+	let newAccount = $state(true);
+
+	// Billing
+	let billingType = $state<'person' | 'company'>('company');
+	let firstName = $state('');
+	let lastName = $state('');
+	let companyName = $state('');
+	let cui = $state('');
+	let regCom = $state('');
+	let address = $state('');
+	let city = $state('');
+	let county = $state('');
+	let postalCode = $state('');
+	let phone = $state('');
+	let vatPayer = $state(false);
 
 	// Per-field derived errors. Each returns null|string. null means OK
 	// (or not-yet-touched — we keep the field neutral in that case).
@@ -422,25 +444,6 @@
 		if (daCheckErrorFor === dom) return 'error';
 		return 'idle';
 	});
-
-	// Account
-	let email = $state('');
-	// password state removed — account is provisioned silently post-payment.
-	let newAccount = $state(true);
-
-	// Billing
-	let billingType = $state<'person' | 'company'>('company');
-	let firstName = $state('');
-	let lastName = $state('');
-	let companyName = $state('');
-	let cui = $state('');
-	let regCom = $state('');
-	let address = $state('');
-	let city = $state('');
-	let county = $state('');
-	let postalCode = $state('');
-	let phone = $state('');
-	let vatPayer = $state(false);
 
 	// ANAF lookup
 	let anafLoading = $state(false);
@@ -1014,16 +1017,17 @@
 				inquiryId: 'inquiryId' in result ? (result as { inquiryId?: string }).inquiryId : null
 			});
 
+			// ANTI-ENUMERATION: server-ul returnează acum mereu `duplicateCui: false`
+			// pentru a nu expune dacă email/CUI există deja. Comanda existentă pentru
+			// client cunoscut e atașată automat la contul existent (vezi
+			// submitHostingOrder în public-hosting.remote.ts). Branch-ul vechi de
+			// "EXISTING client" e eliminat — toate fluxurile continuă la plată.
 			if (result.duplicateCui) {
-				debugLog('result branch: duplicateCui → success step (existing client)', {
-					hasMessage: !!result.message,
+				// Nu ar trebui să se mai întâmple după fix-ul anti-enumeration. Loghez
+				// defensiv ca să detectez eventuale regresii.
+				debugLog('UNEXPECTED: duplicateCui=true post anti-enumeration fix', {
 					inquiryId: result.inquiryId
 				});
-				toast.success(result.message);
-				orderId = result.inquiryId ?? null;
-				isExistingClient = true;
-				step = 4;
-				return;
 			}
 
 			// Card flow → embedded Stripe Elements

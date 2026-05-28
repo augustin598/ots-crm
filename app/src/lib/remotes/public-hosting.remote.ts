@@ -307,8 +307,8 @@ async function fetchUserDomains(
 		method: 'GET',
 		headers: { Authorization: auth, Accept: 'text/plain' },
 		signal: AbortSignal.timeout(8000),
-		// @ts-expect-error Bun extends RequestInit with tls
-		tls: { rejectUnauthorized: false }
+		// Bun extends RequestInit with `tls` — typed natively in current Bun versions.
+		tls: { rejectUnauthorized: false } as never
 	});
 	if (!r.ok) return [];
 	const body = await r.text();
@@ -344,8 +344,8 @@ async function fetchUsernames(
 		method: 'GET',
 		headers: { Authorization: auth, Accept: 'application/json' },
 		signal: AbortSignal.timeout(8000),
-		// @ts-expect-error Bun extends RequestInit with tls
-		tls: { rejectUnauthorized: false }
+		// Bun extends RequestInit with `tls` — typed natively in current Bun versions.
+		tls: { rejectUnauthorized: false } as never
 	});
 	if (!r.ok) return [];
 	const text = await r.text();
@@ -490,10 +490,16 @@ export const checkDomainAvailability = query(DomainCheckSchema, async (raw) => {
 });
 
 // ====================== Email-known-to-CRM (anti-enumeration) =================
-// Public lookup the checkout modal calls on email blur. We mirror the
-// duplicate-CUI behaviour: detect silently and (eventually) send a magic
-// link. The response shape is CONSTANT regardless of hit/miss so an attacker
-// can't enumerate registered addresses from this endpoint.
+// Public lookup. Modal-ul îl apela pentru a marca pre-submit dacă emailul e
+// cunoscut și a afișa un hint UI "ai deja cont, autentifică-te". Acel hint
+// CONSTITUIE un oracle de enumeration pentru atacatori anonimi (request URL +
+// răspuns => o listă de emailuri client). Eliminăm scurgerea:
+//   - Răspunsul e mereu identic, indiferent dacă match-uiește sau nu.
+//   - Logging-ul server-side rămâne (pentru telemetrie internă), dar valorile
+//     diferențiale (`known: true/false`, `action: 'login-required'/'none'`)
+//     NU mai trec wire-ul.
+//   - Modalul nu mai are flag-uri de UI bazate pe match — vezi commit-ul
+//     anti-enumeration din hosting-checkout-modal.svelte.
 
 const EmailCheckSchema = v.pipe(
 	v.string(),
@@ -503,9 +509,10 @@ const EmailCheckSchema = v.pipe(
 );
 
 /**
- * Returns the same shape whether the email is known or not. When known, we log
- * a magic-link intent server-side (TODO Sprint 8.1: actually send the email).
- * Public — no auth. Rate-limited per IP.
+ * ANTI-ENUMERATION: returnează un payload identic indiferent de match. NU
+ * expune `known`, `action` sau alte flag-uri diferențiale. Server-side
+ * facem lookup-ul (pentru audit + viitor magic-link async), dar răspunsul
+ * spre client e sealed. Rate-limited per IP.
  */
 export const checkEmailKnownToCrm = query(EmailCheckSchema, async (rawEmail) => {
 	const event = getRequestEvent();
@@ -559,23 +566,20 @@ export const checkEmailKnownToCrm = query(EmailCheckSchema, async (rawEmail) => 
 		null;
 
 	if (matched) {
-		// We DO NOT send any email here. Sending email on form input would let
-		// an attacker spam arbitrary inboxes by typing addresses into the form
-		// (a reflected-email relay), and the bounce/delivery timing would also
-		// be a side-channel for enumerating which emails exist. The user is
-		// directed to /login instead and must initiate the magic link manually
-		// from there.
-		logInfo('directadmin', 'checkout: known-email lookup hit (no email sent)', {
+		// LOG server-side pentru telemetrie internă + future async magic-link.
+		// NU returnăm nicio diferență către client — atacatorul anonim NU mai
+		// poate enumera emailuri prin acest endpoint.
+		logInfo('directadmin', 'checkout: known-email lookup hit (no enumeration leak)', {
 			tenantId,
 			metadata: { kind: matched.kind, email: normalized, ip }
 		});
-		return { ok: true as const, known: true, action: 'login-required' as const };
 	}
 
-	// Constant-shape response — never reveal that the email is NOT in CRM.
-	// All three lookups above run via Promise.all so wall-time stays uniform
-	// regardless of which (if any) branch matched.
-	return { ok: true as const, known: false, action: 'none' as const };
+	// ANTI-ENUMERATION: răspuns sealed, identic indiferent de match. Nu mai
+	// expunem `known: true/false` sau `action: '...'` distinguibile. Modalul nu
+	// mai are nimic util să facă cu acest endpoint — îl chemăm doar pentru
+	// rate-limiting + audit (e nice-to-have, NU comportament UI critic).
+	return { ok: true as const };
 });
 
 // ====================== Sprint 8: ANAF + Stripe checkout ======================
@@ -796,7 +800,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 		.limit(1);
 	if (!product) throw error(404, 'Pachetul selectat nu mai e disponibil.');
 
-	const clientId = generateId();
+	// `clientId` se reasignează la id-ul existent dacă clientul deja există în CRM
+	// (vezi anti-enumeration logic în branch-urile de mai jos). Inițial = UUID nou
+	// folosit DOAR dacă insertăm un client nou. Tipul rămâne string în ambele cazuri.
+	let clientId = generateId();
 	const inquiryId = generateId();
 	const now = new Date();
 
@@ -837,117 +844,68 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			.limit(1);
 
 		if (existingClient) {
-			logInfo('directadmin', 'CUI duplicat — login redirect (no email sent)', {
+			// ANTI-ENUMERATION: NU returnăm un response distinguishable de cel pentru
+			// client nou. Atașăm comanda la clientul existent și continuăm prin path-ul
+			// comun (insert inquiry status='new' + Stripe). Atacatorul anonim NU mai
+			// poate testa dacă un CUI/email există probând endpoint-ul.
+			logInfo('directadmin', 'CUI hit — attaching new order to existing client (anti-enumeration unified path)', {
 				tenantId,
 				metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
 			});
-			await insertHostingOrder(tenantId, {
-				id: inquiryId,
-				product,
-				hostingProductId: product.id,
-				contactName: companyName,
-				contactEmail: normalizedEmail,
-				contactPhone: data.phone || null,
-				companyName,
-				vatNumber: cleanCui,
-				message: 'CUI duplicat — clientul există deja în CRM',
-				status: 'discarded',
-				source: 'pachete-hosting-checkout',
-				ipAddress: ip,
-				userAgent,
-				clientId: existingClient.id,
-				paymentMethod: data.paymentMethod ?? 'card',
-				paymentStatus: 'pending',
-				requestedDomain: data.requestedDomain || null,
-				domainName: data.domainName ?? null,
-				domainMode: data.domainMode ?? null,
-				domainCostCents: data.domainCostCents ?? null
-			});
-			return {
-				duplicateCui: true as const,
-				inquiryId,
-				message:
-					'Acest CUI există deja în sistemul nostru. Autentifică-te pe /login cu emailul contului existent pentru a continua comanda.'
-			};
-		}
-
-		try {
-			const inserted = await withTursoBusyRetry(
-				() =>
-					db
-						.insert(table.client)
-						.values({
-							id: clientId,
-							tenantId,
-							name: companyName,
-							businessName: companyName,
-							email: normalizedEmail,
-							phone: data.phone || null,
-							status: 'prospect',
-							cui: cleanCui,
-							vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
-							registrationNumber: data.registrationNumber || null,
-							address: data.address || null,
-							city: data.city || null,
-							county: data.county || null,
-							postalCode: data.postalCode || null,
-							country: 'RO',
-							legalType: 'srl',
-							signupSource: 'public-form',
-							onboardingStatus: 'pending_email'
-						})
-						.returning(),
-				{ tenantId, label: 'public-hosting/insertClient' }
-			);
-			clientRow = inserted[0];
-		} catch (err) {
-			const { message } = serializeError(err);
-			if (message.toLowerCase().includes('unique')) {
-				logInfo('directadmin', 'CUI duplicat detected via UNIQUE constraint race', {
-					tenantId,
-					metadata: { cui: cleanCui }
-				});
-				// Race condition: another concurrent submit committed the CUI between
-				// our pre-INSERT SELECT and our INSERT. The client row exists; find it
-				// and record a 'discarded' hostingInquiry for traceability so support
-				// can still look up the customer's reference.
-				const [raceClient] = await db
-					.select()
-					.from(table.client)
-					.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cleanCui)))
-					.limit(1);
-				if (raceClient) {
-					await insertHostingOrder(tenantId, {
-						id: inquiryId,
-						product,
-						hostingProductId: product.id,
-						contactName: companyName,
-						contactEmail: normalizedEmail,
-						contactPhone: data.phone || null,
-						companyName,
-						vatNumber: cleanCui,
-						message: 'CUI duplicat (UNIQUE race) — clientul există deja în CRM',
-						status: 'discarded',
-						source: 'pachete-hosting-checkout',
-						ipAddress: ip,
-						userAgent,
-						clientId: raceClient.id,
-						paymentMethod: data.paymentMethod ?? 'card',
-						paymentStatus: 'pending',
-						requestedDomain: data.requestedDomain || null,
-						domainName: data.domainName ?? null,
-						domainMode: data.domainMode ?? null,
-						domainCostCents: data.domainCostCents ?? null
+			clientRow = existingClient;
+			clientId = existingClient.id;
+		} else {
+			try {
+				const inserted = await withTursoBusyRetry(
+					() =>
+						db
+							.insert(table.client)
+							.values({
+								id: clientId,
+								tenantId,
+								name: companyName,
+								businessName: companyName,
+								email: normalizedEmail,
+								phone: data.phone || null,
+								status: 'prospect',
+								cui: cleanCui,
+								vatNumber: data.vatPayer ? `RO${cleanCui}` : cleanCui,
+								registrationNumber: data.registrationNumber || null,
+								address: data.address || null,
+								city: data.city || null,
+								county: data.county || null,
+								postalCode: data.postalCode || null,
+								country: 'RO',
+								legalType: 'srl',
+								signupSource: 'public-form',
+								onboardingStatus: 'pending_email'
+							})
+							.returning(),
+					{ tenantId, label: 'public-hosting/insertClient' }
+				);
+				clientRow = inserted[0];
+			} catch (err) {
+				const { message } = serializeError(err);
+				if (message.toLowerCase().includes('unique')) {
+					logInfo('directadmin', 'CUI UNIQUE race — attaching to existing (anti-enumeration unified path)', {
+						tenantId,
+						metadata: { cui: cleanCui }
 					});
+					const [raceClient] = await db
+						.select()
+						.from(table.client)
+						.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cleanCui)))
+						.limit(1);
+					if (!raceClient) {
+						// Race lost dar nu găsim client-ul — re-throw, fluxul nu se poate completa.
+						throw err;
+					}
+					clientRow = raceClient;
+					clientId = raceClient.id;
+				} else {
+					throw err;
 				}
-				return {
-					duplicateCui: true as const,
-					inquiryId: raceClient ? inquiryId : null,
-					message:
-						'Acest CUI există deja în sistemul nostru. Autentifică-te pe /login cu emailul contului existent pentru a continua comanda.'
-				};
 			}
-			throw err;
 		}
 	} else {
 		// === Person flow ===
@@ -966,117 +924,67 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			.limit(1);
 
 		if (existingByEmail) {
-			logInfo('directadmin', 'Email duplicat (persoană fizică) — login redirect (no email sent)', {
+			// ANTI-ENUMERATION: vezi comentariul de la company branch. Atașăm
+			// comanda la clientul existent — răspuns identic cu cel pentru client nou.
+			logInfo('directadmin', 'Email hit (PF) — attaching new order to existing client (anti-enumeration unified path)', {
 				tenantId,
 				metadata: { clientId: existingByEmail.id, email: normalizedEmail }
 			});
-			await insertHostingOrder(tenantId, {
-				id: inquiryId,
-				product,
-				hostingProductId: product.id,
-				contactName: displayName,
-				contactEmail: normalizedEmail,
-				contactPhone: data.phone || null,
-				message: 'Email duplicat (PF) — clientul există deja în CRM',
-				status: 'discarded',
-				source: 'pachete-hosting-checkout',
-				ipAddress: ip,
-				userAgent,
-				clientId: existingByEmail.id,
-				paymentMethod: data.paymentMethod ?? 'card',
-				paymentStatus: 'pending',
-				requestedDomain: data.requestedDomain || null,
-				domainName: data.domainName ?? null,
-				domainMode: data.domainMode ?? null,
-				domainCostCents: data.domainCostCents ?? null
-			});
-			return {
-				duplicateCui: true as const,
-				inquiryId,
-				message:
-					'Acest email există deja în sistemul nostru. Autentifică-te pe /login pentru a continua comanda din contul tău.'
-			};
-		}
-
-		try {
-			const inserted = await withTursoBusyRetry(
-				() =>
-					db
-						.insert(table.client)
-						.values({
-							id: clientId,
-							tenantId,
-							name: displayName,
-							businessName: null,
-							email: normalizedEmail,
-							phone: data.phone || null,
-							status: 'prospect',
-							cui: null,
-							vatNumber: null,
-							registrationNumber: null,
-							address: data.address || null,
-							city: data.city || null,
-							county: data.county || null,
-							postalCode: data.postalCode || null,
-							country: 'RO',
-							legalType: 'pf',
-							signupSource: 'public-form',
-							onboardingStatus: 'pending_email'
-						})
-						.returning(),
-				{ tenantId, label: 'public-hosting/insertClient-person' }
-			);
-			clientRow = inserted[0];
-		} catch (err) {
-			const { message } = serializeError(err);
-			if (message.toLowerCase().includes('unique')) {
-				// Race condition: another PF submit with the same email landed between
-				// our duplicate-email SELECT (above) and this INSERT. Mirror the
-				// company branch behaviour — return the same login-redirect message.
-				logInfo('directadmin', 'PF duplicate email — UNIQUE race', {
-					tenantId,
-					metadata: { email: normalizedEmail }
-				});
-				// Record a 'discarded' inquiry for traceability so support can locate
-				// this attempt by reference number even though the client row was
-				// already inserted by the concurrent request.
-				const [raceClientPf] = await db
-					.select()
-					.from(table.client)
-					.where(
-						and(eq(table.client.tenantId, tenantId), eq(table.client.email, normalizedEmail))
-					)
-					.limit(1);
-				if (raceClientPf) {
-					await insertHostingOrder(tenantId, {
-						id: inquiryId,
-						product,
-						hostingProductId: product.id,
-						contactName: displayName,
-						contactEmail: normalizedEmail,
-						contactPhone: data.phone || null,
-						message: 'Email duplicat (PF, UNIQUE race) — clientul există deja în CRM',
-						status: 'discarded',
-						source: 'pachete-hosting-checkout',
-						ipAddress: ip,
-						userAgent,
-						clientId: raceClientPf.id,
-						paymentMethod: data.paymentMethod ?? 'card',
-						paymentStatus: 'pending',
-						requestedDomain: data.requestedDomain || null,
-						domainName: data.domainName ?? null,
-						domainMode: data.domainMode ?? null,
-						domainCostCents: data.domainCostCents ?? null
+			clientRow = existingByEmail;
+			clientId = existingByEmail.id;
+		} else {
+			try {
+				const inserted = await withTursoBusyRetry(
+					() =>
+						db
+							.insert(table.client)
+							.values({
+								id: clientId,
+								tenantId,
+								name: displayName,
+								businessName: null,
+								email: normalizedEmail,
+								phone: data.phone || null,
+								status: 'prospect',
+								cui: null,
+								vatNumber: null,
+								registrationNumber: null,
+								address: data.address || null,
+								city: data.city || null,
+								county: data.county || null,
+								postalCode: data.postalCode || null,
+								country: 'RO',
+								legalType: 'pf',
+								signupSource: 'public-form',
+								onboardingStatus: 'pending_email'
+							})
+							.returning(),
+					{ tenantId, label: 'public-hosting/insertClient-person' }
+				);
+				clientRow = inserted[0];
+			} catch (err) {
+				const { message } = serializeError(err);
+				if (message.toLowerCase().includes('unique')) {
+					logInfo('directadmin', 'PF email UNIQUE race — attaching to existing (anti-enumeration unified path)', {
+						tenantId,
+						metadata: { email: normalizedEmail }
 					});
+					const [raceClientPf] = await db
+						.select()
+						.from(table.client)
+						.where(
+							and(eq(table.client.tenantId, tenantId), eq(table.client.email, normalizedEmail))
+						)
+						.limit(1);
+					if (!raceClientPf) {
+						throw err;
+					}
+					clientRow = raceClientPf;
+					clientId = raceClientPf.id;
+				} else {
+					throw err;
 				}
-				return {
-					duplicateCui: true as const,
-					inquiryId: raceClientPf ? inquiryId : null,
-					message:
-						'Acest email există deja în sistemul nostru. Autentifică-te pe /login pentru a continua comanda din contul tău.'
-				};
 			}
-			throw err;
 		}
 	}
 
