@@ -4,6 +4,7 @@
 		acceptHostingOrderPayment,
 		provisionFromInquiry,
 		createManualHostingOrder,
+		deleteHostingInquiry,
 		type HostingOrderRow,
 		type HostingOrderItemRow
 	} from '$lib/remotes/hosting-inquiries.remote';
@@ -37,6 +38,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PaymentMethodPicker from '$lib/components/payment-method-picker.svelte';
 
 	// ---- Constant lookups -----------------------------------------------------
@@ -126,6 +128,11 @@
 	let productsPromise = $state(getHostingProducts());
 
 	async function refresh() {
+		// SvelteKit `query()` cache-uiește răspunsul. Reassigning la `getHostingOrders()`
+		// returnează același rezultat cached, deci UI-ul nu se update-ează după
+		// delete/edit. Apelăm `.refresh()` pe query-handle ca să invalidăm cache-ul,
+		// apoi reassign-ăm promise-ul pentru a forța re-render-ul `{#await}`.
+		await getHostingOrders().refresh();
 		ordersPromise = getHostingOrders();
 	}
 
@@ -168,6 +175,13 @@
 		initialStatus: 'paid' as 'paid' | 'pending' | 'processing',
 		server: 'auto' as string
 	});
+
+	// Delete confirmation modal — typed-confirm pentru ștergere ireversibilă.
+	// Cere admin-ului să tipezească exact `STERGE` ca să previn click-uri accidentale.
+	const DELETE_CONFIRM_PHRASE = 'STERGE';
+	let deleteTarget = $state<HostingOrderRow | null>(null);
+	let deleteConfirmText = $state('');
+	let deleteBusy = $state(false);
 
 	// Pagination — client-side, 10 rows / page.
 	const PAGE_SIZE = 10;
@@ -587,6 +601,47 @@
 		const arr = new Uint8Array(12);
 		crypto.getRandomValues(arr);
 		return Array.from(arr, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 18);
+	}
+
+	// ---- Delete confirmation -----------------------------------------------
+
+	function openDeleteModal(o: HostingOrderRow) {
+		deleteTarget = o;
+		deleteConfirmText = '';
+	}
+
+	function closeDeleteModal() {
+		if (deleteBusy) return; // nu închide în timpul request-ului
+		deleteTarget = null;
+		deleteConfirmText = '';
+	}
+
+	async function submitDelete() {
+		if (!deleteTarget) return;
+		if (deleteConfirmText.trim().toUpperCase() !== DELETE_CONFIRM_PHRASE) {
+			toast.error(`Trebuie să tipezești exact "${DELETE_CONFIRM_PHRASE}" pentru a confirma.`);
+			return;
+		}
+		const target = deleteTarget;
+		deleteBusy = true;
+		const toastId = toast.loading('Se șterge comanda...');
+		try {
+			await deleteHostingInquiry(target.id);
+			toast.success('Comanda a fost ștearsă', {
+				id: toastId,
+				description: displayOrderId(target.orderNumber, target.id)
+			});
+			deleteTarget = null;
+			deleteConfirmText = '';
+			await refresh();
+		} catch (e) {
+			toast.error('Ștergere eșuată', {
+				id: toastId,
+				description: e instanceof Error ? e.message : String(e)
+			});
+		} finally {
+			deleteBusy = false;
+		}
 	}
 
 	// ---- Manual order modal ----------------------------------------------------
@@ -1122,6 +1177,16 @@
 									>
 										<MailIcon size={12} />
 									</button>
+									{#if !o.hostingAccountId}
+										<button
+											class="hst-icon-btn hst-icon-btn-danger"
+											title="Șterge comanda"
+											aria-label="Șterge comanda"
+											onclick={() => openDeleteModal(o)}
+										>
+											<Trash2Icon size={12} />
+										</button>
+									{/if}
 								</div>
 							</td>
 						</tr>
@@ -1735,6 +1800,119 @@
 				onclick={submitManualOrder}
 			>
 				<CheckIcon size={13} /> Creează comanda
+			</button>
+		</div>
+	</div>
+{/if}
+
+<!-- ===========================================================================
+   MODAL DELETE — typed-confirm pentru ștergere ireversibilă
+   =========================================================================== -->
+{#if deleteTarget}
+	{@const target = deleteTarget}
+	{@const isValid = deleteConfirmText.trim().toUpperCase() === DELETE_CONFIRM_PHRASE}
+	<div
+		class="del-backdrop"
+		role="button"
+		tabindex="-1"
+		aria-label="Închide"
+		onclick={closeDeleteModal}
+		onkeydown={(e) => e.key === 'Escape' && closeDeleteModal()}
+	></div>
+	<div
+		class="del-modal"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="del-modal-title"
+		use:focusTrap={{}}
+	>
+		<div class="del-modal-head">
+			<div class="del-modal-icon">
+				<AlertTriangleIcon size={18} />
+			</div>
+			<div class="del-modal-head-text">
+				<strong id="del-modal-title">Ștergi comanda definitiv?</strong>
+				<span>Acțiunea nu poate fi anulată. Toate datele asociate dispar din DB.</span>
+			</div>
+			<button
+				class="del-modal-close"
+				aria-label="Închide"
+				onclick={closeDeleteModal}
+				disabled={deleteBusy}
+			>
+				<XIcon size={14} />
+			</button>
+		</div>
+
+		<div class="del-modal-body">
+			<div class="del-summary">
+				<div class="del-summary-row">
+					<span>Comanda</span>
+					<strong class="del-mono">{displayOrderId(target.orderNumber, target.id)}</strong>
+				</div>
+				<div class="del-summary-row">
+					<span>Client</span>
+					<strong>{target.contactName}</strong>
+				</div>
+				<div class="del-summary-row">
+					<span>Email</span>
+					<strong class="del-mono">{target.contactEmail}</strong>
+				</div>
+				<div class="del-summary-row">
+					<span>Domeniu</span>
+					<strong class="del-mono">{domainItemOf(target)?.domainName ?? target.requestedDomain ?? '—'}</strong>
+				</div>
+				<div class="del-summary-row">
+					<span>Pachet</span>
+					<strong>{target.productName ?? '—'}</strong>
+				</div>
+				<div class="del-summary-row">
+					<span>Sumă</span>
+					<strong>{fmtRon(target.paidAmountCents) || fmtRonInt(totalCents(target) / 100)}</strong>
+				</div>
+			</div>
+
+			<div class="del-confirm-wrap">
+				<label class="del-confirm-label" for="del-confirm-input">
+					Pentru a confirma, tipează exact
+					<strong class="del-mono">{DELETE_CONFIRM_PHRASE}</strong>
+					în câmpul de mai jos:
+				</label>
+				<input
+					id="del-confirm-input"
+					class="del-confirm-input"
+					class:del-confirm-input-valid={isValid}
+					type="text"
+					bind:value={deleteConfirmText}
+					placeholder={DELETE_CONFIRM_PHRASE}
+					autocomplete="off"
+					autocapitalize="characters"
+					spellcheck="false"
+					disabled={deleteBusy}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' && isValid && !deleteBusy) submitDelete();
+					}}
+				/>
+				{#if deleteConfirmText && !isValid}
+					<div class="del-confirm-hint">
+						Tipează exact <strong>{DELETE_CONFIRM_PHRASE}</strong> (case-insensitive).
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		<div class="del-modal-foot">
+			<button class="btn-secondary" onclick={closeDeleteModal} disabled={deleteBusy}>
+				Anulează
+			</button>
+			<div class="ord-mo-foot-spacer"></div>
+			<button
+				class="del-modal-confirm"
+				disabled={!isValid || deleteBusy}
+				onclick={submitDelete}
+			>
+				<Trash2Icon size={13} />
+				{deleteBusy ? 'Se șterge...' : 'Șterge definitiv'}
 			</button>
 		</div>
 	</div>
@@ -3007,5 +3185,274 @@
 		.ord-mo-plans {
 			grid-template-columns: repeat(2, 1fr);
 		}
+	}
+
+	/* ===========================================================================
+	 * DELETE MODAL — typed-confirm pentru ștergere ireversibilă
+	 * =========================================================================== */
+	.hst-icon-btn-danger:hover {
+		color: #b91c1c;
+		background: #fef2f2;
+		border-color: #fecaca;
+	}
+	:global(.dark) .hst-icon-btn-danger:hover {
+		color: #fca5a5;
+		background: rgba(127, 29, 29, 0.2);
+		border-color: rgba(127, 29, 29, 0.4);
+	}
+
+	.del-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(15, 23, 42, 0.55);
+		backdrop-filter: blur(2px);
+		z-index: 90;
+	}
+
+	.del-modal {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 100%;
+		max-width: 480px;
+		max-height: 90vh;
+		overflow: auto;
+		background: white;
+		border-radius: 12px;
+		box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.5);
+		z-index: 100;
+		display: flex;
+		flex-direction: column;
+	}
+	:global(.dark) .del-modal {
+		background: #1e293b;
+		box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+	}
+
+	.del-modal-head {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		padding: 18px 20px 14px;
+		border-bottom: 1px solid #e5e9f0;
+	}
+	:global(.dark) .del-modal-head {
+		border-color: #334155;
+	}
+
+	.del-modal-icon {
+		flex-shrink: 0;
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: #fee2e2;
+		color: #dc2626;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	:global(.dark) .del-modal-icon {
+		background: rgba(127, 29, 29, 0.4);
+		color: #fca5a5;
+	}
+
+	.del-modal-head-text {
+		flex: 1;
+		min-width: 0;
+	}
+	.del-modal-head-text strong {
+		display: block;
+		font-size: 15px;
+		font-weight: 700;
+		color: #0f172a;
+		margin-bottom: 2px;
+	}
+	.del-modal-head-text span {
+		display: block;
+		font-size: 12px;
+		color: #64748b;
+	}
+	:global(.dark) .del-modal-head-text strong {
+		color: #f1f5f9;
+	}
+	:global(.dark) .del-modal-head-text span {
+		color: #94a3b8;
+	}
+
+	.del-modal-close {
+		flex-shrink: 0;
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: 0;
+		border-radius: 6px;
+		color: #64748b;
+		cursor: pointer;
+	}
+	.del-modal-close:hover {
+		background: #f1f5f9;
+		color: #0f172a;
+	}
+	.del-modal-close:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	:global(.dark) .del-modal-close:hover {
+		background: #334155;
+		color: #f1f5f9;
+	}
+
+	.del-modal-body {
+		padding: 16px 20px;
+	}
+
+	.del-summary {
+		border: 1px solid #e5e9f0;
+		border-radius: 8px;
+		padding: 10px 12px;
+		background: #fafbfd;
+		margin-bottom: 16px;
+	}
+	:global(.dark) .del-summary {
+		border-color: #334155;
+		background: rgba(15, 23, 42, 0.4);
+	}
+
+	.del-summary-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		font-size: 12.5px;
+		padding: 4px 0;
+		border-bottom: 1px solid #f1f5f9;
+	}
+	.del-summary-row:last-child {
+		border-bottom: 0;
+	}
+	.del-summary-row > span {
+		color: #64748b;
+		flex-shrink: 0;
+	}
+	.del-summary-row > strong {
+		color: #0f172a;
+		text-align: right;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	:global(.dark) .del-summary-row {
+		border-color: #334155;
+	}
+	:global(.dark) .del-summary-row > span {
+		color: #94a3b8;
+	}
+	:global(.dark) .del-summary-row > strong {
+		color: #f1f5f9;
+	}
+
+	.del-mono {
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 12px;
+	}
+
+	.del-confirm-wrap {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.del-confirm-label {
+		font-size: 12.5px;
+		color: #475569;
+		line-height: 1.5;
+	}
+	:global(.dark) .del-confirm-label {
+		color: #cbd5e1;
+	}
+	.del-confirm-input {
+		width: 100%;
+		padding: 9px 12px;
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 14px;
+		font-weight: 600;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		border: 1px solid #e5e9f0;
+		border-radius: 7px;
+		background: white;
+		color: #0f172a;
+		outline: none;
+		transition: border-color 0.15s, box-shadow 0.15s;
+	}
+	.del-confirm-input:focus {
+		border-color: #dc2626;
+		box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+	}
+	.del-confirm-input-valid {
+		border-color: #16a34a !important;
+		background: #f0fdf4 !important;
+		color: #15803d;
+	}
+	.del-confirm-input-valid:focus {
+		box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+	}
+	:global(.dark) .del-confirm-input {
+		background: #0f172a;
+		border-color: #334155;
+		color: #f1f5f9;
+	}
+	:global(.dark) .del-confirm-input-valid {
+		background: rgba(20, 83, 45, 0.3) !important;
+		color: #86efac;
+	}
+
+	.del-confirm-hint {
+		font-size: 11.5px;
+		color: #f97316;
+	}
+	:global(.dark) .del-confirm-hint {
+		color: #fdba74;
+	}
+
+	.del-modal-foot {
+		display: flex;
+		gap: 8px;
+		padding: 14px 20px;
+		border-top: 1px solid #e5e9f0;
+		background: #fafbfd;
+		border-radius: 0 0 12px 12px;
+	}
+	:global(.dark) .del-modal-foot {
+		border-color: #334155;
+		background: rgba(15, 23, 42, 0.4);
+	}
+
+	.del-modal-confirm {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		background: #dc2626;
+		color: white;
+		border: 0;
+		border-radius: 6px;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s;
+	}
+	.del-modal-confirm:hover:not(:disabled) {
+		background: #b91c1c;
+	}
+	.del-modal-confirm:disabled {
+		background: #fca5a5;
+		cursor: not-allowed;
+	}
+	:global(.dark) .del-modal-confirm:disabled {
+		background: rgba(127, 29, 29, 0.5);
 	}
 </style>
