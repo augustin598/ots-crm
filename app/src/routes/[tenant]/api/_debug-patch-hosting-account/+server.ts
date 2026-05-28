@@ -12,6 +12,10 @@
  *   - `hostingProductId`: link the account to a specific catalog product.
  *   - `recurringAmount`: cents, integer ≥ 0. ONLY accept when explicitly needed
  *                        — normally the catalog is source-of-truth.
+ *   - `clientId`       : reassign the account to a specific CRM client (id).
+ *                        Use either this OR `clientCui`, not both.
+ *   - `clientCui`      : reassign by CUI lookup (accepts "39988493" or "RO39988493").
+ *                        Resolved against client.cui within this tenant.
  *
  * Returns before/after for the patched row. Refuses to operate on more than
  * one account per call to keep changes auditable.
@@ -22,7 +26,7 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import { logInfo } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
 
@@ -43,6 +47,8 @@ export const POST: RequestHandler = async (event) => {
 	const currencyParam = event.url.searchParams.get('currency');
 	const hostingProductIdParam = event.url.searchParams.get('hostingProductId');
 	const recurringAmountParam = event.url.searchParams.get('recurringAmount');
+	const clientIdParam = event.url.searchParams.get('clientId');
+	const clientCuiParam = event.url.searchParams.get('clientCui');
 
 	const targetCurrency = currencyParam ? currencyParam.toUpperCase() : null;
 	if (targetCurrency && !ALLOWED_CURRENCY.has(targetCurrency)) {
@@ -55,6 +61,48 @@ export const POST: RequestHandler = async (event) => {
 		(!Number.isInteger(targetRecurringAmount) || targetRecurringAmount < 0)
 	) {
 		throw error(400, 'recurringAmount must be a non-negative integer (cents)');
+	}
+
+	if (clientIdParam && clientCuiParam) {
+		throw error(400, 'Pass either clientId or clientCui, not both');
+	}
+
+	let targetClientId: string | null = null;
+	let targetClientLabel: string | null = null;
+	if (clientIdParam) {
+		const [c] = await db
+			.select({ id: table.client.id, name: table.client.name, cui: table.client.cui })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientIdParam), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!c) throw error(404, `No client with id "${clientIdParam}" in this tenant`);
+		targetClientId = c.id;
+		targetClientLabel = `${c.name} (CUI ${c.cui ?? '—'})`;
+	} else if (clientCuiParam) {
+		// Accept "39988493" or "RO39988493" — match against both stored forms.
+		const raw = clientCuiParam.trim().toUpperCase();
+		const bare = raw.startsWith('RO') ? raw.slice(2) : raw;
+		const withPrefix = `RO${bare}`;
+		const candidates = await db
+			.select({ id: table.client.id, name: table.client.name, cui: table.client.cui })
+			.from(table.client)
+			.where(
+				and(
+					eq(table.client.tenantId, tenantId),
+					or(eq(table.client.cui, bare), eq(table.client.cui, withPrefix))
+				)
+			);
+		if (candidates.length === 0) {
+			throw error(404, `No client with CUI "${clientCuiParam}" in this tenant`);
+		}
+		if (candidates.length > 1) {
+			throw error(
+				409,
+				`${candidates.length} clients share CUI "${clientCuiParam}" — refusing to patch ambiguous selector`
+			);
+		}
+		targetClientId = candidates[0].id;
+		targetClientLabel = `${candidates[0].name} (CUI ${candidates[0].cui ?? '—'})`;
 	}
 
 	const matches = await db
@@ -75,7 +123,8 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const account = matches[0];
-	const changes: Record<string, { before: unknown; after: unknown }> = {};
+	const changes: Record<string, { before: unknown; after: unknown; afterLabel?: string | null }> =
+		{};
 	const patch: Partial<typeof table.hostingAccount.$inferInsert> = {};
 
 	if (targetCurrency && targetCurrency !== account.currency) {
@@ -96,6 +145,14 @@ export const POST: RequestHandler = async (event) => {
 		};
 		patch.recurringAmount = targetRecurringAmount;
 	}
+	if (targetClientId !== null && targetClientId !== account.clientId) {
+		changes.clientId = {
+			before: account.clientId,
+			after: targetClientId,
+			afterLabel: targetClientLabel
+		};
+		patch.clientId = targetClientId;
+	}
 
 	if (Object.keys(changes).length === 0) {
 		return json({
@@ -107,7 +164,8 @@ export const POST: RequestHandler = async (event) => {
 			current: {
 				currency: account.currency,
 				hostingProductId: account.hostingProductId,
-				recurringAmount: account.recurringAmount
+				recurringAmount: account.recurringAmount,
+				clientId: account.clientId
 			}
 		});
 	}
