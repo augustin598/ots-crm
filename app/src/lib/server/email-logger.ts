@@ -29,6 +29,7 @@ export const EMAIL_TYPES = [
 	'hosting-renewal-reminder',
 	'hosting-payment-failed',
 	'hosting-provisioning-failed',
+	'hosting-password-reset',
 	'payment-succeeded',
 	'admin-payment-received'
 ] as const;

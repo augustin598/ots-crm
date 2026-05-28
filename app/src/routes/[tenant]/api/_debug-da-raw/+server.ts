@@ -47,7 +47,15 @@ export const GET: RequestHandler = async (event) => {
 		'/CMD_API_SHOW_USER_DOMAINS',
 		'/CMD_API_SHOW_DOMAINS',
 		'/CMD_API_ADDITIONAL_DOMAINS',
-		'/CMD_API_PACKAGES_USER'
+		'/CMD_API_PACKAGES_USER',
+		// IP-listing endpoints — necessary pentru debugging `resolveDefaultIp`.
+		// Wrapper-ul probează aceste paths în client.ts: tryResolveSharedIp +
+		// tryResolveAnyIp. Dacă ambele returnează gol → throw "no IPs available".
+		'/CMD_API_SHOW_RESELLER_IPS',
+		'/CMD_API_SHOW_USER_IPS',
+		'/CMD_API_ADDITIONAL_IPS',
+		'/CMD_API_IP_MANAGER',
+		'/CMD_API_ALL_USER_IPS'
 	]);
 	const ALLOWED_PREFIXES = ['/api/users/', '/api/db-show/', '/api/domain-tls/'];
 
@@ -78,8 +86,8 @@ export const GET: RequestHandler = async (event) => {
 		method: 'GET',
 		headers: { Authorization: auth, Accept: '*/*' },
 		signal: AbortSignal.timeout(10_000),
-		// @ts-expect-error Bun extends RequestInit with tls
-		tls: { rejectUnauthorized: false }
+		// Bun extends RequestInit with `tls` — typed natively in current Bun versions.
+		tls: { rejectUnauthorized: false } as never
 	});
 	const body = await r.text();
 

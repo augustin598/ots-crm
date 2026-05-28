@@ -25,6 +25,7 @@ import { render as renderSuspended } from './email-templates/suspended';
 import { render as renderReactivated } from './email-templates/reactivated';
 import { render as renderRenewalReminder } from './email-templates/renewal-reminder';
 import { render as renderPaymentFailed } from './email-templates/payment-failed';
+import { render as renderPasswordReset } from './email-templates/password-reset';
 import { logInfo, logError } from '$lib/server/logger';
 
 function generateEventId(): string {
@@ -1431,6 +1432,156 @@ export async function notifyHostingPaymentFailed(
 		logError('hosting-email', `notifyHostingPaymentFailed failed for account ${accountId}`, {
 			tenantId,
 			metadata: { invoiceId, failureReason },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+		throw err;
+	}
+}
+
+/**
+ * Email-uri trimise după ce un admin resetează manual parola unui cont de hosting.
+ *
+ * Spre deosebire de welcome (dedupe `lifetime`), reset-ul de parolă se poate
+ * întâmpla de mai multe ori per cont, deci dedupeKey include un timestamp
+ * (`password-reset:<ms>`) astfel încât fiecare reset trimite un email separat,
+ * iar audit-ul rămâne 1-la-1 cu fiecare acțiune.
+ *
+ * Decryptul credențialelor se face în remote function ÎNAINTE de a apela
+ * această funcție, ca să nu duplicăm logica. Aici primim direct parola plain
+ * text pentru a o trimite — apoi e dată uitării (nu o loghez nicăieri).
+ */
+export async function notifyHostingPasswordReset(
+	tenantId: string,
+	accountId: string,
+	newPasswordPlain: string
+): Promise<void> {
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
+	if (!account) {
+		throw new Error(`hosting account ${accountId} not found for tenant ${tenantId}`);
+	}
+
+	const dedupeKey = `password-reset:${Date.now()}`;
+	const dedupeRowId = generateEventId();
+
+	const insertedRows = await db
+		.insert(hostingEmailEvent)
+		.values({
+			id: dedupeRowId,
+			tenantId,
+			hostingAccountId: accountId,
+			eventType: 'password-reset',
+			dedupeKey
+		})
+		.onConflictDoNothing({
+			target: [
+				hostingEmailEvent.tenantId,
+				hostingEmailEvent.hostingAccountId,
+				hostingEmailEvent.dedupeKey
+			]
+		})
+		.returning({ id: hostingEmailEvent.id });
+
+	if (insertedRows.length === 0) {
+		logInfo('hosting-email', `dedupe skip password-reset for account ${accountId}`, { tenantId });
+		return;
+	}
+
+	const newDedupeId = insertedRows[0]?.id ?? dedupeRowId;
+
+	try {
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		const [server] = await db
+			.select({
+				id: daServer.id,
+				tenantId: daServer.tenantId,
+				hostname: daServer.hostname
+			})
+			.from(daServer)
+			.where(and(eq(daServer.id, account.daServerId), eq(daServer.tenantId, tenantId)))
+			.limit(1);
+
+		if (!server) {
+			throw new Error(
+				`DA server ${account.daServerId} not found for tenant ${tenantId} (account ${accountId})`
+			);
+		}
+
+		const { subject, html } = await renderPasswordReset({
+			tenantId,
+			domain: account.domain,
+			daUsername: account.daUsername,
+			daPassword: newPasswordPlain,
+			daServerHost: server.hostname,
+			clientName: customer.name
+		});
+
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: customer.email,
+			subject,
+			emailType: 'hosting-password-reset',
+			htmlBody: html,
+			payload: null
+		});
+
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-password-reset',
+				metadata: { accountId },
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => {
+				const brand = await fetchTenantBrand(tenantId);
+				const [settings] = await db
+					.select()
+					.from(emailSettingsTable)
+					.where(eq(emailSettingsTable.tenantId, tenantId))
+					.limit(1);
+				const fromEmail = resolveFromEmail(settings ?? null);
+				return {
+					from: `"${brand.tenantName}" <${fromEmail}>`,
+					to: customer.email,
+					subject,
+					html,
+					...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+				};
+			}
+		);
+
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId })
+			.where(eq(hostingEmailEvent.id, newDedupeId));
+
+		logInfo('hosting-email', `sent password-reset for account ${accountId}`, {
+			tenantId,
+			metadata: { emailLogId, toEmail: customer.email }
+		});
+	} catch (err) {
+		logError('hosting-email', `notifyHostingPasswordReset failed for account ${accountId}`, {
+			tenantId,
 			stackTrace: err instanceof Error ? err.stack : undefined
 		});
 		throw err;

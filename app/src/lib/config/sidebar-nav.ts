@@ -36,7 +36,8 @@ export type IconKey =
 	| 'hosting-server'
 	| 'hosting-account'
 	| 'hosting-product'
-	| 'hosting-import';
+	| 'hosting-import'
+	| 'hosting-provisioning';
 
 export type RoleRequirement = 'admin' | 'owner';
 
@@ -147,6 +148,13 @@ export const SIDEBAR_NAV: NavGroup[] = [
 				label: 'Conturi Hosting',
 				icon: 'hosting-account',
 				href: '/hosting/accounts',
+				requiredPlugin: 'directadmin'
+			},
+			{
+				id: 'hosting-provisioning',
+				label: 'Provisioning',
+				icon: 'hosting-provisioning',
+				href: '/hosting/provisioning',
 				requiredPlugin: 'directadmin'
 			},
 			{

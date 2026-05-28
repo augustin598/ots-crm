@@ -916,6 +916,30 @@ export class DirectAdminClient {
 		);
 	}
 
+	/**
+	 * Change a user's DA login password. Legacy form endpoint — DA expects both
+	 * `passwd` and `passwd2` to match. DA enforces its own complexity policy on
+	 * the server side; if the password is rejected, `request()` surfaces a
+	 * `DirectAdminApiError` with `kind: 'password_weak'`.
+	 *
+	 * On success, the OLD password is immediately invalidated on DA. The caller
+	 * MUST re-encrypt `hostingAccount.daCredentialsEncrypted` with the new value
+	 * in the same transaction — otherwise the CRM's stored credentials diverge
+	 * from DA.
+	 */
+	async changeUserPassword(username: string, password: string): Promise<void> {
+		await this.request<Record<string, string>>(
+			'POST',
+			'/CMD_API_USER_PASSWD',
+			{
+				username,
+				passwd: password,
+				passwd2: password
+			},
+			true
+		);
+	}
+
 	async getAdminUsage(): Promise<DAAdminUsage> {
 		return this.request<DAAdminUsage>('GET', '/api/admin-usage');
 	}

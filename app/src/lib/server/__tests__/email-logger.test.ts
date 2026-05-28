@@ -37,8 +37,8 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 26 types (18 existing + 8 new)', () => {
-		expect(EMAIL_TYPES.length).toBe(26);
+	test('has exactly 27 types (18 existing + 8 hosting + 1 hosting-password-reset)', () => {
+		expect(EMAIL_TYPES.length).toBe(27);
 	});
 });
 

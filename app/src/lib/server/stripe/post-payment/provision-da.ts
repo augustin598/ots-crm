@@ -20,9 +20,15 @@ function generateId(): string {
  * Idempotent: dacă există deja un hostingAccount linked la sessionId, returnăm
  * payload-ul existent (chemarea repetată e no-op).
  *
- * Domain placeholder: în lipsa unui câmp `domain` în formularul de comandă, folosim
- * `${username}.hosting-temp.ots` (rezolvabil doar intern). Staff va edita domain-ul
- * real în CRM după ce clientul îl comunică.
+ * Resolvare domeniu (în ordinea priorității):
+ *   1. `params.domain` — pasat explicit de caller (override total).
+ *   2. `hostingInquiry.requestedDomain` — domeniul introdus de client în
+ *      formular (când `inquiryId` e dat).
+ *   3. Primul `hostingInquiryItem.domainName` non-null din inquiry (când
+ *      `inquiryId` e dat) — pentru comenzi multi-item cu domeniu separat.
+ *   4. Placeholder `{username}.hosting-temp.ots` — fallback de ultimă instanță,
+ *      doar dacă niciuna dintre sursele de mai sus nu are date. Staff editează
+ *      ulterior domeniul real în CRM.
  */
 export async function provisionDirectAdminAccount(params: {
 	tenantId: string;
@@ -37,8 +43,18 @@ export async function provisionDirectAdminAccount(params: {
 	 * is null in `hosting_account`), then a delayed Stripe webhook arrives with
 	 * the real subscription id and the old (tenant+client+product+sub) lookup
 	 * misses → would create a duplicate DA account.
+	 *
+	 * When provided, ALSO populates the domain from `inquiry.requestedDomain`
+	 * (or `hosting_inquiry_item.domainName` fallback) — replacing the previous
+	 * `{username}.hosting-temp.ots` placeholder behaviour. See docstring.
 	 */
 	inquiryId?: string;
+	/**
+	 * Optional explicit domain override. Bypasses the inquiry lookup entirely.
+	 * Use only when caller has already verified the domain (e.g. admin manual
+	 * provisioning form). When unset, falls back to inquiry → item → placeholder.
+	 */
+	domain?: string;
 }): Promise<{
 	hostingAccountId: string;
 	daUsername: string;
@@ -49,9 +65,17 @@ export async function provisionDirectAdminAccount(params: {
 	// means provisioning happened (via either Stripe or manual). Return that
 	// account regardless of subscription-id differences in the existing-key
 	// lookup below.
+	//
+	// We ALSO read `requestedDomain` in the same query to avoid a second
+	// round-trip later when we need to pick the domain. `requestedDomain` is
+	// the value the customer typed on /pachete-hosting.
+	let inquiryRequestedDomain: string | null = null;
 	if (params.inquiryId) {
 		const [inquiry] = await db
-			.select({ hostingAccountId: table.hostingInquiry.hostingAccountId })
+			.select({
+				hostingAccountId: table.hostingInquiry.hostingAccountId,
+				requestedDomain: table.hostingInquiry.requestedDomain
+			})
 			.from(table.hostingInquiry)
 			.where(
 				and(
@@ -60,6 +84,7 @@ export async function provisionDirectAdminAccount(params: {
 				)
 			)
 			.limit(1);
+		inquiryRequestedDomain = inquiry?.requestedDomain ?? null;
 		if (inquiry?.hostingAccountId) {
 			const [linked] = await db
 				.select({
@@ -166,15 +191,65 @@ export async function provisionDirectAdminAccount(params: {
 	let daUsername = generateDaUsername(seed);
 	let daPassword = generateDaPassword();
 
+	// Resolvare domeniu real, în ordinea priorității (vezi docstring):
+	//   1) params.domain (override explicit)
+	//   2) inquiry.requestedDomain (citit deja mai sus dacă inquiryId e dat)
+	//   3) primul hostingInquiryItem cu domain_name non-null
+	//   4) placeholder `{username}.hosting-temp.ots` ca ultim resort
+	let resolvedDomain: string | null = null;
+	let domainSource: 'param' | 'inquiry.requestedDomain' | 'inquiry_item.domainName' | 'placeholder' =
+		'placeholder';
+
+	if (params.domain && params.domain.trim()) {
+		resolvedDomain = params.domain.trim().toLowerCase();
+		domainSource = 'param';
+	} else if (inquiryRequestedDomain && inquiryRequestedDomain.trim()) {
+		resolvedDomain = inquiryRequestedDomain.trim().toLowerCase();
+		domainSource = 'inquiry.requestedDomain';
+	} else if (params.inquiryId) {
+		// Fallback secund: itemii de pe inquiry (cazuri cu items multiple).
+		const items = await db
+			.select({ domainName: table.hostingInquiryItem.domainName })
+			.from(table.hostingInquiryItem)
+			.where(
+				and(
+					eq(table.hostingInquiryItem.inquiryId, params.inquiryId),
+					eq(table.hostingInquiryItem.tenantId, params.tenantId)
+				)
+			);
+		const itemDomain = items
+			.map((i) => i.domainName?.trim())
+			.find((d): d is string => !!d && d.length > 0);
+		if (itemDomain) {
+			resolvedDomain = itemDomain.toLowerCase();
+			domainSource = 'inquiry_item.domainName';
+		}
+	}
+
 	const daClient = createDAClient(params.tenantId, server);
 	const accountId = generateId();
 	const MAX_RETRIES = 3;
 
 	let finalUsername = daUsername;
-	let finalDomain = `${daUsername}.hosting-temp.ots`;
+	let finalDomain = resolvedDomain ?? `${daUsername}.hosting-temp.ots`;
+
+	logInfo(
+		'directadmin',
+		`Provisioning DA — domain source: ${domainSource}, domain: ${finalDomain}`,
+		{
+			tenantId: params.tenantId,
+			metadata: {
+				inquiryId: params.inquiryId,
+				clientId: params.clientId,
+				productId: params.productId,
+				domainSource
+			}
+		}
+	);
 
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		const domain = `${daUsername}.hosting-temp.ots`; // Placeholder — staff va edita real domain.
+		// Username se poate schimba pe retry (collision); domeniul rămâne fix.
+		const domain = resolvedDomain ?? `${daUsername}.hosting-temp.ots`;
 		finalUsername = daUsername;
 		finalDomain = domain;
 

@@ -1334,9 +1334,10 @@ export const daAuditLog = sqliteTable(
 			onDelete: 'set null'
 		}),
 		daServerId: text('da_server_id').references(() => daServer.id, { onDelete: 'set null' }),
-		action: text('action').notNull(), // suspend|unsuspend|create|delete|sync|test|package-change
-		trigger: text('trigger').notNull(), // hook:invoice.status.changed|hook:invoice.paid|manual|cron
+		action: text('action').notNull(), // suspend|unsuspend|create|delete|sync|test|package-change|view-credentials|password-reset|welcome-resend|retry-provision|login-as|ssl-issue|alert-sent|package-apply
+		trigger: text('trigger').notNull(), // hook:invoice.status.changed|hook:invoice.paid|manual|cron|stripe-webhook|system|retry
 		invoiceId: text('invoice_id'),
+		actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
 		success: boolean('success').notNull(),
 		errorMessage: text('error_message'),
 		durationMs: integer('duration_ms'),
@@ -1347,7 +1348,8 @@ export const daAuditLog = sqliteTable(
 	(t) => [
 		index('da_audit_log_tenant_idx').on(t.tenantId),
 		index('da_audit_log_account_idx').on(t.hostingAccountId),
-		index('da_audit_log_action_idx').on(t.action)
+		index('da_audit_log_action_idx').on(t.action),
+		index('da_audit_log_actor_idx').on(t.actorId)
 	]
 );
 

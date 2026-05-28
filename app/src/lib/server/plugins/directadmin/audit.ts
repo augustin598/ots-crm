@@ -10,19 +10,31 @@ export type DaAuditAction =
 	| 'delete'
 	| 'sync'
 	| 'test'
-	| 'package-change';
+	| 'package-change'
+	| 'package-apply'
+	| 'view-credentials'
+	| 'password-reset'
+	| 'welcome-resend'
+	| 'retry-provision'
+	| 'login-as'
+	| 'ssl-issue'
+	| 'alert-sent';
 
 export type DaAuditTrigger =
 	| 'hook:invoice.status.changed'
 	| 'hook:invoice.paid'
 	| 'manual'
-	| 'cron';
+	| 'cron'
+	| 'stripe-webhook'
+	| 'system'
+	| 'retry';
 
 export interface DaAuditEntry {
 	tenantId: string;
 	hostingAccountId?: string | null;
 	daServerId?: string | null;
 	invoiceId?: string | null;
+	actorId?: string | null;
 	action: DaAuditAction;
 	trigger: DaAuditTrigger;
 	success: boolean;
@@ -46,6 +58,7 @@ export async function writeDaAudit(entry: DaAuditEntry): Promise<void> {
 			hostingAccountId: entry.hostingAccountId ?? null,
 			daServerId: entry.daServerId ?? null,
 			invoiceId: entry.invoiceId ?? null,
+			actorId: entry.actorId ?? null,
 			action: entry.action,
 			trigger: entry.trigger,
 			success: entry.success,
