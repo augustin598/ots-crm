@@ -8,9 +8,9 @@ export interface HostingShellInput {
 }
 
 /**
- * Renders a hosting email using the tenant's branding (theme color, name).
- * Logo attachment is intentionally omitted for hosting templates in MVP —
- * we use plain text headers without CID attachments.
+ * Renders a hosting email using the tenant's branding (theme color, name, logo).
+ * The logo is referenced inline via cid:companylogo; callers attach
+ * `brand.logoAttachment` so the image resolves in the body.
  *
  * Use this when the body doesn't need brand info up-front. If the body needs
  * `themeColor` (e.g. for a CTA button) call `fetchTenantBrand` yourself and
@@ -20,7 +20,7 @@ export async function renderHostingShell(input: HostingShellInput): Promise<stri
 	const brand = await fetchTenantBrand(input.tenantId);
 	return renderBrandedEmail({
 		themeColor: brand.themeColor,
-		headerLogoHtml: '', // no logo attachment in hosting emails (MVP)
+		headerLogoHtml: brand.headerLogoHtml,
 		title: input.title,
 		bodyHtml: input.bodyHtml,
 		previewTitle: input.previewTitle ?? input.title,
@@ -43,7 +43,7 @@ export interface HostingShellWithBrandInput {
 export function renderHostingShellWithBrand(input: HostingShellWithBrandInput): string {
 	return renderBrandedEmail({
 		themeColor: input.brand.themeColor,
-		headerLogoHtml: '', // no logo attachment in hosting emails (MVP)
+		headerLogoHtml: input.brand.headerLogoHtml,
 		title: input.title,
 		bodyHtml: input.bodyHtml,
 		previewTitle: input.previewTitle ?? input.title,
