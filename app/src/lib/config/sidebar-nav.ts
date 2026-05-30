@@ -130,7 +130,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 		items: [
 			{
 				id: 'hosting-overview',
-				label: 'Hosting',
+				label: 'Dashboard Hosting',
 				icon: 'hosting',
 				href: '/hosting',
 				requiredPlugin: 'directadmin'

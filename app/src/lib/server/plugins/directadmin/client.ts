@@ -879,13 +879,22 @@ export class DirectAdminClient {
 		);
 	}
 
+	// CMD_API_SELECT_USERS routes by *button-name* form fields, not by `action=`.
+	// Sending `action=suspend` makes DA's CMD_SHOW_USERS handler resolve the
+	// command to "none" and reply with `text=Unkown Select Command&details=none`
+	// (typo is in DA's source). The accepted shape — used by TomMalbran/DirectAdmin,
+	// clientexec/directadmin-server, and nexces/directadmin-commands — is:
+	//   location=CMD_SELECT_USERS  (some DA versions require this hint)
+	//   dosuspend=Suspend         (button name, presence of key is what matters)
+	//   select0=<username>        (numeric-indexed select rows)
 	async suspendUser(username: string): Promise<void> {
 		await this.request<Record<string, string>>(
 			'POST',
 			'/CMD_API_SELECT_USERS',
 			{
-				action: 'suspend',
-				[`select${username}`]: username
+				location: 'CMD_SELECT_USERS',
+				dosuspend: 'Suspend',
+				select0: username
 			},
 			true
 		);
@@ -896,8 +905,9 @@ export class DirectAdminClient {
 			'POST',
 			'/CMD_API_SELECT_USERS',
 			{
-				action: 'unsuspend',
-				[`select${username}`]: username
+				location: 'CMD_SELECT_USERS',
+				dounsuspend: 'Unsuspend',
+				select0: username
 			},
 			true
 		);

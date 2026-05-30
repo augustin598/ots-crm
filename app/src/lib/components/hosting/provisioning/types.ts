@@ -11,14 +11,16 @@ export type DaSyncStatus =
 	| 'suspended_on_da'
 	| 'active_on_da'
 	| 'package_mismatch'
+	| 'zombie_on_da'
 	| 'server_error';
 
 export const DA_SYNC_LABELS: Record<DaSyncStatus, string> = {
-	ok: 'Sincronizat',
-	orphan: 'Orfan — nu există pe DA',
+	ok: 'Confirmat pe DA',
+	orphan: 'Nu există pe DA',
 	suspended_on_da: 'Suspendat pe DA',
 	active_on_da: 'Activ pe DA',
-	package_mismatch: 'Pachet diferit pe DA',
+	package_mismatch: 'Pachet diferit',
+	zombie_on_da: 'Încă există pe DA',
 	server_error: 'DA inaccesibil'
 };
 

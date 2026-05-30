@@ -1317,6 +1317,7 @@ type ReconcileBucket = {
 	suspendedOnDa: number;
 	activeOnDa: number;
 	packageMismatch: number;
+	zombies: number;
 	errors: number;
 };
 
@@ -1347,9 +1348,9 @@ export const reconcileHostingWithDA = command(async () => {
 	assertCan(actor, 'admin.hosting.manage');
 	if (actor.kind !== 'tenant') throw new Error('Forbidden');
 
-	// 1) Conturile care merită verificate: active + suspended + pending. Excludem
-	//    'terminated' / 'failed' / 'cancelled' — pentru acelea, „nu există pe DA"
-	//    e starea așteptată, nu un orphan.
+	// 1) TOATE conturile cu un username valid — verificăm și terminated/failed/
+	//    cancelled, dar cu semantică inversă: pentru ele „există pe DA" e
+	//    discrepanța (zombie), nu „nu există".
 	const accounts = await db
 		.select({
 			id: table.hostingAccount.id,
@@ -1363,7 +1364,14 @@ export const reconcileHostingWithDA = command(async () => {
 		.where(
 			and(
 				eq(table.hostingAccount.tenantId, tenantId),
-				inArray(table.hostingAccount.status, ['active', 'suspended', 'pending'])
+				inArray(table.hostingAccount.status, [
+					'active',
+					'suspended',
+					'pending',
+					'terminated',
+					'failed',
+					'cancelled'
+				])
 			)
 		);
 
@@ -1375,6 +1383,7 @@ export const reconcileHostingWithDA = command(async () => {
 			suspendedOnDa: 0,
 			activeOnDa: 0,
 			packageMismatch: 0,
+			zombies: 0,
 			errors: 0,
 			discrepancies: [] as Array<{
 				id: string;
@@ -1413,8 +1422,10 @@ export const reconcileHostingWithDA = command(async () => {
 		suspendedOnDa: 0,
 		activeOnDa: 0,
 		packageMismatch: 0,
+		zombies: 0,
 		errors: 0
 	};
+	const TERMINATED_LIKE = new Set(['terminated', 'failed', 'cancelled']);
 	const discrepancies: Array<{
 		id: string;
 		daUsername: string;
@@ -1432,6 +1443,7 @@ export const reconcileHostingWithDA = command(async () => {
 			| 'suspended_on_da'
 			| 'active_on_da'
 			| 'package_mismatch'
+			| 'zombie_on_da'
 			| 'server_error';
 		daSyncIssue: string | null;
 	};
@@ -1467,11 +1479,33 @@ export const reconcileHostingWithDA = command(async () => {
 
 			await mapWithConcurrency(list, PER_SERVER_CONCURRENCY, async (account) => {
 				bucket.checked++;
+				const isTerminatedLike = TERMINATED_LIKE.has(account.status);
 				try {
 					const config = await daClient.getUserConfig(account.daUsername);
 					const daSuspended = !!config.suspended;
 					const daPackage = config.package ?? '';
 					const crmPackage = account.daPackageName ?? '';
+					const daStatusLabel = daSuspended ? 'suspended' : 'active';
+
+					// CRM zice că e mort dar DA încă are contul → zombie.
+					if (isTerminatedLike) {
+						bucket.zombies++;
+						const issue = `CRM = ${account.status}, dar DA încă are contul (${daStatusLabel})`;
+						updates.push({
+							id: account.id,
+							daSyncStatus: 'zombie_on_da',
+							daSyncIssue: issue
+						});
+						discrepancies.push({
+							id: account.id,
+							daUsername: account.daUsername,
+							domain: account.domain,
+							crmStatus: account.status,
+							daSyncStatus: 'zombie_on_da',
+							daSyncIssue: issue
+						});
+						return;
+					}
 
 					// Prioritate: suspended-mismatch > package-mismatch > ok
 					if (daSuspended && account.status === 'active') {
@@ -1529,11 +1563,25 @@ export const reconcileHostingWithDA = command(async () => {
 						return;
 					}
 					bucket.ok++;
-					updates.push({ id: account.id, daSyncStatus: 'ok', daSyncIssue: null });
+					updates.push({
+						id: account.id,
+						daSyncStatus: 'ok',
+						daSyncIssue: `DA confirmă ${daStatusLabel} pe ${server.hostname}`
+					});
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					const isNotFound = /404|not found|user.*not.*exist/i.test(msg);
 					if (isNotFound) {
+						// Pentru terminated/failed/cancelled, 404 e ce așteptăm → ok.
+						if (isTerminatedLike) {
+							bucket.ok++;
+							updates.push({
+								id: account.id,
+								daSyncStatus: 'ok',
+								daSyncIssue: `DA confirmă: ${account.daUsername} nu mai există pe ${server.hostname}`
+							});
+							return;
+						}
 						bucket.orphans++;
 						const issue = `Contul "${account.daUsername}" nu există pe ${server.hostname}`;
 						updates.push({

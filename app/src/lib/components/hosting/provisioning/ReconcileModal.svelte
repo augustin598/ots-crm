@@ -24,6 +24,7 @@
 		suspendedOnDa: number;
 		activeOnDa: number;
 		packageMismatch: number;
+		zombies: number;
 		errors: number;
 		discrepancies: Discrepancy[];
 		startedAt: string;
@@ -67,6 +68,7 @@
 			{ key: 'suspended_on_da', label: 'Suspendate pe DA', value: r.suspendedOnDa, tone: 'orange' },
 			{ key: 'active_on_da', label: 'Active pe DA', value: r.activeOnDa, tone: 'amber' },
 			{ key: 'package_mismatch', label: 'Pachet diferit', value: r.packageMismatch, tone: 'violet' },
+			{ key: 'zombie_on_da', label: 'Zombi pe DA', value: r.zombies, tone: 'fuchsia' },
 			{ key: 'server_error', label: 'Erori DA', value: r.errors, tone: 'slate' }
 		];
 	});
@@ -81,6 +83,8 @@
 			'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300',
 		violet:
 			'bg-violet-50 border-violet-200 text-violet-700 dark:bg-violet-950/30 dark:border-violet-900/40 dark:text-violet-300',
+		fuchsia:
+			'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700 dark:bg-fuchsia-950/30 dark:border-fuchsia-900/40 dark:text-fuchsia-300',
 		slate:
 			'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-300'
 	};

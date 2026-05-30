@@ -47,6 +47,7 @@
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import PaymentMethodPicker from '$lib/components/payment-method-picker.svelte';
+	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
 
 	type Props = {
 		account: EditableAccount;
@@ -255,7 +256,14 @@
 		if (target === currentStatus) return;
 
 		if (target === 'suspended') {
-			if (!confirm('Suspendă contul pe DirectAdmin? Site-ul va deveni inaccesibil imediat.')) return;
+			const ok = await confirmDialog({
+				title: 'Suspendă contul de hosting',
+				description: `Contul ${account.daUsername} (${account.domain}) va fi suspendat pe DirectAdmin imediat. Site-ul devine inaccesibil până la reactivare.`,
+				confirmLabel: 'Suspendă',
+				cancelLabel: 'Anulează',
+				variant: 'destructive'
+			});
+			if (!ok) return;
 			statusBusy = true;
 			const toastId = toast.loading('Se suspendă contul...');
 			try {
@@ -269,7 +277,14 @@
 				statusBusy = false;
 			}
 		} else {
-			if (!confirm('Reactivează contul pe DirectAdmin?')) return;
+			const ok = await confirmDialog({
+				title: 'Reactivează contul de hosting',
+				description: `Contul ${account.daUsername} (${account.domain}) va fi reactivat pe DirectAdmin. Site-ul va redeveni accesibil.`,
+				confirmLabel: 'Reactivează',
+				cancelLabel: 'Anulează',
+				variant: 'default'
+			});
+			if (!ok) return;
 			statusBusy = true;
 			const toastId = toast.loading('Se reactivează contul...');
 			try {

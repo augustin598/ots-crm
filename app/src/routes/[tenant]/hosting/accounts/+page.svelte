@@ -7,6 +7,7 @@
 		syncAllHostingAccounts,
 		type ClientGroup
 	} from '$lib/remotes/hosting-accounts.remote';
+	import { getDaServersForFilter } from '$lib/remotes/hosting-provisioning.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import type { Option } from '$lib/components/ui/combobox/combobox-types';
 	import ColumnManager from '$lib/components/hosting/column-manager.svelte';
@@ -34,10 +35,14 @@
 	import XIcon from '@lucide/svelte/icons/x';
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
-	let statusFilter = $state('');
+	type StatusKey = 'all' | 'active' | 'suspended' | 'pending' | 'terminated' | 'cancelled' | 'failed';
+	let statusFilter = $state<StatusKey>('active');
+	let serverFilter = $state<string>('all');
 	let clientSearch = $state('');
 	let groupByClient = $state(true);
 	let showOnlyUnassigned = $state(false);
+	let showOnlyExpiring30 = $state(false);
+	let showOnlyOverdue = $state(false);
 	let columnDrawerOpen = $state(false);
 	let editingAccountId = $state<string | null>(null);
 
@@ -53,18 +58,42 @@
 	const visibleColumns = $derived(visibleColumnsInOrder(HOSTING_ACCOUNT_COLUMNS, columnConfig));
 
 	function fetchGroups() {
-		return getHostingAccountsGrouped({ status: statusFilter || undefined, limit: 500 });
+		return getHostingAccountsGrouped({
+			status: statusFilter === 'all' ? undefined : statusFilter,
+			serverId: serverFilter === 'all' ? undefined : serverFilter,
+			limit: 500
+		});
 	}
 	let groups = $state(fetchGroups());
 	const allClients = getClients();
+	const allServers = getDaServersForFilter();
 
 	function refresh(): void {
 		groups = fetchGroups();
 	}
 
-	function filterGroups(items: ClientGroup[], q: string, onlyUnassigned: boolean): ClientGroup[] {
+	const STATUS_PILLS: Array<{ key: StatusKey; label: string }> = [
+		{ key: 'all', label: 'Toate' },
+		{ key: 'active', label: 'Active' },
+		{ key: 'suspended', label: 'Suspendate' },
+		{ key: 'pending', label: 'În așteptare' },
+		{ key: 'terminated', label: 'Terminate' },
+		{ key: 'cancelled', label: 'Anulate' },
+		{ key: 'failed', label: 'Eșuate' }
+	];
+
+	function filterGroups(
+		items: ClientGroup[],
+		q: string,
+		onlyUnassigned: boolean,
+		onlyExpiring30: boolean,
+		onlyOverdue: boolean
+	): ClientGroup[] {
 		let out = items;
 		if (onlyUnassigned) out = out.filter((g) => !g.clientId);
+		if (onlyExpiring30)
+			out = out.filter((g) => !!g.totals.nextExpiry && g.totals.nextExpiry.days <= 30);
+		if (onlyOverdue) out = out.filter((g) => g.totals.overdueCount > 0);
 		const query = q.trim().toLowerCase();
 		if (!query) return out;
 		return out
@@ -211,7 +240,7 @@
 		</div>
 	{:then items}
 		{@const allGroups = items as ClientGroup[]}
-		{@const filtered = filterGroups(allGroups, clientSearch, showOnlyUnassigned)}
+		{@const filtered = filterGroups(allGroups, clientSearch, showOnlyUnassigned, showOnlyExpiring30, showOnlyOverdue)}
 		{@const totalAccounts = filtered.reduce((s, g) => s + g.accounts.length, 0)}
 		{@const totalClients = filtered.filter((g) => g.clientId).length}
 		{@const totalAddons = filtered.reduce((s, g) => s + g.totals.addonCount, 0)}
@@ -271,22 +300,6 @@
 			</div>
 		</div>
 
-		<!-- Info banner -->
-		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-			<span class="font-semibold">Ce e nou în acest design:</span> headerul de grup expune
-			<em>sănătatea relației</em> (LTV, vechime, status mix, facturi restante, next renewal), nu doar
-			identitatea. Coloanele noi:
-			<code class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900">Ciclu</code>
-			(lunar/anual + auto-renew),
-			<code class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900">Ultima plată</code>
-			(status factură),
-			<code class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900">+ domenii adiționale</code>
-			ca chip vizibil în celula domeniului. Marginea colorată din stânga grupului semnalizează rapid:
-			<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-emerald-500"></span> OK</span> ·
-			<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-amber-500"></span> VIP / atenție scadență</span> ·
-			<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-red-500"></span> risc (restant / suspendat)</span>.
-		</div>
-
 		<!-- KPI tiles -->
 		<div class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
 			<div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -304,25 +317,48 @@
 				<div class="mt-1 text-2xl font-bold text-emerald-600">{activeAccounts}</div>
 				<div class="text-[11px] text-slate-500">{activePct}% din total</div>
 			</div>
-			<div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
-				<div class="text-[10px] font-medium uppercase tracking-wider text-slate-500">Expiră 30z</div>
-				<div class="mt-1 text-2xl font-bold text-amber-600">{expiring30}</div>
-				<div class="text-[11px] text-slate-500">acțiune necesară</div>
-			</div>
 			<button
 				type="button"
-				onclick={() => (showOnlyUnassigned = !showOnlyUnassigned)}
-				class="rounded-xl border bg-white p-4 text-left dark:bg-slate-800 {overdueInvoices > 0
-					? 'border-red-200 dark:border-red-800'
+				onclick={() => (showOnlyExpiring30 = !showOnlyExpiring30)}
+				class="rounded-xl border bg-white p-4 text-left transition hover:border-amber-300 dark:bg-slate-800 {showOnlyExpiring30
+					? 'border-amber-400 ring-2 ring-amber-100 dark:border-amber-500 dark:ring-amber-900/30'
 					: 'border-slate-200 dark:border-slate-700'}"
+				title={showOnlyExpiring30
+					? 'Click pentru a arăta toți clienții'
+					: 'Click pentru a filtra doar clienții cu conturi care expiră în 30 zile'}
 			>
-				<div class="text-[10px] font-medium uppercase tracking-wider {overdueInvoices > 0 ? 'text-red-700' : 'text-slate-500'}">
+				<div class="text-[10px] font-medium uppercase tracking-wider {showOnlyExpiring30 ? 'text-amber-700' : 'text-slate-500'}">
+					Expiră 30z
+				</div>
+				<div class="mt-1 text-2xl font-bold text-amber-600">{expiring30}</div>
+				<div class="text-[11px] text-slate-500">
+					{showOnlyExpiring30 ? 'filtru activ — click pentru toate' : 'acțiune necesară'}
+				</div>
+			</button>
+			<button
+				type="button"
+				onclick={() => (showOnlyOverdue = !showOnlyOverdue)}
+				disabled={overdueInvoices === 0}
+				class="rounded-xl border bg-white p-4 text-left transition hover:border-red-300 disabled:cursor-default dark:bg-slate-800 {showOnlyOverdue
+					? 'border-red-400 ring-2 ring-red-100 dark:border-red-500 dark:ring-red-900/30'
+					: overdueInvoices > 0
+						? 'border-red-200 dark:border-red-800'
+						: 'border-slate-200 dark:border-slate-700'}"
+				title={overdueInvoices === 0
+					? 'Niciun cont cu facturi restante'
+					: showOnlyOverdue
+						? 'Click pentru a arăta toți clienții'
+						: 'Click pentru a filtra doar clienții cu facturi restante'}
+			>
+				<div class="text-[10px] font-medium uppercase tracking-wider {showOnlyOverdue || overdueInvoices > 0 ? 'text-red-700' : 'text-slate-500'}">
 					Facturi restante
 				</div>
 				<div class="mt-1 text-2xl font-bold {overdueInvoices > 0 ? 'text-red-600' : 'text-slate-900 dark:text-slate-100'}">
 					{overdueInvoices}
 				</div>
-				<div class="text-[11px] text-slate-500">{overdueInvoices > 0 ? 'follow-up urgent' : 'totul OK'}</div>
+				<div class="text-[11px] text-slate-500">
+					{#if showOnlyOverdue}filtru activ — click pentru toate{:else if overdueInvoices > 0}follow-up urgent{:else}totul OK{/if}
+				</div>
 			</button>
 			<div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
 				<div class="text-[10px] font-medium uppercase tracking-wider text-slate-500">MRR / ARR</div>
@@ -331,50 +367,86 @@
 			</div>
 		</div>
 
-		<!-- Toolbar -->
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="flex flex-wrap items-center gap-2">
-				<div class="relative">
-					<SearchIcon class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-					<input
-						type="text"
-						placeholder="Caută după client, domeniu, user…"
-						bind:value={clientSearch}
-						class="w-72 rounded-lg border border-slate-300 py-1.5 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800"
-					/>
-				</div>
+		{@const statusCounts = (() => {
+			const c: Record<StatusKey, number> = {
+				all: 0,
+				active: 0,
+				suspended: 0,
+				pending: 0,
+				terminated: 0,
+				cancelled: 0,
+				failed: 0
+			};
+			for (const g of allGroups) {
+				for (const k of Object.keys(g.totals.byStatus) as StatusKey[]) {
+					const n = g.totals.byStatus[k] ?? 0;
+					c.all += n;
+					if (k in c) c[k] += n;
+				}
+			}
+			return c;
+		})()}
+
+		<!-- Toolbar — pills + server + search (provisioning-style) -->
+		<div class="flex flex-wrap items-center gap-2">
+			{#each STATUS_PILLS as p (p.key)}
 				<button
 					type="button"
-					onclick={() => (groupByClient = !groupByClient)}
-					class="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium {groupByClient
-						? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-						: 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'}"
+					onclick={() => { statusFilter = p.key; refresh(); }}
+					class="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] font-medium {statusFilter ===
+					p.key
+						? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
+						: 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-slate-100'}"
 				>
-					<span class="flex size-4 items-center justify-center rounded {groupByClient ? 'bg-emerald-500 text-white' : 'border border-slate-300'}">
-						{#if groupByClient}<CheckIcon class="size-3" />{/if}
+					{p.label}
+					<span
+						class="rounded-full px-1.5 text-[10.5px] tabular-nums {statusFilter === p.key
+							? 'bg-blue-200/60 text-blue-700 dark:bg-blue-800/40 dark:text-blue-300'
+							: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300'}"
+					>
+						{statusCounts[p.key] ?? 0}
 					</span>
-					Grupează după client
 				</button>
+			{/each}
+
+			<span class="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700"></span>
+
+			{#await allServers then servers}
 				<select
-					bind:value={statusFilter}
+					bind:value={serverFilter}
 					onchange={refresh}
-					class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
+					class="rounded-md border border-slate-200 bg-white py-1.5 pl-3 pr-7 text-[12.5px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
 				>
-					<option value="">Toate (fără eșuate)</option>
-					<option value="active">Active</option>
-					<option value="suspended">Suspendate</option>
-					<option value="pending">În așteptare</option>
-					<option value="terminated">Terminate</option>
-					<option value="cancelled">Anulate</option>
-					<option value="failed">Eșuate (forensic)</option>
+					<option value="all">Toate serverele</option>
+					{#each servers as s (s.id)}
+						<option value={s.id}>{s.name}</option>
+					{/each}
 				</select>
+			{/await}
+
+			<div
+				class="inline-flex max-w-xs flex-1 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-slate-400 dark:border-slate-700 dark:bg-slate-800"
+			>
+				<SearchIcon class="h-3 w-3" />
+				<input
+					bind:value={clientSearch}
+					placeholder="Caută client, domeniu, username DA..."
+					class="flex-1 bg-transparent text-[12.5px] text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
+				/>
 			</div>
-			<div class="flex items-center gap-3 text-[11px]">
-				<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-emerald-500"></span> active</span>
-				<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-amber-400"></span> expiră</span>
-				<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-orange-500"></span> suspendat</span>
-				<span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-slate-400"></span> terminat</span>
-			</div>
+
+			<button
+				type="button"
+				onclick={() => (groupByClient = !groupByClient)}
+				class="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-[12.5px] font-medium {groupByClient
+					? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+					: 'border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'}"
+			>
+				<span class="flex size-4 items-center justify-center rounded {groupByClient ? 'bg-emerald-500 text-white' : 'border border-slate-300'}">
+					{#if groupByClient}<CheckIcon class="size-3" />{/if}
+				</span>
+				Grupează după client
+			</button>
 		</div>
 
 		{#await allClients then clients}

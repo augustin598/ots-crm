@@ -37,8 +37,14 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 27 types (18 existing + 8 hosting + 1 hosting-password-reset)', () => {
-		expect(EMAIL_TYPES.length).toBe(27);
+	test('has exactly 30 types (18 existing + 8 hosting + 1 hosting-password-reset + 3 hosting status-change variants)', () => {
+		expect(EMAIL_TYPES.length).toBe(30);
+	});
+
+	test('includes the manual + admin status-change hosting variants', () => {
+		expect(EMAIL_TYPES).toContain('hosting-suspended-manual');
+		expect(EMAIL_TYPES).toContain('hosting-reactivated-manual');
+		expect(EMAIL_TYPES).toContain('hosting-admin-status-change');
 	});
 });
 

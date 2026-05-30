@@ -20,6 +20,7 @@
 		active_on_da: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
 		package_mismatch:
 			'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
+		zombie_on_da: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300',
 		server_error: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
 	};
 
@@ -29,6 +30,7 @@
 		suspended_on_da: 'bg-orange-500',
 		active_on_da: 'bg-amber-500',
 		package_mismatch: 'bg-violet-500',
+		zombie_on_da: 'bg-fuchsia-500',
 		server_error: 'bg-slate-500'
 	};
 

@@ -149,6 +149,7 @@
 					suspendedOnDa: number;
 					activeOnDa: number;
 					packageMismatch: number;
+					zombies: number;
 					errors: number;
 					discrepancies: Array<{
 						id: string;
@@ -861,23 +862,22 @@
 									<td class="px-3.5 py-3 align-middle">
 										<span
 											class="inline-flex max-w-full items-center gap-1.5 text-[12px] text-slate-700 dark:text-slate-200"
-											title={r.daPackageName ?? r.productName ?? ''}
+											title={r.daPackageName ?? r.productName ?? 'Default'}
 										>
 											<span
 												class="h-2 w-2 flex-shrink-0 rounded-sm"
 												style="background-color: {r.productColor ?? '#64748b'}"
 											></span>
-											<span class="truncate">{r.daPackageName ?? r.productName ?? '—'}</span>
+											<span class="truncate">{r.daPackageName ?? r.productName ?? 'Default'}</span>
 										</span>
 									</td>
 									<td class="px-3.5 py-3 align-middle">
 										<div class="flex flex-col items-start gap-1">
 											<StatusBadge status={r.status} />
-											{#if r.daSyncStatus && r.daSyncStatus !== 'ok'}
+											{#if r.daSyncStatus}
 												<SyncStatusBadge
 													status={r.daSyncStatus as DaSyncStatus}
 													issue={r.daSyncIssue}
-													compact
 												/>
 											{/if}
 										</div>
