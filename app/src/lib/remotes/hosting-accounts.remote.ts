@@ -16,7 +16,30 @@ import { logWarning } from '$lib/server/logger';
 // Imports below sit OUTSIDE the pre-existing merge conflict block so the
 // compiler can see them. Do NOT move them inside the markers.
 import { logError } from '$lib/server/logger';
-import { notifyHostingSuspended } from '$lib/server/hosting/notifications';
+import {
+	notifyHostingSuspended,
+	notifyHostingSuspendedManual,
+	notifyHostingReactivatedManual
+} from '$lib/server/hosting/notifications';
+
+/**
+ * Resolves the actor's display name for audit/email purposes.
+ * Falls back to email when first/last name is missing, then to a generic label.
+ */
+async function resolveActorName(userId: string): Promise<string | null> {
+	const [u] = await db
+		.select({
+			email: table.user.email,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName
+		})
+		.from(table.user)
+		.where(eq(table.user.id, userId))
+		.limit(1);
+	if (!u) return null;
+	const full = `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim();
+	return full || u.email || null;
+}
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -299,18 +322,35 @@ export const suspendHostingAccount = command(SuspendSchema, async (params) => {
 			.where(eq(table.hostingAccount.id, params.id));
 	});
 
-	// Fire customer notification email only when admin tied this suspend to a
-	// specific invoice (the template needs invoice context to render).
-	// Best-effort — DA suspend has already committed; email failure must not
-	// roll back or fail the admin's action.
+	// Fire customer + admin notification emails. Two paths:
+	//   - invoiceId present → rich invoice template (notifyHostingSuspended)
+	//     also fires admin alert internally (auto-trigger dedupe keyed on invoice).
+	//   - invoiceId absent (modal panel suspend) → generic manual template
+	//     (notifyHostingSuspendedManual) + admin alert with actorName.
+	// Both paths are best-effort: DA suspend has already committed; email
+	// failure must not roll back or fail the admin's action.
 	if (params.invoiceId) {
 		const invoiceId = params.invoiceId;
 		notifyHostingSuspended(tenantId, params.id, invoiceId).catch((err) => {
-			logError('hosting-email', 'manual suspend notify failed', {
+			logError('hosting-email', 'invoice-tied suspend notify failed', {
 				tenantId,
 				metadata: {
 					hostingAccountId: params.id,
 					invoiceId,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		});
+	} else {
+		const actorName = await resolveActorName(event.locals.user.id);
+		notifyHostingSuspendedManual(tenantId, params.id, {
+			reason: params.reason ?? null,
+			actorName
+		}).catch((err) => {
+			logError('hosting-email', 'manual suspend notify failed', {
+				tenantId,
+				metadata: {
+					hostingAccountId: params.id,
 					error: err instanceof Error ? err.message : String(err)
 				}
 			});
@@ -321,15 +361,11 @@ export const suspendHostingAccount = command(SuspendSchema, async (params) => {
 });
 
 /**
- * Manual unsuspend by admin. Updates DA + DB but does NOT fire a customer
- * notification email — the reactivated template needs invoice context
- * (invoiceNumber, amountPaid) that this manual signature doesn't carry.
- * The invoice-driven hook (`directadmin/hooks.ts onInvoiceStatusChanged`)
- * IS the email-driving path; manual button is for admin recovery scenarios
- * where the customer was already notified out-of-band.
- *
- * To wire email here: change the signature to accept invoiceId, update the UI
- * to pass it, and add a fire-and-forget notifyHostingReactivated call.
+ * Manual unsuspend by admin. Updates DA + DB, then fires the generic
+ * reactivated-manual customer email + admin internal alert. The invoice-tied
+ * unsuspend path (auto, via stripe/keez webhook → directadmin/hooks.ts) uses
+ * `notifyHostingReactivated` with full invoice context — this manual path uses
+ * the generic template since the admin's button-click carries no invoice tie.
  */
 export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 	const event = getRequestEvent();
@@ -377,6 +413,19 @@ export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 				updatedAt: new Date()
 			})
 			.where(eq(table.hostingAccount.id, accountId));
+	});
+
+	// Fire customer + admin notification emails. Best-effort — DA unsuspend has
+	// already committed; email failure must not roll back or fail the action.
+	const actorName = await resolveActorName(event.locals.user.id);
+	notifyHostingReactivatedManual(tenantId, accountId, { actorName }).catch((err) => {
+		logError('hosting-email', 'manual reactivate notify failed', {
+			tenantId,
+			metadata: {
+				hostingAccountId: accountId,
+				error: err instanceof Error ? err.message : String(err)
+			}
+		});
 	});
 
 	return { success: true };
@@ -802,6 +851,7 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 			recurringAmount: table.hostingAccount.recurringAmount,
 			currency: table.hostingAccount.currency,
 			billingCycle: table.hostingAccount.billingCycle,
+			status: table.hostingAccount.status,
 			autoRenew: table.hostingAccount.autoRenew
 		})
 		.from(table.hostingAccount)
@@ -888,6 +938,36 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 		});
 	} catch (e) {
 		logWarning('directadmin', 'updateHostingAccount audit insert failed', {
+			metadata: { err: e instanceof Error ? e.message : String(e), accountId: data.id }
+		});
+	}
+
+	// Re-sync the recurring-invoice template from the catalog and reconcile the
+	// snapshot — parity with createHostingAccount, which calls the upsert at
+	// creation. Without this, changing the package/cycle/price here leaves the OLD
+	// price billing at the next renewal (audit finding H2/DRIFT-1). Uses merged
+	// post-update values. Best-effort: a hiccup must not fail the save.
+	try {
+		await upsertRecurringInvoiceForHostingAccount({
+			tenantId,
+			userId: event.locals.user.id,
+			hostingAccountId: data.id,
+			hostingProductId:
+				data.hostingProductId !== undefined ? data.hostingProductId : account.hostingProductId,
+			daPackageId: data.daPackageId !== undefined ? data.daPackageId : account.daPackageId,
+			clientId: data.clientId !== undefined ? data.clientId : account.clientId,
+			domain: data.domain ?? account.domain,
+			daPackageName: null,
+			recurringAmount:
+				data.recurringAmount !== undefined ? data.recurringAmount : account.recurringAmount,
+			currency: data.currency !== undefined ? data.currency : account.currency,
+			billingCycle: data.billingCycle !== undefined ? data.billingCycle : account.billingCycle,
+			startDate: account.startDate,
+			nextDueDate: data.nextDueDate !== undefined ? data.nextDueDate : account.nextDueDate,
+			status: account.status
+		});
+	} catch (e) {
+		logWarning('directadmin', 'updateHostingAccount recurring re-sync failed', {
 			metadata: { err: e instanceof Error ? e.message : String(e), accountId: data.id }
 		});
 	}

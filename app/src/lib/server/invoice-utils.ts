@@ -10,6 +10,7 @@ import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './pl
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
 import { logInfo, logWarning } from '$lib/server/logger';
 import { classifyClientVat } from '$lib/server/vat/classify-client';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 import {
 	DEFAULT_INTRACOM_NOTE,
 	DEFAULT_EXPORT_NOTE,
@@ -473,7 +474,7 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 		.where(eq(table.invoiceSettings.tenantId, recurringInvoice.tenantId))
 		.limit(1);
 
-	const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+	const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
 	const defaultTaxRateCents = defaultTaxRatePercent * 100;
 
 	// Zero-VAT classification by client residency. Romanian fiscal law requires 0% VAT for

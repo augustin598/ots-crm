@@ -207,15 +207,26 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 		clearTenantTransporterCache(log.tenantId);
 	}
 
-	// Delete the old failed log entry first — the send function creates a new log via
-	// sendWithPersistence (or via the legacy code path).
-	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
+	// Validate retryability BEFORE mutating anything. A payload-less row whose
+	// type has no legacy handler (e.g. hosting-* notifiers) cannot be replayed —
+	// throw here with the row INTACT. Previously the row was deleted first and
+	// the throw then destroyed the evidence with no resend (audit finding H4/GAP-4).
+	if (!log.payload && !LEGACY_RETRYABLE_EMAIL_TYPES.has(log.emailType)) {
+		throw new Error(
+			`Acest tip de email (${log.emailType}) nu poate fi retrimis din panou — declanșează manual acțiunea care îl generează. Rândul a fost păstrat.`
+		);
+	}
 
+	// Dispatch first (the send function creates a fresh log via sendWithPersistence),
+	// then delete the old failed row only on SUCCESS — so a transient send failure
+	// leaves the original row intact for a later retry instead of vanishing.
 	if (log.payload) {
 		await dispatchPayloadRetry(log);
 	} else {
 		await dispatchLegacyRetry(log);
 	}
+
+	await db.delete(table.emailLog).where(eq(table.emailLog.id, logId));
 
 	return { success: true };
 });

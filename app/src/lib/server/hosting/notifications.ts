@@ -8,7 +8,8 @@ import {
 	tenant as tenantTable,
 	emailSettings as emailSettingsTable,
 	invoice as invoiceTable,
-	invoiceSettings as invoiceSettingsTable
+	invoiceSettings as invoiceSettingsTable,
+	recurringInvoice
 } from '$lib/server/db/schema';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
@@ -23,10 +24,18 @@ import { render as renderAccountCreated } from './email-templates/account-create
 import { render as renderProvisioningFailed } from './email-templates/provisioning-failed';
 import { render as renderSuspended } from './email-templates/suspended';
 import { render as renderReactivated } from './email-templates/reactivated';
+import { render as renderSuspendedManual } from './email-templates/suspended-manual';
+import { render as renderReactivatedManual } from './email-templates/reactivated-manual';
+import {
+	render as renderAdminStatusChange,
+	type StatusChangeAction,
+	type StatusChangeTrigger
+} from './email-templates/admin-status-change';
 import { render as renderRenewalReminder } from './email-templates/renewal-reminder';
 import { render as renderPaymentFailed } from './email-templates/payment-failed';
 import { render as renderPasswordReset } from './email-templates/password-reset';
-import { logInfo, logError } from '$lib/server/logger';
+import { logInfo, logError, logWarning } from '$lib/server/logger';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
 function generateEventId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -702,6 +711,17 @@ export async function notifyHostingSuspended(
 			`sent suspended alert for account ${accountId} (invoice ${invoiceId})`,
 			{ tenantId, metadata: { emailLogId, toEmail: customer.email } }
 		);
+
+		// Fire the admin alert AFTER the customer email is queued. Best-effort:
+		// failure here MUST NOT roll back the customer send. Has its own dedupe
+		// row keyed on invoiceId so retries naturally collapse.
+		await fireAutoAdminStatusAlert(
+			tenantId,
+			accountId,
+			'suspended',
+			invoiceId,
+			invoiceRow.invoiceNumber
+		);
 	} catch (err) {
 		logError('hosting-email', `notifyHostingSuspended failed for account ${accountId}`, {
 			tenantId,
@@ -950,6 +970,17 @@ export async function notifyHostingReactivated(
 			`sent reactivated alert for account ${accountId} (invoice ${invoiceId})`,
 			{ tenantId, metadata: { emailLogId, toEmail: customer.email } }
 		);
+
+		// Fire the admin alert AFTER the customer email is queued. Best-effort:
+		// failure here MUST NOT roll back the customer send. Has its own dedupe
+		// row keyed on invoiceId so retries naturally collapse.
+		await fireAutoAdminStatusAlert(
+			tenantId,
+			accountId,
+			'reactivated',
+			invoiceId,
+			invoiceRow.invoiceNumber
+		);
 	} catch (err) {
 		logError('hosting-email', `notifyHostingReactivated failed for account ${accountId}`, {
 			tenantId,
@@ -1068,28 +1099,67 @@ export async function notifyHostingRenewalReminder(
 		const dueDateRo = formatTextDateRo(dueDateIso);
 		const payUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
 
-		// 5. Currency narrowing — schema is free-form text but our templates only
-		//    support these three. Anything else is normalized to RON (consistent
-		//    with the rest of the CRM's defaults).
-		const currency = (
-			account.currency === 'EUR' || account.currency === 'USD' ? account.currency : 'RON'
-		) as 'RON' | 'EUR' | 'USD';
+		// 5. Resolve the billed amount from the recurring-invoice template — the
+		//    SAME source the scheduler bills from (recurring-invoices.ts →
+		//    recurringInvoice.amount). recurring-template.ts syncs that row from the
+		//    product catalog (hostingProduct.price) and INTENTIONALLY ignores
+		//    hostingAccount.recurringAmount, a per-account snapshot that can drift
+		//    from the catalog. Reading the snapshot here is exactly what made the
+		//    email quote a different price than the invoice (e.g. 866 vs 1149).
+		const [recurring] = await db
+			.select({
+				amount: recurringInvoice.amount,
+				currency: recurringInvoice.currency,
+				taxRate: recurringInvoice.taxRate // BPS (percent × 100)
+			})
+			.from(recurringInvoice)
+			.where(
+				and(
+					eq(recurringInvoice.hostingAccountId, accountId),
+					eq(recurringInvoice.tenantId, tenantId)
+				)
+			)
+			.limit(1);
 
-		// 5b. Resolve VAT rate from tenant invoiceSettings. Per
-		//     feedback_no_hardcode.md — Romania changed 19% → 21% in 2025/2026,
-		//     never hardcode. Fallback 21 matches recurring-template.ts:270 which
-		//     uses the same default at invoice generation, so the email always
-		//     reflects what the customer will actually be charged.
+		// 5b. VAT fallback from tenant invoiceSettings — only used on the snapshot
+		//     fallback path below. Per feedback_no_hardcode.md (RO 19% → 21% in
+		//     2025/2026) never hardcode; fallback 21 matches recurring-template.ts.
 		const [vatRow] = await db
 			.select({ defaultTaxRate: invoiceSettingsTable.defaultTaxRate })
 			.from(invoiceSettingsTable)
 			.where(eq(invoiceSettingsTable.tenantId, tenantId))
 			.limit(1);
-		const vatRate = vatRow?.defaultTaxRate ?? 21;
+		const fallbackVatRate = vatRow?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
 
-		// 5c. Compute breakdown. recurringAmount is NET — recurring-template.ts
-		//     treats it as `rate` (pre-tax line item) at invoice generation.
-		const subtotal = Number(account.recurringAmount ?? 0);
+		// 5c. Pick the price source: the recurring-invoice template (catalog-derived,
+		//     == what the customer is actually billed) when present, else the
+		//     snapshot as a last resort so the reminder still sends — logged as a
+		//     warning so the drift is traceable.
+		let subtotal: number;
+		let vatRate: number;
+		let currencyRaw: string;
+		if (recurring && recurring.amount > 0) {
+			subtotal = recurring.amount;
+			// recurringInvoice.taxRate is BPS (e.g. 2100 = 21%) → integer percent.
+			vatRate = recurring.taxRate ? Math.round(recurring.taxRate / 100) : fallbackVatRate;
+			currencyRaw = recurring.currency ?? account.currency ?? 'RON';
+		} else {
+			logWarning(
+				'hosting-email',
+				`renewal reminder falling back to recurringAmount snapshot — no recurringInvoice template for account ${accountId}`,
+				{ tenantId, metadata: { accountId } }
+			);
+			subtotal = Number(account.recurringAmount ?? 0);
+			vatRate = fallbackVatRate;
+			currencyRaw = account.currency ?? 'RON';
+		}
+
+		// 5d. Currency narrowing — templates support only these three; anything
+		//     else is normalized to RON (consistent with the rest of the CRM).
+		const currency = (
+			currencyRaw === 'EUR' || currencyRaw === 'USD' ? currencyRaw : 'RON'
+		) as 'RON' | 'EUR' | 'USD';
+
 		const vatAmount = Math.round((subtotal * vatRate) / 100);
 		const totalAmount = subtotal + vatAmount;
 
@@ -1585,5 +1655,482 @@ export async function notifyHostingPasswordReset(
 			stackTrace: err instanceof Error ? err.stack : undefined
 		});
 		throw err;
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Admin status-change alerts + manual suspend/reactivate flows.
+//
+// Every suspend/reactivate (manual or automatic) fires:
+//   1. Customer email — rich invoice template (auto) or generic manual template (manual)
+//   2. Admin alert    — internal "ops" email to resolveAdminRecipients
+//
+// The admin alert lives behind its own dedupe row (different eventType), so a
+// customer-email dedupe hit does NOT suppress the admin alert and vice-versa.
+// ----------------------------------------------------------------------------
+
+interface SendAdminAlertOpts {
+	action: StatusChangeAction;
+	trigger: StatusChangeTrigger;
+	actorName: string | null;
+	reason: string | null;
+	invoiceNumber: string | null;
+	dedupeSuffix: string;
+}
+
+async function sendAdminStatusChangeAlert(
+	tenantId: string,
+	accountId: string,
+	opts: SendAdminAlertOpts
+): Promise<void> {
+	let recipients: string[];
+	try {
+		recipients = await resolveAdminRecipients(tenantId);
+	} catch (err) {
+		if (err instanceof NoAdminRecipientError) {
+			logInfo(
+				'hosting-email',
+				`admin status-change alert skipped — no admin recipients resolved for tenant ${tenantId}`,
+				{ tenantId, metadata: { accountId, action: opts.action, trigger: opts.trigger } }
+			);
+			return;
+		}
+		throw err;
+	}
+
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+	if (!account) {
+		throw new Error(`hosting account ${accountId} not found for tenant ${tenantId}`);
+	}
+
+	const [tenantRow] = await db
+		.select({ id: tenantTable.id, slug: tenantTable.slug })
+		.from(tenantTable)
+		.where(eq(tenantTable.id, tenantId))
+		.limit(1);
+	if (!tenantRow) throw new Error(`tenant ${tenantId} not found`);
+
+	const dedupeKey = `admin-status-change:${opts.action}:${opts.trigger}${opts.dedupeSuffix}`;
+	const dedupeRowId = generateEventId();
+	const insertedRows = await db
+		.insert(hostingEmailEvent)
+		.values({
+			id: dedupeRowId,
+			tenantId,
+			hostingAccountId: accountId,
+			eventType: 'admin-status-change',
+			dedupeKey
+		})
+		.onConflictDoNothing({
+			target: [
+				hostingEmailEvent.tenantId,
+				hostingEmailEvent.hostingAccountId,
+				hostingEmailEvent.dedupeKey
+			]
+		})
+		.returning({ id: hostingEmailEvent.id });
+
+	if (insertedRows.length === 0) {
+		logInfo(
+			'hosting-email',
+			`dedupe skip admin status-change alert for account ${accountId} (${dedupeKey})`,
+			{ tenantId }
+		);
+		return;
+	}
+
+	const adminCrmUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/hosting/accounts/${accountId}`;
+	const { subject, html } = await renderAdminStatusChange({
+		tenantId,
+		tenantSlug: tenantRow.slug,
+		accountId,
+		domain: account.domain,
+		daUsername: account.daUsername,
+		action: opts.action,
+		trigger: opts.trigger,
+		actorName: opts.actorName,
+		reason: opts.reason,
+		invoiceNumber: opts.invoiceNumber,
+		adminCrmUrl
+	});
+
+	const brand = await fetchTenantBrand(tenantId);
+	const [settings] = await db
+		.select()
+		.from(emailSettingsTable)
+		.where(eq(emailSettingsTable.tenantId, tenantId))
+		.limit(1);
+	const fromEmail = resolveFromEmail(settings ?? null);
+
+	let lastEmailLogId: string | undefined;
+	for (const email of recipients) {
+		const emailLogId = await logEmailAttempt({
+			tenantId,
+			toEmail: email,
+			subject,
+			emailType: 'hosting-admin-status-change',
+			htmlBody: html,
+			payload: null
+		});
+		lastEmailLogId = emailLogId;
+
+		await sendWithPersistence(
+			{
+				tenantId,
+				toEmail: email,
+				subject,
+				emailType: 'hosting-admin-status-change',
+				metadata: {
+					hostingAccountId: accountId,
+					action: opts.action,
+					trigger: opts.trigger
+				},
+				htmlBody: html,
+				payload: null,
+				_retryOfLogId: emailLogId
+			},
+			async () => ({
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: email,
+				subject,
+				html,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+			})
+		);
+	}
+
+	if (lastEmailLogId) {
+		await db
+			.update(hostingEmailEvent)
+			.set({ emailLogId: lastEmailLogId })
+			.where(eq(hostingEmailEvent.id, insertedRows[0]?.id ?? dedupeRowId));
+	}
+
+	logInfo(
+		'hosting-email',
+		`sent admin status-change alert for account ${accountId} (${opts.action}/${opts.trigger}) to ${recipients.length} recipient(s)`,
+		{ tenantId, metadata: { accountId, action: opts.action, trigger: opts.trigger } }
+	);
+}
+
+export async function notifyHostingSuspendedManual(
+	tenantId: string,
+	accountId: string,
+	opts: { reason: string | null; actorName: string | null }
+): Promise<void> {
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	try {
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		const { subject, html } = await renderSuspendedManual({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			reason: opts.reason,
+			supportEmail: 'support@onetopsolution.ro'
+		});
+
+		const dedupeKey = `manual-suspended:${dayBucketEET()}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'manual-suspended',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			logInfo(
+				'hosting-email',
+				`dedupe skip manual-suspended for account ${accountId} (today)`,
+				{ tenantId }
+			);
+		} else {
+			const emailLogId = await logEmailAttempt({
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-suspended-manual',
+				htmlBody: html,
+				payload: null
+			});
+
+			await sendWithPersistence(
+				{
+					tenantId,
+					toEmail: customer.email,
+					subject,
+					emailType: 'hosting-suspended-manual',
+					metadata: { hostingAccountId: accountId },
+					htmlBody: html,
+					payload: null,
+					_retryOfLogId: emailLogId
+				},
+				async () => {
+					const brand = await fetchTenantBrand(tenantId);
+					const [settings] = await db
+						.select()
+						.from(emailSettingsTable)
+						.where(eq(emailSettingsTable.tenantId, tenantId))
+						.limit(1);
+					const fromEmail = resolveFromEmail(settings ?? null);
+					return {
+						from: `"${brand.tenantName}" <${fromEmail}>`,
+						to: customer.email,
+						subject,
+						html,
+						...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+					};
+				}
+			);
+
+			await db
+				.update(hostingEmailEvent)
+				.set({ emailLogId })
+				.where(eq(hostingEmailEvent.id, insertedRows[0]?.id ?? dedupeRowId));
+
+			logInfo('hosting-email', `sent manual-suspended alert for account ${accountId}`, {
+				tenantId,
+				metadata: { emailLogId, toEmail: customer.email }
+			});
+		}
+	} catch (err) {
+		logError(
+			'hosting-email',
+			`notifyHostingSuspendedManual customer email failed for ${accountId}`,
+			{ tenantId, stackTrace: err instanceof Error ? err.stack : undefined }
+		);
+	}
+
+	try {
+		await sendAdminStatusChangeAlert(tenantId, accountId, {
+			action: 'suspended',
+			trigger: 'manual',
+			actorName: opts.actorName,
+			reason: opts.reason,
+			invoiceNumber: null,
+			dedupeSuffix: `:${dayBucketEET()}`
+		});
+	} catch (err) {
+		logError('hosting-email', `admin alert failed for manual suspend of ${accountId}`, {
+			tenantId,
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+	}
+}
+
+export async function notifyHostingReactivatedManual(
+	tenantId: string,
+	accountId: string,
+	opts: { actorName: string | null }
+): Promise<void> {
+	const [account] = await db
+		.select({
+			id: hostingAccount.id,
+			tenantId: hostingAccount.tenantId,
+			clientId: hostingAccount.clientId,
+			daServerId: hostingAccount.daServerId,
+			daUsername: hostingAccount.daUsername,
+			domain: hostingAccount.domain
+		})
+		.from(hostingAccount)
+		.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+		.limit(1);
+	if (!account) {
+		const msg = `hosting account ${accountId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+
+	try {
+		const customer = await resolveCustomerEmail({
+			id: account.id,
+			tenantId: account.tenantId,
+			clientId: account.clientId
+		});
+
+		const [server] = await db
+			.select({ id: daServer.id, hostname: daServer.hostname })
+			.from(daServer)
+			.where(and(eq(daServer.id, account.daServerId), eq(daServer.tenantId, tenantId)))
+			.limit(1);
+
+		const daPanelUrl = server ? `https://${server.hostname}:2222` : '';
+
+		const { subject, html } = await renderReactivatedManual({
+			tenantId,
+			domain: account.domain,
+			clientName: customer.name,
+			daPanelUrl
+		});
+
+		const dedupeKey = `manual-reactivated:${dayBucketEET()}`;
+		const dedupeRowId = generateEventId();
+		const insertedRows = await db
+			.insert(hostingEmailEvent)
+			.values({
+				id: dedupeRowId,
+				tenantId,
+				hostingAccountId: accountId,
+				eventType: 'manual-reactivated',
+				dedupeKey
+			})
+			.onConflictDoNothing({
+				target: [
+					hostingEmailEvent.tenantId,
+					hostingEmailEvent.hostingAccountId,
+					hostingEmailEvent.dedupeKey
+				]
+			})
+			.returning({ id: hostingEmailEvent.id });
+
+		if (insertedRows.length === 0) {
+			logInfo(
+				'hosting-email',
+				`dedupe skip manual-reactivated for account ${accountId} (today)`,
+				{ tenantId }
+			);
+		} else {
+			const emailLogId = await logEmailAttempt({
+				tenantId,
+				toEmail: customer.email,
+				subject,
+				emailType: 'hosting-reactivated-manual',
+				htmlBody: html,
+				payload: null
+			});
+
+			await sendWithPersistence(
+				{
+					tenantId,
+					toEmail: customer.email,
+					subject,
+					emailType: 'hosting-reactivated-manual',
+					metadata: { hostingAccountId: accountId },
+					htmlBody: html,
+					payload: null,
+					_retryOfLogId: emailLogId
+				},
+				async () => {
+					const brand = await fetchTenantBrand(tenantId);
+					const [settings] = await db
+						.select()
+						.from(emailSettingsTable)
+						.where(eq(emailSettingsTable.tenantId, tenantId))
+						.limit(1);
+					const fromEmail = resolveFromEmail(settings ?? null);
+					return {
+						from: `"${brand.tenantName}" <${fromEmail}>`,
+						to: customer.email,
+						subject,
+						html,
+						...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+					};
+				}
+			);
+
+			await db
+				.update(hostingEmailEvent)
+				.set({ emailLogId })
+				.where(eq(hostingEmailEvent.id, insertedRows[0]?.id ?? dedupeRowId));
+
+			logInfo('hosting-email', `sent manual-reactivated alert for account ${accountId}`, {
+				tenantId,
+				metadata: { emailLogId, toEmail: customer.email }
+			});
+		}
+	} catch (err) {
+		logError(
+			'hosting-email',
+			`notifyHostingReactivatedManual customer email failed for ${accountId}`,
+			{ tenantId, stackTrace: err instanceof Error ? err.stack : undefined }
+		);
+	}
+
+	try {
+		await sendAdminStatusChangeAlert(tenantId, accountId, {
+			action: 'reactivated',
+			trigger: 'manual',
+			actorName: opts.actorName,
+			reason: null,
+			invoiceNumber: null,
+			dedupeSuffix: `:${dayBucketEET()}`
+		});
+	} catch (err) {
+		logError('hosting-email', `admin alert failed for manual reactivate of ${accountId}`, {
+			tenantId,
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
+	}
+}
+
+/**
+ * Fires the admin alert for the AUTO-trigger suspend/reactivate flows.
+ * Called by notifyHostingSuspended/notifyHostingReactivated AFTER the
+ * customer email has been queued. Best-effort: never throws.
+ */
+export async function fireAutoAdminStatusAlert(
+	tenantId: string,
+	accountId: string,
+	action: StatusChangeAction,
+	invoiceId: string,
+	invoiceNumber: string
+): Promise<void> {
+	try {
+		await sendAdminStatusChangeAlert(tenantId, accountId, {
+			action,
+			trigger: 'auto',
+			actorName: null,
+			reason: null,
+			invoiceNumber,
+			dedupeSuffix: `:${invoiceId}`
+		});
+	} catch (err) {
+		logError('hosting-email', `admin alert failed for auto ${action} of ${accountId}`, {
+			tenantId,
+			metadata: { invoiceId },
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
 	}
 }

@@ -20,6 +20,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getLatestBnrRate } from '$lib/server/bnr/client';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -38,6 +39,7 @@ function cycleToRecurring(
 		case 'quarterly':
 			return { type: 'monthly', interval: 3 };
 		case 'semiannually':
+		case 'biannually': // WHMCS-conflated alias (spelled with 'a') — same 6-month cadence
 			return { type: 'monthly', interval: 6 };
 		case 'annually':
 			return { type: 'yearly', interval: 1 };
@@ -224,12 +226,22 @@ export async function upsertRecurringInvoiceForHostingAccount(
 		priceSource = resolvedViaNameMatch ? 'catalog_via_name_match_bnr' : 'catalog_converted_via_bnr';
 	}
 
-	// When we auto-resolved via name match, persist the link back so subsequent
-	// syncs and the UI both see the chosen catalog product. Dry-run skips this.
-	if (resolvedViaNameMatch && !dryRun) {
+	// Reconcile the account snapshot to the catalog-resolved price so EVERY
+	// snapshot-reading surface (panel SUMĂ, client portal, MRR/ARR, the renewal
+	// email's fallback path) shows exactly what the customer is billed. Without
+	// this, hostingAccount.recurringAmount silently drifts from the catalog — the
+	// structural cause of the audit's DRIFT-1/3/4 (H6/M4) findings. We also persist
+	// the name-matched product link when one was auto-resolved. Dry-run writes nothing.
+	if (!dryRun) {
+		const accountPatch: Record<string, unknown> = {
+			recurringAmount: effectiveAmount,
+			currency: effectiveCurrency,
+			updatedAt: new Date()
+		};
+		if (resolvedViaNameMatch) accountPatch.hostingProductId = product.id;
 		await db
 			.update(table.hostingAccount)
-			.set({ hostingProductId: product.id, updatedAt: new Date() })
+			.set(accountPatch)
 			.where(eq(table.hostingAccount.id, args.hostingAccountId));
 	}
 
@@ -267,7 +279,7 @@ export async function upsertRecurringInvoiceForHostingAccount(
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, args.tenantId))
 		.limit(1);
-	const taxRatePercent = vatSettings?.defaultTaxRate ?? 21;
+	const taxRatePercent = vatSettings?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
 	const taxRateBps = taxRatePercent * 100;
 
 	const name = resolvedPackageName

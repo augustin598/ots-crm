@@ -25,8 +25,27 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 			.from(table.recurringInvoice)
 			.where(and(...conditions));
 
-		// Filter out invoices that have ended (endDate is exclusive — invoices stop BEFORE endDate)
+		// Stripe-subscription templates are billed by Stripe's OWN recurring engine
+		// — the CRM scheduler must NOT also generate an invoice for them, or the
+		// customer gets a duplicate document. They are also the templates whose
+		// lineItemsJson historically stored the rate in cents (see emit-keez-invoice.ts),
+		// which the generator would re-multiply ×100 → a grossly inflated invoice.
+		// stripe/post-payment/emit-keez-invoice.ts tags them in `notes`.
+		const isStripeOwned = (ri: { notes: string | null }) =>
+			ri.notes?.startsWith('stripe_subscription:') ?? false;
+		const stripeOwnedCount = recurringInvoices.filter(isStripeOwned).length;
+		if (stripeOwnedCount > 0) {
+			logInfo(
+				'scheduler',
+				`Recurring invoices: skipping ${stripeOwnedCount} Stripe-subscription template(s) — billed by Stripe, not the CRM`,
+				{ action: 'recurring_skip_stripe', metadata: { stripeOwnedCount } }
+			);
+		}
+
+		// Filter out Stripe-owned templates and invoices that have ended (endDate is
+		// exclusive — invoices stop BEFORE endDate).
 		const activeRecurringInvoices = recurringInvoices.filter((ri) => {
+			if (isStripeOwned(ri)) return false;
 			if (!ri.endDate) return true;
 			return new Date(ri.endDate) > now;
 		});

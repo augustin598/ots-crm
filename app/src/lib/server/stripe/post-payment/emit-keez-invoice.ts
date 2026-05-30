@@ -7,6 +7,8 @@ import { pushInvoiceToKeez } from '$lib/server/plugins/keez/auto-push';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { buildRecurringLineItem } from '$lib/server/hosting/recurring-line-item';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -138,7 +140,7 @@ export async function emitKeezFiscalInvoice(params: {
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
-	const vatPercent = settings?.defaultTaxRate ?? 19;
+	const vatPercent = settings?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
 
 	// Tenant owner — required for invoice.createdByUserId (NOT NULL).
 	const [tenantOwner] = await db
@@ -561,16 +563,19 @@ async function createRecurringTemplate(params: {
 		// subscription. The retry job + Keez emit can branch on this if needed.
 		// Stored as a structured tag in `notes` to avoid adding a column for v1.
 		notes: `stripe_subscription:${stripeSubscriptionId}`,
+		// CONTRACT: generateInvoiceFromRecurringTemplate (invoice-utils.ts) treats
+		// lineItemsJson `rate` as DECIMAL currency units and `taxRate` as PERCENT
+		// (Math.round(rate * 100) / Math.round(taxRate * 100)). Storing cents/bps
+		// here caused a 100× over-billing (audit finding C2). The shared helper
+		// encodes the unit contract so it can never drift again.
 		lineItemsJson: JSON.stringify([
-			{
+			buildRecurringLineItem({
 				description: product.name,
-				quantity: 1,
-				rate: netCents,
-				amount: netCents,
-				taxRate: lineTaxRate,
-				currency: product.currency,
-				unitOfMeasure: 'Buc'
-			}
+				netCents,
+				// lineTaxRate is BPS (vatPercent × 100) → back to integer percent.
+				taxRatePercent: Math.round(lineTaxRate / 100),
+				currency: product.currency
+			})
 		]),
 		isActive: true
 	});

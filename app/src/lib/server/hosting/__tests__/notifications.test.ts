@@ -155,6 +155,15 @@ mock.module('$lib/server/db/schema', () => ({
 	tenant: { id: 'id', slug: 'slug', adminContactEmail: 'admin_contact_email' },
 	emailSettings: { id: 'id', tenantId: 'tenant_id', smtpFrom: 'smtp_from', smtpUser: 'smtp_user' },
 	invoiceSettings: { id: 'id', tenantId: 'tenant_id', defaultTaxRate: 'default_tax_rate' },
+	recurringInvoice: {
+		id: 'id',
+		tenantId: 'tenant_id',
+		hostingAccountId: 'hosting_account_id',
+		amount: 'amount',
+		currency: 'currency',
+		taxRate: 'tax_rate',
+		isActive: 'is_active'
+	},
 	invoice: {
 		id: 'id',
 		tenantId: 'tenant_id',
@@ -989,14 +998,18 @@ describe('notifyHostingRenewalReminder', () => {
 				daUsername: 'da-user',
 				domain: 'example.ro',
 				nextDueDate: '2026-06-01',
-				recurringAmount: 9950,
+				recurringAmount: 8660,
 				currency: 'RON',
 				autoRenew: true
 			}
 		]);
 		// 2. Tenant lookup (for slug → payUrl)
 		pushSelect([{ id: 't-1', slug: 'ots' }]);
-		// 3. invoiceSettings lookup → VAT rate (21% RO default)
+		// 3. recurringInvoice lookup → catalog-derived billed amount (9950 net).
+		//    The account snapshot above is intentionally DRIFTED (8660) so this
+		//    asserts the email quotes the template value, NOT the stale snapshot.
+		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
+		// 4. invoiceSettings lookup → VAT fallback (unused when template resolves)
 		pushSelect([{ defaultTaxRate: 21 }]);
 		// 4. Atomic dedupe insert → returns row (insert succeeded)
 		pushInsert([{ id: 'evt-rr-1' }]);
@@ -1064,16 +1077,18 @@ describe('notifyHostingRenewalReminder', () => {
 				daUsername: 'da-user',
 				domain: 'example.ro',
 				nextDueDate: '2026-06-01',
-				recurringAmount: 9950,
+				recurringAmount: 8660,
 				currency: 'RON',
 				autoRenew: true
 			}
 		]);
 		// 2. Tenant lookup
 		pushSelect([{ id: 't-1', slug: 'ots' }]);
-		// 3. invoiceSettings lookup → VAT rate
+		// 3. recurringInvoice lookup
+		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
+		// 4. invoiceSettings lookup → VAT fallback
 		pushSelect([{ defaultTaxRate: 21 }]);
-		// 4. onConflictDoNothing returns [] → dedupe hit
+		// 5. onConflictDoNothing returns [] → dedupe hit
 		pushInsert([]);
 
 		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
@@ -1087,6 +1102,87 @@ describe('notifyHostingRenewalReminder', () => {
 		expect(updateCalls).toBe(1);
 		// Info log for skip
 		expect(loggerCalls.info.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test('REGRESSION: quotes the recurringInvoice (catalog) amount, NOT the stale recurringAmount snapshot', async () => {
+		// Real reported case: snapshot drifted to 866.00 (86600 cents) while the
+		// catalog/recurring-invoice the customer is actually billed is 1149.00.
+		// 1. Account lookup — recurringAmount snapshot is the WRONG (drifted) value.
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'nevada2023',
+				domain: 'nevadasuceava.ro',
+				nextDueDate: '2026-08-23',
+				recurringAmount: 86600,
+				currency: 'RON',
+				autoRenew: true
+			}
+		]);
+		// 2. Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 3. recurringInvoice lookup — what the scheduler ACTUALLY bills (catalog
+		//    price 1149.00 net = 114900 cents; taxRate stored in BPS = 2100).
+		pushSelect([{ amount: 114900, currency: 'RON', taxRate: 2100, isActive: true }]);
+		// 4. invoiceSettings lookup → VAT fallback (unused when template resolves)
+		pushSelect([{ defaultTaxRate: 21 }]);
+		// 5. Atomic dedupe insert → returns row (insert succeeded)
+		pushInsert([{ id: 'evt-rr-reg' }]);
+		// 6. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		expect(renderRenewalReminderCalls.length).toBe(1);
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		// Uses the catalog/invoice amount (114900), NOT the snapshot (86600).
+		expect(renderInput.subtotal).toBe(114900);
+		expect(renderInput.vatRate).toBe(21);
+		// round(114900 * 21 / 100) = 24129 → total 139029 (= 1390.29 RON)
+		expect(renderInput.vatAmount).toBe(24129);
+		expect(renderInput.totalAmount).toBe(139029);
+		expect(renderInput.currency).toBe('RON');
+	});
+
+	test('falls back to recurringAmount snapshot (and warns) when no recurringInvoice template exists', async () => {
+		// 1. Account lookup
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: '2026-06-01',
+				recurringAmount: 5000,
+				currency: 'RON',
+				autoRenew: false
+			}
+		]);
+		// 2. Tenant lookup
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// 3. recurringInvoice lookup → NONE (account has no billing template)
+		pushSelect([]);
+		// 4. invoiceSettings lookup → VAT rate used for the fallback path
+		pushSelect([{ defaultTaxRate: 21 }]);
+		// 5. dedupe insert
+		pushInsert([{ id: 'evt-rr-fb' }]);
+		// 6. emailSettings lookup inside buildMail
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 1);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.subtotal).toBe(5000);
+		expect(renderInput.vatRate).toBe(21);
+		expect(renderInput.vatAmount).toBe(1050);
+		expect(renderInput.totalAmount).toBe(6050);
+		// Warned about the snapshot fallback so drift is traceable in logs.
+		expect(loggerCalls.warning.length).toBeGreaterThanOrEqual(1);
 	});
 
 	test('throws when account.nextDueDate is null', async () => {

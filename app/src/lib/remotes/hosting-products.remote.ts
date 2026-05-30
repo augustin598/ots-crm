@@ -2,10 +2,12 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, desc, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
+import { upsertRecurringInvoiceForHostingAccount } from '$lib/server/hosting/recurring-template';
+import { logInfo, logWarning } from '$lib/server/logger';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -195,6 +197,74 @@ export const updateHostingProduct = command(UpdateSchema, async (params) => {
 				eq(table.hostingProduct.tenantId, event.locals.tenant.id)
 			)
 		);
+
+	// Propagate a catalog price/currency change to every active account billed
+	// off this product so the recurring invoice (and its reconciled snapshot)
+	// follow the catalog. Without this the next renewal bills the OLD price until
+	// someone runs the debug re-sync manually (audit finding H1/RECUR-1).
+	if (params.data.price !== undefined || params.data.currency !== undefined) {
+		const affected = await db
+			.select({
+				id: table.hostingAccount.id,
+				hostingProductId: table.hostingAccount.hostingProductId,
+				daPackageId: table.hostingAccount.daPackageId,
+				clientId: table.hostingAccount.clientId,
+				domain: table.hostingAccount.domain,
+				daPackageName: table.hostingAccount.daPackageName,
+				recurringAmount: table.hostingAccount.recurringAmount,
+				currency: table.hostingAccount.currency,
+				billingCycle: table.hostingAccount.billingCycle,
+				startDate: table.hostingAccount.startDate,
+				nextDueDate: table.hostingAccount.nextDueDate,
+				status: table.hostingAccount.status
+			})
+			.from(table.hostingAccount)
+			.where(
+				and(
+					eq(table.hostingAccount.tenantId, event.locals.tenant.id),
+					eq(table.hostingAccount.hostingProductId, params.id),
+					notInArray(table.hostingAccount.status, ['terminated', 'cancelled'])
+				)
+			);
+
+		let resynced = 0;
+		for (const acc of affected) {
+			try {
+				await upsertRecurringInvoiceForHostingAccount({
+					tenantId: event.locals.tenant.id,
+					userId: event.locals.user.id,
+					hostingAccountId: acc.id,
+					hostingProductId: acc.hostingProductId,
+					daPackageId: acc.daPackageId,
+					clientId: acc.clientId,
+					domain: acc.domain,
+					daPackageName: acc.daPackageName,
+					recurringAmount: acc.recurringAmount,
+					currency: acc.currency,
+					billingCycle: acc.billingCycle,
+					startDate: acc.startDate,
+					nextDueDate: acc.nextDueDate,
+					status: acc.status
+				});
+				resynced++;
+			} catch (e) {
+				logWarning('directadmin', 'updateHostingProduct recurring re-sync failed', {
+					metadata: {
+						err: e instanceof Error ? e.message : String(e),
+						accountId: acc.id,
+						productId: params.id
+					}
+				});
+			}
+		}
+		if (affected.length > 0) {
+			logInfo(
+				'directadmin',
+				`updateHostingProduct re-synced ${resynced}/${affected.length} account(s) after catalog price change`,
+				{ metadata: { productId: params.id } }
+			);
+		}
+	}
 
 	return { success: true };
 });
