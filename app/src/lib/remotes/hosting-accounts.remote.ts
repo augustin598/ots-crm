@@ -2,13 +2,13 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, isNotNull, isNull, sql, ne, or } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull, isNull, sql, ne, or, gt } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
-import { encrypt } from '$lib/server/plugins/smartbill/crypto';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
+import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 import { upsertRecurringInvoiceForHostingAccount } from '$lib/server/hosting/recurring-template';
@@ -94,64 +94,9 @@ const UpdateClientSchema = v.object({
 
 const IdSchema = v.pipe(v.string(), v.minLength(1));
 
-export const getHostingAccounts = query(FiltersSchema, async (filters) => {
-	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
-	const actor = await getActor(event);
-	assertCan(actor, 'admin.hosting.view');
-
-	const conditions = [eq(table.hostingAccount.tenantId, event.locals.tenant.id)];
-	if (filters?.clientId) conditions.push(eq(table.hostingAccount.clientId, filters.clientId));
-	if (filters?.status) {
-		conditions.push(eq(table.hostingAccount.status, filters.status));
-	} else {
-		// Hide forensic-preserved failed rows from default lists; surfaceable
-		// via explicit `?status=failed`. See `getHostingAccountsGrouped` for
-		// the same pattern + audit context.
-		conditions.push(ne(table.hostingAccount.status, 'failed'));
-	}
-	if (filters?.serverId) conditions.push(eq(table.hostingAccount.daServerId, filters.serverId));
-
-	return db
-		.select({
-			id: table.hostingAccount.id,
-			domain: table.hostingAccount.domain,
-			daUsername: table.hostingAccount.daUsername,
-			status: table.hostingAccount.status,
-			suspendReason: table.hostingAccount.suspendReason,
-			nextDueDate: table.hostingAccount.nextDueDate,
-			recurringAmount: table.hostingAccount.recurringAmount,
-			currency: table.hostingAccount.currency,
-			diskUsage: table.hostingAccount.diskUsage,
-			bandwidthUsage: table.hostingAccount.bandwidthUsage,
-			emailCount: table.hostingAccount.emailCount,
-			dbCount: table.hostingAccount.dbCount,
-			clientId: table.hostingAccount.clientId,
-			clientName: table.client.name,
-			clientBusinessName: table.client.businessName,
-			clientEmail: table.client.email,
-			clientCui: table.client.cui,
-			daServerId: table.hostingAccount.daServerId,
-			serverName: table.daServer.name,
-			serverHostname: table.daServer.hostname,
-			daPackageName: table.hostingAccount.daPackageName,
-			linkedPackageName: table.daPackage.daName,
-			billingCycle: table.hostingAccount.billingCycle,
-			additionalDomains: table.hostingAccount.additionalDomains,
-			paymentMethod: table.hostingAccount.paymentMethod,
-			startDate: table.hostingAccount.startDate,
-			createdAt: table.hostingAccount.createdAt,
-			lastSyncedAt: table.hostingAccount.lastSyncedAt
-		})
-		.from(table.hostingAccount)
-		.leftJoin(table.client, eq(table.hostingAccount.clientId, table.client.id))
-		.leftJoin(table.daServer, eq(table.hostingAccount.daServerId, table.daServer.id))
-		.leftJoin(table.daPackage, eq(table.hostingAccount.daPackageId, table.daPackage.id))
-		.where(and(...conditions))
-		.orderBy(desc(table.hostingAccount.createdAt))
-		.limit(filters?.limit ?? 50)
-		.offset(filters?.offset ?? 0);
-});
+// NOTE: the flat `getHostingAccounts` list query was removed 2026-05-30 (audit J1) —
+// it had no callers; the page uses `getHostingAccountsGrouped`. Its RBAC pattern was
+// copied to that function (audit C1).
 
 export const getHostingAccount = query(GetAccountSchema, async (params) => {
 	const event = getRequestEvent();
@@ -174,7 +119,7 @@ export const getHostingAccount = query(GetAccountSchema, async (params) => {
 			const [server] = await db
 				.select()
 				.from(table.daServer)
-				.where(eq(table.daServer.id, account.daServerId))
+				.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
 				.limit(1);
 			if (server) {
 				const daClient = createDAClient(tenantId, server);
@@ -289,7 +234,7 @@ export const suspendHostingAccount = command(SuspendSchema, async (params) => {
 	const [server] = await db
 		.select()
 		.from(table.daServer)
-		.where(eq(table.daServer.id, account.daServerId))
+		.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
 		.limit(1);
 
 	await withAccountLock(`${tenantId}:${account.daUsername}`, async () => {
@@ -384,7 +329,7 @@ export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 	const [server] = await db
 		.select()
 		.from(table.daServer)
-		.where(eq(table.daServer.id, account.daServerId))
+		.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
 		.limit(1);
 
 	await withAccountLock(`${tenantId}:${account.daUsername}`, async () => {
@@ -448,9 +393,14 @@ export const terminateHostingAccount = command(IdSchema, async (accountId) => {
 	const [server] = await db
 		.select()
 		.from(table.daServer)
-		.where(eq(table.daServer.id, account.daServerId))
+		.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
 		.limit(1);
 
+	// Policy (memory: feedback_never_delete_da_accounts + audit C2, 2026-05-30):
+	// NEVER call deleteUserAccount from a production code path — it irreversibly
+	// wipes /home, mail, DBs and domains. "Terminate" = stop the service: mark the
+	// CRM row terminated and SUSPEND the DA user (reversible). The real DA deletion
+	// stays a deliberate manual action by an admin in the DA panel.
 	if (server) {
 		const daClient = createDAClient(tenantId, server);
 		await runWithAudit(
@@ -458,16 +408,16 @@ export const terminateHostingAccount = command(IdSchema, async (accountId) => {
 				tenantId,
 				hostingAccountId: account.id,
 				daServerId: account.daServerId,
-				action: 'delete',
+				action: 'suspend',
 				trigger: 'manual'
 			},
-			() => daClient.deleteUserAccount(account.daUsername)
+			() => daClient.suspendUser(account.daUsername)
 		);
 	}
 
 	await db
 		.update(table.hostingAccount)
-		.set({ status: 'terminated', updatedAt: new Date() })
+		.set({ status: 'terminated', suspendedAt: new Date(), updatedAt: new Date() })
 		.where(eq(table.hostingAccount.id, accountId));
 
 	return { success: true };
@@ -552,7 +502,7 @@ async function syncOneAccount(
 	const [server] = await db
 		.select()
 		.from(table.daServer)
-		.where(eq(table.daServer.id, account.daServerId))
+		.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
 		.limit(1);
 	if (!server) throw new Error('Server not found');
 
@@ -607,10 +557,17 @@ async function syncOneAccount(
 	if (daPackageId !== null) updates.daPackageId = daPackageId;
 	if (additionalDomains !== null) updates.additionalDomains = additionalDomains;
 
-	await db
-		.update(table.hostingAccount)
-		.set(updates)
-		.where(eq(table.hostingAccount.id, accountId));
+	// Bulk sync runs many syncOneAccount in parallel (p-limit 5) against libSQL's
+	// single writer → wrap this write in the shared busy-retry so a transient
+	// "database is locked" doesn't fail the whole account's sync (audit L2).
+	await withTursoBusyRetry(
+		() =>
+			db
+				.update(table.hostingAccount)
+				.set(updates)
+				.where(eq(table.hostingAccount.id, accountId)),
+		{ tenantId, label: `syncOneAccount:${accountId}` }
+	);
 
 	return {
 		daPackageName,
@@ -1195,6 +1152,12 @@ export type AccountInGroup = {
 	recurringAmount: number;
 	currency: string;
 	lastInvoice: LastInvoiceLite;
+	/**
+	 * True when the account is active + billable + assigned to a client but has NO
+	 * active recurring-invoice template → it will silently never be auto-billed
+	 * (audit M2, 2026-05-30). Detected at read-time; no schema column.
+	 */
+	billingRisk: boolean;
 };
 
 export type ClientGroup = {
@@ -1218,6 +1181,8 @@ export type ClientGroup = {
 		arrCents: number;
 		byStatus: Record<string, number>;
 		overdueCount: number;
+		/** Count of accounts in this group flagged billingRisk (audit M2). */
+		billingRiskCount: number;
 		nextExpiry: { date: string; days: number } | null;
 		oldestOverdue: { date: string; daysOverdue: number } | null;
 	};
@@ -1255,10 +1220,35 @@ function daysDiff(
 	return Math.round((b.getTime() - a.getTime()) / (24 * 60 * 60 * 1000));
 }
 
+/**
+ * Run an `inArray(col, ids)` query in batches of ≤900 ids and concat the rows.
+ * libSQL/SQLite caps host parameters at 999 per statement (audit M3, 2026-05-30) —
+ * without batching, a tenant with >~999 hosting accounts would crash the grouped
+ * query. The caller re-sorts the merged result because per-chunk ordering is not
+ * globally consistent.
+ */
+async function runInIdChunks<T>(
+	ids: string[],
+	run: (chunk: string[]) => Promise<T[]>
+): Promise<T[]> {
+	const CHUNK = 900;
+	const out: T[] = [];
+	for (let i = 0; i < ids.length; i += CHUNK) {
+		const part = await run(ids.slice(i, i + CHUNK));
+		for (const row of part) out.push(row);
+	}
+	return out;
+}
+
 export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) => {
 	const event = getRequestEvent();
-	const tenantId = event.locals.tenant?.id;
-	if (!tenantId) throw new Error('Tenant context required');
+	// RBAC parity with every other export in this file (audit C1, 2026-05-30):
+	// without this, the page's primary data source was callable by any
+	// authenticated tenant session regardless of the hosting capability.
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.view');
+	const tenantId = event.locals.tenant.id;
 
 	const rows = await db
 		.select({
@@ -1327,7 +1317,21 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 				filters?.serverId ? eq(table.hostingAccount.daServerId, filters.serverId) : undefined
 			)
 		)
-		.limit(filters?.limit ?? 500);
+		.limit((filters?.limit ?? 5000) + 1);
+
+	// No silent truncation (audit M3 + review nit): we fetch cap+1 so we can tell
+	// GENUINE truncation (more than cap exist) from "exactly cap rows exist" — only
+	// the former warns + drops the probe row before aggregation. With a bare LIMIT N
+	// you can't distinguish those two cases, so `>=` would false-positive at N==cap.
+	const cap = filters?.limit ?? 5000;
+	if (rows.length > cap) {
+		logWarning(
+			'directadmin',
+			`getHostingAccountsGrouped hit the ${cap}-row cap; KPI totals may undercount`,
+			{ tenantId, metadata: { rows: rows.length } }
+		);
+		rows.length = cap; // drop the +1 probe row(s) so aggregation matches the cap
+	}
 
 	const accountIds = rows.map((r) => r.id);
 
@@ -1388,25 +1392,33 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 
 	// === Pass A: invoices with the hosting_account_id FK directly set. ===
 	const fkInvoices = accountIds.length
-		? await db
-				.select({
-					id: table.invoice.id,
-					invoiceNumber: table.invoice.invoiceNumber,
-					hostingAccountId: table.invoice.hostingAccountId,
-					status: table.invoice.status,
-					dueDate: table.invoice.dueDate,
-					issueDate: table.invoice.issueDate,
-					totalAmount: table.invoice.totalAmount
-				})
-				.from(table.invoice)
-				.where(
-					and(
-						eq(table.invoice.tenantId, tenantId),
-						inArray(table.invoice.hostingAccountId, accountIds)
+		? await runInIdChunks(accountIds, (chunk) =>
+				db
+					.select({
+						id: table.invoice.id,
+						invoiceNumber: table.invoice.invoiceNumber,
+						hostingAccountId: table.invoice.hostingAccountId,
+						status: table.invoice.status,
+						dueDate: table.invoice.dueDate,
+						issueDate: table.invoice.issueDate,
+						totalAmount: table.invoice.totalAmount
+					})
+					.from(table.invoice)
+					.where(
+						and(
+							eq(table.invoice.tenantId, tenantId),
+							inArray(table.invoice.hostingAccountId, chunk)
+						)
 					)
-				)
-				.orderBy(desc(table.invoice.issueDate))
+			)
 		: [];
+	// Global issueDate-desc sort across chunks so applyCandidate's "first wins"
+	// picks the genuinely most-recent invoice per account.
+	fkInvoices.sort(
+		(a, b) =>
+			(b.issueDate ? new Date(b.issueDate).getTime() : 0) -
+			(a.issueDate ? new Date(a.issueDate).getTime() : 0)
+	);
 
 	for (const inv of fkInvoices) {
 		if (!inv.hostingAccountId) continue;
@@ -1421,39 +1433,46 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 	// can't disambiguate and the client has exactly one hosting account, we
 	// fall back to that single account. ===
 	const candidateRows = clientIdsWithAccounts.length
-		? await db
-				.select({
-					id: table.invoice.id,
-					invoiceNumber: table.invoice.invoiceNumber,
-					clientId: table.invoice.clientId,
-					status: table.invoice.status,
-					dueDate: table.invoice.dueDate,
-					issueDate: table.invoice.issueDate,
-					totalAmount: table.invoice.totalAmount,
-					lineDescription: table.invoiceLineItem.description
-				})
-				.from(table.invoice)
-				.innerJoin(
-					table.invoiceLineItem,
-					eq(table.invoiceLineItem.invoiceId, table.invoice.id)
-				)
-				.where(
-					and(
-						eq(table.invoice.tenantId, tenantId),
-						inArray(table.invoice.clientId, clientIdsWithAccounts),
-						isNull(table.invoice.hostingAccountId),
-						or(
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gazduire%'`,
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%găzduire%'`,
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gasduire%'`,
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gaduire%'`,
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%hosting%'`,
-							sql`LOWER(${table.invoiceLineItem.description}) LIKE '%wordpress%'`
+		? await runInIdChunks(clientIdsWithAccounts, (chunk) =>
+				db
+					.select({
+						id: table.invoice.id,
+						invoiceNumber: table.invoice.invoiceNumber,
+						clientId: table.invoice.clientId,
+						status: table.invoice.status,
+						dueDate: table.invoice.dueDate,
+						issueDate: table.invoice.issueDate,
+						totalAmount: table.invoice.totalAmount,
+						lineDescription: table.invoiceLineItem.description
+					})
+					.from(table.invoice)
+					.innerJoin(
+						table.invoiceLineItem,
+						eq(table.invoiceLineItem.invoiceId, table.invoice.id)
+					)
+					.where(
+						and(
+							eq(table.invoice.tenantId, tenantId),
+							inArray(table.invoice.clientId, chunk),
+							isNull(table.invoice.hostingAccountId),
+							or(
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gazduire%'`,
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%găzduire%'`,
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gasduire%'`,
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%gaduire%'`,
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%hosting%'`,
+								sql`LOWER(${table.invoiceLineItem.description}) LIKE '%wordpress%'`
+							)
 						)
 					)
-				)
-				.orderBy(desc(table.invoice.issueDate))
+			)
 		: [];
+	// Global issueDate-desc sort across chunks (candidateOrder relies on it).
+	candidateRows.sort(
+		(a, b) =>
+			(b.issueDate ? new Date(b.issueDate).getTime() : 0) -
+			(a.issueDate ? new Date(a.issueDate).getTime() : 0)
+	);
 
 	// Group candidate rows by invoice id (an invoice can have multiple line items
 	// that all matched the keyword filter).
@@ -1501,6 +1520,51 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		if (attribution) applyCandidate(attribution.accountId, inv, attribution.matchedVia);
 	}
 
+	// === M2 (audit, read-time, no schema change): billing-risk detection. ===
+	// An account that is active + billable (amount>0, recurring cycle) + assigned to
+	// a client but has NO active recurring-invoice template will silently never be
+	// auto-billed — a cash-flow leak. Build the set of accountIds that DO have an
+	// active recurring_invoice row; anything billable missing from it is at risk.
+	const accountsWithActiveTemplate = new Set<string>();
+	if (accountIds.length) {
+		const templateRows = await runInIdChunks(accountIds, (chunk) =>
+			db
+				.select({ hostingAccountId: table.recurringInvoice.hostingAccountId })
+				.from(table.recurringInvoice)
+				.where(
+					and(
+						eq(table.recurringInvoice.tenantId, tenantId),
+						eq(table.recurringInvoice.isActive, true),
+						// Only count templates that would ACTUALLY bill (review M2 false-negative):
+						// a stale `amount=0` template is a no-op at renewal, so it must NOT
+						// suppress the billing-risk flag. (one_time never produces a template —
+						// the upsert skips it — so amount>0 is the meaningful guard here.)
+						gt(table.recurringInvoice.amount, 0),
+						inArray(table.recurringInvoice.hostingAccountId, chunk)
+					)
+				)
+		);
+		for (const t of templateRows) {
+			if (t.hostingAccountId) accountsWithActiveTemplate.add(t.hostingAccountId);
+		}
+	}
+
+	function isBillingAtRisk(r: {
+		id: string;
+		status: string;
+		clientId: string | null;
+		recurringAmount: number;
+		billingCycle: string;
+	}): boolean {
+		return (
+			r.status === 'active' &&
+			!!r.clientId &&
+			r.recurringAmount > 0 &&
+			r.billingCycle !== 'one_time' &&
+			!accountsWithActiveTemplate.has(r.id)
+		);
+	}
+
 	const groups = new Map<string, ClientGroup>();
 	for (const r of rows) {
 		const key = r.clientId ?? '__unassigned__';
@@ -1527,6 +1591,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 					arrCents: 0,
 					byStatus: {},
 					overdueCount: 0,
+					billingRiskCount: 0,
 					nextExpiry: null,
 					oldestOverdue: null
 				}
@@ -1565,7 +1630,8 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 			expiresInDays,
 			recurringAmount: r.recurringAmount,
 			currency: r.currency,
-			lastInvoice: lastInv
+			lastInvoice: lastInv,
+			billingRisk: isBillingAtRisk(r)
 		};
 		g.accounts.push(acc);
 		g.totals.count++;
@@ -1574,6 +1640,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		if (r.status === 'active' || r.status === 'pending') {
 			g.totals.mrrCents += toMonthlyCentsGrouped(r.recurringAmount, r.billingCycle);
 		}
+		if (acc.billingRisk) g.totals.billingRiskCount++;
 		if (lastInv.status === 'overdue') g.totals.overdueCount++;
 		if (
 			(r.status === 'active' || r.status === 'pending') &&

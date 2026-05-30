@@ -539,16 +539,17 @@
 					</section>
 				</div>
 
-				<!-- Domain primary + addons -->
+				<!-- Domain primary (read-only — rename = DA migration, audit M1) + addons -->
 				<section class="space-y-2">
-					<label for="primary-domain" class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Domeniu principal</label>
-					<input
-						id="primary-domain"
-						type="text"
-						bind:value={draft.domain}
-						class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800"
-					/>
-					<p class="text-[11px] text-slate-500">Schimbarea aici nu redenumește user-ul DA — doar metadata CRM.</p>
+					<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Domeniu principal</div>
+					<div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+						<span class="font-mono text-[13px] text-slate-700 dark:text-slate-200">{draft.domain}</span>
+						<span class="text-[10px] uppercase tracking-wider text-slate-400">read-only</span>
+					</div>
+					<p class="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+						<AlertTriangleIcon class="mt-0.5 size-3 shrink-0" />
+						Domeniul nu se editează de aici — ar desincroniza CRM-ul de DirectAdmin (user-ul DA nu e redenumit). Pentru schimbarea reală a domeniului folosește un workflow de migrare DA.
+					</p>
 				</section>
 
 				<section class="space-y-2">

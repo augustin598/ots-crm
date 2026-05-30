@@ -67,7 +67,13 @@
 	}
 
 	async function handleTerminate() {
-		if (!confirm('SIGUR vrei să termini contul? Va șterge user-ul DA real.')) return;
+		if (
+			!confirm(
+				'Marchezi contul ca TERMINAT?\n\nContul va fi SUSPENDAT pe DirectAdmin (reversibil) — NU este șters. ' +
+					'Ștergerea definitivă a datelor (fișiere, mail, baze) se face manual din panoul DirectAdmin.'
+			)
+		)
+			return;
 		try {
 			await terminateHostingAccount(accountId);
 			toast.success('Cont terminat');

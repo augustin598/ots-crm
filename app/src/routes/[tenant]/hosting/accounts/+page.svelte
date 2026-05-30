@@ -33,6 +33,7 @@
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import XIcon from '@lucide/svelte/icons/x';
+	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 	type StatusKey = 'all' | 'active' | 'suspended' | 'pending' | 'terminated' | 'cancelled' | 'failed';
@@ -57,19 +58,25 @@
 
 	const visibleColumns = $derived(visibleColumnsInOrder(HOSTING_ACCOUNT_COLUMNS, columnConfig));
 
-	function fetchGroups() {
-		return getHostingAccountsGrouped({
-			status: statusFilter === 'all' ? undefined : statusFilter,
-			serverId: serverFilter === 'all' ? undefined : serverFilter,
-			limit: 500
-		});
-	}
-	let groups = $state(fetchGroups());
+	// Declarative read (audit S1): args are reactive, so the query object is recreated
+	// — and `{#await groups}` re-runs — automatically when the status/server filter
+	// changes. The pills/select just set state; no manual re-fetch on filter change
+	// (the old fragile pattern). `$derived(query)` (not `await query`) keeps the query
+	// OBJECT so `{#await}` + `.refresh()` still work without migrating the whole
+	// template to `<svelte:boundary>`. Verified warning-free by svelte-autofixer.
+	const groupArgs = $derived({
+		status: statusFilter === 'all' ? undefined : statusFilter,
+		serverId: serverFilter === 'all' ? undefined : serverFilter
+	});
+	const groups = $derived(getHostingAccountsGrouped(groupArgs));
 	const allClients = getClients();
 	const allServers = getDaServersForFilter();
 
+	// Mutations (assign client, bulk sync, dialog save) refresh the SAME-args query
+	// instance — SvelteKit dedupes remote queries by args, so this re-fetches exactly
+	// what's on screen.
 	function refresh(): void {
-		groups = fetchGroups();
+		void getHostingAccountsGrouped(groupArgs).refresh();
 	}
 
 	const STATUS_PILLS: Array<{ key: StatusKey; label: string }> = [
@@ -250,7 +257,7 @@
 		{@const totalARR = filtered.reduce((s, g) => s + g.totals.arrCents, 0)}
 		{@const expiring30 = filtered.reduce((s, g) => s + (g.totals.nextExpiry && g.totals.nextExpiry.days <= 30 ? 1 : 0), 0)}
 		{@const overdueInvoices = filtered.reduce((s, g) => s + g.totals.overdueCount, 0)}
-		{@const unassignedCount = allGroups.find((g) => !g.clientId)?.accounts.length ?? 0}
+		{@const billingRiskTotal = filtered.reduce((s, g) => s + (g.totals.billingRiskCount ?? 0), 0)}
 
 		<!-- Title + actions -->
 		<div class="flex items-start justify-between gap-4">
@@ -367,6 +374,16 @@
 			</div>
 		</div>
 
+		{#if billingRiskTotal > 0}
+			<div class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+				<AlertTriangleIcon class="mt-0.5 size-4 shrink-0" />
+				<div>
+					<span class="font-semibold">{billingRiskTotal} cont{billingRiskTotal === 1 ? '' : 'uri'} fără facturare automată.</span>
+					Sunt active, cu sumă recurentă și client asignat, dar nu au un abonament de facturare activ — clientul NU va fi facturat automat la scadență. Deschide contul → tab „Abonament" pentru a configura prețul/ciclul (re-salvarea recreează abonamentul).
+				</div>
+			</div>
+		{/if}
+
 		{@const statusCounts = (() => {
 			const c: Record<StatusKey, number> = {
 				all: 0,
@@ -392,7 +409,7 @@
 			{#each STATUS_PILLS as p (p.key)}
 				<button
 					type="button"
-					onclick={() => { statusFilter = p.key; refresh(); }}
+					onclick={() => (statusFilter = p.key)}
 					class="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] font-medium {statusFilter ===
 					p.key
 						? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
@@ -414,7 +431,6 @@
 			{#await allServers then servers}
 				<select
 					bind:value={serverFilter}
-					onchange={refresh}
 					class="rounded-md border border-slate-200 bg-white py-1.5 pl-3 pr-7 text-[12.5px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
 				>
 					<option value="all">Toate serverele</option>
@@ -430,6 +446,7 @@
 				<SearchIcon class="h-3 w-3" />
 				<input
 					bind:value={clientSearch}
+					aria-label="Caută client, domeniu sau username DA"
 					placeholder="Caută client, domeniu, username DA..."
 					class="flex-1 bg-transparent text-[12.5px] text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
 				/>

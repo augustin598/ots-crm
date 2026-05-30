@@ -239,6 +239,15 @@
 					{group.totals.overdueCount} factur{group.totals.overdueCount === 1 ? 'ă' : 'i'} restant{group.totals.overdueCount === 1 ? 'ă' : 'e'}
 				</div>
 			{/if}
+			{#if (group.totals.billingRiskCount ?? 0) > 0}
+				<div
+					class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+					title="Conturi active cu sumă recurentă dar fără abonament de facturare activ — nu se facturează automat"
+				>
+					<AlertTriangleIcon class="size-3.5" />
+					{group.totals.billingRiskCount} fără facturare automată
+				</div>
+			{/if}
 		</div>
 
 		<!-- Col 4: actions -->
