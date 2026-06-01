@@ -106,6 +106,21 @@ const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 const VALID_TASK_TYPES = ['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'] as const;
 
+/**
+ * Parse a `meetTime` value into a valid Date for the Google Calendar/Meet flow.
+ * Accepts a full ISO datetime like "2026-06-01T10:00". Throws a clear, logged
+ * error on a bare time ("10:00") or any other unparseable value — otherwise
+ * createMeetEvent's `.toISOString()` blows up deep in the Calendar call with an
+ * opaque `RangeError: Invalid Date` (Bun/JSC) recorded as meet_event_failed.
+ */
+function parseMeetStartTime(raw: string): Date {
+	const d = new Date(raw);
+	if (Number.isNaN(d.getTime())) {
+		throw new Error(`Invalid meetTime: "${raw}" (expected ISO datetime like 2026-06-01T10:00)`);
+	}
+	return d;
+}
+
 const taskSchema = v.object({
 	title: v.pipe(v.string(), v.minLength(1, 'Title is required')),
 	description: v.optional(v.string()),
@@ -908,7 +923,7 @@ export const createTask = command(taskSchema, async (data) => {
 			position: nextPosition,
 			dueDate: data.dueDate ? new Date(data.dueDate) : null,
 			assignedToUserId: data.assignedToUserId || null,
-			createdByUserId: event.locals.user.id,
+			createdByUserId: event.locals.user!.id,
 			isRecurring: !!data.isRecurring,
 			recurringType: data.isRecurring ? data.recurringType ?? null : null,
 			recurringInterval: data.isRecurring ? data.recurringInterval ?? 1 : null,
@@ -931,7 +946,7 @@ export const createTask = command(taskSchema, async (data) => {
 					title: data.subtasks[i],
 					done: 0,
 					position: i,
-					createdByUserId: event.locals.user.id,
+					createdByUserId: event.locals.user!.id,
 					createdAt: now,
 					updatedAt: now
 				});
@@ -975,12 +990,12 @@ export const createTask = command(taskSchema, async (data) => {
 		await tx.insert(table.taskWatcher).values({
 			id: watcherId,
 			taskId,
-			userId: event.locals.user.id,
+			userId: event.locals.user!.id,
 			tenantId: targetTenantId
 		});
 
 		// Auto-watch for assignee (if different from creator)
-		if (data.assignedToUserId && data.assignedToUserId !== event.locals.user.id) {
+		if (data.assignedToUserId && data.assignedToUserId !== event.locals.user!.id) {
 			const assigneeWatcherId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 			await tx.insert(table.taskWatcher).values({
 				id: assigneeWatcherId,
@@ -1106,7 +1121,7 @@ export const createTask = command(taskSchema, async (data) => {
 				const meetResult = await createMeetEvent({
 					tenantId: event.locals.tenant.id,
 					title: data.title,
-					startTime: new Date(data.meetTime),
+					startTime: parseMeetStartTime(data.meetTime),
 					durationMinutes: data.meetDurationMinutes ?? 30,
 					timezone: 'Europe/Bucharest',
 					attendees: attendeeEmails,
@@ -1445,7 +1460,7 @@ export const updateTask = command(
 			// Pre-batch per-user notification prefs once so a 100-watcher loop runs one DB query
 			// instead of N.
 			const eligibleWatcherIds = watcherUsers
-				.filter((w) => w.userId !== event.locals.user.id && w.email)
+				.filter((w) => w.userId !== event.locals.user!.id && w.email)
 				.map((w) => w.userId);
 			const watcherPrefMap = await tenantUserPrefAllowsBatch(
 				eligibleWatcherIds,
@@ -1456,7 +1471,7 @@ export const updateTask = command(
 				watcherUsers
 					.filter(
 						(w) =>
-							w.userId !== event.locals.user.id &&
+							w.userId !== event.locals.user!.id &&
 							w.email &&
 							watcherPrefMap.get(w.userId) !== false
 					)
@@ -1585,7 +1600,7 @@ export const updateTask = command(
 							if (clientRow?.email) attendeeEmails.push(clientRow.email);
 						}
 
-						const startTime = newMeetTime ? new Date(newMeetTime) : undefined;
+						const startTime = newMeetTime ? parseMeetStartTime(newMeetTime) : undefined;
 						await updateMeetEvent({
 							tenantId: event.locals.tenant.id,
 							eventId: existing.googleCalendarEventId!,
@@ -1630,7 +1645,7 @@ export const updateTask = command(
 					const meetResult = await createMeet({
 						tenantId: event.locals.tenant.id,
 						title: updateData.title ?? existing.title,
-						startTime: new Date(newMeetTime),
+						startTime: parseMeetStartTime(newMeetTime),
 						durationMinutes: newDuration ?? 30,
 						timezone: 'Europe/Bucharest',
 						attendees: attendeeEmails,
@@ -2139,7 +2154,7 @@ export const bulkUpdateTaskStatus = command(
 					tenantId,
 					'status-change',
 					{ newStatus },
-					event.locals.user.email
+					event.locals.user!.email
 				)
 			)
 		);
@@ -2939,7 +2954,7 @@ export const removeAssignee = command(
 				.where(and(
 					eq(table.taskAssignee.taskId, taskId),
 					eq(table.taskAssignee.userId, userId),
-					eq(table.taskAssignee.tenantId, event.locals.tenant.id)
+					eq(table.taskAssignee.tenantId, event.locals.tenant!.id)
 				));
 
 			if (task.assignedToUserId === userId) {
@@ -2947,7 +2962,7 @@ export const removeAssignee = command(
 					.from(table.taskAssignee)
 					.where(and(
 						eq(table.taskAssignee.taskId, taskId),
-						eq(table.taskAssignee.tenantId, event.locals.tenant.id)
+						eq(table.taskAssignee.tenantId, event.locals.tenant!.id)
 					))
 					.orderBy(asc(table.taskAssignee.createdAt))
 					.limit(1);
@@ -3095,7 +3110,7 @@ export const scheduleMeet = command(
 						const meetResult = await createMeetEvent({
 							tenantId: event.locals.tenant.id,
 							title: taskRow.title,
-							startTime: new Date(meetTime),
+							startTime: parseMeetStartTime(meetTime),
 							durationMinutes: meetDurationMinutes ?? taskRow.meetDurationMinutes ?? 30,
 							timezone: 'Europe/Bucharest',
 							attendees: attendeeEmails,

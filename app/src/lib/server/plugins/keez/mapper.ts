@@ -1039,7 +1039,10 @@ export function mapKeezPartnerToClient(
 		legalType: keezPartner.isLegalPerson ? 'srl' : 'pf',
 		signupSource: 'keez-import',
 		onboardingStatus: 'active',
-		stripeCustomerId: null
+		stripeCustomerId: null,
+		clientSince: null,
+		tier: 'standard',
+		ltvCents: 0
 	};
 }
 

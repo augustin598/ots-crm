@@ -328,7 +328,7 @@ export const createTaskComment = command(
 		// are a separate channel and fire even when email is throttled.
 		if (mentionedUserIds.length > 0) {
 			const nonSelfMentionIds = mentionedUserIds.filter(
-				(id) => id !== event.locals.user.id
+				(id) => id !== event.locals.user!.id
 			);
 			const authorName =
 				`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||

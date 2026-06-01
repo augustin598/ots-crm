@@ -119,7 +119,17 @@
 		return defaultDueDate || '';
 	}
 
+	// Local YYYY-MM-DD (avoids the UTC off-by-one of toISOString near midnight).
+	function localTodayIso(): string {
+		const d = new Date();
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	}
+
 	let step = $state(1);
+	// svelte-ignore state_referenced_locally
 	let draft = $state({
 		title: '',
 		description: '',
@@ -386,7 +396,10 @@
 				recurringEndDate:
 					draft.isRecurring && draft.recurringEndDate ? draft.recurringEndDate : undefined,
 				type: draft.type as any,
-				meetTime: isMeet && draft.meetTime ? draft.meetTime : undefined,
+				meetTime:
+					isMeet && draft.meetTime
+						? `${draft.dueDate || localTodayIso()}T${draft.meetTime}`
+						: undefined,
 				meetDurationMinutes: isMeet ? draft.meetDurationMinutes : undefined,
 				subtasks: draft.subtasks.length ? draft.subtasks : undefined,
 				tagNames: tagNames.length ? tagNames : undefined
@@ -483,10 +496,10 @@
 				<div class="grid grid-cols-2 gap-4">
 					<!-- Title -->
 					<div class="col-span-2 flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 							Titlu {isMeet ? 'meeting' : 'task'}
 							<span class="text-red-500">*</span>
-						</label>
+						</span>
 						<!-- svelte-ignore a11y_autofocus -->
 						<input
 							autofocus
@@ -501,9 +514,8 @@
 					{#if isMeet}
 						<!-- Meet time -->
 						<div class="flex flex-col gap-1.5">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-								>Oră început</label
-							>
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Oră început</span>
 							<input
 								type="time"
 								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
@@ -512,9 +524,8 @@
 						</div>
 						<!-- Duration -->
 						<div class="flex flex-col gap-1.5">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-								>Durată</label
-							>
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Durată</span>
 							<div class="flex gap-1.5">
 								{#each [15, 30, 45, 60] as dur}
 									<button
@@ -554,9 +565,8 @@
 
 					<!-- Description -->
 					<div class="col-span-2 flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Descriere</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Descriere</span>
 						<Textarea
 							class="min-h-[80px] resize-y text-sm"
 							placeholder="Detalii, link-uri, brief..."
@@ -567,9 +577,9 @@
 					{#if !isClient}
 						<!-- Client -->
 						<div class="flex flex-col gap-1.5">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 								Client <span class="text-red-500">*</span>
-							</label>
+							</span>
 							<select
 								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
 								bind:value={draft.clientId}
@@ -583,9 +593,8 @@
 
 						<!-- Project -->
 						<div class="flex flex-col gap-1.5">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-								>Proiect</label
-							>
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Proiect</span>
 							<select
 								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
 								bind:value={draft.projectId}
@@ -600,7 +609,7 @@
 
 					<!-- Type chips -->
 					<div class="col-span-2 flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tip</label>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tip</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each TYPES as t}
 								<button
@@ -625,13 +634,13 @@
 					{#if !isClient || clientAssigneeOptions.length > 0}
 						<!-- Assignees: agency + (optional) client team in admin; "Echipa ta" in client portal -->
 						<div class="col-span-2 flex flex-col gap-2">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 								{#if isClient}
 									Echipa ta
 								{:else}
 									Responsabili <span class="text-red-500">*</span>
 								{/if}
-							</label>
+							</span>
 
 							{#if !isClient}
 								<!-- Agency section (admin only) -->
@@ -714,9 +723,8 @@
 
 					<!-- Priority -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Prioritate</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Prioritate</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each PRIORITIES as p}
 								<button
@@ -739,9 +747,8 @@
 					<!-- Status -->
 					{#if !isClient}
 						<div class="flex flex-col gap-1.5">
-							<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-								>Status inițial</label
-							>
+							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+								>Status inițial</span>
 							<div class="flex gap-1.5">
 								{#each STATUSES_CREATE as s}
 									<button
@@ -760,9 +767,8 @@
 
 					<!-- Due date -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Deadline</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Deadline</span>
 						<Popover.Root bind:open={dueDateOpen}>
 							<Popover.Trigger>
 								{#snippet child({ props })}
@@ -805,9 +811,8 @@
 
 					<!-- Recurring -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Recurență</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Recurență</span>
 						<label
 							class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
 						>
@@ -821,9 +826,8 @@
 							class="col-span-2 grid grid-cols-2 gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3"
 						>
 							<div class="flex flex-col gap-1">
-								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-									>Frecvență</label
-								>
+								<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>Frecvență</span>
 								<select
 									class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none"
 									bind:value={draft.recurringType}
@@ -835,15 +839,13 @@
 								</select>
 							</div>
 							<div class="flex flex-col gap-1">
-								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-									>La fiecare</label
-								>
+								<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>La fiecare</span>
 								<Input type="number" min="1" max="365" bind:value={draft.recurringInterval} />
 							</div>
 							<div class="col-span-2 flex flex-col gap-1">
-								<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-									>Data sfârșit (opțional)</label
-								>
+								<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+									>Data sfârșit (opțional)</span>
 								<Popover.Root bind:open={recurringEndDateOpen}>
 									<Popover.Trigger>
 										{#snippet child({ props })}
@@ -890,9 +892,8 @@
 
 					<!-- Tags -->
 					<div class="col-span-2 flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Tag-uri</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Tag-uri</span>
 						<div class="flex gap-2">
 							<input
 								class="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
@@ -935,9 +936,9 @@
 				<div class="grid grid-cols-1 gap-4">
 					<!-- Subtasks -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 							Subtaskuri ({draft.subtasks.length})
-						</label>
+						</span>
 						<div class="flex gap-2">
 							<input
 								class="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
@@ -986,9 +987,8 @@
 
 					<!-- Attachments stub -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Atașamente</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Atașamente</span>
 						<div
 							class="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 py-6 text-xs text-slate-400"
 						>
@@ -1002,9 +1002,8 @@
 
 					<!-- Summary -->
 					<div class="flex flex-col gap-1.5">
-						<label class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
-							>Sumar task</label
-						>
+						<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500"
+							>Sumar task</span>
 						<div
 							class="flex flex-col divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm"
 						>

@@ -255,7 +255,10 @@ export function mapAnafCompanyToClient(
 		legalType: 'srl',
 		signupSource: 'anaf-spv-import',
 		onboardingStatus: 'active',
-		stripeCustomerId: null
+		stripeCustomerId: null,
+		clientSince: null,
+		tier: 'standard',
+		ltvCents: 0
 	};
 }
 

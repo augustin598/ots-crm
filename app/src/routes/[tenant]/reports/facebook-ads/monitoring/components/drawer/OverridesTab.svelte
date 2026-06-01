@@ -9,9 +9,13 @@
 	interface Props { tenantSlug: string; target: any; onSaved: () => void }
 	let { tenantSlug, target, onSaved }: Props = $props();
 
+	// svelte-ignore state_referenced_locally
 	let cooldown = $state(target.customCooldownHours !== null ? String(target.customCooldownHours) : '');
+	// svelte-ignore state_referenced_locally
 	let minConv = $state(target.minConversionsThreshold !== null ? String(target.minConversionsThreshold) : '');
+	// svelte-ignore state_referenced_locally
 	let severity = $state(target.severityOverride ?? '');
+	// svelte-ignore state_referenced_locally
 	let suppressed = $state<string[]>(Array.isArray(target.suppressedActions) ? [...target.suppressedActions] : []);
 	let saving = $state(false);
 

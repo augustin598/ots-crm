@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 
 /**
  * Unit tests for the helper logic in getHostingAccountsGrouped.

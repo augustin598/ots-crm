@@ -26,7 +26,9 @@
 
 	let { data }: { data: PageData } = $props();
 
+	// svelte-ignore state_referenced_locally
 	let targets = $state([...data.targets]);
+	// svelte-ignore state_referenced_locally
 	let recommendations = $state([...data.recommendations]);
 	let runningRebuild = $state(false);
 	let runningBackfill = $state(false);
@@ -45,6 +47,7 @@
 	let filterStatus = $state<'all' | 'active' | 'muted' | 'inactive'>('all');
 	let filterDeviation = $state<'all' | 'over' | 'under' | 'ok'>('all');
 	let filterSearch = $state('');
+	// svelte-ignore state_referenced_locally
 	let filterOutcome = $state(data.outcomeFilter ?? 'all');
 
 	const OUTCOME_VERDICTS = ['improved', 'worsened', 'neutral', 'insufficient_data', 'no_baseline'] as const;

@@ -93,6 +93,7 @@
 	});
 
 	// Provide filter context for child components (CreateTaskDialog reads it for default values)
+	// svelte-ignore state_referenced_locally
 	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
 
 	const tasksQuery = $derived(

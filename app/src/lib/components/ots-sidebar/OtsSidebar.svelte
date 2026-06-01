@@ -126,6 +126,7 @@
 	const flatVisible = $derived(flattenNav(visibleGroups));
 
 	// pins (mirror of server state, optimistic on toggle)
+	// svelte-ignore state_referenced_locally
 	let pins = $state<string[]>([...initialPins]);
 
 	// per-group collapse (default: all open)

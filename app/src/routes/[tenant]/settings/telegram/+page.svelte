@@ -10,6 +10,7 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	// svelte-ignore state_referenced_locally
 	let link = $state({ ...data.link });
 	let generating = $state(false);
 	let testing = $state(false);

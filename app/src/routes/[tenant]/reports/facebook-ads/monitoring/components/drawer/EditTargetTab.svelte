@@ -5,14 +5,21 @@
 	interface Props { tenantSlug: string; target: any; onSaved: () => void }
 	let { tenantSlug, target, onSaved }: Props = $props();
 
+	// svelte-ignore state_referenced_locally
 	let cpl = $state(target.targetCplCents !== null ? (target.targetCplCents / 100).toString() : '');
+	// svelte-ignore state_referenced_locally
 	let cpa = $state(target.targetCpaCents !== null ? (target.targetCpaCents / 100).toString() : '');
+	// svelte-ignore state_referenced_locally
 	let roas = $state(target.targetRoas !== null ? String(target.targetRoas) : '');
+	// svelte-ignore state_referenced_locally
 	let ctr = $state(target.targetCtr !== null ? String(target.targetCtr) : '');
+	// svelte-ignore state_referenced_locally
 	let dailyBudget = $state(
 		target.targetDailyBudgetCents !== null ? (target.targetDailyBudgetCents / 100).toString() : ''
 	);
+	// svelte-ignore state_referenced_locally
 	let threshold = $state(String(target.deviationThresholdPct ?? 20));
+	// svelte-ignore state_referenced_locally
 	let notes = $state(target.notes ?? '');
 	let auditNote = $state('');
 	let saving = $state(false);

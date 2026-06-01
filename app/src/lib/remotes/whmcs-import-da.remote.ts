@@ -579,7 +579,7 @@ export const importFromWHMCS = command(ImportSchema, async (params) => {
 							nextDueDate: normalizeWHMCSDate(s.nextduedate),
 							status: mapWHMCSStatus(s.domainstatus)
 						});
-						stats.byType.recurring[result]++;
+						if (result.action !== 'noop') stats.byType.recurring[result.action]++;
 					} catch (recErr) {
 						const msg = recErr instanceof Error ? recErr.message : String(recErr);
 						logError('directadmin', `recurring upsert failed for service ${s.id}: ${msg}`, {

@@ -16,7 +16,7 @@ global.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
 	// Ad step
 	if (url.includes('/ads')) return new Response(JSON.stringify({ id: 'ad_1' }), { status: 200 });
 	return new Response('{}', { status: 200 });
-}) as typeof fetch;
+}) as unknown as typeof fetch;
 
 mock.module('$lib/server/db', () => ({
 	db: {

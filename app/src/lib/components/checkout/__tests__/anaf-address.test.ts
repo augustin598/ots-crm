@@ -94,7 +94,7 @@ describe('parseAnafAddress — communes and villages', () => {
 		expect(r.county).toBe('Iași');
 		// The first matching SAT/COM wins for `city`; the loser stays in residual.
 		expect(r.city).not.toContain('Com.');
-		expect(['Holboca', 'Dancu']).toContain(r.city);
+		expect(['Holboca', 'Dancu']).toContain(r.city!);
 	});
 });
 

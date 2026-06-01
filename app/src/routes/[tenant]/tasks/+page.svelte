@@ -94,6 +94,7 @@
 
 	// Provide filterParams via context so child components can access it without prop drilling
 	// Note: captures initial filterParams reference — context consumers get the derived object which updates reactively
+	// svelte-ignore state_referenced_locally
 	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
 
 	// Fetch data — in kanban view, exclude done/cancelled (they are loaded lazily by the kanban board)

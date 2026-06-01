@@ -78,11 +78,6 @@
 		color: var(--foreground);
 		background: var(--accent);
 	}
-	.ots-crumb-sep {
-		color: var(--muted-foreground);
-		opacity: 0.5;
-		flex-shrink: 0;
-	}
 	.ots-crumb {
 		color: var(--muted-foreground);
 		text-decoration: none;

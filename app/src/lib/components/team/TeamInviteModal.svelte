@@ -41,7 +41,9 @@
 
 	let email = $state('');
 	let jobTitle = $state('');
+	// svelte-ignore state_referenced_locally
 	let role = $state<RoleId>(defaultRole);
+	// svelte-ignore state_referenced_locally
 	let department = $state<DeptId | null>(defaultDepartment);
 	let welcome = $state('');
 	let busy = $state(false);

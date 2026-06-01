@@ -176,8 +176,17 @@
 	$effect(() => {
 		if (showMeetModal && task) {
 			meetTitle = task.title;
-			meetDate = new Date().toISOString().split('T')[0];
-			meetTime = (task as any).meetTime ?? '10:00';
+			// Stored meetTime is a full ISO datetime ("2026-06-01T10:00"); split it
+			// back into date + time. Tolerate legacy bare-time values ("10:00").
+			const storedMeet = (task as any).meetTime as string | null;
+			if (storedMeet && storedMeet.includes('T')) {
+				const [datePart, timePart] = storedMeet.split('T');
+				meetDate = datePart;
+				meetTime = timePart.slice(0, 5);
+			} else {
+				meetDate = new Date().toISOString().split('T')[0];
+				meetTime = storedMeet ?? '10:00';
+			}
 			meetDuration = String((task as any).meetDurationMinutes ?? 30);
 			meetLink = '';
 		}
@@ -575,7 +584,9 @@
 			await scheduleMeet({
 				taskId: task.id,
 				meetLink: meetLink || undefined,
-				meetTime: meetTime || undefined,
+				meetTime: meetTime
+					? `${meetDate || new Date().toISOString().split('T')[0]}T${meetTime}`
+					: undefined,
 				meetDurationMinutes: meetDuration ? parseInt(meetDuration) : undefined
 			}).updates(getTask(task.id));
 			showMeetModal = false;
@@ -709,11 +720,12 @@
 
 							{#if (currentTask as any).meetTime}
 								{@const mt = (currentTask as any).meetTime}
+								{@const mtTime = mt.includes('T') ? mt.split('T')[1].slice(0, 5) : mt}
 								{@const dur = (currentTask as any).meetDurationMinutes}
 								{@const ml = (currentTask as any).meetLink}
-								{@const endHour = dur ? (() => { const [h, m] = mt.split(':').map(Number); const total = h * 60 + m + dur; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; })() : null}
+								{@const endHour = dur ? (() => { const [h, m] = mtTime.split(':').map(Number); const total = h * 60 + m + dur; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; })() : null}
 								<div class="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
-									📅 {mt}{endHour ? ` - ${endHour}` : ''}{#if ml} — <a href={ml} target="_blank" rel="noopener noreferrer" class="underline hover:text-emerald-600">{new URL(ml).hostname}</a>{/if}
+									📅 {mtTime}{endHour ? ` - ${endHour}` : ''}{#if ml} — <a href={ml} target="_blank" rel="noopener noreferrer" class="underline hover:text-emerald-600">{new URL(ml).hostname}</a>{/if}
 								</div>
 							{/if}
 						</div>
