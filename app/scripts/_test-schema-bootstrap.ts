@@ -44,6 +44,7 @@ export async function bootstrapTestSchema(): Promise<void> {
 		contract_prefix text DEFAULT 'CTR',
 		theme_color text,
 		favicon text,
+		admin_contact_email text,
 		created_at timestamp DEFAULT current_date NOT NULL,
 		updated_at timestamp DEFAULT current_date NOT NULL
 	)`);
@@ -80,6 +81,13 @@ export async function bootstrapTestSchema(): Promise<void> {
 		avatar_path text,
 		avatar_source text NOT NULL DEFAULT 'whatsapp',
 		whmcs_client_id integer,
+		legal_type text,
+		signup_source text,
+		onboarding_status text NOT NULL DEFAULT 'active',
+		stripe_customer_id text,
+		client_since text,
+		tier text DEFAULT 'standard',
+		ltv_cents integer NOT NULL DEFAULT 0,
 		created_at timestamp DEFAULT current_date NOT NULL,
 		updated_at timestamp DEFAULT current_date NOT NULL
 	)`);
@@ -137,6 +145,13 @@ export async function bootstrapTestSchema(): Promise<void> {
 		tenant_id text NOT NULL REFERENCES tenant(id),
 		user_id text NOT NULL REFERENCES user(id),
 		role text NOT NULL DEFAULT 'member',
+		department text,
+		title text,
+		phone text,
+		skills text DEFAULT '[]',
+		hourly_rate text,
+		status text NOT NULL DEFAULT 'active',
+		capabilities text,
 		created_at timestamp NOT NULL DEFAULT current_date
 	)`);
 
@@ -187,6 +202,7 @@ export async function bootstrapTestSchema(): Promise<void> {
 		contract_id text,
 		project_id text,
 		service_id text,
+		hosting_account_id text,
 		invoice_number text NOT NULL,
 		status text NOT NULL DEFAULT 'draft',
 		amount integer,
@@ -222,6 +238,9 @@ export async function bootstrapTestSchema(): Promise<void> {
 		external_source text,
 		external_invoice_id integer,
 		external_transaction_id text,
+		stripe_payment_intent_id text,
+		stripe_session_id text,
+		stripe_subscription_id text,
 		created_by_user_id text NOT NULL REFERENCES user(id),
 		created_at timestamp NOT NULL DEFAULT current_date,
 		updated_at timestamp NOT NULL DEFAULT current_date
