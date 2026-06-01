@@ -25,7 +25,22 @@
 
 **Verificat:** svelte-check baseline (16 err/56 warn, fișierele modificate curate) · 61 teste existente PASS · 43 aserțiuni VAT PASS. Doc actualizat în `app/docs/stripe-module.md`.
 
-**Restul findings-urilor (H1–H4, mediums, lows) rămân deschise** — vezi mai jos.
+**Tier 1 + Tier 2 REZOLVATE (2026-06-01, commit `abc8463`):**
+- **H1** `getStripeForTenant` aruncă pe `isActive=false` ÎNAINTE de fallback env (toggle admin nu mai e bypass-uit).
+- **H2** recovery-ul de race re-caută email SAU CUI/vatNumber (nu mai dă 502 când emailul există la alt client).
+- **H3** refund total + orice dispute suspendă contul DA legat (reversibil, prin `suspendUser` audita), rezolvând contul via `stripeSubscriptionId` sau `inquiry.paymentReference`; ruta webhook rezolvă tenant via PI→invoice (disputele n-au `customer`).
+- **H4** emailul „Plată confirmată" + `onboardingStatus='active'` se trimit DOAR după `da_provision` reușit; pe eșec → email nou „cont în curs de activare" (`provisioning-in-progress.ts` + demo) și onboarding nepromovat.
+- **M1** `paidAmountCents` = brut (reconciliază cu totalul Keez post-C1; manual order via `computeVatBreakdown`).
+- **M5** etichetă ciclu corectă (annually/quarterly/...) + TVA din tenant (nu 19 hardcodat) pe ambii calleri.
+- **M6** `accountId` generat per-attempt (retry-ul de username nu mai moare pe PK violation).
+- **M10** modalul trimite `chosenDomain` rezolvat (nu „.ro" garbage pe have/transfer).
+- **M12** nu se mai creează cont DA cu placeholder invalid `.ots`; lipsa domeniului → eșec curat în calea H4.
+- **M7** FAQ: scos PayPal/Revolut + claim „pro-rata automat 5 min"; garanția 30 zile păstrată (refund e suportat).
+- **Lows:** focus-trap pe modal; retry decriptare credențiale DA pe `DecryptionError` cu re-citire fresh; docstring magic-link corectat.
+
+Verificat: test VAT PASS · svelte-check 0 erori/56 warn baseline · teste izolate (hosting 41, remotes 78, stripe 18, email-logger 6).
+
+**Rămân deschise (Tier 3 — tehnic/business):** M2 (3DS redirect success page), M3 (retry post-payment / webhook 200-on-failure), M4 (PII în loguri), M8 (`/comanda` wizard divergent), M9 (template recurring fiabilitate), M11 (expirare 3DS abandonat). Vezi mai jos.
 
 ---
 
