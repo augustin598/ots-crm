@@ -2,13 +2,15 @@ import type Stripe from 'stripe';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { hostingAccount } from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, ne, isNotNull } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { runPostPaymentSteps } from './post-payment/dispatcher';
 import { emitKeezFiscalInvoice } from './post-payment/emit-keez-invoice';
 import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
 import { translateDeclineCode } from './decline-codes';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
+import { createDAClient } from '$lib/server/plugins/directadmin/factory';
+import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
 
 /**
  * Resolve the PaymentIntent id from an Invoice across Stripe API shapes.
@@ -115,7 +117,11 @@ export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Se
 	await db.transaction(async (tx) => {
 		await tx
 			.update(table.client)
-			.set({ onboardingStatus: 'active', status: 'active', updatedAt: new Date() })
+			// H4 (audit 2026-05-31): mark the paying client `active`, but DON'T set
+			// onboardingStatus:'active' here — the post-payment dispatcher promotes it
+			// only AFTER DA provisioning succeeds, so a provisioning failure no longer
+			// leaves the customer flagged "onboarded" with no hosting account.
+			.set({ status: 'active', updatedAt: new Date() })
 			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
 
 		await tx
@@ -590,7 +596,11 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 	await db.transaction(async (tx) => {
 		await tx
 			.update(table.client)
-			.set({ onboardingStatus: 'active', status: 'active', updatedAt: new Date() })
+			// H4 (audit 2026-05-31): mark the paying client `active`, but DON'T set
+			// onboardingStatus:'active' here — the post-payment dispatcher promotes it
+			// only AFTER DA provisioning succeeds, so a provisioning failure no longer
+			// leaves the customer flagged "onboarded" with no hosting account.
+			.set({ status: 'active', updatedAt: new Date() })
 			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
 
 		await tx
@@ -601,6 +611,10 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 				updatedAt: new Date(),
 				paymentStatus: 'paid',
 				paidAt: new Date().toISOString(),
+				// M1 (audit 2026-05-31): `intent.amount` is now the GROSS amount
+				// (net + VAT) — C1 made the PaymentIntent charge the gross — so this
+				// reconciles 1:1 with the Keez invoice `totalAmount`. (Before C1 it
+				// stored only the net and diverged from the fiscal invoice.)
 				paidAmountCents: intent.amount ?? null,
 				paymentReference: intent.id,
 				cardLast4
@@ -676,13 +690,154 @@ export async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
 		);
 }
 
+/**
+ * Suspend the DirectAdmin hosting account(s) tied to a reversed Stripe payment
+ * (audit H3: full refund or dispute). Mirrors the overdue-invoice suspend path
+ * in directadmin/hooks.ts — per-account lock → audited DA `suspendUser` → DB
+ * flip to `status:'suspended'`. Best-effort + idempotent: an already
+ * suspended/terminated account is skipped, and a webhook redelivery re-runs
+ * harmlessly.
+ *
+ * Account resolution — the Stripe-emitted CRM invoice carries no
+ * `hostingAccountId`, so we link via two paths:
+ *   1. subscription id → `hostingAccount.stripeSubscriptionId` (recurring orders)
+ *   2. the hosting inquiry whose `paymentReference` == this PaymentIntent →
+ *      `hostingAccountId` (one-time orders + the first charge of a subscription)
+ */
+async function suspendHostingForChargeReversal(params: {
+	tenantId: string;
+	paymentIntentId: string;
+	subscriptionId: string | null;
+	reason: string;
+	logLabel: string;
+}): Promise<void> {
+	const { tenantId, paymentIntentId, subscriptionId, reason, logLabel } = params;
+	const ids = new Set<string>();
+
+	if (subscriptionId) {
+		const subRows = await db
+			.select({ id: hostingAccount.id })
+			.from(hostingAccount)
+			.where(
+				and(
+					eq(hostingAccount.tenantId, tenantId),
+					eq(hostingAccount.stripeSubscriptionId, subscriptionId)
+				)
+			);
+		subRows.forEach((r) => ids.add(r.id));
+	}
+
+	const inqRows = await db
+		.select({ hostingAccountId: table.hostingInquiry.hostingAccountId })
+		.from(table.hostingInquiry)
+		.where(
+			and(
+				eq(table.hostingInquiry.tenantId, tenantId),
+				eq(table.hostingInquiry.paymentReference, paymentIntentId),
+				isNotNull(table.hostingInquiry.hostingAccountId)
+			)
+		);
+	inqRows.forEach((r) => {
+		if (r.hostingAccountId) ids.add(r.hostingAccountId);
+	});
+
+	if (ids.size === 0) {
+		logWarning('directadmin', `${logLabel}: no hosting account linked — nothing to suspend`, {
+			tenantId,
+			metadata: { paymentIntentId, subscriptionId }
+		});
+		return;
+	}
+
+	for (const accountId of ids) {
+		const [account] = await db
+			.select({
+				id: hostingAccount.id,
+				daUsername: hostingAccount.daUsername,
+				daServerId: hostingAccount.daServerId,
+				status: hostingAccount.status
+			})
+			.from(hostingAccount)
+			.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+			.limit(1);
+		if (!account) continue;
+
+		// Idempotent: only suspend a live account. suspended/terminated/cancelled
+		// → leave as-is (a webhook redelivery or a manual prior suspend).
+		if (account.status !== 'active' && account.status !== 'pending') {
+			logInfo('directadmin', `${logLabel}: account ${account.daUsername} already ${account.status} — skip`, {
+				tenantId,
+				metadata: { accountId }
+			});
+			continue;
+		}
+
+		const [server] = await db
+			.select()
+			.from(table.daServer)
+			.where(and(eq(table.daServer.id, account.daServerId), eq(table.daServer.tenantId, tenantId)))
+			.limit(1);
+		if (!server) {
+			logError('directadmin', `${logLabel}: cannot suspend ${account.daUsername} — server row missing`, {
+				tenantId,
+				metadata: { accountId }
+			});
+			continue;
+		}
+
+		await withAccountLock(`${tenantId}:${account.daUsername}`, async () => {
+			try {
+				await runWithAudit(
+					{
+						tenantId,
+						hostingAccountId: account.id,
+						daServerId: account.daServerId,
+						action: 'suspend',
+						trigger: 'stripe-webhook'
+					},
+					async () => {
+						const daClient = createDAClient(tenantId, server);
+						// External DA call first (no rollback after this point), then DB flip.
+						await daClient.suspendUser(account.daUsername);
+						await db
+							.update(hostingAccount)
+							.set({
+								status: 'suspended',
+								suspendReason: reason,
+								suspendedAt: new Date(),
+								reactivatedAt: null,
+								updatedAt: new Date()
+							})
+							.where(eq(hostingAccount.id, account.id));
+					}
+				);
+				logInfo('directadmin', `${logLabel}: suspended ${account.daUsername}`, {
+					tenantId,
+					metadata: { accountId, reason }
+				});
+			} catch (err) {
+				logError(
+					'directadmin',
+					`${logLabel}: suspend failed for ${account.daUsername}: ${serializeError(err).message}`,
+					{ tenantId, metadata: { accountId } }
+				);
+			}
+		});
+	}
+}
+
 export async function handleChargeRefunded(charge: Stripe.Charge) {
 	const paymentIntentId =
 		typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
 	if (!paymentIntentId) return;
 
 	const [invoiceRow] = await db
-		.select({ id: table.invoice.id, tenantId: table.invoice.tenantId, status: table.invoice.status })
+		.select({
+			id: table.invoice.id,
+			tenantId: table.invoice.tenantId,
+			status: table.invoice.status,
+			stripeSubscriptionId: table.invoice.stripeSubscriptionId
+		})
 		.from(table.invoice)
 		.where(eq(table.invoice.stripePaymentIntentId, paymentIntentId))
 		.limit(1);
@@ -707,6 +862,19 @@ export async function handleChargeRefunded(charge: Stripe.Charge) {
 		tenantId: invoiceRow.tenantId,
 		metadata: { invoiceId: invoiceRow.id, chargeId: charge.id, paymentIntentId }
 	});
+
+	// H3 (audit 2026-05-31): a FULL refund means the customer got their money
+	// back — they must not keep an active hosting account. Suspend (reversible,
+	// NEVER delete) the linked DA account(s). Partial refunds leave hosting up.
+	if (fullyRefunded) {
+		await suspendHostingForChargeReversal({
+			tenantId: invoiceRow.tenantId,
+			paymentIntentId,
+			subscriptionId: invoiceRow.stripeSubscriptionId ?? null,
+			reason: `Refund Stripe (charge ${charge.id})`,
+			logLabel: 'charge.refunded'
+		});
+	}
 }
 
 export async function handleChargeDisputeCreated(dispute: Stripe.Dispute) {
@@ -717,7 +885,11 @@ export async function handleChargeDisputeCreated(dispute: Stripe.Dispute) {
 	if (!paymentIntentId) return;
 
 	const [invoiceRow] = await db
-		.select({ id: table.invoice.id, tenantId: table.invoice.tenantId })
+		.select({
+			id: table.invoice.id,
+			tenantId: table.invoice.tenantId,
+			stripeSubscriptionId: table.invoice.stripeSubscriptionId
+		})
 		.from(table.invoice)
 		.where(eq(table.invoice.stripePaymentIntentId, paymentIntentId))
 		.limit(1);
@@ -731,7 +903,27 @@ export async function handleChargeDisputeCreated(dispute: Stripe.Dispute) {
 			invoiceId: invoiceRow?.id ?? null
 		}
 	});
-	// TODO: trigger email staff URGENT (template nou); pentru moment, log only.
+
+	// H3 (audit 2026-05-31): a dispute (chargeback) means the funds are held /
+	// being clawed back. Suspend the linked DA account(s) immediately — keeping
+	// hosting live for a customer who disputed the charge is direct loss. Suspend
+	// is reversible: if the dispute is later won, staff unsuspend from the panel.
+	// Needs a resolved tenant — disputes carry no `customer`, so the webhook route
+	// resolves the tenant via PaymentIntent → invoice before this runs.
+	if (invoiceRow) {
+		await suspendHostingForChargeReversal({
+			tenantId: invoiceRow.tenantId,
+			paymentIntentId,
+			subscriptionId: invoiceRow.stripeSubscriptionId ?? null,
+			reason: `Dispute Stripe (${dispute.reason ?? 'unknown'} · ${dispute.id})`,
+			logLabel: 'charge.dispute.created'
+		});
+	} else {
+		logWarning('directadmin', 'charge.dispute.created — no CRM invoice for PI, cannot auto-suspend', {
+			tenantId: null,
+			metadata: { disputeId: dispute.id, paymentIntentId }
+		});
+	}
 }
 
 export async function handleCustomerUpdated(customer: Stripe.Customer) {

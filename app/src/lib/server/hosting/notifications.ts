@@ -9,9 +9,10 @@ import {
 	emailSettings as emailSettingsTable,
 	invoice as invoiceTable,
 	invoiceSettings as invoiceSettingsTable,
-	recurringInvoice
+	recurringInvoice,
+	client as clientTable
 } from '$lib/server/db/schema';
-import { decrypt } from '$lib/server/plugins/smartbill/crypto';
+import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { sendWithPersistence, fetchTenantBrand, resolveFromEmail } from '$lib/server/email';
 import { logEmailAttempt } from '$lib/server/email-logger';
 import {
@@ -34,6 +35,7 @@ import {
 import { render as renderRenewalReminder } from './email-templates/renewal-reminder';
 import { render as renderPaymentFailed } from './email-templates/payment-failed';
 import { render as renderPasswordReset } from './email-templates/password-reset';
+import { render as renderProvisioningInProgress } from './email-templates/provisioning-in-progress';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
@@ -103,10 +105,39 @@ export async function notifyHostingAccountCreated(
 	try {
 		creds = JSON.parse(decrypt(tenantId, account.daCredentialsEncrypted));
 	} catch (err) {
-		logError('hosting-email', `decrypt credentials failed for account ${accountId}`, {
-			tenantId
-		});
-		throw err;
+		// Low (audit 2026-05-31): retry once on DecryptionError with a FRESH DB read.
+		// Turso occasionally truncates ciphertext on a read → decrypt fails
+		// transiently; re-reading the row usually returns the full blob (matches the
+		// documented decrypt-retry pattern used by the Keez/Stripe factories).
+		if (err instanceof DecryptionError) {
+			logWarning('hosting-email', `decrypt credentials failed for account ${accountId} — retrying with fresh read`, {
+				tenantId
+			});
+			const [fresh] = await db
+				.select({ daCredentialsEncrypted: hostingAccount.daCredentialsEncrypted })
+				.from(hostingAccount)
+				.where(and(eq(hostingAccount.id, accountId), eq(hostingAccount.tenantId, tenantId)))
+				.limit(1);
+			if (!fresh?.daCredentialsEncrypted) {
+				logError('hosting-email', `decrypt retry: no credentials on fresh read for account ${accountId}`, {
+					tenantId
+				});
+				throw err;
+			}
+			try {
+				creds = JSON.parse(decrypt(tenantId, fresh.daCredentialsEncrypted));
+			} catch (retryErr) {
+				logError('hosting-email', `decrypt credentials failed after retry for account ${accountId}`, {
+					tenantId
+				});
+				throw retryErr;
+			}
+		} else {
+			logError('hosting-email', `decrypt credentials failed for account ${accountId}`, {
+				tenantId
+			});
+			throw err;
+		}
 	}
 
 	// 3. Atomic dedupe: insert one row with the unique-key conflict resolving to no-op.
@@ -473,6 +504,101 @@ export async function notifyHostingProvisioningFailed(
 }
 // Re-export for downstream consumers that need to differentiate admin-config bugs.
 export { NoAdminRecipientError };
+
+/**
+ * Customer email sent when payment succeeded but automatic DA provisioning did
+ * NOT complete (audit H4). The post-payment dispatcher fires this INSTEAD of the
+ * "payment confirmed / account ready" email so the customer never gets login
+ * promises for an account that doesn't exist yet — they're told the payment was
+ * received + the account is being set up by the team. Staff are alerted via the
+ * admin-payment-received email (it surfaces the failed `da_provision` step).
+ *
+ * Resolves the recipient straight off the client row (no hosting_account needed
+ * — provisioning may have failed before any account row was created, e.g. M12
+ * domain_missing). Best-effort, no dedupe table: the webhook returns 200 even on
+ * a failed step so Stripe does NOT auto-retry → this fires once per real event
+ * delivery; a rare manual replay could re-send, which is acceptable for a
+ * reassurance email. The caller (dispatcher) catches + logs so a send failure
+ * never marks the webhook event failed.
+ */
+export async function notifyHostingProvisioningInProgress(
+	tenantId: string,
+	clientId: string,
+	planName?: string | null
+): Promise<void> {
+	const [clientRow] = await db
+		.select({
+			id: clientTable.id,
+			tenantId: clientTable.tenantId,
+			email: clientTable.email,
+			name: clientTable.name
+		})
+		.from(clientTable)
+		.where(and(eq(clientTable.id, clientId), eq(clientTable.tenantId, tenantId)))
+		.limit(1);
+
+	if (!clientRow) {
+		const msg = `client ${clientId} not found for tenant ${tenantId}`;
+		logError('hosting-email', msg, { tenantId });
+		throw new Error(msg);
+	}
+	if (!clientRow.email) {
+		logWarning('hosting-email', `client ${clientId} has no email — provisioning-in-progress skipped`, {
+			tenantId
+		});
+		return;
+	}
+	const toEmail = clientRow.email;
+
+	const { subject, html } = await renderProvisioningInProgress({
+		tenantId,
+		clientName: clientRow.name ?? 'client',
+		planName: planName ?? null
+	});
+
+	const emailLogId = await logEmailAttempt({
+		tenantId,
+		toEmail,
+		subject,
+		emailType: 'hosting-provisioning-in-progress',
+		htmlBody: html,
+		payload: null
+	});
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail,
+			subject,
+			emailType: 'hosting-provisioning-in-progress',
+			metadata: { clientId },
+			htmlBody: html,
+			payload: null,
+			_retryOfLogId: emailLogId
+		},
+		async () => {
+			const brand = await fetchTenantBrand(tenantId);
+			const [settings] = await db
+				.select()
+				.from(emailSettingsTable)
+				.where(eq(emailSettingsTable.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(settings ?? null);
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: toEmail,
+				subject,
+				html,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {})
+			};
+		}
+	);
+
+	logInfo('hosting-email', `sent provisioning-in-progress for client ${clientId}`, {
+		tenantId,
+		metadata: { emailLogId, toEmail }
+	});
+}
 
 /**
  * Format a Date (or ISO string) as `DD.MM.YYYY` (Romanian locale).

@@ -22,6 +22,7 @@
 	} from '$lib/components/checkout/validators';
 	import { COUNTIES, parseAnafAddress } from '$lib/components/checkout/anaf-address';
 	import { computeVatBreakdown } from '$lib/utils/vat';
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import { toast } from 'svelte-sonner';
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -1038,7 +1039,12 @@
 				paymentMode: paymentMethod === 'card' ? 'payment_intent' : 'checkout_redirect',
 				paymentMethod,
 				requestedDomain: chosenDomain || undefined,
-				domainName: (domainName + domainTld).toLowerCase(),
+				// M10 (audit 2026-05-31): send the already-resolved `chosenDomain` (it
+				// handles buy → `${name}${tld}`, have/transfer → the existingDomain
+				// field). The old `domainName + domainTld` sent garbage like ".ro" when
+				// the mode was have/transfer (the buy-input `domainName` is empty then),
+				// which corrupted the domain line item + the provisioning prefill.
+				domainName: chosenDomain || undefined,
 				domainMode,
 				domainCostCents: domainMode === 'buy' ? Math.round(tldPrice * 100) : 0
 			});
@@ -1239,6 +1245,7 @@
 	role="dialog"
 	aria-modal="true"
 	tabindex="-1"
+	use:focusTrap={{}}
 	onclick={(e) => {
 		if (e.target === e.currentTarget && step < 4) onClose();
 	}}

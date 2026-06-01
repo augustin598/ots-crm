@@ -226,32 +226,50 @@ export async function provisionDirectAdminAccount(params: {
 		}
 	}
 
-	const daClient = createDAClient(params.tenantId, server);
-	const accountId = generateId();
-	const MAX_RETRIES = 3;
-
-	let finalUsername = daUsername;
-	let finalDomain = resolvedDomain ?? `${daUsername}.hosting-temp.ots`;
-
-	logInfo(
-		'directadmin',
-		`Provisioning DA — domain source: ${domainSource}, domain: ${finalDomain}`,
-		{
+	// M12 (audit 2026-05-31): never provision a DA account with an invalid
+	// placeholder domain. The old fallback `${daUsername}.hosting-temp.ots` has a
+	// non-real `.ots` TLD → DA created a broken account the customer was then sent
+	// credentials for. When NO real domain was resolved from any source, fail
+	// cleanly: the dispatcher records da_provision as failed → the customer gets
+	// the "cont în curs de activare" email (H4) and staff completes the order by
+	// setting the real domain via the admin form, then re-provisions.
+	if (!resolvedDomain) {
+		logWarning('directadmin', 'provisioning blocked — no real domain resolved (M12)', {
 			tenantId: params.tenantId,
 			metadata: {
 				inquiryId: params.inquiryId,
 				clientId: params.clientId,
-				productId: params.productId,
-				domainSource
+				productId: params.productId
 			}
+		});
+		throw new Error(
+			'domain_missing: niciun domeniu real pentru provisioning — staff trebuie să seteze domeniul și să reia'
+		);
+	}
+
+	const daClient = createDAClient(params.tenantId, server);
+	const MAX_RETRIES = 3;
+
+	logInfo('directadmin', `Provisioning DA — domain source: ${domainSource}, domain: ${resolvedDomain}`, {
+		tenantId: params.tenantId,
+		metadata: {
+			inquiryId: params.inquiryId,
+			clientId: params.clientId,
+			productId: params.productId,
+			domainSource
 		}
-	);
+	});
 
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		// Username se poate schimba pe retry (collision); domeniul rămâne fix.
-		const domain = resolvedDomain ?? `${daUsername}.hosting-temp.ots`;
-		finalUsername = daUsername;
-		finalDomain = domain;
+		// M6 (audit 2026-05-31): fresh account id PER attempt. It was generated
+		// ONCE outside the loop, so on the 2nd username-collision retry the
+		// pre-insert below collided on the PRIMARY KEY (the attempt-1 row already
+		// exists, now marked `failed`) → the retry threw a PK violation instead of
+		// actually retrying. Each attempt now inserts its own row; failed attempts
+		// remain as forensic records (consistent with "mark failed, never delete").
+		const accountId = generateId();
+		// Domeniul rămâne fix peste retries (doar username-ul se schimbă pe collision).
+		const domain = resolvedDomain;
 
 		const credentialsEncrypted = encrypt(
 			params.tenantId,

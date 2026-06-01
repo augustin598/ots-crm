@@ -256,7 +256,7 @@
 		},
 		{
 			q: 'Pot face upgrade între pachete?',
-			a: 'Da, oricând, cu pro-rata. Diferența rămasă din pachetul curent se transferă automat în pachetul nou. Procesul durează 5 minute și nu pierzi nimic din site.'
+			a: 'Da, oricând. Ne scrii, mutăm site-ul în pachetul nou fără downtime și calculăm diferența proporțional (pro-rata) pentru perioada rămasă din abonamentul curent.'
 		},
 		{
 			q: 'Există garanție de returnare a banilor?',
@@ -267,8 +267,8 @@
 			a: 'Toate pachetele suportă PHP 7.4, 8.0, 8.1, 8.2 și 8.3. Schimbi versiunea cu un click din panoul de administrare. MySQL 8.0 / MariaDB 10.6 cu PHPMyAdmin inclus.'
 		},
 		{
-			q: 'Acceptați plata cu cardul / Stripe / Revolut?',
-			a: 'Da. Acceptăm card bancar (Visa / Mastercard), ordin de plată, PayPal și Revolut. Pentru clienții pe persoană juridică emitem factură fiscală în 10 minute, cu TVA reverse charge pentru clienții din UE.'
+			q: 'Acceptați plata cu cardul / ordin de plată?',
+			a: 'Da. Acceptăm card bancar (Visa / Mastercard) și ordin de plată (OP). Pentru clienții pe persoană juridică emitem automat factură fiscală cu TVA imediat după confirmarea plății.'
 		}
 	];
 </script>

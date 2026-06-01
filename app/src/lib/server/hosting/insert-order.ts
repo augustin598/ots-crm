@@ -14,9 +14,38 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { sql, eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
+
+/**
+ * Romanian label for a hosting product's billing cycle. Covers every value the
+ * product catalog uses — M5 (audit 2026-05-31): the previous `=== 'yearly'`
+ * check mislabeled `annually` products (the real catalog value) as "lunar".
+ */
+function billingCycleLabelRo(cycle: string | null): string {
+	switch (cycle) {
+		case 'monthly':
+			return 'lunar';
+		case 'quarterly':
+			return 'trimestrial';
+		case 'semiannually':
+		case 'biannually':
+			return 'semestrial';
+		case 'annually':
+		case 'yearly':
+			return 'anual';
+		case 'biennially':
+			return 'la 2 ani';
+		case 'triennially':
+			return 'la 3 ani';
+		case 'one_time':
+			return 'plată unică';
+		default:
+			return 'periodic';
+	}
 }
 
 /**
@@ -60,6 +89,13 @@ export interface InsertOrderParams {
 	domainName?: string | null;
 	domainMode?: 'buy' | 'have' | 'transfer' | null;
 	domainCostCents?: number | null;
+	/**
+	 * VAT percent (integer, e.g. 21) stored on every line item. M5 (audit
+	 * 2026-05-31): was hardcoded `19` — diverged from the tenant's real rate (21)
+	 * used by Stripe + Keez. Callers pass the tenant's `defaultTaxRate`; falls
+	 * back to DEFAULT_VAT_PERCENT so a missing value never silently reverts to 19.
+	 */
+	vatRate?: number | null;
 	status?: 'new' | 'contacted' | 'converted' | 'discarded' | 'abandoned';
 	clientCreated?: boolean;
 	clientCreatedAt?: Date | null;
@@ -146,9 +182,12 @@ export async function insertHostingOrder(
 		clientCreatedAt: params.clientCreatedAt ?? null
 	});
 
+	// M5: line-item VAT comes from the tenant's real rate, not a hardcoded 19.
+	const lineVatRate = params.vatRate ?? DEFAULT_VAT_PERCENT;
+
 	const items: (typeof table.hostingInquiryItem.$inferInsert)[] = [];
 	if (product) {
-		const period = product.billingCycle === 'yearly' ? 'anual' : 'lunar';
+		const period = billingCycleLabelRo(product.billingCycle);
 		items.push({
 			id: generateId(),
 			inquiryId: id,
@@ -158,7 +197,7 @@ export async function insertHostingOrder(
 			hostingProductId: product.id,
 			unitPriceCents: product.price,
 			quantity: 1,
-			vatRate: 19
+			vatRate: lineVatRate
 		});
 	}
 
@@ -173,7 +212,7 @@ export async function insertHostingOrder(
 				label: `Domeniu ${params.domainName}`,
 				unitPriceCents: params.domainCostCents!,
 				quantity: 1,
-				vatRate: 19,
+				vatRate: lineVatRate,
 				domainName: params.domainName,
 				domainMode: 'buy'
 			});
@@ -187,7 +226,7 @@ export async function insertHostingOrder(
 				label: `Domeniu ${params.domainName} (${lbl})`,
 				unitPriceCents: 0,
 				quantity: 1,
-				vatRate: 19,
+				vatRate: lineVatRate,
 				domainName: params.domainName,
 				domainMode: mode
 			});

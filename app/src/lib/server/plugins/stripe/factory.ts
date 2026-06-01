@@ -78,6 +78,16 @@ export async function getStripeForTenant(tenantId: string): Promise<Stripe> {
 		return stripe;
 	}
 
+	// H1 (audit 2026-05-31): an EXPLICITLY deactivated integration row must NOT
+	// fall through to the env fallback below. Without this guard, toggling Stripe
+	// off in admin for the `ots` tenant was silently bypassed by `STRIPE_SECRET_KEY`
+	// env vars — checkout + webhooks kept working despite the admin "off" switch.
+	// Treat deactivation as "not configured" so isStripeConfiguredForTenant() gates
+	// the UI off and the webhook route stops accepting events for this tenant.
+	if (integration && !integration.isActive) {
+		throw new StripeNotConfiguredError(tenantId);
+	}
+
 	// Fallback: tenant-ul actual `ots` care încă rulează pe env vars (Sprint 8 setup).
 	// Migration script va muta cheia în DB; după aceea fallback-ul ăsta devine inutil
 	// și poate fi șters.

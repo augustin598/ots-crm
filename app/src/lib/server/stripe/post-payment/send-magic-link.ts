@@ -20,8 +20,12 @@ function hashToken(token: string): string {
  * Creează un magic-link token de onboarding pentru clientul nou-onboardat și
  * trimite emailul cu linkul către portalul lui.
  *
- * Idempotent în limitele input-ului: dacă pentru același clientId există deja
- * un token activ (non-expired, non-used), îl reutilizăm în loc să creăm altul.
+ * NU e idempotent în sine: fiecare apel emite un token NOU (nu putem reutiliza
+ * unul existent — stocăm doar hash-ul, deci nu mai avem plaintext-ul de retrimis
+ * în email). Dublarea pe retry e prevenită UN nivel mai sus: pasul `magic_link`
+ * din `post_payment_step` e marcat `success` la prima rulare, iar `runStep` sare
+ * pașii deja `success`/`skipped` pe redelivery Stripe → nu re-emite alt token.
+ * (Docstring-ul vechi pretindea „reuse idempotent", ceea ce nu reflecta codul.)
  *
  * Returns: payload obiect care va fi serializat în `post_payment_step.payload`.
  */

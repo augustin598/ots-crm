@@ -40,6 +40,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			object?: {
 				metadata?: { crmTenantId?: string };
 				customer?: string | { id?: string } | null;
+				payment_intent?: string | { id?: string } | null;
 			};
 		};
 	} = {};
@@ -67,6 +68,26 @@ export const POST: RequestHandler = async ({ request }) => {
 				.where(eq(table.client.stripeCustomerId, customerId))
 				.limit(1);
 			if (c) tenantId = c.tenantId;
+		}
+	}
+
+	// H3 (audit 2026-05-31): `charge.dispute.created` objects carry NO `customer`
+	// field — only `payment_intent`. Without this fallback disputes stayed
+	// untenanted (200 + dropped), so the auto-suspend handler never ran. Resolve
+	// the tenant via PaymentIntent → CRM invoice. Same trust model as above: this
+	// only picks WHICH tenant's webhook secret to verify against; a forged body
+	// still fails the signature check below.
+	if (!tenantId) {
+		const obj = parsedPreview.data?.object;
+		const piId =
+			typeof obj?.payment_intent === 'string' ? obj.payment_intent : obj?.payment_intent?.id;
+		if (piId) {
+			const [inv] = await db
+				.select({ tenantId: table.invoice.tenantId })
+				.from(table.invoice)
+				.where(eq(table.invoice.stripePaymentIntentId, piId))
+				.limit(1);
+			if (inv) tenantId = inv.tenantId;
 		}
 	}
 

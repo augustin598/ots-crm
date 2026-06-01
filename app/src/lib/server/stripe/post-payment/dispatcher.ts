@@ -2,12 +2,13 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { sendOnboardingMagicLink } from './send-magic-link';
 import { provisionDirectAdminAccount } from './provision-da';
 import { emitKeezFiscalInvoice } from './emit-keez-invoice';
 import { notifyPaymentSucceeded, notifyAdminPaymentReceived } from '../notifications';
+import { notifyHostingProvisioningInProgress } from '$lib/server/hosting/notifications';
 
 type StepName = 'magic_link' | 'keez_invoice' | 'da_provision';
 type StepStatus = 'pending' | 'success' | 'failed' | 'skipped';
@@ -211,32 +212,11 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 		})
 	);
 
-	// 2b. Customer payment-succeeded email — best-effort, never blocks the
-	// pipeline. Fired only when the keez step actually wrote/found an invoice
-	// (skipped pre-conditions like `product_missing` leave nothing to email
-	// about). `notifyPaymentSucceeded` has its own lifetime dedupe per invoice,
-	// so a Stripe webhook retry that re-fires the dispatcher will no-op safely
-	// here even though the keez step itself returned the cached invoiceId on
-	// the second pass. Errors are caught + logged so a notify failure cannot
-	// mark the webhook event as `failed` and trigger a Stripe retry storm.
-	if (
-		keezResult &&
-		typeof keezResult === 'object' &&
-		'invoiceId' in keezResult &&
-		!('skipped' in keezResult)
-	) {
-		const invoiceId = keezResult.invoiceId;
-		notifyPaymentSucceeded(ctx.tenantId, invoiceId).catch((err) => {
-			logError('hosting-email', 'payment-succeeded notify failed', {
-				tenantId: ctx.tenantId,
-				metadata: {
-					sessionId: ctx.sessionId,
-					invoiceId,
-					error: err instanceof Error ? err.message : String(err)
-				}
-			});
-		});
-	}
+	// NOTE (audit H4): the customer "payment confirmed / account ready" email was
+	// previously fired HERE — before provisioning — so a customer whose DA
+	// provisioning then failed got a success email + magic link for an account
+	// that never came up. It now fires AFTER da_provision, gated on the
+	// provisioning outcome (see the branch below the da_provision step).
 
 	// 3. DA provisioning — ultima, poate dura mai mult (apel DA + DB writes).
 	await runStep(ctx, 'da_provision', async () => {
@@ -269,6 +249,67 @@ export async function runPostPaymentSteps(ctx: PostPaymentContext): Promise<void
 		);
 		return result;
 	});
+
+	// 3b. Customer email — gated on the da_provision OUTCOME (audit H4). Read the
+	//     persisted step status: 'success'/'skipped' (already-provisioned on a
+	//     retry) == the account is up; 'failed' == it is not. runStep swallows the
+	//     error and returns undefined for BOTH failed AND already-done, so we read
+	//     the row instead of the return value to tell them apart.
+	const daStep = await getStepStatus(ctx.sessionId, 'da_provision');
+	const provisioned = daStep?.status === 'success' || daStep?.status === 'skipped';
+
+	if (provisioned) {
+		// Account is live → send the "payment confirmed" customer email (its own
+		// lifetime-per-invoice dedupe makes a redelivery a no-op) and promote the
+		// client's onboarding state. Both best-effort: a failure here must never
+		// mark the webhook event failed + trigger a Stripe retry storm.
+		if (
+			keezResult &&
+			typeof keezResult === 'object' &&
+			'invoiceId' in keezResult &&
+			!('skipped' in keezResult)
+		) {
+			const invoiceId = keezResult.invoiceId;
+			notifyPaymentSucceeded(ctx.tenantId, invoiceId).catch((err) => {
+				logError('hosting-email', 'payment-succeeded notify failed', {
+					tenantId: ctx.tenantId,
+					metadata: {
+						sessionId: ctx.sessionId,
+						invoiceId,
+						error: err instanceof Error ? err.message : String(err)
+					}
+				});
+			});
+		}
+		// H4: promote onboarding to active only now that the account actually
+		// exists (was previously set eagerly in the webhook handler, before
+		// provisioning). status:'active' (paying customer) already set there.
+		await db
+			.update(table.client)
+			.set({ onboardingStatus: 'active', updatedAt: new Date() })
+			.where(and(eq(table.client.id, ctx.clientId), eq(table.client.tenantId, ctx.tenantId)))
+			.catch((err) => {
+				logWarning('directadmin', 'onboardingStatus promote failed (non-fatal)', {
+					tenantId: ctx.tenantId,
+					metadata: { clientId: ctx.clientId, error: err instanceof Error ? err.message : String(err) }
+				});
+			});
+	} else {
+		// H4: provisioning did NOT complete → send the honest "cont în curs de
+		// activare" email INSTEAD of a success confirmation, and leave
+		// onboardingStatus as-is (not 'active'). Staff see the failed da_provision
+		// step in the admin-payment-received email below.
+		notifyHostingProvisioningInProgress(ctx.tenantId, ctx.clientId).catch((err) => {
+			logError('hosting-email', 'provisioning-in-progress notify failed', {
+				tenantId: ctx.tenantId,
+				metadata: {
+					sessionId: ctx.sessionId,
+					clientId: ctx.clientId,
+					error: err instanceof Error ? err.message : String(err)
+				}
+			});
+		});
+	}
 
 	// 4. Admin alert with step statuses — best-effort, doesn't block the pipeline.
 	//    Reads from post_payment_step table (status was persisted by each runStep

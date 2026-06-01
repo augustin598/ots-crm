@@ -291,6 +291,17 @@ mock.module('../email-templates/account-created', () => ({
 	}
 }));
 
+const renderPIPCalls: unknown[] = [];
+mock.module('../email-templates/provisioning-in-progress', () => ({
+	render: async (input: unknown) => {
+		renderPIPCalls.push(input);
+		return {
+			subject: 'Plata a fost confirmată — îți pregătim contul de hosting',
+			html: '<p>in-progress body</p>'
+		};
+	}
+}));
+
 const renderPFCalls: unknown[] = [];
 mock.module('../email-templates/provisioning-failed', () => ({
 	render: async (input: unknown) => {

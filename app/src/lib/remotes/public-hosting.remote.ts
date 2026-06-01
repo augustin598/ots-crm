@@ -906,14 +906,31 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			} catch (err) {
 				const { message } = serializeError(err);
 				if (message.toLowerCase().includes('unique')) {
-					logInfo('directadmin', 'CUI UNIQUE race — attaching to existing (anti-enumeration unified path)', {
+					// H2 (audit 2026-05-31): the UNIQUE violation can be on EITHER the
+					// (tenant, cui) OR the (tenant, email) constraint. The initial
+					// duplicate check above matched on CUI/vatNumber only, so a DIFFERENT
+					// existing client holding this email slipped past it and the insert
+					// failed on the email UNIQUE — re-searching by CUI alone then found
+					// nothing → re-throw → 502 on a legitimate company order. Re-search by
+					// email OR CUI so we recover regardless of which constraint fired.
+					logInfo('directadmin', 'UNIQUE race (email|CUI) — attaching to existing (anti-enumeration unified path)', {
 						tenantId,
 						metadata: { cui: cleanCui }
 					});
 					const [raceClient] = await db
 						.select()
 						.from(table.client)
-						.where(and(eq(table.client.tenantId, tenantId), eq(table.client.cui, cleanCui)))
+						.where(
+							and(
+								eq(table.client.tenantId, tenantId),
+								or(
+									eq(table.client.cui, cleanCui),
+									eq(table.client.vatNumber, `RO${cleanCui}`),
+									eq(table.client.vatNumber, cleanCui),
+									eq(table.client.email, normalizedEmail)
+								)
+							)
+						)
 						.limit(1);
 					if (!raceClient) {
 						// Race lost dar nu găsim client-ul — re-throw, fluxul nu se poate completa.
@@ -1067,7 +1084,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 						requestedDomain: data.requestedDomain || null,
 						domainName: data.domainName ?? null,
 						domainMode: data.domainMode ?? null,
-						domainCostCents: data.domainCostCents ?? null
+						domainCostCents: data.domainCostCents ?? null,
+						// M5: line items carry the tenant's real VAT rate (== Stripe + Keez).
+						vatRate: vatPercent
 					}),
 				{ tenantId, label: 'public-hosting/insertInquiry' }
 			)

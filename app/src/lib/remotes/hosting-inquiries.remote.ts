@@ -11,6 +11,8 @@ import { provisionDirectAdminAccount } from '$lib/server/stripe/post-payment/pro
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { insertHostingOrder } from '$lib/server/hosting/insert-order';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { computeVatBreakdown } from '$lib/utils/vat';
 
 /**
  * Admin-side management of hosting inquiries / orders submitted via the public
@@ -859,10 +861,18 @@ export const createManualHostingOrder = command(
 		const domainCostCents = data.domainMode === 'buy' ? 4900 : 0;
 		const paymentStatus = data.initialStatus;
 		const paid = paymentStatus === 'paid';
-		const grossCents = product.price + domainCostCents;
-		const paidAmountCents = paid
-			? grossCents + Math.round(grossCents * 0.19)
-			: null;
+
+		// M5 (audit 2026-05-31): VAT comes from the tenant's real rate, not a
+		// hardcoded 0.19 — keeps the manual order's paidAmount + line items aligned
+		// with Stripe + Keez (which use invoice_settings.defaultTaxRate).
+		const [taxSettings] = await db
+			.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
+			.from(table.invoiceSettings)
+			.where(eq(table.invoiceSettings.tenantId, tenantId))
+			.limit(1);
+		const vatPercent = taxSettings?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
+		const netCents = product.price + domainCostCents;
+		const paidAmountCents = paid ? computeVatBreakdown(netCents, vatPercent).grossCents : null;
 
 		// For the items insert: the helper builds the hosting line from the
 		// product object and computes the period suffix from billingCycle. We
@@ -895,6 +905,7 @@ export const createManualHostingOrder = command(
 			domainName: data.domainName,
 			domainMode: data.domainMode,
 			domainCostCents,
+			vatRate: vatPercent,
 			status: paid ? 'converted' : 'new'
 		});
 
