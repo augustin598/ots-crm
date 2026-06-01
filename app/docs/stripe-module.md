@@ -17,7 +17,38 @@ Plată online prin Stripe pentru pachete hosting publice (`/pachete-hosting/coma
 - **Defense-in-depth** tenant filter în toate handler-ele recurring
 - **Debug endpoint** admin pentru ping/replay/events visibility
 
-**Current state:** Test mode 100% funcțional. Live mode necesită **fix Keez emission** (stub Sprint 8.2) pentru conformare ANAF.
+**Current state:** Test mode 100% funcțional. Keez emission e implementat (prima plată + reînnoiri).
+
+---
+
+## Audit fix 2026-05-31 — C1 (TVA) + C2 (facturi reînnoire)
+
+Vezi `PACHETE-HOSTING-AUDIT-2026-05-31.md` (repo root) pentru auditul complet.
+
+### C1 — Stripe încasează acum BRUTUL (net + TVA)
+Înainte: Stripe încasa doar `product.price` (NET), dar UI-ul afișa total CU TVA și
+Keez emitea factura CU TVA → TVA promisă + facturată, dar **neîncasată** (expunere fiscală).
+
+Sursă unică de adevăr: `src/lib/utils/vat.ts#computeVatBreakdown(netCents, vatPercent)` →
+`{ netCents, vatCents, grossCents }`. Folosit de TOATE cele 3 suprafețe:
+- **Modal** (`hosting-checkout-modal.svelte`): afișează total din `priceCents` real (nu din numerele „marketing" yearly×10); toggle-ul lunar/anual e acum pur decorativ.
+- **Server** (`public-hosting.remote.ts`): one-time PaymentIntent `amount = grossCents`; subscription + Checkout redirect atașează un **Stripe Tax Rate** (`getOrCreateStripeTaxRate` în `factory.ts`, `inclusive:false`) pe item → TVA peste prețul NET, se propagă și la reînnoiri.
+- **Keez** (`emit-keez-invoice.ts`): `taxCents`/`totalCents` din același helper.
+
+Invariant garantat: `Stripe.amount == Keez.totalAmount == total afișat`.
+Test regresie: `test-hosting-checkout-vat-reconciliation.ts` (43 aserțiuni).
+
+### C2 — Facturile de reînnoire abonament se emit acum
+- `handleInvoicePaid` (webhook-handlers.ts) emite factură Keez pe `invoice.payment_succeeded`
+  cu `billing_reason === 'subscription_cycle'` (sare `subscription_create` — prima plată e
+  deja emisă de `payment_intent.succeeded`). `invoice.paid` e doar ack (sinonim → evită dubla emisie).
+- Idempotent pe PaymentIntent-ul reînnoirii (dedup în `emitKeezFiscalInvoice`).
+- Ruta webhook (`api/stripe/webhook/+server.ts`) rezolvă acum `tenantId` via
+  `customer → client.stripeCustomerId` când lipsește `metadata.crmTenantId` (Stripe NU
+  copiază metadata subscription-ului pe facturile de reînnoire) — altfel events erau aruncate
+  silent cu 200 untenanted. Asta repară și ajungerea la handler-ele refund/dispute.
+- Scheduler-ul CRM rămâne neschimbat (sare corect template-urile `stripe_subscription:` —
+  Stripe face plata, webhook-ul emite factura; complementare, nu dublă).
 
 ---
 

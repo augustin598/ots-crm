@@ -21,6 +21,7 @@
 		validatePostal
 	} from '$lib/components/checkout/validators';
 	import { COUNTIES, parseAnafAddress } from '$lib/components/checkout/anaf-address';
+	import { computeVatBreakdown } from '$lib/utils/vat';
 	import { toast } from 'svelte-sonner';
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -68,8 +69,7 @@
 		plan,
 		period,
 		vatRate,
-		monthlyBilled,
-		yearlyTotal,
+		priceCents,
 		bankInfo,
 		preloadedPublishableKey = null,
 		onClose
@@ -77,8 +77,11 @@
 		plan: Plan;
 		period: Period;
 		vatRate: number;
-		monthlyBilled: number;
-		yearlyTotal: number;
+		// Real NET catalog price in bani (smallest currency unit). The charged
+		// total is derived from THIS (+ TVA) so what the customer sees == what
+		// Stripe charges == the Keez fiscal invoice (audit C1). The yearly/monthly
+		// toggle is display-only; the product's own billingCycle decides the charge.
+		priceCents: number;
 		bankInfo?: BankInfo;
 		// Per-tenant Stripe publishable key surfaced by the parent page. When set,
 		// we kick off loadStripe() on mount so the ~200KB bundle is downloading
@@ -546,8 +549,7 @@
 			plan: { id: plan.id, name: plan.name, currency: plan.currency, cycle: plan.billingCycle },
 			period,
 			vatRate,
-			monthlyBilled,
-			yearlyTotal
+			priceCents
 		});
 		return () => debugLog('modal closed');
 	});
@@ -662,11 +664,45 @@
 	const domainCost = $derived(
 		domainMode === 'buy' && domainName && !domainSearch?.taken ? tldPrice : 0
 	);
-	const hostingCost = $derived(period === 'yearly' ? yearlyTotal : monthlyBilled);
+	// C1: derive the charged total from the REAL product NET price (priceCents,
+	// bani) — NOT the marketing-normalized monthlyBilled/yearlyTotal. This makes
+	// what the customer sees == what Stripe charges == the Keez invoice. The
+	// round(net*vat/100) in cents matches the server (public-hosting.remote.ts)
+	// and the Keez emitter to the cent.
+	const subtotalCents = $derived(priceCents + Math.round(domainCost * 100));
+	const vatBreakdown = $derived(computeVatBreakdown(subtotalCents, vatRate));
+	const vatCents = $derived(vatBreakdown.vatCents);
+	const totalCents = $derived(vatBreakdown.grossCents);
+	const hostingCost = $derived(priceCents / 100);
 	const cycleLabel = $derived(period === 'yearly' ? 'an' : 'lună');
-	const subtotal = $derived(hostingCost + domainCost);
-	const vat = $derived(Math.round((subtotal * vatRate) / 100));
-	const total = $derived(subtotal + vat);
+	const subtotal = $derived(subtotalCents / 100);
+	const vat = $derived(vatCents / 100);
+	const total = $derived(totalCents / 100);
+
+	// Truthful billing label from the product's REAL cycle (not the marketing
+	// yearly/monthly toggle, which doesn't affect what Stripe charges).
+	const billedLabel = $derived.by(() => {
+		switch (plan.billingCycle) {
+			case 'monthly':
+				return 'facturat lunar';
+			case 'quarterly':
+				return 'facturat trimestrial';
+			case 'semiannually':
+			case 'biannually':
+				return 'facturat semestrial';
+			case 'annually':
+			case 'yearly':
+				return 'facturat anual';
+			case 'biennially':
+				return 'facturat la 2 ani';
+			case 'triennially':
+				return 'facturat la 3 ani';
+			case 'one_time':
+				return 'plată unică';
+			default:
+				return 'facturat periodic';
+		}
+	});
 
 	const stepMissing = $derived.by(() => {
 		if (step === 1) {
@@ -2187,7 +2223,7 @@
 					<div class="co-cart-item">
 						<div class="co-cart-name">
 							<strong>Hosting {plan.name}</strong>
-							<span>{period === 'yearly' ? 'facturat anual' : 'facturat lunar'}</span>
+							<span>{billedLabel}</span>
 						</div>
 						<div class="co-cart-price">{hostingCost.toLocaleString('ro-RO')} {plan.currency}</div>
 					</div>

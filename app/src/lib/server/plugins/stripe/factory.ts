@@ -126,6 +126,63 @@ export async function isStripeConfiguredForTenant(tenantId: string): Promise<boo
 export function clearStripeCache(tenantId: string) {
 	cache.delete(tenantId);
 	cache.delete(`${tenantId}:env`);
+	for (const key of taxRateCache.keys()) {
+		if (key.startsWith(`${tenantId}:`)) taxRateCache.delete(key);
+	}
+}
+
+/**
+ * Get/create a Stripe Tax Rate for the tenant's VAT percentage.
+ *
+ * Used to make Stripe collect VAT on top of the NET catalog price so the amount
+ * Stripe charges == the gross total shown to the customer == the Keez fiscal
+ * invoice total (audit C1: previously Stripe charged only NET while the UI and
+ * Keez invoice were gross → VAT promised + invoiced but never collected).
+ *
+ * Stripe Tax Rates are IMMUTABLE and can't be deleted (only archived), so we
+ * reuse an existing active rate with the same percentage + display_name when one
+ * exists, and only create a new one otherwise. Cached per (tenant, percent).
+ *
+ * `inclusive: false` → the rate is added ON TOP of the line item's unit_amount
+ * (which is the NET catalog price). The hosting Price stays `tax_behavior:'exclusive'`.
+ */
+const taxRateCache = new Map<string, string>(); // `${tenantId}:${percent}` → tax_rate id
+export async function getOrCreateStripeTaxRate(
+	tenantId: string,
+	percent: number
+): Promise<string> {
+	const key = `${tenantId}:${percent}`;
+	const cached = taxRateCache.get(key);
+	if (cached) return cached;
+
+	const stripe = await getStripeForTenant(tenantId);
+
+	// Reuse an existing active rate (Tax Rates are immutable + undeletable, so
+	// creating one per checkout would leak rows fast). Match on percentage +
+	// our display name so we don't pick up a manually-created Stripe Tax rate.
+	const existing = await stripe.taxRates.list({ active: true, limit: 100 });
+	const match = existing.data.find(
+		(r) => Number(r.percentage) === percent && r.inclusive === false && r.display_name === 'TVA'
+	);
+	if (match) {
+		taxRateCache.set(key, match.id);
+		return match.id;
+	}
+
+	const created = await stripe.taxRates.create({
+		display_name: 'TVA',
+		description: `TVA ${percent}% (România)`,
+		percentage: percent,
+		inclusive: false,
+		country: 'RO',
+		metadata: { crmTenantId: tenantId }
+	});
+	taxRateCache.set(key, created.id);
+	logInfo('directadmin', `Stripe Tax Rate ${created.id} created/cached (TVA ${percent}%)`, {
+		tenantId,
+		metadata: { taxRateId: created.id, percent }
+	});
+	return created.id;
 }
 
 /**

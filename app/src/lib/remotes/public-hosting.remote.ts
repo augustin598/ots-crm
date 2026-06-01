@@ -12,8 +12,11 @@ import { normalizeCui, validateCuiOrReason } from '$lib/server/cui-validator';
 import {
 	isStripeConfiguredForTenant,
 	getStripeForTenant,
-	getPublishableKeyForTenant
+	getPublishableKeyForTenant,
+	getOrCreateStripeTaxRate
 } from '$lib/server/plugins/stripe/factory';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { computeVatBreakdown } from '$lib/utils/vat';
 import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
 import { getOrCreateStripePrice } from '$lib/server/stripe/price';
 import { createHostingCheckoutSession } from '$lib/server/stripe/checkout';
@@ -800,6 +803,22 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 		.limit(1);
 	if (!product) throw error(404, 'Pachetul selectat nu mai e disponibil.');
 
+	// === C1 (audit 2026-05-31): Stripe MUST collect GROSS (net + TVA) ===
+	// `product.price` is NET (bani). The UI shows the customer a total WITH TVA
+	// and the Keez fiscal invoice is emitted on net+TVA. Previously Stripe charged
+	// only the net → TVA was promised + invoiced but never collected (fiscal gap).
+	// We read the tenant VAT rate (same source as the Keez emitter +
+	// getPublicHostingPackages) and add it on top: as a Stripe Tax Rate for the
+	// Price/subscription + hosted Checkout paths, or by bumping the one-time
+	// PaymentIntent amount directly.
+	const [taxSettings] = await db
+		.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+	const vatPercent = taxSettings?.defaultTaxRate ?? DEFAULT_VAT_PERCENT;
+	const { netCents, vatCents, grossCents } = computeVatBreakdown(Number(product.price), vatPercent);
+
 	// `clientId` se reasignează la id-ul existent dacă clientul deja există în CRM
 	// (vezi anti-enumeration logic în branch-urile de mai jos). Inițial = UUID nou
 	// folosit DOAR dacă insertăm un client nou. Tipul rămâne string în ambele cazuri.
@@ -1088,9 +1107,13 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			let subscriptionId: string | null = null;
 
 			if (mode === 'subscription') {
+				// C1: attach the tenant VAT Tax Rate so Stripe collects net+TVA. The
+				// rate sits on the subscription item → it also applies to every renewal
+				// invoice (keeping renewal charges == renewal Keez invoices).
+				const taxRateId = await getOrCreateStripeTaxRate(tenantId, vatPercent);
 				const subscription = await stripe.subscriptions.create({
 					customer: stripeCustomerId,
-					items: [{ price: stripePriceId }],
+					items: [{ price: stripePriceId, tax_rates: [taxRateId] }],
 					payment_behavior: 'default_incomplete',
 					payment_settings: { save_default_payment_method: 'on_subscription' },
 					// Stripe API 2026-04-22 (dahlia) moved the PaymentIntent reference
@@ -1142,11 +1165,19 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				// earlier `* 100` multiplier here charged 100× the real price
 				// (1.399 RON → 139,900 RON PaymentIntent). Pass through directly.
 				const intent = await stripe.paymentIntents.create({
-					amount: Number(product.price),
+					// C1: charge GROSS (net + TVA). One-time PaymentIntents can't carry
+					// a Stripe Tax Rate, so add TVA into the amount → Stripe collects
+					// exactly what the customer sees + what Keez invoices.
+					amount: grossCents,
 					currency: product.currency.toLowerCase(),
 					customer: stripeCustomerId,
 					automatic_payment_methods: { enabled: true },
-					metadata: stripeMetadata,
+					metadata: {
+						...stripeMetadata,
+						crmNetCents: String(netCents),
+						crmVatCents: String(vatCents),
+						crmVatPercent: String(vatPercent)
+					},
 					description: `Hosting one-time — ${product.name}`
 				});
 				clientSecret = intent.client_secret;
@@ -1198,11 +1229,15 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 		}
 
 		// Default: legacy hosted Stripe Checkout redirect.
+		// C1: pass the tenant VAT Tax Rate so the hosted Checkout page collects
+		// net+TVA (== the total shown in the wizard + the Keez invoice).
+		const checkoutTaxRateId = await getOrCreateStripeTaxRate(tenantId, vatPercent);
 		const session = await createHostingCheckoutSession({
 			tenantId,
 			stripeCustomerId,
 			stripePriceId,
 			mode,
+			taxRateId: checkoutTaxRateId,
 			successUrl: `${origin}/pachete-hosting/comanda/success`,
 			cancelUrl: `${origin}/pachete-hosting`,
 			metadata: stripeMetadata

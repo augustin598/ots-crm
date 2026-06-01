@@ -9,6 +9,7 @@ import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { buildRecurringLineItem } from '$lib/server/hosting/recurring-line-item';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { computeVatBreakdown, vatPercentToBps } from '$lib/utils/vat';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -158,11 +159,14 @@ export async function emitKeezFiscalInvoice(params: {
 	const systemUserId = tenantOwner.userId;
 
 	// 4. Money math. `product.price` is NET in smallest currency unit (bani for RON).
-	const netCents = Number(product.price);
-	const taxCents = Math.round((netCents * vatPercent) / 100);
-	const totalCents = netCents + taxCents;
+	// Shared helper = same net/VAT/total the customer was shown + the amount Stripe
+	// charged (audit C1 single source of truth).
+	const { netCents, vatCents: taxCents, grossCents: totalCents } = computeVatBreakdown(
+		Number(product.price),
+		vatPercent
+	);
 	// invoice_line_item.taxRate stores the percentage *100 (e.g. 1900 for 19%, 2100 for 21%).
-	const lineTaxRate = vatPercent * 100;
+	const lineTaxRate = vatPercentToBps(vatPercent);
 
 	// 5. Generate invoice number — prefer the HOSTING series (`OTSH` in OTS tenant)
 	// over the default series (`OTS`). Falls back to default if hosting series

@@ -22,6 +22,11 @@ export async function createHostingCheckoutSession(opts: {
 		crmHostingInquiryId: string;
 		crmHostingProductId: string;
 	};
+	// Stripe Tax Rate id (rate_...) pentru TVA. Obligatoriu de fapt pentru a
+	// încasa brutul (net+TVA) astfel încât suma de pe pagina Stripe == totalul
+	// afișat clientului == totalul facturii Keez (audit C1). Optional ca să nu
+	// rupem caller-i vechi, dar submitHostingOrder îl pasează mereu.
+	taxRateId?: string;
 	// Locale RO + Europa
 	locale?: 'ro' | 'en';
 }) {
@@ -32,15 +37,17 @@ export async function createHostingCheckoutSession(opts: {
 		line_items: [
 			{
 				price: opts.stripePriceId,
-				quantity: 1
+				quantity: 1,
+				// Atașăm Tax Rate-ul tenantului (inclusive:false) ca Stripe să adauge
+				// TVA peste prețul NET al Price-ului. Pentru subscription, tax rate-ul
+				// se propagă pe item → se aplică și la reînnoiri. Fără asta, Stripe
+				// încasa doar netul deși UI + factura Keez erau pe brut (C1).
+				...(opts.taxRateId ? { tax_rates: [opts.taxRateId] } : {})
 			}
 		],
-		// VAT decision: Keez emite factura fiscală RO autoritate. Stripe colectează
-		// doar plata (RON), nu calculează tax. Așa evităm divergențe între tax rate
-		// Stripe Dashboard și `defaultTaxRate` din CRM. `automatic_tax: false` =
-		// Stripe nu adaugă TVA peste prețul Price (vezi `tax_behavior` pe Price).
-		// Dacă pe viitor activăm Stripe Tax, trebuie sincronizat cu Keez ca să nu
-		// dublăm TVA pe factură.
+		// Stripe calculează TVA din Tax Rate-ul de pe line item (NU din Stripe Tax
+		// automat), ca să rămână sincron cu `defaultTaxRate` din CRM și cu factura
+		// Keez. `automatic_tax:false` rămâne — nu folosim Stripe Tax engine.
 		automatic_tax: { enabled: false },
 		// Pentru mode='payment', Stripe creează propria factură (PDF + Hosted Invoice
 		// Page) — utilă pentru clientul care vrea dovada plății imediat, separat de

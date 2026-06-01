@@ -35,17 +35,44 @@ export const POST: RequestHandler = async ({ request }) => {
 	const rawBody = await request.text();
 
 	// Step 1: Extract tenantId fără signature verify (doar metadata read).
-	let parsedPreview: { data?: { object?: { metadata?: { crmTenantId?: string } } } } = {};
+	let parsedPreview: {
+		data?: {
+			object?: {
+				metadata?: { crmTenantId?: string };
+				customer?: string | { id?: string } | null;
+			};
+		};
+	} = {};
 	try {
 		parsedPreview = JSON.parse(rawBody);
 	} catch {
 		return new Response('Invalid JSON', { status: 400 });
 	}
-	const tenantId = parsedPreview.data?.object?.metadata?.crmTenantId;
+	let tenantId = parsedPreview.data?.object?.metadata?.crmTenantId;
+
+	// Some events don't carry `crmTenantId` on the object metadata — Stripe does
+	// NOT copy subscription/PaymentIntent metadata onto renewal invoices, charges
+	// (refund), or disputes. Without a fallback these were silently dropped here
+	// (200 untenanted), so renewal fiscal invoices + refund/dispute handlers never
+	// ran (audit C2 + #45). Resolve the tenant via the Stripe customer → client
+	// map. This uses the UNVERIFIED body ONLY to choose which tenant's webhook
+	// secret to verify against; a forged body still fails the signature check below.
+	if (!tenantId) {
+		const obj = parsedPreview.data?.object;
+		const customerId = typeof obj?.customer === 'string' ? obj.customer : obj?.customer?.id;
+		if (customerId) {
+			const [c] = await db
+				.select({ tenantId: table.client.tenantId })
+				.from(table.client)
+				.where(eq(table.client.stripeCustomerId, customerId))
+				.limit(1);
+			if (c) tenantId = c.tenantId;
+		}
+	}
 
 	if (!tenantId) {
 		// Event fără tenant context (ex: account-level events Stripe test) — accept dar log
-		logInfo('directadmin', 'Stripe webhook fără tenantId în metadata — accept dar skip', {});
+		logInfo('directadmin', 'Stripe webhook fără tenantId (nici metadata, nici customer-map) — accept dar skip', {});
 		return new Response(JSON.stringify({ received: true, untenanted: true }), {
 			status: 200,
 			headers: { 'content-type': 'application/json' }

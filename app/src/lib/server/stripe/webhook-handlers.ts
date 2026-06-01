@@ -5,9 +5,30 @@ import { hostingAccount } from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { runPostPaymentSteps } from './post-payment/dispatcher';
+import { emitKeezFiscalInvoice } from './post-payment/emit-keez-invoice';
 import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
 import { translateDeclineCode } from './decline-codes';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
+
+/**
+ * Resolve the PaymentIntent id from an Invoice across Stripe API shapes.
+ * Dahlia (2026-04-22) moved the reference under `payments.data[].payment.
+ * payment_intent`; older versions expose top-level `payment_intent`. Used as the
+ * idempotency key when emitting renewal fiscal invoices (audit C2).
+ */
+function resolveInvoicePaymentIntentId(invoice: Stripe.Invoice): string | null {
+	type InvoicePayment = { payment?: { payment_intent?: string | { id: string } | null } | null };
+	const ext = invoice as Stripe.Invoice & {
+		payment_intent?: string | { id: string } | null;
+		payments?: { data?: InvoicePayment[] } | null;
+	};
+	if (ext.payment_intent) {
+		return typeof ext.payment_intent === 'string' ? ext.payment_intent : ext.payment_intent.id;
+	}
+	const pi = ext.payments?.data?.[0]?.payment?.payment_intent;
+	if (pi) return typeof pi === 'string' ? pi : pi.id;
+	return null;
+}
 
 /**
  * Webhook event handlers — separate per event type, idempotent.
@@ -139,36 +160,136 @@ export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Se
 	});
 }
 
+/**
+ * Subscription RENEWAL fiscal invoice emission (audit C2).
+ *
+ * Triggered by `invoice.payment_succeeded` (dispatched ONLY for that event —
+ * `invoice.paid` is a synonym Stripe sends for the same payment, so routing both
+ * here would double-emit; the dispatcher acks `invoice.paid` separately).
+ *
+ * Scope:
+ *  - ONLY `billing_reason === 'subscription_cycle'` (renewals). The FIRST invoice
+ *    (`subscription_create`) is already emitted by payment_intent.succeeded →
+ *    dispatcher → emitKeezFiscalInvoice, so emitting here too would double-bill.
+ *  - Idempotent: emitKeezFiscalInvoice dedups on the renewal's PaymentIntent id
+ *    (a webhook redelivery finds the existing invoice and skips).
+ *
+ * Errors are swallowed (logged) so a Keez hiccup never 500s the webhook and
+ * triggers a Stripe retry storm — the renewal charge already settled; staff can
+ * re-push from /invoices.
+ */
 export async function handleInvoicePaid(invoice: Stripe.Invoice) {
-	// Pentru subscriptions, fiecare reînnoire emite `invoice.paid`.
-	// Aici legăm la CRM invoice + trigger Keez emit.
+	const billingReason = invoice.billing_reason;
+	if (billingReason !== 'subscription_cycle') {
+		// First invoice + manual/one-off invoices are emitted elsewhere (or not at all).
+		logInfo('directadmin', `invoice.payment_succeeded skip (billing_reason=${billingReason ?? 'null'})`, {
+			metadata: { stripeInvoiceId: invoice.id, billingReason }
+		});
+		return;
+	}
+
 	const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
 	if (!customerId) return;
 
-	// Metadata din Subscription se propagă pe Invoice (Stripe).
 	const expectedTenantId = invoice.metadata?.crmTenantId ?? null;
 	const clientRow = await resolveClientByStripeCustomer(customerId, expectedTenantId, {
-		eventType: 'invoice.paid',
+		eventType: 'invoice.payment_succeeded',
 		eventId: invoice.id ?? '(no-id)'
 	});
 	if (!clientRow) return;
 
-	logInfo('directadmin', 'invoice.paid received', {
-		tenantId: clientRow.tenantId,
-		metadata: {
-			stripeInvoiceId: invoice.id,
-			clientId: clientRow.id,
-			// PII redaction: nu logăm amount/currency în logger general (vezi debugLog
-			// dacă vrei detalii, e tabel intern redactat).
-			amount: '[redacted]',
-			currency: '[redacted]'
+	// Resolve subscription id (dahlia: parent.subscription_details.subscription).
+	const legacySub = (invoice as unknown as { subscription?: string | { id: string } | null })
+		.subscription;
+	const subRaw = invoice.parent?.subscription_details?.subscription ?? legacySub ?? null;
+	const subscriptionId = typeof subRaw === 'string' ? subRaw : subRaw?.id ?? null;
+	if (!subscriptionId) {
+		logWarning('directadmin', 'invoice renewal without subscription id — skip', {
+			tenantId: clientRow.tenantId,
+			metadata: { stripeInvoiceId: invoice.id }
+		});
+		return;
+	}
+
+	// Idempotency key for the Keez emitter — must be stable across webhook
+	// redelivery + the invoice.paid/invoice.payment_succeeded synonym pair.
+	const renewalPiId = resolveInvoicePaymentIntentId(invoice);
+	if (!renewalPiId) {
+		logError(
+			'keez',
+			'invoice renewal — could not resolve PaymentIntent; renewal invoice NOT auto-emitted',
+			{ tenantId: clientRow.tenantId, metadata: { stripeInvoiceId: invoice.id, subscriptionId } }
+		);
+		return;
+	}
+
+	// Resolve productId: prefer metadata stamped at first emission, else the
+	// hosting_account linked to this subscription.
+	let productId = (invoice.metadata?.crmHostingProductId as string | undefined) ?? null;
+	if (!productId) {
+		try {
+			const stripe = await getStripeForTenant(clientRow.tenantId);
+			const sub = await stripe.subscriptions.retrieve(subscriptionId);
+			productId = (sub.metadata?.crmHostingProductId as string | undefined) ?? null;
+		} catch (err) {
+			logWarning('directadmin', `invoice renewal — subscription retrieve failed: ${serializeError(err).message}`, {
+				tenantId: clientRow.tenantId,
+				metadata: { subscriptionId }
+			});
 		}
+	}
+	if (!productId) {
+		const [acc] = await db
+			.select({ hostingProductId: hostingAccount.hostingProductId })
+			.from(hostingAccount)
+			.where(
+				and(
+					eq(hostingAccount.tenantId, clientRow.tenantId),
+					eq(hostingAccount.stripeSubscriptionId, subscriptionId)
+				)
+			)
+			.limit(1);
+		productId = acc?.hostingProductId ?? null;
+	}
+	if (!productId) {
+		logError('keez', 'invoice renewal — cannot resolve productId; renewal invoice NOT emitted', {
+			tenantId: clientRow.tenantId,
+			metadata: { stripeInvoiceId: invoice.id, subscriptionId }
+		});
+		return;
+	}
+
+	logInfo('directadmin', 'invoice renewal (subscription_cycle) — emitting Keez fiscal invoice', {
+		tenantId: clientRow.tenantId,
+		metadata: { stripeInvoiceId: invoice.id, subscriptionId, productId, clientId: clientRow.id }
 	});
 
-	// TODO Sprint 8.2: creează CRM invoice + push Keez fiscal.
-	// Wiring-ul va folosi src/lib/server/stripe/post-payment/emit-keez-invoice.ts
-	// odată ce designul Keez line-items e finalizat (vezi memorie:
-	// project_keez_400_for_missing_invoice + feedback_keez_push_no_overwrite).
+	try {
+		const result = await emitKeezFiscalInvoice({
+			tenantId: clientRow.tenantId,
+			clientId: clientRow.id,
+			sessionId: invoice.id ?? renewalPiId,
+			stripePaymentIntentId: renewalPiId,
+			stripeSubscriptionId: subscriptionId,
+			productId
+		});
+		logInfo(
+			'keez',
+			`invoice renewal → ${'skipped' in result ? `skipped:${result.reason}` : `invoice ${result.invoiceNumber}`}`,
+			{
+				tenantId: clientRow.tenantId,
+				metadata: {
+					stripeInvoiceId: invoice.id,
+					outcome: 'skipped' in result ? result.reason : result.invoiceId
+				}
+			}
+		);
+	} catch (err) {
+		logError('keez', `invoice renewal emit threw: ${serializeError(err).message}`, {
+			tenantId: clientRow.tenantId,
+			metadata: { stripeInvoiceId: invoice.id, subscriptionId, productId }
+		});
+	}
 }
 
 export async function handlePaymentFailed(invoice: Stripe.Invoice) {
@@ -648,6 +769,13 @@ export async function dispatchStripeEvent(event: Stripe.Event): Promise<string> 
 				await handleCheckoutSessionExpired(event.data.object as Stripe.Checkout.Session);
 				return 'handled';
 			case 'invoice.paid':
+				// Synonym Stripe sends for the same successful payment. We emit the
+				// renewal fiscal invoice ONLY on invoice.payment_succeeded to avoid a
+				// double Keez invoice for one renewal (audit C2). Ack this one.
+				logInfo('directadmin', 'invoice.paid received (renewal handled via invoice.payment_succeeded)', {
+					metadata: { eventId: event.id }
+				});
+				return 'handled';
 			case 'invoice.payment_succeeded':
 				await handleInvoicePaid(event.data.object as Stripe.Invoice);
 				return 'handled';

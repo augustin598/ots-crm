@@ -855,8 +855,7 @@
 		}}
 		period={periodKey()}
 		{vatRate}
-		monthlyBilled={monthlyBilledRon(checkoutPkg)}
-		yearlyTotal={yearlyTotalRon(checkoutPkg)}
+		priceCents={checkoutPkg.price}
 		bankInfo={{
 			name: tenantInfo?.name ?? null,
 			bankName: tenantInfo?.bankName ?? null,
