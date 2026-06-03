@@ -16,12 +16,15 @@
 	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import { page } from '$app/state';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { browser } from '$app/environment';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import SearchIcon from '@lucide/svelte/icons/search';
 
 	interface Props {
 		open: boolean;
@@ -60,6 +63,43 @@
 
 	const clientsQuery = $derived(getClients());
 	const clients = $derived(clientsQuery.current || []);
+
+	// --- Client picker (searchable popover) ----------------------------------
+	// "Active" clients = the selection the user saved in the /ots/clients filter
+	// (localStorage key `crm-clients-filter-<tenant>`). Empty/unset = show all.
+	const CLIENTS_FILTER_KEY = (t: string) => `crm-clients-filter-${t}`;
+	let activeClientIds = $state<string[] | null>(null);
+	let clientPopoverOpen = $state(false);
+	let clientSearch = $state('');
+	let showAllClients = $state(false);
+
+	// Re-read the saved active selection each time the dialog opens.
+	$effect(() => {
+		if (!open) return;
+		const t = page.params.tenant as string | undefined;
+		if (!browser || !t) return;
+		try {
+			const stored = localStorage.getItem(CLIENTS_FILTER_KEY(t));
+			const ids = stored ? JSON.parse(stored) : null;
+			activeClientIds = Array.isArray(ids) && ids.length > 0 ? ids : null;
+		} catch {
+			activeClientIds = null;
+		}
+		showAllClients = false;
+		clientSearch = '';
+	});
+
+	const activeClients = $derived(
+		activeClientIds ? clients.filter((c) => activeClientIds!.includes(c.id)) : clients
+	);
+	const baseClientList = $derived(showAllClients ? clients : activeClients);
+	const visibleClients = $derived(
+		clientSearch.trim()
+			? baseClientList.filter((c) =>
+					c.name.toLowerCase().includes(clientSearch.trim().toLowerCase())
+				)
+			: baseClientList
+	);
 
 	const projectsQuery = $derived(getProjects(undefined));
 	const allProjects = $derived(projectsQuery.current || []);
@@ -150,6 +190,16 @@
 		meetTime: '10:00',
 		meetDurationMinutes: 30
 	});
+
+	const selectedClientName = $derived(
+		draft.clientId ? (clients.find((c) => c.id === draft.clientId)?.name ?? null) : null
+	);
+
+	function selectClient(id: string) {
+		draft.clientId = id;
+		clientPopoverOpen = false;
+		clientSearch = '';
+	}
 
 	let tagInput = $state('');
 	let subtaskInput = $state('');
@@ -580,15 +630,64 @@
 							<span class="text-[11px] font-bold uppercase tracking-wide text-slate-500">
 								Client <span class="text-red-500">*</span>
 							</span>
-							<select
-								class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
-								bind:value={draft.clientId}
-							>
-								<option value="">Alege client...</option>
-								{#each clients as client}
-									<option value={client.id}>{client.name}</option>
-								{/each}
-							</select>
+							<Popover.Root bind:open={clientPopoverOpen}>
+								<Popover.Trigger>
+									{#snippet child({ props })}
+										<button
+											{...props}
+											type="button"
+											class="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition-colors hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+										>
+											<span class={selectedClientName ? 'truncate text-slate-900' : 'text-slate-400'}>
+												{selectedClientName ?? 'Alege client...'}
+											</span>
+											<ChevronDownIcon class="h-4 w-4 shrink-0 text-slate-400" />
+										</button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-72 p-2" align="start">
+									<div class="relative mb-2">
+										<SearchIcon
+											class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+										/>
+										<Input
+											bind:value={clientSearch}
+											placeholder="Caută client..."
+											class="h-8 pl-8 text-sm"
+										/>
+									</div>
+									<div class="max-h-[220px] space-y-0.5 overflow-y-auto">
+										{#each visibleClients as client (client.id)}
+											<button
+												type="button"
+												class="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-slate-100 {draft.clientId ===
+												client.id
+													? 'bg-blue-50'
+													: ''}"
+												onclick={() => selectClient(client.id)}
+											>
+												<span class="truncate text-slate-700">{client.name}</span>
+												{#if draft.clientId === client.id}
+													<CheckIcon class="h-3.5 w-3.5 shrink-0 text-blue-600" />
+												{/if}
+											</button>
+										{:else}
+											<p class="px-2 py-3 text-center text-xs text-slate-400">Niciun client găsit</p>
+										{/each}
+									</div>
+									{#if activeClientIds}
+										<button
+											type="button"
+											class="mt-1.5 w-full rounded px-2 py-1 text-center text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+											onclick={() => (showAllClients = !showAllClients)}
+										>
+											{showAllClients
+												? 'Doar clienți activi'
+												: `Arată toți clienții (${clients.length})`}
+										</button>
+									{/if}
+								</Popover.Content>
+							</Popover.Root>
 						</div>
 
 						<!-- Project -->
