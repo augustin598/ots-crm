@@ -137,17 +137,30 @@ export async function processDirectAdminSyncAccounts(): Promise<{
 									]);
 
 									if (!config && !usage) {
-										// Both calls failed — account likely deleted on DA. Mark as terminated.
-										await db
-											.update(table.hostingAccount)
-											.set({ status: 'terminated', updatedAt: new Date() })
-											.where(eq(table.hostingAccount.id, acc.id));
+										// Both calls failed. This is AMBIGUOUS: the account may have been
+										// deleted on DA, OR the DA box had a transient hiccup / brief outage.
+										// INVARIANT (user rule): the CRM must NEVER auto-`terminate` — only an
+										// admin manually terminating on the DA panel is `terminated`. Auto-marking
+										// terminated here previously hid still-live accounts from the default
+										// Active view and broke renewal visibility (nevadasuceava.ro, 2026-06-03).
+										// We DON'T mutate status or daSyncStatus here: a real deletion is confirmed
+										// manually, not inferred from one failed poll, and the richer daSyncStatus
+										// signals (orphan/zombie_on_da/suspended_on_da) belong to reconcileHostingWithDA.
+										// Just warn so staff can investigate a genuinely missing account.
+										logWarning(
+											'scheduler',
+											`DA sync: both getUserConfig + getUserUsage failed for ${acc.daUsername}@${server.hostname} — account may be deleted on DA or DA had a transient outage; status left unchanged`,
+											{ tenantId: tenant.id, metadata: { hostingAccountId: acc.id } }
+										);
 										return;
 									}
 
 									const updates: Partial<typeof table.hostingAccount.$inferInsert> = {
 										updatedAt: new Date(),
 										lastSyncedAt: new Date().toISOString() // column is text(ISO), not timestamp
+										// NOTE: we deliberately do NOT write daSyncStatus here — that field carries
+										// reconcileHostingWithDA's richer signals (orphan/zombie_on_da/suspended_on_da)
+										// and a blanket 'ok' on every poll would clobber them.
 									};
 									if (config?.package) {
 										updates.daPackageName = config.package;

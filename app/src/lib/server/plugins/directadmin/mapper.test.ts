@@ -12,12 +12,15 @@ import {
 describe('mapWHMCSStatus', () => {
 	test('Active → active', () => expect(mapWHMCSStatus('Active')).toBe('active'));
 	test('Suspended → suspended', () => expect(mapWHMCSStatus('Suspended')).toBe('suspended'));
-	test('Terminated → terminated', () => expect(mapWHMCSStatus('Terminated')).toBe('terminated'));
+	// INVARIANT: an import must NEVER produce `terminated` — stale WHMCS state maps to the
+	// reversible `suspended` so a still-live DA account stays visible (nevadasuceava.ro, 2026-06-03).
+	test('Terminated → suspended (never auto-terminate)', () =>
+		expect(mapWHMCSStatus('Terminated')).toBe('suspended'));
 	test('Cancelled → cancelled', () => expect(mapWHMCSStatus('Cancelled')).toBe('cancelled'));
 	test('Fraud → cancelled (treat as no-longer-billable)', () =>
 		expect(mapWHMCSStatus('Fraud')).toBe('cancelled'));
-	test('Completed → terminated (one-off finished)', () =>
-		expect(mapWHMCSStatus('Completed')).toBe('terminated'));
+	test('Completed → suspended (never auto-terminate)', () =>
+		expect(mapWHMCSStatus('Completed')).toBe('suspended'));
 	test('Pending → pending', () => expect(mapWHMCSStatus('Pending')).toBe('pending'));
 	test('case-insensitive', () => expect(mapWHMCSStatus('ACTIVE')).toBe('active'));
 	test('unknown → pending fallback', () => expect(mapWHMCSStatus('xyz')).toBe('pending'));

@@ -3,21 +3,29 @@
 /**
  * Map WHMCS `tblhosting.domainstatus` ENUM to internal hostingAccount.status.
  * Real ENUM values (per WHMCS 8.x schema): Pending | Active | Suspended | Terminated | Cancelled | Fraud | Completed.
- * `Completed` is a WHMCS state used when a one-off service finished its lifecycle (no recurring) — treat as terminated.
+ *
+ * INVARIANT (user rule): the CRM must NEVER produce `terminated` from an import or any
+ * automated path — only an admin manually terminating on the DA panel is `terminated`.
+ * WHMCS data is frequently stale (a service marked `Terminated`/`Completed` in WHMCS is
+ * often still live in DA and actively renewed — see the nevadasuceava.ro incident
+ * 2026-06-03, where the import overwrote a synced-OK account back to terminated and it
+ * vanished from the default Active view). So we map those reversibly to `suspended`,
+ * which keeps the account visible and recoverable instead of hiding/closing it.
  * `Fraud` means the order was flagged — treat as cancelled (the user shouldn't have an active hosting account).
  */
 export function mapWHMCSStatus(
 	whmcsStatus: string
-): 'pending' | 'active' | 'suspended' | 'terminated' | 'cancelled' {
+): 'pending' | 'active' | 'suspended' | 'cancelled' {
 	const s = (whmcsStatus ?? '').toLowerCase().trim();
 	switch (s) {
 		case 'active':
 			return 'active';
 		case 'suspended':
-			return 'suspended';
 		case 'terminated':
 		case 'completed':
-			return 'terminated';
+			// Never `terminated` from an import — stale WHMCS state maps to the reversible
+			// `suspended` so a still-live DA account stays visible and recoverable.
+			return 'suspended';
 		case 'cancelled':
 		case 'canceled':
 		case 'fraud':
