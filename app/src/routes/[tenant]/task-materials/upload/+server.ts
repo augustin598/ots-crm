@@ -5,13 +5,15 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import * as storage from '$lib/server/storage';
 import { randomUUID } from 'node:crypto';
+import { assertAllowedFileType } from '$lib/server/security/file-type-guard';
 
+// NOTE: image/svg+xml intentionally removed — SVG can carry inline scripts and
+// the materials are served inline (stored-XSS vector). See file-type-guard.ts.
 const ALLOWED_TYPES = [
 	'image/jpeg',
 	'image/png',
 	'image/gif',
 	'image/webp',
-	'image/svg+xml',
 	'video/mp4',
 	'video/quicktime',
 	'video/webm',
@@ -95,6 +97,15 @@ export const POST: RequestHandler = async (event) => {
 	const minioPath = `uploads/${tenant.id}/task-materials/${taskId}/${fileId}-${safeName}`;
 
 	const buffer = Buffer.from(await file.arrayBuffer());
+	// Content-based validation: the declared file.type is attacker-controlled, so
+	// verify the actual bytes match an allowed format (blocks SVG/HTML/polyglot
+	// stored-XSS payloads disguised as images). SVG is not magic-detectable and is
+	// therefore rejected.
+	try {
+		assertAllowedFileType(buffer, ALLOWED_TYPES);
+	} catch (e) {
+		throw error(400, e instanceof Error ? e.message : 'Tip de fișier nepermis');
+	}
 	const { size, mimeType } = await (async () => {
 		const result = await storage.uploadFile(tenant.id, file, {
 			type: 'task-material',

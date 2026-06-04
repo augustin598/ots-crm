@@ -8,6 +8,8 @@
  *  - robots.txt discovery
  */
 
+import { safeFetch } from '$lib/server/security/ssrf-guard';
+
 export interface SitemapIndexEntry {
 	url: string;
 	lastmod: string | null;
@@ -67,9 +69,11 @@ export async function fetchSitemapContent(
 		const onExternalAbort = () => controller.abort();
 		opts?.signal?.addEventListener('abort', onExternalAbort, { once: true });
 		try {
-			return await fetch(url, {
+			// safeFetch validates the URL (and every redirect hop) is a public
+			// http(s) address — blocks SSRF to internal services / cloud metadata,
+			// since `url` derives from user-supplied client website URLs.
+			return await safeFetch(url, {
 				method: 'GET',
-				redirect: 'follow',
 				signal: controller.signal,
 				headers: SITEMAP_FETCH_HEADERS
 			});
@@ -187,7 +191,7 @@ export async function discoverSitemapUrls(
 	const robotsUrls = [`https://${host}/robots.txt`, `https://www.${host}/robots.txt`];
 	for (const robotsUrl of robotsUrls) {
 		try {
-			const res = await fetch(robotsUrl, {
+			const res = await safeFetch(robotsUrl, {
 				signal: AbortSignal.timeout(10_000),
 				headers: { 'User-Agent': SITEMAP_FETCH_HEADERS['User-Agent'] }
 			});
@@ -222,7 +226,7 @@ export async function discoverSitemapUrls(
 		];
 		for (const fb of fallbacks) {
 			try {
-				const res = await fetch(fb, {
+				const res = await safeFetch(fb, {
 					method: 'HEAD',
 					signal: AbortSignal.timeout(10_000),
 					headers: { 'User-Agent': SITEMAP_FETCH_HEADERS['User-Agent'] }

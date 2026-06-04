@@ -2,6 +2,7 @@ import puppeteer from 'puppeteer-core';
 import type { Browser } from 'puppeteer-core';
 import { findChromePath } from './find-chrome';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { safeFetch } from '$lib/server/security/ssrf-guard';
 
 // ── Constants ──────────────────────────────────────────────────────
 const BROWSER_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -236,9 +237,8 @@ export async function fetchWithCloudflareFallback(
 			options.signal.addEventListener('abort', () => controller.abort(), { once: true });
 		}
 
-		const res = await fetch(url, {
+		const res = await safeFetch(url, {
 			method: 'GET',
-			redirect: 'follow',
 			signal: controller.signal,
 			headers: options?.headers ?? {}
 		});

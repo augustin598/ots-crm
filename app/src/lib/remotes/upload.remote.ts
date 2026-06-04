@@ -2,6 +2,7 @@ import { command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { env } from '$env/dynamic/private';
 import { Client } from 'minio';
+import { assertAllowedFileType } from '$lib/server/security/file-type-guard';
 
 /**
  * Initialize MinIO client
@@ -50,6 +51,10 @@ export const uploadImage = command(
 		// Decode base64 data
 		const base64Data = fileData.replace(/^data:image\/\w+;base64,/, '');
 		const buffer = Buffer.from(base64Data, 'base64');
+
+		// Content-based validation (declared fileType is attacker-controlled).
+		// Only real raster images allowed; SVG rejected (inline-script XSS vector).
+		assertAllowedFileType(buffer, ['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 		// Validate file size (max 10MB)
 		const maxSize = 10 * 1024 * 1024; // 10MB

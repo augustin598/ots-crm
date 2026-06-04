@@ -18,6 +18,7 @@ import {
 	type PreviewResult
 } from '$lib/server/scraper/seo-link-discoverer';
 import { toDomain } from '$lib/server/scraper/sitemap-parser';
+import { assertPublicHttpUrl, safeFetch } from '$lib/server/security/ssrf-guard';
 
 function generateSeoLinkId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -1408,6 +1409,8 @@ async function performLinkCheck(articleUrl: string): Promise<{
 }> {
 	const start = Date.now();
 	try {
+		// SSRF guard: only check public http(s) URLs (articleUrl is user-supplied).
+		await assertPublicHttpUrl(articleUrl);
 		// Step 1: HEAD with redirect: 'manual' so we detect 3xx codes
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -1443,9 +1446,8 @@ async function performLinkCheck(articleUrl: string): Promise<{
 		console.log(`[SEO-CHECK] HEAD blocked (${httpCode}), retrying with GET: ${articleUrl}`);
 		const getController = new AbortController();
 		const getTimeoutId = setTimeout(() => getController.abort(), 8000);
-		const getRes = await fetch(articleUrl, {
+		const getRes = await safeFetch(articleUrl, {
 			method: 'GET',
-			redirect: 'follow',
 			signal: getController.signal,
 			headers: LINK_CHECK_HEADERS
 		});
