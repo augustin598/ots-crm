@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -9,6 +10,7 @@ export const getClientsRestrictionStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const clients = await db
 		.select({
@@ -44,6 +46,7 @@ export const setClientRestriction = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const dbValue = data.restrictedAccess === 'auto' ? null : data.restrictedAccess;
 

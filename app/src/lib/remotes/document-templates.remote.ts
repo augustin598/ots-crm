@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -57,6 +58,7 @@ export const getDocumentTemplates = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions = eq(table.documentTemplate.tenantId, event.locals.tenant.id);
 
@@ -75,6 +77,7 @@ export const getDocumentTemplate = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [template] = await db
 			.select()
@@ -100,6 +103,7 @@ export const createDocumentTemplate = command(templateSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const templateId = generateTemplateId();
 
@@ -129,6 +133,7 @@ export const updateDocumentTemplate = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify template belongs to tenant
 		const [existing] = await db
@@ -171,6 +176,7 @@ export const deleteDocumentTemplate = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify template belongs to tenant
 		const [existing] = await db
@@ -201,6 +207,7 @@ export const getTemplateVariables = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [template] = await db
 			.select()

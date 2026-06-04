@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -48,6 +49,7 @@ export const connectSmartBill = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Only owners and admins can connect SmartBill
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -123,6 +125,7 @@ export const disconnectSmartBill = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Only owners and admins can disconnect SmartBill
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -145,6 +148,7 @@ export const getSmartBillStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [integration] = await db
 		.select({
@@ -178,6 +182,7 @@ export const syncInvoiceToSmartBill = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get invoice
 		const [invoice] = await db
@@ -360,6 +365,7 @@ export const getInvoicePDFFromSmartBill = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get integration
 		const [integration] = await db
@@ -416,6 +422,7 @@ export const getInvoicePaymentStatus = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get integration
 		const [integration] = await db

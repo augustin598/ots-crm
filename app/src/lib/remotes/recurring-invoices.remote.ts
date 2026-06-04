@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -68,6 +69,7 @@ export const getRecurringInvoices = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions = eq(table.recurringInvoice.tenantId, event.locals.tenant.id);
 
@@ -89,6 +91,7 @@ export const getRecurringInvoice = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [recurringInvoice] = await db
 			.select()
@@ -114,6 +117,7 @@ export const createRecurringInvoice = command(recurringInvoiceSchema, async (dat
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Get default currency and tax rate from invoice settings
 	const [invoiceSettings] = await db
@@ -310,6 +314,7 @@ export const updateRecurringInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { recurringInvoiceId, ...updateData } = data;
 
@@ -519,6 +524,7 @@ export const deleteRecurringInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify recurring invoice belongs to tenant
 		const [existing] = await db
@@ -551,6 +557,7 @@ export const toggleRecurringInvoiceActive = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify recurring invoice belongs to tenant
 		const [existing] = await db
@@ -587,6 +594,7 @@ export const triggerRecurringInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify recurring invoice belongs to tenant
 		const [existing] = await db

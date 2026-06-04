@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -36,6 +37,7 @@ export const getSuppliers = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const suppliers = await db
 		.select()
@@ -50,6 +52,7 @@ export const getSupplier = query(v.pipe(v.string(), v.minLength(1)), async (supp
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [supplier] = await db
 		.select()
@@ -69,6 +72,7 @@ export const createSupplier = command(supplierSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const supplierId = generateSupplierId();
 
@@ -107,6 +111,7 @@ export const updateSupplier = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { supplierId, ...updateData } = data;
 
@@ -138,6 +143,7 @@ export const deleteSupplier = command(v.pipe(v.string(), v.minLength(1)), async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Verify supplier belongs to tenant
 	const [existing] = await db

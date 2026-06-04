@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -33,6 +34,7 @@ export const getServices = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions = eq(table.service.tenantId, event.locals.tenant.id);
 
@@ -52,6 +54,7 @@ export const createService = command(serviceSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Get default currency from invoice settings
 	const [invoiceSettings] = await db
@@ -89,6 +92,7 @@ export const getService = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [service] = await db
 			.select()
@@ -114,6 +118,7 @@ export const updateService = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { serviceId, ...updateData } = data;
 
@@ -149,6 +154,7 @@ export const deleteService = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify service belongs to tenant
 		const [existing] = await db

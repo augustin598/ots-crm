@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
@@ -38,6 +39,7 @@ export const getSavedViews = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		const views = await db
 			.select({
@@ -91,6 +93,7 @@ export const createSavedView = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 		const userId = event.locals.user.id;
@@ -140,6 +143,7 @@ export const updateSavedView = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -195,6 +199,7 @@ export const deleteSavedView = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify ownership + tenant isolation
 		const [existing] = await db

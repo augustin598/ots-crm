@@ -1,4 +1,5 @@
 import { query, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -19,6 +20,7 @@ export const getClientActivity = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const conditions = [
 			eq(table.notification.tenantId, event.locals.tenant.id),

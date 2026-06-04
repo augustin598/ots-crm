@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -443,6 +444,7 @@ export const getBankAccounts = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const accounts = await db
 		.select()
@@ -462,6 +464,7 @@ export const getBankConnectionUrl = query(v.pipe(v.string(), v.minLength(1)), as
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	if (!BankManager.isSupported(bankName)) {
 		throw new Error(`Unsupported bank: ${bankName}`);
@@ -502,6 +505,7 @@ export const connectBankAccount = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		if (!BankManager.isSupported(data.bankName)) {
 			throw new Error(`Unsupported bank: ${data.bankName}`);
@@ -571,6 +575,7 @@ export const syncBankAccounts = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		if (!BankManager.isSupported(bankName)) {
 			throw new Error(`Unsupported bank: ${bankName}`);
@@ -718,6 +723,7 @@ export const disconnectBankAccount = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify account belongs to tenant
 		const [existing] = await db
@@ -757,6 +763,7 @@ export const getTransactions = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions: any = eq(table.bankTransaction.tenantId, event.locals.tenant.id);
 
@@ -837,6 +844,7 @@ export const syncTransactions = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get bank account
 		const [account] = await db
@@ -1215,6 +1223,7 @@ export const matchTransactionToInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify transaction belongs to tenant
 		const [transaction] = await db
@@ -1304,6 +1313,7 @@ export const unmatchTransactionFromInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify transaction belongs to tenant
 		const [transaction] = await db
@@ -1355,6 +1365,7 @@ export const getUnmatchedTransactions = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const transactions = await db
 		.select()
@@ -1376,6 +1387,7 @@ export const syncKeezIfStale = command(v.void_(), async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [keezIntegration] = await db
 		.select()
@@ -1405,6 +1417,7 @@ export const getClientCredit = query(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Get all invoices for client (excluding drafts and cancelled)
 	const allInvoices = await db
@@ -1464,6 +1477,7 @@ export const getExpenses = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions: any = eq(table.expense.tenantId, event.locals.tenant.id);
 
@@ -1519,6 +1533,7 @@ export const createExpense = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const expenseId = generateExpenseId();
 		const amount = Math.round(data.amount * 100); // Convert to cents
@@ -1667,6 +1682,7 @@ export const updateExpense = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { expenseId, ...updateData } = data;
 
@@ -1831,6 +1847,7 @@ export const deleteExpense = command(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Verify expense belongs to tenant
 	const [existing] = await db
@@ -1869,6 +1886,7 @@ export const uploadExpenseInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify expense belongs to tenant
 		const [existing] = await db
@@ -1916,6 +1934,7 @@ export const getExpenseInvoiceUrl = query(v.pipe(v.string(), v.minLength(1)), as
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [expense] = await db
 		.select()
@@ -1951,6 +1970,7 @@ export const linkExpenseToUser = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify expense belongs to tenant
 		const [expense] = await db
@@ -2107,6 +2127,7 @@ export const getUserTransactions = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const userId = filters.userId || event.locals.user.id;
 
@@ -2279,6 +2300,7 @@ export const getUserSpending = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const userId = filters.userId || event.locals.user.id;
 
@@ -2412,6 +2434,7 @@ export const autoLinkExpensesToSuppliers = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Find all expenses without supplierId that have a bankTransactionId
 	const expenses = await db
@@ -2483,6 +2506,7 @@ export const findSimilarExpenses = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get the expense
 		const [expense] = await db
@@ -2613,6 +2637,7 @@ export const linkSimilarExpensesToSupplier = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Find similar expenses
 		const similarExpenses = await findSimilarExpenses({ expenseId: data.expenseId });
@@ -2671,6 +2696,7 @@ export const findSimilarExpensesForUser = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get the expense
 		const [expense] = await db
@@ -2799,6 +2825,7 @@ export const linkSimilarExpensesToUser = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Find similar expenses
 		const similarExpenses = await findSimilarExpensesForUser({ expenseId: data.expenseId });
@@ -2824,6 +2851,7 @@ export const autoLinkTransactionsToClients = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Find all unmatched incoming transactions
 	const transactions = await db

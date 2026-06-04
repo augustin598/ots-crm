@@ -11,6 +11,7 @@ import * as storage from '$lib/server/storage';
 import { env as publicEnv } from '$env/dynamic/public';
 import { extractTextFromPDF, extractClientInfoFromText, type ClientExtractedInfo, type TenantInfo } from '$lib/server/pdf-client-extractor';
 import { env } from '$env/dynamic/private';
+import { requireStaff } from '$lib/server/get-actor';
 import { recordContractActivity } from '$lib/server/contract-activity';
 import { shouldZeroVatForClient } from '$lib/server/vat/classify-client';
 
@@ -116,6 +117,7 @@ export const getContract = query(v.pipe(v.string(), v.minLength(1)), async (cont
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event); // staff-only: client portal uses the scoped PDF route
 
 	const [contract] = await db
 		.select()
@@ -1054,6 +1056,7 @@ export const getActiveSigningToken = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only: exposes signingUrl + email
 		const tenantId = event.locals.tenant.id;
 
 		const [token] = await db
@@ -1227,6 +1230,7 @@ export const getContractInvoices = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only
 
 		const invoices = await db
 			.select({

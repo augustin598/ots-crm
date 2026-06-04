@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -9,6 +10,7 @@ export const getDebugLogs = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -48,6 +50,7 @@ export const getDebugLogStats = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -80,6 +83,7 @@ export const deleteDebugLog = command(v.pipe(v.string(), v.minLength(1)), async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -99,6 +103,7 @@ export const deleteDebugLogsByLevel = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 			throw new Error('Forbidden: Admin access required');
 		}
@@ -120,6 +125,7 @@ export const deleteAllDebugLogs = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -139,6 +145,7 @@ export const resolveDebugLog = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 			throw new Error('Forbidden: Admin access required');
 		}
@@ -171,6 +178,7 @@ export const bulkResolveDebugLogs = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 			throw new Error('Forbidden: Admin access required');
 		}

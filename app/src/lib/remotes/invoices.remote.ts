@@ -8,6 +8,7 @@ import { getHooksManager } from '$lib/server/plugins/hooks';
 import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -24,6 +25,7 @@ export const getInvoice = query(v.pipe(v.string(), v.minLength(1)), async (invoi
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event); // staff-only: clients use getInvoices (client-scoped)
 
 	const [invoice] = await db
 		.select()
@@ -961,7 +963,11 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
  */
 export const getInvoiceEmailLogs = query(async () => {
 	const event = getRequestEvent();
-	const tenantId = event.locals.tenant!.id;
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	await requireStaff(event); // staff-only: internal email logs
+	const tenantId = event.locals.tenant.id;
 
 	const logs = await db
 		.select({

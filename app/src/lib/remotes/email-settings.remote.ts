@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -19,6 +20,7 @@ export const getEmailSettings = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [settings] = await db
 		.select()
@@ -100,6 +102,7 @@ export const updateEmailSettings = command(emailSettingsSchema, async (data) => 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Only owners and admins can update email settings
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -193,6 +196,7 @@ export const testEmailSettings = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Only owners and admins can test email settings
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -285,6 +289,7 @@ const emailProviderSchema = v.object({
 export const updateEmailProvider = command(emailProviderSchema, async (data) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Insufficient permissions');
 	}
@@ -334,6 +339,7 @@ export const updateEmailProvider = command(emailProviderSchema, async (data) => 
 export const testGmailSending = command(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Insufficient permissions');
 	}

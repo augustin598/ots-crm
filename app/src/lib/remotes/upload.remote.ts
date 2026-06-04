@@ -1,4 +1,4 @@
-import { command } from '$app/server';
+import { command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { env } from '$env/dynamic/private';
 import { Client } from 'minio';
@@ -34,6 +34,14 @@ export const uploadImage = command(
 		folder: v.optional(v.string(), 'products')
 	}),
 	async ({ fileData, fileName: originalFileName, fileType, folder }) => {
+		// Require an authenticated user (staff OR client). Was previously
+		// unauthenticated — anyone could upload to MinIO (F9). Dual-audience:
+		// used by both staff and client-portal task comments, so not staff-only.
+		const event = getRequestEvent();
+		if (!event?.locals.user) {
+			throw new Error('Unauthorized');
+		}
+
 		// Validate file type
 		if (!fileType.startsWith('image/')) {
 			throw new Error('File must be an image');

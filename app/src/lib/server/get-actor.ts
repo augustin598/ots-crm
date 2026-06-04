@@ -8,7 +8,7 @@
  */
 
 import type { RequestEvent } from '@sveltejs/kit';
-import { buildActor, type Actor } from './access';
+import { buildActor, assertStaff, type Actor } from './access';
 
 const CACHE = new WeakMap<object, Actor>();
 
@@ -35,5 +35,17 @@ export async function assertCanFromEvent(
 	const { assertCan } = await import('./access');
 	const actor = await getActor(event);
 	assertCan(actor, cap);
+	return actor;
+}
+
+/**
+ * Convenience: build actor and require a STAFF (tenant) actor in one call.
+ * Throws 401/403 for client-portal or anonymous actors. Use as the first line
+ * of any staff-only remote/+server handler that isn't gated by a specific
+ * `admin.*` capability. See `assertStaff` in `./access` for the rationale.
+ */
+export async function requireStaff(event: RequestEvent): Promise<Actor> {
+	const actor = await getActor(event);
+	assertStaff(actor);
 	return actor;
 }

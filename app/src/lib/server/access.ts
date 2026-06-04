@@ -208,6 +208,27 @@ export function assertCan(actor: Actor, cap: Capability): void {
 	}
 }
 
+/**
+ * Security boundary: require a STAFF (tenant) actor. Rejects client-portal and
+ * anonymous actors. Use in every staff-only remote/+server/+page handler that
+ * isn't already gated by an `admin.*` capability via assertCan.
+ *
+ * Why this exists: remote functions (`query`/`command`) are globally reachable
+ * endpoints; a client-portal user can invoke any of them by sending the
+ * `x-sveltekit-pathname: /client/...` header (which makes hooks resolve their
+ * client context and set locals.tenant). The legacy `!locals.user ||
+ * !locals.tenant` guard therefore does NOT keep client users out of staff
+ * functions — this assertion does.
+ */
+export function assertStaff(actor: Actor): asserts actor is TenantActor {
+	if (actor.kind === 'anon') {
+		throw error(401, 'Autentificare necesară.');
+	}
+	if (actor.kind !== 'tenant') {
+		throw error(403, 'Acces permis doar personalului spațiului de lucru.');
+	}
+}
+
 export function assertAny(actor: Actor, caps: Capability[]): void {
 	if (actor.kind === 'anon') throw error(401, 'Autentificare necesară.');
 	for (const cap of caps) {

@@ -3,6 +3,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { requireStaff } from '$lib/server/get-actor';
 
 export const getContractActivities = query(
 	v.pipe(v.string(), v.minLength(1)),
@@ -11,6 +12,7 @@ export const getContractActivities = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only: internal contract audit log
 
 		// Verify contract belongs to tenant
 		const [contract] = await db

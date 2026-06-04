@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import {
@@ -43,6 +44,7 @@ export const refreshBnrRates = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Rate limit: max 1 request per 5 minutes
 	const lastFetch = await getLastFetchTime();

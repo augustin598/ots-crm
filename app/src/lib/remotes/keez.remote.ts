@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -47,6 +48,7 @@ export const connectKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Only owners and admins can connect Keez
 		if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -116,6 +118,7 @@ export const disconnectKeez = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Only owners and admins can disconnect Keez
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
@@ -138,6 +141,7 @@ export const getKeezStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [integration] = await db
 		.select({
@@ -194,6 +198,7 @@ export const getKeezSyncHistory = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const syncRecords = await db
 		.select({
@@ -224,6 +229,7 @@ export const getKeezNextInvoiceNumber = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		if (!filters.series) {
 			return { nextNumber: null };
@@ -262,6 +268,7 @@ export const getKeezItems = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get integration
 		const [integration] = await db
@@ -327,6 +334,7 @@ export const createKeezItem = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -375,6 +383,7 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role === 'viewer') {
 		throw new Error('Insufficient permissions');
 	}
@@ -823,6 +832,7 @@ export const syncInvoicesFromKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -896,6 +906,7 @@ export const importClientsFromKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get integration
 		const [integration] = await db
@@ -1033,6 +1044,7 @@ export const getInvoicePDFFromKeez = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [invoice] = await db
 			.select()
@@ -1081,6 +1093,7 @@ export const sendInvoiceEmailFromKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -1132,6 +1145,7 @@ export const sendInvoiceToEFactura = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -1190,6 +1204,7 @@ export const cancelInvoiceInKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -1265,6 +1280,7 @@ export const createStornoInKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}
@@ -1323,6 +1339,7 @@ export const validateInvoiceInKeez = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.tenantUser?.role === 'viewer') {
 			throw new Error('Insufficient permissions');
 		}

@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -26,6 +27,7 @@ export const getUserBankAccounts = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const userId = params?.userId || event.locals.user.id;
 
@@ -54,6 +56,7 @@ export const createUserBankAccount = command(userBankAccountSchema, async (data)
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const userId = data.userId || event.locals.user.id;
 
@@ -98,6 +101,7 @@ export const updateUserBankAccount = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { accountId, ...updateData } = data;
 
@@ -129,6 +133,7 @@ export const deleteUserBankAccount = command(v.pipe(v.string(), v.minLength(1)),
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Verify account belongs to tenant
 	const [existing] = await db

@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -20,6 +21,7 @@ export const getEmailLogs = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -56,6 +58,7 @@ export const getEmailLogStats = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -87,6 +90,7 @@ export const deleteEmailLog = command(v.pipe(v.string(), v.minLength(1)), async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -104,6 +108,7 @@ export const deleteAllEmailLogs = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -189,6 +194,7 @@ export const retryEmailLog = command(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}
@@ -240,6 +246,7 @@ export const retryAllFailedEmails = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 	if (event.locals.tenantUser?.role !== 'owner' && event.locals.tenantUser?.role !== 'admin') {
 		throw new Error('Forbidden: Admin access required');
 	}

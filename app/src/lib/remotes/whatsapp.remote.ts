@@ -26,7 +26,9 @@ function generateId(): string {
 
 function assertTenantMember() {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	// tenantUser required so client-portal users can't reach staff WhatsApp ops (F8).
+	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser)
+		throw new Error('Unauthorized');
 	return { userId: event.locals.user.id, tenantId: event.locals.tenant.id };
 }
 

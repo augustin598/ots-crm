@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateProjectId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -38,6 +39,7 @@ export const getProjects = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only
 
 		let conditions = eq(table.project.tenantId, event.locals.tenant.id);
 
@@ -76,6 +78,7 @@ export const getProject = query(v.pipe(v.string(), v.minLength(1)), async (proje
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [project] = await db
 		.select()
@@ -113,6 +116,7 @@ export const createProject = command(projectSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Verify client belongs to tenant if clientId is provided
 	if (data.clientId) {
@@ -166,6 +170,7 @@ export const updateProject = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { projectId, ...updateData } = data;
 
@@ -230,6 +235,7 @@ export const deleteProject = command(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [existing] = await db
 		.select()
@@ -253,6 +259,7 @@ export const getProjectTeamMembers = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify project belongs to tenant
 		const [project] = await db
@@ -293,6 +300,7 @@ export const getProjectPartners = query(v.pipe(v.string(), v.minLength(1)), asyn
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [project] = await db
 		.select()
@@ -336,6 +344,7 @@ export const updateProjectTeamMembers = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { projectId, userIds } = data;
 
@@ -405,6 +414,7 @@ export const updateProjectPartner = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { projectId, partnerId } = data;
 

@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -26,6 +27,7 @@ export const getMilestones = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		let conditions = eq(table.milestone.tenantId, event.locals.tenant.id);
 
@@ -44,6 +46,7 @@ export const getMilestone = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [milestone] = await db
 			.select()
@@ -69,6 +72,7 @@ export const createMilestone = command(milestoneSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	// Verify project belongs to tenant
 	const [project] = await db
@@ -112,6 +116,7 @@ export const updateMilestone = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { milestoneId, ...updateData } = data;
 
@@ -151,6 +156,7 @@ export const deleteMilestone = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [existing] = await db
 			.select()

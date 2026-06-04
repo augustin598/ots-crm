@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -24,6 +25,7 @@ export const getSupplierInvoices = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const invoices = await db
 		.select({
@@ -60,6 +62,7 @@ export const getSupplierInvoice = query(v.pipe(v.string(), v.minLength(1)), asyn
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [invoice] = await db
 		.select()
@@ -82,6 +85,7 @@ export const getGmailConnectionStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	return getGmailStatus(event.locals.tenant.id);
 });
@@ -91,6 +95,7 @@ export const getSupplierListForGmail = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const suppliers = await db
 		.select({
@@ -113,6 +118,7 @@ export const deleteSupplierInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [existing] = await db
 			.select()
@@ -156,6 +162,7 @@ export const deleteSupplierInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 		let deleted = 0;
@@ -211,6 +218,7 @@ export const previewGmailInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 		const dateFrom = data.dateFrom ? new Date(data.dateFrom) : undefined;
@@ -289,6 +297,7 @@ export const importSelectedInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 		const results = {
@@ -427,6 +436,7 @@ export const updateGmailSyncConfig = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -466,6 +476,7 @@ export const getLastSyncResults = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+		await requireStaff(event);
 
 	const [integration] = await db
 		.select({
@@ -491,6 +502,7 @@ export const createExpenseFromSupplierInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -552,6 +564,7 @@ export const linkSupplierInvoiceToExpense = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 

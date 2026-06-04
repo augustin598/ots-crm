@@ -37,7 +37,9 @@ interface AuthContext {
 /** Returns auth context for any signed-in tenant member. Throws on anonymous. */
 function requireTenantMember(): AuthContext {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) {
+	// tenantUser required: client-portal users have user+tenant but no tenantUser;
+	// without this they could reach staff functions via x-sveltekit-pathname (F8).
+	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
 	return {
